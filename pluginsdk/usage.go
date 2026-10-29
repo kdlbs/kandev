@@ -3,7 +3,7 @@ package pluginsdk
 import (
 	"context"
 
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 )
 
 // SessionUsageMeasurement is the public Host representation of one source
@@ -43,6 +43,11 @@ type SessionUsageMeasurement struct {
 	CoverageKey       string
 	Estimated         bool
 	Stale             bool
+	// Canonical read-only applicability, assigned by the Host. False means the
+	// metric applies; a nil applicable amount remains unknown. Writes ignore
+	// these fields. A measured zero remains a nonnil amount.
+	TokenMetricAbsent bool
+	CostMetricAbsent  bool
 }
 
 type SessionUsageWriteResult struct {
@@ -97,6 +102,7 @@ func (m SessionUsageMeasurement) toProto() *pluginv1.SessionUsageMeasurement {
 		SourceTimezone: m.SourceTimezone, AttributionStatus: m.AttributionStatus,
 		CoverageStart: m.CoverageStart, CoverageEnd: m.CoverageEnd, SourceDate: m.SourceDate,
 		CoverageKey: m.CoverageKey, Estimated: m.Estimated, Stale: m.Stale,
+		TokenMetricAbsent: m.TokenMetricAbsent, CostMetricAbsent: m.CostMetricAbsent,
 	}
 }
 
@@ -115,6 +121,7 @@ func sessionUsageMeasurementFromProto(p *pluginv1.SessionUsageMeasurement) Sessi
 		SourceTimezone: p.GetSourceTimezone(), AttributionStatus: p.GetAttributionStatus(),
 		CoverageStart: p.CoverageStart, CoverageEnd: p.CoverageEnd, SourceDate: p.GetSourceDate(),
 		CoverageKey: p.GetCoverageKey(), Estimated: p.GetEstimated(), Stale: p.GetStale(),
+		TokenMetricAbsent: p.GetTokenMetricAbsent(), CostMetricAbsent: p.GetCostMetricAbsent(),
 	}
 }
 

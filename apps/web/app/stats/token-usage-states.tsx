@@ -103,10 +103,88 @@ export function TokenUsageEmpty({
 
 export function TokenUsageCoverageNotice({ response }: { response: TokenUsageResponse }) {
   const { t } = useTranslation();
-  if (!response.undated_coverage) return null;
   return (
-    <div className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-      {t(response.dated_coverage ? "stats:mixedCoverageNotice" : "stats:undatedCoverageNotice")}
+    <>
+      {response.history_gap && (
+        <p className="text-xs text-muted-foreground">{t("stats:historyGapNotice")}</p>
+      )}
+      {response.totals.currency === "mixed" && (
+        <p className="text-xs text-muted-foreground">{t("stats:multipleCurrenciesNotice")}</p>
+      )}
+      {response.undated_coverage && (
+        <div className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+          {t(response.dated_coverage ? "stats:mixedCoverageNotice" : "stats:undatedCoverageNotice")}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function TokenUsagePreparing({
+  onRetry,
+  refreshing,
+}: {
+  onRetry: () => void;
+  refreshing?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Card className="rounded-sm">
+      <CardContent
+        className="flex flex-wrap items-center gap-3 p-6"
+        role="status"
+        aria-live="polite"
+      >
+        <p>{t("stats:preparingUsageHistory")}</p>
+        <HistoryStatusRetry onRetry={onRetry} refreshing={refreshing} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function HistoryStatusRetry({
+  onRetry,
+  refreshing,
+}: {
+  onRetry: () => void;
+  refreshing?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="min-h-11 cursor-pointer md:min-h-0 [@media(pointer:coarse)]:min-h-11"
+      onClick={onRetry}
+      disabled={refreshing}
+    >
+      {t("stats:retryHistoryStatus")}
+    </Button>
+  );
+}
+
+export function TokenUsageProjectionNotice({
+  response,
+  refreshing,
+  onRetry,
+}: {
+  response: TokenUsageResponse;
+  refreshing?: boolean;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  const pending =
+    refreshing || response.projection_pending || response.projection_status === "preparing";
+  if (!pending && response.projection_status !== "stale") return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-wrap items-center gap-3 rounded-sm border p-3 text-sm"
+    >
+      <span>{t(pending ? "stats:updatingUsageHistory" : "stats:usageHistoryStale")}</span>
+      <HistoryStatusRetry onRetry={onRetry} refreshing={refreshing} />
     </div>
   );
 }

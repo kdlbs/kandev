@@ -9,10 +9,12 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/usagehistory"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
@@ -105,6 +107,11 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	if err := recordRequiredStore(ctx, tracker, "analytics", err); err != nil {
 		return nil, nil, nil, fmt.Errorf("analytics store: %w", err)
 	}
+	retainer, ok := analyticsRepo.(usagehistory.Retainer)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("analytics store does not provide transactional usage retention")
+	}
+	taskRepoImpl.SetUsageHistoryRetainer(retainer)
 	cleanups = append(cleanups, cleanup)
 	if err := checkStartupContext(ctx, "agent settings repository"); err != nil {
 		return nil, nil, nil, err
@@ -225,6 +232,12 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, err
 	}
 	initialized = true
+	if projector, ok := analyticsRepo.(analyticsservice.UsageProjectionBatchStore); ok {
+		control := newUsageHistoryProjection(ctx, projector, log)
+		repos.UsageHistoryStop = control.stop
+		repos.usageHistoryControl = control
+		cleanups = append(cleanups, control.stop)
+	}
 	startup.EndStep(ctx, startup.StepStoresRepositories)
 	startup.SetPhase(ctx, startup.InitializingServices)
 	startup.BeginStep(ctx, startup.StepStoresServices)

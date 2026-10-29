@@ -5,20 +5,24 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/analytics/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
-func seedUsageFixtures(t *testing.T, dbConn interface {
+func seedLegacyUsageFixtures(t *testing.T, dbConn interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }) {
 	t.Helper()
-	// This helper is intentionally kept local to the usage tests. The analytics
-	// repository only needs task ownership and session identity to validate a
-	// write; it must not depend on a task-service fixture package.
+	// Contract fixtures set the initial organization before explicitly capturing
+	// session birth. This raw seed must not capture earlier ownership.
 	queries := []struct {
 		query string
 		args  []any
@@ -33,26 +37,10 @@ func seedUsageFixtures(t *testing.T, dbConn interface {
 			t.Fatalf("seed usage fixture: %v", err)
 		}
 	}
-}
+	if _, err := dbConn.Exec(`UPDATE task_sessions SET metadata='{"acp":{"session_id":"transcript-1"}}' WHERE id='session-1'`); err != nil {
+		t.Fatal(err)
+	}
 
-func seedSecondUsageWorkspace(t *testing.T, dbConn interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}) {
-	t.Helper()
-	queries := []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO workspaces (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, []any{"ws-2", "Usage 2", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"}},
-		{`INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, []any{"board-2", "ws-2", "Board 2", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"}},
-		{`INSERT INTO tasks (id, workspace_id, board_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, []any{"task-2", "ws-2", "board-2", "Task 2", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"}},
-		{`INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, []any{"session-2", "task-2", "agent-1", "RUNNING", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"}},
-	}
-	for _, item := range queries {
-		if _, err := dbConn.Exec(item.query, item.args...); err != nil {
-			t.Fatalf("seed second usage fixture: %v", err)
-		}
-	}
 }
 
 func usageFixtureMeasurement(observed time.Time) models.SessionUsageMeasurement {
@@ -69,11 +57,11 @@ func usageFixtureMeasurement(observed time.Time) models.SessionUsageMeasurement 
 	}
 }
 
-func createNativeUsageTable(dbConn interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}) error {
+// The minimal legacy shape is a source-price payload fixture, not a supported
+// task ledger migration schema. Its producer writes the canonical ledger API.
+func createLegacyNativeUsageInputTable(dbConn *sqlx.DB) error {
 	_, err := dbConn.Exec(`
-		CREATE TABLE task_usage_events (
+		CREATE TABLE usage_fixture_legacy_native_inputs (
 			id INTEGER PRIMARY KEY,
 			task_id TEXT NOT NULL,
 			session_id TEXT,
@@ -94,25 +82,8 @@ func createNativeUsageTable(dbConn interface {
 	return err
 }
 
-func insertNativeUsageEvent(t *testing.T, dbConn interface {
-	Exec(query string, args ...any) (sql.Result, error)
-}, id int, model, provider string, input, cost, total, output int64, costSource string, occurred time.Time) {
-	t.Helper()
-	_, err := dbConn.Exec(`
-		INSERT INTO task_usage_events (
-			id, task_id, session_id, model, provider, tokens_in, tokens_cached_read,
-			tokens_cached_write, tokens_out, tokens_thought, tokens_total,
-			cost_subcents, cost_source, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, "task-1", "session-1", model, provider, input, 0, 0, output, 0, total, cost,
-		costSource, occurred, occurred)
-	if err != nil {
-		t.Fatalf("insert native usage event: %v", err)
-	}
-}
-
 func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -199,59 +170,72 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 }
 
 func TestSessionUsagePreservesUnknownAndZeroValues(t *testing.T) {
-	dbConn := createTestDB(t)
-	seedUsageFixtures(t, dbConn)
-	repo, err := NewWithDB(dbConn, dbConn)
-	if err != nil {
-		t.Fatalf("NewWithDB failed: %v", err)
-	}
-	ctx := context.Background()
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	known := usageFixtureMeasurement(now)
-	zero := known
-	zero.SourceRecordID = "record-2"
-	zero.UsageIdentity = "lifetime:transcript-2"
-	zero.Model = "model-b"
-	zero.PayloadDigest = "zero"
-	zero.InputTokens = models.Int64(0)
-	zero.OutputTokens = nil
-	zero.CacheReadTokens = models.Int64(0)
-	zero.CacheWriteTokens = nil
-	zero.ReasoningTokens = nil
-	zero.TotalTokens = models.Int64(0)
-	zero.Turns = models.Int64(0)
-	zero.CostBasis = models.UsageCostBasisUnknown
-	zero.CostSubcents = models.Int64(0)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{known, zero}); err != nil {
-		t.Fatalf("upsert with nullable values failed: %v", err)
-	}
+	for _, engine := range []struct {
+		name     string
+		postgres bool
+	}{{name: "sqlite"}, {name: "postgres", postgres: true}} {
+		t.Run(engine.name, func(t *testing.T) {
+			if engine.postgres {
+				testutil.PostgresDSNFromEnv(t)
+			}
+			repo, tasks := currentTargetDatabaseFixture(t, engine.postgres)
+			ctx := context.Background()
+			now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+			known := usageFixtureMeasurement(now)
+			zero := known
+			zero.SourceRecordID = "record-2"
+			zero.UsageIdentity = "lifetime:transcript-2"
+			zero.TranscriptID = "transcript-2"
+			zero.SessionID = "session-extra"
+			require.NoError(t, tasks.CreateTaskSession(ctx, &taskmodels.TaskSession{
+				ID: zero.SessionID, TaskID: zero.TaskID, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				Metadata: map[string]any{"acp": map[string]any{"session_id": zero.TranscriptID}},
+			}))
+			zero.Model = "model-b"
+			zero.PayloadDigest = "zero"
+			zero.InputTokens = models.Int64(0)
+			zero.OutputTokens = nil
+			zero.CacheReadTokens = models.Int64(0)
+			zero.CacheWriteTokens = nil
+			zero.ReasoningTokens = nil
+			zero.TotalTokens = models.Int64(0)
+			zero.Turns = models.Int64(0)
+			zero.CostBasis = models.UsageCostBasisUnknown
+			zero.CostSubcents = models.Int64(0)
+			if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{known, zero}); err != nil {
+				t.Fatalf("upsert with nullable values failed: %v", err)
+			}
 
-	report, err := repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
-	if err != nil {
-		t.Fatalf("listing report failed: %v", err)
-	}
-	if len(report.Rows) != 2 {
-		t.Fatalf("row count = %d, want 2", len(report.Rows))
-	}
-	var modelB models.TokenUsageRow
-	for _, row := range report.Rows {
-		if row.Model == "model-b" {
-			modelB = row
-		}
-	}
-	if modelB.InputTokens == nil || *modelB.InputTokens != 0 {
-		t.Fatalf("zero input was not preserved: %#v", modelB.InputTokens)
-	}
-	if modelB.OutputTokens != nil || modelB.CostSubcents != nil {
-		t.Fatalf("unknown values became zero: output=%v cost=%v", modelB.OutputTokens, modelB.CostSubcents)
-	}
-	if report.Totals.OutputTokens != nil || report.Totals.CostSubcents != nil {
-		t.Fatalf("totals hid unknown values: output=%v cost=%v", report.Totals.OutputTokens, report.Totals.CostSubcents)
+			finishFixtureRetention(t, repo)
+			completeFixtureProjection(t, repo)
+			report, err := repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+			if err != nil {
+				t.Fatalf("listing report failed: %v", err)
+			}
+			if len(report.Rows) != 2 {
+				t.Fatalf("row count = %d, want 2", len(report.Rows))
+			}
+			var modelB models.TokenUsageRow
+			for _, row := range report.Rows {
+				if row.Model == "model-b" {
+					modelB = row
+				}
+			}
+			if modelB.InputTokens == nil || *modelB.InputTokens != 0 {
+				t.Fatalf("zero input was not preserved: %#v", modelB.InputTokens)
+			}
+			if modelB.OutputTokens != nil || modelB.CostSubcents != nil {
+				t.Fatalf("unknown values became zero: output=%v cost=%v", modelB.OutputTokens, modelB.CostSubcents)
+			}
+			if report.Totals.OutputTokens != nil || report.Totals.CostSubcents != nil {
+				t.Fatalf("totals hid unknown values: output=%v cost=%v", report.Totals.OutputTokens, report.Totals.CostSubcents)
+			}
+		})
 	}
 }
 
 func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -292,7 +276,7 @@ func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
 		t.Fatalf("dated upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
+	report, err := preparedUsageReport(t, repo, ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("all-time report failed: %v", err)
 	}
@@ -308,7 +292,7 @@ func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
 
 	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	report, err = repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "day"})
+	report, err = preparedUsageReport(t, repo, ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("ranged report failed: %v", err)
 	}
@@ -321,7 +305,7 @@ func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
 }
 
 func TestSessionUsageKeepsLifetimeWhenDatedImportIsPartial(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -347,7 +331,7 @@ func TestSessionUsageKeepsLifetimeWhenDatedImportIsPartial(t *testing.T) {
 		t.Fatalf("partial dated upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("all-time report failed: %v", err)
 	}
@@ -366,7 +350,7 @@ func TestSessionUsageKeepsLifetimeWhenDatedImportIsPartial(t *testing.T) {
 }
 
 func TestSessionUsageDatedRowsKeepLifetimeSummaryWhenImportIsPartial(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -397,7 +381,7 @@ func TestSessionUsageDatedRowsKeepLifetimeSummaryWhenImportIsPartial(t *testing.
 		t.Fatalf("dated upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
+	report, err := preparedUsageReport(t, repo, ctx, models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("dated report failed: %v", err)
 	}
@@ -413,7 +397,7 @@ func TestSessionUsageDatedRowsKeepLifetimeSummaryWhenImportIsPartial(t *testing.
 }
 
 func TestSessionUsageDoesNotPlaceLifetimeOnlyDataOnDatedAxis(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -424,7 +408,7 @@ func TestSessionUsageDoesNotPlaceLifetimeOnlyDataOnDatedAxis(t *testing.T) {
 		t.Fatalf("lifetime upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1",
 		GroupBy:     "day",
 	})
@@ -443,7 +427,7 @@ func TestSessionUsageDoesNotPlaceLifetimeOnlyDataOnDatedAxis(t *testing.T) {
 }
 
 func TestSessionUsageMarksMonthlyRowsPartialWhenRangeClipsCalendarMonth(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -471,7 +455,7 @@ func TestSessionUsageMarksMonthlyRowsPartialWhenRangeClipsCalendarMonth(t *testi
 
 	start := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "month",
 	})
 	if err != nil {
@@ -494,7 +478,7 @@ func TestSessionUsageMarksMonthlyRowsPartialWhenRangeClipsCalendarMonth(t *testi
 
 	fullStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fullEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	fullReport, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	fullReport, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1", Start: &fullStart, End: &fullEnd, GroupBy: "month",
 	})
 	if err != nil {
@@ -514,7 +498,7 @@ func TestSessionUsageMarksMonthlyRowsPartialWhenRangeClipsCalendarMonth(t *testi
 }
 
 func TestSessionUsageDerivesBucketIdentityForExplicitIntervals(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -546,7 +530,7 @@ func TestSessionUsageDerivesBucketIdentityForExplicitIntervals(t *testing.T) {
 }
 
 func TestSessionUsageRejectsCrossWorkspaceAndSessionOwnership(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -572,7 +556,7 @@ func TestSessionUsageRejectsCrossWorkspaceAndSessionOwnership(t *testing.T) {
 }
 
 func TestSessionUsageIdentityIsScopedByWorkspace(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	seedSecondUsageWorkspace(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
@@ -585,6 +569,7 @@ func TestSessionUsageIdentityIsScopedByWorkspace(t *testing.T) {
 	second.WorkspaceID = "ws-2"
 	second.TaskID = "task-2"
 	second.SessionID = "session-2"
+	second.TranscriptID = "transcript-2"
 	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first}); err != nil {
 		t.Fatalf("first workspace upsert failed: %v", err)
 	}
@@ -609,7 +594,7 @@ func TestSessionUsageIdentityIsScopedByWorkspace(t *testing.T) {
 }
 
 func TestSessionUsageMarksOverlappingSourcesIncomplete(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -626,7 +611,7 @@ func TestSessionUsageMarksOverlappingSourcesIncomplete(t *testing.T) {
 		t.Fatalf("overlapping source upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("overlapping source report failed: %v", err)
 	}
@@ -646,7 +631,7 @@ func TestSessionUsageMarksOverlappingSourcesIncomplete(t *testing.T) {
 }
 
 func TestSessionUsageKeepsProviderRowsSeparateAndComputesRate(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -663,13 +648,15 @@ func TestSessionUsageKeepsProviderRowsSeparateAndComputesRate(t *testing.T) {
 	second := first
 	second.SourceRecordID = "record-2"
 	second.UsageIdentity = "lifetime:transcript-2"
+	second.TranscriptID = "transcript-2"
+	second.SessionID = seedExtraUsageSession(t, dbConn)
 	second.Provider = "provider-b"
 	second.PayloadDigest = "digest-2"
 	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
 		t.Fatalf("provider rows upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("provider rows report failed: %v", err)
 	}
@@ -684,44 +671,17 @@ func TestSessionUsageKeepsProviderRowsSeparateAndComputesRate(t *testing.T) {
 }
 
 func TestSessionUsageKeepsDisjointExternalCoverageAlongsideNativeLedger(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if _, err := dbConn.Exec(`
-		CREATE TABLE task_usage_events (
-			id INTEGER PRIMARY KEY,
-			task_id TEXT NOT NULL,
-			session_id TEXT,
-			model TEXT,
-			provider TEXT,
-			tokens_in BIGINT NOT NULL,
-			tokens_cached_read BIGINT,
-			tokens_cached_write BIGINT,
-			tokens_out BIGINT,
-			tokens_thought BIGINT,
-			tokens_total BIGINT NOT NULL,
-			cost_subcents BIGINT,
-			cost_source TEXT NOT NULL DEFAULT 'provider_reported',
-			estimated INTEGER NOT NULL DEFAULT 0,
-			occurred_at TIMESTAMP NOT NULL,
-			created_at TIMESTAMP NOT NULL
-		)`); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	nativeTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	if _, err := dbConn.Exec(`
-		INSERT INTO task_usage_events (
-			id, task_id, session_id, model, provider, tokens_in, tokens_cached_read,
-			tokens_cached_write, tokens_out, tokens_thought, tokens_total,
-			cost_subcents, cost_source, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		1, "task-1", "session-1", "model-a", "provider-a", 10, 0, 0, 2, 0, 12, 500, "provider_reported",
-		nativeTime, nativeTime); err != nil {
-		t.Fatalf("insert native usage event: %v", err)
-	}
+	insertNativeUsageEvent(t, dbConn, 1, "model-a", "provider-a", 10, 500, 12, 2, "provider_reported", nativeTime)
 
 	dayTwo := usageFixtureMeasurement(nativeTime)
 	dayTwo.SourceRecordID = "external-day-2"
@@ -742,7 +702,7 @@ func TestSessionUsageKeepsDisjointExternalCoverageAlongsideNativeLedger(t *testi
 		t.Fatalf("external dated upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("native plus external report failed: %v", err)
 	}
@@ -766,20 +726,20 @@ func TestSessionUsageKeepsDisjointExternalCoverageAlongsideNativeLedger(t *testi
 }
 
 func TestSessionUsageMapsNativeCostSourcesAndKeepsUnknownCostUnavailable(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	insertNativeUsageEvent(t, dbConn, 1, "model-unpriced", "provider-a", 10, 0, 10, 0, "unpriced", now)
 	insertNativeUsageEvent(t, dbConn, 2, "model-estimated", "provider-b", 20, 250, 20, 0, "models_dev_list", now)
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("native report failed: %v", err)
 	}
@@ -806,13 +766,13 @@ func TestSessionUsageMapsNativeCostSourcesAndKeepsUnknownCostUnavailable(t *test
 }
 
 func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -843,7 +803,7 @@ func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testin
 		t.Fatalf("external day upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("equivalent report failed: %v", err)
 	}
@@ -857,13 +817,13 @@ func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testin
 }
 
 func TestSessionUsageMergesCostCorrectionWithoutReplacingNativeTokens(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	start := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -890,7 +850,7 @@ func TestSessionUsageMergesCostCorrectionWithoutReplacingNativeTokens(t *testing
 		t.Fatalf("cost correction upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("cost correction report failed: %v", err)
 	}
@@ -910,7 +870,7 @@ func TestSessionUsageMergesCostCorrectionWithoutReplacingNativeTokens(t *testing
 }
 
 func TestSessionUsageKeepsPrunedTranscriptIdentitiesSeparate(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -933,7 +893,7 @@ func TestSessionUsageKeepsPrunedTranscriptIdentitiesSeparate(t *testing.T) {
 		t.Fatalf("pruned transcript upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("pruned transcript report failed: %v", err)
 	}
@@ -943,7 +903,7 @@ func TestSessionUsageKeepsPrunedTranscriptIdentitiesSeparate(t *testing.T) {
 }
 
 func TestSessionUsageResolvesOverlappingRowsWithDifferentCoverageKeys(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -967,7 +927,7 @@ func TestSessionUsageResolvesOverlappingRowsWithDifferentCoverageKeys(t *testing
 		t.Fatalf("overlap upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("overlap report failed: %v", err)
 	}
@@ -980,7 +940,7 @@ func TestSessionUsageResolvesOverlappingRowsWithDifferentCoverageKeys(t *testing
 }
 
 func TestSessionUsageRejectsCategoriesLargerThanTotal(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -995,13 +955,13 @@ func TestSessionUsageRejectsCategoriesLargerThanTotal(t *testing.T) {
 }
 
 func TestSessionUsageUsesCompleteEquivalentNativeIntervalCoverage(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	start := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1028,7 +988,7 @@ func TestSessionUsageUsesCompleteEquivalentNativeIntervalCoverage(t *testing.T) 
 		t.Fatalf("external interval upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("complete equivalent report failed: %v", err)
 	}
@@ -1049,13 +1009,13 @@ func TestSessionUsageUsesCompleteEquivalentNativeIntervalCoverage(t *testing.T) 
 }
 
 func TestSessionUsageUsesNativeCoverageWhenExternalCandidateIsPartial(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	start := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1081,7 +1041,7 @@ func TestSessionUsageUsesNativeCoverageWhenExternalCandidateIsPartial(t *testing
 		t.Fatalf("partial external interval upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("partial external interval report failed: %v", err)
 	}
@@ -1095,13 +1055,13 @@ func TestSessionUsageUsesNativeCoverageWhenExternalCandidateIsPartial(t *testing
 }
 
 func TestSessionUsageMatchesUnknownProviderToKnownNativeCoverage(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	start := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1127,7 +1087,7 @@ func TestSessionUsageMatchesUnknownProviderToKnownNativeCoverage(t *testing.T) {
 		t.Fatalf("unknown-provider external upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("unknown-provider report failed: %v", err)
 	}
@@ -1141,13 +1101,13 @@ func TestSessionUsageMatchesUnknownProviderToKnownNativeCoverage(t *testing.T) {
 }
 
 func TestSessionUsageKeepsLifetimeWhenNativeCoverageIsOnlyPartial(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1165,11 +1125,17 @@ func TestSessionUsageKeepsLifetimeWhenNativeCoverageIsOnlyPartial(t *testing.T) 
 		t.Fatalf("external lifetime upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "model"})
 	if err != nil {
 		t.Fatalf("partial native report failed: %v", err)
 	}
 	if len(report.Rows) != 1 {
+		logUsageFixtureWorkProof(t, repo)
+		if snapshot, encodeErr := json.Marshal(report); encodeErr != nil {
+			t.Logf("encode partial native report: %v", encodeErr)
+		} else {
+			t.Logf("partial native report: %s", snapshot)
+		}
 		t.Fatalf("partial native rows = %d, want 1", len(report.Rows))
 	}
 	row := report.Rows[0]
@@ -1182,13 +1148,13 @@ func TestSessionUsageKeepsLifetimeWhenNativeCoverageIsOnlyPartial(t *testing.T) 
 }
 
 func TestSessionUsageKeepsExternalDayWhenOneNativeEventOnlyPartiallyCoversIt(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1212,7 +1178,7 @@ func TestSessionUsageKeepsExternalDayWhenOneNativeEventOnlyPartiallyCoversIt(t *
 		t.Fatalf("external day upsert failed: %v", err)
 	}
 
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1", GroupBy: "day"})
 	if err != nil {
 		t.Fatalf("partial day report failed: %v", err)
 	}
@@ -1229,7 +1195,7 @@ func TestSessionUsageKeepsExternalDayWhenOneNativeEventOnlyPartiallyCoversIt(t *
 }
 
 func TestSessionUsageReportsHistoryMetadataOutsideSelectedRange(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -1249,7 +1215,7 @@ func TestSessionUsageReportsHistoryMetadataOutsideSelectedRange(t *testing.T) {
 
 	start := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "day",
 	})
 	if err != nil {
@@ -1267,13 +1233,13 @@ func TestSessionUsageReportsHistoryMetadataOutsideSelectedRange(t *testing.T) {
 }
 
 func TestSessionUsageReportsNativeHistoryMetadataOutsideSelectedRange(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
-	if err := createNativeUsageTable(dbConn); err != nil {
+	if err := createLegacyNativeUsageInputTable(dbConn); err != nil {
 		t.Fatalf("create native usage table: %v", err)
 	}
 	occurred := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
@@ -1281,7 +1247,7 @@ func TestSessionUsageReportsNativeHistoryMetadataOutsideSelectedRange(t *testing
 
 	start := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "day",
 	})
 	if err != nil {
@@ -1299,7 +1265,7 @@ func TestSessionUsageReportsNativeHistoryMetadataOutsideSelectedRange(t *testing
 }
 
 func TestSessionUsageReportsLifetimeFreshnessForDatedView(t *testing.T) {
-	dbConn := createTestDB(t)
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -1318,7 +1284,7 @@ func TestSessionUsageReportsLifetimeFreshnessForDatedView(t *testing.T) {
 
 	start := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	report, err := repo.ListSessionUsage(context.Background(), models.SessionUsageFilter{
+	report, err := preparedUsageReport(t, repo, context.Background(), models.SessionUsageFilter{
 		WorkspaceID: "ws-1", Start: &start, End: &end, GroupBy: "day",
 	})
 	if err != nil {
@@ -1335,8 +1301,8 @@ func TestSessionUsageReportsLifetimeFreshnessForDatedView(t *testing.T) {
 	}
 }
 
-func TestSessionUsageFollowsTaskRetentionRules(t *testing.T) {
-	dbConn := createTestDB(t)
+func TestSessionUsagePreservesHistoryAfterTaskDeletion(t *testing.T) {
+	dbConn := createUsageTestDB(t)
 	seedUsageFixtures(t, dbConn)
 	repo, err := NewWithDB(dbConn, dbConn)
 	if err != nil {
@@ -1354,8 +1320,15 @@ func TestSessionUsageFollowsTaskRetentionRules(t *testing.T) {
 	if err := dbConn.Get(&sessionID, `SELECT COALESCE(session_id, '') FROM session_usage_measurements WHERE source_record_id = ?`, measurement.SourceRecordID); err != nil {
 		t.Fatalf("read retained usage: %v", err)
 	}
-	if sessionID != "" {
-		t.Fatalf("pruned session id = %q, want empty reference", sessionID)
+	if sessionID != "session-1" {
+		t.Fatalf("retained session id = %q, want stable historical reference", sessionID)
+	}
+	var subjectID string
+	if err := dbConn.Get(&subjectID, `SELECT subject_id FROM session_usage_measurements WHERE source_record_id = ?`, measurement.SourceRecordID); err != nil {
+		t.Fatalf("read retained subject: %v", err)
+	}
+	if subjectID == "" {
+		t.Fatal("retained measurement has no durable subject")
 	}
 	retained, err := repo.ListSessionUsageMeasurements(context.Background(), models.SessionUsageFilter{WorkspaceID: "ws-1"})
 	if err != nil {
@@ -1372,8 +1345,15 @@ func TestSessionUsageFollowsTaskRetentionRules(t *testing.T) {
 	if err := dbConn.Get(&count, `SELECT COUNT(*) FROM session_usage_measurements`); err != nil {
 		t.Fatalf("count usage after task delete: %v", err)
 	}
-	if count != 0 {
-		t.Fatalf("usage rows after task delete = %d, want 0", count)
+	if count != 1 {
+		t.Fatalf("usage rows after task delete = %d, want 1 retained row", count)
+	}
+	var retainedSubjectCount int
+	if err := dbConn.Get(&retainedSubjectCount, `SELECT COUNT(*) FROM usage_subjects WHERE subject_id = ?`, subjectID); err != nil {
+		t.Fatalf("read retained subject after task deletion: %v", err)
+	}
+	if retainedSubjectCount != 1 {
+		t.Fatalf("retained subjects after task deletion = %d, want 1", retainedSubjectCount)
 	}
 }
 
@@ -1393,4 +1373,14 @@ func TestUsageRowsKeepUnknownNumericValuesLastWhenSortingDescending(t *testing.T
 	if rows[0].Key != "known" || rows[1].Key != "unknown" {
 		t.Fatalf("descending token order = [%s, %s], want known before unknown", rows[0].Key, rows[1].Key)
 	}
+}
+
+// Reports run only after actual retention, selection repair and publication.
+func preparedUsageReport(t *testing.T, repo *Repository, ctx context.Context, filter models.SessionUsageFilter) (*models.TokenUsageReport, error) {
+	t.Helper()
+	finishFixtureRetention(t, repo)
+	assertUsageFixtureNativeMigration(t, repo)
+	finishUsageFixtureSelection(t, repo)
+	completeFixtureProjection(t, repo)
+	return repo.ListSessionUsage(ctx, filter)
 }

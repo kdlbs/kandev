@@ -1,0 +1,21 @@
+{
+  "started_at_utc": "2026-10-29T06:30:22.250899+00:00",
+  "status": "FROZEN_STOPPED_FOR_PRODUCTION_FIX",
+  "source_set_sha256": "3318aca02ff4765a7889ed5cfe400b8efca27c87764f85c27223cba51c11f86d",
+  "file_count": 1075,
+  "old_failed_evidence_directory": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-worker4-bench-attempt2-failed",
+  "both_full_benchmarks_passed": false,
+  "sqlite_command": "go test -p 1 -trimpath -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite -run '^$' -bench '^BenchmarkUsageHistoryFiveYears$' -benchtime=10x -benchmem -count=1 -timeout=60m",
+  "postgres_command": "go test -p 1 -trimpath -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite -run '^$' -bench '^BenchmarkUsageHistoryPostgresFiveYears$' -benchtime=10x -benchmem -count=1 -timeout=60m",
+  "command_scoped_environment": {
+    "CGO_ENABLED": "1",
+    "CGO_CFLAGS": "-O2 -g -DSQLITE_ENABLE_STMT_SCANSTATUS",
+    "GOMAXPROCS": "2",
+    "GOMEMLIMIT": "3GiB",
+    "KANDEV_USAGE_BENCH_EVIDENCE_DIR": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence"
+  },
+  "disk_free_bytes": 133695188992,
+  "postgres_started": false,
+  "commands_running": false,
+  "finished_at_utc": "2026-10-29T06:34:17.866597+00:00"
+}

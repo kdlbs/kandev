@@ -543,6 +543,10 @@ func (r usageReader) UpsertBatch(ctx context.Context, workspaceID string, items 
 	if !r.host.capabilities.CanWrite(resourceSessionUsage) {
 		return nil, permissionDenied(apiWriteCapability(resourceSessionUsage))
 	}
+	ctx, accessErr := r.host.usageAccessContext(ctx, workspaceID)
+	if accessErr != nil {
+		return nil, accessErr
+	}
 	source := r.source()
 	if source == nil {
 		return r.host.UnimplementedHostData.Usage().UpsertBatch(ctx, workspaceID, items)
@@ -588,6 +592,10 @@ func (r usageReader) list(ctx context.Context, filter pluginsdk.SessionUsageFilt
 	// The method selected by the SDK is authoritative. Do not let a stale
 	// compatibility bit in the filter turn a source-owned List into a
 	// canonical read (or vice versa).
+	ctx, accessErr := r.host.usageAccessContext(ctx, filter.WorkspaceID)
+	if accessErr != nil {
+		return nil, nil, accessErr
+	}
 	filter.Canonical = canonical
 	source := r.source()
 	if source == nil {
@@ -601,18 +609,20 @@ func (r usageReader) list(ctx context.Context, filter pluginsdk.SessionUsageFilt
 		return nil, nil, err
 	}
 	limit := normalizePageLimit(page.Limit)
-	offset := pageOffset(page.Cursor)
+	queryKey, err := usageCanonicalQueryKey(filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	offset, publication, err := decodeUsagePageCursor(page.Cursor, queryKey, canonical)
+	if err != nil {
+		return nil, nil, err
+	}
 	internalFilter.Limit = limit + 1
 	internalFilter.Offset = offset
-	var items []analyticsmodels.SessionUsageMeasurement
-	var listErr error
-	if canonical {
-		items, listErr = source.ListCanonicalSessionUsageMeasurements(ctx, internalFilter)
-	} else {
-		items, listErr = source.ListPluginSessionUsageMeasurements(ctx, r.host.pluginID, internalFilter)
-	}
+	internalFilter.ProjectionGeneration = publication
+	items, projection, listErr := r.listUsageMeasurements(ctx, source, internalFilter, canonical)
 	if listErr != nil {
-		return nil, nil, listErr
+		return nil, nil, usagePublicError(listErr)
 	}
 	hasMore := len(items) > limit
 	if hasMore {
@@ -622,11 +632,26 @@ func (r usageReader) list(ctx context.Context, filter pluginsdk.SessionUsageFilt
 	for i, item := range items {
 		out[i] = usageMeasurementToDTO(item)
 	}
-	info := &pluginsdk.PageInfo{HasMore: hasMore}
+	info := &pluginsdk.PageInfo{HasMore: hasMore, ProjectionStatus: projection.Status, ProjectionGeneration: projection.Generation, ProjectionPending: projection.Pending}
 	if hasMore {
-		info.NextCursor = strconv.Itoa(offset + limit)
+		info.NextCursor, err = encodeUsagePageCursor(offset+limit, projection.Generation, queryKey, canonical)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return out, info, nil
+}
+
+func (r usageReader) listUsageMeasurements(ctx context.Context, source sessionUsageSource, filter analyticsmodels.SessionUsageFilter, canonical bool) ([]analyticsmodels.SessionUsageMeasurement, analyticsmodels.UsageProjectionState, error) {
+	if !canonical {
+		items, err := source.ListPluginSessionUsageMeasurements(ctx, r.host.pluginID, filter)
+		return items, analyticsmodels.UsageProjectionState{}, err
+	}
+	if pageSource, ok := source.(canonicalUsagePageSource); ok {
+		return pageSource.ListCanonicalSessionUsagePage(ctx, filter)
+	}
+	items, err := source.ListCanonicalSessionUsageMeasurements(ctx, filter)
+	return items, analyticsmodels.UsageProjectionState{}, err
 }
 
 func usageMeasurementFromDTO(workspaceID string, item pluginsdk.SessionUsageMeasurement) (analyticsmodels.SessionUsageMeasurement, error) {
@@ -665,6 +690,7 @@ func usageMeasurementToDTO(item analyticsmodels.SessionUsageMeasurement) plugins
 		SourceTimezone: item.SourceTimezone, AttributionStatus: item.AttributionStatus,
 		CoverageStart: formatPluginTimePtr(item.CoverageStart), CoverageEnd: formatPluginTimePtr(item.CoverageEnd),
 		SourceDate: item.SourceDate, CoverageKey: item.CoverageKey, Estimated: item.Estimated, Stale: item.Stale,
+		TokenMetricAbsent: item.TokenMetricAbsent, CostMetricAbsent: item.CostMetricAbsent,
 	}
 }
 

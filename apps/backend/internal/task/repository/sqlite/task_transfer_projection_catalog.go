@@ -1,11 +1,16 @@
 package sqlite
 
+type transferWorkspaceOwnership uint8
+
+const transferWorkspaceCaptured transferWorkspaceOwnership = 1
+
 type transferWorkspaceProjection struct {
-	table          string
-	taskColumn     string
-	identityColumn string
-	receiptKey     string
-	unmappedOwner  bool
+	table              string
+	taskColumn         string
+	identityColumn     string
+	receiptKey         string
+	unmappedOwner      bool
+	workspaceOwnership transferWorkspaceOwnership
 }
 
 var transferWorkspaceProjections = []transferWorkspaceProjection{
@@ -70,4 +75,15 @@ var transferPreservationTables = []transferWorkspaceProjection{
 	{table: "task_blockers", taskColumn: "blocker_task_id", identityColumn: "task_id", receiptKey: "task_blockers_as_blocker"},
 	{table: "plugin_instances", taskColumn: "task_id", identityColumn: "id"},
 	{table: "canvas_lifecycle_metadata", taskColumn: "task_id", identityColumn: "id"},
+	// Captured accounting ownership survives live task placement changes.
+	{table: "session_usage_measurements", taskColumn: "task_id", identityColumn: "id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "session_usage_buckets", taskColumn: "task_id", identityColumn: "id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_execution_bindings", taskColumn: "task_id", identityColumn: "binding_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_collection_bindings", taskColumn: "task_id", identityColumn: "binding_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_legacy_adoptions", taskColumn: "task_id", identityColumn: "session_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_history_migration_gaps", taskColumn: "task_id", identityColumn: "record_key", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_preservation_fences", taskColumn: "task_id", identityColumn: "fence_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_subjects", taskColumn: "task_id", identityColumn: "subject_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_collection_current_targets", taskColumn: "task_id", identityColumn: "subject_id", workspaceOwnership: transferWorkspaceCaptured},
+	{table: "usage_canonical_facts", taskColumn: "task_id", identityColumn: "fact_key", workspaceOwnership: transferWorkspaceCaptured},
 }

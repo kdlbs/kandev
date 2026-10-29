@@ -19,12 +19,14 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { TokenUsageMetrics } from "@/lib/types/http";
+import { usageAmount } from "@/lib/api/domains/token-usage-amounts";
+import { UsageDetails, UsageDetailsDisclosure, UsageRowIdentity } from "./token-usage-details";
+import { usageProviderLabel, usageRowLabel } from "./token-usage-metadata";
 import {
   coverageLabelKey,
   costBasisLabel,
   formatCost,
   formatRate,
-  formatTokenPeriod,
   formatTokens,
   type SortDirection,
   type TokenMetricKey,
@@ -33,7 +35,6 @@ import {
   type TokenUsageView,
 } from "./token-usage-utils";
 
-const UNKNOWN_LABEL_KEY = "common:unknown";
 const METRIC_LABEL_KEYS: Record<TokenMetricKey, string> = {
   input_tokens: "stats:inputTokens",
   output_tokens: "stats:outputTokens",
@@ -139,7 +140,7 @@ function MobileSortControl({
   return (
     <div className="flex items-center justify-end gap-2">
       <label htmlFor="token-usage-mobile-sort" className="text-xs text-muted-foreground">
-        {t("stats:view")}
+        {t("stats:usageSort")}
       </label>
       <select
         id="token-usage-mobile-sort"
@@ -188,6 +189,7 @@ function UsagePagination({
         variant="outline"
         size="icon"
         aria-label={t("stats:previousPage")}
+        className="h-11 w-11 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
         onClick={() => onPageChange(Math.max(0, offset - limit))}
         disabled={offset <= 0}
       >
@@ -198,6 +200,7 @@ function UsagePagination({
         variant="outline"
         size="icon"
         aria-label={t("stats:nextPage")}
+        className="h-11 w-11 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
         onClick={() => onPageChange(offset + limit)}
         disabled={!hasMore}
       >
@@ -305,7 +308,7 @@ function SortableHead({
     >
       <button
         type="button"
-        className="inline-flex cursor-pointer items-center gap-1"
+        className="inline-flex min-h-7 cursor-pointer items-center gap-1 [@media(pointer:coarse)]:min-h-11"
         onClick={() => onSort(sortKey)}
       >
         {label}
@@ -333,12 +336,11 @@ function DesktopUsageRow({
   return (
     <TableRow data-testid="token-usage-row">
       <TableCell>
-        <div className="flex max-w-48 items-center gap-2 truncate font-medium" title={row.label}>
-          <span className="truncate">
-            {view === "daily" || view === "monthly"
-              ? periodLabel(row.label, view, t)
-              : row.label || t(UNKNOWN_LABEL_KEY)}
-          </span>
+        <div
+          className="flex max-w-48 items-center gap-2 font-medium"
+          title={usageRowLabel(row, view, t)}
+        >
+          <UsageRowIdentity row={row} view={view} />
           {view === "monthly" && row.coverage === "partial" && (
             <CoverageBadge coverage={row.coverage} />
           )}
@@ -346,16 +348,15 @@ function DesktopUsageRow({
         {row.secondary && (
           <div className="max-w-48 truncate text-[11px] text-muted-foreground">{row.secondary}</div>
         )}
+        <UsageDetailsDisclosure row={row} view={view} />
       </TableCell>
-      <TableCell className="text-muted-foreground">
-        {row.provider || t(UNKNOWN_LABEL_KEY)}
-      </TableCell>
+      <TableCell className="text-muted-foreground">{usageProviderLabel(row.provider, t)}</TableCell>
       <MetricCells metrics={row} unavailable={unavailable} />
       <TableCell className="text-right tabular-nums">
         {formatRate(row.effective_cost_per_million, row.currency, unavailable)}
       </TableCell>
       <TableCell>
-        <CoverageBadge coverage={row.coverage} />
+        <CoverageBadge coverage={row.stale ? "stale" : row.coverage} />
       </TableCell>
     </TableRow>
   );
@@ -371,25 +372,25 @@ function MetricCells({
   return (
     <>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.input_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "input_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.output_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "output_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.cache_read_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "cache_read_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.cache_write_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "cache_write_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.reasoning_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "reasoning_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatTokens(metrics.total_tokens, unavailable)}
+        {formatTokens(usageAmount(metrics, "total_tokens"), unavailable)}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {formatCost(metrics.cost_subcents, metrics.currency, unavailable)}
+        {formatCost(usageAmount(metrics, "cost_subcents"), metrics.currency, unavailable)}
       </TableCell>
     </>
   );
@@ -406,72 +407,34 @@ function MobileUsageRow({
 }) {
   const { t } = useTranslation();
   return (
-    <details className="rounded-sm border" data-testid="token-usage-mobile-row">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden">
-        <span className="min-w-0">
-          <span className="flex truncate text-sm font-medium">
-            <span className="truncate">
-              {view === "daily" || view === "monthly"
-                ? periodLabel(row.label, view, t)
-                : row.label || t(UNKNOWN_LABEL_KEY)}
-            </span>
-            {view === "monthly" && row.coverage === "partial" && (
-              <span className="ml-2 shrink-0">
-                <CoverageBadge coverage={row.coverage} />
-              </span>
-            )}
+    <details className="min-w-0 rounded-sm border" data-testid="token-usage-mobile-row">
+      <summary
+        className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden"
+        aria-label={t("stats:usageDetailsFor", { label: usageRowLabel(row, view, t) })}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">
+            <UsageRowIdentity row={row} view={view} link={false} />
           </span>
           {row.secondary && (
             <span className="block truncate text-xs text-muted-foreground">{row.secondary}</span>
           )}
+          <span className="block text-xs text-muted-foreground">{t("stats:usageDetails")}</span>
         </span>
-        <span className="shrink-0 text-right text-xs tabular-nums">
-          <span className="block font-medium">{formatTokens(row.total_tokens, unavailable)}</span>
-          <span className="text-muted-foreground">
-            {formatCost(row.cost_subcents, row.currency, unavailable)}
+        <span className="ml-auto min-w-0 max-w-full text-right text-xs tabular-nums [overflow-wrap:anywhere]">
+          <span className="block font-medium">
+            {formatTokens(usageAmount(row, "total_tokens"), unavailable)}
           </span>
+          <span className="block text-muted-foreground">
+            {formatCost(usageAmount(row, "cost_subcents"), row.currency, unavailable)}
+          </span>
+          <span className="block text-muted-foreground">{costBasisLabel(row.cost_basis, t)}</span>
         </span>
       </summary>
-      <div className="grid grid-cols-2 gap-3 border-t p-3">
-        <MobileMetric
-          label={t("stats:inputTokens")}
-          value={formatTokens(row.input_tokens, unavailable)}
-        />
-        <MobileMetric
-          label={t("stats:outputTokens")}
-          value={formatTokens(row.output_tokens, unavailable)}
-        />
-        <MobileMetric
-          label={t("stats:cacheReadTokens")}
-          value={formatTokens(row.cache_read_tokens, unavailable)}
-        />
-        <MobileMetric
-          label={t("stats:cacheWriteTokens")}
-          value={formatTokens(row.cache_write_tokens, unavailable)}
-        />
-        <MobileMetric
-          label={t("stats:reasoningTokens")}
-          value={formatTokens(row.reasoning_tokens, unavailable)}
-        />
-        <MobileMetric
-          label={t("stats:effectiveRate")}
-          value={formatRate(row.effective_cost_per_million, row.currency, unavailable)}
-        />
-        <div className="col-span-2 flex items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">{t("stats:coverage")}</span>
-          <CoverageBadge coverage={row.coverage} />
-        </div>
+      <div className="min-w-0 border-t p-3">
+        <UsageDetails row={row} view={view} showLink />
       </div>
     </details>
-  );
-}
-
-function MobileMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-sm tabular-nums">{value}</div>
-    </div>
   );
 }
 
@@ -481,9 +444,11 @@ function MobileTotals({ row, unavailable }: { row: TokenUsageMetrics; unavailabl
     <div className="flex items-center justify-between gap-3 border-t px-1 pt-3 text-sm">
       <span className="font-medium">{t("stats:allFilteredRecords")}</span>
       <span className="text-right tabular-nums">
-        <span className="block font-medium">{formatTokens(row.total_tokens, unavailable)}</span>
+        <span className="block font-medium">
+          {formatTokens(usageAmount(row, "total_tokens"), unavailable)}
+        </span>
         <span className="text-xs text-muted-foreground">
-          {formatCost(row.cost_subcents, row.currency, unavailable)}
+          {formatCost(usageAmount(row, "cost_subcents"), row.currency, unavailable)}
         </span>
       </span>
     </div>
@@ -493,8 +458,4 @@ function MobileTotals({ row, unavailable }: { row: TokenUsageMetrics; unavailabl
 function CoverageBadge({ coverage }: { coverage: string }) {
   const { t } = useTranslation();
   return <Badge variant="outline">{t(coverageLabelKey(coverage))}</Badge>;
-}
-
-function periodLabel(value: string, view: TokenUsageView, t: (key: string) => string): string {
-  return value ? formatTokenPeriod(value, view) : t("stats:undatedCoverageOnly");
 }

@@ -41,22 +41,25 @@ func pageFromProto(p *pluginv1.Page) Page {
 // PageInfo is the Go-native mirror of kandev.plugin.v1.PageInfo, returned
 // alongside every paginated Host data read.
 type PageInfo struct {
-	NextCursor string
-	HasMore    bool
+	NextCursor           string
+	HasMore              bool
+	ProjectionStatus     string
+	ProjectionGeneration string
+	ProjectionPending    bool
 }
 
 func (p *PageInfo) toProto() *pluginv1.PageInfo {
 	if p == nil {
 		return nil
 	}
-	return &pluginv1.PageInfo{NextCursor: p.NextCursor, HasMore: p.HasMore}
+	return &pluginv1.PageInfo{NextCursor: p.NextCursor, HasMore: p.HasMore, ProjectionStatus: p.ProjectionStatus, ProjectionGeneration: p.ProjectionGeneration, ProjectionPending: p.ProjectionPending}
 }
 
 func pageInfoFromProto(p *pluginv1.PageInfo) *PageInfo {
 	if p == nil {
 		return nil
 	}
-	return &PageInfo{NextCursor: p.GetNextCursor(), HasMore: p.GetHasMore()}
+	return &PageInfo{NextCursor: p.GetNextCursor(), HasMore: p.GetHasMore(), ProjectionStatus: p.GetProjectionStatus(), ProjectionGeneration: p.GetProjectionGeneration(), ProjectionPending: p.GetProjectionPending()}
 }
 
 // TaskRepository is the Go-native mirror of kandev.plugin.v1.TaskRepository.

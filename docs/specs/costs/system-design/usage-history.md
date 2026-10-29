@@ -19,7 +19,8 @@ The costs system owns retained observations, source selection, summaries, and ac
 Tasks own execution identity and task lifecycle. Auth and organizations own identity and access policy.
 Plugins supply measurements through the supported Host API, without database access.
 The [retention decision](../../../decisions/2026-10-28-retained-usage-history.md) records this boundary.
-New symbols and tables below are proposed, not implemented APIs.
+The additive SDK contract and retained-source boundaries define this design.
+The work package records implementation and verification status separately.
 
 The [Token Usage design](token-usage.md) remains the collection and presentation baseline.
 This design replaces its live-task storage dependency and archive-wide read-time reconciliation.
@@ -49,7 +50,7 @@ This package adds no org-wide visibility right or new release flag.
 | `task/usage/writer.go` | Carry trusted scope and actor evidence through the existing single writer |
 | `task/repository/sqlite/task.go` and task cleanup services | Preserve legacy data before cascade and detach retained live links |
 | `internal/analytics/{models,repository,service}` | Own retained identities, revisions, projection work, and queries |
-| `internal/plugins/host_data.go`, `pkg/pluginsdk/usage.go`, `plugin.proto` | Expose versioned generic measurements and retained bindings |
+| `internal/plugins/host_data.go`, root `pluginsdk/usage_history*.go`, `pluginsdk/proto/kandev/plugin/v1/plugin.proto` | Expose versioned generic measurements, segments, and retained bindings |
 | `internal/org`, `backendapp/orgs.go`, and task workspace-deletion services | Include retained scopes in suspension, erasure, and no-rows-left contracts |
 | `apps/web/app/stats/token-usage-*` | Render retained attribution and canonical summary state |
 | Sibling Session Cost `server/{plugin,collector,import}.go` | Supply normalized observations through the generic contract |
@@ -88,13 +89,29 @@ Workspace erasure removes its retained dataset through the existing authorized d
 Register every retained table and projection checkpoint with org erasure and E2E reset.
 Org erasure queries captured org ownership, including historical scopes whose live workspace links changed.
 Add an explicit costs-service erasure operation to the current org/workspace deletion seam.
-The current `backendapp.orgDataAdapter` delegates to live-workspace deletion and is insufficient alone.
+Live-workspace deletion alone cannot erase historical captured scopes.
 Fence admission, correction, backfill, and every projector generation before purging retained org scopes.
 Workers must observe the erasing scope and cannot recreate observations, dirty work, or summaries after purge.
 Include inactive generations and migration checkpoints in the final no-rows-left assertion.
 There is no unowned fallback scope after erasure.
 User removal can retain an opaque historical actor reference without retaining profile text.
 Historical references confer no access to a deleted account.
+
+Four additional tables are registered with the required-store catalog and accounting lifecycle:
+
+| Table | Purpose and lifetime |
+| --- | --- |
+| `usage_collection_current_targets` | Indexed current bindings for retained subjects. Scoped accounting erasure removes these rows. |
+| `usage_collection_source_guards` | Source/scope hashes and mixed/erased flags. These denial controls survive normal accounting erasure. |
+| `usage_collection_guard_erasure` | Scope-bound sequence checkpoint for bounded guard capture before binding erasure. |
+| `usage_collection_guard_workspaces` | Workspace/source hash membership for isolated fixture reset and shared-source protection. |
+
+The hash guards contain no measurements, actor text, or collector payloads.
+They prevent a later session or tenant from adopting previously foreign or erased source history.
+They are privacy controls, not retained accounting amounts or authority to read erased history.
+The gated E2E reset advances the workspace fence, clears fixture accounting state, then reopens the workspace.
+It removes that workspace's guard membership and removes a source guard only when no other workspace still references it.
+The reset route exists only with `KANDEV_MOCK_AGENT=true` or `only`.
 
 ## Ownership and authorization
 
@@ -114,6 +131,13 @@ Unknown historical actor information stays unknown.
 Token and cost attribution can differ when a collector supplies aggregate cost beside attributable native tokens.
 Keep each metric's actor evidence separate. Never allocate aggregate cost proportionally across users.
 Workspace cost can remain known while per-user cost remains unavailable.
+
+Capture aggregate-source scope evidence at session creation, independently of discovery metadata.
+Discovery cannot manufacture creation evidence from the current workspace owner.
+Only explicit `SourceScopeStatus=eligible` permits aggregate collection. Mixed, unknown, and absent status fail closed.
+Transfers, copied contexts, and erased-source guards can withhold source context or reject an aggregate even with a fresh binding.
+A prior discovery actor snapshot does not authorize attribution of a later cumulative aggregate.
+Resolve aggregate actors from immutable core evidence for the reported coverage. Preserve exact native event actor bindings separately.
 
 Use existing Auth, MultiTenancy, membership, unit-reach, suspension, and operator-tier policy.
 Synthetic single-user identity remains valid when Auth is off. Org identity can remain absent in that mode.
@@ -139,6 +163,7 @@ The contract contains:
 | Binding | Core-issued subject binding, validated workspace, schema version |
 | Provenance | Authenticated collector namespace, immutable observation item ID, source record, tool version, revision, payload digest |
 | Underlying work | Provider thread/event/transcript identity with a declared identity scheme |
+| Segments | Optional stable decomposition and member IDs for explicitly disjoint source records, requiring report schema 2 |
 | Dimensions | Exact model ID, normalized provider, optional agent client and serving platform, raw source labels |
 | Tokens | Nullable input/output/cache-read/cache-write/reasoning/total plus token-semantics version |
 | Cost | Nullable fixed-point amount, currency, reported/estimated/unknown basis, pricing provenance when known |
@@ -153,10 +178,19 @@ Subset semantics must identify reasoning-inside-output and cache-inside-input ex
 Missing fields, inconsistent totals, invalid intervals, and overflow have explicit validation outcomes.
 No adapter infers provider or pricing from an unreviewed model-name prefix.
 Persist no prompt, response, source-code, secret, task-title, or personal-name copy for this capability.
+Core accepts normalized source measurements without parsing collector-specific JSON or assuming any tool's grouping keys.
+An absent token-semantics value remains valid unknown evidence. An explicit source total does not imply unreported subset relationships.
+
+Missing cost remains unknown, independently of known tokens. A selected cost of zero is a measured zero, not missing cost.
+Cost provenance exists only when the selected evidence supplies a cost amount.
+Do not copy token-source attribution or an unselected candidate's cost into that missing metric.
 
 Older callers keep live-task admission through the existing DTO mapper.
 Core resolves a retained binding before storage and marks unsupported new dimensions unknown.
-Unknown major schemas fail explicitly, rather than silently losing intended writes.
+The mapper also enforces source-scope eligibility. Schema 1 remains supported without segments.
+Schema 2 is required when a report carries `UsageSegmentIdentityV1`.
+Unsupported schemas fail explicitly. Never downgrade a segmented report to schema 1.
+Report schema versions are independent of manifest API versions and the existing v1 RPC names.
 
 ## Source identity and indexed selection
 
@@ -166,14 +200,29 @@ Normalize proven underlying identity into a scope-bound work key.
 Use provider account/thread/event evidence or a core-approved transcript binding when available.
 An identity must not cross orgs merely because two providers use the same thread string.
 Aliases require supported evidence. Matching model names alone never establish equivalence.
+One proven transcript within a captured scope remains one work family across subjects and collectors.
+Distinct proven transcript contexts within one subject remain distinct work.
+Unproven or copied lineage does not establish disjoint consumption.
 
 Establish proven work/coverage equivalence before model/provider/semantic partitions can become additive.
 Maintain an indexed equivalence/conflict group keyed by scope, underlying work, and coverage identity.
 Known and unknown dimension variants of the same proven work enter that group together.
 An unallocated unknown-model aggregate cannot be added to its known-model detail as separate consumption.
 Conflicting provider or semantic claims remain alternative incomplete evidence unless a supported mapping resolves them.
-Then partition compatible candidates by model, provider, and token semantics for interval selection.
-Index exact event keys and coverage intervals inside that partition.
+Schema 2 declares a source-local decomposition through `DecompositionID` and disjoint member lineage through `SegmentID`.
+Different declared members can contribute together after work and coverage checks.
+For overlapping work and coverage, different collectors' decompositions remain alternatives, even with matching member ID strings.
+An unsegmented whole-work aggregate also remains an alternative to its segmented detail.
+Select coherent decomposition evidence rather than combining arbitrary members from alternative collectors.
+
+Declared IDs stay stable across subject bindings, lifetime/day views, and supported corrections.
+A member names an immutable producer record or a documented immutable group series.
+Mutable model/provider labels do not establish new work or prove retirement of an old group.
+Without record evidence for a changed group label, the producer quarantines ambiguous replacement membership.
+It cannot invent lineage or retire missing groups through a partial report.
+
+Index stable member lineage and coverage before compatible model, provider, and semantics dimensions.
+Index exact event keys and coverage intervals inside the affected work group.
 Use ordered intervals or a sweep within the affected partition to detect actual overlap.
 Use interval predicates and bounded cursor batches even within a long-lived subject's partition.
 Large lifetime reconciliation runs as durable work, without an unbounded write transaction or foreground read.
@@ -182,6 +231,11 @@ Prefer complete coverage, then trusted source policy for equivalent coverage.
 Select token and cost provenance independently only for equivalent coverage.
 Retain ambiguous overlap as incomplete without adding an invented remainder.
 Keep disjoint proven intervals additive. Keep lifetime and dated representations alternative.
+Time overlap within one member does not become additive because its labels differ.
+All-time reads choose lifetime or dated coverage independently for tokens and cost, within the selected member or alternative decomposition.
+A lifetime cost without tokens cannot suppress dated token evidence. An unknown lifetime cost cannot suppress a known dated cost.
+A partial dated import cannot shrink a fuller lifetime total or add the same consumption again.
+An incomplete native event set cannot claim complete equivalence with a fuller external snapshot merely through native priority.
 
 A bounded batch transaction validates ownership and atomically compares revision/digest.
 Concurrent inserts and updates must return the accepted current row and accurate write status.
@@ -200,6 +254,18 @@ Use an immutable sequence/keyset, an upper snapshot bound, and durable bindings 
 Only authorized targets appear. Concurrent deletion does not invalidate already admitted bindings.
 Core retains no transcript-access capability beyond the supported executor/source context.
 
+Snapshot import preparation advances one bounded durable step per call.
+`Preparing=true` returns no targets, snapshot, or cursor, with zero upper bound and no further page.
+The collector repeats the initial query before starting the immutable snapshot scan.
+Later additions, deletion, and source updates do not shift that snapshot.
+
+Current eligibility uses `ListTargets.CurrentTarget` with a workspace and at least one exact task/session/source/binding constraint.
+Indexed point lookup returns at most one target and requires `CurrentTarget=true` acknowledgement even for an empty result.
+Its snapshot and cursor are empty. Its upper bound is zero, and `HasMore` and `Preparing` are false.
+An older Host without acknowledgement is unsupported. The consumer must not substitute archive enumeration or cached snapshot eligibility.
+Revalidate before a raw source read and before its report. Current authorization and source guards still apply after deletion.
+The [authoring contract](../../../public/plugins-authoring.md#retained-usage-collection) records the exact DTO constraints and compatibility behavior.
+
 ## Canonical facts and daily summaries
 
 Add `usage_canonical_facts`, `usage_daily_summaries`, and durable projection state.
@@ -207,6 +273,8 @@ The current read-time selection becomes a projector for dirty partitions.
 Canonical facts identify selected token and cost sources separately, their coverage, and projection generation.
 Keep dated and lifetime fact kinds distinct.
 Per-subject canonical detail supports task/session reads without scanning native source history.
+Shared work with ambiguous ownership remains visible once in workspace totals without an invented task/session allocation.
+Reporting cannot discard that amount through a mandatory live-subject join.
 
 Daily summary keys include scope, actor key/status, date/calendar, model, provider, currency, and semantic version.
 Retain optional client/platform distinctions when the query exposes them.
@@ -300,6 +368,21 @@ Use the same normalization and idempotency service as live admission.
 New writes dual-write while older source ranges backfill.
 Deletion preservation and ingestion serialize on a subject admission boundary.
 Projection cutover requires verified source watermarks, not merely an empty batch.
+
+Legacy native adoption captures authoritative scope and a source high-water bound before replay continues.
+Later migration pages do not derive historical ownership from the workspace's current org.
+Missing ownership evidence remains a disclosed gap, including after transfer or erasure.
+Gap records alone do not satisfy deletion preservation.
+Ordinary task or session cleanup must stop before it removes a native ledger row without an accepted retained copy.
+Retain its raw source values and the last committed preservation cursor so retry remains safe.
+Authorized workspace or organization erasure can still purge this source data.
+
+Initial work/segment upgrades can traverse retained history once in bounded durable repair pages.
+Ordinary source-context changes enqueue targeted repair for that subject's unproven external rows.
+They do not restart an archive-wide repair or rewrite already proven/native work under the latest transcript.
+Freeze an observation's proven transcript context at admission and preserve it across replay and index repair.
+Repair records old/new invalidations through the shared transactional mutation log.
+Publication remains fenced until the affected context repair and projection group are coherent.
 
 Retain source rows and old read compatibility until validation permits cutover.
 After cutover, retained observations become authoritative for the statistics path.

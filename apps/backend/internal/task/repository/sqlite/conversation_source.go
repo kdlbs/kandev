@@ -441,7 +441,7 @@ func buildConversationMessagePageQuery(
 
 func buildConversationTurnPageQuery(driver string, req models.ConversationTurnPageRequest, cursorStarted time.Time, cursorID string, limit int) (string, []interface{}) {
 	query := `
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation,
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id,
 		       started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND ` + turnHistoryPredicate(driver, "turn_row")

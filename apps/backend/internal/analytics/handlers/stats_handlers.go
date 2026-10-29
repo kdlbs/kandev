@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/analytics"
 	"github.com/kandev/kandev/internal/analytics/dto"
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
@@ -217,20 +219,21 @@ func (h *StatsHandlers) httpGetTokenUsage(c *gin.Context) {
 		return
 	}
 	filter := models.SessionUsageFilter{
-		WorkspaceID:    workspaceID,
-		Start:          start,
-		End:            end,
-		TaskIDs:        queryValues(c.Query("task_id")),
-		SessionIDs:     queryValues(c.Query("session_id")),
-		Model:          c.Query("model"),
-		Timezone:       c.Query("timezone"),
-		GroupBy:        c.Query("group"),
-		SortBy:         c.Query("sort"),
-		SortDirection:  c.Query("direction"),
-		Provider:       c.Query("provider"),
-		IncludeUndated: c.Query("include_undated") == "true",
-		Limit:          limit,
-		Offset:         offset,
+		WorkspaceID:          workspaceID,
+		ProjectionGeneration: c.Query("projection_generation"),
+		Start:                start,
+		End:                  end,
+		TaskIDs:              queryValues(c.Query("task_id")),
+		SessionIDs:           queryValues(c.Query("session_id")),
+		Model:                c.Query("model"),
+		Timezone:             c.Query("timezone"),
+		GroupBy:              c.Query("group"),
+		SortBy:               c.Query("sort"),
+		SortDirection:        c.Query("direction"),
+		Provider:             c.Query("provider"),
+		IncludeUndated:       c.Query("include_undated") == "true",
+		Limit:                limit,
+		Offset:               offset,
 	}
 	report, err := usageRepo.ListSessionUsage(c.Request.Context(), filter)
 	if err != nil {
@@ -360,6 +363,18 @@ func (h *StatsHandlers) authorize(c *gin.Context, workspaceID string) bool {
 }
 
 func (h *StatsHandlers) fail(c *gin.Context, workspaceID, section string, err error) {
+	if errors.Is(err, analytics.ErrUsageAmountOverflow) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error_code": "usage_amount_overflow", "error": "usage totals exceed the supported integer range"})
+		return
+	}
+	if errors.Is(err, repository.ErrUsageProjectionChanged) {
+		c.JSON(http.StatusConflict, gin.H{"error_code": "usage_projection_changed", "error": "usage history changed; retry the report"})
+		return
+	}
+	if errors.Is(err, repository.ErrUsageNotVisible) {
+		c.JSON(http.StatusNotFound, gin.H{"error": workspaceNotFoundMessage})
+		return
+	}
 	if repository.IsAnalyticsBusy(err) {
 		h.logger.Warn("analytics stats request exceeded its bounded read budget",
 			zap.String("workspace_id", workspaceID),

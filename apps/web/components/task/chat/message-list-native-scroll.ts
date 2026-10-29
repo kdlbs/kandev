@@ -1423,6 +1423,21 @@ function useProgrammaticScrollGuard(
   return { runGuardedScroll, releaseProgrammaticScroll: release };
 }
 
+function getScrollAlignmentDelta(
+  elementRect: DOMRect,
+  containerRect: DOMRect,
+  margin: number,
+  alignStart: boolean,
+) {
+  if (alignStart) return elementRect.top - containerRect.top - margin;
+  return (
+    elementRect.top +
+    elementRect.height / 2 -
+    (containerRect.top + containerRect.height / 2) -
+    margin / 2
+  );
+}
+
 /**
  * Returns a `scrollToMessage(messageId, options?)` callback and its cancel
  * operation. The callback scrolls the message's row into view (start- or
@@ -1502,12 +1517,7 @@ export function useScrollToMessage(
           // The anchored bar can resize during this jump, changing scroll-margin-top.
           const margin = parseFloat(getComputedStyle(el).scrollMarginTop) || 0;
           const containerRect = container.getBoundingClientRect();
-          const delta = alignStart
-            ? elementRect.top - containerRect.top - margin
-            : elementRect.top +
-              elementRect.height / 2 -
-              (containerRect.top + containerRect.height / 2) -
-              margin / 2;
+          const delta = getScrollAlignmentDelta(elementRect, containerRect, margin, alignStart);
           const absDelta = Math.abs(delta);
           if (absDelta <= 2) {
             if (alignedFrames > 0) {

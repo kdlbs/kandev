@@ -1,7 +1,7 @@
 ---
 id: "03-collector-contract"
 title: "Normalize collector identities and indexed selection"
-status: pending
+status: in_progress
 wave: 3
 depends_on: ["02-lifecycle-migration"]
 plan: "plan.md"
@@ -64,7 +64,12 @@ Replace workspace-wide overlap loops with bounded identity/coverage matching and
 
 ```bash
 make -C apps/backend proto
-(cd apps/backend && go test -race -trimpath ./internal/analytics/... ./internal/plugins/... ./pkg/pluginsdk/... -run 'TestUsageHistory|TestSessionUsage' -count=1)
+(cd apps/backend && go test -race -trimpath ./internal/analytics/... ./internal/plugins/... -run 'TestUsageHistory|TestSessionUsage' -count=1)
+(cd pluginsdk && go test -race ./... -count=1)
+(cd pluginsdk && go vet ./...)
+(cd pluginsdk && golangci-lint run --config ../apps/backend/.golangci.yml ./...)
+node scripts/pluginsdk/check-proto-generation.mjs
+node scripts/pluginsdk/consumer-smoke.mjs --mode local --backend-only
 (cd apps/backend && : "${KANDEV_TEST_POSTGRES_DSN:?Set an isolated PostgreSQL test DSN}" && go test -trimpath ./internal/analytics/... ./internal/plugins/... -run 'TestUsageHistoryPostgres' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -76,8 +81,8 @@ git diff --check
 - `apps/backend/internal/analytics/{models/usage.go,repository/interface.go,service/service.go}`
 - `apps/backend/internal/analytics/repository/sqlite/usage.go` and new selection/index tests
 - `apps/backend/internal/plugins/{host_data.go,host_data_queries.go}` and Host contract tests
-- `apps/backend/pkg/pluginsdk/{usage.go,host_usage.go,host.go}`
-- `apps/backend/proto/kandev/plugin/v1/plugin.proto` and its existing generated output
+- `pluginsdk/{usage.go,host_usage.go,host.go}` (the extracted Go SDK module)
+- `pluginsdk/proto/kandev/plugin/v1/plugin.proto` and its existing generated output
 - `docs/public/plugins-authoring.md`, `docs/plans/plugins/GRPC-CONTRACT.md`
 
 ## Dependencies
@@ -102,4 +107,47 @@ Contract additions must not change the existing proto numbers or numeric semanti
 
 ## Results
 
-Pending.
+Implementation and test handoff accepted. Full semantic review follows the remaining worker implementations and tests.
+
+- Added the optional root SDK v1 usage-history extension, Host RPCs, protobuf output, transport tests, and public/GRPC documentation. Existing DTO fields and wire numbers remain compatible.
+- Added immutable collector item identities, verified payload digests, revision CAS receipts, explicit same-source supersession/tombstones, and atomic bounded complete-set revisions. Partial absence never retires an item.
+- Added immutable snapshot/keyset discovery with retained binding versions and collector grants. Core supplies scope and actor evidence. Issued bindings authorize corrections after deletion; forged bindings and transferred scopes fail closed.
+- Added nullable trusted session/coverage dates and canonical `PageInfo` projection status, generation, and pending fields. Unknown dates and token semantics remain absent. Explicit source totals retain `int64` precision. Collector message counts do not become Kandev turns.
+- Added indexed selection by retained scope and work before mutable dimensions. Facts have stable keys, nullable measurements, coverage kinds, and independent token/cost provenance and actors. Native priority requires a core-native source. Replacement-collector fixtures cover equivalent work, dimension corrections, currencies, overlap, and partial dated imports with lifetime totals.
+- Retained writes now feed the existing canonical usage reader. Selection visits at most 201 candidates per bounded lookup. An oversized indivisible equivalence group returns preparing state. No projection generation is invented.
+- Connected Task02 backfill and preservation to selection indexing. Final verification found and fixed a dated legacy measurements row that incorrectly selected the buckets table during index catch-up. The existing migration test still requires completion within ten pages. The admission test now requires both distinct semantics partitions to be dirty.
+- Completed behavior-preserving lint cleanup with predecessor helpers preserved. Registered two exact SQLite-only migration boundaries in the SQLguard registry, as required by the [dialect safety design](../../specs/platform/system-design/postgres-domain-store-parity.md). The separate PostgreSQL migration path passed real database tests.
+
+### Task04 integration seams
+
+- `MutateUsageObservationsTx` in `usage_history_contract.go` accepts the caller's transaction and returns mutations with old/new measurements, payloads, and affected partition IDs.
+- `recordUsageMutationTx` in `usage_history_mutations.go` is the shared transaction hook for native, legacy, and versioned observations. Mutation and dirty invalidations commit together. Task04 owns the ordered commit log and replay sequence.
+- `SelectUsagePartitionTx` in `usage_history_selection.go` returns bounded canonical facts and a continuation cursor. `ResolveUsagePartitionsTx` expands legacy dirty keys into work groups. `UsageSourceUpperBoundsTx` captures source bounds for Task04 to pair with its replay sequence.
+- `ListCanonicalUsagePage` and the service/Host page seam carry projection state, including on empty pages. Task04/05 own committed generations and projection-backed reporting.
+- Public selector/source-bound authorization uses the workspace's current organization. Task04 owns its private fenced path for captured scopes after transfer. No public bypass flag was added.
+
+### Verification receipts
+
+Go commands used `GOMAXPROCS=2`, `-p 1`, and `-trimpath`; race suites ran sequentially. PostgreSQL commands silently sourced the isolated PostgreSQL18 environment.
+The four environment-gated PostgreSQL skips in the SQLite run were followed by four actual PostgreSQL passes with no skips.
+
+All logs below use `/tmp/usage-history-task03-final-<name>.log`, except the separately named SDK lint receipt.
+
+| Check | Result | Log name |
+| --- | --- | --- |
+| Approved changed-package backend lint, including all history helpers and task lifecycle package | Zero issues | `backend-lint` |
+| Analytics, plugins, and task repository `TestUsageHistory\|TestSessionUsage` race suites | 61 top-level passes | `backend-race` |
+| Full root SDK race suite | 118 top-level passes; no skips | `sdk-race` |
+| Full root SDK vet | Passed | `sdk-vet` |
+| Full root SDK lint | Zero issues | `/tmp/usage-history-task03-sdk-lint.log` |
+| Deterministic generated-byte comparison and backend proto wrapper | Passed | `proto-generation`, `proto-wrapper` |
+| SDK artifact script tests and local Go consumer smoke | Passed | `sdk-artifact-tests`, `consumer-smoke` |
+| Real PostgreSQL race cases | Four passes; no skips | `postgres-race` |
+| SQL portability and SQLite/PostgreSQL persistence conformance, including previous-stable upgrades | Passed | `sqlguard`, `store-conformance` |
+| Documentation, specification, and whitespace checks | Passed | `docs`, `specs`, `diff-check` |
+
+Meaningful cases include `TestUsageHistoryPostgresConcurrentIndependentWriters`, `TestUsageHistoryPostgresNativeAdmissionAndRetention`, `TestUsageHistoryPostgresTaskDeletePreservesLegacySources`, and `TestUsageHistoryPostgresCapturedOrgErasureAfterWorkspaceTransfer`.
+Host wire cases include `TestUsageHistoryHostRetainedWireAdmissionCanonicalAndDeletion` and `TestUsageHistoryHostEmptyCanonicalPagePreservesProjectionState`.
+
+The initial failing backend receipt remains in `/tmp/usage-history-task03-final-backend-race.failed-1.log`; the migration diagnosis and passing regression remain in `/tmp/usage-history-task03-migration-{failure,fix}.log`.
+No released SDK/Host floor was claimed. `pluginsdk/sdk-release.json` retains null Host release and minimum-version fields. No projection implementation, sibling plugin change, staging, commit, or push was performed by this worker.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { PageShell } from "@/components/page-shell";
 import { IconChartBar } from "@tabler/icons-react";
@@ -13,33 +13,31 @@ import type { TokenUsageResponse } from "@/lib/types/http";
 import type { RangeKey } from "./stats-utils";
 import { DEFAULT_RANGE, isRangeKey } from "./stats-utils";
 import { RANGE_LABEL_KEYS, StatsNavigation, StatsRangeToggle } from "./stats-navigation";
-import { useTokenUsage, type TokenUsageLoadOptions } from "./token-usage-data";
+import { isUsagePreparing, useTokenUsage, type TokenUsageLoadOptions } from "./token-usage-data";
+import { buildTokenUsageCopySummary } from "./token-usage-copy";
 import { TokenUsageBreakdown, TokenUsageSummary, TokenUsageTrend } from "./token-usage-sections";
 import {
   TokenUsageCoverageNotice,
   TokenUsageEmpty,
   TokenUsageError,
   TokenUsageLoading,
+  TokenUsagePreparing,
+  TokenUsageProjectionNotice,
 } from "./token-usage-states";
 import {
-  costBasisLabel,
-  formatCost,
-  formatLastUpdated,
-  formatRate,
-  formatTokens,
   type SortDirection,
   type TokenUsageSortKey,
   type TokenUsageView,
 } from "./token-usage-utils";
 
-const TOKEN_USAGE_VIEW_LABEL_KEYS: Record<TokenUsageView, string> = {
-  models: "stats:models",
-  daily: "stats:daily",
-  monthly: "stats:monthly",
-  tasks: "stats:tasks",
-  sessions: "stats:sessions",
-};
 const TOKEN_USAGE_PAGE_SIZE = 200;
+const TOKEN_USAGE_SORT_ALIASES: Partial<Record<TokenUsageSortKey, string>> = {
+  input_tokens: "input",
+  output_tokens: "output",
+  cache_read_tokens: "cache_read",
+  cache_write_tokens: "cache_write",
+  reasoning_tokens: "reasoning",
+};
 
 type TokenUsagePageClientProps = {
   workspaceId?: string;
@@ -86,9 +84,9 @@ export function TokenUsagePageClient({
   });
   const rangeLabel = t(RANGE_LABEL_KEYS[range]);
   const copyText = useMemo(() => {
-    if (state.status !== "ready") return "";
-    return buildCopySummary(state.data, rangeLabel, breakdownView, t);
-  }, [breakdownView, rangeLabel, state, t]);
+    if (state.status !== "ready" || isUsagePreparing(state.data)) return "";
+    return buildTokenUsageCopySummary(state.data, rangeLabel, breakdownView, provider, t);
+  }, [breakdownView, provider, rangeLabel, state, t]);
 
   const handleRangeChange = useCallback(
     (nextRange: RangeKey) => {
@@ -316,8 +314,11 @@ function TokenUsagePageView({
         </div>
       }
     >
-      <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto max-w-7xl space-y-4 p-4 md:p-6">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto bg-background"
+        data-testid="token-usage-scroll-body"
+      >
+        <div className="mx-auto min-w-0 max-w-7xl space-y-4 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:p-6">
           <TokenUsagePageState
             workspaceId={workspaceId}
             initialError={initialError}
@@ -378,35 +379,67 @@ function TokenUsagePageState({
   if (state.status === "loading") return <TokenUsageLoading />;
   if (state.status === "error")
     return <TokenUsageError message={state.message} onRetry={onRetry} />;
+  if (isUsagePreparing(state.data))
+    return <TokenUsagePreparing onRetry={onRetry} refreshing={state.refreshing} />;
   if (!state.data.has_history) {
     return (
-      <TokenUsageEmpty
-        hasHistory={false}
-        onAllTime={() => onRangeChange("all")}
-        pluginSettingsHref={pluginSettingsHref}
-      />
+      <TokenUsageSavedValues state={state} onRetry={onRetry}>
+        <TokenUsageEmpty
+          hasHistory={false}
+          onAllTime={() => onRangeChange("all")}
+          pluginSettingsHref={pluginSettingsHref}
+        />
+      </TokenUsageSavedValues>
     );
   }
   if (!state.data.has_range_data && !state.data.undated_coverage) {
-    return <TokenUsageEmpty hasHistory onAllTime={() => onRangeChange("all")} />;
+    return (
+      <TokenUsageSavedValues state={state} onRetry={onRetry}>
+        <TokenUsageEmpty hasHistory onAllTime={() => onRangeChange("all")} />
+      </TokenUsageSavedValues>
+    );
   }
   return (
-    <TokenUsageContent
-      data={state.data}
-      trendState={trendState}
-      onRetry={onRetry}
-      view={breakdownView}
-      onViewChange={onViewChange}
-      provider={provider}
-      onProviderChange={onProviderChange}
-      providers={state.data.providers}
-      onSort={onSort}
-      sortKey={sortKey}
-      sortDirection={sortDirection}
-      offset={offset}
-      limit={TOKEN_USAGE_PAGE_SIZE}
-      onPageChange={onPageChange}
-    />
+    <TokenUsageSavedValues state={state} onRetry={onRetry}>
+      <TokenUsageContent
+        data={state.data}
+        trendState={trendState}
+        onRetry={onRetry}
+        view={breakdownView}
+        onViewChange={onViewChange}
+        provider={provider}
+        onProviderChange={onProviderChange}
+        providers={state.data.providers}
+        onSort={onSort}
+        sortKey={sortKey}
+        sortDirection={sortDirection}
+        offset={offset}
+        limit={TOKEN_USAGE_PAGE_SIZE}
+        onPageChange={onPageChange}
+      />
+    </TokenUsageSavedValues>
+  );
+}
+
+function TokenUsageSavedValues({
+  state,
+  onRetry,
+  children,
+}: {
+  state: Extract<TokenUsageRequestState, { status: "ready" }>;
+  onRetry: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <TokenUsageProjectionNotice
+        response={state.data}
+        refreshing={state.refreshing}
+        onRetry={onRetry}
+      />
+      {state.error && <TokenUsageError message={state.error} onRetry={onRetry} />}
+      {children}
+    </>
   );
 }
 
@@ -441,7 +474,7 @@ function apiSortKey(view: TokenUsageView, key: TokenUsageSortKey): string {
     }
   }
   if (key === "effective_cost_per_million") return "rate";
-  return key;
+  return TOKEN_USAGE_SORT_ALIASES[key] ?? key;
 }
 
 function TokenUsageContent({
@@ -478,7 +511,7 @@ function TokenUsageContent({
   return (
     <>
       <TokenUsageSummary
-        metrics={data.summary}
+        metrics={data.totals}
         datedCoverage={data.dated_coverage}
         undatedCoverage={data.undated_coverage}
         lastUpdated={data.last_updated}
@@ -512,49 +545,25 @@ function TokenUsageTrendState({
   fallback: TokenUsageResponse;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   if (state.status === "loading") return <TokenUsageLoading />;
   if (state.status === "error") {
     return <TokenUsageError message={state.message} onRetry={onRetry} />;
   }
-  const data = state.status === "ready" ? state.data : fallback;
+  if (state.status !== "ready") return <TokenUsageLoading />;
+  const data = state.data;
+  if (isUsagePreparing(data))
+    return <TokenUsagePreparing onRetry={onRetry} refreshing={state.refreshing} />;
+  if (data.projection_generation !== fallback.projection_generation)
+    return <TokenUsageError message={t("stats:usageGenerationChanged")} onRetry={onRetry} />;
   return (
-    <TokenUsageTrend
-      rows={data.rows}
-      currency={data.summary.currency}
-      datedCoverage={data.dated_coverage}
-    />
+    <>
+      {state.error && <TokenUsageError message={state.error} onRetry={onRetry} />}
+      <TokenUsageTrend
+        rows={data.rows}
+        currency={data.summary.currency}
+        datedCoverage={data.dated_coverage}
+      />
+    </>
   );
-}
-
-function buildCopySummary(
-  data: TokenUsageResponse,
-  rangeLabel: string,
-  view: TokenUsageView,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  const metrics = data.summary;
-  const unavailable = t("common:unavailable");
-  const rate = metrics.effective_cost_per_million;
-  const coverageKey = tokenUsageCoverageKey(data);
-  return [
-    t("stats:tokenUsageSummaryHeading", { range: rangeLabel }),
-    `${t("stats:view")}: ${t(TOKEN_USAGE_VIEW_LABEL_KEYS[view])}`,
-    `${t("stats:estimatedCost")}: ${formatCost(metrics.cost_subcents, metrics.currency, unavailable)}`,
-    `${t("stats:costBasis")}: ${costBasisLabel(metrics.cost_basis, t)}`,
-    `${t("stats:totalTokens")}: ${formatTokens(metrics.total_tokens, unavailable)}`,
-    `${t("stats:inputTokens")}: ${formatTokens(metrics.input_tokens, unavailable)}`,
-    `${t("stats:outputTokens")}: ${formatTokens(metrics.output_tokens, unavailable)}`,
-    `${t("stats:cacheReadTokens")}: ${formatTokens(metrics.cache_read_tokens, unavailable)}`,
-    `${t("stats:cacheWriteTokens")}: ${formatTokens(metrics.cache_write_tokens, unavailable)}`,
-    `${t("stats:reasoningTokens")}: ${formatTokens(metrics.reasoning_tokens, unavailable)}`,
-    `${t("stats:effectiveRate")}: ${formatRate(rate, metrics.currency, unavailable)}`,
-    `${t("stats:coverage")}: ${t(coverageKey)}`,
-    `${t("stats:lastUpdated")}: ${formatLastUpdated(data.last_updated, unavailable)}`,
-  ].join("\n");
-}
-
-function tokenUsageCoverageKey(data: TokenUsageResponse): string {
-  if (data.dated_coverage) return "stats:datedCoverageAvailable";
-  if (data.undated_coverage) return "stats:undatedCoverageOnly";
-  return "stats:coverageUnavailable";
 }

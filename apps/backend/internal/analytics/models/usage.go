@@ -6,41 +6,62 @@ import "time"
 // observation. A nil token or cost field means that the source did not report
 // that value. It is different from a reported zero.
 type SessionUsageMeasurement struct {
-	ID                string
-	WorkspaceID       string
-	TaskID            string
-	SessionID         string
-	TranscriptID      string
-	Source            string
-	SourceRecordID    string
-	UsageIdentity     string
-	Model             string
-	Provider          string
-	SourceVersion     string
-	Revision          int64
-	PayloadDigest     string
-	ObservedAt        time.Time
-	CollectedAt       time.Time
-	InputTokens       *int64
-	OutputTokens      *int64
-	CacheReadTokens   *int64
-	CacheWriteTokens  *int64
-	ReasoningTokens   *int64
-	TotalTokens       *int64
-	Turns             *int64
-	CostSubcents      *int64
-	Currency          string
-	CostBasis         string
-	Coverage          string
-	CostCoverage      string
-	SourceTimezone    string
-	AttributionStatus string
-	CoverageStart     *time.Time
-	CoverageEnd       *time.Time
-	SourceDate        string
-	CoverageKey       string
-	Estimated         bool
-	Stale             bool
+	ID                       string
+	WorkspaceID              string
+	TaskID                   string
+	SessionID                string
+	ScopeID                  string `json:"-"`
+	SubjectID                string `json:"-"`
+	UsageBindingID           string `json:"-"`
+	ActorID                  string `json:"-"`
+	ActorStatus              string `json:"-"`
+	ActorKind                string `json:"-"`
+	TranscriptID             string
+	Source                   string
+	SourceRecordID           string
+	UsageIdentity            string
+	Model                    string
+	Provider                 string
+	AgentClient              string `json:"-"`
+	SourceVersion            string
+	NativeScope              string `json:"-"`
+	MeasurementSource        string `json:"-"`
+	UsageCompleteness        string `json:"-"`
+	UsageSchemaVersion       int    `json:"-"`
+	PricingCatalogVersion    string `json:"-"`
+	Revision                 int64
+	PayloadDigest            string
+	ObservedAt               time.Time
+	CollectedAt              time.Time
+	InputTokens              *int64
+	OutputTokens             *int64
+	CacheReadTokens          *int64
+	CacheWriteTokens         *int64
+	ReasoningTokens          *int64
+	ReasoningOutputTokens    *int64 `json:"-"`
+	TotalTokens              *int64
+	SourceTotalTokens        *int64 `json:"-"`
+	ReportedCacheWriteTokens *int64 `json:"-"`
+	TokenSemanticsVersion    int    `json:"-"`
+	ReasoningInsideOutput    bool   `json:"-"`
+	CacheReadInsideInput     bool   `json:"-"`
+	Turns                    *int64
+	CostSubcents             *int64
+	Currency                 string
+	CostBasis                string
+	Coverage                 string
+	CostCoverage             string
+	SourceTimezone           string
+	AttributionStatus        string
+	CoverageStart            *time.Time
+	CoverageEnd              *time.Time
+	SourceDate               string
+	CoverageKey              string
+	Estimated                bool
+	Stale                    bool
+	// Canonical read metadata. Source writes cannot set applicability.
+	TokenMetricAbsent bool `json:"token_metric_absent"`
+	CostMetricAbsent  bool `json:"cost_metric_absent"`
 }
 
 // UsageMeasurement is kept as a concise alias for plugin and service callers.
@@ -59,6 +80,7 @@ const (
 	UsageAttributionAttributed = "attributed"
 	UsageAttributionAmbiguous  = "ambiguous"
 	UsageAttributionUnknown    = "unknown"
+	UsageAttributionMixed      = "mixed"
 )
 
 // SessionUsageWriteStatus describes how a cumulative observation was handled.
@@ -90,27 +112,30 @@ type SessionUsageFilter struct {
 	// Source is an internal service-side narrowing key. Browser callers leave
 	// it empty; plugin Host reads set it from the authenticated plugin id so a
 	// plugin can only read its own saved measurements.
-	Source         string
-	SessionIDs     []string
-	TaskIDs        []string
-	Model          string
-	Provider       string
-	Start          *time.Time
-	End            *time.Time
-	Timezone       string
-	GroupBy        string
-	SortBy         string
-	SortDirection  string
-	IncludeUndated bool
-	Limit          int
-	Offset         int
-	Canonical      bool
+	Source               string
+	SessionIDs           []string
+	TaskIDs              []string
+	Model                string
+	Provider             string
+	Start                *time.Time
+	End                  *time.Time
+	Timezone             string
+	GroupBy              string
+	SortBy               string
+	SortDirection        string
+	IncludeUndated       bool
+	Limit                int
+	Offset               int
+	Canonical            bool
+	ProjectionGeneration string
 }
 
 // UsageTotals contains nullable totals so missing source categories stay
 // visible to callers. CostSubcents is in 1/10,000 of a US dollar, matching the
 // native task usage ledger.
 type UsageTotals struct {
+	UsageReportAccounting
+	SourceTotalTokens       *int64   `json:"source_total_tokens"`
 	InputTokens             *int64   `json:"input_tokens"`
 	OutputTokens            *int64   `json:"output_tokens"`
 	CacheReadTokens         *int64   `json:"cache_read_tokens"`
@@ -131,6 +156,13 @@ type UsageTotals struct {
 // TokenUsageRow is a complete filtered result row. Rows are grouped by the
 // query's GroupBy value and are sorted before pagination.
 type TokenUsageRow struct {
+	UsageReportAccounting
+	SourceTotalTokens       *int64   `json:"source_total_tokens"`
+	SubjectID               string   `json:"subject_id,omitempty"`
+	TaskAvailable           bool     `json:"task_available"`
+	SessionAvailable        bool     `json:"session_available"`
+	TaskArchived            bool     `json:"task_archived"`
+	AgentClient             string   `json:"agent_client,omitempty"`
 	Key                     string   `json:"key"`
 	Period                  string   `json:"period,omitempty"`
 	Model                   string   `json:"model,omitempty"`
@@ -157,18 +189,24 @@ type TokenUsageRow struct {
 }
 
 type TokenUsageReport struct {
-	Summary          UsageTotals     `json:"summary"`
-	Rows             []TokenUsageRow `json:"rows"`
-	Totals           UsageTotals     `json:"totals"`
-	TotalRows        int             `json:"total_rows"`
-	HasMore          bool            `json:"has_more"`
-	HasHistory       bool            `json:"has_history"`
-	HasRangeData     bool            `json:"has_range_data"`
-	HasNativeHistory bool            `json:"has_native_history"`
-	DatedCoverage    bool            `json:"dated_coverage"`
-	UndatedCoverage  bool            `json:"undated_coverage"`
-	Providers        []string        `json:"providers"`
-	LastUpdated      *time.Time      `json:"last_updated,omitempty"`
+	RangeStart           *time.Time      `json:"range_start"`
+	RangeEnd             *time.Time      `json:"range_end"`
+	ProjectionStatus     string          `json:"projection_status"`
+	ProjectionGeneration string          `json:"projection_generation"`
+	ProjectionPending    bool            `json:"projection_pending"`
+	HistoryGap           bool            `json:"history_gap"`
+	Summary              UsageTotals     `json:"summary"`
+	Rows                 []TokenUsageRow `json:"rows"`
+	Totals               UsageTotals     `json:"totals"`
+	TotalRows            int             `json:"total_rows"`
+	HasMore              bool            `json:"has_more"`
+	HasHistory           bool            `json:"has_history"`
+	HasRangeData         bool            `json:"has_range_data"`
+	HasNativeHistory     bool            `json:"has_native_history"`
+	DatedCoverage        bool            `json:"dated_coverage"`
+	UndatedCoverage      bool            `json:"undated_coverage"`
+	Providers            []string        `json:"providers"`
+	LastUpdated          *time.Time      `json:"last_updated,omitempty"`
 }
 
 func Int64(value int64) *int64 { return &value }

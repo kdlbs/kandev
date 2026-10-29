@@ -51,11 +51,12 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(session.changes).toBeVisible();
       await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
 
-      // A real tracker update must not finish the still-held foreground request.
+      // The tracker reports the new file as pending while the foreground request stays held.
       git.createFile("initial-loading-notification.txt", "foreground refresh is still pending\n");
-      await expect
-        .poll(() => bridge.notificationHasReadyFile("initial-loading-notification.txt"))
-        .toBe(true);
+      await bridge.waitForPendingNotificationWithFile(
+        "initial-loading-notification.txt",
+        task.session_id,
+      );
 
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");

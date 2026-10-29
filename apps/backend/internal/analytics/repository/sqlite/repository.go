@@ -2,8 +2,8 @@
 package sqlite
 
 import (
-	"sync"
 	"github.com/jmoiron/sqlx"
+	"sync"
 )
 
 // Repository provides SQLite-based analytics operations.

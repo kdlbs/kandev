@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
@@ -449,40 +447,17 @@ func TestUserStoreInitSchemaIsIdempotent(t *testing.T) {
 	}
 }
 
-// openIsolatedPostgresConcurrentPool is like testutil.OpenIsolatedPostgres
-// but for tests that need real concurrent connections. OpenIsolatedPostgres
-// isolates its schema with a session-level `SET search_path`, which only
-// applies to the one connection it ran on; raising that *sqlx.DB's
-// MaxOpenConns afterwards lets the pool open additional physical
-// connections that never ran the SET and fall back to the default schema,
-// so plugin_user_state "doesn't exist" the moment a query lands on a fresh
-// connection (caught by actually running this test against a live
-// container, not just trusting the retry-until-skip path). Baking
-// search_path into the DSN via the `options` startup parameter instead
-// applies it to every new physical connection at connect time.
+// The shared utility scopes every physical connection through its DSN and
+// registers schema cleanup. Raising its limit preserves that isolation.
 func openIsolatedPostgresConcurrentPool(t *testing.T, dsn string, maxOpenConns int) *sqlx.DB {
 	t.Helper()
-	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-
-	setup, err := sqlx.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open postgres (schema setup): %v", err)
-	}
-	if _, err := setup.Exec("CREATE SCHEMA " + schema); err != nil {
-		_ = setup.Close()
-		t.Fatalf("create postgres schema %s: %v", schema, err)
-	}
-	t.Cleanup(func() {
-		_, _ = setup.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
-		_ = setup.Close()
-	})
-
-	pooled, err := sqlx.Open("pgx", dsn+" options='-c search_path="+schema+"'")
-	if err != nil {
-		t.Fatalf("open postgres (pooled): %v", err)
-	}
+	pooled := testutil.OpenIsolatedPostgres(t, dsn)
 	pooled.SetMaxOpenConns(maxOpenConns)
-	t.Cleanup(func() { _ = pooled.Close() })
+	var version string
+	if err := pooled.Get(&version, `SHOW server_version`); err != nil {
+		t.Fatal("read PostgreSQL test server version")
+	}
+	t.Logf("PostgreSQL server %s", version)
 	return pooled
 }
 

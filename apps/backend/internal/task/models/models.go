@@ -2368,9 +2368,10 @@ func copyMetadata(m map[string]any) map[string]any {
 // A turn starts when a user sends a prompt and ends when the agent completes,
 // cancels, or errors.
 type Turn struct {
-	ID            string `json:"id"`
-	TaskSessionID string `json:"session_id"`
-	TaskID        string `json:"task_id"`
+	ID             string `json:"id"`
+	TaskSessionID  string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	UsageBindingID string `json:"-"`
 	// ExecutionProfileID and RouteGeneration are immutable attribution for the
 	// concrete route that started this turn. They are kept alongside the
 	// existing metadata during the compatibility migration so old rows remain

@@ -3,7 +3,7 @@ package pluginsdk
 import (
 	"context"
 
-	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 )
 
 type grpcUsageReader struct {
@@ -61,6 +61,7 @@ func (s *grpcHostServer) UpsertSessionUsage(ctx context.Context, req *pluginv1.U
 	measurements := make([]SessionUsageMeasurement, len(req.GetMeasurements()))
 	for i, item := range req.GetMeasurements() {
 		measurements[i] = sessionUsageMeasurementFromProto(item)
+		measurements[i].TokenMetricAbsent, measurements[i].CostMetricAbsent = false, false
 	}
 	results, err := s.impl.Usage().UpsertBatch(ctx, req.GetWorkspaceId(), measurements)
 	if err != nil {

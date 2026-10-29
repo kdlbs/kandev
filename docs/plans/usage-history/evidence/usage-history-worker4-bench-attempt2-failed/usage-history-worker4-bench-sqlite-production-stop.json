@@ -1,0 +1,14 @@
+{
+  "at_utc": "2026-10-29T05:39:47.586081+00:00",
+  "reason": "Stop at measured production scan-bound violation in recent UTC report; coarse fallback visits all dated contributions",
+  "root_shell_pid": 2012439,
+  "signal": "SIGINT",
+  "benchmark_pids": [
+    2012508
+  ],
+  "descendant_pids": [
+    2012439,
+    2012445,
+    2012508
+  ]
+}

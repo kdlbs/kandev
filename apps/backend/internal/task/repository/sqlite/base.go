@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/usagehistory"
 	"github.com/kandev/kandev/internal/db"
 )
 
@@ -21,6 +22,8 @@ type Repository struct {
 	ro                      *sqlx.DB // reader (read-only pool)
 	ownsDB                  bool
 	log                     *logger.Logger
+	usageHistoryRetainer    usagehistory.Retainer
+	usageHistoryLifecycle   usagehistory.Lifecycle
 	migrate                 *db.MigrateLogger
 	queuePurgeMu            sync.RWMutex
 	clarificationAdmission  clarificationReadAdmission

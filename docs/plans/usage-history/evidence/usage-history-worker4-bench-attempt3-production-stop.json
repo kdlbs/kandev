@@ -1,0 +1,17 @@
+{
+  "stopped_at_utc": "2026-10-29T06:33:18.455577+00:00",
+  "status": "STOP_REQUESTED_FOR_RECURRENT_PRODUCTION_FAILURE",
+  "source_set_sha256": "3318aca02ff4765a7889ed5cfe400b8efca27c87764f85c27223cba51c11f86d",
+  "signal": "SIGINT",
+  "target_pids": [
+    2085228
+  ],
+  "original_session_descendants": [
+    2085103,
+    2085107,
+    2085228
+  ],
+  "postgres_started": false,
+  "full_size_fixture_completed": false,
+  "production_error": "analytics busy: context deadline exceeded; one_year/five_years/America/New_York and Asia/Kathmandu"
+}

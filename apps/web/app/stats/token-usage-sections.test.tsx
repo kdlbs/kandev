@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type { TokenUsageRow } from "@/lib/types/http";
 
@@ -82,6 +82,16 @@ function usageRow(): TokenUsageRow {
 }
 
 describe("TokenUsageTrend", () => {
+  afterEach(cleanup);
+  it("shows every returned period instead of silently retaining only fourteen", () => {
+    const rows = Array.from({ length: 20 }, (_, index) => ({
+      ...usageRow(),
+      key: String(index),
+      period: `2026-09-${String(index + 1).padStart(2, "0")}`,
+    }));
+    render(<TokenUsageTrend rows={rows} currency="USD" datedCoverage />);
+    expect(screen.getByRole("img").querySelectorAll("[title]")).toHaveLength(20);
+  });
   it("keeps dated points when switching to monthly granularity", () => {
     render(<TokenUsageTrend rows={[usageRow()]} currency="USD" datedCoverage />);
 

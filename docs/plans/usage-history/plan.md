@@ -1,6 +1,6 @@
 ---
 created: 2026-10-28
-status: draft
+status: in_progress
 requirements:
   - REQ-COSTS-USAGE-HISTORY-001
   - REQ-COSTS-USAGE-HISTORY-002
@@ -31,6 +31,10 @@ Source baseline: core `9aecf156c65e7522a43f2a1c8310737179c25d70`, plugin `127bc4
 These commits are investigation evidence, not a promise that their open PRs are merge-ready.
 Reconcile intervening main changes before implementation, without discarding user edits.
 
+Execution started after rebasing onto main `a33ff4139ad`.
+That revision extracts the Go SDK into root `pluginsdk/`, module `github.com/kdlbs/kandev/pluginsdk`.
+Work-order paths and verification must use that module layout. The user authorized six Luna/max workers and coordinator integration/review.
+
 ## Scope
 
 ### In scope
@@ -56,7 +60,7 @@ The [ADR](../../decisions/2026-10-28-retained-usage-history.md) owns retention a
    Capture normalized native observations within `CreateTaskUsageEvent`, preserving its existing ledger/rollup transaction.
 2. Backfill old native/external rows with durable keyset checkpoints. Gate task cascade on committed preservation.
    Register retained tables with workspace/org erasure and E2E reset. Do not expose deleted links as live tasks.
-3. Extend `pkg/pluginsdk/usage.go`, `plugin.proto`, and `internal/plugins/host_data.go` additively.
+3. Extend root `pluginsdk/usage.go`, its `plugin.proto`, and `internal/plugins/host_data.go` additively.
    Separate source provenance from proven work identity. Match only indexed identity/coverage partitions.
    Add snapshot/keyset target discovery and authorized retained corrections.
 4. Persist selected facts and daily summaries through durable dirty-partition work and atomic projection revisions.
@@ -188,11 +192,70 @@ Use deterministic transcript fixtures. Run affected browser cases with retries d
 - [ ] [Task 06: Adopt the generic contract in Session Cost](task-06-session-cost-adapter.md)
 
 Dependency order: 01 -> 02 -> 03 -> 04 -> 05 -> 06.
-All work orders are sequential because they share schema, projection rules, or published SDK contracts.
+The integration handoffs follow this order because they share schema, projection rules, and SDK contracts.
+Independent phases may overlap when their write sets are disjoint.
+Task 03's tested SDK phase allows Task 06 adapter and fixture tests while core lifecycle work continues.
+Task 05 may implement frontend presentation and component tests against additive DTO fields while Task 04 owns backend projection work.
+Its SQL mapping, benchmarks, and browser runs wait for the tested projection handoff.
+Real Host validation, browser evidence, and the final immutable SDK pin remain gated on core integration.
+Task 04 preparation identified selector and replay dependencies; its implementation waits for those handoffs.
 
 ## Verification results
 
-Implementation: Pending. No product build, database benchmark, or browser test is claimed by this design package.
+Implementation: In progress. The design-package results below predate code changes.
+Each work order's Results owns its actual implementation and test evidence.
+Tasks 01 and 02 reopened for scoped lint cleanup found during Task 03 integration.
+Their original workers completed helper extractions, then Task 03's combined lint, race, real PostgreSQL, and static checks passed.
+Tasks 01 through 03 have initial implementation/test handoffs. Coordinator review is checking components after their own tests pass.
+
+Coordinator review on 2026-10-29 reopened Task 03 after its tested handoff.
+Shared transcripts across subjects need one accounting contribution, and a fresh binding must not assign earlier organization usage to a new owner.
+Collection-target discovery must also bound metadata refresh per request.
+The original contract worker owns these corrections. The plugin worker owns the related cache, import-state, startup-scan, and source-day rollover findings.
+Their earlier passing receipts remain recorded; they do not close the new findings.
+The full scale retry and final browser, review, push, and CI gates remain open.
+
+Review also reopened Task 02: preservation must advance to the last copied row, rather than the end of all remaining rows.
+The lifecycle fix now passes SQLite and PostgreSQL race tests with 451 native events, measurements, and dated buckets each.
+The optional state-key API and bounded plugin cleanup also pass their focused tests. Final Host integration remains open.
+Task 01 reopened for native turn-count and reasoning-subset corrections, including repair of already published values.
+Task 03 also needs distinct model groups to survive selection, and current source checks must avoid archive-wide lookup.
+Task 05 is correcting client aggregation that can recreate an unavailable server rate. Its final checks remain open.
+
+Native turn/reasoning integration now passes 13 focused cases normally and under race on SQLite and PostgreSQL 18.6.
+The client rate and numeric-sort corrections also pass their focused tests, lint, and typechecking.
+Task 04 reopened for model-segment selection and projection repair. New sessions must not reindex unrelated history.
+The projection worker owns this work; the lifecycle worker owns bounded current-target lookup and source-scope safety.
+The plugin passes its full Go/race suite against the typed eligibility/preparation checkpoint.
+It still needs the final lookup/segment contract, actual Host proof, immutable source pin, packaging, and browser checks.
+
+At the 2026-10-29 15:12 UTC checkpoint, shared usage labels distinguish unallocated work from deleted subjects.
+The focused component cases, lint, typechecking, and locale checks pass. Five public and contract guides also pass validation.
+The core's focused frozen-transcript and targeted context-repair cases pass; final source-selection integration remains open.
+Current-target privacy and erasure cases pass on PostgreSQL, while an actual SQL-visit regression still requires correction.
+The plugin's point/explicit-segment checkpoint passes its full Go and race suites.
+Ordinary Tokscale group declarations and ambiguous membership handling remain in progress after verification of the pinned producer source.
+The complete benchmarks, browser cases, final rebase, source pin, package, pushes, and current-head CI remain required.
+
+The 16:02 UTC checkpoint closes the focused lookup test gate: race cases pass on SQLite and PostgreSQL 18.6.
+Actual SQL visits remain constant after adding 902 unrelated sessions. Full frontend and normal documentation validation also pass.
+The plugin's producer checkpoint passes 152 Go functions and 105 subtests in normal and race runs, plus 58 UI cases.
+Core coverage-window selection now preserves disjoint days across collectors in both databases, including the oversized path.
+Review still requires fixes for unknown lifetime cost, selected-cost estimate metadata, and canonical metric applicability across the Host boundary.
+The plugin consumer must distinguish an absent metric from an unknown value through the typed contract.
+Core production remains unfrozen, and every final integration and delivery gate remains open.
+
+Coordinator integration checkpoint on 2026-10-29:
+
+Component implementations have tested, reviewed handoffs. Integration remains in progress.
+The full analytics package passed 390 test/subtest results before the final lifecycle and transfer corrections.
+Those corrections passed focused normal and race cases on SQLite and PostgreSQL 18.6.
+They protect uncopied native records, stale completed checkpoints, and captured ownership after actual task transfers.
+The migration fixture retains its original assertions and now also runs on PostgreSQL.
+The standalone SDK, frontend components, plugin, and persistence conformance have passing component receipts.
+Small benchmark fixtures pass on both engines through real admission and production publication.
+The large five-year runs, fresh browsers, final SDK pin/packages, primary rebase, pushes, and current-head CI remain required.
+Earlier failed receipts remain historical evidence and are not relabeled as passes.
 
 Package checks on 2026-10-28:
 

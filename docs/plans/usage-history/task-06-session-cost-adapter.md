@@ -1,7 +1,7 @@
 ---
 id: "06-session-cost-adapter"
 title: "Adopt the generic contract in Session Cost"
-status: pending
+status: in_progress
 wave: 6
 depends_on: ["05-retained-reporting"]
 plan: "plan.md"
@@ -119,4 +119,28 @@ Changing the measurement source must not create another cumulative contribution 
 
 ## Results
 
-Pending.
+Task 06 remains in progress pending core integration. SDK-layout preparation completed against the current local core:
+new module imports/replacement, sparse checkouts, and package-tool layout are adapted.
+`go test ./server/...`, `go vet ./server/...`, explicit-output Go build, `make check-format`, `make test`, and `make verify-package` passed.
+The package covered all five declared platforms and 44 UI tests. Workflow YAML parsing and repeated tidy also passed.
+Phase B implemented retained bindings, durable revision replay, bounded observation batches, corrections/supersession,
+snapshot/keyset import, diagnostic fixes, canonical readback, nullable token display, and upgrade guidance.
+Independent checks passed with `GOMAXPROCS=2` and `GOFLAGS=-p=1`:
+
+- `make check-format vet test`: Go checks and 47 UI tests.
+- `go test -p 1 -race ./server/... -run 'TestUsageHistory|TestReport|TestCollector|TestHistorical' -count=1`.
+- `make -j1 build verify-package-host verify-package`: host package and all five platforms.
+- `go mod tidy -diff`: clean.
+
+The 23 new Go fixtures cover replay, deletion/resume, correction, partial absence, rejected receipts, cancellation, and diagnostics.
+Receipts and integration details: `/tmp/kandev-plugin-session-cost-phase-b/integration-handoff.txt` and `final-scope.txt`.
+These are fixture/package results, not real Host or browser evidence.
+Task 03 added trusted target dates and canonical-generation metadata after the Phase B handoff.
+Phase C consumes those fields for bounded dated import after deletion and restart-safe saved canonical values during preparing/pending work.
+Generation tokens remain opaque. Tokscale parsed message counts do not populate Kandev turns.
+Phase C focused metadata/import/refresh tests, 16 new metadata test functions, full Go checks, 49 UI tests,
+focused race checks, tidy, and diff checks passed. Commands and SDK hashes are in `/tmp/kandev-plugin-session-cost-phase-c/handoff.txt`.
+The existing package archive still contains Phase B; final package/browser validation must rebuild it after integration.
+Tokscale model-label changes remain ambiguous without stable source-record evidence.
+Real Host selection/readback, lifecycle/uninstall retention, packaged desktop/mobile smoke, and the final reachable core pin remain pending.
+The coordinator will resume the same worker after the core handoffs. No complete Task 06 result is claimed yet.

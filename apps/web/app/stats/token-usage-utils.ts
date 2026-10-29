@@ -1,5 +1,11 @@
 import type { TokenUsageMetrics, TokenUsageMetricValue, TokenUsageRow } from "@/lib/types/http";
-import { formatDate, formatDateTime, formatNumber } from "@/lib/i18n/formats";
+import { formatDate, formatDateTime, formatNumber, intlLocale } from "@/lib/i18n/formats";
+import {
+  MAX_SAFE_USAGE_AMOUNT,
+  parseUsageInteger,
+  usageAmount,
+  type UsageIntegerValue,
+} from "@/lib/api/domains/token-usage-amounts";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 export const TOKEN_METRIC_KEYS = [
@@ -18,14 +24,15 @@ export type TokenUsageView = "models" | "daily" | "monthly" | "tasks" | "session
 export type SortDirection = "asc" | "desc";
 export type TokenUsageSortKey = TokenMetricKey | "effective_cost_per_million" | "label" | "period";
 
-export type TokenUsageAggregate = TokenUsageMetrics & {
-  key: string;
-  label: string;
-  secondary: string;
-  period: string;
-  provider: string;
-  coverage: string;
-};
+export type TokenUsageAggregate = TokenUsageMetrics &
+  Partial<TokenUsageRow> & {
+    key: string;
+    label: string;
+    secondary: string;
+    period: string;
+    provider: string;
+    coverage: string;
+  };
 export type TokenUsageTrendView = "daily" | "weekly" | "monthly";
 
 export function emptyTokenMetrics(): TokenUsageMetrics {
@@ -67,7 +74,12 @@ function mergeCostBasis(left: string, right: string): string {
 
 type TokenMetricsInput = Pick<
   TokenUsageMetrics,
-  TokenMetricKey | "currency" | "cost_basis" | "cost_coverage"
+  | TokenMetricKey
+  | "currency"
+  | "cost_basis"
+  | "cost_coverage"
+  | "amounts_decimal"
+  | "effective_cost_per_million"
 > & {
   coverage?: string;
 };
@@ -82,14 +94,14 @@ export function sumTokenMetrics(rows: TokenMetricsInput[]): TokenUsageMetrics {
     TokenMetricKey,
     boolean
   >;
+  const sums: Partial<Record<TokenMetricKey, bigint>> = {};
   for (const row of rows) {
     for (const key of TOKEN_METRIC_KEYS) {
-      if (row[key] === null) {
+      const amount = usageAmount(row, key);
+      if (amount === null) {
         missing[key] = true;
-      } else if (result[key] === null) {
-        result[key] = row[key];
       } else {
-        result[key] += row[key];
+        sums[key] = (sums[key] ?? BigInt(0)) + amount;
       }
     }
     result.currency = mergeDimension(result.currency, row.currency);
@@ -98,25 +110,48 @@ export function sumTokenMetrics(rows: TokenMetricsInput[]): TokenUsageMetrics {
     coverage = mergeCoverage(coverage, row.coverage ?? "complete");
   }
   for (const key of TOKEN_METRIC_KEYS) {
-    if (missing[key]) result[key] = null;
+    const amount = missing[key] ? undefined : sums[key];
+    if (amount === undefined) continue;
+    if (amount <= MAX_SAFE_USAGE_AMOUNT) result[key] = Number(amount);
+    else {
+      result.amounts_decimal ??= {};
+      result.amounts_decimal[key] = amount.toString();
+    }
   }
   if (result.currency === "mixed") {
     result.cost_subcents = null;
+    if (result.amounts_decimal) result.amounts_decimal.cost_subcents = null;
   }
-  result.effective_cost_per_million = calculateEffectiveRate({ ...result, coverage });
+  result.effective_cost_per_million = aggregateEffectiveRate(rows, result, coverage);
   return result;
+}
+
+function aggregateEffectiveRate(
+  rows: TokenMetricsInput[],
+  metrics: TokenUsageMetrics,
+  coverage: string,
+): number | null {
+  // A published null also covers unavailable rate-matched attribution and coverage.
+  if (!rows.every((row) => Number.isFinite(row.effective_cost_per_million))) return null;
+  return calculateEffectiveRate({
+    ...metrics,
+    coverage,
+    effective_cost_per_million: rows[0]?.effective_cost_per_million ?? null,
+  });
 }
 
 export function calculateEffectiveRate(
   metrics: TokenUsageMetrics & { coverage?: string },
 ): number | null {
   if (
+    !Number.isFinite(metrics.effective_cost_per_million) ||
     metrics.cost_subcents === null ||
     metrics.total_tokens === null ||
     metrics.total_tokens <= 0 ||
     metrics.cost_basis === "unknown" ||
     metrics.cost_basis === "mixed" ||
     metrics.cost_coverage !== "complete" ||
+    !metrics.currency ||
     metrics.currency === "mixed" ||
     (metrics.coverage !== undefined && metrics.coverage !== "complete")
   ) {
@@ -130,9 +165,9 @@ function groupKey(row: TokenUsageRow, view: TokenUsageView): string {
     case "models":
       return `${row.model}\u0000${row.provider}`;
     case "daily":
-      return row.period;
+      return `${row.period}\u0000${row.calendar ?? ""}\u0000${row.currency}`;
     case "monthly":
-      return row.period.slice(0, 7);
+      return `${row.period.slice(0, 7)}\u0000${row.calendar ?? ""}\u0000${row.currency}`;
     case "tasks":
       return row.task_id;
     case "sessions":
@@ -175,7 +210,7 @@ export function aggregateTokenRows(
         key,
         label: display.label,
         secondary: display.secondary,
-        period: view === "monthly" ? key : row.period,
+        period: view === "monthly" ? row.period.slice(0, 7) : row.period,
         effective_cost_per_million: row.effective_cost_per_million,
       });
       continue;
@@ -184,11 +219,12 @@ export function aggregateTokenRows(
     const merged = sumTokenMetrics([existing, row]);
     const coverage = mergeCoverage(existing.coverage, row.coverage);
     grouped.set(key, {
+      ...existing,
       ...merged,
       key,
       label: existing.label,
       secondary: mergeDimension(existing.secondary, display.secondary),
-      period: view === "monthly" ? key : existing.period,
+      period: existing.period,
       provider: mergeDimension(existing.provider, row.provider),
       coverage,
       effective_cost_per_million:
@@ -196,6 +232,14 @@ export function aggregateTokenRows(
     });
   }
   return [...grouped.values()];
+}
+
+/** Breakdown rows are already grouped, sorted and paginated by the server. */
+export function presentTokenRows(
+  rows: TokenUsageRow[],
+  view: TokenUsageView,
+): TokenUsageAggregate[] {
+  return rows.map((row) => ({ ...row, ...aggregateLabel(row, view) }));
 }
 
 export function aggregateTokenTrendRows(
@@ -210,11 +254,12 @@ export function aggregateTokenTrendRows(
   for (const point of aggregateTokenRows(rows, "daily")) {
     const period = weekStartPeriod(point.period);
     if (!period) continue;
-    const existing = grouped.get(period);
+    const key = `${period}\u0000${point.calendar ?? ""}\u0000${point.currency}`;
+    const existing = grouped.get(key);
     if (!existing) {
-      grouped.set(period, {
+      grouped.set(key, {
         ...point,
-        key: period,
+        key,
         label: period,
         secondary: "",
         period,
@@ -224,9 +269,10 @@ export function aggregateTokenTrendRows(
 
     const merged = sumTokenMetrics([existing, point]);
     const coverage = mergeCoverage(existing.coverage, point.coverage);
-    grouped.set(period, {
+    grouped.set(key, {
+      ...existing,
       ...merged,
-      key: period,
+      key,
       label: period,
       secondary: "",
       period,
@@ -249,13 +295,16 @@ export function sortTokenRows(
     if (sortKey === "label" || sortKey === "period") {
       return left[sortKey].localeCompare(right[sortKey]) * multiplier;
     }
-    const leftValue = left[sortKey] as TokenUsageMetricValue;
-    const rightValue = right[sortKey] as TokenUsageMetricValue;
+    const leftValue =
+      sortKey === "effective_cost_per_million" ? left[sortKey] : usageAmount(left, sortKey);
+    const rightValue =
+      sortKey === "effective_cost_per_million" ? right[sortKey] : usageAmount(right, sortKey);
     if (leftValue === null || rightValue === null) {
       if (leftValue === null && rightValue === null) return 0;
       return leftValue === null ? 1 : -1;
     }
-    return (leftValue - rightValue) * multiplier;
+    if (leftValue === rightValue) return 0;
+    return (leftValue < rightValue ? -1 : 1) * multiplier;
   });
 }
 
@@ -297,19 +346,36 @@ export function formatTokenPeriod(value: string, view: TokenUsageView): string {
   );
 }
 
-export function formatTokens(value: TokenUsageMetricValue, unavailable: string): string {
-  if (value === null || !Number.isFinite(value)) return unavailable;
-  return formatNumber(value, { notation: "compact", maximumFractionDigits: 1 });
+export function formatTokens(value: UsageIntegerValue, unavailable: string): string {
+  const amount = parseUsageInteger(value);
+  return amount === null ? unavailable : new Intl.NumberFormat(intlLocale()).format(amount);
 }
 
 export function formatCost(
-  value: TokenUsageMetricValue,
+  value: UsageIntegerValue,
   currency: string,
   unavailable: string,
 ): string {
-  if (value === null || !Number.isFinite(value) || currency === "mixed") return unavailable;
-  const amount = value / 10_000;
-  return formatCurrencyAmount(amount, currency);
+  const amount = parseUsageInteger(value);
+  if (amount === null || !/^[A-Z]{3}$/.test(currency)) return unavailable;
+  const whole = amount / BigInt(10_000);
+  const fraction = (amount % BigInt(10_000))
+    .toString()
+    .padStart(4, "0")
+    .replace(/0{1,2}$/, "");
+  const digits = formatNumber(Number(fraction), {
+    useGrouping: false,
+    minimumIntegerDigits: fraction.length,
+  });
+  return new Intl.NumberFormat(intlLocale(), {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })
+    .formatToParts(whole)
+    .map((part) => (part.type === "fraction" ? digits : part.value))
+    .join("");
 }
 
 export function formatRate(
@@ -317,7 +383,7 @@ export function formatRate(
   currency: string,
   unavailable: string,
 ): string {
-  if (value === null || !Number.isFinite(value) || currency === "mixed") return unavailable;
+  if (value === null || !Number.isFinite(value) || !/^[A-Z]{3}$/.test(currency)) return unavailable;
   return formatCurrencyAmount(value, currency);
 }
 
@@ -325,8 +391,8 @@ function formatCurrencyAmount(amount: number, currency: string): string {
   try {
     return formatNumber(amount, {
       style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 2,
+      currency,
+      maximumSignificantDigits: 15,
     });
   } catch {
     return `${currency || "USD"} ${formatNumber(amount, { maximumFractionDigits: 2 })}`;

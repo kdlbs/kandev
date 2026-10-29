@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -41,6 +42,10 @@ func TestOrganizationDeletionUsesWorkspaceLifecycle(t *testing.T) {
 		t.Fatalf("task repository: %v", err)
 	}
 	t.Cleanup(func() { _ = cleanupTaskRepo() })
+	analyticsRepo, err := analyticssqlite.NewWithDB(database, database)
+	if err != nil {
+		t.Fatalf("analytics repository: %v", err)
+	}
 	accounts, cleanupAccounts, err := userstore.Provide(database, database)
 	if err != nil {
 		t.Fatalf("user repository: %v", err)
@@ -83,7 +88,7 @@ func TestOrganizationDeletionUsesWorkspaceLifecycle(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Features.MultiTenancy = true
 	pool := db.NewPool(database, database)
-	orgSvc, err := buildOrgService(cfg, pool, &Repositories{Task: taskRepo, UserAccounts: accounts}, taskSvc, log)
+	orgSvc, err := buildOrgService(cfg, pool, &Repositories{Task: taskRepo, UserAccounts: accounts, Analytics: analyticsRepo}, taskSvc, log)
 	if err != nil {
 		t.Fatalf("organization service: %v", err)
 	}

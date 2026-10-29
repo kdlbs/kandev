@@ -1339,6 +1339,7 @@ func (r *Repository) initMessageTurnSchema() error {
 		completed_at TIMESTAMP,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
 		route_generation BIGINT NOT NULL DEFAULT 0,
+		usage_binding_id TEXT NOT NULL DEFAULT '',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -1434,6 +1435,7 @@ const sessionWorktreeSchemaDDL = `
 		tokens_in INTEGER NOT NULL DEFAULT 0,
 		tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 		tokens_out INTEGER NOT NULL DEFAULT 0,
+		usage_execution_binding_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 

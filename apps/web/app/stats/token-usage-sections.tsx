@@ -6,8 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { useTranslation } from "react-i18next";
 import type { TokenUsageMetrics, TokenUsageResponse, TokenUsageRow } from "@/lib/types/http";
+import { usageAmount } from "@/lib/api/domains/token-usage-amounts";
+import { actorAttributionLabel, usageCalendarLabel } from "./token-usage-metadata";
 import {
-  aggregateTokenRows,
+  presentTokenRows,
   aggregateTokenTrendRows,
   costBasisLabel,
   formatCost,
@@ -48,34 +50,41 @@ export function TokenUsageSummary({
     <div className="space-y-3" data-testid="token-usage-summary">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label={t("stats:estimatedCost")}
-          value={formatCost(metrics.cost_subcents, metrics.currency, unavailable)}
+          label={t("stats:cost")}
+          value={formatCost(usageAmount(metrics, "cost_subcents"), metrics.currency, unavailable)}
           detail={costBasisLabel(metrics.cost_basis, t)}
         />
         <SummaryCard
           label={t("stats:totalTokens")}
-          value={formatTokens(metrics.total_tokens, unavailable)}
+          value={formatTokens(usageAmount(metrics, "total_tokens"), unavailable)}
           detail={t("stats:tokenUsageAllCategories")}
         />
         <SummaryCard
           label={t("stats:inputOutput")}
-          value={`${formatTokens(metrics.input_tokens, unavailable)} / ${formatTokens(metrics.output_tokens, unavailable)}`}
+          value={`${formatTokens(usageAmount(metrics, "input_tokens"), unavailable)} / ${formatTokens(usageAmount(metrics, "output_tokens"), unavailable)}`}
           detail={t("stats:inputOutputTokens")}
         />
         <SummaryCard
           label={t("stats:cacheAndReasoning")}
-          value={`${formatTokens(metrics.cache_read_tokens, unavailable)} / ${formatTokens(metrics.cache_write_tokens, unavailable)}`}
-          detail={`${t("stats:cacheReadWrite")} · ${t("stats:reasoningTokens")}: ${formatTokens(metrics.reasoning_tokens, unavailable)}`}
+          value={`${formatTokens(usageAmount(metrics, "cache_read_tokens"), unavailable)} / ${formatTokens(usageAmount(metrics, "cache_write_tokens"), unavailable)}`}
+          detail={`${t("stats:cacheReadWrite")} · ${t("stats:reasoningTokens")}: ${formatTokens(usageAmount(metrics, "reasoning_tokens"), unavailable)}`}
         />
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>{coverageText}</span>
-        {metrics.effective_cost_per_million !== null && (
-          <span>
-            {t("stats:effectiveRate")}:{" "}
-            {formatRate(metrics.effective_cost_per_million, metrics.currency, unavailable)}
-          </span>
-        )}
+        <span>
+          {t("stats:effectiveRate")}:{" "}
+          {formatRate(metrics.effective_cost_per_million, metrics.currency, unavailable)}
+        </span>
+        <span>
+          {t("stats:tokenUserAttribution")}: {actorAttributionLabel(metrics.token_source, t)}
+        </span>
+        <span>
+          {t("stats:costUserAttribution")}: {actorAttributionLabel(metrics.cost_source, t)}
+        </span>
+        <span>
+          {t("stats:calendar")}: {usageCalendarLabel(metrics, t)}
+        </span>
         <span>
           {t("stats:lastUpdated")}: {formatLastUpdated(lastUpdated, unavailable)}
         </span>
@@ -91,7 +100,10 @@ function SummaryCard({ label, value, detail }: { label: string; value: string; d
         <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-lg font-semibold tabular-nums" data-testid="token-usage-card-value">
+        <div
+          className="min-w-0 text-lg font-semibold tabular-nums [overflow-wrap:anywhere]"
+          data-testid="token-usage-card-value"
+        >
           {value}
         </div>
         <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
@@ -106,7 +118,7 @@ type TokenUsageTrendProps = {
   datedCoverage: boolean;
 };
 
-export function TokenUsageTrend({ rows, currency, datedCoverage }: TokenUsageTrendProps) {
+export function TokenUsageTrend({ rows, datedCoverage }: TokenUsageTrendProps) {
   const { t } = useTranslation();
   const [metric, setMetric] = useState<"cost" | "tokens">("cost");
   const [granularity, setGranularity] = useState<TokenUsageTrendView>("daily");
@@ -121,19 +133,17 @@ export function TokenUsageTrend({ rows, currency, datedCoverage }: TokenUsageTre
                 : /^\d{4}-\d{2}-\d{2}$/.test(point.period),
             )
             .sort((a, b) => a.period.localeCompare(b.period))
-            .slice(-14)
         : [],
     [datedCoverage, granularity, rows],
   );
   const values = points.map((point) => {
-    const value =
-      metric === "cost" && point.currency !== "mixed" ? point.cost_subcents : point.total_tokens;
     if (metric === "cost" && point.currency === "mixed") return null;
-    if (value === null || !Number.isFinite(value)) return null;
-    return metric === "cost" ? value / 10_000 : value;
+    return usageAmount(point, metric === "cost" ? "cost_subcents" : "total_tokens");
   });
-  const knownValues = values.filter((value): value is number => value !== null);
-  const maxValue = Math.max(...knownValues, 1);
+  const maxValue = values.reduce<bigint>(
+    (largest, value) => (value !== null && value > largest ? value : largest),
+    BigInt(1),
+  );
 
   return (
     <Card className="rounded-sm" data-testid="token-usage-trend">
@@ -193,7 +203,6 @@ export function TokenUsageTrend({ rows, currency, datedCoverage }: TokenUsageTre
             values={values}
             maxValue={maxValue}
             metric={metric}
-            currency={currency}
             unavailable={unavailable}
             granularity={granularity}
             label={t("stats:usageOverTime")}
@@ -206,10 +215,9 @@ export function TokenUsageTrend({ rows, currency, datedCoverage }: TokenUsageTre
 
 type TrendBarsProps = {
   points: TokenUsageAggregate[];
-  values: Array<number | null>;
-  maxValue: number;
+  values: Array<bigint | null>;
+  maxValue: bigint;
   metric: "cost" | "tokens";
-  currency: string;
   unavailable: string;
   granularity: TokenUsageTrendView;
   label: string;
@@ -220,45 +228,51 @@ function TrendBars({
   values,
   maxValue,
   metric,
-  currency,
   unavailable,
   granularity,
   label,
 }: TrendBarsProps) {
   return (
-    <div className="flex h-36 items-end gap-1.5" role="img" aria-label={label}>
-      {points.map((point, index) => {
-        const value = values[index];
-        const height = value === null ? 0 : Math.max(6, Math.round((value / maxValue) * 100));
-        const formattedValue =
-          metric === "cost"
-            ? formatCost(
-                point.currency === "mixed" ? null : point.cost_subcents,
-                point.currency || currency,
-                unavailable,
-              )
-            : formatTokens(point.total_tokens, unavailable);
-        return (
-          <div
-            key={`${point.period}-${index}`}
-            className="flex min-w-0 flex-1 flex-col items-center gap-1"
-          >
-            <span className="max-w-full truncate text-[10px] text-muted-foreground">
-              {formattedValue}
-            </span>
-            <div className="flex h-24 w-full items-end">
-              <div
-                className="w-full rounded-t-sm bg-primary/70"
-                style={{ height: `${height}%` }}
-                title={formattedValue}
-              />
+    <div className="max-w-full overflow-x-auto" tabIndex={0} aria-label={label}>
+      <div
+        className="flex h-36 items-end gap-1.5"
+        style={{ minWidth: `max(100%, ${points.length * 48}px)` }}
+        role="img"
+        aria-label={label}
+      >
+        {points.map((point, index) => {
+          const value = values[index];
+          const height = value === null ? 0 : Number((value * BigInt(10_000)) / maxValue) / 100;
+          const formattedValue =
+            metric === "cost"
+              ? formatCost(
+                  point.currency === "mixed" ? null : usageAmount(point, "cost_subcents"),
+                  point.currency,
+                  unavailable,
+                )
+              : formatTokens(usageAmount(point, "total_tokens"), unavailable);
+          return (
+            <div
+              key={`${point.period}-${index}`}
+              className="flex min-w-0 flex-1 flex-col items-center gap-1"
+            >
+              <span className="max-w-full truncate text-[10px] text-muted-foreground">
+                {formattedValue}
+              </span>
+              <div className="flex h-24 w-full items-end">
+                <div
+                  className="w-full rounded-t-sm bg-primary/70"
+                  style={{ height: `${height}%` }}
+                  title={formattedValue}
+                />
+              </div>
+              <span className="max-w-full truncate text-[10px] text-muted-foreground">
+                {formatTokenPeriod(point.period, granularity === "monthly" ? "monthly" : "daily")}
+              </span>
             </div>
-            <span className="max-w-full truncate text-[10px] text-muted-foreground">
-              {formatTokenPeriod(point.period, granularity === "monthly" ? "monthly" : "daily")}
-            </span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -294,7 +308,7 @@ export function TokenUsageBreakdown({
 }: TokenUsageBreakdownProps) {
   const { t } = useTranslation();
   const unavailable = t("common:unavailable");
-  const rows = useMemo(() => aggregateTokenRows(response.rows, view), [response.rows, view]);
+  const rows = useMemo(() => presentTokenRows(response.rows, view), [response.rows, view]);
   const viewLabels = viewLabelMap(t);
 
   return (
