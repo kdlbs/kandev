@@ -77,7 +77,7 @@ agentctl utility: TestAttempt* (6 cases incl. Windows Job proof, 2.881s)
 backendapp: TestNativeInferenceRoot* and TestNativeInferenceStop* (2.283s)
 hostutility: TestInferenceConsumerHost* (0.157s)
 lifecycle: TestInferenceConsumer*, TestInferenceStop* (0.132s)
-backendapp: TestOneOffReadFailureFailsClosedButKeepsBindings and TestOneOffInventoryFailureIsNotMaskedByGatedMode
+backendapp: TestOneOffReadFailureFailsClosedButKeepsBindings, TestOneOffInventoryFailureIsNotMaskedByGatedMode and TestOneOffAutomaticPolicyUsesNativePathWithoutBindingStore
 ```
 
 The full api and lifecycle suites still hit pre-existing Windows environment
