@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// @covers AC-EXECUTORS-REPOSITORY-BRANCH-002.2
 func TestRefreshWorkspaceRepositoryTracksUpdatedPullRequest(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -32,6 +33,7 @@ func TestRefreshWorkspaceRepositoryTracksUpdatedPullRequest(t *testing.T) {
 	runGit(t, seed, "push", "origin", "HEAD:refs/heads/main")
 	runGit(t, root, "clone", origin, checkout)
 	cloner := NewCloner(Config{}, ProtocolHTTPS, root, logger.Default())
+	checkoutHead := strings.TrimSpace(runGit(t, checkout, "rev-parse", "HEAD"))
 	for revision := 0; revision < 3; revision++ {
 		runGit(t, seed, "commit", "--allow-empty", "-m", fmt.Sprintf("PR revision %d", revision))
 		runGit(t, seed, "push", "origin", "HEAD:refs/pull/42/head")
@@ -43,8 +45,8 @@ func TestRefreshWorkspaceRepositoryTracksUpdatedPullRequest(t *testing.T) {
 		if got != want {
 			t.Fatalf("PR revision %d: got %s, want %s", revision, got, want)
 		}
-		if got := strings.TrimSpace(runGit(t, checkout, "rev-parse", "HEAD")); got == want {
-			t.Fatal("refresh changed checkout HEAD to the PR head")
+		if got := strings.TrimSpace(runGit(t, checkout, "rev-parse", "HEAD")); got != checkoutHead {
+			t.Fatalf("PR revision %d: checkout HEAD = %s, want unchanged %s", revision, got, checkoutHead)
 		}
 	}
 }

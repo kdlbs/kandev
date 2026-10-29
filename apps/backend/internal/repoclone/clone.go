@@ -554,6 +554,8 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}, 0)
 }
 
+// refreshWorkspaceRepository updates origin and the Kandev-owned PR snapshot refs
+// without changing the checkout HEAD.
 func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
