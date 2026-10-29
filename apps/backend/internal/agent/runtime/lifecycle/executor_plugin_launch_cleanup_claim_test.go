@@ -37,12 +37,15 @@ func TestLaunchCleanupWaitsForABusyClaimAndDestroysTheResource(t *testing.T) {
 	}
 }
 
-func TestLaunchCleanupThatCannotRetainRetryInformationSaysSo(t *testing.T) {
+// A claim that stays busy and a checkpoint that is rejected leave the launch
+// as the only holder of the resource handle, so it destroys the resource
+// itself and says the resource was never recorded.
+func TestLaunchCleanupThatCannotRetainRetryInformationDestroysAndSaysSo(t *testing.T) {
 	_, operations, _, err := launchCleanupRuntime(t, 1<<20, errors.New("claim held elsewhere"))
-	if operations.destroyRequest != nil {
-		t.Fatal("destroy ran without the cleanup claim")
+	if operations.destroyRequest == nil {
+		t.Fatal("the unrecorded resource was dropped without a destroy")
 	}
-	if err == nil || !strings.Contains(err.Error(), "retry information could not be retained") {
-		t.Fatalf("error = %v, want the lost retry information to be reported", err)
+	if err == nil || !strings.Contains(err.Error(), "not recorded and was removed") {
+		t.Fatalf("error = %v, want the unrecorded resource to be reported as removed", err)
 	}
 }
