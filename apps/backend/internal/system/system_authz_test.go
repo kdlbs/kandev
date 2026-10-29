@@ -859,30 +859,44 @@ func newRetentionMessageService(t *testing.T, opts dataretention.Options) (*data
 }
 
 // TestArchivedRetentionMessageTargetProtectsLiveAndUnknown verifies the message
-// target against the real schema: an eligible finished task is reduced, while a
-// task with a live session (finished but not quiescent) and a task with an
-// unknown message author are retained byte-for-byte.
+// target against the real schema. The eligible finished session holds two ordered
+// messages whose metadata is reduced, while a task with a live session (finished
+// but not quiescent) and a task with an unsupported message type are retained.
+// Message identity, type, content, timestamps, and ordering (rowid order and the
+// sorted id list) are compared before and after the pass, because only metadata
+// may shrink.
 func TestArchivedRetentionMessageTargetProtectsLiveAndUnknown(t *testing.T) {
 	service, d := newRetentionMessageService(t, dataretention.Options{
 		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
 		VerifyBackup: func(context.Context, string) error { return nil },
 	})
 	reducible := `{"tool_call_id":"id","normalized":{"kind":"shell_exec","shell_exec":{"output":{"stdout":"` + strings.Repeat("payload", 400) + `"}}},"result":"` + strings.Repeat("secret", 400) + `"}`
-	seed := `
-INSERT INTO tasks(id,workspace_id,title,state,created_at,updated_at) VALUES('agg','','r','COMPLETED','2020-01-01','2020-01-01'),('live','','r','COMPLETED','2020-01-01','2020-01-01'),('unknown','','r','COMPLETED','2020-01-01','2020-01-01');
-INSERT INTO task_sessions(id,task_id,state,started_at,completed_at,updated_at) VALUES('s-agg','agg','COMPLETED','2020-01-01','2020-01-01','2020-01-01'),('s-live','live','RUNNING','2020-01-01',NULL,'2020-01-01'),('s-unknown','unknown','COMPLETED','2020-01-01','2020-01-01','2020-01-01');
-INSERT INTO task_session_turns(id,task_id,task_session_id,started_at,completed_at,created_at,updated_at) VALUES('t-agg','agg','s-agg','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-live','live','s-live','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-unknown','unknown','s-unknown','2020-01-01','2020-01-01','2020-01-01','2020-01-01');`
+	seed := `INSERT INTO tasks(id,workspace_id,title,state,created_at,updated_at) VALUES('agg','','r','COMPLETED','2020-01-01','2020-01-01'),('live','','r','COMPLETED','2020-01-01','2020-01-01'),('unknown','','r','COMPLETED','2020-01-01','2020-01-01'); INSERT INTO task_sessions(id,task_id,state,started_at,completed_at,updated_at) VALUES('s-agg','agg','COMPLETED','2020-01-01','2020-01-01','2020-01-01'),('s-live','live','RUNNING','2020-01-01',NULL,'2020-01-01'),('s-unknown','unknown','COMPLETED','2020-01-01','2020-01-01','2020-01-01'); INSERT INTO task_session_turns(id,task_id,task_session_id,started_at,completed_at,created_at,updated_at) VALUES('t-agg','agg','s-agg','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-live','live','s-live','2020-01-01','2020-01-01','2020-01-01','2020-01-01'),('t-unknown','unknown','s-unknown','2020-01-01','2020-01-01','2020-01-01','2020-01-01');`
 	if _, err := d.Exec(seed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-agg','s-agg','agg','t-agg','agent','','tool_execute',?,'2020-01-01','2020-01-01')`, reducible); err != nil {
-		t.Fatal(err)
+	for _, m := range []struct{ id, sess, task, turn, typ, meta, made string }{
+		{"m-agg-1", "s-agg", "agg", "t-agg", "tool_execute", reducible, "2020-01-01"},
+		{"m-agg-2", "s-agg", "agg", "t-agg", "tool_execute", reducible, "2020-01-02"},
+		{"m-live", "s-live", "live", "t-live", "tool_execute", reducible, "2020-01-01"},
+		{"m-unknown", "s-unknown", "unknown", "t-unknown", "tool_unknown", "{}", "2020-01-01"},
+	} {
+		if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES(?,?,?,?,'agent','',?,?,?,?)`, m.id, m.sess, m.task, m.turn, m.typ, m.meta, m.made, m.made); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-live','s-live','live','t-live','agent','','tool_execute',?,'2020-01-01','2020-01-01')`, reducible); err != nil {
-		t.Fatal(err)
+
+	readOrder := func() []string {
+		t.Helper()
+		var rows []string
+		if err := d.Select(&rows, `SELECT rowid||'/'||id||'/'||task_id||'/'||task_session_id||'/'||turn_id||'/'||type||'/'||content||'/'||created_at||'/'||updated_at FROM task_session_messages WHERE task_session_id = 's-agg' ORDER BY rowid`); err != nil {
+			t.Fatal(err)
+		}
+		return rows
 	}
-	if _, err := d.Exec(`INSERT INTO task_session_messages(id,task_session_id,task_id,turn_id,author_type,content,type,metadata,created_at,updated_at) VALUES('m-unknown','s-unknown','unknown','t-unknown','agent','','tool_unknown',?,'2020-01-01','2020-01-01')`, `{}`); err != nil {
-		t.Fatal(err)
+	before := readOrder()
+	if len(before) != 2 {
+		t.Fatalf("seed produced %d eligible messages, want 2", len(before))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -890,6 +904,18 @@ INSERT INTO task_session_turns(id,task_id,task_session_id,started_at,completed_a
 	service.Start(ctx)
 	saveBackupPolicy(t, service)
 	waitRetentionState(t, service, func(s dataretention.Status) bool { return s.LastRun != nil && s.LastRun.State != "running" })
+
+	// Only metadata may shrink: rows, identity, type, content, timestamps, and
+	// rowid ordering (the sorted id list) must be identical before and after.
+	after := readOrder()
+	if len(after) != len(before) {
+		t.Fatalf("message rows changed: %d -> %d", len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("message identity/order changed at %d: %q -> %q", i, before[i], after[i])
+		}
+	}
 
 	metadata := func(id string) string {
 		t.Helper()
@@ -899,25 +925,25 @@ INSERT INTO task_session_turns(id,task_id,task_session_id,started_at,completed_a
 		}
 		return raw
 	}
-	if got := metadata("m-agg"); got == reducible {
-		t.Fatalf("eligible finished task was not reduced: %s", got)
-	} else if strings.Contains(got, strings.Repeat("payload", 400)) {
-		t.Fatalf("eligible tool payload was not removed: %s", got)
+	for _, id := range []string{"m-agg-1", "m-agg-2"} {
+		if got := metadata(id); got == reducible || strings.Contains(got, strings.Repeat("payload", 400)) {
+			t.Fatalf("eligible message %s was not reduced: %s", id, got)
+		}
 	}
 	if got := metadata("m-live"); got != reducible {
 		t.Fatalf("live task message changed: %s", got)
 	}
 	if got := metadata("m-unknown"); got != `{}` {
-		t.Fatalf("unknown/unsupported message changed: %s", got)
+		t.Fatalf("unsupported-type message changed: %s", got)
 	}
 }
 
 // TestArchivedRetentionSecondServiceSeesSavedState verifies that a second Service
 // over the same pool reads the saved policy and preparation rather than its own
-// defaults, which is the precondition for restart recovery. The recovery tick
-// itself is not asserted: a fresh Service's first reconcile waits up to the
-// one-minute idle timer and there is no public wake, so a bounded test cannot
-// observe it without a production notify hook (the blocking entry point).
+// defaults, which is the precondition for restart recovery. This case asserts only
+// that precondition; the actual recovery tick was observed separately with a
+// one-shot test that waited the real first one-minute idle tick (recovery after
+// about one minute), so no slow wait is kept here.
 func TestArchivedRetentionSecondServiceSeesSavedState(t *testing.T) {
 	first, connection := newRetentionSafetyService(t, dataretention.Options{
 		CreateBackup: func(context.Context) (string, error) { return "receipt", nil },
