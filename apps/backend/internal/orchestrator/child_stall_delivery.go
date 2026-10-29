@@ -543,25 +543,38 @@ func (p *ChildStallProducer) buildAlert(
 }
 
 func formatChildStallPrompt(child *models.Task, turn *models.Turn, stepName string, decision childstall.Decision) string {
+	return formatChildStallPromptText(
+		child.Title, child.ID, turn.ID, stepName, string(decision.Cause), decision.QuestionID,
+	)
+}
+
+// formatChildStallPromptText renders one candidate's parent-facing alert text.
+// A folded alert rebuilds the text of the candidates that still qualify from
+// these same values, so a dropped candidate leaves no text behind.
+func formatChildStallPromptText(childTitle, childTaskID, turnID, stepName, cause, questionID string) string {
 	var b strings.Builder
 	b.WriteString("CHILD TASK NEEDS ATTENTION\n\n")
-	fmt.Fprintf(&b, "Child task: %s (%s)\n", child.Title, child.ID)
+	fmt.Fprintf(&b, "Child task: %s (%s)\n", childTitle, childTaskID)
 	if stepName != "" {
 		fmt.Fprintf(&b, "Workflow step: %s\n", stepName)
 	}
-	fmt.Fprintf(&b, "Cause: %s\n", decision.Cause)
-	fmt.Fprintf(&b, "Child turn: %s\n\n", turn.ID)
-	b.WriteString(childStallCauseInstruction(child.ID, decision))
+	fmt.Fprintf(&b, "Cause: %s\n", cause)
+	fmt.Fprintf(&b, "Child turn: %s\n\n", turnID)
+	b.WriteString(childStallCauseInstructionText(childTaskID, cause, questionID))
 	b.WriteString("\n\nThis notice does not move, answer, or change either task. Review the child and decide the next action.")
 	return b.String()
 }
 
 func childStallCauseInstruction(childID string, decision childstall.Decision) string {
-	switch decision.Cause {
+	return childStallCauseInstructionText(childID, string(decision.Cause), decision.QuestionID)
+}
+
+func childStallCauseInstructionText(childID, cause, questionID string) string {
+	switch childstall.Cause(cause) {
 	case childstall.CauseInputRequired:
-		if decision.QuestionID != "" {
+		if questionID != "" {
 			return fmt.Sprintf("The child is still waiting for your answer to its question %s. Answer it with message_task_kandev using task_id=%s and reply_to_question_id=%s.",
-				decision.QuestionID, childID, decision.QuestionID)
+				questionID, childID, questionID)
 		}
 		return "The child is waiting for input in its own conversation (a question or permission request)."
 	case childstall.CauseQuota:

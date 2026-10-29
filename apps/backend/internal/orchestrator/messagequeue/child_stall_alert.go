@@ -86,11 +86,18 @@ func childStallAlertList(metadata map[string]interface{}) []interface{} {
 }
 
 // ChildStallAlertDescriptor is one child-turn stalled candidate folded into a
-// queued alert entry.
+// queued alert entry. It carries every value the candidate's prompt text was
+// built from, so the text of one candidate can be rebuilt without the other
+// folded candidates.
 type ChildStallAlertDescriptor struct {
-	ChildTaskID string
-	TurnID      string
-	Cause       string
+	ChildTaskID    string
+	ChildTaskTitle string
+	ChildSessionID string
+	TurnID         string
+	StepID         string
+	StepName       string
+	Cause          string
+	QuestionID     string
 }
 
 // ChildStallAlertDescriptors returns the candidate descriptors folded into a
@@ -104,12 +111,22 @@ func ChildStallAlertDescriptors(message *QueuedMessage) []ChildStallAlertDescrip
 	for _, item := range raw {
 		descriptor, _ := item.(map[string]interface{})
 		childID, _ := descriptor["child_task_id"].(string)
+		childTitle, _ := descriptor["child_task_title"].(string)
+		childSessionID, _ := descriptor["child_session_id"].(string)
 		turnID, _ := descriptor["turn_id"].(string)
+		stepID, _ := descriptor["step_id"].(string)
+		stepName, _ := descriptor["step_name"].(string)
 		cause, _ := descriptor["cause"].(string)
+		questionID, _ := descriptor["question_id"].(string)
 		descriptors = append(descriptors, ChildStallAlertDescriptor{
-			ChildTaskID: childID,
-			TurnID:      turnID,
-			Cause:       cause,
+			ChildTaskID:    childID,
+			ChildTaskTitle: childTitle,
+			ChildSessionID: childSessionID,
+			TurnID:         turnID,
+			StepID:         stepID,
+			StepName:       stepName,
+			Cause:          cause,
+			QuestionID:     questionID,
 		})
 	}
 	return descriptors

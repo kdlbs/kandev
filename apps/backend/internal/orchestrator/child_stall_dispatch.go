@@ -114,20 +114,35 @@ func (p *ChildStallProducer) alertEntryDisposition(
 		return true, ""
 	}
 	key := alertOrderKeyOf(entry)
-	eligible := false
-	for _, descriptor := range descriptors {
-		if !p.alertDescriptorEligible(ctx, descriptor.TurnID) {
-			continue
-		}
-		eligible = true
+	eligible := p.eligibleChildStallDescriptors(ctx, entry)
+	for _, descriptor := range eligible {
 		if !newest[descriptor.ChildTaskID].after(key) {
 			return true, ""
 		}
 	}
-	if !eligible {
+	if len(eligible) == 0 {
 		return false, "stale_at_dispatch"
 	}
 	return false, "superseded_at_dispatch"
+}
+
+// eligibleChildStallDescriptors returns the folded candidates of one queued
+// alert that still qualify. A candidate with no turn identity counts as
+// eligible, and an unreadable source keeps its candidate, so a read failure
+// never drops an alert.
+func (p *ChildStallProducer) eligibleChildStallDescriptors(
+	ctx context.Context,
+	entry *messagequeue.QueuedMessage,
+) []messagequeue.ChildStallAlertDescriptor {
+	descriptors := messagequeue.ChildStallAlertDescriptors(entry)
+	eligible := make([]messagequeue.ChildStallAlertDescriptor, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if !p.alertDescriptorEligible(ctx, descriptor.TurnID) {
+			continue
+		}
+		eligible = append(eligible, descriptor)
+	}
+	return eligible
 }
 
 // alertDescriptorEligible reports whether one folded candidate still qualifies.

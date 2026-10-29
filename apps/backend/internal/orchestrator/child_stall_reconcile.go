@@ -41,6 +41,14 @@ func (p *ChildStallProducer) reconcileDelivered(
 		return
 	}
 	if !p.sourceStillStalled(ctx, turn.ID) {
+		if p.noticeServesOtherLiveCandidate(ctx, state.QueueID, turn.ID) {
+			// Sibling candidates folded into the same entry are still stalled;
+			// keep the shared notice and let the dispatch boundary drop only
+			// this stale candidate. Removing the entry by id would drop every
+			// sibling's notice.
+			p.resolveDeliveredCandidate(ctx, turn, state, now)
+			return
+		}
 		p.withdrawDeliveredNotice(ctx, turn, start, state, noticeOutcomeSourceDone, now)
 		return
 	}
@@ -78,6 +86,31 @@ func (p *ChildStallProducer) reconcileDelivered(
 	}
 	// Re-home found no entry to move, so the notice is already gone.
 	p.resolveDeliveredCandidate(ctx, turn, state, now)
+}
+
+// noticeServesOtherLiveCandidate reports whether the shared folded notice still
+// carries a descriptor for another candidate that is still stalled. A stale
+// candidate's own withdrawal must not remove the whole entry when sibling
+// alerts folded into it remain valid; the stale candidate is dropped from the
+// parent prompt by the dispatch boundary recheck.
+func (p *ChildStallProducer) noticeServesOtherLiveCandidate(ctx context.Context, queueID, exceptTurnID string) bool {
+	queue := p.messageQueue()
+	if queue == nil || queueID == "" {
+		return false
+	}
+	entry, err := queue.FindEntryByID(ctx, queueID)
+	if err != nil || entry == nil || !messagequeue.IsChildStallAlert(entry) {
+		return false
+	}
+	for _, descriptor := range messagequeue.ChildStallAlertDescriptors(entry) {
+		if descriptor.TurnID == "" || descriptor.TurnID == exceptTurnID {
+			continue
+		}
+		if p.sourceStillStalled(ctx, descriptor.TurnID) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveOrKeepDelivered keeps a notice already on the promptable primary, and
