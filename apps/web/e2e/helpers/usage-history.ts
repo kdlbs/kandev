@@ -7,10 +7,12 @@ export type UsageTarget = {
   TaskID: string;
   SessionID: string | null;
   ActorAttributionStatus: string;
+  SourceScopeStatus: string;
 };
 
 type UsageTargetPage = {
-  Targets: UsageTarget[];
+  Targets: UsageTarget[] | null;
+  Preparing: boolean;
   SnapshotID: string;
   NextCursor: string;
   HasMore: boolean;
@@ -53,6 +55,33 @@ export async function usageTarget(
   task: string,
   session?: string,
 ): Promise<UsageTarget> {
+  const state: { target?: UsageTarget; failed: boolean; error?: unknown } = { failed: false };
+  const message = `The real Host did not issue an eligible collection target for ${task}/${session ?? "task"}`;
+  await expect
+    .poll(
+      async () => {
+        try {
+          state.target = await findUsageTarget(page, workspace, task, session);
+        } catch (error) {
+          state.failed = true;
+          state.error = error;
+        }
+        return state.failed || state.target !== undefined;
+      },
+      { message },
+    )
+    .toBe(true);
+  if (state.failed) throw state.error;
+  if (!state.target) throw new Error(message);
+  return state.target;
+}
+
+async function findUsageTarget(
+  page: Page,
+  workspace: string,
+  task: string,
+  session?: string,
+): Promise<UsageTarget | undefined> {
   let snapshot = "";
   let cursor = "";
   for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
@@ -61,18 +90,20 @@ export async function usageTarget(
       snapshot_id: snapshot,
       cursor,
     });
-    const target = result.Targets.find(
-      (item) => item.TaskID === task && (!session || item.SessionID === session),
+    if (result.Preparing) return undefined;
+    const target = (result.Targets ?? []).find(
+      (item) =>
+        item.SourceScopeStatus === "eligible" &&
+        item.TaskID === task &&
+        (!session || item.SessionID === session),
     );
     if (target) return target;
-    if (!result.HasMore) break;
+    if (!result.HasMore) return undefined;
     expect(result.NextCursor).not.toBe("");
     snapshot = result.SnapshotID;
     cursor = result.NextCursor;
   }
-  throw new Error(
-    `The real Host did not issue a collection target for ${task}/${session ?? "task"}`,
-  );
+  throw new Error("The bounded Host target snapshot did not terminate");
 }
 
 export async function reportFixtureUsage(

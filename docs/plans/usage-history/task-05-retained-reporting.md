@@ -141,6 +141,22 @@ Existing direct task/session readers must not bypass retained-scope authorizatio
 
 ## Results
 
+### Current browser integration checkpoint
+
+The current frontend passed 90 component/helper tests, lint, full typechecking, localization checks, and a production build.
+The first actual desktop browser run executed five cases with retries disabled: all five failed, with zero skips or flakes.
+Its logs, traces, and screenshots remain preserved. Discovery-only receipts are not browser passes.
+
+The correction prepares real sessions, handles nullable/preparing target pages, and scopes assertions to the intended usage component.
+Policy cleanup reads the current CAS revision and preserves an original assertion if restoration also fails.
+All token, cost, attribution, and authorization assertions remain intact.
+The corrected helpers passed 23 focused tests, ten-file lint, formatting, and a full TypeScript check.
+The new tests cover target snapshots, request serialization, current-revision restoration, and preservation of operation errors.
+Successful collector/native flows now capture actual retained details separately for desktop and phone.
+Those captures and all 16 browser results remain pending a fresh combined build.
+
+Earlier implementation and review receipts follow as historical evidence.
+
 Retained SQL reporting and HTTP mapping are implemented; integrated verification remains pending.
 Independent frontend CI preparation completed:
 full `pnpm lint` passed, the focused `useScrollToMessage` run passed 9 cases (99 unrelated cases skipped),

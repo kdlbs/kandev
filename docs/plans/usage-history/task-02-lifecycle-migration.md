@@ -100,6 +100,21 @@ Restore and binary downgrade need separate treatment from reverting the read pat
 
 ## Results
 
+### Current integration checkpoint
+
+Current-main integration passed 390 normal analytics results and 77 focused lifecycle/history-cleanup results normally and under race.
+Persistence conformance passed 644 race results across 42 adapters on SQLite and PostgreSQL 18.6.
+These counts overlap and are not a combined count of distinct tests.
+
+Browser logs then exposed a stamped-turn transaction defect with retention enabled.
+`CreateTurnWithStepStamp` now uses `BeginTxx`, preserving workflow stamps and atomic turn/binding admission.
+`TestUsageHistoryStampedTurnTransaction` and its PostgreSQL counterpart reproduce the original failure and pass after the correction.
+They verify active and completed turns, trusted actor/org attribution, native ledger admission, and rollback followed by retry.
+Focused normal and race runs pass on both engines. Go formatting, scoped vet, and changed-line lint pass. Fresh browser validation remains pending.
+The full analytics/persistence receipts above predate this narrow correction.
+
+Earlier implementation and review receipts follow as historical evidence.
+
 Implemented durable 200-row high-water/keyset backfill for native and external sources, unknown-identity migration gaps, preservation fences for task deletion and session pruning, captured-scope erasure/reset, and durable live-link detachment. Source copies and cursor advancement commit together; task/session writes are fenced during preservation, and final detachment shares the destructive transaction. Organization erasure uses captured organization ownership after workspace transfer. Native ledger cascade and task rollup behavior remain intact.
 
 Verification completed (resource-capped with `GOMAXPROCS=2` and `-p 1`):

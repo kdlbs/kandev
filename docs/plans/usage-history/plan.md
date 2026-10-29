@@ -202,6 +202,19 @@ Task 04 preparation identified selector and replay dependencies; its implementat
 
 ## Verification results
 
+### Latest integration checkpoint
+
+Current-main integration passed the full analytics suite, focused lifecycle tests, persistence conformance, backend static checks, and the backend build.
+Frontend component tests, typechecking, lint, localization, and a production build also passed.
+Browser execution then exposed fixture/selector defects and a stamped-turn transaction defect.
+The reviewed corrections preserve the original accounting and authorization assertions.
+Their focused helper tests and normal/race backend regressions pass. Go formatting, scoped backend vet and lint, frontend formatting and lint, and full TypeScript checks pass; fresh browser validation remains pending.
+
+A conflict-free rebase candidate preserves all 94 existing patches and every feature path.
+Its incoming pull-request fetch regression passes. Primary adoption and delivery remain pending.
+Both full five-year benchmarks, the reachable SDK pin, final packages, installed-plugin browsers, pushes, and current-head CI remain required.
+Earlier checkpoints below are historical evidence, not current completion claims.
+
 Implementation: In progress. The design-package results below predate code changes.
 Each work order's Results owns its actual implementation and test evidence.
 Tasks 01 and 02 reopened for scoped lint cleanup found during Task 03 integration.

@@ -1,7 +1,8 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { installFixturePlugin, uninstallFixturePlugin } from "./plugin-fixture";
+import { PrAssetCapture } from "./pr-asset-capture";
 import {
   expectUsageCopy,
   readUsage,
@@ -20,6 +21,7 @@ async function createUsageTask(api: ApiClient, seed: SeedData, title: string) {
     repository_ids: [seed.repositoryId],
     executor_profile_id: seed.worktreeExecutorProfileId,
     start_agent: false,
+    prepare_session: true,
   });
 }
 
@@ -29,6 +31,9 @@ export async function exerciseCollectorRetention(
   seed: SeedData,
   touch: boolean,
 ) {
+  const capture = new PrAssetCapture(page, test.info().file, {
+    captureKey: touch ? "phone-real-collector" : "desktop-real-collector",
+  });
   await installFixturePlugin(page);
   try {
     const task = await createUsageTask(api, seed, "Collector accounting lifecycle");
@@ -52,7 +57,21 @@ export async function exerciseCollectorRetention(
       "href",
       `/t/${task.id}`,
     );
-    await expect(breakdown.getByText("Archived", { exact: true })).toBeVisible();
+    const archivedRow = breakdown
+      .getByTestId(touch ? "token-usage-mobile-row" : "token-usage-row")
+      .filter({ hasText: task.id });
+    await expect(archivedRow).toHaveCount(1);
+    await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
+    if (capture.capturing) {
+      const details = archivedRow.locator("summary");
+      if (touch) await details.tap();
+      else await details.click();
+      await expect(archivedRow.getByTestId("token-usage-details")).toContainText(
+        "client-is-not-a-provider",
+      );
+      await archivedRow.scrollIntoViewIfNeeded();
+      await capture.screenshot("real-collector-archived-details");
+    }
     await api.deleteTask(task.id);
     const deleted = await readUsage(page, seed.workspaceId);
     expect(deleted.rows).toHaveLength(1);
@@ -84,7 +103,10 @@ export async function exerciseCollectorRetention(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+    await row.scrollIntoViewIfNeeded();
+    await capture.screenshot("real-collector-deleted-details");
   } finally {
+    capture.flush();
     await uninstallFixturePlugin(api);
   }
 }
@@ -117,7 +139,9 @@ export async function exerciseProjectionRecovery(
     expect(first.projection_generation).toBe("");
     expect(first.rows).toEqual([]);
     await page.goto(`/stats/token-usage?workspaceId=${workspace}&range=all`);
-    await expect(page.getByRole("status")).toContainText("Preparing usage history.");
+    await expect(page.getByTestId("token-usage-preparing")).toContainText(
+      "Preparing usage history.",
+    );
     await expect(page.getByTestId("token-usage-summary")).toHaveCount(0);
     await usageControl(page, workspace, "resume");
     const complete = await waitForUsage(page, workspace, "41");
@@ -135,7 +159,7 @@ export async function exerciseProjectionRecovery(
     expect(pending.projection_pending).toBe(true);
     expect(pending.totals.amounts_decimal?.total_tokens).toBe("41");
     await page.reload();
-    await expect(page.getByRole("status")).toContainText(
+    await expect(page.getByTestId("token-usage-projection-notice")).toContainText(
       "Saved values remain visible. Updating history...",
     );
     await expect(page.getByTestId("token-usage-summary")).toContainText("41");
@@ -145,7 +169,8 @@ export async function exerciseProjectionRecovery(
     expect(next.projection_generation).not.toBe(complete.projection_generation);
     await page.getByRole("button", { name: "Retry status", exact: true }).click();
     await expect(page.getByTestId("token-usage-summary")).toContainText("43");
-    await expect(page.getByRole("status")).toHaveCount(0);
+    await expect(page.getByTestId("token-usage-preparing")).toHaveCount(0);
+    await expect(page.getByTestId("token-usage-projection-notice")).toHaveCount(0);
     await expect(page.getByTestId("token-usage-error")).toHaveCount(0);
   } finally {
     try {
@@ -177,7 +202,7 @@ async function exerciseRealUsageReadFault(page: Page, workspace: string) {
     .getByRole("button", { name: "Retry", exact: true })
     .click();
   await expect(page.getByTestId("token-usage-error")).toHaveCount(0);
-  await expect(page.getByRole("status")).toContainText(
+  await expect(page.getByTestId("token-usage-projection-notice")).toContainText(
     "Saved values remain visible. Updating history...",
   );
 }

@@ -65,7 +65,12 @@ test.describe("Retained usage HTTP presentation", () => {
       "href",
       `/t/${archived.id}`,
     );
-    await expect(breakdown.getByText("Archived", { exact: true })).toBeVisible();
+    const archivedRow = breakdown
+      .getByTestId("token-usage-table")
+      .getByTestId("token-usage-row")
+      .filter({ hasText: archived.id });
+    await expect(archivedRow).toHaveCount(1);
+    await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
     const disclosure = deletedRow.locator("summary");
     await disclosure.focus();
     await testPage.keyboard.press("Enter");
@@ -128,13 +133,15 @@ test.describe("Retained usage HTTP presentation", () => {
       });
     });
     await testPage.goto(`/stats/token-usage?workspaceId=${seedData.workspaceId}`);
-    await expect(testPage.getByRole("status")).toContainText("Preparing usage history.");
+    await expect(testPage.getByTestId("token-usage-preparing")).toContainText(
+      "Preparing usage history.",
+    );
     await expect(testPage.getByTestId("token-usage-summary")).toHaveCount(0);
     await expect(testPage.getByTestId("token-usage-empty-history")).toHaveCount(0);
     phase = "pending";
     await testPage.getByRole("button", { name: "Retry status", exact: true }).click();
     await expect(testPage.getByTestId("token-usage-summary")).toContainText("132");
-    await expect(testPage.getByRole("status")).toContainText(
+    await expect(testPage.getByTestId("token-usage-projection-notice")).toContainText(
       "Saved values remain visible. Updating history...",
     );
     phase = "busy";
@@ -150,7 +157,8 @@ test.describe("Retained usage HTTP presentation", () => {
       .getByRole("button", { name: "Retry", exact: true })
       .click();
     await expect(testPage.getByTestId("token-usage-error")).toHaveCount(0);
-    await expect(testPage.getByRole("status")).toHaveCount(0);
+    await expect(testPage.getByTestId("token-usage-preparing")).toHaveCount(0);
+    await expect(testPage.getByTestId("token-usage-projection-notice")).toHaveCount(0);
     await expect(testPage.getByTestId("token-usage-summary")).toContainText("132");
   });
 });

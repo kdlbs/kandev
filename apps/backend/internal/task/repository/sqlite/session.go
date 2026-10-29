@@ -49,7 +49,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
 	stampTurnDefaults(turn)
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, r.insertTurnWithSessionLock(ctx, turn)
 	}
@@ -123,9 +123,9 @@ func stampTurnDefaults(turn *models.Turn) {
 	turn.UpdatedAt = now
 }
 
-// insertTurnRow inserts turn's row via execer, which is either r.db (a plain,
-// non-transactional insert) or a *sql.Tx (participating in the caller's
-// transaction). A new turn is session activity, so the same statement batch
+// insertTurnRow inserts the turn in the caller's transaction. With retention
+// enabled, execer must be a *sqlx.Tx so the usage binding and turn commit or
+// roll back together. A new turn is session activity, so the same statement batch
 // also refreshes task_sessions.updated_at: the session reconciliation sweep
 // measures event silence from that row (and the newest message), and a turn
 // dispatched without a user message (auto-start, workflow on_enter) must

@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
@@ -13,16 +13,16 @@ import {
   waitForUsage,
 } from "./usage-history";
 import { installFixturePlugin, PLUGIN_ID, uninstallFixturePlugin } from "./plugin-fixture";
+import { PrAssetCapture } from "./pr-asset-capture";
 import {
   activateRetention,
   analyzeRetention,
   readRetentionMessage,
   resetRetention,
-  retentionStatus,
-  RETENTION_API,
   RETENTION_ROUTE,
   runRetention,
   seedRetentionTask,
+  withRetentionPolicyRestore,
 } from "./tool-payload-retention";
 
 export async function exerciseNativeRetention(
@@ -32,6 +32,9 @@ export async function exerciseNativeRetention(
   backend: BackendContext,
   touch: boolean,
 ) {
+  const capture = new PrAssetCapture(page, test.info().file, {
+    captureKey: touch ? "phone-real-native" : "desktop-real-native",
+  });
   let before: TokenUsageResponse | undefined;
   const native = await pruneSavedDelivery(page, api, seed, backend, {
     prompt: "/slow 1s /with-usage",
@@ -64,7 +67,14 @@ export async function exerciseNativeRetention(
     await expect(row).toContainText("Unavailable session");
     await expect(row.locator(`a[href*="${native.sessionId}"]`)).toHaveCount(0);
     await expect(page.getByTestId("token-usage-summary")).toContainText("150");
+    const disclosure = row.locator("summary");
+    if (touch) await disclosure.tap();
+    else await disclosure.click();
+    await expect(row.getByTestId("token-usage-details")).toBeVisible();
+    await row.scrollIntoViewIfNeeded();
+    await capture.screenshot("real-native-retained-unavailable-session-details");
   } finally {
+    capture.flush();
     await uninstallFixturePlugin(api);
   }
 }
@@ -112,8 +122,7 @@ async function compactToolPayloads(
   options: { touch: boolean; before: TokenUsageResponse },
 ) {
   const { touch, before } = options;
-  const previousPolicy = (await retentionStatus(page)).policy;
-  try {
+  await withRetentionPolicyRestore(page, async () => {
     await resetRetention(page);
     const payload = await seedRetentionTask(backend.tmpDir, api, seed, false);
     expect(
@@ -128,8 +137,5 @@ async function compactToolPayloads(
     ).not.toHaveProperty("stdout");
     const compacted = await waitForUsage(page, seed.workspaceId, "150");
     expect(compacted.totals).toEqual(before.totals);
-  } finally {
-    const restored = await page.request.put(RETENTION_API, { data: previousPolicy });
-    expect(restored.status(), await restored.text()).toBe(200);
-  }
+  });
 }

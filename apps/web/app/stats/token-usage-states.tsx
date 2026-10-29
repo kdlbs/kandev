@@ -131,6 +131,7 @@ export function TokenUsagePreparing({
   return (
     <Card className="rounded-sm">
       <CardContent
+        data-testid="token-usage-preparing"
         className="flex flex-wrap items-center gap-3 p-6"
         role="status"
         aria-live="polite"
@@ -179,6 +180,7 @@ export function TokenUsageProjectionNotice({
   if (!pending && response.projection_status !== "stale") return null;
   return (
     <div
+      data-testid="token-usage-projection-notice"
       role="status"
       aria-live="polite"
       className="flex flex-wrap items-center gap-3 rounded-sm border p-3 text-sm"

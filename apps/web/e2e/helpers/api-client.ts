@@ -451,6 +451,8 @@ type OptionalAgentTaskOpts = {
   start_when_unblocked?: boolean;
   /** Prepare the task without launching its session so E2E fixtures can bind it first. */
   start_agent?: boolean;
+  /** Capture a real session at task creation without launching its agent. */
+  prepare_session?: boolean;
   mcp_server_ids?: string[];
 };
 
@@ -483,6 +485,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
   if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
+  if (opts.prepare_session !== undefined) fields.prepare_session = opts.prepare_session;
   return fields;
 }
 
@@ -1091,6 +1094,8 @@ export class ApiClient {
       start_when_unblocked?: boolean;
       /** Prepare the task without launching its session so E2E fixtures can bind it first. */
       start_agent?: boolean;
+      /** Capture a real session at task creation without launching its agent. */
+      prepare_session?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
