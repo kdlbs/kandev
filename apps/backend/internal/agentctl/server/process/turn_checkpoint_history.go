@@ -405,7 +405,7 @@ func (g *GitOperator) turnCheckpointExistingComparisonCommit(
 	if !validCheckpointOID(commitOID, hashAlgorithm) {
 		return ""
 	}
-	treeOutput, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%T", commitOID)
+	treeOutput, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--verify", commitOID+"^{tree}")
 	if err != nil || strings.TrimSpace(string(treeOutput)) != treeOID {
 		return ""
 	}

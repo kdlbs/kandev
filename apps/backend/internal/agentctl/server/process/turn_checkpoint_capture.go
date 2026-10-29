@@ -269,7 +269,7 @@ func (g *GitOperator) existingTurnCheckpoint(
 	if !validCheckpointOID(commitOID, hashAlgorithm) {
 		return turnchanges.CheckpointResult{}, false, turnCheckpointFailure(turnchanges.ReasonUnsafeGitState, errors.New("existing checkpoint ref points to an invalid object"))
 	}
-	treeOutput, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%T", commitOID)
+	treeOutput, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--verify", commitOID+"^{tree}")
 	if err != nil {
 		return turnchanges.CheckpointResult{}, false, turnCheckpointFailure(turnchanges.ReasonCaptureFailed, err)
 	}

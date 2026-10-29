@@ -102,7 +102,7 @@ func (g *GitOperator) archiveTurnCheckpointLocked(
 }
 
 func (g *GitOperator) verifyTurnCheckpointEndpoint(ctx context.Context, commitOID, treeOID string) error {
-	treeOutput, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%T", commitOID)
+	treeOutput, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--verify", commitOID+"^{tree}")
 	if err != nil {
 		return turnCheckpointFailure(turnchanges.ReasonContentUnavailable, fmt.Errorf("read accepted checkpoint commit: %w", err))
 	}

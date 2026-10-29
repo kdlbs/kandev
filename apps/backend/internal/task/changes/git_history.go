@@ -367,7 +367,7 @@ func (s *GitHistoryStore) verifyEndpointIdentities(
 		{archive.StartCommitOID, archive.StartTreeOID},
 		{archive.EndCommitOID, archive.EndTreeOID},
 	} {
-		output, err := s.git(ctx, "", repoPath, historyGitOperationTimeout, "show", "-s", "--format=%T", endpoint.commit)
+		output, err := s.git(ctx, "", repoPath, historyGitOperationTimeout, "rev-parse", "--verify", endpoint.commit+"^{tree}")
 		if err != nil {
 			return err
 		}
@@ -654,7 +654,7 @@ func (s *GitHistoryStore) ExportPack(
 }
 
 func (s *GitHistoryStore) archiveCommitTree(ctx context.Context, repoPath, commit string) (string, error) {
-	output, err := s.git(ctx, "", repoPath, historyGitOperationTimeout, "show", "-s", "--format=%T", commit)
+	output, err := s.git(ctx, "", repoPath, historyGitOperationTimeout, "rev-parse", "--verify", commit+"^{tree}")
 	if err != nil {
 		return "", err
 	}
@@ -797,7 +797,7 @@ func (s *GitHistoryStore) SourceObjects(ctx context.Context, repositoryID, check
 	}
 	unlock := s.lockSource(sourceID)
 	defer unlock()
-	output, err := s.runGitBounded(ctx, "", repoPath, 32<<20, nil, "rev-list", "--objects", "--all")
+	output, err := s.runGitBounded(ctx, "", repoPath, 32<<20, nil, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)")
 	if err != nil {
 		return nil
 	}

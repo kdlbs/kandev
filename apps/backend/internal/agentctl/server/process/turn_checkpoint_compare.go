@@ -143,7 +143,7 @@ func (g *GitOperator) checkpointResultForAcceptedOID(
 	boundary turnchanges.CheckpointBoundary,
 	commitOID, treeOID, hashAlgorithm string,
 ) (turnchanges.CheckpointResult, error) {
-	output, err := g.turnCheckpointOutput(ctx, "", "show", "-s", "--format=%T", commitOID)
+	output, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--verify", commitOID+"^{tree}")
 	if err != nil {
 		return turnchanges.CheckpointResult{}, turnCheckpointFailure(turnchanges.ReasonContentUnavailable, err)
 	}

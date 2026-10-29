@@ -174,7 +174,7 @@ func (s *GitHistoryStore) CommonSourceUsable(ctx context.Context, gitDir string,
 	for _, endpoint := range []struct{ commit, tree string }{
 		{row.StartCommitOID, row.StartTreeOID}, {row.EndCommitOID, row.EndTreeOID},
 	} {
-		output, err := s.runGitBounded(ctx, "", gitDir, 1<<20, nil, "show", "-s", "--format=%T", endpoint.commit)
+		output, err := s.runGitBounded(ctx, "", gitDir, 1<<20, nil, "rev-parse", "--verify", endpoint.commit+"^{tree}")
 		if err != nil || strings.TrimSpace(string(output)) != endpoint.tree {
 			return false
 		}

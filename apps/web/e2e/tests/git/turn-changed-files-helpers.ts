@@ -102,6 +102,34 @@ export async function waitForTurnChangeCount(
     .toMatchObject({ status: 200, total: count, finalized: count });
 }
 
+export async function waitForTurnChangeFileContent(
+  apiClient: ApiClient,
+  sessionId: string,
+  changeSetId: string,
+  fileChangeId: string,
+): Promise<string> {
+  let content = "";
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSetId}/files/${fileChangeId}/content?variant=canonical_patch`,
+        );
+        if (!response.ok) return response.status;
+        const payload = (await response.json()) as { content: string };
+        content = Buffer.from(payload.content, "base64").toString("utf8");
+        return response.status;
+      },
+      {
+        message: "Turn change content should finish preserving before its source is removed",
+        timeout: 60_000,
+      },
+    )
+    .toBe(200);
+  return content;
+}
+
 export async function readTurnChangeHistory(apiClient: ApiClient, sessionId: string) {
   const response = await apiClient.rawRequest(
     "GET",
