@@ -63,7 +63,7 @@ function OperationResult({ operation }: { operation: ArchivedDataOperation }) {
         {t(`system:archivedData.${operation.kind}`)}: {t(`system:archivedData.${operation.state}`)}
         {operation.finished_at && <> · {retentionDate(operation.finished_at)}</>}
       </p>
-      {operation.state === "succeeded" && scanned === 0 ? (
+      {operation.kind !== "analysis" && operation.state === "succeeded" && scanned === 0 ? (
         <p>{t("system:archivedData.empty")}</p>
       ) : (
         <>

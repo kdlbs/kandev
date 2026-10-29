@@ -217,7 +217,9 @@ func ArchivedMessageMetadata(ctx context.Context, q sqlx.QueryerContext, rowID i
 // holds the value the reduction was computed from, so a concurrent write wins
 // instead of being overwritten.
 func WriteReducedMessageMetadata(ctx context.Context, tx *sqlx.Tx, id, expected, replacement string) error {
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET metadata=?
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	result, err := tx.ExecContext(stmt, tx.Rebind(`UPDATE task_session_messages SET metadata=?
 	 WHERE id=? AND metadata=?`), replacement, id, expected)
 	if err != nil {
 		return err
@@ -278,7 +280,9 @@ func CleanupJobSnapshotRow(ctx context.Context, q sqlx.QueryerContext, id string
 // still holds the value the reduction was computed from, so a job that left the
 // succeeded state keeps its snapshot.
 func WriteReducedCleanupSnapshot(ctx context.Context, tx *sqlx.Tx, id, expected, replacement string) error {
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET resource_snapshot=?
+	stmt, cancel := budgetedStatementCtx(ctx)
+	defer cancel()
+	result, err := tx.ExecContext(stmt, tx.Rebind(`UPDATE task_resource_cleanup_jobs SET resource_snapshot=?
 	 WHERE id=? AND state=? AND resource_snapshot=?`),
 		replacement, id, models.TaskResourceCleanupStateSucceeded, expected)
 	if err != nil {

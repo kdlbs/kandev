@@ -75,8 +75,8 @@ func (s *Service) storeScanProgress(ctx context.Context, r record) error {
 		if !operationMatches(current, r.Operation.ID) {
 			return nil
 		}
-		if r.Operation.State == stateRunning && current.Operation.State != stateRunning {
-			// A cancel committed after the tick read; do not resurrect the row.
+		if current.Operation.State != stateRunning {
+			// A cancel or another writer settled this row after the tick read.
 			return nil
 		}
 		if r.Operation.Kind == kindCleanup && (!approved(current) || current.Policy.Revision != r.Progress.Revision) {
@@ -104,30 +104,29 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 		return nil, err
 	}
 	used := int64(0)
-	changed, err := s.scanMessageBatch(ctx, q, r, mutate, &used)
+	// rows is shared by both phases, so the batch honours one 100-row budget.
+	rows := int64(0)
+	changed, err := s.scanMessageBatch(ctx, q, r, mutate, &used, &rows)
 	if err != nil {
 		return nil, err
 	}
 	if used < batchBytes && r.Progress.Phase == phaseJobs {
-		if _, err := s.scanJobBatch(ctx, q, r, mutate, &used); err != nil {
+		if _, err := s.scanJobBatch(ctx, q, r, mutate, &used, &rows); err != nil {
 			return nil, err
 		}
 	}
 	return changed, checkScanSchema(ctx, q, r)
 }
 
-func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) ([]string, error) {
+func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used, rows *int64) ([]string, error) {
 	changed := []string{}
 	validated := r.Progress.Task
 	started := time.Now()
-	// rows is this batch's own row usage, separate from the operation's cumulative
-	// report counters, so a long pass still honours the per-batch row budget.
-	rows := int64(0)
 	for i := 0; i < batchRows && *used < batchBytes; i++ {
 		if i > 0 && time.Since(started) >= statementBudget {
 			break
 		}
-		remaining := int64(batchRows) - rows
+		remaining := int64(batchRows) - *rows
 		if remaining <= 0 {
 			break
 		}
@@ -146,7 +145,7 @@ func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r
 		if err != nil {
 			return nil, err
 		}
-		rows += scannedRows(r) - before
+		*rows += scannedRows(r) - before
 		if full {
 			break
 		}
@@ -316,16 +315,13 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 // scanJobBatch reduces finished cleanup-job snapshots. It reports no changed
 // message ids: the Changed hook only refreshes message payloads in the UI, and a
 // reduced job snapshot has no reader that needs a notification.
-func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used *int64) (bool, error) {
+func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *record, mutate bool, used, rows *int64) (bool, error) {
 	started := time.Now()
-	// rows is this batch's own row usage, separate from the operation's cumulative
-	// report counters, so a long pass still honours the per-batch row budget.
-	rows := int64(0)
 	for i := 0; i < batchRows && *used < batchBytes; i++ {
 		if i > 0 && time.Since(started) >= statementBudget {
 			break
 		}
-		if rows >= int64(batchRows) {
+		if *rows >= int64(batchRows) {
 			break
 		}
 		p := &r.Progress
@@ -345,7 +341,7 @@ func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *re
 		if err != nil {
 			return false, err
 		}
-		rows += scannedRows(r) - before
+		*rows += scannedRows(r) - before
 		if full {
 			break
 		}
