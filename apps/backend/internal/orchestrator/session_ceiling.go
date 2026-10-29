@@ -128,6 +128,12 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
+	inferenceStore   *sessioncapacity.Store
+	inferenceRefresh func(context.Context)
+	inferenceKnown   bool
+	inferenceWakeMu  sync.Mutex
+	inferenceWake    chan struct{}
+
 	policy       string
 	gradeLimits  map[string]int
 	resolveGrade func(context.Context, admissionRequest) (string, error)
@@ -270,6 +276,16 @@ func (s *Service) SessionCapacity() int {
 // decision time rather than kept as a running tally, so a restart, a panic or a
 // missed release cannot leak capacity permanently.
 func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
+	if c.policy == sessioncapacity.PolicyAll {
+		population, err := c.readGradedPopulationLocked(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if population.unknown {
+			return nil, fmt.Errorf("execution grade population is unknown")
+		}
+		return population.counted, nil
+	}
 	if c.lister == nil {
 		return map[string]struct{}{}, nil
 	}
