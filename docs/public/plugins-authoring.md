@@ -2414,6 +2414,31 @@ an unavailable error. After successful inspection, Kandev persists the validated
 descriptor with the normal native task flow. Existing repository IDs and built-in
 provider URLs continue to use their existing paths.
 
+### Bare project URL discovery
+
+Office projects store repository source strings without a provider hint. When a
+source is not a public built-in URL and does not name a provider, Kandev asks
+every active manifest owner that declares the workspace `repositories.inspect`
+action to inspect it. Each candidate receives the selected workspace and must
+reject URLs its own connection does not own before any authenticated provider
+call. Return `{"matched":false}` for those URLs.
+
+Kandev keeps all validated candidates and never chooses one by registration
+order, hostname resemblance, or response speed. A project source that two
+providers both recognize is rejected as ambiguous, and so is a source that no
+provider recognizes. Discovery uses at most four simultaneous inspections under
+one 15-second deadline. Cancellation, a deadline, or a plugin that disables,
+upgrades, or uninstalls during the pass discards the whole candidate set, so the
+caller retries rather than accepting a partial result.
+
+An unrelated candidate's ordinary inspection failure does not cancel another
+candidate's match. The host selects that failure for the user-visible error only
+when no provider matched. Plugin participation needs no new wire action, SDK
+method, or host provider list: declare `repository_providers`, declare the
+workspace `repositories.inspect` action, and implement its connection checks.
+Installation makes the capability available; the plugin still owns its
+connection, authentication, and URL rules.
+
 A code-host review provider may publish normalized task chrome on each snapshot:
 
 ```ts

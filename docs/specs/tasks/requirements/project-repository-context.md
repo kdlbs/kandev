@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-10-07
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -41,6 +42,10 @@ already describes project repository inheritance. This document defines its crea
 - **AC-TASKS-PROJECT-REPOSITORIES-001.7:** When no project is selected, or its source list is empty, existing repositoryless task behavior shall apply.
 - **AC-TASKS-PROJECT-REPOSITORIES-001.8:** When a repository-backed task first launches, its prepared environment shall contain the project files under the selected executor's existing semantics. `local_pc` shall use its source checkout. Worktree shall use an isolated worktree. An inheriting child shall retain the parent's prepared source context.
 - **AC-TASKS-PROJECT-REPOSITORIES-001.9:** Desktop and phone Office creation shall receive the same source attachments through the existing task form. Creation errors shall use the existing error presentation.
+- **AC-TASKS-PROJECT-REPOSITORIES-001.10:** When a project source uniquely matches the workspace's configured self-managed GitLab origin, automatic selection shall resolve it without provider hints or prior registration. The repository identity shall retain its scheme, host, port, and full namespace.
+- **AC-TASKS-PROJECT-REPOSITORIES-001.11:** When any project source fails origin verification, creation shall produce no new repository, task, attachment, or creation event. Missing or mismatched connections shall produce the existing invalid-selection error. Unreadable connections shall produce the existing unavailable-selection error. Other valid sources shall not authorize the rejected source.
+- **AC-TASKS-PROJECT-REPOSITORIES-001.12:** When an active repository plugin uniquely verifies a project source in the selected workspace, automatic selection shall attach that repository without provider hints or prior registration. Its identity, scope, clone URL, and default branch shall come from the verified provider result.
+- **AC-TASKS-PROJECT-REPOSITORIES-001.13:** When multiple providers verify an unhinted project URL, creation shall refuse the ambiguous source before any repository or task write. Response speed and provider registration order shall not select a winner. Explicit provider selections and saved repository IDs shall retain their existing selection rules.
 
 ## Compatibility and exclusions
 
@@ -48,11 +53,13 @@ Existing tasks receive no automatic backfill. Changing a task's project or editi
 project sources does not replace its attachments. Existing task external-ID retry
 semantics remain unchanged.
 
-Executor selection, repository-provider support, plain-folder project support,
+Executor selection, new provider-specific URL syntax, plain-folder project support,
 branch policy, and multi-branch explicit selections are outside this change.
 Unsupported source formats produce a creation error.
+Plugin discovery uses the [plugin-owned discovery contract](../../plugins/requirements/repository-url-discovery.md).
 
 ## System design and implementation
 
 - [Project repository context design](../system-design/project-repository-context.md)
 - [Issue 4289 implementation package](../../../plans/office-project-repository-context/plan.md)
+- [Provider-neutral project-source package](../../../plans/office-project-self-managed-gitlab/plan.md)

@@ -78,7 +78,7 @@ type Service struct {
 	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
 	// authenticated actions and reference RPCs. Dispatch holds a read lease for
 	// the full RPC; lifecycle mutation holds the write side.
-	dispatchLocks *keyedRWMutex
+	dispatchLocks *keyedContextRWMutex
 
 	// agentToolInstallMu makes exposed-name collision validation and registry
 	// insertion one atomic catalog mutation across different plugin IDs.
@@ -228,7 +228,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:                             log,
 		httpClient:                      &http.Client{},
 		lifecycleLocks:                  newKeyedMutex(),
-		dispatchLocks:                   newKeyedRWMutex(),
+		dispatchLocks:                   newKeyedContextRWMutex(),
 		agentToolGeneration:             uuid.NewString(),
 		eventHub:                        webapp.NewEventHub(),
 		conversationTokens:              newConversationTokenManager(),
@@ -323,26 +323,6 @@ func (s *Service) revokeGitCredentialProviderLeases(providers []string) {
 type keyedMutex struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
-}
-
-type keyedRWMutex struct {
-	mu    sync.Mutex
-	locks map[string]*sync.RWMutex
-}
-
-func newKeyedRWMutex() *keyedRWMutex {
-	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
-}
-
-func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	lock, ok := k.locks[key]
-	if !ok {
-		lock = &sync.RWMutex{}
-		k.locks[key] = lock
-	}
-	return lock
 }
 
 func newKeyedMutex() *keyedMutex {
