@@ -16,6 +16,7 @@ type Options struct {
 	Report       func(context.Context, *Operation)
 	Log          func(context.Context, string, error)
 	Now          func() time.Time
+	History      HistoryCompactor
 }
 
 type Service struct {

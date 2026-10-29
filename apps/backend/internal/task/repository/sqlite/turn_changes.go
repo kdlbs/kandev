@@ -267,6 +267,7 @@ func (r *Repository) ListTurnRepositoryChanges(ctx context.Context, changeSetID 
 		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
 			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
 			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
+			source_git_dir, content_source, preservation_state, preservation_reason, preservation_attempts, preservation_bytes, preservation_receipt, preservation_deadline,
 			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
 			overlap_intervals_json, created_at, updated_at
 		FROM turn_repository_changes
@@ -312,6 +313,7 @@ func (r *Repository) ListTurnRepositoryChangesForSets(ctx context.Context, chang
 		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
 			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
 			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
+			source_git_dir, content_source, preservation_state, preservation_reason, preservation_attempts, preservation_bytes, preservation_receipt, preservation_deadline,
 			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
 			overlap_intervals_json, created_at, updated_at
 		FROM turn_repository_changes
@@ -336,6 +338,7 @@ func (r *Repository) GetTurnRepositoryChange(ctx context.Context, changeSetID, r
 		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
 			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
 			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
+			source_git_dir, content_source, preservation_state, preservation_reason, preservation_attempts, preservation_bytes, preservation_receipt, preservation_deadline,
 			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
 			overlap_intervals_json, created_at, updated_at
 		FROM turn_repository_changes WHERE change_set_id = ? AND id = ?
@@ -589,14 +592,14 @@ func insertTurnRepositoryChangeStart(
 		INSERT INTO turn_repository_changes (
 			id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
 			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, hash_algorithm,
-			start_captured_at, start_ref, availability, reason, cleanup_pending, overlap_intervals_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			start_captured_at, start_ref, source_git_dir, availability, reason, cleanup_pending, overlap_intervals_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`), repositoryChange.ID, changeSetID, repositoryChange.CheckoutID, repositoryChange.TaskEnvironmentRepoID,
 		repositoryChange.TaskRepositoryID, repositoryChange.RepositoryID, repositoryChange.WorktreeID,
 		repositoryChange.DisplayName, repositoryChange.RepositorySubpath, repositoryChange.StartCommitOID,
 		repositoryChange.StartTreeOID, repositoryChange.HashAlgorithm, repositoryChange.StartCapturedAt,
-		repositoryChange.StartReachabilityRef, repositoryChange.Availability, repositoryChange.Reason, repositoryChange.CleanupPending,
+		repositoryChange.StartReachabilityRef, repositoryChange.SourceGitDir, repositoryChange.Availability, repositoryChange.Reason, repositoryChange.CleanupPending,
 		repositoryChange.OverlapIntervalsJSON, repositoryChange.CreatedAt, repositoryChange.UpdatedAt)
 	if err != nil {
 		return err
@@ -715,6 +718,8 @@ func finalizeTurnChangeRepositories(
 		repositoryChange.OverlapIntervalsJSON = overlapJSON
 		result, err := tx.ExecContext(ctx, db.Rebind(`
 			UPDATE turn_repository_changes SET end_commit_oid = ?, end_tree_oid = ?, end_captured_at = ?, end_ref = ?,
+				source_git_dir = ?, content_source = ?, preservation_state = ?, preservation_reason = ?, preservation_attempts = ?,
+				preservation_bytes = ?, preservation_receipt = ?,
 				availability = ?, reason = ?, enumeration_complete = ?, comparison_complete = ?, content_complete = ?,
 				overlap_intervals_json = ?, updated_at = ?
 			WHERE id = ? AND change_set_id = ? AND (
@@ -722,7 +727,10 @@ func finalizeTurnChangeRepositories(
 				(end_commit_oid = ? AND end_tree_oid = ? AND end_ref = ?)
 			)
 		`), repositoryChange.EndCommitOID, repositoryChange.EndTreeOID, repositoryChange.EndCapturedAt,
-			repositoryChange.EndReachabilityRef, repositoryChange.Availability, repositoryChange.Reason,
+			repositoryChange.EndReachabilityRef, repositoryChange.SourceGitDir, repositoryChange.ContentSource, repositoryChange.PreservationState,
+			repositoryChange.PreservationReason, repositoryChange.PreservationAttempts,
+			repositoryChange.PreservationBytes, repositoryChange.PreservationReceipt,
+			repositoryChange.Availability, repositoryChange.Reason,
 			repositoryChange.EnumerationComplete, repositoryChange.ComparisonComplete, repositoryChange.ContentComplete,
 			repositoryChange.OverlapIntervalsJSON, finalization.TerminalAt, repositoryChange.ID, changeSetID,
 			repositoryChange.EndCommitOID, repositoryChange.EndTreeOID, repositoryChange.EndReachabilityRef,

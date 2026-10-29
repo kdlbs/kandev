@@ -16,6 +16,7 @@ export function projectTurnRepositoryAvailability(
   if (repository.availability === "unsupported") return "unavailable";
   if (repository.availability !== "ready") return repository.availability;
   if (!repository.comparison_complete) return "partial";
+  if (!repository.content_complete && repository.preservation_pending) return "pending";
   if (!repository.content_complete) return "content_unavailable";
   return "ready";
 }

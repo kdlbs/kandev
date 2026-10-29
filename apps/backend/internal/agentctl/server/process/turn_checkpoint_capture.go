@@ -99,6 +99,7 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if existing, found, err := g.existingTurnCheckpoint(ctx, request, ref, hashAlgorithm); err != nil {
 		return turnchanges.CheckpointResult{}, err
 	} else if found {
+		existing.CommonGitDir, _ = g.turnCheckpointCommonDir(ctx)
 		return existing, nil
 	}
 	indexPath, err := createTurnCheckpointIndex(gitDir)
@@ -121,10 +122,11 @@ func (g *GitOperator) captureTurnCheckpointLocked(
 	if _, err := g.turnCheckpointOutput(ctx, indexPath, "update-ref", ref, commitOID, zeroOID); err != nil {
 		return g.resolveTurnCheckpointRefRace(ctx, request, ref, hashAlgorithm, err)
 	}
+	commonDir, _ := g.turnCheckpointCommonDir(ctx)
 	return turnchanges.CheckpointResult{
 		ChangeSetID: request.ChangeSetID, CheckoutID: request.CheckoutID, Boundary: request.Boundary,
 		CommitOID: commitOID, TreeOID: treeOID, HashAlgorithm: hashAlgorithm,
-		ReachabilityRef: ref, CapturedAt: capturedAt,
+		ReachabilityRef: ref, CommonGitDir: commonDir, CapturedAt: capturedAt,
 	}, nil
 }
 
@@ -667,4 +669,16 @@ func isTurnCheckpointGitBinding(key string) bool {
 		}
 	}
 	return false
+}
+
+func (g *GitOperator) turnCheckpointCommonDir(ctx context.Context) (string, error) {
+	output, err := g.turnCheckpointOutput(ctx, "", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	commonDir, err := filepath.Abs(strings.TrimSpace(string(output)))
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(commonDir)
 }

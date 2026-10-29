@@ -76,3 +76,25 @@ func TestUnreadableRuntimeStateFailsClosed(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestLegacyToolOnlyApprovalRequiresNewPreparation(t *testing.T) {
+	s := testService(t)
+	legacy := `{"version":1,"policy":{"enabled":true,"revision":1,"age":{"value":3,"unit":"months"}},"preparation":{"state":"ready","choice":"skip"},"approved_revision":1}`
+	_, err := s.pool.Writer().Exec(`INSERT INTO settings(key,value,updated_at) VALUES('tool_payload_retention',?,CURRENT_TIMESTAMP)`, legacy)
+	require.NoError(t, err)
+	status, err := s.Get(context.Background())
+	require.NoError(t, err)
+	require.False(t, status.Policy.Enabled, "legacy tool-only approval must not enable the wider scope")
+	require.Equal(t, "none", status.Preparation.State)
+	require.EqualValues(t, 3, status.Policy.Age.Value)
+	_, err = s.Run(context.Background(), status.Policy.Revision)
+	require.Error(t, err, "legacy approval cannot authorize combined cleanup")
+
+	saved, err := s.Save(context.Background(), Update{
+		Enabled: true, Age: status.Policy.Age, Revision: status.Policy.Revision, BackupChoice: "skip",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "pending", saved.Preparation.State)
+	require.False(t, saved.Policy.Enabled)
+	require.Equal(t, "skip", saved.Preparation.Choice)
+}

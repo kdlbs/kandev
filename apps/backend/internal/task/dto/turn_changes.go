@@ -46,6 +46,7 @@ type TurnRepositoryChangeDTO struct {
 	EnumerationComplete bool                          `json:"enumeration_complete"`
 	ComparisonComplete  bool                          `json:"comparison_complete"`
 	ContentComplete     bool                          `json:"content_complete"`
+	PreservationPending bool                          `json:"preservation_pending,omitempty"`
 	OverlapIntervals    []models.TurnChangeOverlap    `json:"overlap_intervals,omitempty"`
 }
 
@@ -115,7 +116,8 @@ func TurnChangeSetSummaryFromModel(changeSet *models.TurnChangeSet, repositories
 			RepositorySubpath: repository.RepositorySubpath, Availability: repository.Availability,
 			Reason: repository.Reason, EnumerationComplete: repository.EnumerationComplete,
 			ComparisonComplete: repository.ComparisonComplete, ContentComplete: repository.ContentComplete,
-			OverlapIntervals: repository.OverlapIntervals,
+			PreservationPending: repository.PreservationState == models.TurnChangePreservationPending,
+			OverlapIntervals:    repository.OverlapIntervals,
 		})
 	}
 	return dto

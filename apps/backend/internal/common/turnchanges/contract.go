@@ -113,6 +113,7 @@ type CheckpointResult struct {
 	TreeOID         string             `json:"tree_oid"`
 	HashAlgorithm   string             `json:"hash_algorithm"`
 	ReachabilityRef string             `json:"reachability_ref"`
+	CommonGitDir    string             `json:"common_git_dir,omitempty"`
 	CapturedAt      time.Time          `json:"captured_at"`
 	Reused          bool               `json:"reused,omitempty"`
 }
@@ -196,4 +197,38 @@ type CheckpointExport struct {
 	Complete       bool                   `json:"complete"`
 	Reason         ReasonCode             `json:"reason,omitempty"`
 	ExportBytes    int64                  `json:"export_bytes"`
+}
+
+// ArchiveRequest asks the executor to export the exact accepted object
+// closure for one immutable interval. Object identity is always server-owned;
+// the archive never accepts arbitrary revisions.
+type ArchiveRequest struct {
+	ChangeSetID    string   `json:"change_set_id"`
+	KnownObjects   []string `json:"known_objects,omitempty"`
+	CheckoutID     string   `json:"checkout_id"`
+	Repo           string   `json:"repo,omitempty"`
+	HashAlgorithm  string   `json:"hash_algorithm"`
+	StartCommitOID string   `json:"start_commit_oid"`
+	StartTreeOID   string   `json:"start_tree_oid"`
+	EndCommitOID   string   `json:"end_commit_oid"`
+	EndTreeOID     string   `json:"end_tree_oid"`
+}
+
+// CheckpointArchive is a self-contained pack containing the accepted commits,
+// both interval trees, and every tree/blob needed to render their difference.
+// Objects lists the verified object identities in Pack for the importer.
+type CheckpointArchive struct {
+	ChangeSetID       string     `json:"change_set_id"`
+	CheckoutID        string     `json:"checkout_id"`
+	HashAlgorithm     string     `json:"hash_algorithm"`
+	StartCommitOID    string     `json:"start_commit_oid"`
+	StartTreeOID      string     `json:"start_tree_oid"`
+	EndCommitOID      string     `json:"end_commit_oid"`
+	EndTreeOID        string     `json:"end_tree_oid"`
+	Pack              []byte     `json:"pack"`
+	Objects           []string   `json:"objects"`
+	ObjectCount       int64      `json:"object_count"`
+	UncompressedBytes int64      `json:"uncompressed_bytes"`
+	Complete          bool       `json:"complete"`
+	Reason            ReasonCode `json:"reason,omitempty"`
 }

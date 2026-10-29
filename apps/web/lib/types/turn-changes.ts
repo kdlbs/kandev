@@ -25,6 +25,7 @@ export type TurnRepositoryChange = {
   enumeration_complete: boolean;
   comparison_complete: boolean;
   content_complete: boolean;
+  preservation_pending?: boolean;
   overlap_intervals?: TurnChangeOverlap[];
 };
 

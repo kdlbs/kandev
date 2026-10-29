@@ -312,6 +312,7 @@ func (c *Coordinator) captureStart(ctx context.Context, admission Admission, cli
 		row.StartTreeOID = captured.TreeOID
 		row.HashAlgorithm = captured.HashAlgorithm
 		row.StartReachabilityRef = captured.ReachabilityRef
+		row.SourceGitDir = captured.CommonGitDir
 		row.CleanupPending = captured.ReachabilityRef != ""
 		capturedAt := captured.CapturedAt.UTC()
 		row.StartCapturedAt = &capturedAt
@@ -440,6 +441,11 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows 
 			return errors.Join(append(failures, ctx.Err())...)
 		}
 		if !row.CleanupPending {
+			continue
+		}
+		// A pending preservation still needs the executor-owned refs to retry
+		// against the accepted endpoint pair.
+		if row.PreservationState == models.TurnChangePreservationPending {
 			continue
 		}
 		cleanupFailed := false

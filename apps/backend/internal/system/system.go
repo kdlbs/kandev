@@ -77,6 +77,8 @@ type Wiring struct {
 	SessionCapacityEnvironment sessioncapacity.Environment
 	TaskSessions               sleepinhibition.SessionReader
 	ToolPayloadChanged         func(context.Context, []string)
+	HistoryCompaction          toolretention.HistoryCompactor
+	HistoryBackup              backups.RetentionSources
 	AgentRuntimeRecovery       AgentRuntimeRecoveryTarget
 }
 
@@ -146,6 +148,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.RetentionSources = wiring.HistoryBackup
 	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
 	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
 	dbSvc.DatabaseQuiesce = retentionQuiesce(retentionSvc, wiring.DatabaseQuiesce)
@@ -358,6 +361,9 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 		CreateBackup: func(ctx context.Context) (string, error) {
 			receipt, err := snapshots.CreateForRetention(ctx)
 			if err != nil {
+				if log != nil {
+					log.Error("retention backup preparation failed", zap.Error(err))
+				}
 				return "", err
 			}
 			encoded, err := json.Marshal(receipt)
@@ -368,9 +374,14 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 			if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
 				return err
 			}
-			return snapshots.VerifyRetentionBackupUnderLease(ctx, receipt)
+			err := snapshots.VerifyRetentionBackupWithSources(ctx, receipt)
+			if err != nil && log != nil {
+				log.Error("retention backup verification failed", zap.Error(err))
+			}
+			return err
 		},
 		Changed: wiring.ToolPayloadChanged,
+		History: wiring.HistoryCompaction,
 		Report:  func(ctx context.Context, op *toolretention.Operation) { reportToolRetention(ctx, eventBus, log, op) },
 		Log: func(_ context.Context, message string, err error) {
 			if log != nil {

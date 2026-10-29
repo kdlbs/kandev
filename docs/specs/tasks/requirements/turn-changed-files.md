@@ -84,7 +84,8 @@ The card does not claim exclusive agent authorship.
 - **AC-TASKS-TURN-CHANGES-003.1:** Start capture and endpoint persistence shall precede provider dispatch.
   Bounded capture failure shall allow dispatch with affected history marked unavailable.
 - **AC-TASKS-TURN-CHANGES-003.2:** Terminal capture shall validate the turn, execution, and prompt generation.
-  End capture, summary persistence, and required content preservation shall precede successor dispatch and executor cleanup.
+  Accepted end capture shall precede successor dispatch. Historical content preservation can continue independently from accepted immutable endpoints.
+  Executor cleanup shall wait for preserved content or an explicit final partial or unavailable result within its cleanup deadline.
 - **AC-TASKS-TURN-CHANGES-003.3:** Duplicate READY/COMPLETE events and delayed events from replaced executions shall not replace accepted endpoints or capture a successor.
 - **AC-TASKS-TURN-CHANGES-003.4:** Interrupted, canceled, and failed turns shall retain valid changes when their checkout remains available.
   Stop and Cancel shall remain bounded and responsive.
@@ -113,6 +114,16 @@ The card does not claim exclusive agent authorship.
   Expired reads shall return an explicit expired state.
 - **AC-TASKS-TURN-CHANGES-004.7:** Missing repositories, comparison failures, truncated enumeration, and missing required content shall prevent a fully ready label.
   Available entries shall remain usable with explicit partial completeness.
+- **AC-TASKS-TURN-CHANGES-004.8:** Transient preservation failures shall receive bounded automatic retries against the original accepted interval.
+  During recovery, readers shall see pending preparation rather than a final content-loss result. Recovery shall not extend the agent-running indicator.
+- **AC-TASKS-TURN-CHANGES-004.9:** After restart, pending preservation shall resume only with verified original checkout identity and accepted endpoints.
+  Missing proof, permanent failure, or exhausted recovery time shall settle explicitly without replacement snapshots.
+- **AC-TASKS-TURN-CHANGES-004.10:** Retrying one repository shall preserve file identities, counts, and content already retained for every other repository.
+  Successful recovery shall update the original turn automatically and preserve its historical selection and transcript anchor.
+- **AC-TASKS-TURN-CHANGES-004.11:** Historical rendering shall derive from the exact retained interval on demand.
+  A temporary rendering error shall not permanently invalidate verified snapshots. Removal of a managed worktree shall not invalidate surviving checkpoint objects.
+- **AC-TASKS-TURN-CHANGES-004.12:** The existing compaction policy shall govern removal of eligible historical content and old tool details together.
+  Compaction shall retain turn/file summaries and show expired history explicitly. No separate historical-diff policy or enable switch shall be required.
 
 ### REQ-TASKS-TURN-CHANGES-005: Transcript card
 
@@ -200,6 +211,9 @@ Backfill from current HEAD or workspace content and an off-by-default release to
 - [Subscription reconciliation design](../system-design/turn-changed-files-subscription.md)
 - [Implementation plan](../../../plans/turn-changed-files/plan.md)
 - [Subscription reconciliation plan](../../../plans/turn-changes-subscription-reconciliation/plan.md)
+- [Preservation design](../system-design/turn-change-preservation.md)
+- [Unified compaction contract](../../system-page/requirements/tool-payload-retention.md)
+- [Preservation retry plan](../../../plans/turn-change-preservation-retry/plan.md)
 - [Actor attribution](human-assignee.md)
 
 Presentation refinement: [plan](../../../plans/turn-changed-files-presentation/plan.md).

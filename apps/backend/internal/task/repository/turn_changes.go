@@ -24,6 +24,21 @@ type TurnChangesRepository interface {
 	AcceptTurnRepositoryEnd(ctx context.Context, changeSetID, repositoryChangeID string, expectedStartCommitOID, expectedStartTreeOID string, end models.TurnRepositoryChangeSet) (bool, error)
 	SetTurnRepositoryEndUnavailable(ctx context.Context, changeSetID, repositoryChangeID, startCommitOID, startTreeOID string, reason models.TurnChangeReason) (bool, error)
 	MarkTurnRepositoryCheckpointRefsCleaned(ctx context.Context, repositoryChangeID string) error
+	UpdateTurnRepositoryPreservation(ctx context.Context, repositoryChangeID string, source models.TurnChangeContentSource, state models.TurnChangePreservation, reason models.TurnChangeReason, attempts, bytes int64, receipt string, contentComplete bool) error
+	MarkTurnChangeFilesGitBacked(ctx context.Context, repositoryChangeID string) (bool, error)
+	GetTurnFileContentSource(ctx context.Context, changeSetID, fileChangeID string) (*models.TurnFileContentSource, error)
+	ListTurnRepositoryPreservationRows(ctx context.Context, states []models.TurnChangePreservation, limit int) ([]*models.TurnRepositoryChangeSet, error)
+	ListTurnPreservationJobs(ctx context.Context, limit int) ([]*models.TurnRepositoryChangeSet, error)
+	SetTurnRepositoryPreservationDeadline(ctx context.Context, repositoryChangeID string, deadline time.Time) error
+	UpdateTurnChangeSetContentStatus(ctx context.Context, changeSetID string, contentComplete bool, reason models.TurnChangeReason) error
+	TaskPreservationBytes(ctx context.Context, changeSetID string) (int64, error)
+	ListTurnHistoryRetentionCandidates(ctx context.Context, cutoff, now time.Time, limit int) ([]*models.TurnHistoryRetentionCandidate, error)
+	ListTurnHistoryRetentionCandidatesPage(ctx context.Context, cutoff, now time.Time, afterTaskID string, limit int) ([]*models.TurnHistoryRetentionCandidate, string, error)
+	ExpireTurnHistory(ctx context.Context, changeSetIDs []string, cutoff time.Time, reason models.TurnChangeReason, now time.Time) (models.TurnHistoryExpiryResult, error)
+	ListExpiredTurnHistoryRepositories(ctx context.Context, limit int) ([]*models.TurnRepositoryChangeSet, error)
+	ListTurnRepositoryPreservationReady(ctx context.Context, limit int) ([]*models.TurnRepositoryChangeSet, error)
+	ListTurnRepositoryPreservationReadyPage(ctx context.Context, afterID string, limit int) ([]*models.TurnRepositoryChangeSet, string, error)
+	ClearTurnRepositoryPreservationReceipt(ctx context.Context, repositoryChangeID string) error
 	UpdateTurnChangeSetOverlaps(ctx context.Context, changeSetID string, overlaps []models.TurnChangeOverlap) error
 	FinalizeTurnChangeSet(ctx context.Context, changeSetID string, expectedRevision int64, finalization models.TurnChangeSetFinalization) (bool, error)
 	StoreTurnChangeFiles(ctx context.Context, repositoryChangeID string, files []models.TurnChangeFileContent) error

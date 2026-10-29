@@ -332,6 +332,16 @@ func seedTurnChangeContentOwner(t *testing.T, repo *Repository, suffix string, r
 	if err := repo.CreateTurn(ctx, &models.Turn{ID: turnID, TaskID: taskID, TaskSessionID: sessionID, StartedAt: now}); err != nil {
 		t.Fatalf("create turn: %v", err)
 	}
+	oldTime := "2020-01-01T00:00:00Z"
+	if _, err := repo.db.ExecContext(ctx, `UPDATE tasks SET state='COMPLETED', queued_for_step_id='', queued_at=NULL, created_at=?, updated_at=? WHERE id=?`, oldTime, oldTime, taskID); err != nil {
+		t.Fatalf("age retention task fixture: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `UPDATE task_sessions SET state='COMPLETED', started_at=?, completed_at=?, updated_at=? WHERE id=?`, oldTime, oldTime, oldTime, sessionID); err != nil {
+		t.Fatalf("age retention session fixture: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `UPDATE task_session_turns SET started_at=?, created_at=?, completed_at=?, updated_at=?, metadata='{}' WHERE id=?`, oldTime, oldTime, oldTime, oldTime, turnID); err != nil {
+		t.Fatalf("age retention turn fixture: %v", err)
+	}
 	changeSetID := "change-set-" + suffix
 	changeSet := &models.TurnChangeSet{
 		ID: changeSetID, TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID, TaskEnvironmentID: envID,

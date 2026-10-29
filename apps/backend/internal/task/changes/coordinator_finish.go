@@ -375,7 +375,7 @@ func (c *Coordinator) finishTerminalRepository(
 		row.Reason = models.TurnChangeReasonContentUnavailable
 		return row, comparison, 0
 	}
-	return c.exportTerminalRepositoryContent(ctx, changeSet, row, comparison, client)
+	return c.preserveTerminalRepositoryContent(ctx, changeSet, row, comparison, client)
 }
 
 func unavailableTurnRepository(row models.TurnRepositoryChangeSet, reason models.TurnChangeReason) models.TurnRepositoryChangeSet {
@@ -409,6 +409,9 @@ func (c *Coordinator) captureAndAcceptTurnRepositoryEnd(
 		return row, errors.Join(fmt.Errorf("capture end for checkout %q: hash algorithm changed from %q to %q", row.CheckoutID, row.HashAlgorithm, end.HashAlgorithm), cleanupErr)
 	}
 	row.EndCommitOID, row.EndTreeOID, row.EndReachabilityRef = end.CommitOID, end.TreeOID, end.ReachabilityRef
+	if end.CommonGitDir != "" {
+		row.SourceGitDir = end.CommonGitDir
+	}
 	row.EndCapturedAt = timePtr(end.CapturedAt.UTC())
 	row.CleanupPending = row.CleanupPending || row.EndReachabilityRef != ""
 	acceptCtx, cancel := turnChangePersistenceContext()
@@ -439,6 +442,59 @@ func (c *Coordinator) storeTerminalComparisonFiles(row models.TurnRepositoryChan
 	ctx, cancel := turnChangePersistenceContext()
 	defer cancel()
 	return c.repository.StoreTurnChangeFiles(ctx, row.ID, summaries)
+}
+
+func (c *Coordinator) preserveTerminalRepositoryContent(
+	ctx context.Context,
+	changeSet *models.TurnChangeSet,
+	row models.TurnRepositoryChangeSet,
+	comparison *turnchanges.CheckpointComparison,
+	client CheckpointClient,
+) (models.TurnRepositoryChangeSet, *turnchanges.CheckpointComparison, int64) {
+	if c.content == nil {
+		row.ContentComplete, row.Reason = false, models.TurnChangeReasonContentUnavailable
+		return row, comparison, 0
+	}
+	archiveClient, ok := client.(ArchiveClient)
+	if !ok || !c.content.HistoryEnabled() {
+		return c.exportTerminalRepositoryContent(ctx, changeSet, row, comparison, client)
+	}
+	row.ContentSource = models.TurnChangeSourceGitArchive
+	receipt, err := c.content.Preserve(ctx, archiveClient, row)
+	if err != nil {
+		c.logger.Warn("turn change content preservation failed",
+			zap.String("change_set_id", changeSet.ID), zap.String("checkout_id", row.CheckoutID),
+			zap.Error(err))
+		row.ContentComplete, row.Reason = false, models.TurnChangeReasonContentUnavailable
+		row.PreservationState = models.TurnChangePreservationPending
+		return row, comparison, 0
+	}
+	row.PreservationAttempts = receipt.Attempts
+	row.PreservationBytes = receipt.Bytes
+	row.PreservationReceipt = receipt.Receipt
+	if !receipt.Complete && receipt.Cause != nil {
+		c.logger.Warn("turn change content preservation did not settle",
+			zap.String("change_set_id", changeSet.ID), zap.String("checkout_id", row.CheckoutID),
+			zap.Bool("retryable", receipt.Retryable), zap.Int64("attempts", receipt.Attempts),
+			zap.String("reason", string(receipt.Reason)), zap.Error(receipt.Cause))
+	}
+	if receipt.Complete {
+		row.ContentComplete = true
+		row.PreservationState = models.TurnChangePreservationReady
+		row.Reason = ""
+		return row, comparison, 0
+	}
+	row.ContentComplete = false
+	row.Reason = receipt.Reason
+	if row.Reason == "" {
+		row.Reason = models.TurnChangeReasonContentUnavailable
+	}
+	if receipt.Retryable {
+		row.PreservationState = models.TurnChangePreservationPending
+	} else {
+		row.PreservationState = models.TurnChangePreservationUnavailable
+	}
+	return row, comparison, 0
 }
 
 func (c *Coordinator) exportTerminalRepositoryContent(

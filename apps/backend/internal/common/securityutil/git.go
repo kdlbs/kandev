@@ -167,6 +167,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--git-path", "--path-format=", "--count", "--merges",
 		"--refs",
 		"--src-prefix=", "--dst-prefix=",
+		"--full-tree", "--stdout", "--batch-check=", "--object-format=", "-t",
 	}
 	for _, safe := range safeFlags {
 		if strings.HasPrefix(arg, safe) {

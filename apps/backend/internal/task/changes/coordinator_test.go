@@ -871,3 +871,7 @@ func (s *coordinatorStore) ReleaseTurnChangeContentLease(context.Context, string
 func (s *coordinatorStore) ApplyTurnChangeRetention(context.Context, models.TurnChangeRetentionPolicy, time.Time) (models.TurnChangeRetentionResult, error) {
 	return models.TurnChangeRetentionResult{}, nil
 }
+
+func (s *coordinatorStore) ListTurnRepositoryPreservationRows(context.Context, []models.TurnChangePreservation, int) ([]*models.TurnRepositoryChangeSet, error) {
+	return nil, nil
+}

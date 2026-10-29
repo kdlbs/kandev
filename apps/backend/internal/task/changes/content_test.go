@@ -133,14 +133,25 @@ func (f *fakeContentExporter) ExportTurnCheckpoint(_ context.Context, request tu
 }
 
 type fakeContentRepository struct {
-	repositoryChangeID string
-	files              []models.TurnChangeFileContent
-	statusComplete     bool
-	statusReason       models.TurnChangeReason
-	leaseID            string
-	releasedLease      string
-	payload            *models.TurnChangeContentPayload
-	storeReceipt       models.TurnChangeContentStoreReceipt
+	repositoryChangeID   string
+	files                []models.TurnChangeFileContent
+	statusComplete       bool
+	statusReason         models.TurnChangeReason
+	leaseID              string
+	releasedLease        string
+	payload              *models.TurnChangeContentPayload
+	storeReceipt         models.TurnChangeContentStoreReceipt
+	source               *models.TurnFileContentSource
+	preservedID          string
+	preservationSource   models.TurnChangeContentSource
+	preservationState    models.TurnChangePreservation
+	preservationReason   models.TurnChangeReason
+	preservationAttempts int64
+	preservationBytes    int64
+	preservationReceipt  string
+	contentComplete      bool
+	gitBackedID          string
+	legacyReads          int
 }
 
 func (f *fakeContentRepository) StoreTurnChangeFiles(_ context.Context, id string, files []models.TurnChangeFileContent) error {
@@ -163,6 +174,7 @@ func (f *fakeContentRepository) StoreTurnChangeFilesWithReceipt(ctx context.Cont
 }
 
 func (f *fakeContentRepository) ReadTurnChangeContent(context.Context, string, string, models.TurnChangeContentVariant) (*models.TurnChangeContentPayload, error) {
+	f.legacyReads++
 	return f.payload, nil
 }
 
@@ -189,4 +201,35 @@ func (f *fakeContentRepository) ApplyTurnChangeRetention(_ context.Context, poli
 		return models.TurnChangeRetentionResult{}, errors.New("unexpected retention policy")
 	}
 	return models.TurnChangeRetentionResult{}, nil
+}
+
+func (f *fakeContentRepository) GetTurnFileContentSource(_ context.Context, changeSetID, fileID string) (*models.TurnFileContentSource, error) {
+	if f.source != nil {
+		return f.source, nil
+	}
+	return &models.TurnFileContentSource{
+		ChangeSet:  &models.TurnChangeSet{ID: changeSetID, Availability: models.TurnChangeAvailabilityReady},
+		Repository: &models.TurnRepositoryChangeSet{ContentSource: models.TurnChangeSourceLegacySQL, PreservationState: models.TurnChangePreservationReady},
+		File:       &models.TurnFileChange{ID: fileID, ContentAvailability: models.TurnChangeAvailabilityReady},
+	}, nil
+}
+
+func (f *fakeContentRepository) UpdateTurnRepositoryPreservation(_ context.Context, id string, source models.TurnChangeContentSource, state models.TurnChangePreservation, reason models.TurnChangeReason, attempts, bytes int64, receipt string, complete bool) error {
+	f.preservationSource, f.preservationState, f.preservationReason = source, state, reason
+	f.preservationAttempts, f.preservationBytes, f.preservationReceipt, f.contentComplete = attempts, bytes, receipt, complete
+	f.preservedID = id
+	return nil
+}
+
+func (f *fakeContentRepository) SetTurnRepositoryPreservationDeadline(context.Context, string, time.Time) error {
+	return nil
+}
+
+func (f *fakeContentRepository) TaskPreservationBytes(context.Context, string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeContentRepository) MarkTurnChangeFilesGitBacked(_ context.Context, id string) (bool, error) {
+	f.gitBackedID = id
+	return true, nil
 }

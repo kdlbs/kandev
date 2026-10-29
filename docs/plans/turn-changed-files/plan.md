@@ -360,10 +360,12 @@ Broaden tests only for new failures or unresolved concerns. No automatic broad r
 Confirmed: fresh endpoints, multi-checkout capture, exact OIDs, default-on missing settings, explicit-false preservation,
 retained history across off/on, existing diff surfaces, interrupted-turn capture, and unchanged workflow authority.
 
-Design-selected proposals: database-backed compressed rendering content; 30-day content retention;
+Original delivery proposals: database-backed compressed rendering content; 30-day content retention;
 1 GiB installation/128 MiB task budgets; 10-second start/15-second terminal/2-second cancel preservation bounds.
 These defaults are reviewable and require measurements in order 09.
 They are not an established performance promise.
+The Git-history follow-up replaces this original content-storage and fixed-retention direction.
+Its Git storage budgets require new measurements and do not inherit SQL gzip accounting.
 
 Primary risks:
 
@@ -395,6 +397,13 @@ Passed checks:
   stress passed 20 repetitions; native Windows CI is pending. See work order 03.
 
 Qualification gaps remain open. Kind-backed Kubernetes, Sprites, and plugin executors have no feature-specific passing E2E evidence. The Kubernetes E2E seed currently creates no Git repository, so its Git capture path needs a repository-capable fixture. The local benchmark excludes executor transport, SQL writes, compression and retention growth, cold/slow storage, size-limit failures, and Stop/Cancel bounds. PostgreSQL-specific tests were not run because `KANDEV_TEST_POSTGRES_DSN` is unset. These are acceptance gaps, not claims of support or performance.
+
+## Pending preservation repair
+
+The [Git history and unified compaction package](../turn-change-preservation-retry/plan.md) revises work orders 04 and 05 after an observed export timeout.
+It selects Git content, SQL metadata, on-demand rendering, and one compaction policy for tool details and historical content.
+Its four work orders are implemented. Earlier validation results and work order 09's qualification gaps remain unchanged.
+The package owns source durability, shared cleanup and backup, projection, and desktop/phone evidence.
 
 ## Source inventory
 

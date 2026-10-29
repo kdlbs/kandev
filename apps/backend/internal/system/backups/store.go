@@ -78,9 +78,23 @@ type Service struct {
 	// only when RestoreQuiesce is not wired.
 	OrchestratorShutdown func()
 
+	// RetentionSources adds checkpoint coverage to retention backups. It is
+	// optional; nil keeps database-only backup behavior.
+	RetentionSources RetentionSources
+
 	// failWritesForTest, when true, causes Restore's staged-write step to
 	// fail before the configured database file is touched. Only set by tests.
 	failWritesForTest bool
+}
+
+// RetentionSources publishes and verifies external checkpoint sources that
+// belong to one retention backup. Implementations must keep a missing sidecar
+// valid only for a legacy database-only artifact.
+type RetentionSources interface {
+	PublishRetentionBackup(ctx context.Context, snapshotPath, databaseSHA256 string) error
+	VerifyRetentionBackup(ctx context.Context, snapshotPath, databaseSHA256 string) error
+	RestoreRetentionBackup(ctx context.Context, snapshotPath string) error
+	HasRetentionBackup(snapshotPath string) bool
 }
 
 // NewService constructs a Service. The backups directory beside databasePath
@@ -221,6 +235,18 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 	if _, err := verifySnapshot(ctx, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, fmt.Errorf("verify staged restore: %w", err)
+	}
+	if s.RetentionSources != nil {
+		if err := s.RetentionSources.VerifyRetentionBackup(ctx, snapshotPath, ""); err != nil {
+			_ = os.Remove(stagedPath)
+			return nil, fmt.Errorf("verify retained checkpoint sources: %w", err)
+		}
+		if s.RetentionSources.HasRetentionBackup(snapshotPath) {
+			if err := s.RetentionSources.RestoreRetentionBackup(ctx, snapshotPath); err != nil {
+				_ = os.Remove(stagedPath)
+				return nil, fmt.Errorf("restore retained checkpoint sources: %w", err)
+			}
+		}
 	}
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
@@ -424,6 +450,7 @@ func (s *Service) deleteContext(ctx context.Context, name string) error {
 	if err := os.Remove(abs); err != nil {
 		return fmt.Errorf("delete snapshot: %w", err)
 	}
+	_ = os.RemoveAll(abs + ".history")
 	return nil
 }
 

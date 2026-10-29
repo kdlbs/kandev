@@ -55,6 +55,15 @@ describe("projectTurnRepositoryAvailability", () => {
       "content_unavailable",
     ],
     [
+      {
+        availability: "ready",
+        comparison_complete: true,
+        content_complete: false,
+        preservation_pending: true,
+      },
+      "pending",
+    ],
+    [
       { availability: "unavailable", comparison_complete: false, content_complete: false },
       "unavailable",
     ],
