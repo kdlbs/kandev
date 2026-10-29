@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -56,4 +57,44 @@ func TestRemoteDockerAdoptedIdentitySurvivesPersistenceAndRecoveryRequest(t *tes
 	require.Equal(t, "container-1", containerID)
 	require.Equal(t, "backend-new", req.InstanceID)
 	require.Equal(t, "agentctl-old", remoteDockerAgentctlInstanceID(req))
+}
+
+// @covers AC-EXECUTORS-REMOTE-DOCKER-001.12
+func TestDockerAgentctlIdentityResolverUsesAdoptedMetadata(t *testing.T) {
+	for _, runtime := range []agentruntime.Runtime{
+		agentruntime.RuntimeDocker,
+		agentruntime.RuntimeRemoteDocker,
+	} {
+		t.Run(string(runtime), func(t *testing.T) {
+			got, err := recordedAgentctlInstanceID(runtime, "backend-new", map[string]interface{}{
+				MetadataKeyRemoteDockerAgentctlInstanceID: "agentctl-old",
+			})
+			require.NoError(t, err)
+			require.Equal(t, "agentctl-old", got)
+
+			got, err = recordedAgentctlInstanceID(runtime, "backend-new", nil)
+			require.NoError(t, err)
+			require.Equal(t, "backend-new", got, "legacy records without adopted metadata keep the backend identity")
+		})
+	}
+}
+
+// @covers AC-EXECUTORS-REMOTE-DOCKER-001.12
+func TestValidateExistingAgentIdentityAcceptsAdoptedDockerAgentctlID(t *testing.T) {
+	execution := &AgentExecution{
+		ID: "backend-new", SessionID: "session-1", RuntimeName: agentruntime.RuntimeRemoteDocker,
+		ACPSessionID: "native-session",
+		metadata: map[string]interface{}{
+			MetadataKeyRemoteDockerAgentctlInstanceID: "agentctl-old",
+		},
+	}
+	association := &agentctl.AgentSessionAssociation{
+		AgentStatus:       agentProcessStatusRunning,
+		InstanceID:        "agentctl-old",
+		SessionID:         "session-1",
+		NativeSessionID:   "native-session",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 1,
+	}
+	require.NoError(t, validateExistingAgentIdentity(execution, association))
 }
