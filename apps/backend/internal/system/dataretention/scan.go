@@ -385,18 +385,24 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	// succeeded state between batches is counted as skipped instead of eligible.
 	eligible, err := tasksqlite.SucceededCleanupJobEligible(ctx, q, s.driverName(), jobID, r.Operation.CleanupCutoff)
 	if err != nil {
+		if errors.Is(err, tasksqlite.ErrCleanupSnapshotEligibilityBudget) {
+			r.Operation.CleanupJobs.Skipped[skipEligibilityBudget]++
+			finishCleanupJob(&r.Progress)
+			return false, nil
+		}
 		return false, err
 	}
-	// The row was read either way, so it counts as scanned before eligibility
-	// decides whether it is credited or skipped.
+	// The row was read either way, so it counts as scanned and is charged to the
+	// shared batch byte budget before eligibility decides whether it is credited
+	// or skipped.
 	target.Rows++
 	target.TotalBytes += bytes
+	*used += bytes
 	if !eligible {
 		r.Operation.CleanupJobs.Skipped[skipProtectedTasks]++
 		finishCleanupJob(&r.Progress)
 		return false, nil
 	}
-	*used += bytes
 	reduced, err := models.ReduceCleanupSnapshot(snapshot, r.Operation.StartedAt)
 	if err != nil {
 		return false, err
@@ -452,7 +458,7 @@ func (s *Service) stopChangedScan(ctx context.Context, id string) error {
 // partial, so an unbounded decision is never presented as a complete removal.
 func completeOperation(r *record, now time.Time) {
 	state, code := stateSucceeded, ""
-	if r.Operation.Messages.Skipped[skipEligibilityBudget] > 0 {
+	if r.Operation.Messages.Skipped[skipEligibilityBudget] > 0 || r.Operation.CleanupJobs.Skipped[skipEligibilityBudget] > 0 {
 		state, code = statePartial, skipEligibilityBudget
 	}
 	finishOperation(r, state, code, now)
