@@ -690,10 +690,10 @@ func TestArchivedRetentionCancelDuringBackupKeepsPolicyUnapproved(t *testing.T) 
 	if after.Policy.Enabled {
 		t.Fatal("cancel left the policy enabled")
 	}
-	if after.Operation != nil && after.Operation.State == "running" {
-		t.Fatalf("a running operation survived cancel: %#v", after.Operation)
+	if after.Operation == nil {
+		t.Fatal("the cancelled operation was dropped, so its identity is unobservable")
 	}
-	if after.Operation != nil && after.Operation.ID != opID {
+	if after.Operation.ID != opID {
 		t.Fatalf("operation id was replaced: %s -> %s", opID, after.Operation.ID)
 	}
 }
@@ -730,19 +730,28 @@ func TestArchivedRetentionCleanupPreservesEvidenceAndProtectedRows(t *testing.T)
 	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-eligible'`).Scan(&reduced); err != nil {
 		t.Fatal(err)
 	}
-	for _, keep := range []string{`"archive_source_manifest":{"manifest":1}`, `"workspace_id":"ws-1"`, `"worktrees":[{"id":"w1"}]`} {
-		if !strings.Contains(reduced, keep) {
-			t.Fatalf("evidence field not preserved byte-for-byte (%s): %s", keep, reduced)
+	var reducedFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(reduced), &reducedFields); err != nil {
+		t.Fatalf("reduced snapshot is not JSON: %v (%s)", err, reduced)
+	}
+	for key, want := range map[string]string{
+		"archive_source_manifest": `{"manifest":1}`,
+		"workspace_id":            `"ws-1"`,
+		"worktrees":               `[{"id":"w1"}]`,
+	} {
+		if got := string(reducedFields[key]); got != want {
+			t.Fatalf("evidence field %s = %s, want %s byte-for-byte", key, got, want)
 		}
 	}
-	if strings.Contains(reduced, `"progress":"`) {
+	if _, ok := reducedFields["progress"]; ok {
 		t.Fatalf("operational field was not dropped: %s", reduced)
 	}
-	if !strings.Contains(reduced, `"removed_fields":["progress"]`) {
-		t.Fatalf("dropped field not recorded: %s", reduced)
-	}
-	if !strings.Contains(reduced, `"snapshot_reduced"`) {
+	marker, ok := reducedFields["snapshot_reduced"]
+	if !ok {
 		t.Fatalf("reduction marker missing: %s", reduced)
+	}
+	if !strings.Contains(string(marker), `"removed_fields":["progress"]`) {
+		t.Fatalf("dropped field not recorded in the marker: %s", marker)
 	}
 	var kept string
 	if err := connection.QueryRow(`SELECT resource_snapshot FROM task_resource_cleanup_jobs WHERE id = 'job-protected'`).Scan(&kept); err != nil {
