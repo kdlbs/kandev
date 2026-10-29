@@ -224,7 +224,12 @@ func (t *promptTurnState) observeCapacityDetachedWorkload(
 		}
 		return
 	}
-	if status, shellID, ok := capacityShellMetadata(update.RawOutput); ok {
+	status, shellID, conflict, hasStatus := capacityShellMetadata(update.RawOutput)
+	if conflict {
+		t.capacityBackground = true
+		return
+	}
+	if hasStatus {
 		if tool.detachedWorkloadID != "" && shellID != "" && shellID != tool.detachedWorkloadID {
 			t.capacityBackground = true
 			return
@@ -233,7 +238,9 @@ func (t *promptTurnState) observeCapacityDetachedWorkload(
 			return
 		}
 	}
-	if !capacityObservedShellExit(update) {
+	// Without a launch identity there is no way to prove which workload
+	// finished, so an exit code alone never resolves the detached call.
+	if tool.detachedWorkloadID == "" || !capacityObservedShellExit(update) {
 		return
 	}
 	tool.detachedResolved = true
@@ -241,17 +248,26 @@ func (t *promptTurnState) observeCapacityDetachedWorkload(
 
 // capacityShellMetadata exposes a shell status/identity pair even when the
 // status is not "running", so a terminal result can still be correlated.
-func capacityShellMetadata(result any) (status, shellID string, ok bool) {
+// Conflict reports two present, disagreeing identity spellings, which is
+// contradictory evidence even when the status is missing.
+func capacityShellMetadata(result any) (status, shellID string, conflict, ok bool) {
 	metadata, ok := openCodeShellMetadata(result)
 	if !ok {
-		return "", "", false
+		return "", "", false, false
+	}
+	shellID, idOK := openCodeShellID(metadata)
+	if !idOK {
+		if _, upperOK := metadataString(metadata, "shellID"); upperOK {
+			if _, lowerOK := metadataString(metadata, "shellId"); lowerOK {
+				conflict = true
+			}
+		}
 	}
 	status, ok = openCodeShellStatus(metadata)
 	if !ok {
-		return "", "", false
+		return "", "", conflict, false
 	}
-	shellID, _ = openCodeShellID(metadata)
-	return status, shellID, true
+	return status, shellID, conflict, true
 }
 
 func capacityObservedShellExit(update *acpsdk.SessionToolCallUpdate) bool {

@@ -196,6 +196,8 @@ Implementation evidence:
   `TestOpenCodeCapacityOrdinaryForegroundExecuteStaysSafe`,
   `TestOpenCodeCapacityUnresolvedBackgroundDoesNotDispatch`, and
   `TestOpenCodeAdmissionCapacityHintIgnoresUnrelatedLines`.
+  A terminal exit resolves a launch only after its identity was observed, and
+  conflicting identity spellings fail closed even without a status.
 - Changed-Go lint: `bash scripts/lint-go-changed` reported zero issues for every changed Go file.
 - `node --test scripts/validate-public-docs.test.mjs`: 63 tests passed. `node scripts/validate-public-docs.mjs`: 54 pages passed.
 - Documentation coverage preflight: passed for actual changes and planned source coverage.

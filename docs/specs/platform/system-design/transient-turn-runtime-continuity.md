@@ -238,6 +238,7 @@ Use the existing bounded ledger for authoritative completed outcomes.
 OpenCode child-session, background, and subagent work must block continuation unless the current evidence accounts for its completion.
 A completed detached execute launch is not completed workload evidence: the ledger stays unresolved until terminal evidence for the same native shell, independent of the background-work inspection feature.
 Missing, malformed, or contradictory launch metadata fails closed.
+A terminal exit resolves the launch only when that launch identity was previously observed and the result does not disagree with it; an exit code alone or conflicting identity spellings never resolve the workload.
 Never infer that completion from a title or a null native retry update.
 
 Forward the existing typed failure and snapshot through process outcomes, lifecycle, and watcher conversion.

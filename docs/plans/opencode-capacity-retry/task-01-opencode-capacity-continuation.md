@@ -187,9 +187,11 @@ Review remediation:
   metadata keeps the snapshot unsafe. `TestOpenCodeCapacityDetachedLaunchBlocksContinuation`
   covers inspection off and on with the captured launch shape;
   `TestOpenCodeCapacityDetachedLaunchFailsClosed` covers missing and
-  contradictory evidence; `TestOpenCodeCapacityOrdinaryForegroundExecuteStaysSafe`
-  is the positive control. `TestOpenCodeCapacityUnresolvedBackgroundDoesNotDispatch`
-  proves the service creates no retry owner and dispatches nothing.
+  contradictory evidence, including an exit code with no observed launch
+  identity and conflicting identity spellings with or without a status;
+  `TestOpenCodeCapacityOrdinaryForegroundExecuteStaysSafe` is the positive
+  control. `TestOpenCodeCapacityUnresolvedBackgroundDoesNotDispatch` proves the
+  service creates no retry owner and dispatches nothing.
 - The relative reset suffix is read only from the line that matched the
   admission-refusal signature. Unrelated stderr/stdout lines and a malformed
   diagnostic hint no longer supply a delay. `TestOpenCodeAdmissionCapacityHintIgnoresUnrelatedLines`

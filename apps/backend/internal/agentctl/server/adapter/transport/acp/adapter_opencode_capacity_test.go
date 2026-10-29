@@ -383,6 +383,60 @@ func TestOpenCodeCapacityDetachedLaunchFailsClosed(t *testing.T) {
 			},
 		},
 		{
+			name: "terminal exit without an observed launch identity",
+			frames: func(t *testing.T, a *Adapter) {
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{
+					ToolCall: &sdk.SessionUpdateToolCall{
+						ToolCallId: "call-ci", Kind: sdk.ToolKindExecute, Status: sdk.ToolCallStatusCompleted,
+						RawInput: map[string]any{"command": "sleep 30", "background": true},
+					},
+				}), 7)
+				completed := sdk.ToolCallStatusCompleted
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{
+					ToolCallUpdate: &sdk.SessionToolCallUpdate{
+						ToolCallId: "call-ci", Status: &completed,
+						RawOutput: map[string]any{"output": "finished", "exit_code": 0},
+					},
+				}), 7)
+			},
+		},
+		{
+			name: "conflicting identity at terminal evidence",
+			frames: func(t *testing.T, a *Adapter) {
+				call, update := openCodeLaunchFrames("call-ci", "shell-ci", "sleep 30")
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{ToolCall: call}), 7)
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{ToolCallUpdate: update}), 7)
+				completed := sdk.ToolCallStatusCompleted
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{
+					ToolCallUpdate: &sdk.SessionToolCallUpdate{
+						ToolCallId: "call-ci", Status: &completed,
+						RawOutput: map[string]any{
+							"exit_code": 0,
+							"metadata":  map[string]any{"shellID": "shell-a", "shellId": "shell-b", "status": "completed"},
+						},
+					},
+				}), 7)
+			},
+		},
+		{
+			name: "conflicting identity without status",
+			frames: func(t *testing.T, a *Adapter) {
+				call, update := openCodeLaunchFrames("call-ci", "shell-ci", "sleep 30")
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{ToolCall: call}), 7)
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{ToolCallUpdate: update}), 7)
+				completed := sdk.ToolCallStatusCompleted
+				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{
+					ToolCallUpdate: &sdk.SessionToolCallUpdate{
+						ToolCallId: "call-ci", Status: &completed,
+						RawOutput: map[string]any{
+							"exit_code": 0,
+							"metadata":  map[string]any{"shellID": "shell-a", "shellId": "shell-b"},
+						},
+					},
+				}), 7)
+			},
+		},
+		{
 			name: "background flag on a non-execute call",
 			frames: func(t *testing.T, a *Adapter) {
 				a.handleACPUpdate(makeNotification(openCodeCapacitySessionID, sdk.SessionUpdate{
