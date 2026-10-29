@@ -128,6 +128,17 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	pluginsSvc := integrations.pluginsSvc
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
+	sandboxPolicies, err := newSandboxPolicyService(cfg, dbPool.Writer())
+	if recordErr := recordRequiredStore(ctx, storeTracker, "sandbox-policies", err); recordErr != nil {
+		return nil, nil, fmt.Errorf("initialize sandbox policies: %w", recordErr)
+	}
+	sandboxPolicies.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+	sandboxPolicies.SetSessionAuthorizer(taskSvc.AuthorizeSessionAccess)
+	sandboxPolicies.SetTargetResolver(sandboxTargetResolver{tasks: taskSvc, profiles: repos.AgentSettings, workflows: workflowSvc}.resolve)
+	configureSandboxProviderCatalog(sandboxPolicies, pluginsSvc)
+	configureSandboxApprovalEvents(sandboxPolicies, repos.Task, eventBus, log)
+	services.Sandbox = sandboxPolicies
+	taskSvc.SetSandboxCreationAdmission(sandboxCreationAdmission{policies: sandboxPolicies, targets: sandboxTargetResolver{tasks: taskSvc, profiles: repos.AgentSettings, workflows: workflowSvc}}.admit)
 	if services.Plugins != nil {
 		services.Plugins.SetSourceIssueController(pluginSourceIssueController{
 			tasks: services.Task, jira: services.Jira, linear: services.Linear,

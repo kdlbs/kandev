@@ -82,7 +82,8 @@ type queueAdmissionStore interface {
 //nolint:funlen // The catalog-to-owner mapping is deliberately explicit.
 func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors := map[string]ownerBehavior{
-		"schema-meta": {actions: []apiAction{metaAction()}},
+		sandboxStoreID:    {actions: []apiAction{sandboxAction()}},
+		schemaMetaStoreID: {actions: []apiAction{metaAction()}},
 		"task": {actions: []apiAction{
 			standardAction(reflectedSpec{
 				name: "workspaces", factory: taskFactory,

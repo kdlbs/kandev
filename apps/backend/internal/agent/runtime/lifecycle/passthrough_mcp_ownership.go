@@ -268,6 +268,10 @@ func (m *Manager) cleanupPassthroughMCPClaimLocked(execution *AgentExecution, cl
 	if execution == nil || !claim.Owned || claim.Path == "" || claim.Fingerprint == "" {
 		return
 	}
+	if execution.SandboxSelection != nil {
+		m.cleanupSandboxMCPClaimLocked(execution, claim)
+		return
+	}
 	path := passthroughMCPClaimPath(claim.Path)
 	info, err := os.Lstat(path)
 	if err != nil {

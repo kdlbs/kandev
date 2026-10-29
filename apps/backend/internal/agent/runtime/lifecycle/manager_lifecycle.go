@@ -36,6 +36,7 @@ type recoveryOutcomeSummary struct {
 	notRetrackedEnvironment        int
 	notRetrackedAgent              int
 	notRetrackedTurnStatus         int
+	notRetrackedSandbox            int
 	notRetrackedDuplicate          int
 }
 
@@ -51,7 +52,7 @@ func (s recoveryOutcomeSummary) knownNotRetrackedCount() int {
 	return s.notRetrackedNoMatchingInstance + s.notRetrackedEnumerationFailed +
 		s.notRetrackedDeadline + s.notRetrackedCanceled + s.notRetrackedTaskID +
 		s.notRetrackedEnvironment + s.notRetrackedAgent + s.notRetrackedTurnStatus +
-		s.notRetrackedDuplicate
+		s.notRetrackedDuplicate + s.notRetrackedSandbox
 }
 
 func (s recoveryOutcomeSummary) unknownNotRetrackedCount() int {
@@ -76,6 +77,7 @@ func (s recoveryOutcomeSummary) logFields() []zap.Field {
 		zap.Int("not_retracked_task_environment", s.notRetrackedEnvironment),
 		zap.Int("not_retracked_agent_identity", s.notRetrackedAgent),
 		zap.Int("not_retracked_turn_status", s.notRetrackedTurnStatus),
+		zap.Int("not_retracked_sandbox", s.notRetrackedSandbox),
 		zap.Int("not_retracked_duplicate_execution", s.notRetrackedDuplicate),
 		zap.Int("not_retracked_unknown", s.unknownNotRetrackedCount()),
 	}
@@ -355,6 +357,13 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			if err := m.admitSandboxRecovery(recoveryCtx, execution); err != nil {
+				m.logger.Warn("sandbox execution requires recovery before adoption", zap.String("instance_id", execution.ID), zap.String("session_id", execution.SessionID))
+				setCandidateOutcome(ri.SessionID, "sandbox")
+				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				continue
+			}
 			// A recovered instance is resuming a live provider session (its
 			// ACPSessionID above comes straight from the adopted instance), so
 			// ACP session setup is already complete -- unlike a fresh launch,
@@ -606,6 +615,8 @@ func (m *Manager) Start(ctx context.Context) error {
 			recoveryOutcome.notRetrackedEnvironment++
 		case "agent_identity":
 			recoveryOutcome.notRetrackedAgent++
+		case "sandbox":
+			recoveryOutcome.notRetrackedSandbox++
 		case "turn_status":
 			recoveryOutcome.notRetrackedTurnStatus++
 		case "duplicate":

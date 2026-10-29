@@ -163,6 +163,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
+	api.GET("/agent-profiles/:id/command-preview", cfg, h.httpPreviewSavedProfileCommand)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
@@ -683,6 +684,7 @@ type commandPreviewRequest struct {
 	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
 	CommandPrefix          string           `json:"command_prefix,omitempty"`
 	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
+	SafeOnly               bool             `json:"safe_only"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -705,8 +707,17 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		CLIFlags:               body.CLIFlags,
 		CommandPrefix:          body.CommandPrefix,
 		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
+		SafeOnly:               body.SafeOnly,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidCommandPrefix) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid command prefix"})
+			return
+		}
+		if body.SafeOnly {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "command preview unavailable"})
+			return
+		}
 		h.logger.Error("failed to preview agent command", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

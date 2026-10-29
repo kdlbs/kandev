@@ -32,6 +32,15 @@ capabilities:
   secrets: true
   user_state: true
   executor_provider: true
+  sandbox_provider: true
+
+sandbox_providers:
+  - key: fixture-alpha
+    display_name: fixture-alpha
+    protocol_major: 1
+  - key: fixture-beta
+    display_name: fixture-beta
+    protocol_major: 1
 
 # These provider-neutral declarations keep the package fixture useful as a
 # second-provider contract: the labels and canned data resemble a Bitbucket

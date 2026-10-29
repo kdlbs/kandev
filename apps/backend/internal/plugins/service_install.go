@@ -79,9 +79,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock.Lock()
 	defer lock.Unlock()
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
-	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
-		s.closeExecutorProviderAdmission(result.Manifest.ID)
-		defer s.reopenExecutorProviderAdmissionIfActive(result.Manifest.ID)
+	if (hadOldRec && hasBoundedProviderCalls(&oldRec.Manifest)) || hasBoundedProviderCalls(result.Manifest) {
+		s.closeProviderAdmission(result.Manifest.ID)
+		defer s.reopenProviderAdmissionIfActive(result.Manifest.ID)
 	}
 	dispatchLock := s.dispatchLocks.lockFor(result.Manifest.ID)
 	dispatchLock.Lock()
@@ -117,11 +117,12 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	}
 
 	rec := &store.Record{
-		Manifest:    *result.Manifest,
-		Status:      StatusRegistered,
-		InstallPath: result.InstallPath,
-		Signed:      result.Signed,
-		InstalledAt: time.Now().UTC(),
+		Manifest:      *result.Manifest,
+		Status:        StatusRegistered,
+		InstallPath:   result.InstallPath,
+		PackageDigest: result.PackageDigest,
+		Signed:        result.Signed,
+		InstalledAt:   time.Now().UTC(),
 	}
 	// An in-place upgrade rebuilds the record from the new package's manifest,
 	// so the operator's per-plugin auto-update override (an operator choice,
@@ -400,9 +401,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if len(rec.ExecutorProviders) > 0 {
-		s.closeExecutorProviderAdmission(id)
-		defer s.reopenExecutorProviderAdmissionIfActive(id)
+	if hasBoundedProviderCalls(&rec.Manifest) {
+		s.closeProviderAdmission(id)
+		defer s.reopenProviderAdmissionIfActive(id)
 	}
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()

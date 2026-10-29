@@ -92,6 +92,7 @@ export function buildDialogFormBodyProps(
     ),
     fs,
     editDependencies: setup.editDependencies,
+    editSandbox: setup.editSandbox,
     handleKeyDown: setup.handleKeyDown,
     onAgentProfileChange: handlers.handleAgentProfileChange,
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
@@ -195,7 +196,10 @@ export function buildDialogFooterProps(
       pendingAttachmentUploadReason ??
       setup.savedBaseSubmitBlockedReason ??
       workflowAgentOverridesBlockedReason ??
+      setup.editSandbox.blockedReason ??
       setup.executorOwnershipBlockedReason,
-    editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
+    editDependenciesReady: setup.isEditMode
+      ? setup.editDependencies.ready && setup.editSandbox.ready
+      : undefined,
   };
 }

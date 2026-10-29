@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"strings"
 	"time"
 
@@ -182,6 +183,7 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
+	SandboxRestartReview *contract.RestartPolicyReview `json:"sandbox_restart_review,omitempty"`
 	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
 	reusePreparedPrimary  bool
 	TaskID                string                        `json:"task_id"`
@@ -539,7 +541,7 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	block, err := store.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, generation)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return s.checkBootstrapAttemptRecoveryBlock(ctx, sessionID)
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
@@ -1099,6 +1101,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		resumeCtx = withSessionOpenRecoveryContext(ctx)
 	}
 	resumeOptions := executor.ResumeOptions{
+		SandboxRestartReview:             req.SandboxRestartReview,
 		AllowBranchReplacement:           req.AllowBranchReplacement,
 		RepairWorkspaceInventory:         req.RepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,
@@ -1635,6 +1638,10 @@ func (s *Service) prepareSessionRecoveryLaunchContext(
 	session *models.TaskSession,
 	action, errorStamp string,
 ) (models.WorkspaceRecoveryErrorObservation, context.Context, error) {
+	ctx, err := s.prepareBootstrapRecoveryContext(ctx, session, errorStamp)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
 	observation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
 	if err != nil {
 		return models.WorkspaceRecoveryErrorObservation{}, nil, err
@@ -2114,6 +2121,9 @@ func (s *Service) recoverOfficeSessionThroughScheduler(
 		var required *sessionRecoveryRequiredError
 		if !errors.As(err, &required) {
 			return nil, err
+		}
+		if required.Block == nil || required.Block.ID == "" {
+			return nil, errOfficeTaskResumeRequiresScheduler
 		}
 	}
 	if action == "fresh_start" {

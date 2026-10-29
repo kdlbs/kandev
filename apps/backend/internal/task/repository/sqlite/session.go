@@ -534,7 +534,10 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id,
+	COALESCE((SELECT payload FROM agent_execution_snapshots WHERE session_id = ts.id ORDER BY sequence DESC LIMIT 1), ''),
+	COALESCE((SELECT o.payload FROM agent_execution_snapshots s LEFT JOIN agent_execution_observations o ON o.attempt_id=s.attempt_id WHERE s.session_id=ts.id ORDER BY s.sequence DESC LIMIT 1), ''),
+	COALESCE((SELECT generation FROM agent_execution_observer WHERE id=1),0)`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1549,6 +1552,8 @@ func unmarshalSessionJSON(jsonStr string, dest interface{}, fieldDesc string) er
 
 func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsErr string) (*models.TaskSession, error) {
 	session := &models.TaskSession{}
+	var executionSnapshotJSON, executionObservationJSON string
+	var executionObserverGeneration uint64
 	var state string
 	var metadataJSON string
 	var agentProfileSnapshotJSON string
@@ -1575,6 +1580,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&executionSnapshotJSON, &executionObservationJSON, &executionObserverGeneration,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1584,6 +1590,8 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		return nil, err
 	}
 
+	session.ExecutionSnapshot = decodeExecutionSnapshot(executionSnapshotJSON, session)
+	session.ExecutionObservation = decodeExecutionObservation(executionObservationJSON, session.ExecutionSnapshot, executionObserverGeneration, time.Now())
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
 	session.IsPassthrough = isPassthrough == 1
@@ -4484,6 +4492,8 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 // scanTaskSessionRow scans a single row into a TaskSession, applying all field mappings and JSON unmarshalling.
 func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	session := &models.TaskSession{}
+	var executionSnapshotJSON, executionObservationJSON string
+	var executionObserverGeneration uint64
 	var state string
 	var metadataJSON string
 	var agentProfileSnapshotJSON string
@@ -4508,11 +4518,14 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
+		&executionSnapshotJSON, &executionObservationJSON, &executionObserverGeneration,
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	session.ExecutionSnapshot = decodeExecutionSnapshot(executionSnapshotJSON, session)
+	session.ExecutionObservation = decodeExecutionObservation(executionObservationJSON, session.ExecutionSnapshot, executionObserverGeneration, time.Now())
 	session.State = models.TaskSessionState(state)
 	session.IsPrimary = isPrimary == 1
 	session.IsPassthrough = isPassthrough == 1

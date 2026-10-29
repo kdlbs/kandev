@@ -186,10 +186,10 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 	if s, exists := permSettings[agents.PermissionKeyAutoApprove]; exists {
 		autoApprove = s.Default
 	}
-	if s, exists := permSettings["allow_indexing"]; exists {
+	if s, exists := permSettings[permissionAllowIndexing]; exists {
 		allowIndexing = s.Default
 	}
-	if s, exists := permSettings["dangerously_skip_permissions"]; exists {
+	if s, exists := permSettings[agents.PermissionKeyDangerouslySkipPermissions]; exists {
 		skipPermissions = s.Default
 	}
 	return
@@ -203,6 +203,7 @@ type CommandPreviewRequest struct {
 	CLIFlags               []dto.CLIFlagDTO
 	CommandPrefix          string
 	CopilotSelectedPlugins []string
+	SafeOnly               bool
 }
 
 // PreviewAgentCommand generates a preview of the CLI command that will be executed
@@ -272,13 +273,20 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
 		}
-		// Prepend the launcher prefix last, mirroring
-		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;
-		// passthrough never applies one (neither does the launch path), so this
-		// stays in the ACP branch only.
-		if prefixTokens, err := cliflags.Tokenise(req.CommandPrefix); err == nil && len(prefixTokens) > 0 {
-			cmd = agents.NewCommand(append(prefixTokens, cmd.Args()...)...)
+	}
+	if req.SafeOnly {
+		preview, err := safeCommandPreview(cmd.Args(), req.CommandPrefix, req.CLIPassthrough)
+		if err != nil {
+			return nil, err
 		}
+		preview.DeferredPluginIDs = copilotPlugins
+		preview.DeferredPluginCount = len(copilotPlugins)
+		preview.CommandIncomplete = len(copilotPlugins) > 0
+		return preview, nil
+	}
+	// Both launch transports prepend the validated wrapper to the agent argv.
+	if prefixTokens, err := cliflags.Tokenise(req.CommandPrefix); err == nil && len(prefixTokens) > 0 {
+		cmd = agents.NewCommand(append(prefixTokens, cmd.Args()...)...)
 	}
 
 	flagDestination := dto.FlagDestinationACPBridge
@@ -440,11 +448,12 @@ func (c *Controller) ResolveAgentModelConfig(
 		ConfigOptions: []dto.ConfigOptionDTO{},
 	}
 	var profileContext *hostutility.ProfileProbeContext
-	if req.ProfileID != "" || req.LaunchSettings != nil {
+	if req.ProfileID != "" || req.LaunchSettings != nil || req.ExecutorID != "" {
 		resolved, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
 		if err != nil {
 			return nil, err
 		}
+		resolved.ExecutorID = req.ExecutorID
 		profileContext = &resolved
 	}
 	if c.hostUtility == nil {

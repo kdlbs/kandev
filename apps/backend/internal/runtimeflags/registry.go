@@ -62,6 +62,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.sandboxPolicies",
+			EnvVar:          "KANDEV_FEATURES_SANDBOX_POLICIES",
+			Kind:            KindFeature,
+			Label:           "Sandbox policies",
+			Description:     "Enables operator-managed sandbox policies through optional providers. Command wrapping remains independent.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Requires a verified provider and authenticated human policy management. Disabling this feature blocks new launches that require a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.SandboxPolicies },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.SandboxPolicies = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.integratedControl",
 			EnvVar:          "KANDEV_FEATURES_INTEGRATED_CONTROL",
 			Kind:            KindFeature,

@@ -748,6 +748,40 @@ func startAgentInfrastructure(
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
 	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
+	if services.Sandbox != nil {
+		coordinator, err := newSandboxRuntime(cfg, services.Sandbox, services.Plugins)
+		if err != nil {
+			log.Error("Failed to initialize sandbox runtime", zap.Error(err))
+			return false
+		}
+		admission := sandboxLaunchAdmission{policies: services.Sandbox, tasks: repos.Task, runtime: coordinator}
+		lifecycleMgr.SetSandboxAdmission(admission.admit)
+		lifecycleMgr.SetSandboxRecoveryAdmission(admission.recover)
+		services.SandboxRuntime = coordinator
+		if coordinator != nil {
+			addRuntimeCleanup(coordinator.Close)
+			factory := sandboxRuntimeFactory{runtime: coordinator, policies: services.Sandbox, tasks: repos.Task, config: cfg}
+			lifecycleMgr.SetSandboxRuntime(factory.prepareExecution)
+		}
+	}
+	var evidenceSource executionEvidenceSource
+	if services.SandboxRuntime != nil {
+		evidenceSource = services.SandboxRuntime
+	}
+	recorder := executionSnapshotRecorder{tasks: repos.Task, policies: services.Sandbox, eventBus: eventBus}
+	observer, err := newExecutionObserver(ctx, repos.Task, evidenceSource, recorder.publish)
+	if err != nil {
+		log.Error("Failed to initialize execution observer", zap.Error(err))
+		return false
+	}
+	recorder.changed = observer.wake
+	lifecycleMgr.SetExecutionSnapshotRecorder(recorder.record)
+	if services.Sandbox != nil {
+		services.Sandbox.SetAttemptChangeNotifier(observer.wake)
+	}
+	if evidenceSource != nil {
+		addRuntimeCleanup(observer.start(ctx, log))
+	}
 	if services.GitHub != nil {
 		services.GitHub.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
 	}
@@ -832,6 +866,14 @@ func startAgentInfrastructure(
 		return false
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
+	if services.Sandbox != nil {
+		cleanup := sandboxSessionCleanup{policies: services.Sandbox}
+		if services.SandboxRuntime != nil {
+			cleanup.remove = services.SandboxRuntime.CleanupSessionState
+		}
+		orchestratorSvc.SetSessionSandboxCleanup(cleanup.cleanup)
+		services.Task.SetSessionSandboxCleanup(cleanup.cleanup)
+	}
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 	// These queries distinguish successfully re-tracked executions from remote
 	// owners whose guarded retry is still pending during startup reconciliation.
@@ -1221,6 +1263,16 @@ func startGatewayAndServe(
 	// (e.g. "enhance prompt" before a task/session exists).
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, "", 0, nil, log)
 	hostUtilityMgr.SetRuntimeOwner(agentRuntimeAvailability)
+	if services.Sandbox != nil {
+		hostUtilityMgr.SetSandboxAdmission(sandboxUtilityAdmission{
+			launch:  sandboxLaunchAdmission{policies: services.Sandbox, tasks: repos.Task, runtime: services.SandboxRuntime},
+			targets: sandboxTargetResolver{tasks: services.Task, profiles: repos.AgentSettings, workflows: services.Workflow},
+		}.admit)
+	}
+	if services.SandboxRuntime != nil {
+		factory := sandboxRuntimeFactory{runtime: services.SandboxRuntime, policies: services.Sandbox, tasks: repos.Task, config: cfg}
+		hostUtilityMgr.SetSandboxRuntime(factory.prepareUtility)
+	}
 	pluginProfileResolver := profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok

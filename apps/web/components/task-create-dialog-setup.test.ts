@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   workflowAgentOverridesBlockedReason: undefined as string | undefined,
 }));
 
+vi.mock("@/hooks/domains/task/use-task-edit-sandbox", () => ({
+  useTaskEditSandbox: () => ({ visible: false, ready: true, isDirty: false, save: vi.fn() }),
+}));
 vi.mock("@/lib/keyboard/constants", () => ({ SHORTCUTS: { SUBMIT: "submit" } }));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({

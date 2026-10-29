@@ -445,7 +445,8 @@
     "workflow-sync",
     "office-config-sync",
     "automation",
-    "coordinator"
+    "coordinator",
+    "sandbox-policies"
   ],
   "known_missing_required_tables": {
     "task": [
@@ -470,7 +471,10 @@
       "turn_change_contents",
       "turn_change_sets",
       "turn_file_changes",
-      "turn_repository_changes"
+      "turn_repository_changes",
+      "agent_execution_snapshots",
+      "agent_execution_observer",
+      "agent_execution_observations"
     ]
   }
 }

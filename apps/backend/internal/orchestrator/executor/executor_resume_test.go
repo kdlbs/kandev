@@ -1346,6 +1346,22 @@ func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *
 	}
 }
 
+func TestApplyRunningRecordToResumeRequest_BootstrapRetryPreservesConversation(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "original prompt", RecoveryAction: "resume"}
+	session := &models.TaskSession{
+		ID: "session-1", State: models.TaskSessionStateFailed, DownstreamACPSessionID: "native-original",
+		Metadata: map[string]interface{}{models.SessionMetaKeyLastAgentError: models.LastAgentError{
+			Message: "The agent could not start.", Phase: models.LaunchErrorPhaseBootstrap,
+		}},
+	}
+	exec.applyRunningRecordToResumeRequest(req, &v1.Task{ID: "task-1"}, session, true, nil)
+	if req.ACPSessionID != "native-original" || req.TaskDescription != "" {
+		t.Fatalf("bootstrap resume = token %q, description %q; want original token and no prompt", req.ACPSessionID, req.TaskDescription)
+	}
+}
+
 func TestApplyRunningRecordToResumeRequest_ProviderRestoredFailedSessionUsesPersistedToken(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

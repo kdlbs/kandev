@@ -3,6 +3,7 @@ package dto
 import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -582,9 +583,10 @@ const (
 
 // CommandPreviewResponse is the response for the command preview endpoint
 type CommandPreviewResponse struct {
-	Supported     bool     `json:"supported"`
-	Command       []string `json:"command"`
-	CommandString string   `json:"command_string"`
+	Composition   *CommandComposition `json:"composition,omitempty"`
+	Supported     bool                `json:"supported"`
+	Command       []string            `json:"command"`
+	CommandString string              `json:"command_string"`
 	// FlagDestination names the process the profile's CLI flags are appended
 	// to. Over ACP that is the bridge, not the agent CLI it wraps, and the
 	// difference is the whole reason a flag can look enabled and change
@@ -599,6 +601,11 @@ type CommandPreviewResponse struct {
 	// CommandIncomplete is true when the previewed command omits deferred
 	// plugin mounts.
 	CommandIncomplete bool `json:"command_incomplete,omitempty"`
+}
+
+type CommandComposition struct {
+	Wrapper *launchwrapper.Summary       `json:"wrapper"`
+	Agent   launchwrapper.CommandSummary `json:"agent"`
 }
 
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
@@ -632,6 +639,7 @@ type ProfileLaunchSettingsRequest struct {
 // ProfileCapabilityRequest asks the host utility to inspect a saved profile
 // or a complete unsaved launch-settings snapshot.
 type ProfileCapabilityRequest struct {
+	ExecutorID         string                        `json:"executor_id,omitempty"`
 	ProfileID          string                        `json:"profile_id,omitempty"`
 	LaunchSettings     *ProfileLaunchSettingsRequest `json:"launch_settings,omitempty"`
 	Refresh            bool                          `json:"refresh,omitempty"`
@@ -640,6 +648,7 @@ type ProfileCapabilityRequest struct {
 
 // ResolveAgentModelConfigRequest selects the provider context to resolve.
 type ResolveAgentModelConfigRequest struct {
+	ExecutorID         string                        `json:"executor_id,omitempty"`
 	Model              string                        `json:"model"`
 	Mode               string                        `json:"mode,omitempty"`
 	ConfigOptions      map[string]string             `json:"config_options,omitempty"`

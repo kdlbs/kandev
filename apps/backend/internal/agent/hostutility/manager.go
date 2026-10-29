@@ -57,6 +57,8 @@ type Manager struct {
 	}
 	providerGatewayAuthResolver ProviderGatewayAuthResolver
 	profileEnvironmentResolver  ProfileEnvironmentResolver
+	sandboxPrepare              SandboxPrepare
+	sandboxAdmission            func(context.Context, *ProfileProbeContext) error
 
 	parentTmpDir            string
 	tempArtifacts           *tempartifacts.Registry
@@ -741,85 +743,6 @@ var errManagerStopped = errors.New("host utility manager stopped")
 
 // getInstance returns the warm instance for the agent type, lazily recreating
 // it if missing (e.g. after a previous failure or crash).
-func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance, agents.InferenceAgent, error) {
-	if err := m.reconcileRuntimeEpoch(ctx); err != nil {
-		return nil, nil, err
-	}
-	ia, ok := m.registry.GetInferenceAgent(agentType)
-	if !ok {
-		return nil, nil, fmt.Errorf("agent %q not found or not inference-capable", agentType)
-	}
-	ag, ok := ia.(agents.Agent)
-	if !ok || !ag.Enabled() {
-		return nil, nil, fmt.Errorf("agent %q is not a full agent type", agentType)
-	}
-	if rt := ag.Runtime(); rt == nil || (rt.Protocol != agent.ProtocolACP && rt.Protocol != agent.ProtocolCodexAppServer) {
-		return nil, nil, fmt.Errorf("agent %q is not ACP-capable", agentType)
-	}
-
-	m.mu.RLock()
-	if m.stopped {
-		m.mu.RUnlock()
-		return nil, nil, errManagerStopped
-	}
-	inst := m.instances[agentType]
-	parentTmpDir := m.parentTmpDir
-	m.mu.RUnlock()
-	if inst != nil {
-		if err := m.staleInstanceCause(ctx, inst); err == nil {
-			return inst, ia, nil
-		} else if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
-		}
-	}
-
-	if parentTmpDir == "" {
-		return nil, nil, errors.New("host utility manager not started")
-	}
-
-	// Serialize instance creation per agent type via singleflight so two
-	// concurrent callers don't both spawn a process and then race to cache
-	// the result.
-	v, err, _ := m.createGroup.Do(agentType, func() (interface{}, error) {
-		// Double-check inside the singleflight window.
-		m.mu.RLock()
-		existing := m.instances[agentType]
-		m.mu.RUnlock()
-		if existing != nil {
-			if err := m.staleInstanceCause(ctx, existing); err == nil {
-				return existing, nil
-			} else if ctx.Err() != nil {
-				return nil, ctx.Err()
-			} else {
-				m.dropStaleInstance(ctx, agentType, existing, err)
-			}
-		}
-		// Pre-check installation so Refresh surfaces `not_installed`
-		// instead of collapsing it into `failed` via createInstance errors.
-		if disc, derr := ag.IsInstalled(ctx); derr != nil || disc == nil || !disc.Available {
-			return nil, errAgentNotInstalled
-		}
-		created, cerr := m.createInstance(ctx, agentType)
-		if cerr != nil {
-			return nil, cerr
-		}
-		m.mu.Lock()
-		if m.stopped {
-			m.mu.Unlock()
-			deleteCtx, cancel := hostUtilityDeleteContext(ctx)
-			m.deleteInstance(deleteCtx, created)
-			cancel()
-			return nil, errManagerStopped
-		}
-		m.instances[agentType] = created
-		m.mu.Unlock()
-		return created, nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return v.(*instance), ia, nil
-}
 
 const instanceHealthCheckTimeout = 500 * time.Millisecond
 
@@ -901,6 +824,9 @@ func (m *Manager) probeWithOverrides(
 	env map[string]string,
 	stripEnv []string,
 ) AgentCapabilities {
+	if err := m.admitSandbox(ctx, &ProfileProbeContext{}); err != nil {
+		return probeFailureCapabilities(inst.agentType, StatusUnsupported, err.Error(), 0, time.Now())
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	req := buildProbeRequest(inst, ia, refresh, command)

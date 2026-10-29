@@ -290,6 +290,11 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	}
 
 	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
+	if s.sandboxCreationAdmission != nil {
+		if err := s.sandboxCreationAdmission(ctx, prepared.task, req); err != nil {
+			return CreateTaskResult{}, err
+		}
+	}
 	insertTask := func() error { return s.createTaskWithCapacity(ctx, prepared.task) }
 	var createErr error
 	if prepared.task.CreationAttachmentClaim != nil && s.attachmentSvc != nil {

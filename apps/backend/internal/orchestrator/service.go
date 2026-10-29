@@ -811,6 +811,7 @@ type Service struct {
 	sessionQueuePurgeNotifierRegistered bool
 
 	sessionAttachmentCleaner    SessionAttachmentCleaner
+	sessionSandboxCleanup       func(context.Context, string, string) error
 	sessionAttachmentTransferer SessionAttachmentTransferer
 	// subagentContexts optionally persists a relational record of subagent
 	// (Task tool) invocations recognized on the tool-call frame paths. Nil is

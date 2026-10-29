@@ -2454,6 +2454,8 @@ type TaskSession struct {
 	WorkspacePath          string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
 	Worktrees              []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
 	AgentProfileSnapshot   map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutionSnapshot      *ExecutionSnapshot     `json:"execution_snapshot"`
+	ExecutionObservation   *ExecutionObservation  `json:"execution_observation"`
 	ExecutorSnapshot       map[string]interface{} `json:"executor_snapshot,omitempty"`
 	EnvironmentSnapshot    map[string]interface{} `json:"environment_snapshot,omitempty"`
 	RepositorySnapshot     map[string]interface{} `json:"repository_snapshot,omitempty"`
@@ -2549,22 +2551,24 @@ type ActiveSessionRecoveryCandidate struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                    s.ID,
+		"task_id":               s.TaskID,
+		"queue_incarnation_id":  s.QueueIncarnationID,
+		"agent_execution_id":    s.AgentExecutionID,
+		"execution_snapshot":    s.ExecutionSnapshot,
+		"execution_observation": s.ExecutionObservation,
+		"container_id":          s.ContainerID,
+		"agent_profile_id":      s.AgentProfileID,
+		"execution_profile_id":  s.ExecutionProfileID,
+		"executor_id":           s.ExecutorID,
+		"executor_profile_id":   s.ExecutorProfileID,
+		"environment_id":        s.EnvironmentID,
+		"repository_id":         s.RepositoryID,
+		"base_branch":           s.BaseBranch,
+		"base_commit_sha":       s.BaseCommitSHA,
+		"state":                 string(s.State),
+		"started_at":            s.StartedAt,
+		"updated_at":            s.UpdatedAt,
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration

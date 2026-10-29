@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { SessionExecutionControl } from "../session-execution-indicator";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -343,53 +344,60 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     props.baseBranch,
   );
   return (
-    <header className="flex items-center justify-between h-14 px-2 py-1 bg-background">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <Button variant="ghost" size="icon-sm" asChild>
-          <Link
-            href={linkToTaskOverview({ workspaceId: props.workspaceId ?? undefined })}
-            aria-label={t("task:taskOverview")}
-          >
-            <IconArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-        {props.topbarRepository && (
-          <>
-            <MobileRepositoryLabel repository={props.topbarRepository} />
-            <IconChevronRight
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
-          </>
-        )}
-        <MobileTaskTitle
+    <header className="bg-background">
+      <div className="flex h-14 items-center justify-between px-2 py-1">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <Button variant="ghost" size="icon-sm" asChild>
+            <Link
+              href={linkToTaskOverview({ workspaceId: props.workspaceId ?? undefined })}
+              aria-label={t("task:taskOverview")}
+            >
+              <IconArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          {props.topbarRepository && (
+            <>
+              <MobileRepositoryLabel repository={props.topbarRepository} />
+              <IconChevronRight
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-muted-foreground"
+              />
+            </>
+          )}
+          <MobileTaskTitle
+            taskTitle={props.taskTitle}
+            repositoryLabel={props.topbarRepository ? null : props.repositoryLabel}
+            displayBranch={displayBranch}
+            totalAdditions={totalAdditions}
+            totalDeletions={totalDeletions}
+            onTaskPickerClick={props.onTaskPickerClick}
+            taskPickerOpen={props.taskPickerOpen}
+          />
+        </div>
+        <MobileTopBarActions
+          taskId={props.taskId}
+          workspaceId={props.workspaceId}
+          isRemoteExecutor={props.isRemoteExecutor}
+          remoteExecutorType={props.remoteExecutorType}
+          remoteExecutorName={props.remoteExecutorName}
+          remoteState={props.remoteState}
+          remoteCreatedAt={props.remoteCreatedAt}
+          remoteCheckedAt={props.remoteCheckedAt}
+          remoteStatusError={props.remoteStatusError}
+          showApproveButton={props.showApproveButton ?? false}
+          onApprove={props.onApprove}
+          sessionId={props.sessionId}
           taskTitle={props.taskTitle}
-          repositoryLabel={props.topbarRepository ? null : props.repositoryLabel}
-          displayBranch={displayBranch}
-          totalAdditions={totalAdditions}
-          totalDeletions={totalDeletions}
+          isArchived={props.isArchived}
+          onTaskUnarchived={props.onTaskUnarchived}
           onTaskPickerClick={props.onTaskPickerClick}
-          taskPickerOpen={props.taskPickerOpen}
         />
       </div>
-      <MobileTopBarActions
-        taskId={props.taskId}
-        workspaceId={props.workspaceId}
-        isRemoteExecutor={props.isRemoteExecutor}
-        remoteExecutorType={props.remoteExecutorType}
-        remoteExecutorName={props.remoteExecutorName}
-        remoteState={props.remoteState}
-        remoteCreatedAt={props.remoteCreatedAt}
-        remoteCheckedAt={props.remoteCheckedAt}
-        remoteStatusError={props.remoteStatusError}
-        showApproveButton={props.showApproveButton ?? false}
-        onApprove={props.onApprove}
-        sessionId={props.sessionId}
-        taskTitle={props.taskTitle}
-        isArchived={props.isArchived}
-        onTaskUnarchived={props.onTaskUnarchived}
-        onTaskPickerClick={props.onTaskPickerClick}
-      />
+      {props.sessionId && (
+        <div className="flex min-w-0 items-center px-2 pb-1">
+          <SessionExecutionControl sessionId={props.sessionId} labelled />
+        </div>
+      )}
     </header>
   );
 });

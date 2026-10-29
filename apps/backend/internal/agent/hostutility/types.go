@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 )
 
 // Status reports the state of a host utility instance for a given agent type.
@@ -135,6 +136,10 @@ type ProfileProbeContext struct {
 	CLIFlags               []string
 	CommandPrefix          []string
 	CopilotSelectedPlugins []string
+	SandboxSelection       *policy.SelectionContext `json:"-"`
+	ProfileID              string
+	ExecutorID             string
+	SandboxDigest          string
 }
 
 type ProfileCapabilityRequest struct {

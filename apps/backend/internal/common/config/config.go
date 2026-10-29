@@ -504,6 +504,9 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// SandboxPolicies gates structured sandbox admission and operator policy management.
+	SandboxPolicies bool `mapstructure:"sandbox_policies" json:"sandboxPolicies"`
+
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 

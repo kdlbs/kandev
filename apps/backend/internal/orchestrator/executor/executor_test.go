@@ -135,6 +135,7 @@ func TestMockRepositoryGetTaskSessionReturnsDetachedMutableFields(t *testing.T) 
 
 func TestPrepareSession_Success(t *testing.T) {
 	repo := newMockRepository()
+	repo.executors["executor-123"] = &models.Executor{ID: "executor-123", Type: models.ExecutorTypeLocal}
 	agentManager := &mockAgentManager{}
 	executor := newTestExecutor(t, agentManager, repo)
 
@@ -160,6 +161,8 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 
 	createdSession := repo.createTaskSessionCalls[0]
+	require.Equal(t, "executor-123", createdSession.ExecutorSnapshot["id"])
+	require.Equal(t, "local", createdSession.ExecutorSnapshot["executor_type"])
 	if createdSession.TaskID != task.ID {
 		t.Errorf("Expected task ID %s, got %s", task.ID, createdSession.TaskID)
 	}
@@ -180,6 +183,22 @@ func TestPrepareSession_Success(t *testing.T) {
 	if len(repo.setSessionPrimaryCalls) != 1 {
 		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
 	}
+}
+
+func TestPrepareSessionSnapshotsBootstrapRepositoryBinding(t *testing.T) {
+	repo := newMockRepository()
+	repo.executors["executor-123"] = &models.Executor{ID: "executor-123", Type: models.ExecutorTypeLocal}
+	repo.taskRepositories["task-123/repo-123"] = &models.TaskRepository{
+		ID: "task-123/repo-123", TaskID: "task-123", RepositoryID: "repo-123", BaseBranch: "main",
+	}
+	repo.repositories["repo-123"] = &models.Repository{ID: "repo-123", SourceType: sourceTypeLocal, LocalPath: t.TempDir()}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	_, err := exec.PrepareSession(context.Background(), &v1.Task{ID: "task-123", WorkspaceID: "workspace-123"}, "profile-123", "executor-123", "", "step-123")
+	require.NoError(t, err)
+	require.Len(t, repo.createTaskSessionCalls, 1)
+	session := repo.createTaskSessionCalls[0]
+	require.Equal(t, "repo-123", session.RepositorySnapshot["id"])
+	require.Equal(t, "main", session.BaseBranch)
 }
 
 func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {

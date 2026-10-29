@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"io"
 	"strings"
 	"sync"
@@ -523,6 +524,7 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
+	SandboxRestartReview *contract.RestartPolicyReview
 	// ResumePassthrough selects conversation resume independently of runtime ownership.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string

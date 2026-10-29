@@ -1,6 +1,23 @@
 package requiredstores
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
+
+func TestCatalogIncludesSandboxPolicies(t *testing.T) {
+	for _, entry := range Catalog() {
+		if entry.ID == "sandbox-policies" {
+			for _, table := range []string{"sandbox_attempts", "sandbox_approval_requests", "sandbox_reports", "sandbox_learning_proposals"} {
+				if !slices.Contains(entry.RequiredTables, table) {
+					t.Fatalf("sandbox table %s is missing from startup coverage", table)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("sandbox policy store is missing from required startup stores")
+}
 
 func TestCatalog(t *testing.T) {
 	catalog := Catalog()
@@ -9,7 +26,7 @@ func TestCatalog(t *testing.T) {
 	}
 
 	wantIDs := map[string]struct{}{
-		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
+		"sandbox-policies": {}, "agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
 		"azure-devops": {}, "canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
@@ -92,6 +109,9 @@ func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
 		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
 		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
 		"agent_delivery_cleanup_jobs": {}, "agent_delivery_retention_state": {},
+		"agent_execution_snapshots":    {},
+		"agent_execution_observer":     {},
+		"agent_execution_observations": {},
 	}
 	for _, table := range task.RequiredTables {
 		delete(want, table)

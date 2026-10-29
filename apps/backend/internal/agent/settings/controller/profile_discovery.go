@@ -37,6 +37,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	if err != nil {
 		return nil, err
 	}
+	profileContext.ExecutorID = req.ExecutorID
 	resp := &dto.DynamicModelsResponse{
 		AgentName: agentName, Status: string(hostutility.StatusNotConfigured),
 		Models: []dto.ModelEntryDTO{}, Modes: []dto.ModeEntryDTO{},
@@ -112,7 +113,7 @@ func (c *Controller) resolveProfileProbeContext(
 	}
 	scope := profileProbeScope(authorizationScope, agentID, profile)
 	profileContext := hostutility.ProfileProbeContext{
-		Scope: scope, Env: resolvedEnv, CLIFlags: launch.cliTokens, CommandPrefix: launch.prefixTokens,
+		ProfileID: profileID, Scope: scope, Env: resolvedEnv, CLIFlags: launch.cliTokens, CommandPrefix: launch.prefixTokens,
 	}
 	if len(launch.copilotPlugins) > 0 {
 		profileContext.CopilotSelectedPlugins = launch.copilotPlugins

@@ -37,7 +37,7 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
-	if execution.IsPassthrough || client == nil {
+	if execution.IsPassthrough || client == nil || execution.SandboxSelection != nil {
 		return fmt.Errorf("workspace rebind is unsupported for this session; start a new session after attaching sources")
 	}
 	execution.promptLifecycleMu.Lock()
@@ -103,7 +103,7 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	}
 	execution.WorkspacePath = workspacePath
 	client, releaseClient = execution.AcquireAgentCtlClient()
-	_, err = client.Start(ctx)
+	_, err = m.startConfiguredProcessWithSnapshot(ctx, execution, client)
 	releaseClient()
 	if err != nil {
 		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, &promptLifecycleLocked, fmt.Errorf("restart agent after workspace rebind: %w", err))
@@ -192,7 +192,7 @@ func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentE
 	if client == nil {
 		return fmt.Errorf("%w; rollback agentctl client is unavailable", cause)
 	}
-	_, err = client.Start(rollbackCtx)
+	_, err = m.startConfiguredProcessWithSnapshot(rollbackCtx, execution, client)
 	releaseClient()
 	if err != nil {
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback restart failed: %v", cause, err))

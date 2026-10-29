@@ -91,6 +91,8 @@ var VerifySignature func(sig, checksums []byte) error
 
 // InstallResult describes the outcome of a successful Install.
 type InstallResult struct {
+	// PackageDigest is the SHA-256 of the verified package checksum manifest.
+	PackageDigest string
 	// Manifest is the parsed, validated manifest.yaml of the installed
 	// package.
 	Manifest *manifest.Manifest
@@ -192,11 +194,13 @@ func Install(r io.Reader, destRoot string) (*InstallResult, error) {
 		return nil, err
 	}
 
+	packageDigest := sha256.Sum256(files[checksumsFileName])
 	return &InstallResult{
-		Manifest:    m,
-		InstallPath: versionDir,
-		Version:     m.Version,
-		Signed:      verified.Signed,
+		PackageDigest: hex.EncodeToString(packageDigest[:]),
+		Manifest:      m,
+		InstallPath:   versionDir,
+		Version:       m.Version,
+		Signed:        verified.Signed,
 	}, nil
 }
 

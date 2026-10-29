@@ -40,6 +40,284 @@ service Plugin {
   rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
   rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
   rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
+
+  // Optional policy-only extension. Core owns processes, authorization, and persistence.
+  rpc DescribeSandboxProvider(DescribeSandboxProviderRequest) returns (DescribeSandboxProviderResponse);
+  rpc CompileSandboxPolicy(CompileSandboxPolicyRequest) returns (CompileSandboxPolicyResponse);
+  rpc NormalizeSandboxApproval(NormalizeSandboxApprovalRequest) returns (NormalizeSandboxApprovalResponse);
+  rpc NormalizeSandboxStatus(NormalizeSandboxStatusRequest) returns (NormalizeSandboxStatusResponse);
+  rpc ReadSandboxReport(ReadSandboxReportRequest) returns (ReadSandboxReportResponse);
+  rpc ProposeSandboxRevision(ProposeSandboxRevisionRequest) returns (ProposeSandboxRevisionResponse);
+}
+
+message SandboxRequestContext {
+  uint32 protocol_major = 1;
+  string installation_id = 2;
+  string provider_key = 3;
+  string operation_id = 4;
+  string attempt_id = 5;
+  string execution_id = 6;
+  uint64 generation = 7;
+  int64 deadline_unix_ms = 8;
+}
+
+message SandboxResponseContext {
+  uint32 schema_version = 1;
+  string operation_id = 2;
+  string error_code = 3;
+}
+
+message SandboxFilesystemGrant {
+  string path = 1;
+  bool writable = 2;
+}
+
+message SandboxNetworkGrant {
+  string host = 1;
+  uint32 port = 2;
+  string protocol = 3;
+}
+
+message SandboxGrants {
+  repeated SandboxFilesystemGrant filesystem = 1;
+  repeated SandboxNetworkGrant network = 2;
+  bool kandev_mcp = 3;
+  repeated string environment_keys = 4;
+}
+
+message SandboxPolicySource {
+  string scope = 1;
+  string source_id = 2;
+  uint64 revision = 3;
+  string digest = 4;
+}
+
+message SandboxPolicySnapshot {
+  string policy_id = 1;
+  uint64 revision = 2;
+  string digest = 3;
+  string ceiling_digest = 4;
+  SandboxGrants grants = 5;
+  repeated SandboxPolicySource sources = 6;
+}
+
+message SandboxRuntimeFacts {
+  string os = 1;
+  string architecture = 2;
+  string transport = 3;
+  string runtime_version = 4;
+  string runtime_digest = 5;
+  string kernel_abi = 6;
+}
+
+message SandboxRuntimeReference {
+  string key = 1;
+  string value = 2;
+}
+
+// Callback credentials are absent. Core resolves their reserved references.
+message SandboxEndpoint {
+  string key = 1;
+  string host = 2;
+  uint32 port = 3;
+  string scheme = 4;
+  string path = 5;
+}
+
+message SandboxArgument {
+  oneof value {
+    string literal = 1;
+    string runtime_reference = 2;
+    string artifact_reference = 3;
+  }
+}
+
+message SandboxArtifact {
+  string name = 1;
+  string content_utf8 = 2;
+  string kind = 3;
+  repeated SandboxArtifactBinding bindings = 4;
+}
+
+// Core replaces an existing empty JSON string after provider compilation.
+message SandboxArtifactBinding {
+  repeated string path = 1;
+  string runtime_reference = 2;
+}
+
+message SandboxOverrideConstraints {
+  repeated string forbidden_arguments = 1;
+  repeated string forbidden_environment_keys = 2;
+  repeated string protected_roots = 3;
+}
+
+message SandboxCompiledPolicy {
+  repeated SandboxArgument prefix = 1;
+  repeated SandboxArtifact artifacts = 2;
+  SandboxGrants effective_grants = 3;
+  SandboxOverrideConstraints constraints = 4;
+  repeated string required_capabilities = 5;
+  repeated string status_artifacts = 6;
+}
+
+message DescribeSandboxProviderRequest {
+  SandboxRequestContext context = 1;
+  SandboxRuntimeFacts runtime = 2;
+}
+
+// A runtime executable shipped in the reviewed plugin package.
+message SandboxRuntimeArtifact {
+  string relative_path = 1;
+  string sha256 = 2;
+}
+
+// Static replies used only after core authorizes the corresponding decision.
+message SandboxApprovalWire {
+  string content_type = 1;
+  string allow_once_body_utf8 = 2;
+  string deny_body_utf8 = 3;
+  string timeout_body_utf8 = 4;
+}
+
+message SandboxProviderDescription {
+  string display_name = 1;
+  string provider_version = 2;
+  string runtime_version = 3;
+  repeated string supported_transports = 4;
+  repeated string supported_features = 5;
+  repeated string evidence_schemas = 6;
+  repeated string report_classes = 7;
+  repeated string limitations = 8;
+  SandboxRuntimeArtifact runtime_artifact = 9;
+  SandboxApprovalWire approval_wire = 10;
+  repeated SandboxRuntimeSource runtime_sources = 11;
+}
+
+// A bounded read below the core-owned private state directory.
+message SandboxRuntimeSource {
+  string key = 1;
+  string kind = 2;
+  string relative_directory = 3;
+  string filename_suffix = 4;
+  uint32 max_depth = 5;
+  uint32 max_files = 6;
+  uint32 max_bytes = 7;
+}
+
+message DescribeSandboxProviderResponse {
+  SandboxResponseContext context = 1;
+  SandboxProviderDescription description = 2;
+}
+
+message CompileSandboxPolicyRequest {
+  SandboxRequestContext context = 1;
+  SandboxPolicySnapshot policy = 2;
+  SandboxRuntimeFacts runtime = 3;
+  repeated SandboxRuntimeReference references = 4;
+  repeated SandboxEndpoint endpoints = 5;
+}
+
+message CompileSandboxPolicyResponse {
+  SandboxResponseContext context = 1;
+  SandboxCompiledPolicy compiled = 2;
+}
+
+message SandboxApprovalOperation {
+  string request_id = 1;
+  string kind = 2;
+  string target = 3;
+  string access = 4;
+  repeated string supported_decisions = 5;
+  string provider_session_id = 6;
+  int64 child_pid = 7;
+}
+
+message NormalizeSandboxApprovalRequest {
+  SandboxRequestContext context = 1;
+  SandboxPolicySnapshot policy = 2;
+  bytes verified_event = 3;
+}
+
+message NormalizeSandboxApprovalResponse {
+  SandboxResponseContext context = 1;
+  SandboxApprovalOperation operation = 2;
+}
+
+message SandboxProcessIdentity {
+  int64 pid = 1;
+  string birth_id = 2;
+}
+
+message SandboxStatusEvidence {
+  string mechanism = 1;
+  SandboxProcessIdentity process = 2;
+  string policy_digest = 3;
+  string attempt_id = 4;
+  uint64 generation = 5;
+  uint32 schema_version = 6;
+  int64 observed_at_unix_ms = 7;
+  repeated string limitations = 8;
+}
+
+message NormalizeSandboxStatusRequest {
+  SandboxRequestContext context = 1;
+  SandboxPolicySnapshot policy = 2;
+  SandboxProcessIdentity process = 3;
+  bytes evidence = 4;
+  string evidence_schema = 5;
+}
+
+// Registry identity is separate from proof of active confinement.
+message SandboxRuntimeIdentity {
+  int64 supervisor_pid = 1;
+  int64 child_pid = 2;
+  string provider_session_id = 3;
+}
+
+message NormalizeSandboxStatusResponse {
+  SandboxResponseContext context = 1;
+  SandboxStatusEvidence evidence = 2;
+  SandboxRuntimeIdentity identity = 3;
+}
+
+message SandboxDenialRecord {
+  string record_id = 1;
+  string operation = 2;
+  string target = 3;
+  int64 occurred_at_unix_ms = 4;
+  string policy_digest = 5;
+  string attempt_id = 6;
+}
+
+message ReadSandboxReportRequest {
+  SandboxRequestContext context = 1;
+  SandboxPolicySnapshot policy = 2;
+  bytes audit = 3;
+  string cursor = 4;
+}
+
+message ReadSandboxReportResponse {
+  SandboxResponseContext context = 1;
+  repeated SandboxDenialRecord records = 2;
+  string next_cursor = 3;
+  bool complete = 4;
+  string integrity = 5;
+}
+
+message ProposeSandboxRevisionRequest {
+  SandboxRequestContext context = 1;
+  SandboxPolicySnapshot policy = 2;
+  repeated SandboxDenialRecord selected_records = 3;
+  SandboxRuntimeFacts runtime = 4;
+  repeated SandboxRuntimeReference references = 5;
+  repeated SandboxEndpoint endpoints = 6;
+}
+
+message ProposeSandboxRevisionResponse {
+  SandboxResponseContext context = 1;
+  SandboxGrants added_grants = 2;
+  repeated string source_record_ids = 3;
+  SandboxCompiledPolicy compiled = 4;
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).

@@ -100,11 +100,11 @@ func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 		}
 		switch server.Type {
 		case "http":
-			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/mcp") {
+			if server.URL == canonicalKandevMCPURL(cfg, "http") && server.URL != "" {
 				return true
 			}
 		case "sse":
-			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/sse") {
+			if server.URL == canonicalKandevMCPURL(cfg, "sse") && server.URL != "" {
 				return true
 			}
 		}

@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import { AgentSandboxSettings } from "@/components/settings/agent-sandbox-settings";
 import { CursorMcpProfileSelection } from "@/components/settings/cursor-mcp-profile-selection";
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
@@ -58,7 +59,6 @@ import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
-import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { isHandledApiError } from "@/lib/api/client";
@@ -203,6 +203,7 @@ function ProfileSettingsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <ProfileFormFields
+          sandboxControl={<AgentSandboxSettings profileId={draft.id} />}
           profile={toProfileFormData(draft, permissionSettings)}
           baselineProfile={toProfileFormData(savedProfile, permissionSettings)}
           onChange={handleFormChange}
@@ -297,19 +298,6 @@ function ProfileEditorBody({
         baselineEnvVars={savedProfile.envVars}
         onChange={updateDraft}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "environment-variables")}
-      />
-
-      <CommandPreviewCard
-        agentName={agent.name}
-        model={draft.model}
-        permissionSettings={{ allow_indexing: draft.allowIndexing }}
-        cliPassthrough={draft.cliPassthrough}
-        cliFlags={draft.cliFlags ?? []}
-        commandPrefix={draft.commandPrefix}
-        copilotSelectedPlugins={draft.copilotSelectedPlugins}
-        envVars={draft.envVars}
-        secrets={secrets}
-        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "command-preview")}
       />
 
       <ProfileMcpConfigCard

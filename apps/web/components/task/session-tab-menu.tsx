@@ -194,6 +194,7 @@ export function SessionContextMenuItems({
   onShare,
   onHandoffProfile,
   onStartRename,
+  onExecution,
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
@@ -206,18 +207,35 @@ export function SessionContextMenuItems({
   onShare: () => void;
   onHandoffProfile: (profileId: string) => void;
   onStartRename: () => void;
+  onExecution?: () => void;
 }) {
   const { t } = useTranslation();
   const renameAfterCloseRef = useRef(false);
+  const executionAfterCloseRef = useRef(false);
   return (
     <ContextMenuContent
       onCloseAutoFocus={(event) => {
+        if (executionAfterCloseRef.current && onExecution) {
+          executionAfterCloseRef.current = false;
+          event.preventDefault();
+          queueMicrotask(onExecution);
+          return;
+        }
         if (!renameAfterCloseRef.current) return;
         renameAfterCloseRef.current = false;
         event.preventDefault();
         queueMicrotask(onStartRename);
       }}
     >
+      {onExecution && (
+        <ContextMenuItem
+          onSelect={() => {
+            executionAfterCloseRef.current = true;
+          }}
+        >
+          {t("agents:executionDetails")}
+        </ContextMenuItem>
+      )}
       <ContextMenuItem
         className="cursor-pointer"
         onSelect={() => {

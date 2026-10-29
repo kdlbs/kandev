@@ -1671,6 +1671,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
+		session.ExecutorSnapshot = map[string]interface{}{
+			"id": execConfig.ExecutorID, "executor_type": execConfig.ExecutorType,
+		}
+	}
+	if session.RepositoryID != "" {
+		session.RepositorySnapshot = map[string]interface{}{"id": session.RepositoryID}
 	}
 	// Validate every managed-credential repository binding before persisting
 	// the session row. Doing this after the row exists would leave a

@@ -197,13 +197,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if execution.AgentCommand == "" {
 		return "", fmt.Errorf("execution %q has no recorded agent command for Kubernetes restart", execution.ID)
 	}
-	if err := client.ConfigureAgent(
-		ctx, execution.AgentCommand, execution.AgentArgs, env,
-		execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper,
-	); err != nil {
-		return "", fmt.Errorf("configure agent after Kubernetes restart: %w", err)
-	}
-	if _, err := client.Start(ctx); err != nil {
+	if _, err := m.configureAndStartProcess(ctx, execution, client, env); err != nil {
 		return "", fmt.Errorf("start agent after Kubernetes restart: %w", err)
 	}
 	if refresh.AgentConfig == nil || m.sessionManager == nil {

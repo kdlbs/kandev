@@ -18,6 +18,41 @@ type featureFieldBinding struct {
 	envVar     string
 }
 
+func TestSandboxPoliciesIsOptInAndRestartRequired(t *testing.T) {
+	const key = "features.sandboxPolicies"
+	def, ok := DefinitionByKey(key)
+	if !ok || def.EnvVar != "KANDEV_FEATURES_SANDBOX_POLICIES" {
+		t.Fatalf("Sandbox policies identity missing or changed: %+v", def)
+	}
+	if !def.RestartRequired || !def.Mutable || def.Stability != StabilityExperimental {
+		t.Fatalf("Sandbox policies must remain a restart-required experimental override: %+v", def)
+	}
+	for _, profile := range []struct{ name, dev, e2e string }{
+		{name: "prod", dev: "false", e2e: "false"},
+		{name: "dev", dev: "true", e2e: "false"},
+		{name: "e2e", dev: "false", e2e: "true"},
+	} {
+		t.Run(profile.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DEBUG_DEV_MODE", profile.dev)
+			t.Setenv("KANDEV_E2E_MOCK", profile.e2e)
+			defaults, err := profiles.FeatureFlagDefaults()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults["sandbox_policies"] != "false" {
+				t.Fatalf("Sandbox policies defaults to %q in %s", defaults["sandbox_policies"], profile.name)
+			}
+		})
+	}
+	cfg := &config.Config{}
+	for _, enabled := range []bool{true, false} {
+		ApplyStatesToConfig(cfg, []RuntimeFlagState{{Key: key, EffectiveValue: enabled}})
+		if ValuesFromConfig(cfg)[key] != enabled {
+			t.Fatalf("Sandbox policies typed override did not round trip %v", enabled)
+		}
+	}
+}
+
 func TestIntegratedControlIsOptInAndRestartRequired(t *testing.T) {
 	const key = "features.integratedControl"
 	def, ok := DefinitionByKey(key)

@@ -136,6 +136,9 @@ func (c *profileCapabilityCache) entry(element *list.Element) *profileCapability
 }
 
 type profileContextIdentity struct {
+	ProfileID         string             `json:"profile_id"`
+	ExecutorID        string             `json:"executor_id"`
+	SandboxDigest     string             `json:"sandbox_digest"`
 	Scope             string             `json:"scope"`
 	AgentType         string             `json:"agent_type"`
 	Protocol          string             `json:"protocol"`
@@ -166,6 +169,7 @@ func profileContextRevision(key []byte, context ProfileProbeContext, agentType, 
 		env = append(env, profileEnvValue{Key: name, Value: context.Env[name]})
 	}
 	identity := profileContextIdentity{
+		ProfileID: context.ProfileID, ExecutorID: context.ExecutorID, SandboxDigest: context.SandboxDigest,
 		Scope: context.Scope, AgentType: agentType, Protocol: protocol,
 		Command: append([]string(nil), command...), OperatorDefined: operatorDefined,
 		CLIFlags:       append([]string(nil), context.CLIFlags...),

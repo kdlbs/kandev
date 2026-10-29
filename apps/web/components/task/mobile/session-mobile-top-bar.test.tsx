@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { MobileRemoteExecutorIndicator, SessionMobileTopBar } from "./session-mobile-top-bar";
 
 const mocks = vi.hoisted(() => ({ pluginActions: undefined as unknown }));
@@ -90,14 +91,16 @@ describe("phone task navigation controls", () => {
   // @covers AC-UI-MOBILE-TASK-CHROME-001.7
   it("moves session plugin actions out of the fixed header and into mobile navigation", () => {
     render(
-      <SessionMobileTopBar
-        taskId="task-1"
-        workspaceId="workspace-1"
-        sessionId="session-1"
-        taskTitle="Fix checkout"
-        onTaskPickerClick={vi.fn()}
-        taskPickerOpen={false}
-      />,
+      <StateProvider>
+        <SessionMobileTopBar
+          taskId="task-1"
+          workspaceId="workspace-1"
+          sessionId="session-1"
+          taskTitle="Fix checkout"
+          onTaskPickerClick={vi.fn()}
+          taskPickerOpen={false}
+        />
+      </StateProvider>,
     );
 
     expect(screen.queryByTestId("task-top-bar-plugin-actions")).toBeNull();

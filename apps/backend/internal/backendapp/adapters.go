@@ -455,6 +455,7 @@ func buildLifecycleLaunchRequest(
 	req *executor.LaunchAgentRequest, workspacePath, officeProfileID string,
 ) *lifecycle.LaunchRequest {
 	launchReq := &lifecycle.LaunchRequest{
+		SandboxRestartReview:          req.SandboxRestartReview,
 		TaskID:                        req.TaskID,
 		CausingRunID:                  req.CausingRunID,
 		TaskScope:                     req.TaskScope,

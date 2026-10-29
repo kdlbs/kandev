@@ -387,6 +387,7 @@ func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) boo
 
 const sessionIDPayloadKey = "session_id"
 const taskIDPayloadKey = "task_id"
+const workspaceIDPayloadKey = "workspace_id"
 const newStatePayloadKey = "new_state"
 const sessionUpdatedAtPayloadKey = "updated_at"
 
@@ -477,6 +478,9 @@ func appendSessionStateMessageWithCancellation(
 		"name":                     session.Name,
 		"cancellation_pending":     false,
 		"cancellation_revision":    uint64(0),
+		"execution_snapshot":       session.ExecutionSnapshot,
+		"execution_observation":    session.ExecutionObservation,
+		queueIncarnationPayloadKey: session.QueueIncarnationID,
 	}
 	if cancellationProvider != nil {
 		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
@@ -1893,6 +1897,9 @@ func registerSecondaryRoutes(
 		mcpSelectionService,
 	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
+	if p.services.Sandbox != nil {
+		p.services.Sandbox.RegisterRoutes(p.router)
+	}
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick

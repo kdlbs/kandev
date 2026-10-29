@@ -36,6 +36,12 @@ const (
 	Plugin_InspectExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/InspectExecutorEnvironment"
 	Plugin_ResolveExecutorConnection_FullMethodName    = "/kandev.plugin.v1.Plugin/ResolveExecutorConnection"
 	Plugin_DestroyExecutorEnvironment_FullMethodName   = "/kandev.plugin.v1.Plugin/DestroyExecutorEnvironment"
+	Plugin_DescribeSandboxProvider_FullMethodName      = "/kandev.plugin.v1.Plugin/DescribeSandboxProvider"
+	Plugin_CompileSandboxPolicy_FullMethodName         = "/kandev.plugin.v1.Plugin/CompileSandboxPolicy"
+	Plugin_NormalizeSandboxApproval_FullMethodName     = "/kandev.plugin.v1.Plugin/NormalizeSandboxApproval"
+	Plugin_NormalizeSandboxStatus_FullMethodName       = "/kandev.plugin.v1.Plugin/NormalizeSandboxStatus"
+	Plugin_ReadSandboxReport_FullMethodName            = "/kandev.plugin.v1.Plugin/ReadSandboxReport"
+	Plugin_ProposeSandboxRevision_FullMethodName       = "/kandev.plugin.v1.Plugin/ProposeSandboxRevision"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -75,6 +81,13 @@ type PluginClient interface {
 	InspectExecutorEnvironment(ctx context.Context, in *InspectExecutorEnvironmentRequest, opts ...grpc.CallOption) (*InspectExecutorEnvironmentResponse, error)
 	ResolveExecutorConnection(ctx context.Context, in *ResolveExecutorConnectionRequest, opts ...grpc.CallOption) (*ResolveExecutorConnectionResponse, error)
 	DestroyExecutorEnvironment(ctx context.Context, in *DestroyExecutorEnvironmentRequest, opts ...grpc.CallOption) (*DestroyExecutorEnvironmentResponse, error)
+	// Optional policy-only extension. Core owns processes, authorization, and persistence.
+	DescribeSandboxProvider(ctx context.Context, in *DescribeSandboxProviderRequest, opts ...grpc.CallOption) (*DescribeSandboxProviderResponse, error)
+	CompileSandboxPolicy(ctx context.Context, in *CompileSandboxPolicyRequest, opts ...grpc.CallOption) (*CompileSandboxPolicyResponse, error)
+	NormalizeSandboxApproval(ctx context.Context, in *NormalizeSandboxApprovalRequest, opts ...grpc.CallOption) (*NormalizeSandboxApprovalResponse, error)
+	NormalizeSandboxStatus(ctx context.Context, in *NormalizeSandboxStatusRequest, opts ...grpc.CallOption) (*NormalizeSandboxStatusResponse, error)
+	ReadSandboxReport(ctx context.Context, in *ReadSandboxReportRequest, opts ...grpc.CallOption) (*ReadSandboxReportResponse, error)
+	ProposeSandboxRevision(ctx context.Context, in *ProposeSandboxRevisionRequest, opts ...grpc.CallOption) (*ProposeSandboxRevisionResponse, error)
 }
 
 type pluginClient struct {
@@ -255,6 +268,66 @@ func (c *pluginClient) DestroyExecutorEnvironment(ctx context.Context, in *Destr
 	return out, nil
 }
 
+func (c *pluginClient) DescribeSandboxProvider(ctx context.Context, in *DescribeSandboxProviderRequest, opts ...grpc.CallOption) (*DescribeSandboxProviderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeSandboxProviderResponse)
+	err := c.cc.Invoke(ctx, Plugin_DescribeSandboxProvider_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) CompileSandboxPolicy(ctx context.Context, in *CompileSandboxPolicyRequest, opts ...grpc.CallOption) (*CompileSandboxPolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompileSandboxPolicyResponse)
+	err := c.cc.Invoke(ctx, Plugin_CompileSandboxPolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) NormalizeSandboxApproval(ctx context.Context, in *NormalizeSandboxApprovalRequest, opts ...grpc.CallOption) (*NormalizeSandboxApprovalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NormalizeSandboxApprovalResponse)
+	err := c.cc.Invoke(ctx, Plugin_NormalizeSandboxApproval_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) NormalizeSandboxStatus(ctx context.Context, in *NormalizeSandboxStatusRequest, opts ...grpc.CallOption) (*NormalizeSandboxStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NormalizeSandboxStatusResponse)
+	err := c.cc.Invoke(ctx, Plugin_NormalizeSandboxStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) ReadSandboxReport(ctx context.Context, in *ReadSandboxReportRequest, opts ...grpc.CallOption) (*ReadSandboxReportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadSandboxReportResponse)
+	err := c.cc.Invoke(ctx, Plugin_ReadSandboxReport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) ProposeSandboxRevision(ctx context.Context, in *ProposeSandboxRevisionRequest, opts ...grpc.CallOption) (*ProposeSandboxRevisionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProposeSandboxRevisionResponse)
+	err := c.cc.Invoke(ctx, Plugin_ProposeSandboxRevision_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PluginServer is the server API for Plugin service.
 // All implementations must embed UnimplementedPluginServer
 // for forward compatibility.
@@ -292,6 +365,13 @@ type PluginServer interface {
 	InspectExecutorEnvironment(context.Context, *InspectExecutorEnvironmentRequest) (*InspectExecutorEnvironmentResponse, error)
 	ResolveExecutorConnection(context.Context, *ResolveExecutorConnectionRequest) (*ResolveExecutorConnectionResponse, error)
 	DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error)
+	// Optional policy-only extension. Core owns processes, authorization, and persistence.
+	DescribeSandboxProvider(context.Context, *DescribeSandboxProviderRequest) (*DescribeSandboxProviderResponse, error)
+	CompileSandboxPolicy(context.Context, *CompileSandboxPolicyRequest) (*CompileSandboxPolicyResponse, error)
+	NormalizeSandboxApproval(context.Context, *NormalizeSandboxApprovalRequest) (*NormalizeSandboxApprovalResponse, error)
+	NormalizeSandboxStatus(context.Context, *NormalizeSandboxStatusRequest) (*NormalizeSandboxStatusResponse, error)
+	ReadSandboxReport(context.Context, *ReadSandboxReportRequest) (*ReadSandboxReportResponse, error)
+	ProposeSandboxRevision(context.Context, *ProposeSandboxRevisionRequest) (*ProposeSandboxRevisionResponse, error)
 	mustEmbedUnimplementedPluginServer()
 }
 
@@ -352,6 +432,24 @@ func (UnimplementedPluginServer) ResolveExecutorConnection(context.Context, *Res
 }
 func (UnimplementedPluginServer) DestroyExecutorEnvironment(context.Context, *DestroyExecutorEnvironmentRequest) (*DestroyExecutorEnvironmentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DestroyExecutorEnvironment not implemented")
+}
+func (UnimplementedPluginServer) DescribeSandboxProvider(context.Context, *DescribeSandboxProviderRequest) (*DescribeSandboxProviderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeSandboxProvider not implemented")
+}
+func (UnimplementedPluginServer) CompileSandboxPolicy(context.Context, *CompileSandboxPolicyRequest) (*CompileSandboxPolicyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CompileSandboxPolicy not implemented")
+}
+func (UnimplementedPluginServer) NormalizeSandboxApproval(context.Context, *NormalizeSandboxApprovalRequest) (*NormalizeSandboxApprovalResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NormalizeSandboxApproval not implemented")
+}
+func (UnimplementedPluginServer) NormalizeSandboxStatus(context.Context, *NormalizeSandboxStatusRequest) (*NormalizeSandboxStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NormalizeSandboxStatus not implemented")
+}
+func (UnimplementedPluginServer) ReadSandboxReport(context.Context, *ReadSandboxReportRequest) (*ReadSandboxReportResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReadSandboxReport not implemented")
+}
+func (UnimplementedPluginServer) ProposeSandboxRevision(context.Context, *ProposeSandboxRevisionRequest) (*ProposeSandboxRevisionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProposeSandboxRevision not implemented")
 }
 func (UnimplementedPluginServer) mustEmbedUnimplementedPluginServer() {}
 func (UnimplementedPluginServer) testEmbeddedByValue()                {}
@@ -680,6 +778,114 @@ func _Plugin_DestroyExecutorEnvironment_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Plugin_DescribeSandboxProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeSandboxProviderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).DescribeSandboxProvider(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_DescribeSandboxProvider_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).DescribeSandboxProvider(ctx, req.(*DescribeSandboxProviderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_CompileSandboxPolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompileSandboxPolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).CompileSandboxPolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_CompileSandboxPolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).CompileSandboxPolicy(ctx, req.(*CompileSandboxPolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_NormalizeSandboxApproval_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NormalizeSandboxApprovalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).NormalizeSandboxApproval(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_NormalizeSandboxApproval_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).NormalizeSandboxApproval(ctx, req.(*NormalizeSandboxApprovalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_NormalizeSandboxStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NormalizeSandboxStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).NormalizeSandboxStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_NormalizeSandboxStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).NormalizeSandboxStatus(ctx, req.(*NormalizeSandboxStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_ReadSandboxReport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadSandboxReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ReadSandboxReport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ReadSandboxReport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ReadSandboxReport(ctx, req.(*ReadSandboxReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_ProposeSandboxRevision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProposeSandboxRevisionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).ProposeSandboxRevision(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_ProposeSandboxRevision_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).ProposeSandboxRevision(ctx, req.(*ProposeSandboxRevisionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Plugin_ServiceDesc is the grpc.ServiceDesc for Plugin service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -754,6 +960,30 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DestroyExecutorEnvironment",
 			Handler:    _Plugin_DestroyExecutorEnvironment_Handler,
+		},
+		{
+			MethodName: "DescribeSandboxProvider",
+			Handler:    _Plugin_DescribeSandboxProvider_Handler,
+		},
+		{
+			MethodName: "CompileSandboxPolicy",
+			Handler:    _Plugin_CompileSandboxPolicy_Handler,
+		},
+		{
+			MethodName: "NormalizeSandboxApproval",
+			Handler:    _Plugin_NormalizeSandboxApproval_Handler,
+		},
+		{
+			MethodName: "NormalizeSandboxStatus",
+			Handler:    _Plugin_NormalizeSandboxStatus_Handler,
+		},
+		{
+			MethodName: "ReadSandboxReport",
+			Handler:    _Plugin_ReadSandboxReport_Handler,
+		},
+		{
+			MethodName: "ProposeSandboxRevision",
+			Handler:    _Plugin_ProposeSandboxRevision_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

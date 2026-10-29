@@ -16,7 +16,7 @@ import (
 // remote agent CLI starts. Adopting an existing process does not call it.
 func (m *Manager) startPassthroughWithMCP(ctx context.Context, execution *AgentExecution, runner executionPassthroughRunner, request process.InteractiveStartRequest, operation *preparedMCPOperation) (*process.InteractiveProcessInfo, error) {
 	generation := execution.startupAttemptSnapshot()
-	info, err := runner.Start(ctx, request)
+	info, err := m.startSandboxInteractive(ctx, execution, runner, request)
 	if err != nil || info == nil || operation == nil {
 		return info, err
 	}

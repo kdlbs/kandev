@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { SelectConfigOption } from "@/components/model-config-selector";
 import { Button } from "@kandev/ui/button";
@@ -10,8 +11,8 @@ import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import { CursorPluginsMCPPreference } from "@/components/settings/cursor-plugins-mcp-preference";
 import type { MCPSelectionMode } from "@/lib/types/agent-profile";
 import { CursorMCPAuthPreference } from "@/components/settings/cursor-mcp-auth-preference";
-import { ProfileAdvancedOptions } from "@/components/settings/profile-advanced-options";
 import { CopilotPluginProfileSelection } from "@/components/settings/copilot-plugin-profile-selection";
+import { ProfileExecutionSection } from "@/components/settings/profile-execution-section";
 import { useProfileFormCapabilities } from "@/components/settings/profile-capability-helpers";
 import { ProfileCapabilitiesSection } from "@/components/settings/profile-capabilities-row";
 import { ModelFallbackSection } from "@/components/settings/profile-model-fields";
@@ -48,6 +49,7 @@ export type ProfileFormData = {
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
+  sandboxControl?: ReactNode;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -188,6 +190,7 @@ export function ProfileNameField({
 }
 
 export function ProfileFormFields({
+  sandboxControl,
   profile,
   baselineProfile,
   onChange,
@@ -264,6 +267,9 @@ export function ProfileFormFields({
       />
 
       <ProfileFormFooter
+        sandboxControl={sandboxControl}
+        agentName={agentName}
+        profileId={capabilityProfileId}
         profile={profile}
         baselineProfile={baselineProfile}
         onChange={onChange}
@@ -314,6 +320,9 @@ function CopilotProfilePlugins({
 }
 
 function ProfileFormFooter({
+  sandboxControl,
+  agentName,
+  profileId,
   profile,
   baselineProfile,
   onChange,
@@ -325,6 +334,9 @@ function ProfileFormFooter({
   isCompact,
   disableUnverifiedModels,
 }: {
+  sandboxControl?: ReactNode;
+  agentName: string;
+  profileId?: string;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -354,6 +366,15 @@ function ProfileFormFooter({
         />
       </div>
 
+      <ProfileExecutionSection
+        sandboxControl={sandboxControl}
+        agentName={agentName}
+        profileId={profileId}
+        profile={profile}
+        baselineProfile={baselineProfile}
+        onChange={onChange}
+      />
+
       <div className="space-y-1" data-testid="profile-disclosure-stack">
         <ModelFallbackSection
           profile={profile}
@@ -365,14 +386,6 @@ function ProfileFormFooter({
           gapCls={isCompact ? "space-y-1.5" : "space-y-2"}
           onChange={onChange}
         />
-
-        {!profile.cli_passthrough && (
-          <ProfileAdvancedOptions
-            profile={profile}
-            baselineProfile={baselineProfile}
-            onChange={onChange}
-          />
-        )}
       </div>
     </>
   );

@@ -60,6 +60,10 @@ type Manager struct {
 	// passthroughRunnerOverride is a test seam for the interactive process
 	// boundary. Production always resolves the executor-backed runner.
 	passthroughRunnerOverride executionPassthroughRunner
+	sandboxAdmission          func(context.Context, *LaunchRequest) error
+	sandboxPrepare            SandboxPrepare
+	executionSnapshotRecorder ExecutionSnapshotRecorder
+	sandboxRecoveryAdmission  func(context.Context, *AgentExecution) error
 	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —

@@ -30,9 +30,12 @@ func (m *Manager) ProbeProfileCapabilities(
 	if strings.TrimSpace(req.Context.Scope) == "" {
 		return ProfileCapabilityResult{}, errors.New("profile scope is required")
 	}
+	if err := m.admitSandbox(ctx, &req.Context); err != nil {
+		return ProfileCapabilityResult{}, err
+	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType, req.Context.SandboxSelection != nil)
 	if err != nil {
 		return ProfileCapabilityResult{}, err
 	}
@@ -109,9 +112,17 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	if err != nil {
 		return ProfileCapabilityResult{}, err
 	}
-	resp, err := inst.client.Probe(probeCtx, probeReq)
+	var resp *agentctlutil.ProbeResponse
+	err = m.runSandboxUtility(probeCtx, inst, &req.Context, probeReq.InferenceConfig, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = inst.client.Probe(callCtx, probeReq)
+		return callErr
+	})
 	release()
 	if err != nil {
+		return ProfileCapabilityResult{}, err
+	}
+	if err := m.validateSandboxProbeContext(ctx, req.Context); err != nil {
 		return ProfileCapabilityResult{}, err
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
@@ -143,9 +154,12 @@ func (m *Manager) resolveProfileModelConfig(
 	if req.Model == "" || req.ProfileContext == nil || strings.TrimSpace(req.ProfileContext.Scope) == "" {
 		return ModelConfigResolution{}, errors.New("profile model context is incomplete")
 	}
+	if err := m.admitSandbox(ctx, req.ProfileContext); err != nil {
+		return ModelConfigResolution{}, err
+	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType, req.ProfileContext.SandboxSelection != nil)
 	if err != nil {
 		return ModelConfigResolution{}, err
 	}
@@ -246,9 +260,17 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	if err != nil {
 		return ModelConfigResolution{}, err
 	}
-	resp, err := inst.client.Probe(probeCtx, probeReq)
+	var resp *agentctlutil.ProbeResponse
+	err = m.runSandboxUtility(probeCtx, inst, req.ProfileContext, probeReq.InferenceConfig, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = inst.client.Probe(callCtx, probeReq)
+		return callErr
+	})
 	release()
 	if err != nil {
+		return ModelConfigResolution{}, err
+	}
+	if err := m.validateSandboxProbeContext(ctx, *req.ProfileContext); err != nil {
 		return ModelConfigResolution{}, err
 	}
 	resolution := ModelConfigResolution{
@@ -274,9 +296,10 @@ func (m *Manager) resolveProfileModelConfigFlight(
 func (m *Manager) profileProbeInputs(
 	ctx context.Context,
 	agentType string,
+	sandboxed bool,
 ) (*instance, agents.InferenceAgent, *agents.InferenceConfig, agents.Command, uint64, error) {
 	runtimeGeneration := m.profileGeneration(agentType)
-	inst, ia, err := m.getInstance(ctx, agentType)
+	inst, ia, err := m.getInstance(ctx, agentType, sandboxed)
 	if err != nil {
 		return nil, nil, nil, agents.Command{}, 0, err
 	}

@@ -31,6 +31,7 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { SandboxSelectionForm } from "@/components/settings/sandbox-selection-settings";
 import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
 import { MCPSessionSelector } from "@/components/task/mcp-session-selector";
@@ -260,6 +261,14 @@ function DialogFormBody(props: DialogFormBodyProps) {
         mcpInheritedSelections={props.mcpInheritedSelections}
       />
       {props.mcpSelectionRecovery && <MCPSelectionSaveFeedback {...props.mcpSelectionRecovery} />}
+      {props.isEditMode && props.editSandbox.visible && (
+        <SandboxSelectionForm
+          scope="task"
+          model={props.editSandbox.model}
+          inlineChoices
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
       {props.isEditMode && (
         <TaskEditDialogDependencies
           state={props.editDependencies}

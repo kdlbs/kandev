@@ -17,6 +17,7 @@ import (
 )
 
 type procStat struct {
+	parentPID int
 	pid       int
 	state     byte
 	groupID   int
@@ -164,6 +165,10 @@ func readProcStat(pid int) (procStat, error) {
 		return procStat{}, fmt.Errorf("parse proc stat for pid %d: incomplete fields", pid)
 	}
 	state := fields[0]
+	parentPID, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return procStat{}, fmt.Errorf("parse proc stat parent for pid %d: %w", pid, err)
+	}
 	groupID, err := strconv.Atoi(fields[2])
 	if err != nil {
 		return procStat{}, fmt.Errorf("parse proc stat group for pid %d: %w", pid, err)
@@ -176,7 +181,7 @@ func readProcStat(pid int) (procStat, error) {
 	if err != nil {
 		return procStat{}, fmt.Errorf("parse proc stat birth time for pid %d: %w", pid, err)
 	}
-	return procStat{pid: pid, state: state[0], groupID: groupID, sessionID: sessionID, startTime: startTime}, nil
+	return procStat{parentPID: parentPID, pid: pid, state: state[0], groupID: groupID, sessionID: sessionID, startTime: startTime}, nil
 }
 
 func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProcess, error) {

@@ -23,6 +23,9 @@ Plugin-provided automation conditions and webhook
 adapter contracts belong here; automation admission and execution remain owned
 by the [Office system](../office/README.md).
 
+The optional [sandbox provider capability](requirements/sandbox-provider-capability.md) belongs here.
+[Agents](../agents/README.md) owns policy authority and process lifecycle.
+
 ## Exclusions
 
 - Core UI behavior belongs to the [UI system](../ui/README.md).

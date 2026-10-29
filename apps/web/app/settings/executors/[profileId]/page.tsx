@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { ExecutorOwnershipCard } from "@/components/settings/executor-ownership";
+import { ExecutorSandboxSettings } from "@/components/settings/executor-sandbox-settings";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { getExecutorDescription } from "@/components/settings/executor-description";
 import {
@@ -513,17 +514,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     connection,
   });
 
-  const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
-    const beforeDelete = options?.removeRelatedDockerContainers
-      ? async () => {
-          await Promise.all(
-            relatedContainers.containers.map((container) => removeDockerContainer(container.id)),
-          );
-          await relatedContainers.refresh();
-        }
-      : undefined;
-    void persistence.remove(beforeDelete);
-  };
+  const handleDelete = useProfileDelete(persistence, relatedContainers);
 
   return (
     <div className="min-w-0 space-y-8 overflow-x-clip">
@@ -536,6 +527,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       {memberReadOnly && <KubernetesReadOnlyNotice />}
       {!executor.is_system && <ExecutorOwnershipCard executor={executor} />}
       <ExecutorOwnershipCard executor={executor} profile={profile} />
+      <ExecutorSandboxSettings executor={executor} />
       {form.isKubernetes && (
         <KubernetesProfileClusterSection
           executor={executor}
@@ -571,4 +563,21 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
     </div>
   );
+}
+
+function useProfileDelete(
+  persistence: ReturnType<typeof useProfilePersistence>,
+  relatedContainers: ReturnType<typeof useDockerProfileContainers>,
+) {
+  return (options?: { removeRelatedDockerContainers?: boolean }) => {
+    const beforeDelete = options?.removeRelatedDockerContainers
+      ? async () => {
+          await Promise.all(
+            relatedContainers.containers.map((container) => removeDockerContainer(container.id)),
+          );
+          await relatedContainers.refresh();
+        }
+      : undefined;
+    void persistence.remove(beforeDelete);
+  };
 }

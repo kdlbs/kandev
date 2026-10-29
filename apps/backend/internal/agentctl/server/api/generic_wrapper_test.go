@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,6 +86,11 @@ func TestGenericWrapperCapabilityMatchesInstanceAndControl(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &identity))
 			require.Contains(t, identity.Capabilities, launchwrapper.Capability)
+			if runtime.GOOS == "linux" {
+				require.Contains(t, identity.Capabilities, sandbox.LaunchCapability)
+			} else {
+				require.NotContains(t, identity.Capabilities, sandbox.LaunchCapability)
+			}
 			require.Equal(t, SurvivalCapabilities, identity.Capabilities)
 		})
 	}

@@ -127,11 +127,11 @@ type Service struct {
 	runtime                         PluginRuntime
 	executorProviderHostHandler     ExecutorProviderHostHandler
 	executorProviderInventoryReader ExecutorProviderInventoryReader
-	executorProviderOpMu            sync.Mutex
+	providerOpMu                    sync.Mutex
 	executorProviderOps             map[string]*activeExecutorProviderOperation
-	executorProviderDispatches      map[string]map[uint64]context.CancelFunc
-	executorProviderAdmissionClosed map[string]bool
-	executorProviderDispatchID      uint64
+	providerDispatches              map[string]map[uint64]context.CancelFunc
+	providerAdmissionClosed         map[string]bool
+	providerDispatchID              uint64
 	secrets                         SecretVault
 
 	// revokeGitCredentialProvider invalidates leases for a repository provider
@@ -207,6 +207,7 @@ type Service struct {
 
 	reservedReferenceSources       map[string]struct{}
 	reservedReferenceProviderKinds map[string]struct{}
+	sandboxProvidersEnabled        bool
 }
 
 // ReferenceIdentity reserves a host-owned composer source and its canonical
@@ -222,21 +223,21 @@ type ReferenceIdentity struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	service := &Service{
-		store:                           pluginStore,
-		registry:                        registry,
-		eventBus:                        eventBus,
-		log:                             log,
-		httpClient:                      &http.Client{},
-		lifecycleLocks:                  newKeyedMutex(),
-		dispatchLocks:                   newKeyedRWMutex(),
-		agentToolGeneration:             uuid.NewString(),
-		eventHub:                        webapp.NewEventHub(),
-		conversationTokens:              newConversationTokenManager(),
-		conversationEpoch:               uuid.NewString(),
-		humanInteractionReceipts:        newHumanInteractionResponseReceiptStore(),
-		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
-		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
-		executorProviderAdmissionClosed: make(map[string]bool),
+		store:                    pluginStore,
+		registry:                 registry,
+		eventBus:                 eventBus,
+		log:                      log,
+		httpClient:               &http.Client{},
+		lifecycleLocks:           newKeyedMutex(),
+		dispatchLocks:            newKeyedRWMutex(),
+		agentToolGeneration:      uuid.NewString(),
+		eventHub:                 webapp.NewEventHub(),
+		conversationTokens:       newConversationTokenManager(),
+		conversationEpoch:        uuid.NewString(),
+		humanInteractionReceipts: newHumanInteractionResponseReceiptStore(),
+		executorProviderOps:      make(map[string]*activeExecutorProviderOperation),
+		providerDispatches:       make(map[string]map[uint64]context.CancelFunc),
+		providerAdmissionClosed:  make(map[string]bool),
 	}
 	return service
 }

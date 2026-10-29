@@ -52,7 +52,7 @@ func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model resolution request"})
 		return
 	}
-	if req.ProfileID != "" || req.LaunchSettings != nil {
+	if req.ProfileID != "" || req.LaunchSettings != nil || req.ExecutorID != "" {
 		scope, ok := requireProfileDiscoveryScope(c)
 		if !ok {
 			return

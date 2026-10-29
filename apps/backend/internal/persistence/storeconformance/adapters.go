@@ -84,7 +84,8 @@ func adapterFor(descriptor requiredstores.Descriptor) testconformance.Adapter {
 }
 
 var schemaInitializers = map[string]testconformance.Scenario{
-	"schema-meta":           schemaMeta,
+	sandboxStoreID:          sandboxSchema,
+	schemaMetaStoreID:       schemaMeta,
 	"task":                  taskSchema,
 	"workflow":              workflowSchema,
 	"analytics":             analyticsSchema,

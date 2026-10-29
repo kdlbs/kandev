@@ -309,7 +309,7 @@ function recoveryRequestPayload(options: SessionRecoveryRequest) {
     task_id: taskId,
     session_id: sessionId,
     action,
-    ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
+    ...(errorStamp ? { error_stamp: errorStamp } : {}),
     ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
   };
 }
