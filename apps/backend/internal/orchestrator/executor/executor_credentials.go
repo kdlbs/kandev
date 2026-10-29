@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -642,7 +643,7 @@ func (e *Executor) issueGitCredentialScopeWithProfileEnv(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateGitHubCredentialBrokerURL(e.gitCredentialBrokerURL, req.ExecutorType); err != nil {
+	if err := validateGitCredentialBrokerURLForProvider(e.gitCredentialBrokerURL, req.ExecutorType, repository.Provider); err != nil {
 		return nil, err
 	}
 	scope := gitcredentials.Scope{
@@ -911,6 +912,19 @@ func validateGitHubCredentialBrokerURL(raw, executorType string) error {
 		return fmt.Errorf("%w: HTTPS is required for non-local executors", ErrGitHubCredentialBrokerURL)
 	}
 	return nil
+}
+
+// validateGitCredentialBrokerURLForProvider accepts a loopback http broker for
+// a repository of the e2e-local provider under the e2e profile, where the rig's
+// runtime shares the host; every other repository keeps the HTTPS rule.
+func validateGitCredentialBrokerURLForProvider(raw, executorType, provider string) error {
+	if repoclone.IsE2ELocalProvider(provider) {
+		if parsed, err := url.ParseRequestURI(strings.TrimSpace(raw)); err == nil && parsed.Host != "" &&
+			parsed.User == nil && parsed.Fragment == "" && parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()) {
+			return nil
+		}
+	}
+	return validateGitHubCredentialBrokerURL(raw, executorType)
 }
 
 func isLoopbackHost(host string) bool {

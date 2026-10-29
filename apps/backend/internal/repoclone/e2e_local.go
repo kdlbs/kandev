@@ -19,7 +19,7 @@ const (
 // e2e mock profile; every other provider and profile keeps the HTTPS-only,
 // credentialed clone path.
 func E2ELocalRemote(provider, raw string) (name string, ok bool) {
-	if os.Getenv(e2eMockEnv) != "true" || !strings.EqualFold(strings.TrimSpace(provider), ProviderE2ELocal) {
+	if !IsE2ELocalProvider(provider) {
 		return "", false
 	}
 	parsed, err := url.Parse(strings.TrimSpace(raw))
@@ -31,6 +31,12 @@ func E2ELocalRemote(provider, raw string) (name string, ok bool) {
 		return "", false
 	}
 	return name, true
+}
+
+// IsE2ELocalProvider reports whether provider is the synthetic e2e-local one
+// and the process runs under the e2e mock profile.
+func IsE2ELocalProvider(provider string) bool {
+	return os.Getenv(e2eMockEnv) == "true" && strings.EqualFold(strings.TrimSpace(provider), ProviderE2ELocal)
 }
 
 func isE2ELocalHost(parsed *url.URL) bool {
