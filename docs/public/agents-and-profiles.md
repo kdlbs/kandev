@@ -945,53 +945,71 @@ To stop sharing, clear the option and launch that profile again. That launch rem
 ### Load Copilot plugins for a profile
 
 On a saved Copilot profile, open **Plugins** and choose **Refresh plugins**.
-Kandev runs the profile's selected Copilot CLI with its effective home, path,
-and resolved secret references. The list shows installed plugins, their
-marketplace and version, and the CLI's own enabled status. A plugin that the CLI
-has disabled is still selectable here: this checkbox means "load this plugin
-for this Kandev profile", not "enable it globally".
+Kandev uses the profile's selected managed interactive Copilot CLI with its
+effective home, path, and resolved secret references. The list shows installed
+plugins, their marketplace and version, and the CLI's native enabled status.
+A disabled installed plugin can still be selected for this profile. This
+selection asks Copilot to load the whole plugin for this profile; it does not
+enable the plugin globally.
 
-Kandev can discover installed plugins and save a selection on a profile. Native
-plugin mounting is currently fail-closed: a new local or worktree process with
-a nonempty saved selection returns `policy_unverified`. Kandev has not yet
-established with authenticated native fixtures that an explicit
-`--plugin-dir` mount preserves Copilot's MCP disables and managed prohibitions.
-Discovery, save, Reset, and removal remain available while that qualification
-is outstanding.
+Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
+versions **1.0.88** and **1.0.104**. For a supported version and valid local or
+worktree context, Kandev can prepare a native `--plugin-dir` mount without an
+enterprise-policy qualification gate. `mount_permitted` describes that
+preparation eligibility; it is not policy approval, authentication, or a
+guarantee that a plugin component will load. Kandev uses the runtime selected
+for this profile and does not fall back to an unrelated global CLI or change a
+runtime pin.
 
-When native mounting is enabled, a selection will load the whole plugin through
-Copilot's native `--plugin-dir` support. A plugin can run MCP servers, skills,
-agents, commands, hooks, and other executable components. Loading is additive.
-Copilot can still load other plugins that its own configuration enables, so
-this is not an exclusive whitelist. Review a plugin's publisher and contents
-before selecting it.
+A selection loads the whole plugin through Copilot's native support. A plugin
+can run MCP servers, skills, agents, commands, hooks, and other executable
+components. Loading is additive, not an exclusive whitelist. Copilot can still
+load other plugins its own configuration enables, so review a plugin's
+publisher and contents before selecting it.
 
 Selections are stored on the profile and apply when the next Copilot process
-starts. Saving a profile does not reload or stop a running process; that
-process keeps the plugins it started with. Missing plugins stay visible and can
-be unchecked. A new process does not start while a saved selection is missing,
-unresolvable, or policy-unqualified.
+starts. Saving a profile does not reload or stop a running process; it keeps
+the plugins it started with. Plugin loading is limited to local and worktree
+executions. A nonempty selection cannot start on Docker, SSH, Kubernetes,
+Sprites, or another isolated executor. Clear the selection and Save to continue
+without plugin mounts, or use a local or worktree executor. Empty selections
+keep their existing behavior on every executor.
 
-Profile plugin loading is limited to local and worktree executions. Profiles
-with a nonempty selection cannot start on Docker, SSH, Kubernetes, Sprites, or
-another isolated executor; clear the selection or use a local executor.
-Profiles with no selected plugins keep their existing behavior on every
-executor.
+Unsupported runtimes and execution contexts, missing plugins, and unresolved
+plugin roots remain visible and removable. A new process does not start while
+its selected plugins cannot be prepared; Kandev does not silently omit them.
+If inventory refresh fails, saved choices remain and availability is marked
+unchecked. The profile's normal **Save**, **Reset**, and external-change
+recovery flow applies.
 
-Copilot's native authentication, MCP disables, tool permissions, and managed
-policy remain authoritative. Kandev does not copy credentials, start a login,
-install, enable, disable, or update plugins, or reuse plugin MCP definitions as
-Kandev-managed servers. Use Copilot's own commands for plugin management.
+Older Kandev backends may return the legacy `policy_unverified` reason for a
+profile capability or model-option probe. This is older-backend recovery, not
+the supported-runtime default. To restore model discovery without the
+selection, uncheck the plugins, Save the profile, then refresh models or retry
+model options. This does not enable plugin mounting or change Copilot's native
+policy.
 
-Kandev currently qualifies inventory discovery for managed Copilot 1.0.88 and
-1.0.104. Another selected runtime shows an unsupported message instead of
-falling back to an unrelated global CLI. The command preview shows the base
-command and marks it incomplete when plugin mounts are deferred to process
-start; it never shows resolved host directories.
+Copilot remains responsible for native MCP disables, managed prohibitions,
+component availability, authentication, and tool consent. Kandev does not edit
+native activation or configuration, copy credentials, start a login, install,
+enable, disable, or update plugins, reconstruct plugin MCP definitions, add
+permission-bypass flags, or retry a native rejection under another runtime,
+home, transport, or identity. Use Copilot's own commands for plugin management.
 
-If refresh fails, Kandev keeps your saved choices and says availability was not
-checked. You can still remove a choice. The profile's normal **Save**, **Reset**,
-and external-change recovery flow applies to plugin changes.
+The command preview is deferred because plugin roots are resolved at process
+start. It shows the base command and selected plugin identities, marks that
+preview incomplete for the selected plugin launch, and never exposes resolved
+host directories or a runnable `--plugin-dir` command.
+
+Native diagnostics are limited and do not certify enterprise policy. Eight
+full native acceptance attempts exited nonzero. A corrected 1.0.104 diagnostic
+observed real calls and successful results from a plugin, a sibling plugin,
+native-config MCP, and an ACP-injected MCP. In the disable observation, the
+target received no traffic while an allowed sibling succeeded, but no
+authoritative denial was captured. Copilot 1.0.88 reached the endpoints, but
+its paired disable case was not reached. Managed policy was not tested. These
+observations are not evidence of enterprise-policy enforcement or
+certification.
 
 <details>
 <summary>Configure workspace MCP servers</summary>

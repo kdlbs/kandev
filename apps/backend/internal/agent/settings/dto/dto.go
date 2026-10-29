@@ -606,6 +606,7 @@ type CommandPreviewResponse struct {
 type DynamicModelsResponse struct {
 	AgentName       string              `json:"agent_name"`
 	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	ReasonCode      string              `json:"reason_code,omitempty"`
 	Models          []ModelEntryDTO     `json:"models"`
 	CurrentModelID  string              `json:"current_model_id,omitempty"`
 	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
@@ -655,6 +656,7 @@ type AgentModelConfigResponse struct {
 	AgentName       string            `json:"agent_name"`
 	Model           string            `json:"model"`
 	Status          string            `json:"status"`
+	ReasonCode      string            `json:"reason_code,omitempty"`
 	ConfigOptions   []ConfigOptionDTO `json:"config_options"`
 	Error           *string           `json:"error"`
 	ContextRevision string            `json:"context_revision,omitempty"`

@@ -246,6 +246,7 @@ export type ModelDiscovery = {
 export type DynamicModelsResponse = {
   agent_name: string;
   status: CapabilityStatus;
+  reason_code?: string;
   models: ModelEntry[];
   current_model_id?: string;
   modes?: ModeEntry[];
@@ -272,6 +273,7 @@ export type AgentModelConfigResponse = {
   agent_name: string;
   model: string;
   status: CapabilityStatus;
+  reason_code?: string;
   config_options: ConfigOptionEntry[];
   error: string | null;
   context_revision?: string;

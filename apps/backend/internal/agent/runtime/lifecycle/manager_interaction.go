@@ -1658,6 +1658,14 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	if preparation.profileInfo != nil {
+		_ = m.executionStore.WithLock(executionID, func(current *AgentExecution) {
+			if preparation.profileInfo.ProfileID != "" {
+				current.ExecutionProfileID = preparation.profileInfo.ProfileID
+			}
+			current.CopilotSelectedPlugins = append([]string{}, preparation.profileInfo.CopilotSelectedPlugins...)
+		})
+	}
 	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
@@ -1677,7 +1685,7 @@ func (m *Manager) restartAgentProcess(
 	m.stopAgentProcessForRestart(ctx, execution)
 
 	// 3. Reset execution state after the replacement command has been validated.
-	m.resetAgentRestartState(executionID, preparation.commands)
+	m.resetAgentRestartState(executionID, preparation)
 
 	// 4. Wait for agentctl to be ready (it should still be running)
 	client, releaseClient = execution.AcquireAgentCtlClient()
@@ -1697,9 +1705,15 @@ func (m *Manager) restartAgentProcess(
 	}
 
 	// 5. Reconfigure and start new agent subprocess
-	if _, err := m.configureAndStartAgentWithMCP(ctx, execution, preparation.agentConfig, operation); err != nil {
-		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
-		return fmt.Errorf("failed to restart agent: %w", err)
+	var configureErr error
+	if preparation.copilotPluginArgsPrepared {
+		_, configureErr = m.configureAndStartAgentWithPreparedArgs(ctx, execution, preparation.copilotPluginArgs)
+	} else {
+		_, configureErr = m.configureAndStartAgentWithMCP(ctx, execution, preparation.agentConfig, operation)
+	}
+	if configureErr != nil {
+		m.updateExecutionError(executionID, "failed to restart agent: "+configureErr.Error())
+		return fmt.Errorf("failed to restart agent: %w", configureErr)
 	}
 
 	// 6. Wait for agent process to initialize
@@ -1759,10 +1773,13 @@ func (m *Manager) stopAgentProcessForRestart(ctx context.Context, execution *Age
 }
 
 type agentRestartPreparation struct {
-	agentConfig   agents.Agent
-	profileInfo   *AgentProfileInfo
-	commands      agentCommands
-	runtimeConfig models.SessionRuntimeConfig
+	agentConfig               agents.Agent
+	profileInfo               *AgentProfileInfo
+	commands                  agentCommands
+	runtimeConfig             models.SessionRuntimeConfig
+	copilotPluginArgs         []string
+	copilotPluginArgsPrepared bool
+	runtimeEnvironment        map[string]string
 }
 
 // prepareAgentRestart builds and validates the replacement before touching the current process.
@@ -1784,9 +1801,25 @@ func (m *Manager) prepareAgentRestart(
 	if err != nil {
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
-	if profileInfo != nil {
-		execution.ExecutionProfileID = profileInfo.ProfileID
-		execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
+	var copilotPluginArgs []string
+	var runtimeEnvironment map[string]string
+	copilotPluginArgsPrepared := agentConfig.ID() == agents.CopilotACPAgentID
+	if copilotPluginArgsPrepared {
+		runtimeEnvironment, err = m.copilotPluginPreflightEnvironment(ctx, execution, profileInfo)
+		if err != nil {
+			return agentRestartPreparation{}, fmt.Errorf("failed to prepare agent environment for reset: %w", err)
+		}
+		var selected []string
+		if profileInfo != nil {
+			selected = profileInfo.CopilotSelectedPlugins
+		}
+		copilotPluginArgs, err = m.prepareCopilotPluginArgsForSelection(
+			ctx, execution, runtimeEnvironment, commands.args, selected,
+		)
+		if err != nil {
+			return agentRestartPreparation{}, err
+		}
+		copilotPluginArgs = append([]string{}, copilotPluginArgs...)
 	}
 	var runtimeConfig models.SessionRuntimeConfig
 	if runtimeConfigOverride == nil {
@@ -1795,10 +1828,13 @@ func (m *Manager) prepareAgentRestart(
 		runtimeConfig = cloneSessionRuntimeConfig(*runtimeConfigOverride)
 	}
 	return agentRestartPreparation{
-		agentConfig:   agentConfig,
-		profileInfo:   profileInfo,
-		commands:      commands,
-		runtimeConfig: runtimeConfig,
+		agentConfig:               agentConfig,
+		profileInfo:               profileInfo,
+		commands:                  commands,
+		runtimeConfig:             runtimeConfig,
+		copilotPluginArgs:         copilotPluginArgs,
+		copilotPluginArgsPrepared: copilotPluginArgsPrepared,
+		runtimeEnvironment:        runtimeEnvironment,
 	}, nil
 }
 
@@ -1810,7 +1846,8 @@ func cloneSessionRuntimeConfig(config models.SessionRuntimeConfig) models.Sessio
 	}
 }
 
-func (m *Manager) resetAgentRestartState(executionID string, commands agentCommands) {
+func (m *Manager) resetAgentRestartState(executionID string, preparation agentRestartPreparation) {
+	commands := preparation.commands
 	if execution, exists := m.executionStore.Get(executionID); exists && execution.contextResetFencedState() {
 		// The old reset outcome is fenced until this explicit restart owns the
 		// replacement. Streams are closed before this state reset, so setup
@@ -1831,6 +1868,10 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
 		exec.LaunchWrapper = commands.wrapper
+		if preparation.copilotPluginArgsPrepared {
+			exec.AgentArgs = append([]string{}, preparation.copilotPluginArgs...)
+			exec.setRuntimeEnvironment(preparation.runtimeEnvironment)
+		}
 		m.resetStreamingStateWithHistory(exec)
 		select {
 		case <-exec.promptDoneCh:

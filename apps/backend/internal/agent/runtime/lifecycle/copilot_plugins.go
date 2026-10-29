@@ -27,6 +27,19 @@ func (m *Manager) prepareCopilotPluginArgs(
 	if err != nil {
 		return nil, err
 	}
+	return m.prepareCopilotPluginArgsForSelection(ctx, execution, env, baseArgs, selection)
+}
+
+func (m *Manager) prepareCopilotPluginArgsForSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	env map[string]string,
+	baseArgs []string,
+	selection []string,
+) ([]string, error) {
+	if execution == nil || execution.AgentID != agents.CopilotACPAgentID {
+		return baseArgs, nil
+	}
 	if len(selection) == 0 {
 		return baseArgs, nil
 	}
@@ -63,7 +76,49 @@ func (m *Manager) prepareCopilotPluginArgs(
 	return args, nil
 }
 
+func (m *Manager) copilotPluginPreflightEnvironment(
+	ctx context.Context,
+	execution *AgentExecution,
+	profileInfo *AgentProfileInfo,
+) (map[string]string, error) {
+	metadataEnv := runtimeEnvFromMetadata(execution.MetadataSnapshot())
+	snapshot := execution.RuntimeEnvironment()
+	var env map[string]string
+	switch {
+	case snapshot == nil:
+		env = cloneStringMap(metadataEnv)
+		if env == nil {
+			env = make(map[string]string)
+		}
+		var err error
+		if profileInfo != nil {
+			err = m.mergeAgentProfileEnvFromInfoWithPartial(ctx, profileInfo, env, false)
+		} else {
+			err = m.mergeAgentProfileEnvForExecution(ctx, execution, env)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent profile environment: %w", err)
+		}
+	case !hasRuntimeEnvOverlay(execution.MetadataSnapshot()):
+		env = snapshot
+	default:
+		var err error
+		env, err = composeExecutionRuntimeEnvironment(snapshot, metadataEnv)
+		if err != nil {
+			return nil, fmt.Errorf("compose agent env: %w", err)
+		}
+	}
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
+	if err := spillLargeWakePayloadEnv(env, execution.WorkspacePath, m.logger.Zap()); err != nil {
+		return nil, fmt.Errorf("failed to prepare agent env: %w", err)
+	}
+	return env, nil
+}
+
 func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentExecution) ([]string, error) {
+	if execution.CopilotSelectedPlugins != nil {
+		return append([]string(nil), execution.CopilotSelectedPlugins...), nil
+	}
 	profileID := execution.ExecutionProfileID
 	if profileID == "" {
 		// Legacy sessions may not carry the concrete profile identity. Agent
@@ -76,9 +131,9 @@ func (m *Manager) copilotPluginSelection(ctx context.Context, execution *AgentEx
 	if m.profileResolver == nil {
 		return nil, &copilotplugins.Error{Reason: copilotplugins.ReasonMetadataUnavailable}
 	}
-	// Resolve the profile on every new process. A resume or relaunch after a
-	// profile edit must use the saved selection rather than an execution
-	// snapshot from an earlier launch.
+	// Older executions may not have captured a selection. Resolve those once
+	// and retain the result so command, environment, and mounts share a profile
+	// revision on subsequent process boundaries.
 	profile, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve copilot plugin profile: %w", err)
@@ -157,8 +212,21 @@ func (m *Manager) applyPassthroughCopilotPlugins(
 		return nil
 	}
 	selection := execution.CopilotSelectedPlugins
-	if profile != nil {
+	if selection == nil && profile != nil {
 		selection = profile.CopilotSelectedPlugins
+	}
+	return m.applyPassthroughCopilotPluginsForSelection(ctx, execution, cmd, env, selection)
+}
+
+func (m *Manager) applyPassthroughCopilotPluginsForSelection(
+	ctx context.Context,
+	execution *AgentExecution,
+	cmd *passthroughCommand,
+	env map[string]string,
+	selection []string,
+) error {
+	if execution == nil || cmd == nil || execution.AgentID != agents.CopilotACPAgentID {
+		return nil
 	}
 	if len(selection) == 0 {
 		return nil

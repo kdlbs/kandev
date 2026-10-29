@@ -88,11 +88,15 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	}
 	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, req.Context, inst.workDir, command.Args())
 	if err != nil {
+		status := profileCopilotPluginStatus(err)
 		caps := AgentCapabilities{
-			AgentType: inst.agentType, Status: profileCopilotPluginStatus(err),
+			AgentType: inst.agentType, Status: status,
 			Error: err.Error(), LastCheckedAt: time.Now(),
 		}
-		return ProfileCapabilityResult{Capabilities: caps, ContextRevision: revision}, nil
+		return ProfileCapabilityResult{
+			Capabilities: caps, ContextRevision: revision,
+			ReasonCode: profileCopilotPluginReasonCode(inst.agentType, status, err),
+		}, nil
 	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
@@ -221,10 +225,12 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	}
 	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, *req.ProfileContext, inst.workDir, command.Args())
 	if err != nil {
+		status := profileCopilotPluginStatus(err)
 		resolution := ModelConfigResolution{
 			AgentType: inst.agentType, Model: req.Model,
-			Status: profileCopilotPluginStatus(err), Error: err.Error(),
+			Status: status, Error: err.Error(),
 			ContextRevision: revision,
+			ReasonCode:      profileCopilotPluginReasonCode(inst.agentType, status, err),
 		}
 		return resolution, nil
 	}

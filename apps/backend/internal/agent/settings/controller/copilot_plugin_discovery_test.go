@@ -91,6 +91,28 @@ func TestCopilotPluginDiscoveryReturnsSafeRows(t *testing.T) {
 	}
 }
 
+func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
+	ctrl, _, profileID := newCopilotDiscoveryController(t)
+	runner := &recordingCopilotRunner{stdout: []byte(`[]`)}
+	ctrl.copilotPluginRunnerImpl = runner
+
+	got, err := ctrl.DiscoverCopilotPlugins(context.Background(), "agent-row-1", dto.CopilotPluginDiscoveryRequest{
+		ProfileID: profileID, AuthorizationScope: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("DiscoverCopilotPlugins: %v", err)
+	}
+	if got.Status != "ready" || !got.MountPermitted {
+		t.Fatalf("supported inventory must permit native mounts: %#v", got)
+	}
+	if got.RuntimeVersion != "1.0.88" || !copilotplugins.RuntimeSupported(got.RuntimeVersion) {
+		t.Fatalf("discovery runtime = %q, want the supported default", got.RuntimeVersion)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("discovery ran %d inventory commands, want one", len(runner.calls))
+	}
+}
+
 func TestCopilotPluginDiscoveryRejectsForeignAgent(t *testing.T) {
 	ctrl, st, _ := newCopilotDiscoveryController(t)
 	other := &models.Agent{ID: "agent-row-2", Name: "claude-acp"}

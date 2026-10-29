@@ -38,6 +38,8 @@ const discovery: CopilotPluginDiscoveryResponse = {
   profile_id: "profile-1",
   provider_id: "copilot-acp",
   status: "ready",
+  runtime_version: "1.0.88",
+  mount_permitted: true,
   plugins: [
     {
       id: sparkPluginId,
@@ -111,16 +113,20 @@ describe("CopilotPluginProfileSelection", () => {
     expect(onSelectedPluginsChange).toHaveBeenCalledWith([]);
   });
 
-  it("reports a missing saved plugin and blocks adding new rows", () => {
+  it("reports and allows removal of a missing saved plugin", () => {
     mocks.discovery = {
       status: "ready",
       response: { ...discovery, plugins: [] },
       stale: false,
     };
-    renderSelection(["installed:missing/plugin"]);
+    const { onSelectedPluginsChange } = renderSelection(["installed:missing/plugin"]);
     expect(screen.getByText(/Plugin is missing/)).toBeTruthy();
     expect(screen.getByText(/A new process cannot start with this selection/)).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Select browser-use" })).toBeNull();
+    const missing = screen.getByRole("checkbox", { name: "Select plugin" });
+    expect(missing.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(missing);
+    expect(onSelectedPluginsChange).toHaveBeenCalledWith([]);
   });
 
   it("explains stale launch settings without allowing new selections", () => {
@@ -149,24 +155,48 @@ describe("CopilotPluginProfileSelection", () => {
   });
 });
 
-it("warns that a selected plugin blocks new processes while mounting is unverified", () => {
+// @covers AC-AGENTS-COPILOT-PLUGINS-005.8, AC-AGENTS-COPILOT-PLUGINS-006.2, AC-AGENTS-COPILOT-PLUGINS-006.3
+it("keeps a selected plugin removable when the launch context cannot mount it", () => {
   mocks.discovery = {
     status: "ready",
     response: { ...discovery, mount_permitted: false },
     stale: false,
   };
-  renderSelection([sparkPluginId]);
-  expect(screen.getByTestId("copilot-plugins-start-blocked").textContent).toContain(
-    "A new process cannot start with this selection.",
-  );
+  const { onSelectedPluginsChange } = renderSelection([sparkPluginId]);
+  const warning = screen.getByTestId("copilot-plugins-start-blocked").textContent ?? "";
+  expect(warning).toContain("A new process cannot start with this selection.");
+  expect(warning).toMatch(/uncheck.+save/i);
+  const checkbox = screen.getByRole("checkbox", { name: sparkCheckboxName });
+  expect(checkbox.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(checkbox);
+  expect(onSelectedPluginsChange).toHaveBeenCalledWith([]);
 });
 
-it("omits the start-blocked warning once mounting is permitted", () => {
-  mocks.discovery = {
-    status: "ready",
-    response: { ...discovery, mount_permitted: true },
-    stale: false,
-  };
+// @covers AC-AGENTS-COPILOT-PLUGINS-005.8, AC-AGENTS-COPILOT-PLUGINS-006.2
+it("omits the start-blocked warning for the supported default discovery", () => {
+  mocks.discovery = { status: "ready", response: discovery, stale: false };
   renderSelection([sparkPluginId]);
   expect(screen.queryByTestId("copilot-plugins-start-blocked")).toBeNull();
+});
+
+// @covers AC-AGENTS-COPILOT-PLUGINS-005.8, AC-AGENTS-COPILOT-PLUGINS-006.2, AC-AGENTS-COPILOT-PLUGINS-006.3
+it("keeps a saved plugin removable when the runtime is unsupported", () => {
+  mocks.discovery = {
+    status: "unsupported",
+    response: {
+      ...discovery,
+      status: "unsupported",
+      runtime_version: "unsupported-fixture",
+      mount_permitted: false,
+      plugins: [],
+    },
+    stale: false,
+  };
+  const { onSelectedPluginsChange } = renderSelection([sparkPluginId]);
+  expect(screen.getByTestId("copilot-plugins-unsupported")).toBeTruthy();
+  expect(screen.getByTestId("copilot-plugins-start-blocked")).toBeTruthy();
+  const spark = screen.getByRole("checkbox", { name: sparkCheckboxName });
+  expect(spark.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(spark);
+  expect(onSelectedPluginsChange).toHaveBeenCalledWith([]);
 });
