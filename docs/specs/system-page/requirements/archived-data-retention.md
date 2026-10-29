@@ -170,9 +170,11 @@ pass, so that the policy cannot quietly consume the database or the writer.
   shall wait for a completed, verified backup. Failure, cancellation, or an
   interrupted preparation shall block cleanup.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-004.4:** Each batch shall be bounded by
-  row count and byte budget, and a single row above the oversize ceiling shall be
-  skipped intact. A pass shall recheck eligibility inside the writer transaction
-  and end the pass when the database schema changed under it.
+  row count and byte budget. A single larger row counts as one batch up to the
+  oversize ceiling, so a row bigger than the byte budget is admitted alone rather
+  than stalling the pass, and a row above the oversize ceiling shall be skipped
+  intact. A pass shall recheck eligibility inside the writer transaction and end
+  the pass when the database schema changed under it.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-004.5:** No batch shall run while
   backup, restore, reset, or compaction owns the shared maintenance admission.
   Reset and restore shall stop this worker before they proceed.

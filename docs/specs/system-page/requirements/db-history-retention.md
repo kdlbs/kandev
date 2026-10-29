@@ -119,10 +119,12 @@ without deleting conversations.
   the previous metadata value so a concurrent writer wins instead of being
   overwritten.
 - **AC-SYSTEM-PAGE-DB-HISTORY-RETENTION-001.7:** A pass shall be bounded by row
-  count, a byte budget, and a per-statement budget. A row above the oversize
+  count, a byte budget, and a per-statement budget. A single larger row counts as
+  one batch up to the oversize ceiling, so a row bigger than the byte budget is
+  admitted alone rather than stalling the pass, and a row above the oversize
   ceiling shall be skipped intact and counted. A pass that cannot complete an
-  eligibility decision shall fail closed: it retains the affected rows and
-  reports the pass as partial, never complete.
+  eligibility decision shall fail closed: it retains the affected rows and reports
+  the pass as partial, never complete.
 
 ### REQ-SYSTEM-PAGE-DB-HISTORY-RETENTION-002: Reduce completed cleanup-job snapshots on the same pass
 

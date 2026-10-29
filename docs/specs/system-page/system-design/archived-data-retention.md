@@ -162,9 +162,13 @@ intact.
 ## Bounds and observability
 
 A batch is bounded at 100 rows and 8 MiB, with a 200 ms per-statement budget. A
-single row above the 32 MiB `models.ToolPayloadMaxBytes` ceiling is skipped
-intact and counted as oversize. Both targets share one batch budget so neither
-can consume the whole pass and starve the other. A running pass continues in
+single larger row counts as one batch up to the 32 MiB
+`models.ToolPayloadMaxBytes` ceiling, so a row bigger than the 8 MiB budget is
+admitted alone instead of stalling the pass; a row above that ceiling is skipped
+intact and counted as oversize. The shared budget fits a row when `used == 0` or
+`size <= batchBytes - used`, matching the tool-payload batch contract. Both
+targets share one batch budget so neither can consume the whole pass and starve
+the other. A running pass continues in
 short bursts for at most 30 s of wall clock, then returns to a one-minute idle
 tick; the next pass is due 24 h after a complete pass.
 
