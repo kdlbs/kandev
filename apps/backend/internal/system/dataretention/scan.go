@@ -387,13 +387,15 @@ func (s *Service) reduceCleanupJob(ctx context.Context, q sqlx.QueryerContext, r
 	if err != nil {
 		return false, err
 	}
+	// The row was read either way, so it counts as scanned before eligibility
+	// decides whether it is credited or skipped.
+	target.Rows++
+	target.TotalBytes += bytes
 	if !eligible {
 		r.Operation.CleanupJobs.Skipped[skipProtectedTasks]++
 		finishCleanupJob(&r.Progress)
 		return false, nil
 	}
-	target.Rows++
-	target.TotalBytes += bytes
 	*used += bytes
 	reduced, err := models.ReduceCleanupSnapshot(snapshot, r.Operation.StartedAt)
 	if err != nil {

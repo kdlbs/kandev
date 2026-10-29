@@ -103,6 +103,9 @@ func (s *Service) Cancel(ctx context.Context, id string) (Status, error) {
 			return nil
 		}
 		finishOperation(r, stateCancelled, "cancelled", s.opts.Now())
+		// An enabled policy must keep checking daily, so a cancelled cleanup pass
+		// reschedules the next pass instead of leaving NextDueAt empty.
+		scheduleNextPass(r, s.opts.Now())
 		return nil
 	})
 	if err != nil {
