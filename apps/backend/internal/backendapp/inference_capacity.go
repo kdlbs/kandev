@@ -48,6 +48,12 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	} else if request.CallID == "" {
 		request.CallID = uuid.NewString()
 	}
+	all, finite := b.capacity.InferenceCapacityPolicy()
+	if !all || !finite {
+		// Optional capacity modes keep the native inference path; the shared
+		// binding store must not block a prompt when the policy is off.
+		return client.InferencePrompt(ctx, &request)
+	}
 	b.refreshMu.Lock()
 	prepared, err := client.PrepareInferenceCapacityAttempt(ctx, request.CallID)
 	if err == nil {
@@ -64,7 +70,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	binding := b.newBinding(ctx, prepared, identity, &request)
 	defer b.markWorker(binding.Key, false)
 	defer b.cancelUnsentPrepared(client, binding)
-	if all, finite := b.capacity.InferenceCapacityPolicy(); !prepared.Retained && all && finite {
+	if !prepared.Retained {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "ownership_retention_unsupported", Cause: agentruntime.ErrInferenceOwnershipUnsupported}
 	}
 	if err := b.waitInferenceCapacity(ctx, client, binding, identity); err != nil {
