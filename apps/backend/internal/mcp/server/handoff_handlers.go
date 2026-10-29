@@ -3,11 +3,38 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// backendErrorToolResult converts a BackendClient.RequestPayload failure into
+// a CallToolResult. When the backend returned a structured websocket error
+// (BackendError), its code/message/details survive the MCP callable boundary
+// as both JSON text content and StructuredContent, so a caller can branch on
+// a stable machine-readable reason (e.g. details.reason=
+// related_task_scope_required) instead of only matching a flattened error
+// string. Errors without structured details fall back to the plain message.
+func backendErrorToolResult(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) && len(backendErr.Details) > 0 {
+		payload := map[string]interface{}{
+			"code":    backendErr.Code,
+			"message": backendErr.Message,
+			"details": backendErr.Details,
+		}
+		if data, marshalErr := json.MarshalIndent(payload, "", "  "); marshalErr == nil {
+			return &mcp.CallToolResult{
+				Content:           []mcp.Content{mcp.TextContent{Type: mcp.ContentTypeText, Text: string(data)}},
+				StructuredContent: payload,
+				IsError:           true,
+			}
+		}
+	}
+	return mcp.NewToolResultError(err.Error())
+}
 
 // registerRelatedTasksTool registers list_related_tasks_kandev, which lets an
 // agent discover parent / child / sibling / blocker task IDs. Useful in both
@@ -22,6 +49,19 @@ func (s *Server) registerRelatedTasksTool() {
 				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
 		),
 		s.wrapHandler("list_related_tasks_kandev", s.listRelatedTasksHandler()),
+	)
+}
+
+// registerTaskVisibilityTool registers the compact lifecycle projection for a
+// manual session's same-workspace task lookup. The caller identity and scope are
+// derived from the MCP profile, never supplied by the tool caller.
+func (s *Server) registerTaskVisibilityTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_visibility_kandev",
+			mcp.WithDescription("Get a compact task lifecycle/disposition receipt for an exact task in the caller's workspace. Requires an exact manual-session visibility grant. Returns no descriptions, documents, sessions, or task metadata. Foreign and unavailable targets are intentionally indistinguishable."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact target task UUID.")),
+		),
+		s.wrapHandler("get_task_visibility_kandev", s.getTaskVisibilityHandler()),
 	)
 }
 
@@ -89,6 +129,31 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 		}
 		if !req.GetBool("verbose", false) {
 			stripRelatedTaskDescriptions(result)
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) getTaskVisibilityHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString("task_id")
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		if s.taskID == "" || s.sessionID == "" {
+			return backendErrorToolResult(&BackendError{
+				Code: ws.ErrorCodeForbidden, Message: "task visibility access denied",
+				Details: map[string]interface{}{"reason": "target_unavailable"},
+			}), nil
+		}
+		payload := map[string]string{
+			"task_id": taskID, "caller_task_id": s.taskID, "caller_session_id": s.sessionID,
+			"mcp_surface": string(s.Profile().Surface), "related_read_scope": "task-visibility",
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskVisibility, payload, &result); err != nil {
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil

@@ -238,6 +238,14 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
+	if surface == mcpprofile.SurfaceKanbanTask && session != nil && session.ID != "" {
+		storedSession, lookupErr := e.repo.GetTaskSession(ctx, session.ID)
+		if lookupErr != nil {
+			e.logger.Warn("task visibility MCP capability unavailable", zap.Error(lookupErr))
+		} else if models.HasTaskVisibilityGrant(task, storedSession) {
+			capabilities = append(capabilities, mcpprofile.CapabilityTaskVisibilityRead)
+		}
+	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 

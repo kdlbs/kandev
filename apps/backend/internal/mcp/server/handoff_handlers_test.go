@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -93,4 +95,39 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	required, _ := parsed["required"].([]interface{})
 	assert.NotContains(t, required, "verbose")
 	assert.Contains(t, tool.Tool.Description, "verbose=true")
+}
+
+// A visibility lookup is deliberately a separate compact tool. A granted
+// manual task gets only this tool, while caller identity stays backend-owned.
+func TestGetTaskVisibilityToolRequiresExplicitCapabilityAndTakesOnlyTaskID(t *testing.T) {
+	profile := mcpprofile.New(mcpprofile.SurfaceOfficeTask, nil, nil)
+	office := NewWithProfile(&testBackend{}, "session-A", "caller-A", 10005, newTestLogger(t), "", false, profile)
+	_, ok := office.mcpServer.ListTools()["get_task_visibility_kandev"]
+	require.False(t, ok)
+
+	manualProfile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityTaskVisibilityRead,
+	}, nil)
+	manual := NewWithProfile(&testBackend{}, "session-A", "caller-A", 10005, newTestLogger(t), "", false, manualProfile)
+	props := toolInputProperties(t, manual, "get_task_visibility_kandev")
+	assert.Contains(t, props, "task_id")
+	assert.NotContains(t, props, "caller_task_id")
+	assert.NotContains(t, props, "caller_session_id")
+	assert.NotContains(t, props, "workspace_id")
+	assert.NotContains(t, props, "related_read_scope")
+
+	kanban := newTaskModeServer(t, &testBackend{}, "caller-A")
+	assert.NotContains(t, kanban.mcpServer.ListTools(), "get_task_visibility_kandev")
+	backend := &testBackend{response: map[string]interface{}{"task_id": "target"}}
+	manual = NewWithProfile(backend, "session-A", "caller-A", 10005, newTestLogger(t), "", false, manualProfile)
+	assert.Contains(t, manual.mcpServer.ListTools(), "get_task_visibility_kandev")
+	props = toolInputProperties(t, manual, "get_task_visibility_kandev")
+	assert.Equal(t, map[string]interface{}{"task_id": props["task_id"]}, props)
+	result := callTool(t, manual, "get_task_visibility_kandev", map[string]interface{}{"task_id": "target"})
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "task-visibility", payload["related_read_scope"])
+	assert.Equal(t, "caller-A", payload["caller_task_id"])
+	assert.Equal(t, "session-A", payload["caller_session_id"])
 }

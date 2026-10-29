@@ -781,6 +781,9 @@ func (r *Repository) updateTaskTransferPlacement(
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return 0, fmt.Errorf("%w: source predicate changed", repoerrors.ErrTaskTransferConflict)
 	}
+	if err := r.recordTaskLifecycleReceiptForCurrentTask(ctx, tx, command.TaskID, "active", "move", transferredAt); err != nil {
+		return 0, err
+	}
 	attribution := steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerTaskTransfer, ActorID: command.Actor.ID, SessionID: command.Actor.SessionID,
 	}

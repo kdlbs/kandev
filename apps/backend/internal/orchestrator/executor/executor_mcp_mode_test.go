@@ -220,6 +220,38 @@ func TestResolveTaskSessionMCPMode_TitlePendingDoesNotOverrideRestrictedModes(t 
 	require.Equal(t, McpModeOffice, mode)
 }
 
+func TestResolveTaskSessionMCPProfile_VisibilityGrantIsSessionBound(t *testing.T) {
+	repo := newMockRepository()
+	task := &models.Task{ID: "manual-coordinator", WorkspaceID: "workspace-a", Origin: models.TaskOriginManual}
+	grant := models.TaskVisibilityGrant{Version: 1, TaskID: task.ID, SessionID: "approved", WorkspaceID: task.WorkspaceID}
+	approved := &models.TaskSession{ID: "approved", TaskID: task.ID, Metadata: map[string]interface{}{
+		models.SessionMetaKeyTaskVisibilityGrant: grant,
+	}}
+	ordinary := &models.TaskSession{ID: "ordinary", TaskID: task.ID, AgentProfileID: approved.AgentProfileID}
+	repo.tasks[task.ID] = task
+	repo.sessions[approved.ID] = approved
+	repo.sessions[ordinary.ID] = ordinary
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	for _, tt := range []struct {
+		session *models.TaskSession
+		want    bool
+	}{{approved, true}, {ordinary, false}} {
+		profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), task.ID, tt.session, false)
+		require.NoError(t, err)
+		require.Equal(t, mcpprofile.SurfaceKanbanTask, profile.Surface)
+		require.Equal(t, tt.want, profile.HasCapability(mcpprofile.CapabilityTaskVisibilityRead))
+	}
+	forged := *ordinary
+	forged.Metadata = approved.Metadata
+	profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), task.ID, &forged, false)
+	require.NoError(t, err)
+	require.False(t, profile.HasCapability(mcpprofile.CapabilityTaskVisibilityRead))
+	delete(repo.sessions, approved.ID)
+	profile, err = exec.resolveTaskSessionMCPProfile(context.Background(), task.ID, approved, false)
+	require.NoError(t, err)
+	require.False(t, profile.HasCapability(mcpprofile.CapabilityTaskVisibilityRead))
+}
+
 // The executor names the agentctl wire values a second time — this package
 // must not import the agentctl-side MCP server. Pin the literals so a rename
 // or a new mode on either side is a test failure here rather than an HTTP 400

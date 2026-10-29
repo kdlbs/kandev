@@ -23,6 +23,7 @@ var transferWorkspaceProjections = []transferWorkspaceProjection{
 	{table: "task_completion_gate_history", taskColumn: "task_id"},
 	{table: "task_completion_gate_operations", taskColumn: "task_id"},
 	{table: "task_completion_sets", taskColumn: "task_id"},
+	{table: "task_lifecycle_receipts", taskColumn: "task_id"},
 	{table: "task_management_claims", taskColumn: "task_id"},
 	{table: "task_management_claim_history", taskColumn: "task_id"},
 	{table: "office_deferred_assignments", taskColumn: "task_id"},

@@ -7,6 +7,9 @@ import (
 
 	"go.uber.org/zap"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -30,6 +33,53 @@ func (h *Handlers) SetHandoffService(svc *service.HandoffService) {
 		svc.SetTaskAccessChecker(nil)
 	}
 
+}
+
+type taskVisibilityPayload struct {
+	TaskID           string `json:"task_id"`
+	CallerTaskID     string `json:"caller_task_id"`
+	CallerSessionID  string `json:"caller_session_id"`
+	RelatedReadScope string `json:"related_read_scope"`
+	MCPSurface       string `json:"mcp_surface"`
+}
+
+// handleGetTaskVisibility dispatches mcp.get_task_visibility. It shares the
+// related-read attestation envelope so raw callers cannot forge workspace
+// authority or a caller task identity.
+func (h *Handlers) handleGetTaskVisibility(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if h.handoffSvc == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "handoff service not configured", nil)
+	}
+	var req taskVisibilityPayload
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || principal.CallerTaskID != req.CallerTaskID ||
+		principal.CallerSessionID != req.CallerSessionID ||
+		string(principal.Surface) != req.MCPSurface || principal.WorkspaceID == "" ||
+		!visibilityScopeAuthorized(principal, service.RelatedReadScope(req.RelatedReadScope)) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target unavailable", map[string]interface{}{"reason": "target_unavailable"})
+	}
+	visibility, err := h.handoffSvc.GetTaskVisibilityForRequest(ctx, service.RelatedReadRequest{
+		CallerTaskID: req.CallerTaskID, CallerWorkspaceID: principal.WorkspaceID,
+		TargetTaskID: req.TaskID, Scope: service.RelatedReadScope(req.RelatedReadScope),
+	})
+	if err != nil {
+		if reason, ok := service.RelatedReadDenialReasonFor(err); ok {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target unavailable", map[string]interface{}{"reason": string(reason)})
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task visibility lookup failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, visibility)
+}
+
+func visibilityScopeAuthorized(principal mcpscope.Principal, readScope service.RelatedReadScope) bool {
+	return readScope == service.RelatedReadScopeTaskVisibility &&
+		principal.Surface == mcpprofile.SurfaceKanbanTask && principal.TaskVisibilityGrant
 }
 
 // handleListRelatedTasks dispatches mcp.list_related_tasks.
