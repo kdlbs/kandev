@@ -147,7 +147,7 @@ publishes the resource. Recover results for `found` resources must carry `state_
 and the cleanup path. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
 provisioned, the launch destroys that resource directly (claim operation ID, `not_attempted` drain) and reports
 whether it was removed. Provider calls that need the cluster credential (attach, inspect, resolve, tunnel open)
-reveal recorded secrets on each call; none is persisted or logged. Under the e2e mock profile only, a `file://` or
+resolve recorded secrets on each call; the host does not write them into the inventory and rejects provider state that echoes one. Under the e2e mock profile only, a `file://` or
 loopback-host remote parses as the synthetic `e2e-local` provider so a local rig can use a repository; production
 keeps the provider allowlist.
 
