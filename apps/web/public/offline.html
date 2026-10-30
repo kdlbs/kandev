@@ -69,9 +69,10 @@
   <body>
     <main>
       <img src="/web-app-manifest-192x192.png" alt="" width="72" height="72" />
-      <h1>You are offline</h1>
-      <p>Kandev needs a connection to your server. Check your network, then try again.</p>
-      <button type="button" onclick="location.reload()">Try again</button>
+      <h1 id="offline-title"></h1>
+      <p id="offline-description"></p>
+      <button id="offline-retry" type="button" onclick="location.reload()"></button>
     </main>
+    <!-- OFFLINE_COPY_SCRIPT -->
   </body>
 </html>

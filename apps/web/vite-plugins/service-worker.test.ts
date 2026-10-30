@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { computeBuildId, shellAssetsFromHtml } from "./service-worker";
+import { computeBuildId, createOfflineCopyScript, shellAssetsFromHtml } from "./service-worker";
 
 describe("shellAssetsFromHtml", () => {
   it("collects the entry script and stylesheets, skipping modulepreload and external URLs", () => {
@@ -11,6 +11,17 @@ describe("shellAssetsFromHtml", () => {
       <link rel="modulepreload" href="/assets/vendor-123.js">
       <link rel="icon" href="/icon.svg"><script src="https://cdn.example/x.js"></script>`;
     expect(shellAssetsFromHtml(html)).toEqual(["/assets/index-AbC.js", "/assets/index-XyZ.css"]);
+  });
+});
+
+describe("createOfflineCopyScript", () => {
+  it("uses the persisted app locale and inserts text without HTML parsing", () => {
+    const localeRoot = path.resolve(__dirname, "../src/locales");
+    const script = createOfflineCopyScript(localeRoot);
+    expect(script).toContain("kandev_locale");
+    expect(script).toContain("offline-description");
+    expect(script).toContain("textContent = copy.description");
+    expect(script).toContain('"zh-hk"');
   });
 });
 

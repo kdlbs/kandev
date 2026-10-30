@@ -23,6 +23,10 @@ type Notifier interface {
 	Notify(ctx context.Context, userID string, payload Payload, opts SendOptions) (int, error)
 }
 
+type queuedNotifier interface {
+	Enqueue(ctx context.Context, userID string, payload Payload, opts SendOptions) error
+}
+
 // Provider adapts Web Push to the notification provider interface.
 type Provider struct {
 	notifier Notifier
@@ -53,6 +57,9 @@ func (p *Provider) Send(ctx context.Context, message providers.Message) error {
 		Tag:       payloadTag(message),
 	}
 	opts := SendOptions{Urgency: urgencyFor(message.EventType), Topic: topicFor(payload.Tag)}
+	if queued, ok := p.notifier.(queuedNotifier); ok {
+		return queued.Enqueue(ctx, message.UserID, payload, opts)
+	}
 	_, err := p.notifier.Notify(ctx, message.UserID, payload, opts)
 	return err
 }

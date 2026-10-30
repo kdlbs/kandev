@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth"
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -120,6 +121,7 @@ func provideGateway(
 	gitlabSvc *gitlab.Service,
 	referenceValidator entityrefs.SubmissionValidator,
 	authSvc *auth.Service,
+	notificationSettings commonconfig.NotificationsConfig,
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
@@ -438,7 +440,7 @@ func provideGateway(
 	}
 	notificationSvc := notificationservice.NewService(
 		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
-	configureWebPush(notificationSvc, notificationRepo, log)
+	configureWebPush(notificationSvc, notificationRepo, notificationSettings, log, registerCleanup)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
 		subscribeSessionAttentionNotifications(eventBus, notificationSvc, log)

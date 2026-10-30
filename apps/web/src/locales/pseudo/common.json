@@ -567,5 +567,8 @@
   "conversationSearch_query_too_short": "Ũśē àţ ĺēàśţ 3 ćĥàŕàćţēŕś ţō śēàŕćĥ ćōńvēŕśàţĩōńś.",
   "conversationSearch_query_too_long": "Ũśē àţ ḿōśţ 200 ćĥàŕàćţēŕś ţō śēàŕćĥ ćōńvēŕśàţĩōńś.",
   "conversationSearch_query_too_broad": "Ũśē àţ ĺēàśţ 3 ćōńśēćũţĩvē ĺēţţēŕś ōŕ ďĩĝĩţś.",
-  "conversationSearch_title": "Ćōḿḿàńď Ƥàĺēţţē"
+  "conversationSearch_title": "Ćōḿḿàńď Ƥàĺēţţē",
+  "offlineTitle": "Ŷōũ àŕē ōƒƒĺĩńē",
+  "offlineDescription": "Ķàńďēv ńēēďś à ćōńńēćţĩōń ţō ŷōũŕ śēŕvēŕ. Ćĥēćķ ŷōũŕ ńēţŵōŕķ, ţĥēń ţŕŷ àĝàĩń.",
+  "offlineRetry": "Ţŕŷ àĝàĩń"
 }

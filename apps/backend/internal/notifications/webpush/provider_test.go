@@ -15,6 +15,21 @@ type recordingNotifier struct {
 	err     error
 }
 
+type queuedRecordingNotifier struct {
+	queued   bool
+	notified bool
+}
+
+func (q *queuedRecordingNotifier) Enqueue(_ context.Context, _ string, _ Payload, _ SendOptions) error {
+	q.queued = true
+	return nil
+}
+
+func (q *queuedRecordingNotifier) Notify(context.Context, string, Payload, SendOptions) (int, error) {
+	q.notified = true
+	return 1, nil
+}
+
 func (r *recordingNotifier) Notify(_ context.Context, userID string, p Payload, o SendOptions) (int, error) {
 	r.userID, r.payload, r.opts = userID, p, o
 	return 1, r.err
@@ -56,5 +71,17 @@ func TestProviderPropagatesDeliveryFailure(t *testing.T) {
 	err := NewProvider(&recordingNotifier{err: want}).Send(context.Background(), providers.Message{UserID: "u1"})
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v", err, want)
+	}
+}
+
+func TestProviderQueuesDeliveryWhenNotifierSupportsIt(t *testing.T) {
+	notifier := &queuedRecordingNotifier{}
+	if err := NewProvider(notifier).Send(context.Background(), providers.Message{
+		EventType: "session.permission_requested", UserID: "u1", TaskID: "task-1", TaskSessionID: "session-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !notifier.queued || notifier.notified {
+		t.Fatalf("queued = %t, notified = %t; want queue-only delivery", notifier.queued, notifier.notified)
 	}
 }

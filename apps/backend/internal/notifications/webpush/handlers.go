@@ -161,7 +161,7 @@ func (h *handlers) test(c *gin.Context) {
 		Title: h.testCopy.title,
 		Body:  h.testCopy.body,
 		Tag:   "kandev-test",
-		URL:   "/settings/notifications",
+		URL:   "/settings/preferences/notifications",
 	}, SendOptions{Urgency: UrgencyHigh, TTL: time.Minute})
 	if err != nil {
 		h.logger.Warn("test push failed", zap.Error(err))

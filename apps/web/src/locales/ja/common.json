@@ -567,5 +567,8 @@
   "conversationSearch_query_too_short": "会話の検索には3文字以上を入力してください。",
   "conversationSearch_query_too_long": "会話の検索は200文字以内で入力してください。",
   "conversationSearch_query_too_broad": "文字または数字を3つ以上連続して入力してください。",
-  "conversationSearch_title": "コマンドパレット"
+  "conversationSearch_title": "コマンドパレット",
+  "offlineTitle": "オフラインです",
+  "offlineDescription": "Kandev はサーバーへの接続を必要とします。ネットワークを確認して、もう一度お試しください。",
+  "offlineRetry": "再試行"
 }

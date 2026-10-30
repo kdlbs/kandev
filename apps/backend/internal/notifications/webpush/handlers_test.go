@@ -2,6 +2,7 @@ package webpush
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,7 +50,7 @@ func TestPublicKeyEndpoint(t *testing.T) {
 
 func TestSubscribeEndpointStoresDeviceAndEnsuresProvider(t *testing.T) {
 	router, spy := newTestRouter(t, &fakeSender{})
-	body := `{"endpoint":"https://push.example/a","keys":{"p256dh":"k","auth":"a"}}`
+	body := `{"endpoint":"https://fcm.googleapis.com/a","keys":{"p256dh":"k","auth":"a"}}`
 	if rec := do(router, http.MethodPost, "/api/v1/push/subscriptions", body); rec.Code != http.StatusOK {
 		t.Fatalf("subscribe status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -57,7 +58,7 @@ func TestSubscribeEndpointStoresDeviceAndEnsuresProvider(t *testing.T) {
 		t.Fatalf("provider ensured for %v, want [u1]", spy.users)
 	}
 	rec := do(router, http.MethodGet, "/api/v1/push/subscriptions", "")
-	if !strings.Contains(rec.Body.String(), "https://push.example/a") {
+	if !strings.Contains(rec.Body.String(), "https://fcm.googleapis.com/a") {
 		t.Fatalf("list = %s", rec.Body.String())
 	}
 }
@@ -67,7 +68,7 @@ func TestSubscribeEndpointRejectsBadInput(t *testing.T) {
 	for name, body := range map[string]string{
 		"not json":      `nope`,
 		"http endpoint": `{"endpoint":"http://x/a","keys":{"p256dh":"k","auth":"a"}}`,
-		"missing keys":  `{"endpoint":"https://push.example/a"}`,
+		"missing keys":  `{"endpoint":"https://fcm.googleapis.com/a"}`,
 	} {
 		if rec := do(router, http.MethodPost, "/api/v1/push/subscriptions", body); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", name, rec.Code)
@@ -80,16 +81,16 @@ func TestSubscribeEndpointRejectsBadInput(t *testing.T) {
 
 func TestUnsubscribeEndpoint(t *testing.T) {
 	router, _ := newTestRouter(t, &fakeSender{})
-	const body = `{"endpoint":"https://push.example/a","keys":{"p256dh":"k","auth":"a"}}`
+	const body = `{"endpoint":"https://fcm.googleapis.com/a","keys":{"p256dh":"k","auth":"a"}}`
 	do(router, http.MethodPost, "/api/v1/push/subscriptions", body)
 
 	if rec := do(router, http.MethodDelete, "/api/v1/push/subscriptions", `{}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("missing endpoint: status %d, want 400", rec.Code)
 	}
-	if rec := do(router, http.MethodDelete, "/api/v1/push/subscriptions", `{"endpoint":"https://push.example/a"}`); rec.Code != http.StatusOK {
+	if rec := do(router, http.MethodDelete, "/api/v1/push/subscriptions", `{"endpoint":"https://fcm.googleapis.com/a"}`); rec.Code != http.StatusOK {
 		t.Errorf("unsubscribe: status %d, want 200", rec.Code)
 	}
-	if rec := do(router, http.MethodDelete, "/api/v1/push/subscriptions", `{"endpoint":"https://push.example/a"}`); rec.Code != http.StatusNotFound {
+	if rec := do(router, http.MethodDelete, "/api/v1/push/subscriptions", `{"endpoint":"https://fcm.googleapis.com/a"}`); rec.Code != http.StatusNotFound {
 		t.Errorf("repeat unsubscribe: status %d, want 404", rec.Code)
 	}
 }
@@ -100,9 +101,16 @@ func TestTestEndpointReportsDeliveryOutcome(t *testing.T) {
 	if rec := do(router, http.MethodPost, "/api/v1/push/test", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("no devices: status %d, want 404", rec.Code)
 	}
-	do(router, http.MethodPost, "/api/v1/push/subscriptions", `{"endpoint":"https://push.example/a","keys":{"p256dh":"k","auth":"a"}}`)
+	do(router, http.MethodPost, "/api/v1/push/subscriptions", `{"endpoint":"https://fcm.googleapis.com/a","keys":{"p256dh":"k","auth":"a"}}`)
 	rec := do(router, http.MethodPost, "/api/v1/push/test", "")
 	if rec.Code != http.StatusOK || len(sender.sent) != 1 {
 		t.Fatalf("status %d, sent %d", rec.Code, len(sender.sent))
+	}
+	var payload Payload
+	if err := json.Unmarshal(sender.sent[0].body, &payload); err != nil {
+		t.Fatalf("decode test payload: %v", err)
+	}
+	if payload.URL != "/settings/preferences/notifications" {
+		t.Fatalf("test notification URL = %q", payload.URL)
 	}
 }

@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api/client";
+import { deletePushSubscription } from "@/lib/api/domains/push-api";
 import { SERVICE_WORKER_URL } from "./register-sw";
 
 const READY_TIMEOUT_MS = 10_000;
@@ -52,4 +53,28 @@ export async function getPushRegistration(): Promise<ServiceWorkerRegistration> 
 export function isSessionExpiredError(error: unknown): boolean {
   if (error instanceof ApiError) return error.status === 401 || error.status === 403;
   return error instanceof TypeError && navigator.onLine;
+}
+
+/** Removes this browser's push registration when the signed-in user logs out. */
+export async function unsubscribeCurrentPushSubscription(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration("/");
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  const [serverResult, browserResult] = await Promise.allSettled([
+    deletePushSubscription(subscription.endpoint, { init: { signal: controller.signal } }),
+    subscription.unsubscribe(),
+  ]);
+  clearTimeout(timeout);
+
+  if (
+    serverResult.status === "rejected" &&
+    !(serverResult.reason instanceof ApiError && serverResult.reason.status === 404)
+  ) {
+    throw serverResult.reason;
+  }
+  if (browserResult.status === "rejected") throw browserResult.reason;
 }

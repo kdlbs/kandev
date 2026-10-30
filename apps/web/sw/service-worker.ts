@@ -44,7 +44,7 @@ sw.addEventListener("install", (event) => {
         [...PRECACHE].map(async (path) => {
           try {
             const response = await fetch(path, { credentials: "same-origin", cache: "reload" });
-            if (isCacheablePrecache(response)) await cache.put(path, response);
+            if (isCacheablePrecache(response, path)) await cache.put(path, response);
           } catch {
             // Offline or blocked during install: fall back to the network.
           }
@@ -118,7 +118,7 @@ sw.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
       const windows = await sw.clients.matchAll({ type: "window", includeUncontrolled: true });
-      if (shouldSuppressNotification(windows)) return;
+      if (shouldSuppressNotification(windows, payload.taskId)) return;
       await sw.registration.showNotification(payload.title, notificationOptions(payload, ICON_URL));
     })(),
   );

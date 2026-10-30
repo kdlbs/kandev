@@ -8,7 +8,9 @@ import {
   savePushSubscription,
   sendTestPush,
 } from "@/lib/api/domains/push-api";
+import { listNotificationProviders } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+import { useAppStore } from "@/components/state-provider";
 import {
   getPushRegistration,
   isPushSupported,
@@ -97,6 +99,7 @@ async function unsubscribeDevice(): Promise<void> {
 
 /** Per-device Web Push state and actions for the notification settings page. */
 export function useWebPush() {
+  const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
   const [status, setStatus] = useState<WebPushStatus>("loading");
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<WebPushTestResult>("idle");
@@ -125,7 +128,28 @@ export function useWebPush() {
     }
   }, []);
 
-  const enable = useCallback(() => run(subscribeDevice), [run]);
+  const enable = useCallback(
+    () =>
+      run(async () => {
+        const next = await subscribeDevice();
+        if (next === "subscribed") {
+          try {
+            const response = await listNotificationProviders({ cache: "no-store" });
+            setNotificationProviders({
+              items: response.providers ?? [],
+              events: response.events ?? [],
+              appriseAvailable: response.apprise_available ?? false,
+              loaded: true,
+              loading: false,
+            });
+          } catch {
+            // Keep the successful subscription; the settings hook can refresh later.
+          }
+        }
+        return next;
+      }),
+    [run, setNotificationProviders],
+  );
   const disable = useCallback(
     () =>
       run(async () => {

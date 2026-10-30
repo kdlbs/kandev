@@ -8,9 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +36,13 @@ const (
 	maxUserAgentLen = 512
 )
 
+var defaultPushHostSuffixes = []string{
+	"fcm.googleapis.com",
+	"push.services.mozilla.com",
+	"push.apple.com",
+	"notify.windows.com",
+}
+
 // Urgency maps to the RFC 8030 Urgency header.
 type Urgency string
 
@@ -47,6 +56,10 @@ var (
 	ErrInvalidSubscription = errors.New("invalid push subscription")
 	// ErrNotFound reports that the caller has no subscription for an endpoint.
 	ErrNotFound = errors.New("push subscription not found")
+	// ErrDeliveryQueueFull reports that asynchronous push delivery is at capacity.
+	ErrDeliveryQueueFull = errors.New("push delivery queue is full")
+	// ErrDeliveryQueueUnavailable reports that asynchronous delivery is not started.
+	ErrDeliveryQueueUnavailable = errors.New("push delivery queue is not started")
 )
 
 // Payload is the JSON document the service worker receives. It carries titles
@@ -77,19 +90,52 @@ type Sender interface {
 
 // Service owns subscription management and fan-out to a user's devices.
 type Service struct {
-	repo    store.WebPushRepository
-	sender  Sender
-	subject string
-	logger  *logger.Logger
+	deliveryQueueMu sync.RWMutex
+	deliveryQueue   *deliveryQueue
+	repo            store.WebPushRepository
+	sender          Sender
+	subject         string
+	allowedHosts    []string
+	logger          *logger.Logger
+}
+
+// StartAsyncDelivery starts the bounded queue used by notification-provider
+// events. Its cleanup drains accepted jobs before the backend closes storage.
+func (s *Service) StartAsyncDelivery() func() error {
+	queue := newDeliveryQueue(s)
+	s.deliveryQueueMu.Lock()
+	if s.deliveryQueue != nil {
+		existing := s.deliveryQueue
+		s.deliveryQueueMu.Unlock()
+		_ = queue.Close()
+		return existing.Close
+	}
+	s.deliveryQueue = queue
+	s.deliveryQueueMu.Unlock()
+	return queue.Close
+}
+
+// Enqueue accepts provider notifications for background delivery. The direct
+// Notify method remains synchronous for the user-triggered test endpoint.
+func (s *Service) Enqueue(ctx context.Context, userID string, payload Payload, opts SendOptions) error {
+	s.deliveryQueueMu.RLock()
+	queue := s.deliveryQueue
+	s.deliveryQueueMu.RUnlock()
+	if queue == nil {
+		return ErrDeliveryQueueUnavailable
+	}
+	return queue.Enqueue(ctx, userID, payload, opts)
 }
 
 // NewService builds the service. An empty subject falls back to DefaultSubject.
-func NewService(repo store.WebPushRepository, sender Sender, subject string, log *logger.Logger) *Service {
+// Extra allowed host suffixes are for operators who use a private push service.
+func NewService(repo store.WebPushRepository, sender Sender, subject string, log *logger.Logger, allowedHosts ...string) *Service {
 	return &Service{
-		repo:    repo,
-		sender:  sender,
-		subject: NormalizeSubject(subject),
-		logger:  log.WithFields(zap.String("component", "webpush")),
+		repo:         repo,
+		sender:       sender,
+		subject:      NormalizeSubject(subject),
+		allowedHosts: mergePushHostSuffixes(allowedHosts),
+		logger:       log.WithFields(zap.String("component", "webpush")),
 	}
 }
 
@@ -128,7 +174,7 @@ type SubscribeInput struct {
 
 // Subscribe registers or refreshes a device for userID.
 func (s *Service) Subscribe(ctx context.Context, userID string, in SubscribeInput) (*models.PushSubscription, error) {
-	if err := validateSubscription(in); err != nil {
+	if err := validateSubscriptionForHosts(in, s.allowedHosts); err != nil {
 		return nil, err
 	}
 	ua := in.UserAgent
@@ -194,11 +240,14 @@ func (s *Service) Notify(ctx context.Context, userID string, payload Payload, op
 	delivered := 0
 	var lastErr error
 	for _, sub := range subs {
-		if err := s.sendOne(ctx, sub, body, keys, opts); err != nil {
+		accepted, err := s.sendOne(ctx, sub, body, keys, opts)
+		if err != nil {
 			lastErr = err
 			continue
 		}
-		delivered++
+		if accepted {
+			delivered++
+		}
 	}
 	if delivered == 0 && lastErr != nil {
 		return 0, lastErr
@@ -206,33 +255,72 @@ func (s *Service) Notify(ctx context.Context, userID string, payload Payload, op
 	return delivered, nil
 }
 
-func (s *Service) sendOne(ctx context.Context, sub *models.PushSubscription, body []byte, keys models.VAPIDKeys, opts SendOptions) error {
+func (s *Service) sendOne(ctx context.Context, sub *models.PushSubscription, body []byte, keys models.VAPIDKeys, opts SendOptions) (bool, error) {
 	status, err := s.sender.Send(ctx, sub, body, keys, s.subject, opts)
 	switch {
 	case status == http.StatusNotFound || status == http.StatusGone:
 		if delErr := s.repo.DeletePushSubscriptionByEndpoint(ctx, sub.Endpoint); delErr != nil {
 			s.logger.Warn("failed to prune expired push subscription", zap.Error(delErr))
 		}
-		return nil
+		return false, nil
 	case err != nil:
 		s.logger.Warn("push delivery failed", zap.Int("status", status), zap.Error(err))
-		return err
+		return false, err
 	case status < 200 || status >= 300:
-		return fmt.Errorf("push service responded %d", status)
+		return false, fmt.Errorf("push service responded %d", status)
 	}
 	if touchErr := s.repo.TouchPushSubscription(ctx, sub.Endpoint, time.Now()); touchErr != nil {
 		s.logger.Debug("failed to record push delivery time", zap.Error(touchErr))
 	}
-	return nil
+	return true, nil
 }
 
-func validateSubscription(in SubscribeInput) error {
-	u, err := url.Parse(in.Endpoint)
-	if err != nil || u.Scheme != "https" || u.Host == "" || len(in.Endpoint) > maxEndpointLen {
-		return fmt.Errorf("%w: endpoint must be an https URL", ErrInvalidSubscription)
+func validateSubscriptionForHosts(in SubscribeInput, allowedHosts []string) error {
+	if err := validatePushEndpoint(in.Endpoint, allowedHosts); err != nil {
+		return err
 	}
 	if in.P256dh == "" || in.Auth == "" || len(in.P256dh) > maxKeyLen || len(in.Auth) > maxKeyLen {
 		return fmt.Errorf("%w: p256dh and auth keys are required", ErrInvalidSubscription)
 	}
 	return nil
+}
+
+func validatePushEndpoint(raw string, allowedHosts []string) error {
+	endpoint, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(endpoint.Scheme, "https") || endpoint.Host == "" || len(raw) > maxEndpointLen {
+		return fmt.Errorf("%w: endpoint must be an https URL", ErrInvalidSubscription)
+	}
+	if endpoint.User != nil || endpoint.Fragment != "" || !isAllowedPushHost(endpoint, allowedHosts) {
+		return fmt.Errorf("%w: endpoint host is not an allowed push service", ErrInvalidSubscription)
+	}
+	return nil
+}
+
+func mergePushHostSuffixes(extra []string) []string {
+	allowed := make([]string, 0, len(defaultPushHostSuffixes)+len(extra))
+	allowed = append(allowed, defaultPushHostSuffixes...)
+	for _, host := range extra {
+		host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+		if host == "" || strings.ContainsAny(host, "/:@?#[]") || net.ParseIP(host) != nil {
+			continue
+		}
+		allowed = append(allowed, host)
+	}
+	return allowed
+}
+
+func isAllowedPushHost(endpoint *url.URL, allowedHosts []string) bool {
+	if endpoint == nil || endpoint.Port() != "" && endpoint.Port() != "443" {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(endpoint.Hostname()), ".")
+	if host == "" || net.ParseIP(host) != nil {
+		return false
+	}
+	for _, suffix := range allowedHosts {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   savePushSubscription: vi.fn(),
   deletePushSubscription: vi.fn(),
   sendTestPush: vi.fn(),
+  listNotificationProviders: vi.fn(),
+  setNotificationProviders: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/push-api", () => ({
@@ -19,6 +21,16 @@ vi.mock("@/lib/api/domains/push-api", () => ({
   savePushSubscription: mocks.savePushSubscription,
   deletePushSubscription: mocks.deletePushSubscription,
   sendTestPush: mocks.sendTestPush,
+}));
+
+vi.mock("@/lib/api", () => ({ listNotificationProviders: mocks.listNotificationProviders }));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: {
+      setNotificationProviders: typeof mocks.setNotificationProviders;
+    }) => unknown,
+  ) => selector({ setNotificationProviders: mocks.setNotificationProviders }),
 }));
 
 vi.mock("@/lib/pwa/push-client", async () => {
@@ -64,6 +76,11 @@ beforeEach(() => {
   mocks.listPushSubscriptions.mockResolvedValue({ subscriptions: [] });
   mocks.savePushSubscription.mockResolvedValue({ success: true });
   mocks.deletePushSubscription.mockResolvedValue({ success: true });
+  mocks.listNotificationProviders.mockResolvedValue({
+    providers: [{ id: "webpush", type: "web_push" }],
+    events: ["session.failed"],
+    apprise_available: true,
+  });
 });
 
 describe("useWebPush initial state", () => {
@@ -133,6 +150,14 @@ describe("useWebPush actions", () => {
       expect.objectContaining({ userVisibleOnly: true }),
     );
     expect(mocks.savePushSubscription).toHaveBeenCalledTimes(1);
+    expect(mocks.listNotificationProviders).toHaveBeenCalledWith({ cache: "no-store" });
+    expect(mocks.setNotificationProviders).toHaveBeenCalledWith({
+      items: [{ id: "webpush", type: "web_push" }],
+      events: ["session.failed"],
+      appriseAvailable: true,
+      loaded: true,
+      loading: false,
+    });
     expect(result.current.status).toBe("subscribed");
   });
 

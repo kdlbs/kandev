@@ -90,6 +90,8 @@ var startupCatalog = []CatalogEntry{
 	{Key: "auth.tokenDuration", EnvVars: []string{"KANDEV_AUTH_TOKENDURATION"}, Owner: "auth", Default: "3600"},
 	{Key: "auth.sessionTTLHours", EnvVars: []string{"KANDEV_AUTH_SESSIONTTLHOURS"}, Owner: "auth", Default: "720"},
 	{Key: "auth.cookieName", EnvVars: []string{"KANDEV_AUTH_COOKIE_NAME"}, Owner: "auth", Default: ""},
+	{Key: "notifications.webPushSubject", EnvVars: []string{"KANDEV_WEBPUSH_SUBJECT"}, Owner: "notifications", Default: "mailto:admin@localhost.invalid"},
+	{Key: "notifications.webPushAllowedHosts", EnvVars: []string{"KANDEV_WEBPUSH_ALLOWED_HOSTS"}, Owner: "notifications", Default: "", Description: "Comma-separated host suffixes for a self-hosted Web Push service."},
 	{Key: "logging.level", EnvVars: []string{"KANDEV_LOG_LEVEL"}, Owner: "logging", Default: "info"},
 	{Key: "logging.format", EnvVars: []string{"KANDEV_LOGGING_FORMAT"}, Owner: "logging", Default: "text"},
 	{Key: "repositoryDiscovery.roots", EnvVars: []string{"KANDEV_REPOSITORYDISCOVERY_ROOTS"}, Owner: "repository discovery", Default: "[]"},

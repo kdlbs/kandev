@@ -3,12 +3,19 @@ package backendapp
 import (
 	"testing"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+type permissionRequestEventPayload struct {
+	TaskID               string `json:"task_id"`
+	SessionID            string `json:"session_id"`
+	PendingID            string `json:"pending_id"`
+	AutoApprovedOptionID string `json:"auto_approved_option_id,omitempty"`
+	AutoApprovalPending  bool   `json:"auto_approval_pending,omitempty"`
+}
+
 func TestPermissionNotificationOccurrenceAcceptsTypedAndMapPayloads(t *testing.T) {
-	typed := lifecycle.PermissionRequestEventPayload{TaskID: "t1", SessionID: "s1", PendingID: "p1"}
+	typed := permissionRequestEventPayload{TaskID: "t1", SessionID: "s1", PendingID: "p1"}
 	asMap := map[string]interface{}{"task_id": "t1", "session_id": "s1", "pending_id": "p1"}
 	for name, data := range map[string]any{"struct": typed, "map": asMap} {
 		taskID, sessionID, pendingID, ok := permissionNotificationOccurrence(data)
@@ -19,7 +26,7 @@ func TestPermissionNotificationOccurrenceAcceptsTypedAndMapPayloads(t *testing.T
 }
 
 func TestPermissionNotificationOccurrenceSkipsAutoAnsweredAndIncomplete(t *testing.T) {
-	cases := map[string]lifecycle.PermissionRequestEventPayload{
+	cases := map[string]permissionRequestEventPayload{
 		"auto approved": {TaskID: "t1", SessionID: "s1", PendingID: "p1", AutoApprovedOptionID: "allow"},
 		"auto pending":  {TaskID: "t1", SessionID: "s1", PendingID: "p1", AutoApprovalPending: true},
 		"no pending id": {TaskID: "t1", SessionID: "s1"},

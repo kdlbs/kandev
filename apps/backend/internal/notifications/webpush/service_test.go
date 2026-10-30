@@ -50,7 +50,7 @@ func (f *fakeSender) Send(_ context.Context, sub *models.PushSubscription, body 
 	return http.StatusCreated, nil
 }
 
-func newTestService(t *testing.T, sender Sender) (*Service, store.WebPushRepository) {
+func newTestService(t *testing.T, sender Sender, allowedHosts ...string) (*Service, store.WebPushRepository) {
 	t.Helper()
 	conn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "push.db"))
 	if err != nil {
@@ -66,7 +66,7 @@ func newTestService(t *testing.T, sender Sender) (*Service, store.WebPushReposit
 	if err != nil {
 		t.Fatalf("logger: %v", err)
 	}
-	return NewService(repo, sender, "", log), repo
+	return NewService(repo, sender, "", log, allowedHosts...), repo
 }
 
 func validInput(endpoint string) SubscribeInput {
@@ -98,7 +98,7 @@ func TestSubscribeValidatesInput(t *testing.T) {
 	cases := map[string]SubscribeInput{
 		"http endpoint": {Endpoint: "http://push.example/abc", P256dh: "k", Auth: "a"},
 		"empty":         {},
-		"no keys":       {Endpoint: "https://push.example/abc"},
+		"no keys":       {Endpoint: "https://fcm.googleapis.com/abc"},
 		"relative":      {Endpoint: "/abc", P256dh: "k", Auth: "a"},
 	}
 	for name, in := range cases {
@@ -108,10 +108,43 @@ func TestSubscribeValidatesInput(t *testing.T) {
 	}
 }
 
+func TestSubscribeRejectsUntrustedPushDestinations(t *testing.T) {
+	svc, _ := newTestService(t, &fakeSender{})
+	for _, endpoint := range []string{
+		"https://169.254.169.254/latest/meta-data",
+		"https://localhost/push",
+		"https://127.0.0.1/push",
+		"https://fcm.googleapis.com.attacker.example/push",
+		"https://fcm.googleapis.com:8443/push",
+		"https://user@fcm.googleapis.com/push",
+	} {
+		if _, err := svc.Subscribe(context.Background(), "u1", validInput(endpoint)); !errors.Is(err, ErrInvalidSubscription) {
+			t.Errorf("Subscribe(%q) error = %v, want ErrInvalidSubscription", endpoint, err)
+		}
+	}
+	for _, endpoint := range []string{
+		"https://fcm.googleapis.com/fcm/send/device",
+		"https://updates.push.services.mozilla.com/wpush/v2/device",
+		"https://web.push.apple.com/device",
+		"https://wns.notify.windows.com/device",
+	} {
+		if _, err := svc.Subscribe(context.Background(), "u1", validInput(endpoint)); err != nil {
+			t.Errorf("Subscribe(%q) error = %v, want an allowed push service", endpoint, err)
+		}
+	}
+}
+
+func TestSubscribeAllowsConfiguredPushHostSuffix(t *testing.T) {
+	svc, _ := newTestService(t, &fakeSender{}, "push.example")
+	if _, err := svc.Subscribe(context.Background(), "u1", validInput("https://eu.push.example/device")); err != nil {
+		t.Fatalf("Subscribe() error = %v, want configured host suffix to be accepted", err)
+	}
+}
+
 func TestSubscribeIsIdempotentPerEndpointAndScopedToUser(t *testing.T) {
 	svc, _ := newTestService(t, &fakeSender{})
 	ctx := context.Background()
-	const endpoint = "https://push.example/device-1"
+	const endpoint = "https://fcm.googleapis.com/device-1"
 
 	for i := 0; i < 2; i++ {
 		if _, err := svc.Subscribe(ctx, "u1", validInput(endpoint)); err != nil {
@@ -130,7 +163,7 @@ func TestSubscribeIsIdempotentPerEndpointAndScopedToUser(t *testing.T) {
 func TestUnsubscribeOnlyRemovesCallersOwnSubscription(t *testing.T) {
 	svc, _ := newTestService(t, &fakeSender{})
 	ctx := context.Background()
-	const endpoint = "https://push.example/device-1"
+	const endpoint = "https://fcm.googleapis.com/device-1"
 	if _, err := svc.Subscribe(ctx, "u1", validInput(endpoint)); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -150,7 +183,7 @@ func TestNotifySendsEncodedPayloadWithTTLUrgencyAndSubject(t *testing.T) {
 	sender := &fakeSender{}
 	svc, _ := newTestService(t, sender)
 	ctx := context.Background()
-	if _, err := svc.Subscribe(ctx, "u1", validInput("https://push.example/a")); err != nil {
+	if _, err := svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/a")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,41 +219,55 @@ func TestNotifyOnlyReachesThatUsersDevices(t *testing.T) {
 	sender := &fakeSender{}
 	svc, _ := newTestService(t, sender)
 	ctx := context.Background()
-	_, _ = svc.Subscribe(ctx, "u1", validInput("https://push.example/u1"))
-	_, _ = svc.Subscribe(ctx, "u2", validInput("https://push.example/u2"))
+	_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/u1"))
+	_, _ = svc.Subscribe(ctx, "u2", validInput("https://fcm.googleapis.com/u2"))
 
 	if _, err := svc.Notify(ctx, "u1", Payload{Title: "x"}, SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(sender.sent) != 1 || sender.sent[0].endpoint != "https://push.example/u1" {
+	if len(sender.sent) != 1 || sender.sent[0].endpoint != "https://fcm.googleapis.com/u1" {
 		t.Fatalf("sent = %+v, want only u1's endpoint", sender.sent)
 	}
 }
 
 func TestNotifyPrunesGoneSubscriptions(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusGone} {
-		sender := &fakeSender{statuses: map[string]int{"https://push.example/dead": status}}
+		sender := &fakeSender{statuses: map[string]int{"https://fcm.googleapis.com/dead": status}}
 		svc, _ := newTestService(t, sender)
 		ctx := context.Background()
-		_, _ = svc.Subscribe(ctx, "u1", validInput("https://push.example/dead"))
-		_, _ = svc.Subscribe(ctx, "u1", validInput("https://push.example/live"))
+		_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/dead"))
+		_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/live"))
 
 		n, err := svc.Notify(ctx, "u1", Payload{Title: "x"}, SendOptions{})
-		if err != nil || n != 2 {
-			t.Fatalf("status %d: Notify() = %d, %v", status, n, err)
+		if err != nil || n != 1 {
+			t.Fatalf("status %d: Notify() = %d, %v; want only the accepted push counted", status, n, err)
 		}
 		subs, _ := svc.Subscriptions(ctx, "u1")
-		if len(subs) != 1 || subs[0].Endpoint != "https://push.example/live" {
+		if len(subs) != 1 || subs[0].Endpoint != "https://fcm.googleapis.com/live" {
 			t.Fatalf("status %d: remaining = %+v, want only the live endpoint", status, subs)
 		}
 	}
 }
 
+func TestNotifyDoesNotCountExpiredSubscriptionsAsDelivered(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusGone} {
+		sender := &fakeSender{statuses: map[string]int{"https://fcm.googleapis.com/dead": status}}
+		svc, _ := newTestService(t, sender)
+		ctx := context.Background()
+		_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/dead"))
+
+		delivered, err := svc.Notify(ctx, "u1", Payload{Title: "x"}, SendOptions{})
+		if err != nil || delivered != 0 {
+			t.Fatalf("status %d: Notify() = %d, %v; want zero delivered", status, delivered, err)
+		}
+	}
+}
+
 func TestNotifyKeepsSubscriptionOnTransientFailure(t *testing.T) {
-	sender := &fakeSender{statuses: map[string]int{"https://push.example/a": http.StatusServiceUnavailable}}
+	sender := &fakeSender{statuses: map[string]int{"https://fcm.googleapis.com/a": http.StatusServiceUnavailable}}
 	svc, _ := newTestService(t, sender)
 	ctx := context.Background()
-	_, _ = svc.Subscribe(ctx, "u1", validInput("https://push.example/a"))
+	_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/a"))
 
 	n, err := svc.Notify(ctx, "u1", Payload{Title: "x"}, SendOptions{})
 	if err == nil || n != 0 {
@@ -285,7 +332,7 @@ func TestTaskURL(t *testing.T) {
 func TestSubscriptionTimestampsAreRecorded(t *testing.T) {
 	svc, _ := newTestService(t, &fakeSender{})
 	ctx := context.Background()
-	_, _ = svc.Subscribe(ctx, "u1", validInput("https://push.example/a"))
+	_, _ = svc.Subscribe(ctx, "u1", validInput("https://fcm.googleapis.com/a"))
 	before := time.Now().Add(-time.Minute)
 	if _, err := svc.Notify(ctx, "u1", Payload{Title: "x"}, SendOptions{}); err != nil {
 		t.Fatal(err)

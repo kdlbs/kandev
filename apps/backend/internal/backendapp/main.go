@@ -1186,6 +1186,7 @@ func startGatewayAndServe(
 		// Notifications drop rather than redirect when a task's owner cannot
 		// be resolved while authentication is enforced.
 		services.Auth,
+		cfg.Notifications,
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,

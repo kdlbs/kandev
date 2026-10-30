@@ -567,5 +567,8 @@
   "conversationSearch_query_too_short": "请使用至少 3 个字符搜索对话。",
   "conversationSearch_query_too_long": "搜索对话时请最多使用 200 个字符。",
   "conversationSearch_query_too_broad": "请使用至少 3 个连续的字母、汉字或数字。",
-  "conversationSearch_title": "命令面板"
+  "conversationSearch_title": "命令面板",
+  "offlineTitle": "当前处于离线状态",
+  "offlineDescription": "Kandev 需要连接到服务器。请检查网络，然后重试。",
+  "offlineRetry": "重试"
 }

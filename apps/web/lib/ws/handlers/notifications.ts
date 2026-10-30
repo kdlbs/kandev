@@ -83,9 +83,13 @@ function registerNotificationHandler(
     const occurrenceID =
       message.id ??
       ("occurrence_id" in message.payload ? message.payload.occurrence_id : undefined);
-    const nativeEventID = isSemanticSessionNotification(eventType)
-      ? occurrenceID
-      : (message.id ?? `${taskId}:${sessionId ?? "unknown"}`);
+    const nativeEventID = nativeNotificationEventID({
+      eventType,
+      sessionId,
+      taskId,
+      messageID: message.id,
+      occurrenceID,
+    });
     if (nativeNotifications.isAvailable() && taskId && nativeEventID) {
       void nativeNotifications
         .show({
@@ -100,6 +104,24 @@ function registerNotificationHandler(
       showDesktopNotification(payload);
     }
   };
+}
+
+function nativeNotificationEventID({
+  eventType,
+  sessionId,
+  taskId,
+  messageID,
+  occurrenceID,
+}: {
+  eventType: string;
+  sessionId?: string;
+  taskId?: string;
+  messageID?: string;
+  occurrenceID?: string;
+}): string | undefined {
+  if (eventType === NOTIFICATION_EVENT_SESSION_FAILED) return sessionId ?? occurrenceID;
+  if (isSemanticSessionNotification(eventType)) return occurrenceID;
+  return messageID ?? `${taskId}:${sessionId ?? "unknown"}`;
 }
 
 export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHandlers {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestHTTPSenderSpeaksWebPushToALocalPushService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := NewHTTPSender().Send(context.Background(), sub, []byte(`{"title":"hi"}`), keys,
+	status, err := newLocalHTTPSenderForTest().Send(context.Background(), sub, []byte(`{"title":"hi"}`), keys,
 		"mailto:ops@example.com", SendOptions{TTL: 90 * time.Second, Urgency: UrgencyHigh, Topic: "topic1"})
 	if err != nil || status != http.StatusCreated {
 		t.Fatalf("Send() = %d, %v", status, err)
@@ -67,4 +68,56 @@ func TestHTTPSenderSpeaksWebPushToALocalPushService(t *testing.T) {
 	if strings.Contains(string(gotBody), "title") {
 		t.Error("body must be encrypted, found plaintext payload")
 	}
+}
+
+func TestHTTPSenderRejectsUntrustedEndpoint(t *testing.T) {
+	sender := NewHTTPSender()
+	_, err := sender.Send(context.Background(), &models.PushSubscription{Endpoint: "https://127.0.0.1/push"}, nil,
+		models.VAPIDKeys{}, "", SendOptions{})
+	if err == nil {
+		t.Fatal("Send() error = nil, want an untrusted endpoint to be rejected")
+	}
+}
+
+func TestHTTPSenderDoesNotFollowRedirects(t *testing.T) {
+	var redirected atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		redirected.Store(true)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer source.Close()
+
+	browserKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authSecret := make([]byte, 16)
+	if _, err := rand.Read(authSecret); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := generateVAPIDKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := newLocalHTTPSenderForTest().Send(context.Background(), &models.PushSubscription{
+		Endpoint: source.URL,
+		P256dh:   base64.RawURLEncoding.EncodeToString(browserKey.PublicKey().Bytes()),
+		Auth:     base64.RawURLEncoding.EncodeToString(authSecret),
+	}, []byte(`{"title":"hi"}`), keys, "mailto:ops@example.com", SendOptions{TTL: time.Minute})
+	if err != nil || status != http.StatusFound {
+		t.Fatalf("Send() = %d, %v; want redirect response returned without following", status, err)
+	}
+	if redirected.Load() {
+		t.Fatal("HTTPSender followed a redirect to another destination")
+	}
+}
+
+func newLocalHTTPSenderForTest() *HTTPSender {
+	sender := NewHTTPSender()
+	sender.allowUntrustedEndpoint = true
+	return sender
 }

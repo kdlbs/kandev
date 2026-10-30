@@ -120,6 +120,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_AUTH_TOKENDURATION", class: "catalog"},
 		{envVar: "KANDEV_AUTH_SESSIONTTLHOURS", class: "catalog"},
 		{envVar: "KANDEV_AUTH_COOKIE_NAME", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_SUBJECT", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_ALLOWED_HOSTS", class: "catalog"},
 		{envVar: "KANDEV_LOG_LEVEL", class: "catalog"},
 		{envVar: "KANDEV_LOGGING_FORMAT", class: "catalog"},
 		{envVar: "KANDEV_REPOSITORYDISCOVERY_ROOTS", class: "catalog"},

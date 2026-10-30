@@ -5,6 +5,67 @@ import { build, type Plugin, type ResolvedConfig } from "vite";
 
 const SW_ENTRY = path.resolve(__dirname, "../sw/service-worker.ts");
 const SW_OUTPUT = "sw.js";
+const OFFLINE_COPY_KEYS = ["offlineTitle", "offlineDescription", "offlineRetry"] as const;
+
+type OfflineCopy = { title: string; description: string; retry: string };
+
+/** Build a small offline dictionary from the same catalogs used by the app. */
+export function createOfflineCopyScript(localeRoot: string): string {
+  const messages: Record<string, OfflineCopy> = {};
+  const locales = fs
+    .readdirSync(localeRoot)
+    .filter((locale) => fs.existsSync(path.join(localeRoot, locale, "common.json")))
+    .sort();
+  for (const locale of locales) {
+    const catalogPath = path.join(localeRoot, locale, "common.json");
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as Record<string, unknown>;
+    const values = OFFLINE_COPY_KEYS.map((key) => catalog[key]);
+    if (values.some((value) => typeof value !== "string")) {
+      throw new Error(`offline copy is missing from ${locale}/common.json`);
+    }
+    messages[locale] = {
+      title: values[0] as string,
+      description: values[1] as string,
+      retry: values[2] as string,
+    };
+  }
+  const serialized = JSON.stringify(messages).replace(/</g, "\\u003c");
+  // i18n-exempt: the page text comes from locale catalogs serialized above.
+  return `<script>
+    const messages = ${serialized};
+    let savedLocale;
+    for (const item of document.cookie.split(";")) {
+      const [name, ...value] = item.trim().split("=");
+      if (name !== "kandev_locale") continue;
+      try { savedLocale = decodeURIComponent(value.join("=")); } catch { /* Use the browser locale. */ }
+      break;
+    }
+    const requestedLocale = (savedLocale || navigator.language || "en").toLowerCase();
+    let locale = requestedLocale;
+    if (!Object.prototype.hasOwnProperty.call(messages, locale)) {
+      if (locale.startsWith("zh-hk") || locale.startsWith("zh-hant-hk")) locale = "zh-hk";
+      else if (locale.startsWith("zh-tw") || locale.startsWith("zh-hant")) locale = "zh-tw";
+      else if (locale.startsWith("zh")) locale = "zh-cn";
+      else if (locale.startsWith("pt")) locale = "pt-pt";
+      else locale = locale.split("-")[0];
+    }
+    const copy = Object.prototype.hasOwnProperty.call(messages, locale) ? messages[locale] : messages.en;
+    document.documentElement.lang = Object.prototype.hasOwnProperty.call(messages, locale) ? locale : "en";
+    document.getElementById("offline-title").textContent = copy.title;
+    document.getElementById("offline-description").textContent = copy.description;
+    document.getElementById("offline-retry").textContent = copy.retry;
+  </script>`;
+}
+
+function localizeOfflinePage(outDir: string): void {
+  const offlinePath = path.join(outDir, "offline.html");
+  if (!fs.existsSync(offlinePath)) return;
+  const html = fs.readFileSync(offlinePath, "utf8");
+  const marker = "<!-- OFFLINE_COPY_SCRIPT -->";
+  if (!html.includes(marker)) throw new Error("offline.html has no localization marker");
+  const localeRoot = path.resolve(__dirname, "../src/locales");
+  fs.writeFileSync(offlinePath, html.replace(marker, createOfflineCopyScript(localeRoot)));
+}
 
 /** Non-hashed static files the worker precaches next to the shell's own assets. */
 const STATIC_PRECACHE = [
@@ -69,6 +130,7 @@ export function serviceWorkerPlugin(): Plugin {
     async writeBundle() {
       if (config.base !== "/") return;
       const outDir = path.resolve(config.root, config.build.outDir);
+      localizeOfflinePage(outDir);
       const htmlPath = path.join(outDir, "index.html");
       const shell = fs.existsSync(htmlPath)
         ? shellAssetsFromHtml(fs.readFileSync(htmlPath, "utf8"))

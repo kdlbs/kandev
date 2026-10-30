@@ -4,6 +4,8 @@
  * worker entry stays a thin event adapter.
  */
 
+import { linkToTask } from "@/lib/links";
+
 export const SW_MESSAGE_NAVIGATE = "kandev:navigate";
 
 /** Path prefixes the worker must never answer from a cache or intercept. */
@@ -88,11 +90,14 @@ export function isCacheableAsset(response: ResponseLike): boolean {
   return contentType !== "" && !contentType.includes("text/html");
 }
 
-/** Precached files may be HTML (the offline page); redirects are still refused. */
-export function isCacheablePrecache(response: ResponseLike): boolean {
-  return (
-    response.ok && response.status === 200 && response.type === "basic" && !response.redirected
-  );
+/** Only the offline shell may contain HTML; other precache entries are assets. */
+export function isCacheablePrecache(response: ResponseLike, path: string): boolean {
+  if (!response.ok || response.status !== 200 || response.type !== "basic" || response.redirected) {
+    return false;
+  }
+  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+  if (path === "/offline.html") return contentType.includes("text/html");
+  return contentType !== "" && !contentType.includes("text/html");
 }
 
 export function cacheNames(buildId: string) {
@@ -134,13 +139,32 @@ export function parsePushPayload(raw: string | null, fallbackTitle: string): Pus
 
 /** Only origin-relative paths are honoured; anything else falls back to home. */
 export function sanitizeTargetUrl(url: string): string {
-  if (!url.startsWith("/") || url.startsWith("//") || url.includes("\\")) return "/";
+  if (
+    !url.startsWith("/") ||
+    url.startsWith("//") ||
+    url.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(url)
+  ) {
+    return "/";
+  }
   return url;
 }
 
-/** True when a push would only duplicate what the user is already looking at. */
-export function shouldSuppressNotification(clients: readonly WindowClientLike[]): boolean {
-  return clients.some((client) => client.focused && client.visibilityState === "visible");
+/** True when a visible focused window is already showing the notified task. */
+export function shouldSuppressNotification(
+  clients: readonly WindowClientLike[],
+  taskId?: string,
+): boolean {
+  if (!taskId) return false;
+  const expectedPath = linkToTask(taskId);
+  return clients.some((client) => {
+    if (!client.focused || client.visibilityState !== "visible") return false;
+    try {
+      return new URL(client.url).pathname.replace(/\/$/, "") === expectedPath;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function notificationOptions(payload: PushPayload, iconUrl: string) {

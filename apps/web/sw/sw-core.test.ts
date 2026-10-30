@@ -16,7 +16,8 @@ const ORIGIN = "https://kandev.example";
 const TASK_ONE = "/t/1";
 const TASK_ONE_SESSION = "/t/1?sessionId=s";
 const FALLBACK_TITLE = "Kandev";
-const PRECACHE = new Set(["/offline.html", "/icon.svg"]);
+const OFFLINE_PAGE = "/offline.html";
+const PRECACHE = new Set([OFFLINE_PAGE, "/icon.svg"]);
 
 function request(path: string, init: { method?: string; mode?: string } = {}) {
   return { method: init.method ?? "GET", mode: init.mode ?? "no-cors", url: `${ORIGIN}${path}` };
@@ -62,7 +63,7 @@ describe("routeRequest", () => {
       "navigate",
     );
     expect(routeRequest(request("/assets/index-abc.js"), ORIGIN, PRECACHE)).toBe("asset");
-    expect(routeRequest(request("/offline.html"), ORIGIN, PRECACHE)).toBe("precache");
+    expect(routeRequest(request(OFFLINE_PAGE), ORIGIN, PRECACHE)).toBe("precache");
     expect(routeRequest(request("/anything-else.json"), ORIGIN, PRECACHE)).toBe("passthrough");
   });
 });
@@ -87,9 +88,13 @@ describe("isCacheableAsset", () => {
 });
 
 describe("isCacheablePrecache", () => {
-  it("allows HTML but still refuses redirects", () => {
-    expect(isCacheablePrecache(response({ ct: HTML_TYPE }))).toBe(true);
-    expect(isCacheablePrecache(response({ ct: HTML_TYPE, redirected: true }))).toBe(false);
+  it("allows HTML only for the offline page and refuses redirects", () => {
+    expect(isCacheablePrecache(response({ ct: HTML_TYPE }), OFFLINE_PAGE)).toBe(true);
+    expect(isCacheablePrecache(response({ ct: HTML_TYPE }), "/app.js")).toBe(false);
+    expect(isCacheablePrecache(response({ ct: "text/javascript" }), "/app.js")).toBe(true);
+    expect(isCacheablePrecache(response({ ct: HTML_TYPE, redirected: true }), OFFLINE_PAGE)).toBe(
+      false,
+    );
   });
 });
 
@@ -148,22 +153,32 @@ describe("parsePushPayload", () => {
 describe("sanitizeTargetUrl", () => {
   it("only accepts origin-relative paths", () => {
     expect(sanitizeTargetUrl(TASK_ONE)).toBe(TASK_ONE);
-    for (const bad of ["", "t/1", "//evil.example", "https://evil.example", "/\\evil"]) {
+    for (const bad of [
+      "",
+      "t/1",
+      "//evil.example",
+      "https://evil.example",
+      "/\\evil",
+      "/\t//evil.example",
+      "/\n//evil.example",
+    ]) {
       expect(sanitizeTargetUrl(bad)).toBe("/");
     }
   });
 });
 
 describe("shouldSuppressNotification", () => {
-  it("suppresses only when a window is both focused and visible", () => {
-    const win = (focused: boolean, visibilityState: string) => ({
-      url: `${ORIGIN}/`,
+  it("suppresses only when a focused visible window shows the same task", () => {
+    const win = (path: string, focused: boolean, visibilityState: string) => ({
+      url: `${ORIGIN}${path}`,
       focused,
       visibilityState,
     });
-    expect(shouldSuppressNotification([win(true, "visible")])).toBe(true);
-    expect(shouldSuppressNotification([win(false, "visible")])).toBe(false);
-    expect(shouldSuppressNotification([win(true, "hidden")])).toBe(false);
+    expect(shouldSuppressNotification([win(TASK_ONE, true, "visible")], "1")).toBe(true);
+    expect(shouldSuppressNotification([win("/t/2", true, "visible")], "1")).toBe(false);
+    expect(shouldSuppressNotification([win(TASK_ONE, false, "visible")], "1")).toBe(false);
+    expect(shouldSuppressNotification([win(TASK_ONE, true, "hidden")], "1")).toBe(false);
+    expect(shouldSuppressNotification([win(TASK_ONE, true, "visible")])).toBe(false);
     expect(shouldSuppressNotification([])).toBe(false);
   });
 });

@@ -3,10 +3,11 @@ package backendapp
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"strings"
 
 	"go.uber.org/zap"
 
+	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -15,21 +16,34 @@ import (
 	"github.com/kandev/kandev/internal/notifications/webpush"
 )
 
-// webPushSubjectEnv overrides the VAPID subject (a mailto: or https: contact
-// URL that push services may use to reach the operator).
-const webPushSubjectEnv = "KANDEV_WEBPUSH_SUBJECT"
-
 // sessionStateFailed is the wire value of a failed task session.
 const sessionStateFailed = "FAILED"
 
 // configureWebPush enables Web Push when the notification store supports it.
-func configureWebPush(svc *notificationservice.Service, repo notificationstore.Repository, log *logger.Logger) {
+func configureWebPush(
+	svc *notificationservice.Service,
+	repo notificationstore.Repository,
+	settings commonconfig.NotificationsConfig,
+	log *logger.Logger,
+	registerCleanup func(func() error),
+) {
 	pushRepo, ok := repo.(notificationstore.WebPushRepository)
 	if !ok {
 		log.Warn("notification store does not support web push; push notifications disabled")
 		return
 	}
-	svc.SetWebPush(webpush.NewService(pushRepo, webpush.NewHTTPSender(), os.Getenv(webPushSubjectEnv), log))
+	allowedHosts := strings.Split(settings.WebPushAllowedHosts, ",")
+	pushSvc := webpush.NewService(
+		pushRepo,
+		webpush.NewHTTPSender(allowedHosts...),
+		settings.WebPushSubject,
+		log,
+		allowedHosts...,
+	)
+	if registerCleanup != nil {
+		registerCleanup(pushSvc.StartAsyncDelivery())
+	}
+	svc.SetWebPush(pushSvc)
 }
 
 // subscribeSessionAttentionNotifications routes the events that need a person

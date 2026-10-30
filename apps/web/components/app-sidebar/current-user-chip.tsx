@@ -12,11 +12,17 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { logout } from "@/lib/api/domains/auth-api";
+import { unsubscribeCurrentPushSubscription } from "@/lib/pwa/push-client";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { initialsFor } from "@/lib/user-initials";
 
 async function handleLogout() {
+  try {
+    await unsubscribeCurrentPushSubscription();
+  } catch {
+    // Logout must continue if push cleanup is unavailable.
+  }
   try {
     await logout();
   } finally {

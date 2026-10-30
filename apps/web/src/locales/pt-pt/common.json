@@ -567,5 +567,8 @@
   "conversationSearch_query_too_short": "Use pelo menos 3 caracteres para pesquisar conversas.",
   "conversationSearch_query_too_long": "Use no máximo 200 caracteres para pesquisar conversas.",
   "conversationSearch_query_too_broad": "Use pelo menos 3 letras ou algarismos consecutivos.",
-  "conversationSearch_title": "Paleta de comandos"
+  "conversationSearch_title": "Paleta de comandos",
+  "offlineTitle": "Está sem ligação",
+  "offlineDescription": "O Kandev precisa de uma ligação ao servidor. Verifique a rede e tente novamente.",
+  "offlineRetry": "Tentar novamente"
 }

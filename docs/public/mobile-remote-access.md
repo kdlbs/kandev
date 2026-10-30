@@ -273,7 +273,7 @@ Cloudflare Access redirects every request without a valid session cookie to a `c
 
 Kandev can send a Web Push notification to each phone or browser you enable. The Kandev backend sends the message to the browser vendor's push service over outbound HTTPS, so it needs no inbound connection beyond the one you already expose. For Chrome on Android that push service is Google's; the service sees the message's size and timing and the encrypted body, not its content.
 
-Push messages carry only a short title, a one-line status, and a link to the task or session. They never carry code, tokens, or message text.
+Push messages include the task title, a short status, and a link to the task or session. They do not include code, tokens, or message text.
 
 ### Turn push on
 
@@ -282,11 +282,21 @@ Push messages carry only a short title, a one-line status, and a link to the tas
 3. Select **Send test push**. A test notification should arrive within a few seconds.
 4. In **Notification Events**, choose which events the **Web Push** row should send. It starts with agent questions, permission requests, failed sessions, and finished turns.
 
-Each device subscribes separately. **Disable push** removes only the current device.
+Each device subscribes separately. **Disable push** removes only the current device. Logging out also removes this browser's push subscription when the server is available.
 
-Kandev does not show a push notification while a Kandev window is focused and visible. Tapping a notification focuses an open Kandev window and opens the task or session. If no window is open, it opens the app at that link. Repeated notifications for the same session replace each other instead of piling up.
+Kandev suppresses a push notification when a focused, visible Kandev window already shows the same task. A test notification can arrive while another task is open. Tapping a notification focuses an open Kandev window and opens the task or session. If no window is open, it opens the app at that link. Repeated notifications for the same session replace each other instead of piling up.
 
-The backend identifies itself to push services with a contact address. Set it with the `KANDEV_WEBPUSH_SUBJECT` environment variable, for example `KANDEV_WEBPUSH_SUBJECT=mailto:you@example.com`. A `mailto:` or `https:` value is accepted. The default is a placeholder address. The signing keys are generated on first use and stored in the Kandev database. Back up the database to keep subscriptions across a restore. If the keys are lost, turn push off and on again on each device.
+The backend identifies itself to push services with a contact address. Set
+`notifications.webPushSubject` or `KANDEV_WEBPUSH_SUBJECT`, for example
+`KANDEV_WEBPUSH_SUBJECT=mailto:you@example.com`. A `mailto:` or `https:` value
+is accepted. The default is a placeholder address. The backend accepts the
+standard Google, Mozilla, Apple, and Windows push hosts. Operators can add
+comma-separated custom host suffixes with
+`notifications.webPushAllowedHosts` or `KANDEV_WEBPUSH_ALLOWED_HOSTS`. Add only
+hosts for a push service that you operate. The signing keys are generated on
+first use and stored in the Kandev database. Back up the database to keep
+subscriptions across a restore. If the keys are lost, turn push off and on
+again on each device.
 
 ### Troubleshoot push notifications
 

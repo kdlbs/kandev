@@ -45,7 +45,7 @@ function PushActions({ push }: { push: ReturnType<typeof useWebPush> }) {
       <Button
         size="sm"
         variant={subscribed ? "outline" : "default"}
-        className="cursor-pointer"
+        className="cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
         disabled={busy || !canToggle}
         onClick={() => void (subscribed ? push.disable() : push.enable())}
         data-testid="web-push-toggle"
@@ -56,7 +56,7 @@ function PushActions({ push }: { push: ReturnType<typeof useWebPush> }) {
         <Button
           size="sm"
           variant="outline"
-          className="cursor-pointer"
+          className="cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           disabled={busy}
           onClick={() => void push.sendTest()}
           data-testid="web-push-test"
