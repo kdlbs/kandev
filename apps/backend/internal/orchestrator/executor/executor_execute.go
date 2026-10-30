@@ -3334,6 +3334,9 @@ func (e *Executor) configureExistingWorkspace(
 	if request == nil {
 		return errors.New("existing workspace launch request is required")
 	}
+	if err := e.prepareExistingWorkspaceBuiltin(ctx, executionID, request.McpProfile); err != nil {
+		return err
+	}
 	credentialReq := &LaunchAgentRequest{
 		TaskID:            task.ID,
 		WorkspaceID:       task.WorkspaceID,

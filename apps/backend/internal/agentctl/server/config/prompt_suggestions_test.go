@@ -6,10 +6,18 @@ import "testing"
 // suggestion request reaches the instance config and defaults to off.
 func TestNewInstanceConfigPromptSuggestions(t *testing.T) {
 	base := &Config{}
-	if base.NewInstanceConfig(41001, &InstanceOverrides{}).PromptSuggestions {
+	instance, err := base.NewInstanceConfig(41001, &InstanceOverrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.PromptSuggestions {
 		t.Fatal("PromptSuggestions = true without an override, want false")
 	}
-	if !base.NewInstanceConfig(41001, &InstanceOverrides{PromptSuggestions: true}).PromptSuggestions {
+	instance, err = base.NewInstanceConfig(41001, &InstanceOverrides{PromptSuggestions: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !instance.PromptSuggestions {
 		t.Fatal("PromptSuggestions = false with the override, want true")
 	}
 }

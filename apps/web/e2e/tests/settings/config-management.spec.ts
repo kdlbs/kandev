@@ -6,13 +6,13 @@ import type { Page } from "@playwright/test";
 import { getMockAgent } from "../../helpers/agent-fixtures";
 
 /** Each journey retains the real config-mode agentctl MCP transport and API persistence checks. */
-type ConfigCall = [name: string, args: Record<string, unknown>];
+type ConfigCall = [server: string, name: string, args: Record<string, unknown>];
 
 function configSessionRunner(apiClient: ApiClient, seedData: SeedData, testPage: Page) {
   let session: { task_id: string; session_id: string } | undefined;
   return async (calls: ConfigCall[], marker: string) => {
     const prompt = [
-      ...calls.map(([name, args]) => `e2e:mcp:kandev:${name}(${JSON.stringify(args)})`),
+      ...calls.map(([server, name, args]) => `e2e:mcp:${server}:${name}(${JSON.stringify(args)})`),
       `e2e:message(${JSON.stringify(marker)})`,
     ].join("\n");
     if (!session) {
@@ -75,8 +75,8 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
     await test.step("agent can list workspaces and workflows", async () => {
       const page = await runConfig(
         [
-          ["list_workspaces_kandev", {}],
-          ["list_workflows_kandev", { workspace_id: seedData.workspaceId }],
+          ["kandev", "list_workspaces_kandev", {}],
+          ["kandev", "list_workflows_kandev", { workspace_id: seedData.workspaceId }],
         ],
         "Done listing",
       );
@@ -103,11 +103,13 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
     await runConfig(
       [
         [
+          "kandev-configuration",
           "create_workflow_step_kandev",
           { workflow_id: minimal.id, name: "QA Review", position: 0 },
         ],
-        ["list_workflow_steps_kandev", { workflow_id: minimal.id }],
+        ["kandev", "list_workflow_steps_kandev", { workflow_id: minimal.id }],
         [
+          "kandev-configuration",
           "create_workflow_step_kandev",
           {
             workflow_id: fullFields.id,
@@ -122,6 +124,7 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
           },
         ],
         [
+          "kandev-configuration",
           "create_workflow_kandev",
           {
             workspace_id: seedData.workspaceId,
@@ -130,6 +133,7 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
           },
         ],
         [
+          "kandev-configuration",
           "update_workflow_kandev",
           {
             workflow_id: renamed.id,
@@ -137,8 +141,9 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
             description: "Updated description",
           },
         ],
-        ["delete_workflow_kandev", { workflow_id: deleted.id }],
+        ["kandev-configuration", "delete_workflow_kandev", { workflow_id: deleted.id }],
         [
+          "kandev-configuration",
           "update_workflow_step_kandev",
           {
             step_id: step.id,
@@ -153,22 +158,26 @@ test("workflow CRUD and cross-resource setup preserve every config tool result",
             },
           },
         ],
-        ["list_workspaces_kandev", {}],
-        ["list_workflows_kandev", { workspace_id: seedData.workspaceId }],
+        ["kandev", "list_workspaces_kandev", {}],
+        ["kandev", "list_workflows_kandev", { workspace_id: seedData.workspaceId }],
         [
+          "kandev-configuration",
           "create_workflow_step_kandev",
           { workflow_id: multiTool.id, name: "Agent Created Step", position: 0 },
         ],
-        ["list_agents_kandev", {}],
+        ["kandev", "list_agents_kandev", {}],
         [
+          "kandev-configuration",
           "create_workflow_step_kandev",
           { workflow_id: fullSetup.id, name: "Build", position: 0, color: "#3b82f6" },
         ],
         [
+          "kandev-configuration",
           "create_agent_profile_kandev",
           { agent_id: agent.id, name: "CI Profile", model: "mock-fast" },
         ],
         [
+          "kandev-configuration",
           "update_mcp_config_kandev",
           {
             profile_id: seedData.agentProfileId,
@@ -262,23 +271,31 @@ test("agent and profile lifecycle preserves model, name and MCP configuration", 
   try {
     const page = await runConfig(
       [
-        ["list_agents_kandev", {}],
-        ["list_agent_profiles_kandev", { agent_id: firstAgent.id }],
+        ["kandev", "list_agents_kandev", {}],
+        ["kandev-configuration", "list_agent_profiles_kandev", { agent_id: firstAgent.id }],
         [
+          "kandev-configuration",
           "create_agent_profile_kandev",
           { agent_id: mockAgent.id, name: "E2E Created Profile", model: "mock-fast" },
         ],
-        ["update_agent_kandev", { agent_id: firstAgent.id, supports_mcp: true }],
         [
+          "kandev-configuration",
+          "update_agent_kandev",
+          { agent_id: firstAgent.id, supports_mcp: true },
+        ],
+        [
+          "kandev-configuration",
           "update_agent_profile_kandev",
           { profile_id: seedData.agentProfileId, name: "Renamed Profile" },
         ],
         [
+          "kandev-configuration",
           "update_agent_profile_kandev",
           { profile_id: seedData.agentProfileId, model: "claude-sonnet-4-5-20250514" },
         ],
-        ["get_mcp_config_kandev", { profile_id: seedData.agentProfileId }],
+        ["kandev-configuration", "get_mcp_config_kandev", { profile_id: seedData.agentProfileId }],
         [
+          "kandev-configuration",
           "update_mcp_config_kandev",
           {
             profile_id: seedData.agentProfileId,
@@ -338,7 +355,7 @@ test("agent and profile lifecycle preserves model, name and MCP configuration", 
       expect(newProfiles[0].model).toBe("mock-fast");
       const newProfileId = newProfiles[0].id;
       await runConfig(
-        [["delete_agent_profile_kandev", { profile_id: newProfileId }]],
+        [["kandev-configuration", "delete_agent_profile_kandev", { profile_id: newProfileId }]],
         "Profile deleted",
       );
       await expect
@@ -372,13 +389,14 @@ test("task listing, movement, archive and deletion use config-mode MCP", async (
   const deleted = await apiClient.createTask(seedData.workspaceId, "Deletable Task", taskOptions);
   const page = await runConfig(
     [
-      ["list_tasks_kandev", { workflow_id: seedData.workflowId }],
+      ["kandev", "list_tasks_kandev", { workflow_id: seedData.workflowId }],
       [
+        "kandev",
         "move_task_kandev",
         { task_id: moved.id, workflow_id: seedData.workflowId, workflow_step_id: targetStep!.id },
       ],
-      ["archive_task_kandev", { task_id: archived.id }],
-      ["delete_task_kandev", { task_id: deleted.id }],
+      ["kandev", "archive_task_kandev", { task_id: archived.id }],
+      ["kandev", "delete_task_kandev", { task_id: deleted.id }],
     ],
     "Task operations complete",
   );
@@ -412,8 +430,12 @@ test("executor listing and profile lifecycle use config-mode MCP", async ({
   const executor = executors.find((e) => e.type === "local")!;
   const page = await runConfig(
     [
-      ["list_executors_kandev", {}],
-      ["create_executor_profile_kandev", { executor_id: executor.id, name: "E2E Profile" }],
+      ["kandev-configuration", "list_executors_kandev", {}],
+      [
+        "kandev-configuration",
+        "create_executor_profile_kandev",
+        { executor_id: executor.id, name: "E2E Profile" },
+      ],
     ],
     "Executor profile created",
   );
@@ -430,7 +452,7 @@ test("executor listing and profile lifecycle use config-mode MCP", async ({
       ?.profiles?.find((p) => p.name === "E2E Profile");
     expect(profile).toBeTruthy();
     await runConfig(
-      [["delete_executor_profile_kandev", { profile_id: profile!.id }]],
+      [["kandev-configuration", "delete_executor_profile_kandev", { profile_id: profile!.id }]],
       "Executor profile deleted",
     );
     const { executors: afterDelete } = await apiClient.listExecutors();

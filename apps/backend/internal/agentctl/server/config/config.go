@@ -276,6 +276,9 @@ type InstanceConfig struct {
 	// AgentCommand is the command to run the agent
 	AgentCommand string
 
+	// AgentCommandConfigured distinguishes an explicit command from the inherited default.
+	AgentCommandConfigured bool `json:"-"`
+
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
@@ -756,6 +759,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.AgentCommand != "" {
 		cfg.AgentCommand = overrides.AgentCommand
+		cfg.AgentCommandConfigured = true
 	}
 	if overrides.WorkDir != "" {
 		cfg.WorkDir = overrides.WorkDir

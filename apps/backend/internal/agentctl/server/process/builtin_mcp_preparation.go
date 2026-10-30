@@ -12,7 +12,7 @@ import (
 func (m *Manager) PrepareBuiltinProfile(profile p.Context, apply func(p.Context) error) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
-	if m.cfg.AgentCommand != "" || len(m.cfg.AgentArgs) != 0 || m.ProcessGeneration() != 0 || m.passthrough.Live() {
+	if m.cfg.AgentCommandConfigured || m.builtinPreparationStarted() {
 		return errors.New("built-in MCP preparation requires an unused workspace helper")
 	}
 	profile = p.Normalize(profile)
@@ -44,4 +44,16 @@ func (m *Manager) PrepareBuiltinProfile(profile p.Context, apply func(p.Context)
 	m.cfg.McpProfile = &profile
 	m.cfg.McpServers = servers
 	return nil
+}
+
+func (m *Manager) builtinPreparationStarted() bool {
+	if m.ProcessGeneration() != 0 {
+		return true
+	}
+	if m.passthrough == nil {
+		return false
+	}
+	m.passthrough.mu.Lock()
+	defer m.passthrough.mu.Unlock()
+	return m.passthrough.current.Generation != 0
 }

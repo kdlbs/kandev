@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderWithTestingLibrary,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   MCPAttachmentHistory,
@@ -6,6 +13,11 @@ import type {
 } from "@/lib/state/slices/session-runtime/types";
 import { McpStatusTooltip } from "./mcp-status-presentation";
 import { McpIndicator } from "./mcp-indicator";
+import { StateProvider } from "@/components/state-provider";
+
+function render(ui: React.ReactNode) {
+  return renderWithTestingLibrary(ui, { wrapper: StateProvider });
+}
 
 const testCopy = vi.hoisted(() => ({
   thirdPartyCatalogUnavailable: "Kandev does not inspect tools from this server.",

@@ -99,7 +99,11 @@ func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
 	if !cfg.AgentBackgroundWorkEnabled {
 		t.Fatal("AgentBackgroundWorkEnabled = false, want true when the startup contract enables it")
 	}
-	if !cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+	instance, err := cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if !instance.AgentBackgroundWorkEnabled {
 		t.Fatal("instance config did not inherit AgentBackgroundWorkEnabled")
 	}
 
@@ -112,7 +116,11 @@ func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
 	if cfg.AgentBackgroundWorkEnabled {
 		t.Fatal("AgentBackgroundWorkEnabled = true, want false when the startup contract disables it")
 	}
-	if cfg.NewInstanceConfig(0, nil).AgentBackgroundWorkEnabled {
+	instance, err = cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if instance.AgentBackgroundWorkEnabled {
 		t.Fatal("instance config enabled background work for a disabled launch")
 	}
 }

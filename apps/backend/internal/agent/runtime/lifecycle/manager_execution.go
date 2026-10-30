@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -1117,6 +1118,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 		metadata[key] = value
 	}
 	delete(metadata, managedGoCacheMetadataKey)
+	// A new workspace helper receives its binding at the next process launch.
+	delete(metadata, mcpprofile.BuiltinBindingMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = envPreparation.managedGoCachePath

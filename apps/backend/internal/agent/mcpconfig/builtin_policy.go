@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	builtinOriginWorkspace   = "workspace"
 	BuiltinPolicyBlocked     = "blocked"
 	BuiltinPolicyAvailable   = "available"
 	BuiltinPolicyDefault     = "default"
@@ -85,7 +86,7 @@ func appendBuiltinSelections(manifest *mcpprofile.BuiltinManifest, policy *Built
 			continue
 		}
 		manifest.Packages = append(manifest.Packages, id)
-		manifest.Origins[id] = "workspace"
+		manifest.Origins[id] = builtinOriginWorkspace
 		if preference == BuiltinPreferenceOn {
 			manifest.Origins[id] = "task"
 		}

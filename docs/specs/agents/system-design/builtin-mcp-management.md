@@ -350,7 +350,12 @@ An unused workspace helper can precede the agent process. Before configuring its
 agent command, the backend binds its prepared profile through authenticated
 `PUT /api/v1/mcp/builtin-binding`. The helper serializes this operation with
 process start. It accepts one binding and an identical retry; it rejects a
-changed binding, an already configured command, or prior process use. Optional
+changed binding, an explicitly configured command, or prior process use.
+The prepared-workspace start path must bind packages even when the backend has
+already built the command and skips a second launch. An inherited helper default
+command does not establish explicit configuration. A new
+workspace helper drops the previous process binding and binds the prepared
+selection before launch; a retained helper verifies its original binding. Optional
 routes become available only after binding. The response must confirm the exact
 canonical profile. This preparation does not claim accepted process evidence.
 Persist an unavailable marker before a remote binding or capability update.

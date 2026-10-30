@@ -470,16 +470,33 @@ function CatalogLoadError({ error }: { error: unknown }) {
   ) : null;
 }
 
+function useBuiltinWorkspacePages(workspaceId: string) {
+  const builtin = useBuiltinMCPPolicy(workspaceId);
+  const [builtinId, setBuiltinId] = useState<BuiltinMCPPackage | null>(null);
+  const returnFocus = useRef<BuiltinMCPPackage | null>(null);
+  if (builtinId) returnFocus.current = builtinId;
+  const item = builtin.view?.catalog.find((entry) => entry.id === builtinId);
+  return {
+    detail: item ? (
+      <BuiltinWorkspaceDetail editor={builtin} item={item} onBack={() => setBuiltinId(null)} />
+    ) : null,
+    list: (
+      <BuiltinPackageList
+        returnFocus={returnFocus.current}
+        editor={builtin}
+        onSelect={setBuiltinId}
+      />
+    ),
+  };
+}
+
 function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
   const router = useRouter();
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const { toast } = useToast();
   const data = useMCPWorkspaceSettings(workspaceId);
-  const builtin = useBuiltinMCPPolicy(workspaceId);
-  const [builtinId, setBuiltinId] = useState<BuiltinMCPPackage | null>(null);
-  const returnFocus = useRef<BuiltinMCPPackage | null>(null);
-  if (builtinId) returnFocus.current = builtinId;
+  const builtinPages = useBuiltinWorkspacePages(workspaceId);
   const [assignment, setAssignment] = useState<MCPRegistrationReceipt | null>(null);
   const [view, setView] = useState<"configured" | "marketplace">("configured");
   const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
@@ -509,15 +526,7 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
     if (result.status !== "saved") throw new SettingsSaveCancelledError();
   };
 
-  const builtinDetail = builtin.view?.catalog.find((item) => item.id === builtinId);
-  if (builtinDetail)
-    return (
-      <BuiltinWorkspaceDetail
-        editor={builtin}
-        item={builtinDetail}
-        onBack={() => setBuiltinId(null)}
-      />
-    );
+  if (builtinPages.detail) return builtinPages.detail;
   if (editor !== undefined)
     return (
       <MCPDefinitionForm
@@ -543,13 +552,7 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
         />
       )}
       <CatalogLoadError error={data.error} />
-      {view === "configured" && (
-        <BuiltinPackageList
-          returnFocus={returnFocus.current}
-          editor={builtin}
-          onSelect={setBuiltinId}
-        />
-      )}
+      {view === "configured" && builtinPages.list}
       {view === "configured" ? (
         <ConfiguredMCPServers
           servers={data.servers}
