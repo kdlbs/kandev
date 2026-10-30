@@ -1,0 +1,18 @@
+--- FAIL: TestUsageHistoryPostgresCurrentTargetExcludesHistoricalPages (0.00s)
+    usage_history_current_bounds_test.go:59: 
+        	Error Trace:	github.com/kandev/kandev/internal/analytics/repository/sqlite/usage_history_current_fixture_test.go:23
+        	            				github.com/kandev/kandev/internal/analytics/repository/sqlite/usage_history_current_bounds_test.go:59
+        	            				github.com/kandev/kandev/internal/analytics/repository/sqlite/usage_history_current_bounds_test.go:54
+        	Error:      	Should NOT be empty, but was 
+        	Test:       	TestUsageHistoryPostgresCurrentTargetExcludesHistoricalPages
+        	Messages:   	real PostgreSQL verification requires its isolated test DSN
+FAIL
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	0.015s
+--- FAIL: TestUsageHistoryPostgresTaskDeletePreservationPages (0.00s)
+    --- FAIL: TestUsageHistoryPostgresTaskDeletePreservationPages/all_pages (0.00s)
+        usage_history_preservation_pages_test.go:75: KANDEV_TEST_POSTGRES_DSN is required for PostgreSQL preservation parity
+    --- FAIL: TestUsageHistoryPostgresTaskDeletePreservationPages/native_rollback_resume (0.00s)
+        usage_history_preservation_pages_test.go:75: KANDEV_TEST_POSTGRES_DSN is required for PostgreSQL preservation parity
+FAIL
+FAIL	github.com/kandev/kandev/internal/task/repository/sqlite	0.019s
+FAIL

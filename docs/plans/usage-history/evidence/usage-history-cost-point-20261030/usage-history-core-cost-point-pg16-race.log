@@ -1,0 +1,21 @@
+=== RUN   TestUsageHistoryMetricApplicabilityForNativeAndReportedCost
+=== RUN   TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=false/equivalent_work_and_coverage=true
+=== RUN   TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=false/equivalent_work_and_coverage=false
+=== RUN   TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=true/equivalent_work_and_coverage=true
+    usage_history_metric_applicability_integration_test.go:17: PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1)
+=== RUN   TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=true/equivalent_work_and_coverage=false
+    usage_history_metric_applicability_integration_test.go:17: PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1)
+--- PASS: TestUsageHistoryMetricApplicabilityForNativeAndReportedCost (6.38s)
+    --- PASS: TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=false/equivalent_work_and_coverage=true (0.41s)
+    --- PASS: TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=false/equivalent_work_and_coverage=false (0.34s)
+    --- PASS: TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=true/equivalent_work_and_coverage=true (2.83s)
+    --- PASS: TestUsageHistoryMetricApplicabilityForNativeAndReportedCost/postgres=true/equivalent_work_and_coverage=false (2.81s)
+=== RUN   TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval
+=== RUN   TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval/postgres=false
+=== RUN   TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval/postgres=true
+    usage_history_metric_applicability_integration_test.go:26: PostgreSQL 16.14 (Debian 16.14-1.pgdg13+1)
+--- PASS: TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval (3.02s)
+    --- PASS: TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval/postgres=false (0.32s)
+    --- PASS: TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval/postgres=true (2.70s)
+PASS
+ok  	github.com/kandev/kandev/internal/analytics/repository/sqlite	10.450s
