@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,27 +81,68 @@ func (r *Repository) selectionReferencesTx(ctx context.Context, tx *sqlx.Tx, sco
 	var selects []string
 	var args []any
 	for _, table := range []string{usageMeasurementsTable, usageBucketsTable} {
-		query := `SELECT id, '` + table + `' AS source_table, selection_coverage FROM ` + table + ` WHERE scope_id = ? AND selection_partition = ? AND retired = 0`
-		args = append(args, scope, work)
 		if overlap == nil {
+			query := `SELECT id, '` + table + `' AS source_table, selection_coverage FROM ` + table + ` WHERE scope_id = ? AND selection_partition = ? AND retired = 0`
 			query += ` AND selection_coverage > ?`
-			args = append(args, after)
-		} else {
-			predicate, bounds := usageSelectionOverlap(*overlap)
-			query += predicate + ` AND selection_coverage <> ?`
-			args = append(args, bounds...)
-			args = append(args, overlap.CoverageKey)
+			selects = append(selects, query)
+			args = append(args, scope, work, after)
+			continue
+		}
+		pointPredicate, pointArgs, coarsePredicate, coarseArgs := usageSelectionReferencePredicates(*overlap)
+		for _, branch := range []struct {
+			predicate string
+			args      []any
+			index     string
+		}{{pointPredicate, pointArgs, table + "_interval"}, {coarsePredicate, coarseArgs, table + "_coarse_interval_end"}} {
+			index := ""
+			if r.db.DriverName() == usageDriverSQLite {
+				index = ` INDEXED BY idx_` + branch.index
+			}
+			query := `SELECT id, '` + table + `' AS source_table, selection_coverage FROM ` + table + index + ` WHERE scope_id = ? AND selection_partition = ? AND retired = 0` + branch.predicate + ` AND selection_coverage <> ?`
 			if overlap.EventID != "" {
 				query += ` AND (work_event_id = '' OR work_event_id = ?)`
+			}
+			selects = append(selects, query)
+			args = append(args, scope, work)
+			args = append(args, branch.args...)
+			args = append(args, overlap.CoverageKey)
+			if overlap.EventID != "" {
 				args = append(args, overlap.EventID)
 			}
 		}
-		selects = append(selects, query)
 	}
-	query := strings.Join(selects, ` UNION ALL `) + ` ORDER BY selection_coverage, id LIMIT 201`
+	query := strings.Join(selects, ` UNION ALL `)
+	if overlap == nil {
+		query += ` ORDER BY selection_coverage, id`
+	} else {
+		// The overlap callers treat any 201 references as preparing before loading
+		// them. When at most 200 match, every reference is present and sorting in
+		// memory preserves deterministic processing without making SQL scan history.
+		query = `SELECT id, source_table, selection_coverage FROM (` + query + `) overlap_references`
+	}
+	query += ` LIMIT 201`
 	var refs []selectionReference
 	err := tx.SelectContext(ctx, &refs, r.db.Rebind(query), args...)
+	if overlap != nil {
+		sort.Slice(refs, func(i, j int) bool {
+			if refs[i].Coverage != refs[j].Coverage {
+				return refs[i].Coverage < refs[j].Coverage
+			}
+			if refs[i].ID != refs[j].ID {
+				return refs[i].ID < refs[j].ID
+			}
+			return refs[i].Table < refs[j].Table
+		})
+	}
 	return refs, err
+}
+
+func usageSelectionReferencePredicates(row indexedObservation) (string, []any, string, []any) {
+	_, bounds := usageSelectionOverlap(row)
+	end, start := bounds[0], bounds[1]
+	point := ` AND coverage_start >= ? AND coverage_start < ? AND (source = 'native' OR coverage_key LIKE 'point:%')`
+	coarse := ` AND coverage_start < ? AND coverage_end > ? AND source <> 'native' AND coverage_key NOT LIKE 'point:%'`
+	return point, []any{start, end}, coarse, []any{end, start}
 }
 
 func selectionCandidateBetter(a, b indexedObservation) bool {

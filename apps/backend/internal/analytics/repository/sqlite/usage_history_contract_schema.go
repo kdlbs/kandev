@@ -88,6 +88,7 @@ func (r *Repository) ensureUsageContractSourceSchema(ctx context.Context) error 
 			`CREATE INDEX IF NOT EXISTS idx_` + table + `_source_key ON ` + table + `(scope_id, id)`,
 			`CREATE INDEX IF NOT EXISTS idx_` + table + `_selection ON ` + table + `(scope_id, selection_partition, retired, selection_coverage, id)`,
 			`CREATE INDEX IF NOT EXISTS idx_` + table + `_interval ON ` + table + `(scope_id, selection_partition, retired, coverage_start, coverage_end)`,
+			`CREATE INDEX IF NOT EXISTS idx_` + table + `_coarse_interval_end ON ` + table + `(scope_id, selection_partition, retired, coverage_end, coverage_start) WHERE source <> 'native' AND coverage_key NOT LIKE 'point:%'`,
 			`CREATE INDEX IF NOT EXISTS idx_` + table + `_dimensions ON ` + table + `(scope_id, selection_partition, model, provider, token_semantics_version)`,
 		} {
 			if _, err := r.db.ExecContext(ctx, statement); err != nil {

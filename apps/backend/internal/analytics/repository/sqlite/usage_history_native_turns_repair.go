@@ -169,10 +169,20 @@ func (r *Repository) markNativeUsageAccountingCurrentTx(ctx context.Context, tx 
 
 func (r *Repository) nativeUsageAccountingRepairPendingTx(ctx context.Context, tx *sqlx.Tx, scope string) (bool, error) {
 	var pending bool
-	query := `SELECT EXISTS(SELECT 1 FROM session_usage_measurements WHERE scope_id=? AND ` + nativeUsageAccountingPendingSQL +
-		`) OR EXISTS(SELECT 1 FROM session_usage_buckets WHERE scope_id=? AND ` + nativeUsageAccountingPendingSQL + `)`
+	measurementTable := sessionUsageTableForNativeAccountingPending(r.db.DriverName(), usageMeasurementsTable)
+	bucketTable := sessionUsageTableForNativeAccountingPending(r.db.DriverName(), usageBucketsTable)
+	query := `SELECT
+		(SELECT id FROM ` + measurementTable + ` WHERE scope_id=? AND ` + nativeUsageAccountingPendingSQL + ` ORDER BY id LIMIT 1) IS NOT NULL OR
+		(SELECT id FROM ` + bucketTable + ` WHERE scope_id=? AND ` + nativeUsageAccountingPendingSQL + ` ORDER BY id LIMIT 1) IS NOT NULL`
 	err := tx.GetContext(ctx, &pending, r.db.Rebind(query), scope, scope)
 	return pending, err
+}
+
+func sessionUsageTableForNativeAccountingPending(driver, table string) string {
+	if driver == usageDriverSQLite {
+		return table + ` INDEXED BY idx_` + table + `_native_accounting_pending_v1`
+	}
+	return table
 }
 
 // suppressNativeUsageTurns is for source normalization before token provenance
