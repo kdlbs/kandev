@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const usageHistoryFixtureAction = "usage-history-fixture"
@@ -58,9 +60,9 @@ func (p *fixturePlugin) usageHistoryFixture(ctx context.Context, req *pluginsdk.
 	case "targets":
 		result, err = reader.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: req.Context.WorkspaceID, Limit: 200, SnapshotID: input.SnapshotID, Cursor: input.Cursor})
 	case "report":
-		result, err = reportFixtureUsage(ctx, reader, input)
+		result, err = reportFixtureUsage(ctx, reader, req.Context.WorkspaceID, input)
 	case "tombstone":
-		result, err = retireFixtureUsage(ctx, reader, input)
+		result, err = retireFixtureUsage(ctx, reader, req.Context.WorkspaceID, input)
 	case "canonical", "source":
 		result, err = readFixtureUsage(ctx, host.Usage(), req.Context.WorkspaceID, input)
 	default:
@@ -76,7 +78,7 @@ func (p *fixturePlugin) usageHistoryFixture(ctx context.Context, req *pluginsdk.
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
 }
 
-func reportFixtureUsage(ctx context.Context, reader pluginsdk.UsageHistoryReader, input fixtureUsageInput) (pluginsdk.UsageObservationBatchResultV1, error) {
+func reportFixtureUsage(ctx context.Context, reader pluginsdk.UsageHistoryReader, workspace string, input fixtureUsageInput) (pluginsdk.UsageObservationBatchResultV1, error) {
 	item := pluginsdk.UsageObservationV1{
 		SubjectBinding: input.SubjectBinding, ItemID: input.ItemID, SourceRecordID: input.ItemID,
 		SourceVersion: "e2e-fixture-v1", Revision: input.Revision, ModelID: input.ModelID, ModelProvider: input.Provider,
@@ -98,17 +100,68 @@ func reportFixtureUsage(ctx context.Context, reader pluginsdk.UsageHistoryReader
 	if err != nil {
 		return pluginsdk.UsageObservationBatchResultV1{}, err
 	}
+	allowed, err := fixtureUsageBindingAllowed(ctx, reader, workspace, item.SubjectBinding)
+	if err != nil {
+		return pluginsdk.UsageObservationBatchResultV1{}, err
+	}
+	if !allowed {
+		return rejectedFixtureUsageMutation("observation", item.ItemID), nil
+	}
 	return reader.Report(ctx, pluginsdk.UsageObservationBatchV1{SchemaVersion: pluginsdk.UsageObservationSchemaVersionV1, Observations: []pluginsdk.UsageObservationV1{item}})
 }
 
-func retireFixtureUsage(ctx context.Context, reader pluginsdk.UsageHistoryReader, input fixtureUsageInput) (pluginsdk.UsageObservationBatchResultV1, error) {
+func retireFixtureUsage(ctx context.Context, reader pluginsdk.UsageHistoryReader, workspace string, input fixtureUsageInput) (pluginsdk.UsageObservationBatchResultV1, error) {
 	item := pluginsdk.UsageObservationTombstoneV1{SubjectBinding: input.SubjectBinding, ItemID: input.ItemID, Revision: input.Revision}
 	digest, err := item.ComputePayloadDigestV1()
 	if err != nil {
 		return pluginsdk.UsageObservationBatchResultV1{}, err
 	}
 	item.PayloadDigest = digest
+	allowed, err := fixtureUsageBindingAllowed(ctx, reader, workspace, item.SubjectBinding)
+	if err != nil {
+		return pluginsdk.UsageObservationBatchResultV1{}, err
+	}
+	if !allowed {
+		return rejectedFixtureUsageMutation("tombstone", item.ItemID), nil
+	}
 	return reader.Report(ctx, pluginsdk.UsageObservationBatchV1{SchemaVersion: pluginsdk.UsageObservationSchemaVersionV1, Tombstones: []pluginsdk.UsageObservationTombstoneV1{item}})
+}
+
+func fixtureUsageBindingAllowed(ctx context.Context, reader pluginsdk.UsageHistoryReader, workspace, binding string) (bool, error) {
+	if workspace == "" || binding == "" {
+		return false, nil
+	}
+	page, err := reader.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{
+		WorkspaceID: workspace,
+		CurrentTarget: &pluginsdk.UsageCollectionCurrentTargetQueryV1{
+			SubjectBinding: binding,
+		},
+	})
+	if status.Code(err) == codes.NotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, target := range page.Targets {
+		if target.SubjectBinding == binding {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func rejectedFixtureUsageMutation(operation, itemID string) pluginsdk.UsageObservationBatchResultV1 {
+	return pluginsdk.UsageObservationBatchResultV1{
+		Status:                 "partial",
+		SupportedSchemaVersion: pluginsdk.UsageObservationSchemaVersionV2,
+		Results: []pluginsdk.UsageObservationWriteResultV1{{
+			Operation: operation,
+			ItemID:    itemID,
+			Status:    "rejected",
+			Error:     "usage target not found",
+		}},
+	}
 }
 
 func fixtureUsageDecimal(value *string) (*int64, error) {

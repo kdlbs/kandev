@@ -19,16 +19,24 @@ func (h fixtureHistoryHost) UsageHistory() pluginsdk.UsageHistoryReader { return
 func (h fixtureHistoryHost) Usage() pluginsdk.UsageReader               { return h.usage }
 
 type fixtureHistoryReader struct {
-	query pluginsdk.UsageCollectionTargetQueryV1
-	batch pluginsdk.UsageObservationBatchV1
+	query        pluginsdk.UsageCollectionTargetQueryV1
+	batch        pluginsdk.UsageObservationBatchV1
+	targets      []pluginsdk.UsageCollectionTargetV1
+	reportCalled bool
 }
 
 func (r *fixtureHistoryReader) ListTargets(_ context.Context, query pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
 	r.query = query
-	return pluginsdk.UsageCollectionTargetPageV1{}, nil
+	for _, target := range r.targets {
+		if query.CurrentTarget != nil && query.CurrentTarget.SubjectBinding == target.SubjectBinding {
+			return pluginsdk.UsageCollectionTargetPageV1{CurrentTarget: true, Targets: []pluginsdk.UsageCollectionTargetV1{target}}, nil
+		}
+	}
+	return pluginsdk.UsageCollectionTargetPageV1{CurrentTarget: query.CurrentTarget != nil}, nil
 }
 
 func (r *fixtureHistoryReader) Report(_ context.Context, batch pluginsdk.UsageObservationBatchV1) (pluginsdk.UsageObservationBatchResultV1, error) {
+	r.reportCalled = true
 	r.batch = batch
 	return pluginsdk.UsageObservationBatchResultV1{}, nil
 }
@@ -44,7 +52,7 @@ func (r *fixtureCanonicalReader) ListCanonical(_ context.Context, filter plugins
 }
 
 func TestUsageHistoryFixtureUsesAuthorizedWorkspaceAndExactAmounts(t *testing.T) {
-	history, usage := &fixtureHistoryReader{}, &fixtureCanonicalReader{}
+	history, usage := &fixtureHistoryReader{targets: []pluginsdk.UsageCollectionTargetV1{{SubjectBinding: "host-binding"}}}, &fixtureCanonicalReader{}
 	plug := &fixturePlugin{}
 	plug.SetHost(fixtureHistoryHost{history: history, usage: usage})
 	invoke := func(body string) *pluginsdk.PluginActionResponse {
@@ -75,6 +83,43 @@ func TestUsageHistoryFixtureUsesAuthorizedWorkspaceAndExactAmounts(t *testing.T)
 	digest, err := item.ComputePayloadDigestV1()
 	require.NoError(t, err)
 	require.Equal(t, digest, item.PayloadDigest)
+}
+
+func TestUsageHistoryFixtureRejectsBindingsOutsideAuthorizedWorkspace(t *testing.T) {
+	history := &fixtureHistoryReader{targets: []pluginsdk.UsageCollectionTargetV1{{SubjectBinding: "authorized-binding"}}}
+	plug := &fixturePlugin{}
+	plug.SetHost(fixtureHistoryHost{history: history, usage: &fixtureCanonicalReader{}})
+
+	response, err := plug.HandleAction(t.Context(), &pluginsdk.PluginActionRequest{
+		ActionKey: usageHistoryFixtureAction,
+		Body:      []byte(`{"operation":"report","subject_binding":"foreign-binding","item_id":"cross-scope","revision":1,"tokens":{"total_tokens":"9999"}}`),
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "authorized"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "authorized", history.query.WorkspaceID)
+	require.NotNil(t, history.query.CurrentTarget)
+	require.Equal(t, "foreign-binding", history.query.CurrentTarget.SubjectBinding)
+	require.False(t, history.reportCalled, "the fixture must not forward a binding outside the verified workspace")
+	var result pluginsdk.UsageObservationBatchResultV1
+	require.NoError(t, json.Unmarshal(response.Body, &result))
+	require.Len(t, result.Results, 1)
+	require.Equal(t, "rejected", result.Results[0].Status)
+	require.Equal(t, "cross-scope", result.Results[0].ItemID)
+
+	response, err = plug.HandleAction(t.Context(), &pluginsdk.PluginActionRequest{
+		ActionKey: usageHistoryFixtureAction,
+		Body:      []byte(`{"operation":"tombstone","subject_binding":"foreign-binding","item_id":"cross-scope-retire","revision":1}`),
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "authorized"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "authorized", history.query.WorkspaceID)
+	require.NotNil(t, history.query.CurrentTarget)
+	require.Equal(t, "foreign-binding", history.query.CurrentTarget.SubjectBinding)
+	require.False(t, history.reportCalled, "the fixture must not forward a tombstone outside the verified workspace")
+	require.NoError(t, json.Unmarshal(response.Body, &result))
+	require.Len(t, result.Results, 1)
+	require.Equal(t, "rejected", result.Results[0].Status)
+	require.Equal(t, "cross-scope-retire", result.Results[0].ItemID)
 }
 
 func TestUsageHistoryFixtureRejectsRoundedOrInvalidAmounts(t *testing.T) {

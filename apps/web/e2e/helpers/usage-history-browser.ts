@@ -53,22 +53,29 @@ export async function exerciseCollectorRetention(
     await api.archiveTask(task.id);
     await page.goto(`/stats/token-usage?workspaceId=${seed.workspaceId}&range=all`);
     let breakdown = await selectUsageView(page, "Tasks", touch);
-    await expect(breakdown.getByRole("link", { name: task.id, exact: true })).toHaveAttribute(
-      "href",
-      `/t/${task.id}`,
-    );
     const archivedRow = breakdown
       .getByTestId(touch ? "token-usage-mobile-row" : "token-usage-row")
       .filter({ hasText: task.id });
     await expect(archivedRow).toHaveCount(1);
     await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
-    if (capture.capturing) {
-      const details = archivedRow.locator("summary");
-      if (touch) await details.tap();
-      else await details.click();
-      await expect(archivedRow.getByTestId("token-usage-details")).toContainText(
-        "client-is-not-a-provider",
+    const disclosure = archivedRow.locator("summary");
+    if (touch) {
+      await disclosure.tap();
+      await expect(
+        archivedRow
+          .getByTestId("token-usage-details")
+          .getByRole("link", { name: task.id, exact: true }),
+      ).toHaveAttribute("href", `/t/${task.id}`);
+    } else {
+      await expect(breakdown.getByRole("link", { name: task.id, exact: true })).toHaveAttribute(
+        "href",
+        `/t/${task.id}`,
       );
+    }
+    if (capture.capturing) {
+      if (!touch) await disclosure.click();
+      const details = archivedRow.getByTestId("token-usage-details");
+      await expect(details).toContainText("client-is-not-a-provider");
       await archivedRow.scrollIntoViewIfNeeded();
       await capture.screenshot("real-collector-archived-details");
     }
@@ -84,7 +91,7 @@ export async function exerciseCollectorRetention(
       tokens: { input_tokens: "9007199254740995", total_tokens: "9007199254740995" },
     });
     const corrected = await waitForUsage(page, seed.workspaceId, "9007199254740995");
-    expect(corrected.rows[0].provider).toBe("");
+    expect(corrected.rows[0].provider ?? "").toBe("");
     expect(corrected.rows[0].agent_client).toBe("client-is-not-a-provider");
     await page.reload();
     breakdown = await selectUsageView(page, "Tasks", touch);

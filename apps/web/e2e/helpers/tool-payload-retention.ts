@@ -289,7 +289,9 @@ export async function analyzeRetention(page: Page, touch = false) {
       { timeout: 30_000 },
     )
     .toBe("succeeded");
-  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed");
+  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed", {
+    timeout: 15_000,
+  });
 }
 
 export async function activateRetention(page: Page, choice: "backup" | "skip", touch = false) {

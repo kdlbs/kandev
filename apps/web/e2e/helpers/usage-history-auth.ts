@@ -93,13 +93,16 @@ export async function seedAuthenticatedUsage(page: Page, tokens: string) {
   });
   expect(taskResponse.ok(), await taskResponse.text()).toBe(true);
   const task = (await taskResponse.json()) as { id: string };
-  // The existing guarded session fixture provides a historical idle session.
+  // The guarded session fixture provides a historical terminal session.
   // Binding issuance, collector admission, authorization and reporting are real.
+  const terminalAt = new Date().toISOString();
   const sessionResponse = await page.request.post("/api/v1/_test/task-sessions", {
     data: {
       task_id: task.id,
       session_id: randomUUID(),
       state: "COMPLETED",
+      started_at: terminalAt,
+      completed_at: terminalAt,
     },
   });
   expect(sessionResponse.ok(), await sessionResponse.text()).toBe(true);
