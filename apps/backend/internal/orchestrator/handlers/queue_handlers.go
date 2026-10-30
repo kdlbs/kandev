@@ -2649,13 +2649,17 @@ func reservedIdentityError(queuedBy string) string {
 
 // authorizeSession denies the request when the caller cannot access the session.
 func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, sessionID string) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, "", sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // authorizeTaskSession denies the request when the caller cannot access the task/session pair.
@@ -2664,13 +2668,17 @@ func (h *QueueHandlers) authorizeTaskSession(
 	msg *ws.Message,
 	taskID, sessionID string,
 ) *ws.Message {
+	if _, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		return h.authorizeQueueIdentity(ctx, msg, taskID, sessionID, "")
+	}
+
 	if h.accessAuthorizer == nil {
 		return queueAccessDeniedResponse(msg)
 	}
 	if err := h.accessAuthorizer.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 func (h *QueueHandlers) requiresQueueIdentity() bool {
 	_, ok := h.accessAuthorizer.(QueueSessionIdentityAuthorizer)
@@ -2682,6 +2690,16 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	msg *ws.Message,
 	taskID, sessionID, incarnationID string,
 ) *ws.Message {
+	if authorizer, ok := h.accessAuthorizer.(queueActionAuthorizer); ok {
+		if denied := h.authorizeQueueAction(ctx, msg, sessionID); denied != nil {
+			return denied
+		}
+		if err := authorizer.AuthorizeQueueSessionIdentity(ctx, taskID, sessionID, incarnationID); err != nil {
+			return queueAccessDeniedResponse(msg)
+		}
+		return nil
+	}
+
 	if taskID == "" {
 		return h.authorizeSession(ctx, msg, sessionID)
 	}
@@ -2695,7 +2713,7 @@ func (h *QueueHandlers) authorizeQueueIdentity(
 	if err := authorizer.AuthorizeTaskSessionIncarnationAccess(ctx, taskID, sessionID, incarnationID); err != nil {
 		return queueAccessDeniedResponse(msg)
 	}
-	return nil
+	return h.authorizeQueueAction(ctx, msg, sessionID)
 }
 
 // queueAccessDeniedResponse builds the non-enumerating session-not-found error response.

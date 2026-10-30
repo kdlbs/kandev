@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"go.uber.org/zap"
 )
@@ -587,7 +586,13 @@ type TaskStatusUpdateRequest struct {
 	// the canonical task.state_changed event that owns the activity row. Gate
 	// redirects still log here because they do not publish that event.
 	SuppressStatusActivity bool
+	// Automatic terminal writes must not overwrite a later business-state change.
+	ExpectedCurrentState   string
+	ExpectedWorkflowStepID string
 }
+
+// ErrAutomaticCompletionStale means a newer task state owns the outcome.
+var ErrAutomaticCompletionStale = errors.New("task changed before automatic completion")
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
 // and publishes an office.task.status_changed event so execution policy
@@ -629,16 +634,8 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if dbState == stateCompleted {
-		updated, err := s.taskStateWriter.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, v1.TaskState(dbState))
-		if err != nil {
-			return fmt.Errorf("update task state: %w", err)
-		}
-		if !updated {
-			return &WorkflowStepChangedError{TaskID: req.TaskID}
-		}
-	} else if err := s.taskStateWriter.UpdateTaskState(ctx, req.TaskID, v1.TaskState(dbState)); err != nil {
-		return fmt.Errorf("update task state: %w", err)
+	if err := s.persistTaskStatus(ctx, req, dbState, expectedStepID); err != nil {
+		return err
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)

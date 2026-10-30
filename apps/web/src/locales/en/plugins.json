@@ -148,7 +148,7 @@
   "managedChatYou": "You",
   "manifest": "Manifest",
   "manifestApiVersion": "API version",
-  "manifestAuthor": "Author",
+  "manifestAuthor": "Declared author",
   "manifestCapabilities": "Capabilities",
   "manifestId": "ID",
   "manifestInstalled": "Installed",

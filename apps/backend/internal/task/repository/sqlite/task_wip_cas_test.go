@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // seedCASWorkflowStep inserts a bare workflow step row for the compare-and-
@@ -272,5 +273,252 @@ func TestUpdateTaskWithWorkflowStepAdmissionIfAtStep_ConcurrentRace(t *testing.T
 	}
 	if reloaded.WorkflowStepID != "step-target" {
 		t.Fatalf("expected the task to have moved to step-target exactly once, got %q", reloaded.WorkflowStepID)
+	}
+}
+
+// The blocked-state admission regressions below pin the #4889 maintainer
+// blocker: an automatic transition must read the task state inside the
+// admission transaction and stop before it advances a step or records a
+// delivery effect when the persisted state is BLOCKED (or no longer matches
+// the caller's observation). Manual admission variants stay unconditional.
+
+func TestUpdateTaskWithWorkflowStepAdmissionIfAtStep_RejectsBlockedCurrentState(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-cas-blocked")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-cas-blocked", WorkspaceID: "workspace-cas-blocked", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-cas-blocked", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-cas-blocked", "step-target", 1)
+
+	task := &models.Task{
+		ID: "task-cas-blocked", WorkspaceID: "workspace-cas-blocked", WorkflowID: "workflow-cas-blocked",
+		WorkflowStepID: "step-source", Title: "Blocked candidate", WIPAdmitted: true,
+		State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, task.ID, v1.TaskStateBlocked); err != nil {
+		t.Fatalf("UpdateTaskState: %v", err)
+	}
+	observed, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	applied, err := repo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+		ctx, observed, "step-source", "step-target", 0,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionIfAtStep: %v", err)
+	}
+	if applied {
+		t.Fatal("a BLOCKED task must not be advanced by a CAS admission")
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after rejection: %v", err)
+	}
+	if reloaded.WorkflowStepID != "step-source" || reloaded.State != v1.TaskStateBlocked {
+		t.Fatalf("task after rejection = step %q state %q, want step-source/BLOCKED", reloaded.WorkflowStepID, reloaded.State)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmissionAndEffect_RejectsBlockedCurrentState(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-effect-blocked")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-effect-blocked", WorkspaceID: "workspace-effect-blocked", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-effect-blocked", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-effect-blocked", "step-target", 1)
+
+	task := &models.Task{
+		ID: "task-effect-blocked", WorkspaceID: "workspace-effect-blocked", WorkflowID: "workflow-effect-blocked",
+		WorkflowStepID: "step-source", Title: "Blocked effect candidate", WIPAdmitted: true,
+		State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, task.ID, v1.TaskStateBlocked); err != nil {
+		t.Fatalf("UpdateTaskState: %v", err)
+	}
+	observed, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	effect := &models.AgentDeliveryEffect{
+		EffectKey:  "workflow.on_turn_complete:blocked-turn",
+		EffectType: "workflow.on_turn_complete",
+		State:      "completed",
+	}
+
+	admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+		ctx, observed, "step-source", "step-target", 0, effect,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionAndEffect: %v", err)
+	}
+	if admitted || applied {
+		t.Fatalf("blocked effect admission = admitted %v applied %v, want both false", admitted, applied)
+	}
+	if _, err := repo.GetAgentDeliveryEffect(ctx, effect.EffectKey); err == nil {
+		t.Fatal("blocked effect admission recorded the delivery effect")
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after rejection: %v", err)
+	}
+	if reloaded.WorkflowStepID != "step-source" || reloaded.State != v1.TaskStateBlocked {
+		t.Fatalf("task after rejection = step %q state %q, want step-source/BLOCKED", reloaded.WorkflowStepID, reloaded.State)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmissionAndEffect_RejectsConcurrentStateChange(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-effect-race")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-effect-race", WorkspaceID: "workspace-effect-race", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-effect-race", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-effect-race", "step-target", 1)
+
+	task := &models.Task{
+		ID: "task-effect-race", WorkspaceID: "workspace-effect-race", WorkflowID: "workflow-effect-race",
+		WorkflowStepID: "step-source", Title: "Race candidate", WIPAdmitted: true,
+		State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	observed, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	// The concurrent business write lands after the caller's snapshot and
+	// before admission, exactly the ordinary-path race.
+	if err := repo.UpdateTaskState(ctx, task.ID, v1.TaskStateBlocked); err != nil {
+		t.Fatalf("UpdateTaskState: %v", err)
+	}
+	effect := &models.AgentDeliveryEffect{
+		EffectKey:  "workflow.on_turn_complete:race-turn",
+		EffectType: "workflow.on_turn_complete",
+		State:      "completed",
+	}
+
+	admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionAndEffect(
+		ctx, observed, "step-source", "step-target", 0, effect,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionAndEffect: %v", err)
+	}
+	if admitted || applied {
+		t.Fatalf("stale-state admission = admitted %v applied %v, want both false", admitted, applied)
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after rejection: %v", err)
+	}
+	if reloaded.State != v1.TaskStateBlocked {
+		t.Fatalf("state after stale admission = %q, want the concurrent BLOCKED preserved", reloaded.State)
+	}
+	if reloaded.WorkflowStepID != "step-source" {
+		t.Fatalf("workflow step after stale admission = %q, want step-source", reloaded.WorkflowStepID)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmissionReportingApplied_ReportsLostStateComparison(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-reporting-state")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-reporting-state", WorkspaceID: "workspace-reporting-state", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-reporting-state", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-reporting-state", "step-target", 1)
+
+	task := &models.Task{
+		ID: "task-reporting-state", WorkspaceID: "workspace-reporting-state", WorkflowID: "workflow-reporting-state",
+		WorkflowStepID: "step-source", Title: "Reporting candidate", WIPAdmitted: true,
+		State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	observed, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, task.ID, v1.TaskStateBlocked); err != nil {
+		t.Fatalf("UpdateTaskState: %v", err)
+	}
+
+	admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+		ctx, observed, "step-source", "step-target", 0,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionReportingApplied: %v", err)
+	}
+	if admitted || applied {
+		t.Fatalf("reporting admission = admitted %v applied %v, want both false", admitted, applied)
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetTask after rejection: %v", err)
+	}
+	if reloaded.WorkflowStepID != "step-source" || reloaded.State != v1.TaskStateBlocked {
+		t.Fatalf("task after rejection = step %q state %q, want step-source/BLOCKED", reloaded.WorkflowStepID, reloaded.State)
+	}
+}
+
+func TestUpdateTaskWithWorkflowStepAdmissionReportingApplied_ReportsQueuedAsApplied(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-reporting-queued")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-reporting-queued", WorkspaceID: "workspace-reporting-queued", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-reporting-queued", "step-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-reporting-queued", "step-target", 1)
+
+	occupant := &models.Task{
+		ID: "task-reporting-occupant", WorkspaceID: "workspace-reporting-queued", WorkflowID: "workflow-reporting-queued",
+		WorkflowStepID: "step-target", Title: "Occupant", WIPAdmitted: true, State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, occupant); err != nil {
+		t.Fatalf("CreateTask occupant: %v", err)
+	}
+	candidate := &models.Task{
+		ID: "task-reporting-candidate", WorkspaceID: "workspace-reporting-queued", WorkflowID: "workflow-reporting-queued",
+		WorkflowStepID: "step-source", Title: "Queued candidate", WIPAdmitted: true, State: v1.TaskStateInProgress,
+	}
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatalf("CreateTask candidate: %v", err)
+	}
+	observed, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+		ctx, observed, "step-source", "step-target", 1,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskWithWorkflowStepAdmissionReportingApplied: %v", err)
+	}
+	if admitted || !applied {
+		t.Fatalf("queued admission = admitted %v applied %v, want admitted=false applied=true", admitted, applied)
+	}
+	reloaded, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("GetTask after queue: %v", err)
+	}
+	if reloaded.QueuedForStepID != "step-target" || reloaded.WIPAdmitted {
+		t.Fatalf("queued candidate = queued_for %q wip_admitted %v, want step-target/false", reloaded.QueuedForStepID, reloaded.WIPAdmitted)
 	}
 }

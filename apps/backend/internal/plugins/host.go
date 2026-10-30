@@ -354,6 +354,9 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	}
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
+	if h.HostCallContextEnabled() {
+		event.PluginOrigin = &bus.PluginEventOrigin{PluginID: h.pluginID, Reference: pluginsdk.HostCallReference(ctx)}
+	}
 	return h.bus.Publish(ctx, subject, event)
 }
 

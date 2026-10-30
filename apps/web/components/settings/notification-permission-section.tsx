@@ -36,6 +36,24 @@ function permissionActionLabelKey(permission: NotificationPermissionState) {
   return "settings:notificationPermissionEnable";
 }
 
+/**
+ * Warning copy is keyed the same way as the action label so the same value
+ * decides both the warning paragraph and the group frame.
+ */
+function permissionWarningKey(
+  permission: NotificationPermissionState,
+  nativeAvailable: boolean,
+): string | null {
+  if (permission === "denied") {
+    return nativeAvailable
+      ? "settings:notificationsBlockedInOs"
+      : "settings:notificationsBlockedInBrowser";
+  }
+  if (permission === "unsupported") return "settings:notificationsUnsupported";
+  if (permission === "error") return "settings:notificationPermissionCheckFailed";
+  return null;
+}
+
 export function DesktopNotificationsSection({
   notificationPermission,
   onRequestPermission,
@@ -43,11 +61,19 @@ export function DesktopNotificationsSection({
   onTestNotification,
 }: DesktopNotificationsSectionProps) {
   const { t } = useTranslation();
+  const warningKey = permissionWarningKey(
+    notificationPermission,
+    nativeNotifications.isAvailable(),
+  );
+  const warning = warningKey ? t(warningKey) : null;
   return (
     <SettingsGroup
       title={t("settings:desktopNotifications")}
       description={t("settings:desktopNotificationsDescription")}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.desktopNotifications}
+      frame={warning ? "card" : "none"}
+      contentClassName={warning ? undefined : "hidden"}
+      data-testid="notification-permission-group"
       action={
         <div className="flex items-center gap-2">
           <Button
@@ -103,18 +129,10 @@ export function DesktopNotificationsSection({
         </div>
       }
     >
-      {notificationPermission === "denied" && (
-        <p className="text-xs text-amber-600">
-          {nativeNotifications.isAvailable()
-            ? t("settings:notificationsBlockedInOs")
-            : t("settings:notificationsBlockedInBrowser")}
+      {warning && (
+        <p data-testid="notification-permission-warning" className="text-xs text-amber-600">
+          {warning}
         </p>
-      )}
-      {notificationPermission === "unsupported" && (
-        <p className="text-xs text-amber-600">{t("settings:notificationsUnsupported")}</p>
-      )}
-      {notificationPermission === "error" && (
-        <p className="text-xs text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
       )}
     </SettingsGroup>
   );

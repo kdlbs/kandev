@@ -7795,6 +7795,14 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return false
 	}
 
+	if task.IsFromOffice && task.State == v1.TaskStateBlocked {
+		if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "no_automatic_transition") {
+			return false
+		}
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+
 	if s.workflowEngine == nil {
 		if isBoundAgentDeliveryWorkflowEffect(effect) {
 			s.logger.Warn("leaving delivery terminal pending because workflow engine is unavailable",

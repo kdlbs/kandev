@@ -11,4 +11,9 @@ import (
 type TaskStateWriter interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID string, state v1.TaskState) (bool, error)
+	// UpdateTaskStateIfWorkflowStepAndState applies a transition only while
+	// both caller-observed task fields still match.
+	UpdateTaskStateIfWorkflowStepAndState(
+		ctx context.Context, taskID, expectedStepID string, expectedState, state v1.TaskState,
+	) (bool, error)
 }

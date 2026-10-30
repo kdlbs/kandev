@@ -74,6 +74,30 @@ func (w directTaskStateWriter) UpdateTaskStateIfWorkflowStep(
 	return false, nil
 }
 
+func (w directTaskStateWriter) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string, expectedState, state v1.TaskState,
+) (bool, error) {
+	result, err := w.db.ExecContext(ctx, `
+		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ? AND state = ?
+	`, state, taskID, expectedStepID, expectedState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	var exists int
+	if err := w.db.QueryRowxContext(ctx, `SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
 // stubPermissionLister satisfies shared.PermissionLister for testing.
 type stubPermissionLister struct {
 	items []shared.PendingPermission

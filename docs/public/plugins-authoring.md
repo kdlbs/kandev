@@ -418,6 +418,10 @@ curated React, UI, and app-store surface.
   utility-agent calls; and capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
+- When workspace collaboration is enabled, Host calls that read or mutate
+  conversation data require the server context from the handler that produced
+  them; plugin-owned capability operations keep their native behavior. Never
+  synthesize a caller context or store one principal in a shared Host field.
 - Declared webhook keys default to public. Set `webhooks[].access: authenticated`
   for browser UI and billable operations. Kandev does not enforce
   `webhooks[].method`; public integrations must still validate the provider
@@ -2031,6 +2035,24 @@ type Host interface {
 	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
 }
 ```
+
+### Conversation caller context
+
+Reuse the `context.Context` Kandev passed to your plugin handler (event, webhook,
+action, or agent-tool invocation) for every Host call. Kandev restores the
+caller's native principal and any workspace collaboration grant from that
+context. Dropping it and calling with `context.Background()` cannot gain
+conversation authority: task, workspace, session, message, interaction, and
+execution operations then fail with `PermissionDenied` while workspace
+collaboration is enabled.
+
+Plugin-owned operations keep their existing capability rules without that
+context: Host state, config, secrets, events, capability context, plugin-owned
+task trees, managed agent conversations and schedules, managed inputs, executor
+progress and artifacts, declared source-issue writeback, utility agents, and
+profile catalogs. Detached background work that uses only those operations
+continues to run when collaboration is enabled. Retain the handler context for
+the duration of each conversation-domain call instead of storing one globally.
 
 Executor profiles are an additive, optional Host extension so older Host
 implementations remain source-compatible. Discover it through the SDK helper:

@@ -24,11 +24,14 @@ test.describe("turn change history integrity", () => {
       const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
       await waitForTurnChangeCount(apiClient, sessionId, 1);
       await session.sendMessage("/e2e:turn-history-integrity");
+      // Wait for the backend to finalize the second turn before judging the
+      // rendered reply: a 5s UI budget alone fails when the response lands late
+      // under shard load, while the transcript text is still expected afterwards.
+      await waitForTurnChangeCount(apiClient, sessionId, 2);
+      await session.waitForChatIdle();
       await expect(
         session.chat.getByText("turn-history-integrity complete", { exact: false }),
       ).toBeVisible();
-      await session.waitForChatIdle();
-      await waitForTurnChangeCount(apiClient, sessionId, 2);
 
       const history = await readTurnChangeHistory(apiClient, sessionId);
       const turn = [...(history.change_sets ?? [])].sort(

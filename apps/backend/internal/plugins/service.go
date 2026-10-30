@@ -50,6 +50,8 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
+	hostCallContextEnabled                bool
+	hostCallContextValidator              func(context.Context, bool) error
 	automationRevoker                     func(string) error
 	capabilityApprovalWorkspaceAuthorizer func(context.Context, string) error
 	humanInteractionResponseAuthorizer    func(context.Context, string) error
