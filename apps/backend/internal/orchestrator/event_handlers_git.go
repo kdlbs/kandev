@@ -34,6 +34,10 @@ const gitSnapshotStatusReady = "ready"
 
 const automaticPermissionMessageWriteMaxAttempts = 3
 
+// automaticPermissionCleanupTimeout bounds failure settlement so audit and
+// presentation updates still run after the originating request context ends.
+const automaticPermissionCleanupTimeout = 5 * time.Second
+
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
@@ -965,6 +969,9 @@ func (s *Service) handleAutomaticPermissionFailure(
 		zap.String("pending_id", data.PendingID),
 		zap.Error(resolveErr))
 
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automaticPermissionCleanupTimeout)
+	defer cancel()
+
 	switch {
 	case errors.Is(resolveErr, ErrPermissionResolutionInProgress),
 		errors.Is(resolveErr, ErrPermissionAlreadyResolved):
@@ -972,24 +979,21 @@ func (s *Service) handleAutomaticPermissionFailure(
 		return
 	case errors.Is(resolveErr, ErrPermissionDeliveryFailed),
 		errors.Is(resolveErr, ErrPermissionFinalizationFailed):
-		if _, _, err := s.updateAutomaticPermissionPresentation(
-			ctx, data, models.PermissionPresentationUnavailable, false,
-		); err != nil {
-			s.logger.Warn("failed to mark automatic permission presentation unavailable",
-				zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID), zap.Error(err))
-		}
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
 	case errors.Is(resolveErr, ErrPermissionNotFound),
 		errors.Is(resolveErr, ErrPermissionStale),
 		errors.Is(resolveErr, ErrPermissionTaskOrSessionNotFound):
-		// The request was withdrawn or replaced; existing expiry handling owns it.
+		// The request was withdrawn or replaced. Keep it unanswerable, but do
+		// not leave an automatic row hidden without an explanation.
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
 	default:
-		if s.promoteAutomaticPermissionToInteractive(ctx, data) {
-			s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+		if s.promoteAutomaticPermissionToInteractive(cleanupCtx, data) {
+			s.setSessionWaitingForInput(cleanupCtx, data.TaskID, data.TaskSessionID)
 			return
 		}
-		s.settleAutomaticPermissionUnavailable(ctx, data)
+		s.settleAutomaticPermissionUnavailable(cleanupCtx, data)
 	}
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	s.setSessionWaitingForInput(cleanupCtx, data.TaskID, data.TaskSessionID)
 }
 
 // promoteAutomaticPermissionToInteractive exposes an automatic candidate to a

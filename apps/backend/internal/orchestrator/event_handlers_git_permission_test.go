@@ -189,6 +189,12 @@ func TestAutomaticPermissionFailureDoesNotReopenDispatch(t *testing.T) {
 			}
 			var got models.PermissionPresentationUpdate
 			creator := &mockMessageCreator{
+				permissionAuditFn: func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
+					return &models.PermissionResolutionAudit{
+						ClaimID: "claim-auto", Source: models.PermissionSourceAutoApprove,
+						Result: models.PermissionResolutionDispatching,
+					}, nil
+				},
 				permissionPresentationFn: func(_ context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
 					got = request
 					return &models.Message{ID: "message-1"}, true, nil
@@ -211,20 +217,18 @@ func TestAutomaticPermissionFailureDoesNotReopenDispatch(t *testing.T) {
 	}
 }
 
-func TestAutomaticPermissionFallbackSkipsWithdrawnRequest(t *testing.T) {
+func TestAutomaticPermissionFailureShowsWithdrawnRequestAsUnavailable(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-1", "session-1", "")
 	manager := permissionResolvingManager(t, "session-1", nil)
 	manager.listPermissionsFunc = func(context.Context, string) ([]streams.PendingAgentPermission, error) {
 		return nil, nil
 	}
+	var got models.PermissionPresentationUpdate
 	creator := &mockMessageCreator{
-		permissionClaimFn: func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
-			return nil, errors.New("claim storage unavailable")
-		},
-		permissionPresentationFn: func(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error) {
-			t.Fatal("a withdrawn request must not be promoted")
-			return nil, false, nil
+		permissionPresentationFn: func(_ context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+			got = request
+			return &models.Message{ID: "message-1"}, true, nil
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
@@ -233,6 +237,10 @@ func TestAutomaticPermissionFallbackSkipsWithdrawnRequest(t *testing.T) {
 		TaskID: "task-1", TaskSessionID: "session-1", RequestID: "request-1", PendingID: "pending-1",
 		AutoApprovedOptionID: "allow-once", AutoApprovedOptionKind: "allow_once", AutoApprovalPending: true,
 	})
+
+	if got.Presentation != models.PermissionPresentationUnavailable || !got.RequireUnclaimed {
+		t.Fatalf("presentation update = %+v, want withdrawn unavailable feedback", got)
+	}
 }
 
 func TestAutomaticPermissionFailureSettlesClaimReadFailureAsUnavailable(t *testing.T) {
@@ -374,6 +382,61 @@ func TestAutomaticCandidateReplayDoesNotClaimPromotedFallback(t *testing.T) {
 	}
 	if presentation != models.PermissionPresentationInteractive {
 		t.Fatalf("presentation = %q, want interactive", presentation)
+	}
+}
+
+func TestAutomaticPermissionFailureKeepsAcceptedFinalizationReadFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "")
+	manager := permissionResolvingManager(t, "session-1", nil)
+	creator := &mockMessageCreator{
+		permissionFinishFn: func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+			return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalized}, errors.New("finalize read-back failed")
+		},
+		permissionAuditFn: func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
+			return &models.PermissionResolutionAudit{
+				ClaimID: "claim-auto", Source: models.PermissionSourceAutoApprove,
+				Result: models.PermissionResolutionAccepted,
+			}, nil
+		},
+		permissionPresentationFn: func(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+			t.Fatal("an accepted finalization must not be presented as unavailable")
+			return nil, false, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = creator
+	svc.handlePermissionRequest(context.Background(), watcher.PermissionRequestData{
+		TaskID: "task-1", TaskSessionID: "session-1", RequestID: "request-1", PendingID: "pending-1",
+		AutoApprovedOptionID: "allow-once", AutoApprovedOptionKind: "allow_once", AutoApprovalPending: true,
+	})
+}
+
+func TestAutomaticPermissionFailureSettlesAfterCanceledRequestContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "")
+	manager := permissionResolvingManager(t, "session-1", nil)
+	manager.listPermissionsFunc = func(context.Context, string) ([]streams.PendingAgentPermission, error) {
+		return nil, nil
+	}
+	var updates int
+	creator := &mockMessageCreator{
+		permissionPresentationFn: func(_ context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+			updates++
+			return &models.Message{ID: "message-1"}, true, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = creator
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	svc.handlePermissionRequest(ctx, watcher.PermissionRequestData{
+		TaskID: "task-1", TaskSessionID: "session-1", RequestID: "request-1", PendingID: "pending-1",
+		AutoApprovedOptionID: "allow-once", AutoApprovedOptionKind: "allow_once", AutoApprovalPending: true,
+	})
+
+	if updates == 0 {
+		t.Fatal("failure settlement must use a cleanup context after request cancellation")
 	}
 }
 

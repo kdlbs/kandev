@@ -181,9 +181,10 @@ Completed on 2026-10-30, with static-review remediation.
 - Failed automatic decisions promote to `interactive` only after revalidating
   the live request generation. Dispatch and finalization failures retain their
   claim and record non-actionable `unavailable` presentation. A failed live
-  enumeration, or an automatic claim whose read-back failed, also settles to
-  `unavailable` instead of remaining hidden. A competing dispatching resolver or
-  accepted outcome keeps ownership.
+  enumeration, a withdrawn or replaced request, or an automatic claim whose
+  read-back failed also settles to `unavailable` instead of remaining hidden.
+  Settlement uses a bounded cleanup context that survives request cancellation.
+  A competing dispatching resolver or accepted outcome keeps ownership.
 - Added an automatic-only claim guard. A persisted candidate replayed after a
   pre-claim failure was promoted to `interactive` cannot be claimed or delivered
   automatically, even after storage recovers.

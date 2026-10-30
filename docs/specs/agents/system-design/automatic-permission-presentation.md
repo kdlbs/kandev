@@ -65,10 +65,13 @@ defeats promotion. Preserve terminal status and every audit field.
 
 Automatic resolution claims with an automatic-presentation guard, so a row
 already promoted to a person's fallback cannot be claimed automatically when the
-original candidate event is replayed. If live enumeration fails, or an automatic
-claim's read-back fails and no competing resolver owns the request, settlement
-records non-actionable unavailable feedback instead of leaving the row hidden as
-automatic. A competing dispatching resolver or accepted outcome keeps ownership.
+original candidate event is replayed. If live enumeration fails, an automatic
+claim's read-back fails, or the provider withdraws or replaces the request,
+settlement records non-actionable unavailable feedback instead of leaving the
+row hidden as automatic. The same bounded cleanup runs after the originating
+request context is cancelled. A competing dispatching resolver or accepted
+outcome keeps ownership, including an accepted finalization whose read-back
+failed.
 
 An in-progress competing resolver is not a failed decision. Do not overwrite
 its outcome. For a stopped attempt with uncertain delivery, use existing
