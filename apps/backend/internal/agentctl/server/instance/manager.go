@@ -296,6 +296,7 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))

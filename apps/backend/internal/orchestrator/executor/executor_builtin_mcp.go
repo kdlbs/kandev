@@ -67,3 +67,18 @@ func (e *Executor) launchMCPProfile(ctx context.Context, taskID string, session 
 	}
 	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, false)
 }
+
+// prepareExistingWorkspaceBuiltin binds the admitted package snapshot before an
+// already prepared workspace starts its first agent process.
+func (e *Executor) prepareExistingWorkspaceBuiltin(ctx context.Context, executionID string, profile *p.Context) error {
+	if profile == nil || profile.BuiltinPackages == nil {
+		return nil
+	}
+	preparer, ok := e.agentManager.(interface {
+		PrepareBuiltinWorkspace(context.Context, string, p.Context) error
+	})
+	if !ok {
+		return fmt.Errorf("agent manager cannot prepare built-in MCP packages")
+	}
+	return preparer.PrepareBuiltinWorkspace(ctx, executionID, *profile)
+}

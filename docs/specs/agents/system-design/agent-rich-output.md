@@ -10,9 +10,8 @@ requirements:
 
 ## Purpose and boundaries
 
-The replacement baseline and structured evidence extension are implemented.
-The 2026-10-10 evidence package adds Table, StatusList and Callout while
-preserving existing component and historical contracts.
+The implemented evidence extension adds Table, StatusList and Callout and
+preserves existing component and historical contracts.
 
 Replace the fixed rich-output composition engine with json-render and expose
 catalog composition to agents through `show_rich_output_kandev`. Agents owns

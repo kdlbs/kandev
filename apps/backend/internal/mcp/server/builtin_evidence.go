@@ -10,6 +10,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+const coreMCPServerName = "kandev"
+
 func builtinEvidencePackage(manifest *p.BuiltinManifest, name string) p.PackageID {
 	id := p.BuiltinPackageForRuntimeName(name)
 	if manifest != nil && slices.Contains(manifest.Packages, id) {
@@ -22,12 +24,12 @@ func mcpEvidenceServerName(names ...string) string {
 	if len(names) > 0 {
 		return names[0]
 	}
-	return "kandev"
+	return coreMCPServerName
 }
 
 func mcpAttachmentKey(connectionID string, names ...string) string {
 	name := mcpEvidenceServerName(names...)
-	if name == "kandev" {
+	if name == coreMCPServerName {
 		return connectionID
 	}
 	return name + "\x00" + connectionID
