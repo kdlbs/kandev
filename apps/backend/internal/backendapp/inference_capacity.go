@@ -3,7 +3,6 @@ package backendapp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -257,19 +256,11 @@ func (b *sharedInferenceConsumer) settleLocked(ctx context.Context, binding sess
 }
 
 func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, client *agentruntime.InferenceClient, req *utility.PromptRequest, identity agentruntime.InferenceIdentity) (*utility.PromptResponse, error) {
-	all, finite := b.capacity.InferenceCapacityPolicy()
-	if all && finite {
+	if all, finite := b.capacity.InferenceCapacityPolicy(); all && finite {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "ownership_unsupported", Cause: agentruntime.ErrInferenceOwnershipUnsupported}
 	}
-	prepared := &utility.AttemptStatus{AttemptID: uuid.NewString(), InstanceID: client.InferenceInstanceID(), OwnerID: "unsupported"}
-	if prepared.InstanceID == "" {
-		return nil, fmt.Errorf("legacy inference instance identity unavailable")
-	}
-	binding := b.newBinding(ctx, prepared, identity, req)
-	binding.State = inferenceStateUnknown
-	b.refreshMu.Lock()
-	_, _, _ = b.capacity.ReserveInferenceCapacity(ctx, binding)
-	b.refreshMu.Unlock()
+	// Optional capacity modes keep the native prompt path without a synthetic
+	// capacity binding, even on an older agentctl.
 	response, err := client.InferencePrompt(ctx, req)
 	if inferenceFailureNeedsSettlement(response, err) {
 		return response, unconfirmedInferenceFailure(response, err)
