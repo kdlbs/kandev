@@ -2317,6 +2317,22 @@ type Message struct {
 	PayloadSize int64 `json:"-"`
 }
 
+// ClarificationAnsweredBy records which channel carried a clarification
+// response. It is persisted on each bundle message's "answered_by" metadata so
+// a resolution reconstructed from durable rows reports the same channel as the
+// live response. The zero value means no channel was recorded, which is the
+// case for every response resolved before the marker existed.
+type ClarificationAnsweredBy struct {
+	Channel string `json:"channel,omitempty"`
+	Ref     string `json:"ref,omitempty"`
+}
+
+// ClarificationAnsweredByResponseKey is the responses-map key that carries the
+// bundle-wide answer-channel marker through CompleteActiveClarificationBundle.
+// It is not a question ID: empty question IDs are invalid, so the key cannot
+// collide with a real per-question answer.
+const ClarificationAnsweredByResponseKey = ""
+
 // ToAPI converts internal Message to API type.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible content sent to the UI.
