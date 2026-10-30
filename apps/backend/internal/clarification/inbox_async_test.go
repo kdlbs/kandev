@@ -144,6 +144,38 @@ func TestAsyncQuestionsInboxBootHiddenCount(t *testing.T) {
 	}
 }
 
+func TestAsyncQuestionsInboxHiddenPageKeepsOneBound(t *testing.T) {
+	createdAt := testInboxNow.Add(-time.Hour)
+	tasks := &fakeInboxTasks{
+		tasks:    map[string]*taskmodels.Task{"t1": {ID: "t1", Title: "Checkout integration"}},
+		sessions: map[string]*taskmodels.TaskSession{"s1": {ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateRunning}},
+	}
+	bundles := &fakeInboxBundleStore{
+		page: &taskmodels.ClarificationBundlePage{
+			Bundles: []taskmodels.ClarificationBundleSummary{
+				{PendingID: "p1", TaskID: "t1", SessionID: "s1", CreatedAt: createdAt},
+			},
+		},
+		summary: taskmodels.ClarificationInboxHiddenSummary{HiddenCount: 1},
+	}
+	messages := map[string][]*taskmodels.Message{
+		"p1": {{ID: "m1", TaskSessionID: "s1", TaskID: "t1", CreatedAt: createdAt, Metadata: map[string]any{"pending_id": "p1"}}},
+	}
+	h := newInboxTestHandler(t, messages, alwaysAllowAuthorizer{}, tasks, bundles)
+	h.SetAsyncQuestionReader(&fakeInboxAsyncReader{questions: []*taskmodels.AsyncQuestion{asyncInboxQuestion()}})
+
+	rec := runInboxGet(h, "/api/v1/clarification-inbox/hidden?workspace_id=w1&limit=1", h.httpListInboxHidden)
+	var response inboxHiddenListResponse
+	decodeInboxBody(t, rec, &response)
+	if len(response.Bundles)+len(response.AsyncQuestions) != 1 {
+		t.Fatalf("merged hidden page = %d blocking + %d async, want one bounded row",
+			len(response.Bundles), len(response.AsyncQuestions))
+	}
+	if response.Total != 2 {
+		t.Fatalf("combined hidden total = %d, want 2", response.Total)
+	}
+}
+
 func TestAsyncQuestionsInboxAsyncReadFailureIsNotAnEmptySuccess(t *testing.T) {
 	h := newAsyncInboxTestHandler(t, asyncInboxQuestion(), false)
 	h.SetAsyncQuestionReader(failingAsyncReader{})
