@@ -160,11 +160,18 @@ function parseStatusMetadata(comment: Message) {
   };
 }
 
+function isWorkflowReviewNoChangesNotice(metadata: ErrorMetadata | undefined): boolean {
+  return metadata?.kind === "workflow_review_skipped" && metadata.reason === "review_no_changes";
+}
+
 function getStatusMessage(
   comment: Message,
   metadata: ErrorMetadata | undefined,
   statusLine: string | undefined,
 ): string {
+  if (isWorkflowReviewNoChangesNotice(metadata)) {
+    return t("review:noChangesToReviewYet");
+  }
   if (metadata?.variant === "resume_settings_provider_restored") {
     const confirmedModelId =
       metadata.effective_model_known === true
