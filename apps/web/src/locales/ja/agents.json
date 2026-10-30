@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "診断情報",
   "runtimeDetectedLocalCLI": "検出されたローカル CLI：{{path}}",
   "runtimeLocalCLIVersion": "ローカル CLI：{{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "ローカル CLI：{{name}}、バージョン不明（{{reason}}）"
+  "runtimeLocalCLIVersionUnknown": "ローカル CLI：{{name}}、バージョン不明（{{reason}}）",
+  "dynamicPolicyUnclassified": "分類不能な失敗が続くと次の候補へフォールバック",
+  "dynamicPolicyUnclassifiedHelp": "分類器が一時的・重大などちらにも分けられない失敗向けの任意の復旧手段です。既定ではオフで、オンにしない限り分類不能な失敗は手動復旧が必要なままです。 出力も副作用もないことが確認されたプロバイダーの失敗、プロセス起動の失敗、空のターン終了だけを数えます。ワークフローのステップで候補の切り替えを無効にできます。",
+  "dynamicUnclassifiedApplyAll": "すべての候補に適用",
+  "dynamicUnclassifiedApplyAllConfirmAction": "すべてに適用",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "各候補の分類不能ポリシーを有効にして閾値を 2 に設定します。候補の順序、優先度グループ、モデル設定、一時的・重大なポリシーは変わりません。",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "すべての候補で分類不能フォールバックを有効化",
+  "dynamicUnclassifiedDescription": "失敗を一時的または重大として分類できないときに適用されます(出力がなかったターンを含みます)。この候補が同じ理由で閾値回数連続して失敗すると、Kandev は次の候補を 1 回選択します。それ以降は引き続き手動復旧が必要です。",
+  "dynamicUnclassifiedErrors": "分類不能な失敗",
+  "dynamicUnclassifiedSummaryOff": "分類不能フォールバック: オフ",
+  "dynamicUnclassifiedSummaryOn": "分類不能フォールバック: {{threshold}} 回連続",
+  "dynamicUnclassifiedSwitchDescription": "この候補の同一の分類不能失敗を数え、閾値に達したら次の候補へ移ります。 出力も副作用もないことが確認されたプロバイダーの失敗、プロセス起動の失敗、空のターン終了だけを数えます。ワークフローのステップで候補の切り替えを無効にできます。",
+  "dynamicUnclassifiedThreshold": "連続する分類不能な失敗回数",
+  "dynamicUnclassifiedThresholdValidation": "閾値を 2 以上 10 以下で入力してください。"
 }

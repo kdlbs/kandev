@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "진단 정보",
   "runtimeDetectedLocalCLI": "감지된 로컬 CLI: {{path}}",
   "runtimeLocalCLIVersion": "로컬 CLI: {{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "로컬 CLI: {{name}}, 버전 알 수 없음 ({{reason}})"
+  "runtimeLocalCLIVersionUnknown": "로컬 CLI: {{name}}, 버전 알 수 없음 ({{reason}})",
+  "dynamicPolicyUnclassified": "분류되지 않은 실패가 반복되면 다음 후보로 전환",
+  "dynamicPolicyUnclassifiedHelp": "분류기가 일시적이거나 심각한 실패로 나누지 못한 실패를 위한 선택적 복구입니다. 기본값은 꺼져 있으며, 켜지 않으면 분류실패도 그대로 수동 복구가 필요합니다. 출력이나 부수 효과가 없는 것으로 확인된 제공자 오류, 프로세스 시작 오류, 빈 턴 종료만 집계합니다. 워크플로 단계에서 대체 후보 선택을 끌 수 있습니다.",
+  "dynamicUnclassifiedApplyAll": "모든 후보에 적용",
+  "dynamicUnclassifiedApplyAllConfirmAction": "모두 적용",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "각 후보의 분류실패 정책을 켜고 문턱을 2로 설정합니다. 후보 순서, 우선순위 그룹, 모델 옵션, 일시적·심각 정책은 그대로 유지됩니다.",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "모든 후보에서 분류실패 폴백 켜기",
+  "dynamicUnclassifiedDescription": "실패를 일시적이거나 심각한 오류로 분류할 수 없을 때 적용됩니다(출력이 없는 턴 포함). 이 후보가 같은 이유로 문턱 횟수만큼 연속 실패하면 Kandev가 다음 후보를 한 번 선택합니다. 이후에도 수동 복구가 필요합니다.",
+  "dynamicUnclassifiedErrors": "분류되지 않은 실패",
+  "dynamicUnclassifiedSummaryOff": "분류실패 폴백: 꺼짐",
+  "dynamicUnclassifiedSummaryOn": "분류실패 폴백: 연속 {{threshold}}회",
+  "dynamicUnclassifiedSwitchDescription": "이 후보의 동일한 분류실패를 세고, 문턱에 도달하면 다음 후보로 넘어갑니다. 출력이나 부수 효과가 없는 것으로 확인된 제공자 오류, 프로세스 시작 오류, 빈 턴 종료만 집계합니다. 워크플로 단계에서 대체 후보 선택을 끌 수 있습니다.",
+  "dynamicUnclassifiedThreshold": "연속 분류되지 않은 실패 횟수",
+  "dynamicUnclassifiedThresholdValidation": "문턱을 2부터 10 사이로 입력하세요."
 }

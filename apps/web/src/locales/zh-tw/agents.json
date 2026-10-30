@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "診斷資訊",
   "runtimeDetectedLocalCLI": "檢測到本地 CLI：{{path}}",
   "runtimeLocalCLIVersion": "本地 CLI：{{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）"
+  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）",
+  "dynamicPolicyUnclassified": "連續出現未分類失敗後切換到下一個候選",
+  "dynamicPolicyUnclassifiedHelp": "針對分類器無法歸入暫時性或嚴重類別的失敗的可選恢復方式。預設關閉，關閉時未分類失敗仍需手動恢復。 僅計入已確認沒有輸出或副作用的供應商錯誤、程序啟動失敗或空回合結束。工作流程步驟可停用候選項遞補。",
+  "dynamicUnclassifiedApplyAll": "應用到所有候選",
+  "dynamicUnclassifiedApplyAllConfirmAction": "全部應用",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "將每個候選的未分類策略設為啟用，閾值為 2。候選順序、優先順序分組、模型選項以及暫時性和嚴重策略保持不變。",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "為所有候選開啟未分類回退",
+  "dynamicUnclassifiedDescription": "當失敗無法歸類為暫時性或嚴重錯誤時適用，包括沒有產出任何輸出的輪次。該候選以相同原因連續失敗達到閾值次數後，Kandev 會切換一次到下一個候選。耗盡後仍需手動恢復。",
+  "dynamicUnclassifiedErrors": "未分類失敗",
+  "dynamicUnclassifiedSummaryOff": "未分類回退：關閉",
+  "dynamicUnclassifiedSummaryOn": "未分類回退：連續 {{threshold}} 次",
+  "dynamicUnclassifiedSwitchDescription": "統計該候選擁有相同原因的未分類失敗，達到閾值後轉入下一個候選。 僅計入已確認沒有輸出或副作用的供應商錯誤、程序啟動失敗或空回合結束。工作流程步驟可停用候選項遞補。",
+  "dynamicUnclassifiedThreshold": "連續未分類失敗次數",
+  "dynamicUnclassifiedThresholdValidation": "請輸入 2 到 10 之間的閾值。"
 }
