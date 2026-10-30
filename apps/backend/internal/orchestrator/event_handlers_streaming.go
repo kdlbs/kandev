@@ -845,7 +845,7 @@ func (s *Service) handleStreamingEventKind(
 }
 
 type canonicalMessageEventPublisher interface {
-	PublishMessageEvent(context.Context, string, *models.Message) error
+	PublishMessageEvent(context.Context, string, *models.Message, ...*models.ConversationMutationReceipt) error
 }
 
 type canonicalMessageReader interface {
@@ -874,7 +874,7 @@ func (s *Service) publishCanonicalMessageEvent(
 			zap.String("message_id", payload.Data.MessageID))
 		return
 	}
-	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	message, receipt, err := canonicalMessageNotification(ctx, reader, payload)
 	if err != nil || message == nil {
 		s.logger.Warn("failed to load canonical message for notification",
 			zap.String("session_id", payload.SessionID),
@@ -886,7 +886,7 @@ func (s *Service) publishCanonicalMessageEvent(
 	if !payload.Data.IsAppend {
 		eventType = events.MessageAdded
 	}
-	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+	if err := publisher.PublishMessageEvent(ctx, eventType, message, receipt); err != nil {
 		s.logger.Warn("failed to publish canonical message notification",
 			zap.String("session_id", payload.SessionID),
 			zap.String("message_id", payload.Data.MessageID),

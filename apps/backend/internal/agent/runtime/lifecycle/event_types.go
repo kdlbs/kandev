@@ -4,6 +4,7 @@ package lifecycle
 import (
 	"encoding/json"
 	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/task/models"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -241,6 +242,9 @@ type AgentStreamEventData struct {
 	Data                        interface{}                      `json:"data,omitempty"`
 	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
 	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
+
+	// ConversationReceipt covers only committed host source mutations.
+	ConversationReceipt *models.ConversationMutationReceipt `json:"conversation_receipt,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
