@@ -11,7 +11,8 @@ acceptance_criteria:
   - AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.2
   - AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.7
   - AC-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001.8
-system_design: []
+system_design:
+  - ../../specs/platform/system-design/git-credential-lease-reissue.md
 ---
 
 # Task 01: Align the reissue wire contract
@@ -156,3 +157,6 @@ Verification:
 - `bash scripts/lint-go-changed` reported 0 issues before and after remediation.
 - `go build -trimpath ./cmd/agentctl` passed without importing
   `internal/github`.
+- The work order links the new
+  `docs/specs/platform/system-design/git-credential-lease-reissue.md`, and the
+  local documentation coverage evaluator reports `status: covered`.

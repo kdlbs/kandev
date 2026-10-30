@@ -133,6 +133,7 @@ and repository-context identity.
 - [Runtime failure attribution](system-design/runtime-failure-attribution.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
 - [Frontend feature state](system-design/features-slice-state.md)
+- [Git Credential Lease Reissue](system-design/git-credential-lease-reissue.md)
 - [Durable agent delivery](system-design/durable-agent-delivery.md) (draft)
 - [Durable agent stream processing](system-design/durable-agent-stream-processing.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)

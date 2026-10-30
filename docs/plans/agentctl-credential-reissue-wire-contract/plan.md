@@ -3,7 +3,8 @@ created: 2026-10-30
 status: done
 requirements:
   - REQ-PLATFORM-GIT-CREDENTIAL-LEASE-REISSUE-001
-system_design: []
+system_design:
+  - ../../specs/platform/system-design/git-credential-lease-reissue.md
 legacy_specs: []
 ---
 
@@ -17,10 +18,9 @@ execution recovers its lease after a credential rotation or backend restart, as
 the requirement already states. One work order is enough, because the handler
 change and its regression test must land together.
 
-No system design declares this requirement. Its contract lives in the migrated
-detail of
-[the requirement](../../specs/platform/requirements/git-credential-lease-reissue.md),
-so that document's API surface now names the request field. No acceptance
+The design is declared in
+[the system design](../../specs/platform/system-design/git-credential-lease-reissue.md).
+The requirement's API surface now names the request field, and no acceptance
 criterion changes.
 
 ## Root cause
@@ -167,7 +167,12 @@ Implementation completed in the primary conversation.
 - `bash scripts/lint-go-changed` reported 0 issues for every changed Go file
   before and after review remediation.
 - `python3 scripts/list-docs.py validate` and
-  `python3 scripts/lint-spec-files.py --all` passed.
+  `python3 scripts/lint-spec-files.py --all` passed after the system design was
+  added.
+- Docs coverage: the work order now links
+  `docs/specs/platform/system-design/git-credential-lease-reissue.md`, and the
+  local `.github/scripts/pr-docs.cjs` evaluator reports `status: covered` with
+  no errors for the PR file set.
 - `git diff --check` reported no whitespace errors.
 
 ## Risks
