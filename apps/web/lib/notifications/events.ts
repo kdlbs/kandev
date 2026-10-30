@@ -1,5 +1,7 @@
 export const NOTIFICATION_EVENT_SESSION_TURN_FINISHED = "session.turn_finished";
 export const NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED = "session.clarification_requested";
+export const NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED = "session.permission_requested";
+export const NOTIFICATION_EVENT_SESSION_FAILED = "session.failed";
 export const NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE = "system.update_available";
 export const NOTIFICATION_EVENT_OFFICE_INBOX_ITEM = "office.inbox_item";
 

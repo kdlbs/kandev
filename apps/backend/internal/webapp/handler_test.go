@@ -90,3 +90,64 @@ func TestHandlerReturnsNotFoundForAPIMiss(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.Code, http.StatusNotFound)
 	}
 }
+
+func TestHandlerServesServiceWorkerWithRevalidationHeaders(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fstest.MapFS{
+		"index.html": {Data: []byte("<html><head></head><body></body></html>")},
+		"sw.js":      {Data: []byte("self.skipWaiting()")},
+	})
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	}
+	if got := resp.Header().Get("Service-Worker-Allowed"); got != "/" {
+		t.Fatalf("Service-Worker-Allowed = %q, want /", got)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/javascript") {
+		t.Fatalf("Content-Type = %q, want text/javascript", got)
+	}
+}
+
+func TestHandlerRevalidatesManifestButKeepsAssetsImmutable(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fstest.MapFS{
+		"index.html":             {Data: []byte("<html><head></head><body></body></html>")},
+		"manifest.webmanifest":   {Data: []byte(`{"name":"Kandev"}`)},
+		"assets/index-abc123.js": {Data: []byte("1")},
+	})
+
+	for path, want := range map[string]string{
+		"/manifest.webmanifest":   "no-cache",
+		"/assets/index-abc123.js": "public, max-age=31536000, immutable",
+	} {
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := resp.Header().Get("Cache-Control"); got != want {
+			t.Fatalf("%s Cache-Control = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestHandlerDoesNotFallBackToSPAShellForMissingServiceWorker(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fstest.MapFS{
+		"index.html": {Data: []byte("<html><head></head><body></body></html>")},
+	})
+
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d (a worker URL must never answer with the HTML shell)", resp.Code, http.StatusNotFound)
+	}
+}

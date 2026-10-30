@@ -2,6 +2,8 @@ import type { StoreApi } from "zustand";
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
+  NOTIFICATION_EVENT_SESSION_FAILED,
+  NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
@@ -40,7 +42,9 @@ type NotificationPayload = TaskSessionNotificationPayload | OfficeInboxItemNotif
 function isSemanticSessionNotification(eventType: string): boolean {
   return (
     eventType === NOTIFICATION_EVENT_SESSION_TURN_FINISHED ||
-    eventType === NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED
+    eventType === NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED ||
+    eventType === NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED ||
+    eventType === NOTIFICATION_EVENT_SESSION_FAILED
   );
 }
 
@@ -79,9 +83,13 @@ function registerNotificationHandler(
     const occurrenceID =
       message.id ??
       ("occurrence_id" in message.payload ? message.payload.occurrence_id : undefined);
-    const nativeEventID = isSemanticSessionNotification(eventType)
-      ? occurrenceID
-      : (message.id ?? `${taskId}:${sessionId ?? "unknown"}`);
+    const nativeEventID = nativeNotificationEventID({
+      eventType,
+      sessionId,
+      taskId,
+      messageID: message.id,
+      occurrenceID,
+    });
     if (nativeNotifications.isAvailable() && taskId && nativeEventID) {
       void nativeNotifications
         .show({
@@ -96,6 +104,24 @@ function registerNotificationHandler(
       showDesktopNotification(payload);
     }
   };
+}
+
+function nativeNotificationEventID({
+  eventType,
+  sessionId,
+  taskId,
+  messageID,
+  occurrenceID,
+}: {
+  eventType: string;
+  sessionId?: string;
+  taskId?: string;
+  messageID?: string;
+  occurrenceID?: string;
+}): string | undefined {
+  if (eventType === NOTIFICATION_EVENT_SESSION_FAILED) return sessionId ?? occurrenceID;
+  if (isSemanticSessionNotification(eventType)) return occurrenceID;
+  return messageID ?? `${taskId}:${sessionId ?? "unknown"}`;
 }
 
 export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -114,6 +140,22 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
       {
         titleKey: "common:notificationClarificationTitle",
         bodyKey: "common:notificationClarificationBody",
+      },
+    ),
+    [NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED]: registerNotificationHandler(
+      store,
+      NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
+      {
+        titleKey: "common:notificationPermissionTitle",
+        bodyKey: "common:notificationPermissionBody",
+      },
+    ),
+    [NOTIFICATION_EVENT_SESSION_FAILED]: registerNotificationHandler(
+      store,
+      NOTIFICATION_EVENT_SESSION_FAILED,
+      {
+        titleKey: "common:notificationSessionFailedTitle",
+        bodyKey: "common:notificationSessionFailedBody",
       },
     ),
     [NOTIFICATION_EVENT_OFFICE_INBOX_ITEM]: registerNotificationHandler(
