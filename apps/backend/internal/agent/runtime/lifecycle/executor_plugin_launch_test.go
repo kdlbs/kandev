@@ -284,7 +284,7 @@ func TestPluginExecutorInstanceCreationRejectsUnusablePorts(t *testing.T) {
 
 			_, err = createPluginAgentctlInstance(context.Background(), control, &ExecutorCreateRequest{
 				InstanceID: "execution-plugin-1", SessionID: "session-plugin-1",
-			}, pluginExecutorWorkspacePath)
+			}, pluginExecutorInventory{})
 			if err == nil || !strings.Contains(err.Error(), "without a usable port") {
 				t.Fatalf("createPluginAgentctlInstance() error = %v, want unusable port", err)
 			}
