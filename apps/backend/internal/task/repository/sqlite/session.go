@@ -596,6 +596,9 @@ func (r *Repository) createTaskSessionWithInitialRuntimeSeed(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -625,6 +628,9 @@ func (r *Repository) CreateTaskSessionWithWorkflowSessionRoute(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -690,6 +696,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -807,6 +816,9 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.lockSharedMaterializationTasksTx(ctx, tx, groupID, session.TaskID); err != nil {
+		return err
+	}
+	if err := r.admitWorkflowAllocationTx(ctx, tx, session.TaskID, route); err != nil {
 		return err
 	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {

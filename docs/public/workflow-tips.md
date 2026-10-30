@@ -183,6 +183,12 @@ conversation available for reuse or manual follow-up. These settings default
 to reuse on start and park on end. An explicitly selected completion policy is
 preserved.
 
+A retry of the same accepted step entry does not create another conversation.
+Kandev keeps the recorded destination; if it failed, ended, or has uncertain
+ownership, the retry stops without creating or restarting a conversation or
+replaying a prompt.
+A later visit is a new entry and applies the start setting again.
+
 ### Continue a completed conversation
 
 Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
