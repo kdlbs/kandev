@@ -7,6 +7,7 @@ import type {
   FilterOp,
   FilterValue,
   GroupKey,
+  BuiltinGroupKey,
   SidebarView,
   SortKey,
   SortRule,
@@ -27,14 +28,18 @@ import {
 } from "./task-tree-activity";
 import { resolveTaskTreeRunning } from "./task-tree-running";
 import { sidebarSortRules } from "./sidebar-sort-chain";
+import { isTaskListFacetOption } from "@/lib/tasks/tasks-list-options";
 import { sidebarSortHasKey } from "./sidebar-sort-chain";
 
 export type SidebarGroup = {
   key: string;
   label: string;
+  color?: string;
   tasks: TaskSwitcherItem[];
   matchingCount?: number;
   isContinuation?: boolean;
+  /** Facet membership rebuilds the hierarchy independently inside each section. */
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>;
 };
 
 export type GroupedSidebarList = {
@@ -312,7 +317,7 @@ function repositoryCombinationKey(repositories: string[]): string {
   return `${REPOSITORY_COMBINATION_PREFIX}${JSON.stringify(repositories)}`;
 }
 
-const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
+const groupExtractors: Record<Exclude<BuiltinGroupKey, "none">, GroupExtractor> = {
   // Parameter named `task`, not `t`: this file's other extractors and loops use
   // `t` for a task, which shadows the imported translator. These four resolve
   // copy, so they must not. Rename the parameter before adding a `t()` call to
@@ -377,6 +382,7 @@ export function applyGroup(
   effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
   effectiveStateByTaskId?: ReadonlyMap<string, EffectiveTaskTreeState>,
 ): GroupedSidebarList {
+  if (isTaskListFacetOption(groupKey)) groupKey = "none";
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
   if (groupKey === "none") {
@@ -572,30 +578,50 @@ export function countGroupTasks(
   return total;
 }
 
+export type SidebarTaskOccurrence = { taskId: string; key: string };
+
 /**
  * Flatten the grouped sidebar tree into the exact top-to-bottom order of the
  * task rows the user currently sees, honoring collapsed groups and collapsed
  * subtask parents. This is the ordered list shift-click range selection walks.
  */
+export function flattenVisibleTaskOccurrences(
+  grouped: GroupedSidebarList,
+  collapsedGroupKeys: string[],
+  collapsedSubtaskParentIds: string[],
+): SidebarTaskOccurrence[] {
+  const collapsedGroups = new Set(collapsedGroupKeys);
+  const collapsedSubs = new Set(collapsedSubtaskParentIds);
+  const out: SidebarTaskOccurrence[] = [];
+  for (const group of grouped.groups) {
+    if (collapsedGroups.has(group.key)) continue;
+    const children = group.subTasksByParentId ?? grouped.subTasksByParentId;
+    const visited = new Set<string>();
+    const visit = (task: TaskSwitcherItem) => {
+      if (visited.has(task.id)) return;
+      visited.add(task.id);
+      const key = sidebarSubtaskCollapseKey(group, task.id);
+      out.push({ taskId: task.id, key });
+      if (collapsedSubs.has(key)) return;
+      for (const child of children.get(task.id) ?? []) visit(child);
+    };
+    for (const task of group.tasks) visit(task);
+  }
+  return out;
+}
+
 export function flattenVisibleTaskIds(
   grouped: GroupedSidebarList,
   collapsedGroupKeys: string[],
   collapsedSubtaskParentIds: string[],
 ): string[] {
-  const collapsedGroups = new Set(collapsedGroupKeys);
-  const collapsedSubs = new Set(collapsedSubtaskParentIds);
-  const out: string[] = [];
-  const visit = (task: TaskSwitcherItem) => {
-    out.push(task.id);
-    if (collapsedSubs.has(task.id)) return;
-    const subs = grouped.subTasksByParentId.get(task.id);
-    if (subs) for (const sub of subs) visit(sub);
-  };
-  for (const group of grouped.groups) {
-    if (collapsedGroups.has(group.key)) continue;
-    for (const task of group.tasks) visit(task);
-  }
-  return out;
+  return flattenVisibleTaskOccurrences(grouped, collapsedGroupKeys, collapsedSubtaskParentIds).map(
+    (row) => row.taskId,
+  );
+}
+
+export function sidebarSubtaskCollapseKey(group: SidebarGroup, taskId: string): string {
+  return group.subTasksByParentId ? JSON.stringify([group.key, taskId]) : taskId;
 }
 
 /**
@@ -606,7 +632,10 @@ export function flattenVisibleTaskIds(
  * so they never displace the visible-ordered ones.
  */
 export function sortIdsByVisibleOrder(ids: string[], visibleTaskIds: string[]): string[] {
-  const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
+  const order = new Map<string, number>();
+  for (const [index, id] of visibleTaskIds.entries()) {
+    if (!order.has(id)) order.set(id, index);
+  }
   return [...ids].sort(
     (a, b) =>
       (order.get(a) ?? Number.POSITIVE_INFINITY) - (order.get(b) ?? Number.POSITIVE_INFINITY),

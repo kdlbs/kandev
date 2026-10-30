@@ -141,8 +141,8 @@ export type TaskSwitcherProps = {
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceId?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceId?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;

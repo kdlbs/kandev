@@ -15,7 +15,7 @@ import type {
 import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
-import { GroupPicker } from "./group-picker";
+import { GroupPicker, useSidebarGroupLabel } from "./group-picker";
 import { sortKeyLabelKey } from "./sort-picker";
 import { SortChainEditor, sortRuleDirectionLabelKey } from "./sort-chain-editor";
 import { TaskRowSettings } from "./task-row-settings";
@@ -55,6 +55,7 @@ export function SidebarViewEditor({
   onRemoveClause,
 }: Props) {
   const { t } = useTranslation();
+  const groupSummary = useSidebarGroupLabel(current.group);
   const sortSummary = t("task:sortChainSummary", {
     rules: sidebarSortRules(current.sort)
       .map((rule) => {
@@ -99,7 +100,7 @@ export function SidebarViewEditor({
       </SidebarSettingsDisclosure>
       <SidebarSettingsDisclosure
         title={t("task:groupBy")}
-        summary={t(GROUP_SUMMARY_KEYS[current.group])}
+        summary={groupSummary}
         testId="sidebar-group-settings"
         className="border-b"
         contentClassName="pt-1"
@@ -133,15 +134,6 @@ export function SidebarViewEditor({
 
 const SECTION_LABEL_CLASS =
   "text-[11px] font-medium uppercase leading-none tracking-wide text-muted-foreground";
-
-const GROUP_SUMMARY_KEYS: Record<GroupKey, string> = {
-  none: "task:groupNone",
-  repository: "task:groupRepository",
-  workflow: "task:groupWorkflow",
-  workflowStep: "task:groupWorkflowStep",
-  executorType: "task:groupExecutorType",
-  state: "task:groupState",
-};
 
 function FilterSection({
   filters,
