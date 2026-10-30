@@ -40,6 +40,11 @@ service Plugin {
   rpc InspectExecutorEnvironment(InspectExecutorEnvironmentRequest) returns (InspectExecutorEnvironmentResponse);
   rpc ResolveExecutorConnection(ResolveExecutorConnectionRequest) returns (ResolveExecutorConnectionResponse);
   rpc DestroyExecutorEnvironment(DestroyExecutorEnvironmentRequest) returns (DestroyExecutorEnvironmentResponse);
+  // OpenExecutorTunnel is a host-opened byte stream to one port of an
+  // environment. Only a provider that requires the tunnel_transport capability
+  // is called. The first frame is the header; the provider answers with exactly
+  // one ack before any data flows.
+  rpc OpenExecutorTunnel(stream ExecutorTunnelFrame) returns (stream ExecutorTunnelFrame);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -1843,6 +1848,27 @@ message ExecutorProfileSnapshot {
   // Secret values are transient and scoped to this operation/profile. Never
   // place them in profile snapshots, checkpoints, or persisted provider state.
   map<string, string> secret_values = 3;
+  // Typed copies of the non-secret config values, present only for a provider
+  // that requires the typed_profile_values capability. The string config stays
+  // canonical and both forms are derived from one validated value.
+  map<string, ExecutorConfigValue> typed_config = 4;
+  // Opaque secret store IDs for declared secret properties that hold a value,
+  // present only for a provider that requires the secret_references capability.
+  // A reference is non-secret and names the secret that secret_values carries.
+  map<string, ExecutorSecretRef> secret_refs = 5;
+}
+
+message ExecutorConfigValue {
+  oneof value {
+    bool bool_value = 1;
+    int64 int_value = 2;
+    double double_value = 3;
+    string string_value = 4;
+  }
+}
+
+message ExecutorSecretRef {
+  string id = 1;
 }
 
 message ExecutorProviderFieldError {
@@ -1877,23 +1903,72 @@ message ExecutorResourceDescriptor {
   string expires_at = 5;
   string retention = 6;
   uint32 state_version = 7;
+  // workspace_path and workspace_identity are set only by a provider that
+  // declared the workspace_descriptor capability.
+  string workspace_path = 8;
+  string workspace_identity = 9;
+  // repositories is set only by a provider with workspace_preparation
+  // provider: the repositories it prepared inside workspace_path.
+  repeated ExecutorRepositoryState repositories = 10;
+}
+
+// ExecutorRepositoryIntent is one repository the host approved for a
+// provider-prepared workspace. The locator never carries a credential.
+message ExecutorRepositoryIntent {
+  string id = 1;
+  string locator = 2;
+  string branch = 3;
+  string base_branch = 4;
+  string checkout_ref = 5;
+}
+
+// ExecutorRepositoryState is what a provider reports for one repository it
+// prepared: a path inside workspace_path, the checked-out branch and the head
+// commit.
+message ExecutorRepositoryState {
+  string id = 1;
+  string path = 2;
+  string branch = 3;
+  string head_commit = 4;
+}
+
+// ExecutorHostCapability is one row of the host capability registry offered
+// to a provider in the profile validation request.
+message ExecutorHostCapability {
+  string name = 1;
+  uint32 min_version = 2;
+  uint32 max_version = 3;
+  string deprecated_in = 4;
+}
+
+// ExecutorCapabilityVersion is a capability and the version a provider
+// implements; the validation response echoes the full set.
+message ExecutorCapabilityVersion {
+  string name = 1;
+  uint32 version = 2;
 }
 
 message ValidateExecutorProfileRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorProfileSnapshot profile = 2;
+  repeated ExecutorHostCapability host_capabilities = 3;
 }
 
 message ValidateExecutorProfileResponse {
   repeated ExecutorProviderFieldError field_errors = 1;
   ExecutorProviderCapabilities capabilities = 2;
   ExecutorProviderError error = 3;
+  repeated ExecutorCapabilityVersion implemented_capabilities = 4;
 }
 
 message ProvisionExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorProfileSnapshot profile = 2;
   string bootstrap_json = 3;
+  // repositories and agent_env are sent only to a provider that requires the
+  // repository_intent capability.
+  repeated ExecutorRepositoryIntent repositories = 4;
+  map<string, string> agent_env = 5;
 }
 
 message ProvisionExecutorEnvironmentResponse {
@@ -1916,6 +1991,10 @@ message AttachExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
   string expected_runtime_identity = 3;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 4;
 }
 
 message AttachExecutorEnvironmentResponse {
@@ -1926,6 +2005,10 @@ message AttachExecutorEnvironmentResponse {
 message InspectExecutorEnvironmentRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 3;
 }
 
 message InspectExecutorEnvironmentResponse {
@@ -1941,6 +2024,10 @@ message ResolveExecutorConnectionRequest {
   string purpose = 3;
   // agentctl control port, or an instance port agentctl assigned to a session.
   uint32 runtime_port = 4;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 5;
 }
 
 message ExecutorConnectionLease {
@@ -1950,6 +2037,44 @@ message ExecutorConnectionLease {
   repeated string websocket_subprotocols = 4;
   string expires_at = 5;
   string generation = 6;
+  // transport is https (the default when empty) or host_tunnel. A host_tunnel
+  // lease carries no base_url and is valid only for a provider that requires
+  // the tunnel_transport capability.
+  string transport = 7;
+}
+
+// ExecutorTunnelFrame is one message of an executor tunnel stream. The host
+// sends a header first; the provider answers with one ack; data frames carry at
+// most 64 KiB; a close without an error code is an orderly half-close.
+message ExecutorTunnelFrame {
+  oneof kind {
+    ExecutorTunnelHeader header = 1;
+    ExecutorTunnelAck ack = 2;
+    bytes data = 3;
+    ExecutorTunnelClose close = 4;
+  }
+}
+
+message ExecutorTunnelHeader {
+  ExecutorProviderRequestContext context = 1;
+  ExecutorResourceDescriptor resource = 2;
+  // port is the control port or the recorded instance port of the environment.
+  uint32 port = 3;
+  // binding_nonce identifies this stream binding; the provider echoes it in the ack.
+  string binding_nonce = 4;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 5;
+}
+
+message ExecutorTunnelAck {
+  string binding_nonce = 1;
+}
+
+message ExecutorTunnelClose {
+  // error_code is empty for a half-close; otherwise a stable provider error code.
+  string error_code = 1;
 }
 
 message ResolveExecutorConnectionResponse {
@@ -1962,6 +2087,25 @@ message DestroyExecutorEnvironmentRequest {
   ExecutorResourceDescriptor resource = 2;
   string cleanup_reason = 3;
   string cleanup_claim = 4;
+  // drain_outcome is one of drained, unreachable, uncertain or not_attempted.
+  // It is set only for a provider that requires the drain_receipt capability.
+  string drain_outcome = 5;
+  // drain_receipt is present only when drain_outcome is drained.
+  ExecutorDrainReceipt drain_receipt = 6;
+  // profile is the recorded profile snapshot of the environment, with secret
+  // values revealed for this call only, built exactly as for provision. It lets a
+  // provider reach its cluster without state held in its own process.
+  ExecutorProfileSnapshot profile = 7;
+}
+
+// ExecutorDrainReceipt is the host's record that the recorded runtime stopped
+// its managed process groups under one cleanup claim. It is not evidence that
+// the provider resource is absent.
+message ExecutorDrainReceipt {
+  string receipt_id = 1;
+  string cleanup_claim = 2;
+  string runtime_identity = 3;
+  string completed_at = 4;
 }
 
 message DestroyExecutorEnvironmentResponse {
@@ -1973,6 +2117,14 @@ message CheckpointExecutorResourceRequest {
   ExecutorProviderRequestContext context = 1;
   ExecutorResourceDescriptor resource = 2;
   string phase = 3;
+  // sequence orders the checkpoints of one cleanup or recovery claim; it is
+  // required (at least 1) for the cleanup_progress and recovery_progress phases.
+  uint64 sequence = 4;
+  // claim echoes the destroy request's cleanup_claim (or the recovery claim
+  // the host named) for the cleanup_progress and recovery_progress phases. The
+  // host compares it with the claim currently held and refuses a checkpoint
+  // from an earlier acquisition.
+  string claim = 5;
 }
 
 message CheckpointExecutorResourceResponse {

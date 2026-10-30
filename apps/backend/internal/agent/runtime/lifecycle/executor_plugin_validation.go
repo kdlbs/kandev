@@ -23,6 +23,9 @@ func validatePluginExecutorResourceForProvider(provider models.ExecutorProvider,
 	if err := validatePluginExecutorResourceState(provider.ResourceStateSchema, resource.GetStateJson()); err != nil {
 		return err
 	}
+	if resource.GetStateVersion() == 0 {
+		return errors.New("provider resource state version is missing")
+	}
 	for _, supported := range provider.SupportedStateVersions {
 		if supported > 0 && uint32(supported) == resource.GetStateVersion() {
 			return validatePluginExecutorResourceExpiry(provider.Capabilities, resource)

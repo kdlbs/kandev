@@ -3156,6 +3156,12 @@ type TaskEnvironmentRecoveryClaimRequest struct {
 	ExecutorType               string
 	AllowCurrentSessionRuntime bool
 	CleanupJobID               string
+	// SupersedeOperationPrefix lets this acquisition replace a claim of the
+	// same owner, generation and session whose operation id starts with it and
+	// does not contain LiveOperationMarker: a claim an earlier process left
+	// behind. A claim carrying the marker belongs to a live holder and stays busy.
+	SupersedeOperationPrefix string
+	LiveOperationMarker      string
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery

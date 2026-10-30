@@ -20,7 +20,11 @@ type ExecutorProfileSnapshot = pluginv1.ExecutorProfileSnapshot
 type ExecutorProviderError = pluginv1.ExecutorProviderError
 type ExecutorProviderFieldError = pluginv1.ExecutorProviderFieldError
 type ExecutorProviderCapabilities = pluginv1.ExecutorProviderCapabilities
+type ExecutorHostCapability = pluginv1.ExecutorHostCapability
+type ExecutorCapabilityVersion = pluginv1.ExecutorCapabilityVersion
 type ExecutorResourceDescriptor = pluginv1.ExecutorResourceDescriptor
+type ExecutorRepositoryIntent = pluginv1.ExecutorRepositoryIntent
+type ExecutorRepositoryState = pluginv1.ExecutorRepositoryState
 type ExecutorConnectionLease = pluginv1.ExecutorConnectionLease
 type ExecutorRuntimeArtifactChunk = pluginv1.ExecutorRuntimeArtifactChunk
 
@@ -37,6 +41,7 @@ type InspectExecutorEnvironmentResponse = pluginv1.InspectExecutorEnvironmentRes
 type ResolveExecutorConnectionRequest = pluginv1.ResolveExecutorConnectionRequest
 type ResolveExecutorConnectionResponse = pluginv1.ResolveExecutorConnectionResponse
 type DestroyExecutorEnvironmentRequest = pluginv1.DestroyExecutorEnvironmentRequest
+type ExecutorDrainReceipt = pluginv1.ExecutorDrainReceipt
 type DestroyExecutorEnvironmentResponse = pluginv1.DestroyExecutorEnvironmentResponse
 type CheckpointExecutorResourceRequest = pluginv1.CheckpointExecutorResourceRequest
 type CheckpointExecutorResourceResponse = pluginv1.CheckpointExecutorResourceResponse
@@ -372,3 +377,10 @@ func (v *executorArtifactStreamValidator) complete() bool {
 func artifactChunkMetadata(chunk *pluginv1.ExecutorRuntimeArtifactChunk) string {
 	return fmt.Sprintf("%s\x00%s\x00%d\x00%s", chunk.GetArtifactId(), chunk.GetVersion(), chunk.GetTotalSizeBytes(), chunk.GetSha256())
 }
+
+type ExecutorConfigValue = pluginv1.ExecutorConfigValue
+type ExecutorConfigValue_BoolValue = pluginv1.ExecutorConfigValue_BoolValue
+type ExecutorConfigValue_IntValue = pluginv1.ExecutorConfigValue_IntValue
+type ExecutorConfigValue_DoubleValue = pluginv1.ExecutorConfigValue_DoubleValue
+type ExecutorConfigValue_StringValue = pluginv1.ExecutorConfigValue_StringValue
+type ExecutorSecretRef = pluginv1.ExecutorSecretRef

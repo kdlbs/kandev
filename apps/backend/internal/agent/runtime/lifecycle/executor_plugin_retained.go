@@ -32,7 +32,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	inventory.Phase = pluginExecutorPhaseReady
 	inventory.Revision++
 	inventory.Generation++
-	client, err := r.newAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort), r.logger, state.runtimeIdentity, state.token)
+	client, err := r.newAgentctlClient(ctx, r.connectionResolver(state.operationContext, resource, state.inventory.InstancePort, state.snapshot), r.logger, state.runtimeIdentity, state.token)
 	if err != nil {
 		return nil, errors.New("plugin executor retained agentctl transport is unavailable")
 	}
@@ -43,10 +43,11 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 	r.uploadPluginExecutorAgentCredentials(ctx, client, req)
 	r.applyPluginExecutorGitIdentity(ctx, client, req)
 	metadata := clonePluginExecutorMetadata(req.Metadata)
+	delete(metadata, MetadataKeyBootstrapNonceSecret)
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: pluginExecutorWorkspacePath,
+		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: inventory.workspacePath(),
 		Metadata: metadata, AuthToken: state.token, BootstrapNonce: req.BootstrapNonce,
 		AgentProfileID: req.AgentProfileID,
 	}, nil
@@ -59,6 +60,7 @@ type retainedPluginExecutorState struct {
 	token            string
 	runtimeIdentity  string
 	operationContext *pluginsdk.ExecutorProviderRequestContext
+	snapshot         *pluginsdk.ExecutorProfileSnapshot
 }
 
 func (r *PluginRemoteExecutor) loadRetainedPluginExecutor(ctx context.Context, req *ExecutorCreateRequest) (*retainedPluginExecutorState, error) {
@@ -91,6 +93,15 @@ func (r *PluginRemoteExecutor) loadRetainedPluginExecutor(ctx context.Context, r
 	if err := validatePluginExecutorResourceForProvider(provider, inventory.Resource); err != nil {
 		return nil, err
 	}
+	if err := requireRecordedPluginExecutorWorkspace(inventory); err != nil {
+		return nil, err
+	}
+	if err := checkRetainedPluginExecutorProfileSize(inventory, profile); err != nil {
+		return nil, err
+	}
+	if err := r.confirmRetainedPluginExecutorCapabilities(ctx, inventory, profile); err != nil {
+		return nil, err
+	}
 	token := req.AuthToken
 	if token == "" {
 		token = record.TransientAuthToken
@@ -98,8 +109,12 @@ func (r *PluginRemoteExecutor) loadRetainedPluginExecutor(ctx context.Context, r
 	if token == "" {
 		return nil, errors.New("plugin executor agentctl authorization is unavailable")
 	}
+	snapshot, err := pluginExecutorProfileSnapshot(*profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, errors.New("plugin executor retained provider profile is unavailable")
+	}
 	return &retainedPluginExecutorState{
-		record: record, inventory: inventory, profile: profile, token: token,
+		record: record, inventory: inventory, profile: profile, token: token, snapshot: snapshot,
 		runtimeIdentity:  pluginExecutorRuntimeIdentity(inventory, record.AgentExecutionID),
 		operationContext: pluginExecutorRequestContextForRecord(record, inventory, *profile),
 	}, nil
@@ -140,13 +155,19 @@ func (r *PluginRemoteExecutor) inspectAndAttachRetainedPluginExecutor(ctx contex
 		return nil, nil, err
 	}
 	attached, err := r.operations.AttachExecutorEnvironment(ctx, &pluginsdk.AttachExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: inventory.Resource, ExpectedRuntimeIdentity: state.runtimeIdentity,
+		Context: state.operationContext, Resource: inventory.Resource, ExpectedRuntimeIdentity: state.runtimeIdentity, Profile: state.snapshot,
 	})
 	if err != nil || attached == nil || attached.GetError() != nil {
 		return nil, nil, errors.New("plugin executor retained environment attachment is unavailable")
 	}
 	resource := attached.GetResource()
 	if err := validatePluginExecutorResourceForProvider(provider, resource); err != nil {
+		return nil, nil, err
+	}
+	if err := rejectSecretInProviderState(state.profile.SecretValues, resource); err != nil {
+		return nil, nil, err
+	}
+	if _, err := resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, resource); err != nil {
 		return nil, nil, err
 	}
 	if resource.GetResourceHandle() != inventory.Resource.GetResourceHandle() || resource.GetStateVersion() != inventory.Resource.GetStateVersion() {
@@ -161,7 +182,7 @@ func (r *PluginRemoteExecutor) inspectAndAttachRetainedPluginExecutor(ctx contex
 
 func (r *PluginRemoteExecutor) validateRetainedPluginExecutorRunning(ctx context.Context, state *retainedPluginExecutorState) error {
 	inspection, err := r.operations.InspectExecutorEnvironment(ctx, &pluginsdk.InspectExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: state.inventory.Resource,
+		Context: state.operationContext, Resource: state.inventory.Resource, Profile: state.snapshot,
 	})
 	if err != nil || inspection == nil || inspection.GetError() != nil {
 		return errors.New("plugin executor retained environment inspection is unavailable")
@@ -185,7 +206,7 @@ func (r *PluginRemoteExecutor) inspectAttachedRetainedPluginExecutor(
 	resource *pluginsdk.ExecutorResourceDescriptor,
 ) (*pluginsdk.InspectExecutorEnvironmentResponse, error) {
 	inspection, err := r.operations.InspectExecutorEnvironment(ctx, &pluginsdk.InspectExecutorEnvironmentRequest{
-		Context: state.operationContext, Resource: resource,
+		Context: state.operationContext, Resource: resource, Profile: state.snapshot,
 	})
 	if err != nil || inspection == nil || inspection.GetError() != nil ||
 		!strings.EqualFold(strings.TrimSpace(inspection.GetState()), pluginExecutorStateRunning) {

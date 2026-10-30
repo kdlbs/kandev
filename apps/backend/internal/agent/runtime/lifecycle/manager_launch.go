@@ -1502,6 +1502,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		if err := m.preparePluginExecutorLaunch(ctx, execReq, metadata, reqWithWorktree.TaskEnvironmentID); err != nil {
 			return nil, nil, nil, err
 		}
+		if err := attachPluginRepositoryInputs(execReq, reqWithWorktree, profileInfo); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
@@ -2244,7 +2247,8 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if pluginRemote {
 		minimumRepos = 1
 	}
-	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil {
+	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil &&
+		!pluginProviderPreparedLaunch(execReq) {
 		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, pluginRemote)
 		if projectionErr == nil {
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)

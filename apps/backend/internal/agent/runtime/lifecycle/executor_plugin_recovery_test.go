@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -58,14 +60,30 @@ type pluginExecutorInventoryStoreFake struct {
 	claimErr     error
 	claim        *models.TaskEnvironmentRecoveryClaim
 	deleted      bool
-	releaseCount int
+	// onAcquire runs when a claim is granted, as a provider's checkpoints
+	// under that claim would change the stored record.
+	onAcquire     func(*models.ExecutorRunning, *models.TaskEnvironmentRecoveryClaim)
+	releaseCount  int
+	checkpointErr error
+	onCheckpoint  func(*models.ExecutorRunning)
+	claimBusy     int
+	unrecorded    []*models.UnrecordedPluginExecutor
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
+	if f.checkpointErr != nil {
+		return f.checkpointErr
+	}
+	if f.onCheckpoint != nil {
+		f.onCheckpoint(record)
+	}
 	if f.record != nil {
 		current, err := decodePluginExecutorInventory(f.record.Metadata)
 		if err != nil || f.record.AgentExecutionID != record.AgentExecutionID || record.ExpectedPluginExecutorRevision != current.Revision {
 			return models.ErrExecutionRotated
+		}
+		if next, err := decodePluginExecutorInventory(record.Metadata); err != nil || !sqlite.PluginExecutorInventoryPhaseMayFollow(current.Phase, next.Phase) {
+			return fmt.Errorf("plugin executor inventory phase transition is invalid: %w", models.ErrExecutionRotated)
 		}
 	} else if record.ExpectedPluginExecutorRevision != 0 {
 		return models.ErrExecutionRotated
@@ -104,6 +122,21 @@ func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ c
 	return nil
 }
 
+// RecordPluginExecutorCleanupRequested ignores checkpointErr and claimErr: the
+// real write does not wait on the environment claim.
+func (f *pluginExecutorInventoryStoreFake) RecordPluginExecutorCleanupRequested(_ context.Context, _, executionID string) error {
+	if f.record == nil || f.record.AgentExecutionID != executionID {
+		return models.ErrExecutionRotated
+	}
+	inventory, err := decodePluginExecutorInventory(f.record.Metadata)
+	if err != nil {
+		return err
+	}
+	inventory.CleanupRequested = true
+	f.record.Metadata = map[string]interface{}{MetadataKeyPluginExecutor: inventory}
+	return nil
+}
+
 func (f *pluginExecutorInventoryStoreFake) DeletePluginExecutorInventoryIfCurrent(_ context.Context, sessionID, executionID string, generation int64) error {
 	if f.record == nil || f.record.SessionID != sessionID {
 		return models.ErrExecutorRunningNotFound
@@ -122,15 +155,22 @@ func (f *pluginExecutorInventoryStoreFake) DeletePluginExecutorInventoryIfCurren
 
 func (f *pluginExecutorInventoryStoreFake) AcquireTaskEnvironmentRecoveryClaim(_ context.Context, request models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error) {
 	f.claimRequest = request
+	if f.claimBusy > 0 {
+		f.claimBusy--
+		return nil, recoveryclaim.ErrBusy
+	}
 	if f.claimErr != nil {
 		return nil, f.claimErr
 	}
 	claim := &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID: request.TaskEnvironmentID, OwnerTaskID: request.OwnerTaskID,
 		OwnershipGeneration: request.OwnershipGeneration, SessionID: request.SessionID,
-		OperationID: request.OperationID, ExecutorType: request.ExecutorType,
+		OperationID: request.OperationID, ExecutorType: request.ExecutorType, CreatedAt: time.Now().UTC(),
 	}
 	f.claim = claim
+	if f.onAcquire != nil && f.record != nil {
+		f.onAcquire(f.record, claim)
+	}
 	return claim, nil
 }
 
@@ -153,6 +193,31 @@ func (f *pluginExecutorInventoryStoreFake) GetExecutorRunningBySessionID(context
 	}
 	copy := *f.record
 	return &copy, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) ListUnrecordedPluginExecutors(_ context.Context, taskID, environmentID string) ([]*models.UnrecordedPluginExecutor, error) {
+	var listed []*models.UnrecordedPluginExecutor
+	for _, item := range f.unrecorded {
+		if item.TaskID == taskID && item.EnvironmentID == environmentID {
+			listed = append(listed, item)
+		}
+	}
+	return listed, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) ListAllUnrecordedPluginExecutors(context.Context) ([]*models.UnrecordedPluginExecutor, error) {
+	return append([]*models.UnrecordedPluginExecutor(nil), f.unrecorded...), nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) DeleteUnrecordedPluginExecutor(_ context.Context, executionID string) error {
+	kept := f.unrecorded[:0]
+	for _, item := range f.unrecorded {
+		if item.ExecutionID != executionID {
+			kept = append(kept, item)
+		}
+	}
+	f.unrecorded = kept
+	return nil
 }
 
 func (f *pluginExecutorInventoryStoreFake) ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error) {

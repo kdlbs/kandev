@@ -697,6 +697,9 @@ func (c *Cloner) workspaceCloneAuth(
 func (c *Cloner) workspaceCloneAuthRequest(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, *cloneAuth, error) {
+	if _, local := E2ELocalRemote(request.Provider, request.CloneURL); local {
+		return request.CloneURL, nil, nil
+	}
 	provider := strings.ToLower(strings.TrimSpace(request.Provider))
 	if provider == "" {
 		provider = githubProvider

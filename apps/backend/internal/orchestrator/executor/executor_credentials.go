@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -820,6 +821,11 @@ func managedGitCredentialProviderForProfile(
 		return ""
 	}
 	if repository.SourceType == sourceTypeLocal && strings.TrimSpace(repository.Provider) == "" {
+		return ""
+	}
+	// A repository of the synthetic e2e-local provider carries no credential
+	// under the e2e profile, so it never takes a lease.
+	if repoclone.IsE2ELocalProvider(repository.Provider) {
 		return ""
 	}
 	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))

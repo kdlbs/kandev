@@ -32,6 +32,12 @@ func cloneExecutorProviders(values []ExecutorProvider) []ExecutorProvider {
 	for index, value := range values {
 		clone[index] = value
 		clone[index].SupportedStateVersions = append([]int(nil), value.SupportedStateVersions...)
+		if value.StateSchema != nil {
+			schema := *value.StateSchema
+			clone[index].StateSchema = &schema
+		}
+		clone[index].RequiresHostCapabilities = append([]HostCapabilityRequirement(nil), value.RequiresHostCapabilities...)
+		clone[index].LaunchPolicyIDs = append([]string(nil), value.LaunchPolicyIDs...)
 		clone[index].ProfileSchema = cloneMap(value.ProfileSchema)
 		clone[index].ResourceStateSchema = cloneMap(value.ResourceStateSchema)
 		if value.LocalizedMessages != nil {

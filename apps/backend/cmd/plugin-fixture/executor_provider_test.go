@@ -99,6 +99,7 @@ func TestPluginExecutorFixtureContract(t *testing.T) {
 
 	destroyed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, destroyed.GetConfirmedAbsent())
@@ -179,6 +180,7 @@ func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 	t.Setenv(fixtureExecutorBarrierEnv, fixtureBarrierUnconfirmedCleanupOnce)
 	delayed, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.False(t, delayed.GetConfirmedAbsent())
@@ -186,6 +188,7 @@ func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 
 	cleaned, err := plugin.DestroyExecutorEnvironment(context.Background(), &pluginsdk.DestroyExecutorEnvironmentRequest{
 		Context: ctx, Resource: provisioned.GetResource(),
+		CleanupReason: "launch_failed", DrainOutcome: "not_attempted",
 	})
 	require.NoError(t, err)
 	require.True(t, cleaned.GetConfirmedAbsent())
@@ -215,4 +218,27 @@ func fixtureHTTPSRequest(t *testing.T, plugin *fixturePlugin, lease *pluginsdk.E
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	return string(body)
+}
+
+func TestPluginExecutorFixtureSameOperationSameInputReusesAndChangedInputConflicts(t *testing.T) {
+	plugin := newFixturePluginAt(t.TempDir())
+	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
+	profile := &pluginsdk.ExecutorProfileSnapshot{ProfileId: "profile-1", Config: map[string]string{"region": "eu-west-1"}}
+	request := func(digest string) *pluginsdk.ProvisionExecutorEnvironmentRequest {
+		return &pluginsdk.ProvisionExecutorEnvironmentRequest{Profile: profile, Context: &pluginsdk.ExecutorProviderRequestContext{
+			PluginId: "kandev-plugin-e2e", InstallationId: "installation-1", ProviderKey: executorProviderKey,
+			ContractVersion: 1, EnvironmentId: "environment-1", OperationId: "operation-1", InputDigest: digest,
+		}}
+	}
+	_, err := plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-a"))
+	require.NoError(t, err)
+	_, err = plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-a"))
+	require.NoError(t, err)
+	require.Equal(t, 1, plugin.executorAllocationCount(), "a retry with the same intent must not allocate again")
+
+	_, err = plugin.ProvisionExecutorEnvironment(context.Background(), request("digest-intent-b"))
+	var actionErr *pluginsdk.ActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, pluginsdk.ActionErrorConflict, actionErr.Code)
+	require.Equal(t, 1, plugin.executorAllocationCount())
 }

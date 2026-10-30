@@ -90,3 +90,22 @@ export async function readFixtureProfile(
     secret_fields?: Record<string, boolean>;
   }>;
 }
+
+/** Asserts the schema `default` hint and the `minLength` error and the `maxLength` input cap on the Image field. */
+export async function expectImageSchemaFeedback(page: Page) {
+  const image = page.getByLabel("Image");
+  await expect(page.getByTestId("executor-profile-default-image")).toHaveText(
+    "Default: fixture-agent:latest",
+  );
+  await expect(image).toHaveAttribute("maxlength", "32");
+
+  await image.fill("ab");
+  await expect(
+    page.getByText("Image must be at least 3 characters.", { exact: true }),
+  ).toBeVisible();
+  await image.fill("x".repeat(33));
+  await expect(image).toHaveValue("x".repeat(32));
+  await expect(page.getByText(/^Image must be at (least|most)/)).toHaveCount(0);
+  await image.fill("fixture-agent:stable");
+  await expect(page.getByText(/^Image must be at (least|most)/)).toHaveCount(0);
+}

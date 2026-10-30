@@ -33,6 +33,10 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 // expected owner or generation is stale.
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 
+// ErrUnrecordedPluginExecutorsRemain refuses an environment transfer or delete
+// while a provisioned plugin resource is still handed off for cleanup.
+var ErrUnrecordedPluginExecutorsRemain = errors.New("unrecorded plugin executors remain for the environment")
+
 var errDetachedWorkspaceTransferNotApplicable = errors.New("detached workspace stewardship transfer not applicable")
 
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
