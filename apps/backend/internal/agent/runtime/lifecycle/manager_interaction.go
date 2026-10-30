@@ -1291,12 +1291,6 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 // with no agent to drive it.
 var ErrNoExecutionForSession = errors.New("no execution for session")
 
-// ErrCancelEscalated is returned by CancelAgent when the agent subprocess accepted
-// the ACP cancel but did not publish a completion event before the timeout. The
-// lifecycle manager has locally unblocked the in-flight SendPrompt and marked the
-// execution ready, but the agent never acknowledged the cancel. Callers should
-// still reconcile session-level state (e.g. transition the task session to
-// WAITING_FOR_INPUT) — the user's intent was unambiguous.
 const (
 	// pluginRemoteGracefulStopTimeout caps the graceful agentctl stop of a
 	// plugin_remote runtime; the caller's remaining budget share caps it lower.
@@ -1304,6 +1298,12 @@ const (
 	pluginRemoteGracefulStopBudgetShare = 3
 )
 
+// ErrCancelEscalated is returned by CancelAgent when the agent subprocess accepted
+// the ACP cancel but did not publish a completion event before the timeout. The
+// lifecycle manager has locally unblocked the in-flight SendPrompt and marked the
+// execution ready, but the agent never acknowledged the cancel. Callers should
+// still reconcile session-level state (e.g. transition the task session to
+// WAITING_FOR_INPUT) — the user's intent was unambiguous.
 var ErrCancelEscalated = errors.New("cancel escalated: agent did not acknowledge within timeout")
 
 // CancelAgentBySessionID cancels the current agent turn for a specific session.
