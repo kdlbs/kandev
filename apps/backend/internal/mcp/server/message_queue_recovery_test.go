@@ -1,0 +1,77 @@
+package mcp
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/profile"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+)
+
+func TestQueueRecoveryCatalogIsTaskBound(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task")
+	for _, name := range []string{"get_terminal_session_message_queue_kandev", "get_child_queue_inventory_kandev", "get_child_session_message_queue_kandev"} {
+		tool, ok := s.mcpServer.ListTools()[name]
+		require.True(t, ok, name)
+		require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint)
+		require.True(t, *tool.Tool.Annotations.ReadOnlyHint)
+		require.False(t, *tool.Tool.Annotations.DestructiveHint)
+	}
+}
+
+func TestQueueRecoveryToolResultWrapperBound(t *testing.T) {
+	entry := map[string]interface{}{"id": ""}
+	response := map[string]interface{}{"task_id": "child", "sessions": []interface{}{map[string]interface{}{"session_id": "session", "manifest": map[string]interface{}{"entries": []interface{}{entry}}}}}
+	encoded, err := json.Marshal(response)
+	require.NoError(t, err)
+	entry["id"] = strings.Repeat("x", taskcontract.MaxQueueRecoveryResponseBytes-len(encoded)-1)
+	encoded, err = json.Marshal(response)
+	require.NoError(t, err)
+	require.Equal(t, taskcontract.MaxQueueRecoveryResponseBytes-1, len(encoded))
+	s := newTaskModeServer(t, &testBackend{response: response}, "task")
+	result := callTool(t, s, "get_child_queue_inventory_kandev", map[string]interface{}{"task_id": "child"})
+	require.True(t, result.IsError, "MCP text-result encoding must also remain bounded")
+	wire, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(wire), taskcontract.MaxQueueRecoveryResponseBytes)
+}
+
+func TestQueueRecoveryNeverLogsUntrustedArguments(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task")
+	core, logs := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	s.logger = log
+	result := callTool(t, s, "get_child_queue_inventory_kandev", map[string]interface{}{"task_id": "child", "attachment_data": "private-secret"})
+	require.True(t, result.IsError)
+	for _, entry := range logs.All() {
+		require.NotContains(t, entry.ContextMap(), "args")
+		require.NotContains(t, entry.ContextMap(), "result")
+	}
+}
+
+func TestQueueRecoveryOwnTaskForwardingAndRestrictedCatalog(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"page": map[string]interface{}{"snapshot_sha256": "hash"}}}
+	s := newTaskModeServer(t, backend, "bound-task")
+	forged := callTool(t, s, "get_terminal_session_message_queue_kandev", map[string]interface{}{"session_id": "predecessor", "task_id": "forged"})
+	require.True(t, forged.IsError)
+	require.Empty(t, backend.lastAction)
+	result := callTool(t, s, "get_terminal_session_message_queue_kandev", map[string]interface{}{"session_id": "predecessor", "max_body_bytes": float64(1024)})
+	require.False(t, result.IsError, "%+v", result.Content)
+	require.Equal(t, ws.ActionMCPGetTerminalSessionMessageQueue, backend.lastAction)
+	payload := backend.lastPayload.(map[string]interface{})
+	require.Equal(t, "bound-task", payload["task_id"])
+	require.Equal(t, "predecessor", payload["session_id"])
+	require.Equal(t, 1024, payload["max_body_bytes"])
+	for _, surface := range []profile.Surface{profile.SurfaceExternal, profile.SurfaceConfiguration, profile.SurfaceAutomation, profile.SurfaceCoordinator, profile.SurfaceManagedConversation} {
+		server := NewWithProfile(&testBackend{}, "caller", "task", 10005, newTestLogger(t), "", false, profile.Context{Surface: surface})
+		_, present := server.mcpServer.ListTools()["get_terminal_session_message_queue_kandev"]
+		require.False(t, present, string(surface))
+	}
+}
