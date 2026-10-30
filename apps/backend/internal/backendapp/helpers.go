@@ -95,6 +95,7 @@ import (
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
+	taskquestions "github.com/kandev/kandev/internal/task/questions"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
@@ -1206,6 +1207,30 @@ func registerRoutes(p routeParams) {
 		p.log,
 	)
 
+	asyncQuestionSvc := taskquestions.NewService(p.taskRepo, nil, p.log.Zap())
+	asyncQuestionSvc.SetDeliveryQueue(&asyncQuestionQueueAdapter{
+		queue: p.orchestratorSvc.GetMessageQueue(), sessions: p.taskRepo,
+		readiness: p.orchestratorSvc, log: p.log.Zap(),
+	})
+	asyncQuestionSvc.SetNotifier(asyncQuestionNotifier{bus: p.eventBus})
+	asyncQuestionSvc.SetSessionStateReader(asyncQuestionSessionState{sessions: p.taskRepo})
+	asyncQuestionSvc.SetWakeDestination(func(ctx context.Context, taskID, sessionID string) {
+		p.orchestratorSvc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
+	})
+	p.orchestratorSvc.SetAsyncQuestionGate(asyncQuestionSvc)
+	p.orchestratorSvc.SetAsyncQuestionLifecycle(asyncQuestionSvc)
+	p.taskSvc.SetAsyncQuestionLifecycle(asyncQuestionSvc)
+	p.services.AsyncQuestions = asyncQuestionSvc
+	if p.ctx != nil {
+		asyncQuestionSvc.Start(p.ctx)
+	}
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			asyncQuestionSvc.Stop()
+			return nil
+		})
+	}
+
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
 		p.services.OfficeSvcs.Dashboard.SetPermissionLister(clarificationStore)
@@ -1931,7 +1956,7 @@ func registerSecondaryRoutes(
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
-	clarification.RegisterRoutes(
+	clarificationHandlers := clarification.RegisterRoutes(
 		p.router,
 		clarificationStore,
 		p.gateway.Hub,
@@ -1945,7 +1970,14 @@ func registerSecondaryRoutes(
 		p.features.NeedsYouInbox,
 		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr},
 	)
+	if p.services.AsyncQuestions != nil {
+		clarificationHandlers.SetAsyncQuestionReader(p.services.AsyncQuestions)
+	}
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	taskquestions.RegisterRoutes(p.router, p.services.AsyncQuestions, p.taskSvc, p.taskSvc, p.log.Zap(),
+		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr})
+	p.log.Debug("Registered async question handlers (HTTP)")
 
 	if p.features.Coordinator {
 		wireCoordinatorConversation(p)
@@ -2614,6 +2646,9 @@ func registerMCPAndDebugRoutes(
 				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
+	}
+	if p.services.AsyncQuestions != nil {
+		mcpHandlers.SetAsyncQuestionService(p.services.AsyncQuestions)
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)

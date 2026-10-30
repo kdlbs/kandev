@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
@@ -58,12 +59,24 @@ type inboxTaskService interface {
 // Inbox History endpoints need: the existing bundle-query machinery, the
 // per-user dismiss/snooze sidecar (needs-you-inbox design, "Persistence"),
 // and the additive, isolated history read.
+// inboxAsyncQuestionReader is the narrow async population the Needs-you Inbox
+// merges into the same bounded response and count. The task question service
+// implements it; clarification never imports that package.
+type inboxAsyncQuestionReader interface {
+	ListInboxAsyncQuestions(ctx context.Context, workspaceID, userID string, limit int, cursorAt, cursorID string) (*taskmodels.AsyncQuestionPage, error)
+	CountInboxAsyncQuestions(ctx context.Context, workspaceID, userID string) (int, error)
+	ListHiddenInboxAsyncQuestions(ctx context.Context, workspaceID, userID string, limit int, now time.Time) ([]*taskmodels.AsyncQuestion, int, *time.Time, error)
+	HasParkedWait(ctx context.Context, sessionID string) bool
+	AsyncQuestionWorkspace(ctx context.Context, questionID string) (string, bool, error)
+}
+
 type inboxBundleStore interface {
 	ListUnresolvedClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (*taskmodels.ClarificationBundlePage, error)
 	FindMessagesByPendingIDs(ctx context.Context, pendingIDs []string) (map[string][]*taskmodels.Message, error)
 	UpsertClarificationInboxSidecar(ctx context.Context, userID, pendingID string, state taskmodels.ClarificationSidecarState, snoozeUntil *time.Time, now time.Time) error
 	DeleteClarificationInboxSidecar(ctx context.Context, userID, pendingID string) error
 	CountHiddenClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (taskmodels.ClarificationInboxHiddenSummary, error)
+	CountVisibleClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (int, error)
 	GetClarificationInboxSidecarStates(ctx context.Context, userID string, pendingIDs []string) (map[string]taskmodels.ClarificationInboxHiddenBundle, error)
 	ListInboxHistoryBundles(ctx context.Context, opts taskmodels.ListClarificationHistoryOptions) (*taskmodels.ClarificationHistoryPage, error)
 	CountInboxHistoryBundles(ctx context.Context, opts taskmodels.ListClarificationHistoryOptions) (int, error)
@@ -103,12 +116,32 @@ type inboxBundleView struct {
 }
 
 // inboxListResponse is GET /api/v1/clarification-inbox's response envelope.
+type inboxAsyncQuestionView struct {
+	QuestionID      string                           `json:"question_id"`
+	TaskID          string                           `json:"task_id"`
+	SessionID       string                           `json:"session_id"`
+	SessionState    string                           `json:"session_state"`
+	TaskTitle       string                           `json:"task_title"`
+	ParentTaskID    string                           `json:"parent_task_id,omitempty"`
+	ParentTaskTitle string                           `json:"parent_task_title,omitempty"`
+	Forwarded       bool                             `json:"forwarded"`
+	Waiting         bool                             `json:"waiting"`
+	Status          string                           `json:"status"`
+	Context         string                           `json:"context"`
+	CreatedAt       string                           `json:"created_at"`
+	Questions       []protocol.Question              `json:"questions"`
+	Outcome         *taskmodels.AsyncQuestionOutcome `json:"outcome,omitempty"`
+	WithdrawReason  string                           `json:"withdraw_reason,omitempty"`
+}
+
 type inboxListResponse struct {
-	Bundles          []inboxBundleView `json:"bundles"`
-	Count            int               `json:"count"`
-	HiddenCount      int               `json:"hidden_count"`
-	NextSnoozeExpiry *string           `json:"next_snooze_expiry"`
-	NextCursor       string            `json:"next_cursor,omitempty"`
+	Bundles          []inboxBundleView        `json:"bundles"`
+	AsyncQuestions   []inboxAsyncQuestionView `json:"async_questions"`
+	Count            int                      `json:"count"`
+	AsyncCount       int                      `json:"async_count"`
+	HiddenCount      int                      `json:"hidden_count"`
+	NextSnoozeExpiry *string                  `json:"next_snooze_expiry"`
+	NextCursor       string                   `json:"next_cursor,omitempty"`
 }
 
 // inboxHiddenBundleView is one row of the hidden-bundles enumeration: the
@@ -122,10 +155,17 @@ type inboxHiddenBundleView struct {
 // inboxHiddenListResponse is GET /api/v1/clarification-inbox/hidden's
 // response envelope. total is workspace-wide; count is page-scoped.
 type inboxHiddenListResponse struct {
-	Bundles    []inboxHiddenBundleView `json:"bundles"`
-	Count      int                     `json:"count"`
-	Total      int                     `json:"total"`
-	NextCursor string                  `json:"next_cursor,omitempty"`
+	Bundles        []inboxHiddenBundleView        `json:"bundles"`
+	AsyncQuestions []inboxHiddenAsyncQuestionView `json:"async_questions"`
+	Count          int                            `json:"count"`
+	Total          int                            `json:"total"`
+	NextCursor     string                         `json:"next_cursor,omitempty"`
+}
+
+type inboxHiddenAsyncQuestionView struct {
+	inboxAsyncQuestionView
+	State       string  `json:"state"`
+	SnoozeUntil *string `json:"snooze_until"`
 }
 
 // inboxSidecarPutBody is PUT /api/v1/clarification-inbox/sidecar/:pendingID's
@@ -175,11 +215,31 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 
 	userID := InboxUserID(ctx)
 	now := h.now()
+	blockingCursorAt, blockingCursorID := time.Time{}, ""
+	asyncCursorAt, asyncCursorID := time.Time{}, ""
+	if !cursorCreatedAt.IsZero() {
+		kind, storedID := inboxCursorSource(cursorPendingID)
+		switch kind {
+		case "a":
+			// Async sorts before blocking at the same instant, so blocking rows
+			// at T remain after the cursor while async resumes by ID.
+			blockingCursorAt = cursorCreatedAt
+			asyncCursorAt, asyncCursorID = cursorCreatedAt, storedID
+		case "b":
+			// Blocking sorts after async at T, so async must resume strictly
+			// after T to avoid replaying rows before the cursor.
+			blockingCursorAt, blockingCursorID = cursorCreatedAt, storedID
+			asyncCursorAt = cursorCreatedAt.Add(time.Nanosecond)
+		default:
+			blockingCursorAt, blockingCursorID = cursorCreatedAt, storedID
+			asyncCursorAt = cursorCreatedAt.Add(time.Nanosecond)
+		}
+	}
 	page, err := h.inboxBundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped:        true,
 		WorkspaceID:     workspaceID,
-		CursorCreatedAt: cursorCreatedAt,
-		CursorPendingID: cursorPendingID,
+		CursorCreatedAt: blockingCursorAt,
+		CursorPendingID: blockingCursorID,
 		Limit:           limit,
 		Sidecar:         &taskmodels.ClarificationSidecarFilter{UserID: userID, Now: now},
 	})
@@ -217,15 +277,69 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 		return
 	}
 
-	resp := inboxListResponse{
-		Bundles:          views,
-		Count:            len(views),
-		HiddenCount:      summary.HiddenCount,
-		NextSnoozeExpiry: formatOptionalInboxTime(summary.NextSnoozeExpiry),
+	asyncCursorAtText := ""
+	if !asyncCursorAt.IsZero() {
+		asyncCursorAtText = asyncCursorAt.UTC().Format(time.RFC3339Nano)
 	}
-	if page.HasMore && len(page.Bundles) > 0 {
-		last := page.Bundles[len(page.Bundles)-1]
-		resp.NextCursor = encodeInboxCursor(last.CreatedAt, last.PendingID)
+	asyncViews, _, asyncHasMore, err := h.buildInboxAsyncViews(
+		ctx, userID, workspaceID, limit, asyncCursorAtText, asyncCursorID, now)
+	if err != nil {
+		if h.respondInboxReadError(c, requestCtx, err) {
+			return
+		}
+		h.logger.Error("failed to read async question inbox population", zap.Error(err))
+		respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+		return
+	}
+
+	asyncCount := 0
+	if h.inboxAsync != nil {
+		asyncCount, err = h.inboxAsync.CountInboxAsyncQuestions(ctx, workspaceID, userID)
+		if err != nil {
+			if h.respondInboxReadError(c, requestCtx, err) {
+				return
+			}
+			h.logger.Error("failed to count async question inbox population", zap.Error(err))
+			respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+			return
+		}
+	}
+	merged := mergeInboxPage(views, asyncViews, page.HasMore, asyncHasMore, limit)
+	asyncHidden := 0
+	var asyncNextSnooze *time.Time
+	if h.inboxAsync != nil {
+		_, asyncHidden, asyncNextSnooze, err = h.inboxAsync.ListHiddenInboxAsyncQuestions(ctx, workspaceID, userID, 1, now)
+		if err != nil {
+			if h.respondInboxReadError(c, requestCtx, err) {
+				return
+			}
+			h.logger.Error("failed to count hidden async questions", zap.Error(err))
+			respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+			return
+		}
+	}
+	blockingTotal, err := h.inboxBundles.CountVisibleClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
+		Unscoped: true, WorkspaceID: workspaceID, Limit: 1,
+		Sidecar: &taskmodels.ClarificationSidecarFilter{UserID: userID, Now: now},
+	})
+	if err != nil {
+		if h.respondInboxReadError(c, requestCtx, err) {
+			return
+		}
+		h.logger.Error("failed to count visible needs-you inbox bundles", zap.Error(err))
+		respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+		return
+	}
+	resp := inboxListResponse{
+		Bundles:          merged.bundles,
+		AsyncQuestions:   merged.async,
+		Count:            blockingTotal + asyncCount,
+		AsyncCount:       asyncCount,
+		HiddenCount:      summary.HiddenCount + asyncHidden,
+		NextSnoozeExpiry: formatOptionalInboxTime(earlierInboxTime(summary.NextSnoozeExpiry, asyncNextSnooze)),
+	}
+	if merged.hasMore && merged.lastItem != nil {
+		resp.NextCursor = encodeInboxCursor(merged.lastItem.createdAt, merged.lastItem.kind+":"+merged.lastItem.id)
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -284,7 +398,30 @@ func (h *Handlers) httpListInboxHidden(c *gin.Context) {
 		respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
 		return
 	}
-	resp.Total = summary.HiddenCount
+	asyncViews, asyncHidden, err := h.buildInboxHiddenAsyncViews(ctx, userID, workspaceID, limit, now)
+	if err != nil {
+		if h.respondInboxReadError(c, requestCtx, err) {
+			return
+		}
+		h.logger.Error("failed to read hidden async question population", zap.Error(err))
+		respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+		return
+	}
+	resp.AsyncQuestions = asyncViews
+	if len(resp.Bundles)+len(resp.AsyncQuestions) > limit {
+		remaining := limit
+		if len(resp.Bundles) > remaining {
+			resp.Bundles = resp.Bundles[:remaining]
+			remaining = 0
+		} else {
+			remaining -= len(resp.Bundles)
+		}
+		if len(resp.AsyncQuestions) > remaining {
+			resp.AsyncQuestions = resp.AsyncQuestions[:remaining]
+		}
+	}
+	resp.Count = len(resp.Bundles) + len(resp.AsyncQuestions)
+	resp.Total = summary.HiddenCount + asyncHidden
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -319,6 +456,148 @@ func (h *Handlers) buildInboxHiddenResponse(
 		resp.NextCursor = encodeInboxCursor(last.CreatedAt, last.PendingID)
 	}
 	return resp, nil
+}
+
+// buildInboxAsyncViews reads the additive async population and applies the
+// same per-user hiding as blocking rows. Async sidecar identities are
+// namespaced so they cannot collide with a blocking pending ID.
+func (h *Handlers) buildInboxAsyncViews(
+	ctx context.Context, userID, workspaceID string, limit int, cursorAt, cursorID string, now time.Time,
+) ([]inboxAsyncQuestionView, int, bool, error) {
+	if h.inboxAsync == nil {
+		return []inboxAsyncQuestionView{}, 0, false, nil
+	}
+	page, err := h.inboxAsync.ListInboxAsyncQuestions(ctx, workspaceID, userID, limit, cursorAt, cursorID)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if len(page.Questions) == 0 {
+		return []inboxAsyncQuestionView{}, 0, page.HasMore, nil
+	}
+	states, err := h.inboxAsyncSidecarStates(ctx, userID, page.Questions)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	visible, hidden := filterHiddenAsyncQuestions(page.Questions, states, now)
+	taskIDs := inboxAsyncQuestionTaskIDs(visible)
+	titles := h.batchInboxTaskTitles(ctx, taskIDs)
+	sessionStates := h.batchInboxSessionStates(ctx, taskIDs)
+	views := make([]inboxAsyncQuestionView, 0, len(visible))
+	for _, question := range visible {
+		views = append(views, h.buildInboxAsyncView(ctx, question, titles, sessionStates))
+	}
+	return views, hidden, page.HasMore, nil
+}
+
+func (h *Handlers) inboxAsyncSidecarStates(
+	ctx context.Context,
+	userID string,
+	questions []*taskmodels.AsyncQuestion,
+) (map[string]taskmodels.ClarificationInboxHiddenBundle, error) {
+	keys := make([]string, 0, len(questions))
+	for _, question := range questions {
+		keys = append(keys, inboxAsyncSidecarKey(question.ID))
+	}
+	return h.inboxBundles.GetClarificationInboxSidecarStates(ctx, userID, keys)
+}
+
+func filterHiddenAsyncQuestions(
+	questions []*taskmodels.AsyncQuestion,
+	states map[string]taskmodels.ClarificationInboxHiddenBundle,
+	now time.Time,
+) ([]*taskmodels.AsyncQuestion, int) {
+	visible := make([]*taskmodels.AsyncQuestion, 0, len(questions))
+	hidden := 0
+	for _, question := range questions {
+		state, ok := states[inboxAsyncSidecarKey(question.ID)]
+		if !ok {
+			visible = append(visible, question)
+			continue
+		}
+		if state.State == taskmodels.ClarificationSidecarDismissed ||
+			(state.State == taskmodels.ClarificationSidecarSnoozed && state.SnoozeUntil != nil && state.SnoozeUntil.After(now)) {
+			hidden++
+			continue
+		}
+		visible = append(visible, question)
+	}
+	return visible, hidden
+}
+
+func inboxAsyncQuestionTaskIDs(questions []*taskmodels.AsyncQuestion) []string {
+	taskIDs := make([]string, 0, len(questions)*2)
+	seen := make(map[string]bool, len(questions)*2)
+	for _, question := range questions {
+		for _, id := range []string{question.TaskID, question.ParentTaskID} {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				taskIDs = append(taskIDs, id)
+			}
+		}
+	}
+	return taskIDs
+}
+
+func (h *Handlers) buildInboxAsyncView(
+	ctx context.Context,
+	question *taskmodels.AsyncQuestion,
+	titles, sessionStates map[string]string,
+) inboxAsyncQuestionView {
+	return inboxAsyncQuestionView{
+		QuestionID:      question.ID,
+		TaskID:          question.TaskID,
+		SessionID:       question.SessionID,
+		SessionState:    sessionStates[question.SessionID],
+		TaskTitle:       titles[question.TaskID],
+		ParentTaskID:    question.ParentTaskID,
+		ParentTaskTitle: titles[question.ParentTaskID],
+		Forwarded:       question.Forwarded,
+		Waiting:         h.inboxAsync.HasParkedWait(ctx, question.SessionID),
+		Status:          string(question.Status),
+		Context:         question.Context,
+		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Questions:       question.Questions,
+		Outcome:         question.Outcome,
+		WithdrawReason:  question.WithdrawReason,
+	}
+}
+
+// buildInboxHiddenAsyncViews enumerates the async subset this operator's own
+// dismiss or snooze is hiding, including snoozes that have not expired yet.
+func (h *Handlers) buildInboxHiddenAsyncViews(
+	ctx context.Context, userID, workspaceID string, limit int, now time.Time,
+) ([]inboxHiddenAsyncQuestionView, int, error) {
+	if h.inboxAsync == nil {
+		return []inboxHiddenAsyncQuestionView{}, 0, nil
+	}
+	questions, total, _, err := h.inboxAsync.ListHiddenInboxAsyncQuestions(ctx, workspaceID, userID, limit, now)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(questions) == 0 {
+		return []inboxHiddenAsyncQuestionView{}, 0, nil
+	}
+	states, err := h.inboxAsyncSidecarStates(ctx, userID, questions)
+	if err != nil {
+		return nil, 0, err
+	}
+	taskIDs := inboxAsyncQuestionTaskIDs(questions)
+	titles := h.batchInboxTaskTitles(ctx, taskIDs)
+	sessionStates := h.batchInboxSessionStates(ctx, taskIDs)
+	views := make([]inboxHiddenAsyncQuestionView, 0, len(questions))
+	for _, question := range questions {
+		state := states[inboxAsyncSidecarKey(question.ID)]
+		views = append(views, inboxHiddenAsyncQuestionView{
+			inboxAsyncQuestionView: h.buildInboxAsyncView(ctx, question, titles, sessionStates),
+			State:                  string(state.State),
+			SnoozeUntil:            formatOptionalInboxTime(state.SnoozeUntil),
+		})
+	}
+	return views, total, nil
+}
+
+func inboxAsyncSidecarKey(questionID string) string {
+	return "async:" + questionID
 }
 
 // buildInboxBundleViews hydrates each bundle's durable messages and
@@ -366,7 +645,7 @@ func (h *Handlers) buildInboxBundleViews(
 			PendingID:    b.PendingID,
 			TaskID:       b.TaskID,
 			SessionID:    b.SessionID,
-			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339Nano),
 			Context:      content.Context,
 			Messages:     content.Messages,
 			TaskTitle:    taskTitles[b.TaskID],
@@ -575,7 +854,7 @@ func (h *Handlers) httpUpsertInboxSidecar(c *gin.Context) {
 		snoozeUntil = &until
 	}
 
-	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
+	if !h.authorizeInboxSidecarAccess(c, pendingID) {
 		return
 	}
 	if err := h.inboxBundles.UpsertClarificationInboxSidecar(c.Request.Context(), InboxUserID(c.Request.Context()), pendingID, state, snoozeUntil, now); err != nil {
@@ -591,7 +870,7 @@ func (h *Handlers) httpUpsertInboxSidecar(c *gin.Context) {
 // restore is deleting the sidecar row, idempotent by construction.
 func (h *Handlers) httpDeleteInboxSidecar(c *gin.Context) {
 	pendingID := c.Param("pendingID")
-	if !h.authorizeBundleAccessOrRespond(c, pendingID) {
+	if !h.authorizeInboxSidecarAccess(c, pendingID) {
 		return
 	}
 	if err := h.inboxBundles.DeleteClarificationInboxSidecar(c.Request.Context(), InboxUserID(c.Request.Context()), pendingID); err != nil {
@@ -601,6 +880,37 @@ func (h *Handlers) httpDeleteInboxSidecar(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+const inboxAsyncSidecarPrefix = "async:"
+
+// authorizeInboxSidecarAccess authorizes both blocking bundle IDs and
+// namespaced async question IDs without disclosing foreign records.
+func (h *Handlers) authorizeInboxSidecarAccess(c *gin.Context, pendingID string) bool {
+	if !strings.HasPrefix(pendingID, inboxAsyncSidecarPrefix) {
+		return h.authorizeBundleAccessOrRespond(c, pendingID)
+	}
+	id := strings.TrimPrefix(pendingID, inboxAsyncSidecarPrefix)
+	if h.inboxAsync == nil || id == "" {
+		respondInboxError(c, http.StatusNotFound, errInboxInternal)
+		return false
+	}
+	workspaceID, found, err := h.inboxAsync.AsyncQuestionWorkspace(c.Request.Context(), id)
+	if err != nil {
+		h.logger.Error("failed to authorize async question sidecar",
+			zap.String("question_id", id), zap.Error(err))
+		respondInboxError(c, http.StatusInternalServerError, errInboxInternal)
+		return false
+	}
+	if !found {
+		respondInboxError(c, http.StatusNotFound, errInboxInternal)
+		return false
+	}
+	if err := h.inboxTasks.AuthorizeWorkspaceScope(c.Request.Context(), workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		respondInboxError(c, http.StatusNotFound, errInboxInternal)
+		return false
+	}
+	return true
 }
 
 // encodeInboxCursor/decodeInboxCursor implement the opaque (created_at,
@@ -631,6 +941,16 @@ func decodeInboxCursor(cursor string) (time.Time, string, error) {
 // formatOptionalInboxTime renders a *time.Time as an RFC3339 string pointer,
 // or nil (JSON null) when absent -- next_snooze_expiry and snooze_until are
 // never omitted, always either a string or null.
+func earlierInboxTime(first, second *time.Time) *time.Time {
+	if first == nil {
+		return second
+	}
+	if second == nil || first.Before(*second) {
+		return first
+	}
+	return second
+}
+
 func formatOptionalInboxTime(t *time.Time) *string {
 	if t == nil {
 		return nil
@@ -663,7 +983,7 @@ func InboxBootSummary(
 	workspaceID, userID string,
 	now time.Time,
 ) (count int, hasMore bool, nextSnoozeExpiry *time.Time, err error) {
-	page, err := bundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
+	count, err = bundles.CountVisibleClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped:    true,
 		WorkspaceID: workspaceID,
 		Limit:       defaultInboxLimit,
@@ -679,5 +999,5 @@ func InboxBootSummary(
 	if err != nil {
 		return 0, false, nil, err
 	}
-	return len(page.Bundles), page.HasMore, summary.NextSnoozeExpiry, nil
+	return count, count > defaultInboxLimit, summary.NextSnoozeExpiry, nil
 }

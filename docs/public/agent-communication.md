@@ -128,6 +128,54 @@ when the user must select one of the offered options. If omitted, the user can
 also provide a free-text answer. Native Codex questions use the same setting
 that Codex provides for an "Other" answer.
 
+## Async questions
+
+Ask without ending the turn when independent work remains. Pass
+`async: true` to `ask_user_question_kandev` or `ask_parent_question_kandev`:
+
+```json
+{
+  "questions": [
+    {
+      "id": "api_field",
+      "prompt": "Which value belongs in the missing API field?",
+      "options": [
+        {"label": "Documented default", "description": "Use the value documented by the API."},
+        {"label": "Leave empty", "description": "Keep the field absent and handle it downstream."}
+      ]
+    }
+  ],
+  "context": "The batch import can continue while this is decided.",
+  "async": true,
+  "request_id": "batch-import-api-field"
+}
+```
+
+The call returns a durable `question_id` immediately and the agent continues.
+A create retry with the same `request_id` returns the same request; reusing it
+with different content is rejected. The request is visible in the Needs you
+Inbox while the agent works.
+
+Read the answer at a checkpoint with `list_question_answers_kandev`. Reads are
+bounded, repeatable, and never consume the answer. An accepted answer also
+arrives as a correlated queued continuation for the original session; the
+current turn finishes first, so the answer does not cancel or redirect it.
+Withdraw a request that is no longer needed with
+`withdraw_question_kandev`; history keeps the reason and the request never
+becomes answerable again.
+
+When no independent work remains, call
+`wait_for_question_answers_kandev` with the pending request IDs. If any named
+request already resolved, the call returns `status=ready` without pausing.
+Otherwise it parks the captured turn until any named request reaches a
+terminal outcome. Pending async requests that were never named in a wait do
+not block completion.
+
+A direct parent can forward a child's pending request to the operator with
+`forward_question_kandev`. The child request keeps its identity; an operator
+answer resolves it and the child receives the same outcome. An autopilot
+parent does not gain direct operator access through forwarding.
+
 The tool returns answers keyed by question ID. An option selection includes
 `selected_option` (the option ID) and `selected_label` (the exact displayed label):
 

@@ -2583,6 +2583,17 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// silently strand.
 	s.markOrphanedInheritParentChildren(finalizeCtx, task)
 	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
+	if s.asyncQuestions != nil {
+		for _, session := range sessions {
+			if session == nil {
+				continue
+			}
+			if _, err := s.asyncQuestions.MarkSessionStale(context.WithoutCancel(finalizeCtx), session.ID, "task_archived"); err != nil {
+				s.logger.Warn("failed to stale async questions on archive",
+					zap.String("task_id", id), zap.String("session_id", session.ID), zap.Error(err))
+			}
+		}
+	}
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -3211,6 +3222,11 @@ func (s *Service) deleteTaskWithManagedClaim(
 		return deleted, err
 	}
 	attachmentsLocked = s.cleanupDeletedTaskAttachments(operationCtx, id, attachments, attachmentsLocked)
+	if s.asyncQuestions != nil {
+		if err := s.asyncQuestions.DeleteAsyncQuestionsForTask(context.WithoutCancel(operationCtx), id); err != nil {
+			s.logger.Warn("failed to delete async questions for task", zap.String("task_id", id), zap.Error(err))
+		}
+	}
 	s.completeTaskDeletion(operationCtx, id, task, reason, start, cleanupJob, sessions, worktrees, stopTargets, envCleanup)
 	return true, nil
 }

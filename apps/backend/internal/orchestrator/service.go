@@ -1312,6 +1312,10 @@ type Service struct {
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
+	// asyncQuestionGate reads the explicit async dependency gate. It never
+	// infers a pause from pending requests alone.
+	asyncQuestionGate      AsyncQuestionGate
+	asyncQuestionLifecycle AsyncQuestionLifecycle
 
 	// Push tracker: "<sessionID>|<repository_name>" -> last known ahead count.
 	// The repository_name segment is required for multi-repo: each repo emits
@@ -2615,6 +2619,29 @@ func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
 	s.clarificationCanceller = c
 }
 
+// AsyncQuestionGate is the explicit async dependency gate consulted by
+// completion and queue-drain decisions.
+type AsyncQuestionGate interface {
+	HasParkedWait(ctx context.Context, sessionID string) bool
+	CancelActiveWait(ctx context.Context, sessionID, reason string) error
+}
+
+// SetAsyncQuestionGate wires the task-owned explicit question gate.
+func (s *Service) SetAsyncQuestionGate(gate AsyncQuestionGate) {
+	s.asyncQuestionGate = gate
+}
+
+// AsyncQuestionLifecycle closes pending async questions when their author
+// session reaches a terminal state.
+type AsyncQuestionLifecycle interface {
+	MarkSessionStale(ctx context.Context, sessionID, reason string) (int, error)
+}
+
+// SetAsyncQuestionLifecycle wires terminal-session question cleanup.
+func (s *Service) SetAsyncQuestionLifecycle(lifecycle AsyncQuestionLifecycle) {
+	s.asyncQuestionLifecycle = lifecycle
+}
+
 // initWorkflowEngine creates the workflow engine with store and callbacks.
 // Called after the workflow step getter is set. Safe to call multiple times —
 // previously-applied engine options are re-applied on reinit.
@@ -3194,6 +3221,12 @@ func (s *Service) getActiveTurnID(sessionID string) string {
 // wired — callers must treat that as "no turn identity can be
 // established" and fall back to their pre-existing (turn-unaware)
 // behavior, not as a confirmed empty turn.
+// CaptureActiveTurnID binds a question wait to the turn that is running when
+// the gate is registered.
+func (s *Service) CaptureActiveTurnID(ctx context.Context, sessionID string) (string, error) {
+	return s.peekActiveTurnID(ctx, sessionID)
+}
+
 func (s *Service) peekActiveTurnID(ctx context.Context, sessionID string) (string, error) {
 	if sessionID == "" || s.turnService == nil {
 		return "", nil

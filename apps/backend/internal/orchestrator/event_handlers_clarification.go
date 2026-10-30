@@ -628,7 +628,17 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 // parent answers.
 type ClarificationPauseOptions struct {
 	DrainQueuedMessages bool
+	// Force permits a pause for an explicit async question gate even though
+	// the session has no blocking clarification message to detach.
+	Force bool
+	// ExpectedTurnID binds the pause to the turn that registered the wait. A
+	// successor turn makes the pause stale instead of cancelling it.
+	ExpectedTurnID *string
 }
+
+// ErrStaleQuestionWaitPause reports an explicit wait whose captured turn was
+// replaced before the pause could settle. No turn was cancelled.
+var ErrStaleQuestionWaitPause = errors.New("question wait turn was superseded before pause")
 
 // PauseForClarificationInput converts a no-answer ask_user_question outcome
 // into a platform pause. It detaches the pending clarification so a late user
@@ -656,7 +666,7 @@ func (s *Service) PauseForClarificationInputWithOptions(
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
 	guardedPersistenceStartedAt := time.Now()
-	session, expectedTurnID, expectedTurn, err := s.loadClarificationPauseState(writeCtx, sessionID)
+	session, expectedTurnID, expectedTurn, err := s.loadClarificationPauseState(writeCtx, sessionID, options.ExpectedTurnID)
 	if err != nil {
 		return 0, err
 	}
@@ -680,7 +690,7 @@ func (s *Service) PauseForClarificationInputWithOptions(
 	if isTerminalSessionState(session.State) {
 		return detached, detachErr
 	}
-	if !hasPendingClarification && detached == 0 && detachErr == nil {
+	if !options.Force && !hasPendingClarification && detached == 0 && detachErr == nil {
 		return detached, nil
 	}
 	pauseCtx, cancelPause := clarificationInputPhaseContext(writeCtx)
@@ -702,6 +712,9 @@ func (s *Service) PauseForClarificationInputWithOptions(
 		guard.unlock,
 		guard.relockWithContext,
 	); errors.Is(err, ErrSendNowTurnChanged) {
+		if options.ExpectedTurnID != nil {
+			return detached, ErrStaleQuestionWaitPause
+		}
 		s.logger.Debug("skipping stale clarification pause after successor turn",
 			zap.String("task_id", session.TaskID),
 			zap.String("session_id", sessionID),
@@ -734,6 +747,7 @@ func (s *Service) PauseForClarificationInputWithOptions(
 func (s *Service) loadClarificationPauseState(
 	ctx context.Context,
 	sessionID string,
+	capturedTurnID *string,
 ) (*models.TaskSession, string, *string, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -741,6 +755,9 @@ func (s *Service) loadClarificationPauseState(
 	}
 	if session == nil || s.turnService == nil {
 		return session, "", nil, nil
+	}
+	if capturedTurnID != nil {
+		return session, *capturedTurnID, capturedTurnID, nil
 	}
 	expectedTurnID, err := s.peekActiveTurnID(ctx, sessionID)
 	if err != nil {

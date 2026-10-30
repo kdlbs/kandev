@@ -479,6 +479,7 @@ type Service struct {
 	workspaceCollaboration          WorkspaceCollaborationBoundary
 	workspaceCollaborationStore     WorkspaceCollaborationStore
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
+	asyncQuestions                  AsyncQuestionLifecycle
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer
@@ -777,6 +778,18 @@ func (s *Service) SetProjectRepositorySourceReader(reader ProjectRepositorySourc
 
 // SetTaskLifecycleCoordinator installs the canonical destructive task
 // transition used by automatic cleanup callers.
+// AsyncQuestionLifecycle is the task-owned question cleanup boundary.
+type AsyncQuestionLifecycle interface {
+	MarkSessionStale(ctx context.Context, sessionID, reason string) (int, error)
+	DeleteAsyncQuestionsForTask(ctx context.Context, taskID string) error
+}
+
+// SetAsyncQuestionLifecycle wires task-owned async question cleanup into
+// archive, delete, and session-removal lifecycles.
+func (s *Service) SetAsyncQuestionLifecycle(lifecycle AsyncQuestionLifecycle) {
+	s.asyncQuestions = lifecycle
+}
+
 func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
 	s.taskLifecycleCoordinator = coordinator
 }

@@ -397,6 +397,21 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 	return messageID != "" && messageFingerprint != ""
 }
 
+// MetadataAsyncQuestion identifies a correlated async question continuation.
+// These rows are generated decisions, not editable user drafts.
+const MetadataAsyncQuestion = "async_question_id"
+
+// IsAsyncQuestionNotification reports whether this row carries a correlated
+// async question outcome. Such a row is never auto-merged, edited, coalesced,
+// or sent now.
+func (m *QueuedMessage) IsAsyncQuestionNotification() bool {
+	if m == nil || m.Metadata == nil {
+		return false
+	}
+	value, _ := m.Metadata[MetadataAsyncQuestion].(string)
+	return value != ""
+}
+
 // IsDurableDelivery reports whether the row must survive dequeue until its
 // owner records the exact accepted turn or explicitly acknowledges delivery.
 func (m *QueuedMessage) IsDurableDelivery() bool {

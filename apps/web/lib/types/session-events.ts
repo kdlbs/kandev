@@ -301,6 +301,10 @@ export type SessionBackendMessageMap = {
     "session.pending_action_changed",
     SessionPendingActionChangedPayload
   >;
+  "task.question.changed": BackendMessage<
+    "task.question.changed",
+    { workspace_id: string; question_id: string; kind: string }
+  >;
   "session.workspace_recovery.changed": BackendMessage<
     "session.workspace_recovery.changed",
     SessionWorkspaceRecoveryChangedPayload

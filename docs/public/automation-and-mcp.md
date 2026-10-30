@@ -877,6 +877,48 @@ answers with `message_task_kandev` using the child task ID and
 the correlated answer arrives, so the sidebar shows the normal question
 indicator during the wait.
 
+### Async questions
+
+Both question tools accept an optional `async` boolean. Omitted or `false`
+keeps the blocking behavior above. With `async: true` the tool returns a
+durable `question_id` immediately, the author's turn keeps running, and the
+request appears in the Needs you Inbox without waiting for the turn to end.
+An exact retry with the same `request_id` returns the original request.
+
+```json
+{
+  "questions": [
+    {
+      "id": "database",
+      "prompt": "Which database should I use?",
+      "options": [
+        {"label": "SQLite", "description": "Embedded database for simplicity."},
+        {"label": "Postgres", "description": "Managed relational database."}
+      ]
+    }
+  ],
+  "context": "The migration needs a database choice before implementation.",
+  "async": true,
+  "request_id": "checkout-database-choice"
+}
+```
+
+Use the companion tools to manage the request during the same turn:
+
+| Tool | Purpose |
+| --- | --- |
+| `list_question_answers_kandev` | Bounded checkpoint read of your requests and their canonical outcomes. `scope=own` reads your requests; `scope=children` reads direct-child requests. Reads never consume an answer. |
+| `withdraw_question_kandev` | Close a pending request with a reason. Every item becomes `withdrawn`, and the request leaves the actionable Inbox. |
+| `forward_question_kandev` | Let a direct parent with user-question capability expose a child request to the operator without copying it. |
+| `wait_for_question_answers_kandev` | Pause only when all remaining work depends on named pending requests. If any named request already resolved, the tool returns `status=ready` without pausing. |
+
+Open async requests alone never block workflow completion. Only an explicit
+dependency wait parks the captured turn. An accepted answer records the
+outcome and a correlated queued continuation; it never cancels or steers a
+running turn. A direct parent answers a child request with
+`message_task_kandev(reply_to_question_id=...)`, and an operator answers a
+forwarded request in the Inbox. Both compete for one canonical outcome.
+
 ### Create idempotency with `external_id`
 
 A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed (a crash before recording the response or a webhook redelivery) can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.

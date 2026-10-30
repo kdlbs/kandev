@@ -1369,6 +1369,12 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+		if s.asyncQuestionLifecycle != nil {
+			if _, err := s.asyncQuestionLifecycle.MarkSessionStale(context.WithoutCancel(ctx), sessionID, "session_terminal"); err != nil {
+				s.logger.Warn("failed to stale async questions on terminal session",
+					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		}
 	}
 	// Entering STARTING/RUNNING only records a recovery attempt. The durable
 	// interruption marker is cleared after the provider confirms boot/readiness,

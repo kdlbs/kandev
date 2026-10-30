@@ -10,8 +10,12 @@ import {
   listHiddenClarificationInbox,
   restoreClarificationInboxBundle,
 } from "@/lib/api/domains/clarification-inbox-api";
-import type { ClarificationInboxHiddenBundle } from "@/lib/types/clarification-inbox";
+import type {
+  ClarificationInboxHiddenAsyncQuestion,
+  ClarificationInboxHiddenBundle,
+} from "@/lib/types/clarification-inbox";
 import { rowPrimaryText } from "@/lib/needs-you-inbox/row-presentation";
+import { ASYNC_SIDECAR_PREFIX } from "@/lib/needs-you-inbox/async-question-groups";
 
 type HiddenListStatus = "idle" | "loading" | "ready" | "error";
 
@@ -51,6 +55,42 @@ function HiddenRow({
   );
 }
 
+function HiddenAsyncRow({
+  question,
+  onRestore,
+}: {
+  question: ClarificationInboxHiddenAsyncQuestion;
+  onRestore: (pendingId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const primary =
+    question.questions[0]?.title || question.questions[0]?.prompt || question.task_title;
+  return (
+    <div
+      className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+      data-testid="needs-you-inbox-hidden-async-row"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">{primary}</p>
+        <p className="text-xs text-muted-foreground">
+          {question.state === "snoozed" && question.snooze_until
+            ? t("needsYouInbox:snoozedUntil", { time: formatRelativeTime(question.snooze_until) })
+            : t("needsYouInbox:dismissed")}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="default"
+        className="cursor-pointer shrink-0"
+        onClick={() => onRestore(`${ASYNC_SIDECAR_PREFIX}${question.question_id}`)}
+      >
+        {t("needsYouInbox:restore")}
+      </Button>
+    </div>
+  );
+}
+
 function useHiddenList(
   workspaceId: string | null,
   open: boolean,
@@ -59,6 +99,7 @@ function useHiddenList(
 ) {
   const [status, setStatus] = useState<HiddenListStatus>("idle");
   const [bundles, setBundles] = useState<ClarificationInboxHiddenBundle[]>([]);
+  const [asyncQuestions, setAsyncQuestions] = useState<ClarificationInboxHiddenAsyncQuestion[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const generationRef = useRef(0);
   // Read inside `load` instead of `workspaceId` itself: a restore captures
@@ -78,6 +119,7 @@ function useHiddenList(
         return;
       }
       setBundles(page.bundles);
+      setAsyncQuestions(page.async_questions ?? []);
       setTotal(page.total);
       setStatus("ready");
     } catch {
@@ -94,6 +136,7 @@ function useHiddenList(
     previousWorkspaceId.current = workspaceId;
     generationRef.current += 1;
     setBundles([]);
+    setAsyncQuestions([]);
     setTotal(null);
     setStatus("idle");
     if (open) void load();
@@ -111,7 +154,7 @@ function useHiddenList(
     if (open) void load();
   }, [hiddenCount, listRevision, open, load]);
 
-  return { status, bundles, total, load };
+  return { status, bundles, asyncQuestions, total, load };
 }
 
 // Discloses how many answerable bundles this operator's own dismiss or
@@ -127,7 +170,7 @@ export function NeedsYouInboxHiddenPanel({
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const [open, setOpen] = useState(false);
-  const { status, bundles, total, load } = useHiddenList(
+  const { status, bundles, asyncQuestions, total, load } = useHiddenList(
     workspaceId,
     open,
     hiddenCount,
@@ -180,12 +223,20 @@ export function NeedsYouInboxHiddenPanel({
           {status === "error" && (
             <p className="text-xs text-destructive">{t("needsYouInbox:hiddenLoadFailed")}</p>
           )}
-          {status === "ready" && bundles.length === 0 && (
+          {status === "ready" && bundles.length === 0 && asyncQuestions.length === 0 && (
             <p className="text-xs text-muted-foreground">{t("needsYouInbox:hiddenEmpty")}</p>
           )}
           {status === "ready" &&
             bundles.map((bundle) => (
               <HiddenRow key={bundle.pending_id} bundle={bundle} onRestore={handleRestore} />
+            ))}
+          {status === "ready" &&
+            asyncQuestions.map((question) => (
+              <HiddenAsyncRow
+                key={question.question_id}
+                question={question}
+                onRestore={handleRestore}
+              />
             ))}
         </div>
       )}
