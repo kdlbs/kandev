@@ -1475,6 +1475,8 @@ INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 VALUES ('fixture-v0930-analytics-task', 'fixture-v0930-task-workspace', 'Fixture Analytics Task', 'preserved analytics row', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
 INSERT INTO workflow_templates (id, name, description, is_system, steps, created_at, updated_at)
 VALUES ('fixture-v0930-workflow-template', 'Fixture Workflow Template', 'preserved workflow template', 0, '[]', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
+INSERT INTO workflows (id, workspace_id, name, description, created_at, updated_at)
+VALUES ('fixture-v0930-workflow', 'fixture-v0930-task-workspace', 'Fixture Workflow', 'preserved workflow', '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
 INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
 VALUES ('fixture-v0930-workflow-step', 'fixture-v0930-workflow', 'Fixture Workflow Step', 0, '2024-01-02 03:04:05+00:00', '2024-01-02 03:04:05+00:00');
 INSERT INTO agents (id, name, created_at, updated_at)

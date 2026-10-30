@@ -13,6 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/jmoiron/sqlx"
+
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/controller"
@@ -28,6 +30,9 @@ type fakeWorkflowProvider struct {
 	listErr   error
 	created   []string
 	updated   []string
+	// db mirrors created workflow rows into the same store the step
+	// repository locks and validates.
+	db *sqlx.DB
 }
 
 func (p *fakeWorkflowProvider) ListWorkflows(
@@ -69,20 +74,51 @@ func (p *fakeWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskm
 func (p *fakeWorkflowProvider) CreateWorkflow(
 	_ context.Context, workspaceID, name, description string,
 ) (*taskmodels.Workflow, error) {
+	now := time.Now().UTC()
 	wf := &taskmodels.Workflow{
 		ID:          "created-" + name,
 		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: description,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	p.workflows = append(p.workflows, wf)
 	p.created = append(p.created, name)
+	if p.db != nil {
+		if _, err := p.db.Exec(`
+			INSERT OR IGNORE INTO workflows (id, workspace_id, name, description, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, wf.ID, wf.WorkspaceID, wf.Name, wf.Description, wf.CreatedAt, wf.UpdatedAt); err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
 func (p *fakeWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
 	p.updated = append(p.updated, workflow.ID)
+	if p.db != nil {
+		if _, err := p.db.Exec(`
+			UPDATE workflows SET name = ?, description = ?, updated_at = ? WHERE id = ?
+		`, workflow.Name, workflow.Description, workflow.UpdatedAt, workflow.ID); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// ensureWorkflowRow mirrors a workflow row under a wrapper-returned ID when a
+// test provider replaces the base provider's generated ID.
+func (p *fakeWorkflowProvider) ensureWorkflowRow(id, workspaceID, name string) {
+	if p.db == nil {
+		return
+	}
+	now := time.Now().UTC()
+	p.db.MustExec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, id, workspaceID, name, now, now)
 }
 
 // fakeWorkspaceProvider resolves workspaces for the read-only guard.
@@ -145,7 +181,7 @@ func requireJSONError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus i
 func TestListStepsEndpoints(t *testing.T) {
 	h := setupStepRouter(t)
 	if _, err := h.db.Exec(
-		`INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+		`INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
 		 VALUES ('workflow-1','ws-1','Main',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),
 		        ('workflow-2','ws-2','Other',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatalf("seed workflows: %v", err)
@@ -356,7 +392,7 @@ func TestStepMutationsBlockedOnReadOnlyWorkflows(t *testing.T) {
 			step := createStepViaHTTP(t, h.router, map[string]interface{}{
 				"workflow_id": "workflow-1", "name": "Backlog", "position": 0,
 			})
-			h.service.SetWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{tc.workflow}})
+			h.setWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{tc.workflow}})
 			h.service.SetWorkspaceProvider(&fakeWorkspaceProvider{
 				workspaces: map[string]*taskmodels.Workspace{tc.workspace.ID: tc.workspace},
 			})
@@ -491,7 +527,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 	newExportHarness := func(t *testing.T) *workflowHarness {
 		t.Helper()
 		h := setupStepRouter(t)
-		h.service.SetWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
+		h.setWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
 			{ID: "workflow-1", WorkspaceID: "ws-1", Name: "Main", Description: "Primary"},
 			{ID: "workflow-2", WorkspaceID: "ws-1", Name: "Hidden", Hidden: true},
 		}})
@@ -559,7 +595,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 
 	t.Run("provider failure is 500", func(t *testing.T) {
 		h := setupStepRouter(t)
-		h.service.SetWorkflowProvider(&fakeWorkflowProvider{listErr: errors.New("database is locked")})
+		h.setWorkflowProvider(&fakeWorkflowProvider{listErr: errors.New("database is locked")})
 		rec := doJSON(t, h.router, http.MethodGet, "/api/v1/workspaces/ws-1/workflows/export", nil)
 		requireJSONError(t, rec, http.StatusInternalServerError, "Failed to export workflows")
 	})
@@ -586,7 +622,7 @@ workflows:
 	t.Run("creates the workflow and persists its steps", func(t *testing.T) {
 		h := setupStepRouter(t)
 		provider := &fakeWorkflowProvider{}
-		h.service.SetWorkflowProvider(provider)
+		h.setWorkflowProvider(provider)
 
 		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import", validYAML)
 		if rec.Code != http.StatusOK {
@@ -619,7 +655,7 @@ workflows:
 		provider := &fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
 			{ID: "existing", WorkspaceID: "ws-1", Name: "Imported"},
 		}}
-		h.service.SetWorkflowProvider(provider)
+		h.setWorkflowProvider(provider)
 
 		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import", validYAML)
 		if rec.Code != http.StatusOK {
@@ -642,7 +678,7 @@ workflows:
 
 	t.Run("unparsable yaml is 400", func(t *testing.T) {
 		h := setupStepRouter(t)
-		h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+		h.setWorkflowProvider(&fakeWorkflowProvider{})
 		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import", "version: [1")
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
@@ -655,7 +691,7 @@ workflows:
 	t.Run("structurally invalid export is 400 with the validation reason", func(t *testing.T) {
 		h := setupStepRouter(t)
 		provider := &fakeWorkflowProvider{}
-		h.service.SetWorkflowProvider(provider)
+		h.setWorkflowProvider(provider)
 		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import",
 			"version: 99\ntype: kandev_workflow\nworkflows: []\n")
 		if rec.Code != http.StatusBadRequest {
@@ -672,7 +708,7 @@ workflows:
 
 func TestPreviewImportWorkflowsEndpoint(t *testing.T) {
 	h := setupStepRouter(t)
-	h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+	h.setWorkflowProvider(&fakeWorkflowProvider{})
 
 	rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import/preview", `version: 1
 type: kandev_workflow
@@ -712,7 +748,7 @@ func TestImportWorkflowProfileSelectionHTTP(t *testing.T) {
 
 	t.Run("preview includes an exact match", func(t *testing.T) {
 		h := setupStepRouter(t)
-		h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+		h.setWorkflowProvider(&fakeWorkflowProvider{})
 		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
 		h.service.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return profile.ID })
 
@@ -749,7 +785,7 @@ workflows:
 
 	t.Run("preview serializes an empty eligible catalog as an array", func(t *testing.T) {
 		h := setupStepRouter(t)
-		h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+		h.setWorkflowProvider(&fakeWorkflowProvider{})
 		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{})
 		h.service.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return "" })
 
@@ -789,7 +825,7 @@ workflows:
 	t.Run("stale selection is a structured conflict", func(t *testing.T) {
 		h := setupStepRouter(t)
 		provider := &fakeWorkflowProvider{}
-		h.service.SetWorkflowProvider(provider)
+		h.setWorkflowProvider(provider)
 		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
 		body := map[string]any{
 			"yaml": `version: 1
@@ -837,7 +873,7 @@ workflows:
 	t.Run("valid JSON envelope persists the selected ID", func(t *testing.T) {
 		h := setupStepRouter(t)
 		provider := &fakeWorkflowProvider{}
-		h.service.SetWorkflowProvider(provider)
+		h.setWorkflowProvider(provider)
 		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
 		body := map[string]any{
 			"yaml": `version: 1
