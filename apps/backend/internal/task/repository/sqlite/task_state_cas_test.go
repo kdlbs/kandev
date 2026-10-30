@@ -86,28 +86,37 @@ func TestUpdateTaskStateIfSessionState_DoesNotReopenCompletedTask(t *testing.T) 
 	if err := repo.UpdateTaskState(ctx, "task-session-completed", v1.TaskStateCompleted); err != nil {
 		t.Fatalf("seed COMPLETED: %v", err)
 	}
-	oldState, updated, err := repo.UpdateTaskStateIfSessionState(
-		ctx,
-		"task-session-completed",
-		"session-completed",
-		models.TaskSessionStateStarting,
-		v1.TaskStateInProgress,
-	)
-	if err != nil {
-		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
-	}
-	if updated {
-		t.Fatal("completed task was reopened by a runtime state writer")
-	}
-	if oldState != v1.TaskStateCompleted {
-		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateCompleted)
-	}
-	task, err := repo.GetTask(ctx, "task-session-completed")
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if task.State != v1.TaskStateCompleted {
-		t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateCompleted)
+	for _, targetState := range []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateFailed} {
+		sessionState := models.TaskSessionStateStarting
+		if targetState == v1.TaskStateFailed {
+			sessionState = models.TaskSessionStateFailed
+			if err := repo.UpdateTaskSessionState(ctx, "session-completed", sessionState, "bootstrap failed"); err != nil {
+				t.Fatalf("seed failed session: %v", err)
+			}
+		}
+		oldState, updated, err := repo.UpdateTaskStateIfSessionState(
+			ctx,
+			"task-session-completed",
+			"session-completed",
+			sessionState,
+			targetState,
+		)
+		if err != nil {
+			t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+		}
+		if updated {
+			t.Fatalf("completed task was replaced by runtime state %q", targetState)
+		}
+		if oldState != v1.TaskStateCompleted {
+			t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateCompleted)
+		}
+		task, err := repo.GetTask(ctx, "task-session-completed")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.State != v1.TaskStateCompleted {
+			t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateCompleted)
+		}
 	}
 }
 

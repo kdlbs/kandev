@@ -266,6 +266,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.officeAgentErrorSessionVerdict",
+			EnvVar:      "KANDEV_FEATURES_OFFICE_AGENT_ERROR_SESSION_VERDICT",
+			Kind:        KindFeature,
+			Label:       "Office agent-error session verdict",
+			Description: "Waits for the failed session's verdict before failing an Office task run and queueing its on_agent_error replacement, so a successor launched in the same session keeps the work.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "A deferred failure is applied only when the session records a failure, or after a bounded re-check. " +
+				"A failure parked when the backend restarts stays claimed until stale-claim recovery requeues it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeAgentErrorSessionVerdict },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeAgentErrorSessionVerdict = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,

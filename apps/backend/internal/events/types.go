@@ -718,6 +718,7 @@ const (
 	OfficeCostRecorded       = "office.cost.recorded"
 	OfficeRunQueued          = "office.run.queued"
 	OfficeRunProcessed       = "office.run.processed"
+	OfficeTurnSettled        = "office.turn_settled" // A completed Office turn finished its runtime teardown.
 	// OfficeRunEventAppended is published after a row lands in
 	// office_run_events. Subjects are namespaced by run id so the
 	// gateway only delivers events for runs the client cares about.

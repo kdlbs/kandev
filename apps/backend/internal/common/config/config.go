@@ -617,6 +617,12 @@ type FeaturesConfig struct {
 	// OpenCodePlugin supplies the Kandev integration plugin to supported
 	// OpenCode v2 launches. Off in every shipped profile and restart-required.
 	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
+
+	// OfficeAgentErrorSessionVerdict defers an Office task run's terminal
+	// failure, and its on_agent_error replacement run, until the failed
+	// session records its verdict. A successor launched in the same session
+	// keeps the run instead. Off in every embedded profile.
+	OfficeAgentErrorSessionVerdict bool `mapstructure:"office_agent_error_session_verdict" json:"officeAgentErrorSessionVerdict"`
 }
 
 // LoggingConfig holds logging configuration.

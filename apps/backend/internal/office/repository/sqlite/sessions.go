@@ -60,3 +60,18 @@ func (r *Repository) GetSessionAgentProfileID(
 	}
 	return agentProfileID, nil
 }
+
+// GetTaskSessionState returns a task session's current state and error
+// message. A missing session returns empty strings and no error.
+func (r *Repository) GetTaskSessionState(ctx context.Context, sessionID string) (state, errorMessage string, err error) {
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT COALESCE(state, ''), COALESCE(error_message, '') FROM task_sessions WHERE id = ?`,
+	), sessionID).Scan(&state, &errorMessage)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return state, errorMessage, nil
+}

@@ -1792,6 +1792,7 @@ func constructOfficeServices(
 	log.Info("Office service constructed with all dependencies")
 
 	services.Office.SetPricingLookup(pricingLookup)
+	services.Office.SetAgentErrorSessionVerdict(cfg.Features.OfficeAgentErrorSessionVerdict)
 	orchestratorSvc.SetModelInfoLookup(pricingLookup)
 
 	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the
