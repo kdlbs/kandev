@@ -636,6 +636,7 @@ func probeModelConfigOptions(model string) []acp.SessionConfigOption {
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Id:           "model",
+			Name:         "Model",
 			Category:     &modelCategory,
 			Type:         "select",
 			CurrentValue: acp.SessionConfigValueId(model),
@@ -647,6 +648,7 @@ func probeModelConfigOptions(model string) []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Id:           "reasoning_effort",
+			Name:         "Reasoning effort",
 			Category:     &effortCategory,
 			Type:         "select",
 			CurrentValue: "high",
@@ -665,6 +667,7 @@ func probeTwoConfigOptions(model string) []acp.SessionConfigOption {
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Id:           "model",
+			Name:         "Model",
 			Category:     &modelCategory,
 			Type:         "select",
 			CurrentValue: acp.SessionConfigValueId(model),
@@ -676,6 +679,7 @@ func probeTwoConfigOptions(model string) []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Id:           "first",
+			Name:         "First option",
 			Category:     &optionCategory,
 			Type:         "select",
 			CurrentValue: "one",
@@ -685,6 +689,7 @@ func probeTwoConfigOptions(model string) []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Id:           "second",
+			Name:         "Second option",
 			Category:     &optionCategory,
 			Type:         "select",
 			CurrentValue: "two",

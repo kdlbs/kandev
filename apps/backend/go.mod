@@ -150,7 +150,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 )
 
-replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9
+replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261030214619-d83842969b9e
 
 require github.com/kdlbs/kandev/pluginsdk v0.1.0
 

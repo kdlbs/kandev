@@ -113,7 +113,7 @@ envelopes remain unmarked.
 - Fork source base: `48a57e4292e8`.
 - Published branch: `kandev/acp-prompt-error-origin` in `kdlbs/acp-go-sdk`.
 - Immutable revision: `5e124db622e9e7ed37d1e49b78a28ffcdb58a444`.
-- Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9`.
+- Original Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9`.
 - `FORK.md` documents the delta.
 
 Verification:
@@ -123,3 +123,28 @@ Verification:
   `TestConnectionReceivesLargeSingleLineNotification` timeout; it fails on the
   base revision without this change.
 - `go list -m -json github.com/coder/acp-go-sdk` resolves the pinned replacement.
+
+### Schema 1.28 compatibility follow-up
+
+[SDK PR #7](https://github.com/kdlbs/acp-go-sdk/pull/7) now includes the original `5e124db622e9` commit as an ancestor.
+Its error-origin implementation and tests remain unchanged.
+The SDK retains the corresponding `FORK.md` entry.
+
+- SDK revision: `d83842969b9eae021b3beb1b14ba7515168cecdc`.
+- Current Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261030214619-d83842969b9e`.
+- Kandev removes references to the retired `AuthMethod.EnvVar` variant.
+- Probe fixtures supply required config option names. Their assertions remain unchanged.
+- Kandev keeps its advertised capabilities unchanged. Notice, compaction, and subagent support require a separate consumer change.
+
+Schema 1.28 silently filters malformed config options, including options with a missing or empty `name`.
+An invalid model option can therefore cause a later unsupported model-selection error.
+The SDK README and a regression test record this behavior.
+
+Verification:
+
+- SDK `make test`, `go test -race ./...`, and `make check`: passed.
+- SDK GitHub CI run `41133567103`: passed.
+- The six previously failing probe tests: reproduced before the fixture correction, then passed.
+- Backend `go build -trimpath -tags fts5 ./...` with the published dependency: passed.
+- Affected Kandev packages with `-race` and a temporary modfile for the identical SDK checkout: passed.
+  Packages: `./internal/agentctl/...`, `./internal/agent/acpdbg/`, and `./cmd/mock-agent/`.
