@@ -161,6 +161,9 @@ func (s *Service) writeCeilingSurfaceNote(ctx context.Context, taskID, sessionID
 		content = fmt.Sprintf("This session's launch is queued: %d of %d concurrent sessions are in use.",
 			deferral.Population, deferral.Ceiling)
 	}
+	if deferral.ReasonCode == ceilingReasonMemoryPressure {
+		content = "This session's launch is queued: the host is low on available memory or above its commit ceiling."
+	}
 	return s.messageCreator.CreateSessionMessageIdempotent(
 		admissionCtx, messageID, taskID, content, sessionID, string(v1.MessageTypeStatus), "", metadata, false,
 	)

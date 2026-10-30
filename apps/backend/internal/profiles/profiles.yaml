@@ -96,6 +96,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Holding launches under host memory pressure is opt-in. Thresholds come from
+  # KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB and KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT.
+  KANDEV_FEATURES_SESSION_MEMORY_GUARD:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

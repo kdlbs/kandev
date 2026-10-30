@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -70,6 +71,10 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// SessionMemoryGuardEnabled holds launches that would add an agent process
+	// while the host is low on available memory or above its commit ceiling.
+	SessionMemoryGuardEnabled bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -1893,6 +1898,13 @@ func NewService(
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
+	}
+	if cfg.SessionMemoryGuardEnabled {
+		gate := hostmemory.ReadConfig(true)
+		s.sessionCeiling.configureMemoryGate(gate, hostmemory.NewReader(), s.coordinatorTaskMemoryExemption)
+		s.logger.Info("session memory guard enabled",
+			zap.Uint64("min_available_bytes", gate.MinAvailableBytes),
+			zap.Float64("max_commit_percent", gate.MaxCommitPercent))
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
