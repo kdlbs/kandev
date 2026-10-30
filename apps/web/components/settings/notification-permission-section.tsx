@@ -72,6 +72,7 @@ export function DesktopNotificationsSection({
       description={t("settings:desktopNotificationsDescription")}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.desktopNotifications}
       frame={warning ? "card" : "none"}
+      contentClassName={warning ? undefined : "hidden"}
       data-testid="notification-permission-group"
       action={
         <div className="flex items-center gap-2">

@@ -132,3 +132,9 @@ phone header, the single settings scroll owner, and the absence of horizontal ov
 
 Changed-file ESLint passed with zero problems, typecheck passed, `i18n:ratchet` passed, and the
 specification catalog and linter checks passed.
+
+Fixup addressed a current-head review finding that the normal path still rendered an empty content
+element. That element's internal margin collapses today, so no visible gap was measurable, but the
+section now hides the empty body instead of relying on margin collapsing. The component regression
+asserts the hidden class and the browser check asserts computed `display: none` plus a normal 24px
+header-to-next-section gap. The 54 component tests and both permission specs passed again.

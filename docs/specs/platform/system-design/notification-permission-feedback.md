@@ -28,8 +28,9 @@ It reuses the [settings composition](../../ui/system-design/settings-composition
 Its actions remain in the `SettingsGroup` header.
 Resolve one warning value inside the component with the existing translation keys.
 Use `SettingsGroup` with `frame="card"` only when that warning exists.
-Otherwise use its existing `frame="none"` path, with no warning paragraph.
-This path has no border, background, or vertical content padding.
+Otherwise use its existing `frame="none"` path, with no warning paragraph, and hide
+that path's empty content element so it contributes no reserved inter-section space.
+This path has no border, background, vertical content padding, or reserved warning space.
 The page retains its normal spacing between sections.
 
 Keep the shared `SettingsGroup` implementation unchanged.
@@ -74,7 +75,8 @@ Do not use a class-string assertion as the only evidence.
 Add focused permission-layout cases to the existing desktop and phone notification type-scale Playwright specs.
 Set browser permission deterministically before navigation without opening an operating-system permission prompt.
 Cover a normal state, a denied warning, and refresh back to granted.
-Assert computed zero vertical padding for the normal content and no warning card.
+Assert computed zero vertical padding for the normal content, a hidden empty body,
+a normal inter-section gap, and no warning card.
 Assert warning wrapping, action reachability, and no document horizontal overflow.
 Capture desktop and phone results through the existing `prCapture` fixture.
 Component tests cover native denial and check-error cases that need transport stubs.

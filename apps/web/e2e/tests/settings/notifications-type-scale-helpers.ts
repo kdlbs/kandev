@@ -92,17 +92,31 @@ export function notificationPermissionGroup(page: Page) {
   };
 }
 
-/** Asserts the undecided/granted composition: no card and no warning padding. */
+/** Asserts the undecided/granted composition: no card, hidden body, normal gap. */
 export async function expectNormalPermissionLayout(page: Page): Promise<void> {
   const { group, warning, card, content } = notificationPermissionGroup(page);
   await expect(group).toBeVisible();
   await expect(warning).toHaveCount(0);
   await expect(card).toHaveCount(0);
+  // `display: none` is stronger than Playwright's zero-box "hidden" heuristic:
+  // the empty body element must not participate in layout at all.
+  await expect(content).toHaveCSS("display", "none");
   const padding = await content.evaluate((element) => {
     const style = getComputedStyle(element);
     return [style.paddingTop, style.paddingBottom];
   });
   expect(padding).toEqual(["0px", "0px"]);
+  const gap = await group.evaluate((element) => {
+    const header = element.firstElementChild;
+    const next = element.nextElementSibling;
+    if (!header || !next) return null;
+    return next.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+  });
+  expect(gap).not.toBeNull();
+  if (gap !== null) {
+    expect(gap).toBeGreaterThanOrEqual(23);
+    expect(gap).toBeLessThanOrEqual(25);
+  }
 }
 
 /** Asserts the warning sits inside its card and inside the viewport width. */

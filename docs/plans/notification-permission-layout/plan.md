@@ -39,7 +39,8 @@ Backend delivery, sound preferences, providers, global settings primitives, and 
 ## Technical approach
 
 Use the existing `SettingsGroup` frame property as described in the [design](../../specs/platform/system-design/notification-permission-feedback.md).
-Derive one translated warning value and reuse its presence to select the frame and paragraph.
+Derive one translated warning value and reuse its presence to select the frame, hide the empty
+content element, and render the paragraph.
 Do not change `SettingsGroup`, introduce another state variable, or add a child-inspection utility.
 Retain the section's discovery target and header actions.
 
@@ -98,7 +99,7 @@ The first case must fail against the current component because the card exists.
 
 Add `permission feedback has no empty frame and follows refresh` to both existing notification type-scale specs.
 The desktop file uses `chromium`; the `mobile-` file uses `mobile-chrome`.
-Both cover normal permission, denied feedback, refresh to granted, zero normal-body padding, and viewport containment.
+Both cover normal permission, denied feedback, refresh to granted, zero normal-body padding, a normal inter-section gap, and viewport containment.
 The phone case preserves the existing stacked header and one page scroll owner.
 Use existing screenshot capture fixtures to compare UI-01 and UI-02 against the actual render.
 
@@ -115,6 +116,8 @@ Use existing screenshot capture fixtures to compare UI-01 and UI-02 against the 
 - `python3 scripts/list-docs.py validate`: passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
+
+Fixup applied a current-head review finding: the undecided/granted path still rendered an empty content element inside `SettingsGroup`, whose internal spacing is margin-collapsed today but remains fragile. The section now hides that empty body, and the component and browser suites assert `display: none` plus a normal 24px header-to-next-section gap. The 54 component tests and both desktop and phone permission specs were rerun after the change and passed.
 
 Product checks were recorded against the implemented component and the rendered E2E captures.
 

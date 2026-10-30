@@ -122,11 +122,13 @@ describe("DesktopNotificationsSection permission frame", () => {
       mocks.nativeAvailable.mockReturnValue(false);
       const { container } = renderSection(permission);
       const group = container.querySelector(GROUP_SELECTOR);
+      const content = group?.querySelector(GROUP_CONTENT_SELECTOR);
 
       expect(group).toBeTruthy();
       expect(group?.querySelector(GROUP_CARD_SELECTOR)).toBeNull();
       expect(group?.querySelector(WARNING_SELECTOR)).toBeNull();
-      expect(group?.querySelector(GROUP_CONTENT_SELECTOR)?.childElementCount).toBe(0);
+      expect(content?.childElementCount).toBe(0);
+      expect(content?.classList.contains("hidden")).toBe(true);
     },
   );
 
@@ -172,5 +174,6 @@ describe("DesktopNotificationsSection permission frame", () => {
     rerender(section("granted"));
     expect(group()?.querySelector(GROUP_CARD_SELECTOR)).toBeNull();
     expect(warning()).toBeNull();
+    expect(group()?.querySelector(GROUP_CONTENT_SELECTOR)?.classList.contains("hidden")).toBe(true);
   });
 });
