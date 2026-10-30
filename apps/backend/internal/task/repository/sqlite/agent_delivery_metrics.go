@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+const (
+	agentDeliveryDurabilityBarrierSuccess = "success"
+	agentDeliveryDurabilityBarrierError   = "error"
+)
+
 var (
 	agentDeliveryInboxLagEvents      = expvar.NewInt("agent_delivery_inbox_lag_events")
 	agentDeliveryProjectionLagEvents = expvar.NewInt("agent_delivery_projection_lag_events")
@@ -17,9 +22,9 @@ var (
 // observeAgentDeliveryDurabilityBarrier publishes one bounded barrier result
 // and accumulates the duration buckets through one second.
 func observeAgentDeliveryDurabilityBarrier(err error, elapsed time.Duration) {
-	result := "success"
+	result := agentDeliveryDurabilityBarrierSuccess
 	if err != nil {
-		result = "error"
+		result = agentDeliveryDurabilityBarrierError
 	}
 	agentDeliveryDurabilityBarrierTotal.Add(result, 1)
 	seconds := elapsed.Seconds()
