@@ -129,9 +129,6 @@ test.describe("Mobile automatic permission presentation", () => {
         permissionMessages: 0,
         amber: 0,
       });
-      await prCapture.screenshot("mobile-automatic-permission-absent", {
-        caption: "Automatic approval keeps the ordinary tool row with no input prompt.",
-      });
     } finally {
       await gate.release();
     }
@@ -139,6 +136,9 @@ test.describe("Mobile automatic permission presentation", () => {
     await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.chat).toContainText(COMMITTED_LINE);
     await expect(session.permissionActionRows()).toHaveCount(0);
+    await prCapture.screenshot("mobile-automatic-permission-absent", {
+      caption: "Automatic approval keeps the ordinary completed tool row with no input prompt.",
+    });
 
     const history = await readPermissionHistory(apiClient, prepared.session_id);
     expect(history).toMatchObject({
@@ -192,6 +192,7 @@ test.describe("Mobile automatic permission presentation", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const session = await seedWaitingPermissionTask(
       testPage,
@@ -213,6 +214,9 @@ test.describe("Mobile automatic permission presentation", () => {
     await expect(session.activeChat().getByTestId("permission-unavailable-feedback")).toBeVisible();
     await expect(session.activeChat().getByTestId("permission-request-message")).toHaveCount(0);
     await expect(session.permissionActionRows()).toHaveCount(0);
+    await prCapture.screenshot("mobile-attached-permission-unavailable", {
+      caption: "An unavailable attached decision shows non-actionable feedback on a phone.",
+    });
   });
 
   test("a real attended request completes after a tap", async ({

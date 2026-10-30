@@ -80,6 +80,7 @@ test.describe("Automatic permission presentation", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const profile = await createAutomaticPermissionProfile(apiClient, seedData.agentProfileId);
     const task = await apiClient.createTaskWithAgent(
@@ -134,6 +135,9 @@ test.describe("Automatic permission presentation", () => {
     await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.chat).toContainText(COMMITTED_LINE);
     await expect(session.permissionActionRows()).toHaveCount(0);
+    await prCapture.screenshot("desktop-automatic-permission-absent", {
+      caption: "Automatic approval keeps the ordinary completed tool row with no approval prompt.",
+    });
 
     const history = await readPermissionHistory(apiClient, prepared.session_id);
     expect(history).toMatchObject({
@@ -155,7 +159,12 @@ test.describe("Automatic permission presentation", () => {
     expect(await readPermissionHistory(apiClient, prepared.session_id)).toEqual(history);
   });
 
-  test("an interactive fallback stays answerable", async ({ testPage, apiClient, seedData }) => {
+  test("an interactive fallback stays answerable", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
     const session = await seedWaitingPermissionTask(testPage, apiClient, seedData, {
       request_id: "req-fallback",
       pending_id: "pend-fallback",
@@ -171,12 +180,16 @@ test.describe("Automatic permission presentation", () => {
     await expect(message).toHaveAttribute("data-permission-presentation", "interactive");
     await expect(session.permissionActionRows()).toHaveCount(1);
     await expect(session.permissionApproveButtons()).toHaveCount(1);
+    await prCapture.screenshot("desktop-interactive-permission-fallback", {
+      caption: "Interactive fallback keeps its inline permission choices.",
+    });
   });
 
   test("an unavailable decision keeps non-actionable feedback", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const session = await seedWaitingPermissionTask(
       testPage,
@@ -198,6 +211,9 @@ test.describe("Automatic permission presentation", () => {
     await expect(session.activeChat().getByTestId("permission-unavailable-feedback")).toBeVisible();
     await expect(session.activeChat().getByTestId("permission-request-message")).toHaveCount(0);
     await expect(session.permissionActionRows()).toHaveCount(0);
+    await prCapture.screenshot("desktop-attached-permission-unavailable", {
+      caption: "An unavailable attached decision shows non-actionable feedback.",
+    });
   });
 
   test("a real attended request completes after a click", async ({
