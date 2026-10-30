@@ -562,6 +562,74 @@ func TestTerminalCaptureRetriesPersistenceAndReleasesFence(t *testing.T) {
 	require.Equal(t, generation+1, nextGeneration)
 }
 
+func TestSummaryExhaustionContinuesDurableSettlement(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-summary-settlement", TaskID: "task-summary-settlement",
+		SessionID: "session-summary-settlement", TaskEnvironmentID: "env-summary-settlement",
+		Status: v1.AgentStatusRunning, promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.setPromptTurnID("turn-summary-settlement")
+	require.NoError(t, manager.executionStore.Add(execution))
+	handler := &turnChangeSummarySettlementHandler{abandonFailures: 1, settled: make(chan struct{})}
+	manager.SetTurnChangeCaptureHandler(handler)
+	terminal := turnChangeTerminalForEvent(execution, &agentctl.AgentEvent{
+		PromptGeneration: 1, TurnID: "turn-summary-settlement",
+	}, false, "completed")
+
+	manager.scheduleTurnChangeSummary(execution, terminal)
+
+	select {
+	case <-handler.settled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("summary exhaustion did not continue durable settlement")
+	}
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	require.Equal(t, turnChangeMaximumAttempts, handler.summaryCalls)
+	require.Equal(t, 2, handler.abandonCalls)
+	require.Zero(t, handler.captureCalls)
+}
+
+type turnChangeSummarySettlementHandler struct {
+	mu              sync.Mutex
+	summaryCalls    int
+	captureCalls    int
+	abandonCalls    int
+	abandonFailures int
+	settled         chan struct{}
+}
+
+func (h *turnChangeSummarySettlementHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (h *turnChangeSummarySettlementHandler) FinishTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.captureCalls++
+	return nil
+}
+
+func (h *turnChangeSummarySettlementHandler) ProcessTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.summaryCalls++
+	return errors.New("summary storage unavailable")
+}
+
+func (h *turnChangeSummarySettlementHandler) AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	h.mu.Lock()
+	h.abandonCalls++
+	attempt := h.abandonCalls
+	h.mu.Unlock()
+	if attempt <= h.abandonFailures {
+		return errors.New("settlement storage unavailable")
+	}
+	close(h.settled)
+	return nil
+}
+
 type turnChangeCaptureRetryHandler struct {
 	mu        sync.Mutex
 	attempts  int
