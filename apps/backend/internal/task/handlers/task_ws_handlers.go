@@ -431,6 +431,9 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "task deletion preview is no longer current", nil)
 		case errors.Is(err, service.ErrForbidden):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		case errors.As(err, new(*service.TaskDeleteChildWorkspaceConflictError)):
+			details, _ := taskDeleteChildConflictDetails(err)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), details)
 		case errors.Is(err, repoerrors.ErrTaskNotFound):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 		case errors.Is(err, service.ErrKubernetesAdminRequired):
@@ -446,7 +449,8 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				dependencyKeyTaskID: req.ID,
 			})
 		default:
-			h.logger.Error("failed to delete task", zap.Error(err))
+			h.logger.Error("failed to delete task",
+				zap.String("task_id", req.ID), zap.Bool("cascade", req.Cascade), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete task", nil)
 		}
 	}
