@@ -35,7 +35,7 @@ export const noLiteralStringOptions = {
     exclude: [
       "^\\s*$",
       "^[^A-Za-z]*$",
-      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Sprites\\.dev)$",
+      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Webhook|Sprites\\.dev)$",
       "^(ACP|MCP|SSH|URL|ID|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|JQL)$",
       // Units, version prefixes, and keyboard glyphs — not translatable
       // copy; these show up as fragments beside an interpolated value.

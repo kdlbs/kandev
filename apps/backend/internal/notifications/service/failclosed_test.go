@@ -141,7 +141,7 @@ func TestNilAuthEnforcementBehavesAsAuthDisabled(t *testing.T) {
 		t.Fatalf("create logger: %v", err)
 	}
 	// A nil predicate is the pre-auth single-user install.
-	svc := NewService(repo, brokenTasks{taskErr: errors.New("database unavailable")}, nil, log, nil)
+	svc := NewService(repo, brokenTasks{taskErr: errors.New("database unavailable")}, nil, log, nil, false)
 	capture := &captureProvider{}
 	svc.providers[models.ProviderTypeLocal] = capture
 

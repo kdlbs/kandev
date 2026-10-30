@@ -18,7 +18,7 @@ func TestRuntimeOccurrencesRespectPreferencesAndPersistAcrossRestart(t *testing.
 	repo := &notificationTestRepository{providers: []*models.Provider{{ID: "local", Type: models.ProviderTypeLocal, Enabled: true}, {ID: "muted", Type: models.ProviderTypeApprise, Enabled: true}}, subscriptions: map[string][]*models.Subscription{"local": {{ProviderID: "local", EventType: EventSystemUpdateAvailable, Enabled: true}}, "muted": {{ProviderID: "muted", EventType: EventSystemUpdateAvailable, Enabled: false}}}}
 	local, muted := &captureProvider{}, &captureProvider{}
 	makeService := func() *Service {
-		s := NewService(repo, nil, nil, log, nil)
+		s := NewService(repo, nil, nil, log, nil, false)
 		s.providers[models.ProviderTypeLocal] = local
 		s.providers[models.ProviderTypeApprise] = muted
 		return s

@@ -31,6 +31,7 @@ type Config struct {
 	// live under this root.
 	HomeDir                string                       `mapstructure:"homeDir"`
 	Server                 ServerConfig                 `mapstructure:"server"`
+	Notifications          NotificationsConfig          `mapstructure:"notifications"`
 	Tasks                  TasksConfig                  `mapstructure:"tasks"`
 	Credentials            CredentialsConfig            `mapstructure:"credentials"`
 	Limits                 LimitsConfig                 `mapstructure:"limits"`
@@ -55,6 +56,11 @@ type Config struct {
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
 	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
+}
+
+// NotificationsConfig contains process-wide notification delivery policy.
+type NotificationsConfig struct {
+	WebhookAllowPrivateNetworks bool `mapstructure:"webhookAllowPrivateNetworks"`
 }
 
 // TasksConfig contains task lifecycle startup limits.
@@ -725,6 +731,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
 	v.SetDefault("server.webTitlePrefix", "")
+	v.SetDefault("notifications.webhookAllowPrivateNetworks", false)
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")

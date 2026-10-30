@@ -37,6 +37,7 @@
   "configurationChat": "設定聊天",
   "configurationChatDescription": "讓代理程式更新 Kandev 設定、工作流程、代理程式設定檔和 MCP 設定。",
   "configurationChatTab": "設定聊天",
+  "continuationActivityResumed": "代理程式已恢復執行",
   "continuationHistoryPreserved": "之前的對話會保留。",
   "continuationIn": "將在 {{countdown}} 後繼續。",
   "continuationPhase_continuing": "正在繼續之前的請求...",

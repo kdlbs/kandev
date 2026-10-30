@@ -52,6 +52,10 @@ const (
 // yellow (non-alarming) styling, as opposed to the red "error" variant.
 const metaVariantWarning = "warning"
 
+// metaVariantDefault cancels the warning styling once a continuation has
+// resumed; the marker is explicit so older frontends keep their presentation.
+const metaVariantDefault = "default"
+
 // metaVariantCeiling is the status-message variant AC-49 requires for every
 // session-ceiling card note, including AC-17c's drop note.
 const metaVariantCeiling = "ceiling"
@@ -110,6 +114,8 @@ type transientRetryEntry struct {
 	mode               string
 	continuationPolicy continuationPolicy
 	continuation       *continuationBinding
+	taskID             string
+	failureCode        routingerr.Code
 	providerID         string
 	modelID            string
 	cancel             func()
@@ -123,6 +129,7 @@ type transientRetryEntry struct {
 	acceptedGeneration uint64
 	restoredExecution  string
 	retainedRuntime    *retainedRuntimeRetry
+	activity           continuationActivity
 }
 
 type retainedRuntimeRetry struct {
@@ -303,6 +310,8 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			}
 			entry.modelID = data.ProviderError.ModelID
 		}
+		entry.taskID = data.TaskID
+		entry.failureCode = classified.Code
 		entry.retainedRuntime = retainedRuntime
 	})
 	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
@@ -425,6 +434,7 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 			entry.started = previous.started
 			entry.mode, entry.continuationPolicy, entry.continuation = previous.mode, previous.continuationPolicy, previous.continuation
 			entry.providerID, entry.modelID = previous.providerID, previous.modelID
+			entry.taskID, entry.failureCode = previous.taskID, previous.failureCode
 			previous.mu.Unlock()
 		}
 	}

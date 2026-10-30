@@ -8,6 +8,7 @@ const (
 	ProviderTypeLocal   ProviderType = "local"
 	ProviderTypeApprise ProviderType = "apprise"
 	ProviderTypeSystem  ProviderType = "system"
+	ProviderTypeWebhook ProviderType = "webhook"
 )
 
 type Provider struct {

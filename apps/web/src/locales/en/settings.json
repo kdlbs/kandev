@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "These servers no longer contribute to this session. Restoring inheritance does not add them.",
   "mcpNoLongerInherited": "No longer inherited",
   "mcpRestoreDisabledDescription": "Restoring inheritance does not enable a disabled server.",
-  "mcpExclusionCount": "Saved session exclusions: {{total}}"
+  "mcpExclusionCount": "Saved session exclusions: {{total}}",
+  "addWebhookProvider": "Add Webhook Provider",
+  "noWebhookProviders": "No webhook providers configured yet.",
+  "webhookProvider": "Webhook provider",
+  "webhookUrl": "Webhook URL",
+  "webhookHeadersPlaceholder": "Headers, one per line (Name: value)",
+  "webhookHeadersInvalid": "Webhook headers must use valid HTTP header names and must not repeat.",
+  "webhookSecret": "Secret (optional)",
+  "webhookUrlRequired": "A webhook URL is required.",
+  "webhooks": "Webhooks",
+  "webhooksDescription": "Send notification events to a webhook endpoint."
 }

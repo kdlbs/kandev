@@ -103,6 +103,12 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 
 When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
+### Notifications
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webhookAllowPrivateNetworks` | `KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Allows webhook providers to send to private or local destinations. This setting applies to the backend process. Keep it disabled unless the destination needs it. Restart the backend after a change. |
+
 ### Database
 
 | YAML key            | Environment variable       | Default                 | Current behavior                                                          |
@@ -490,6 +496,9 @@ server:
   trustedProxies: []
   webInternalUrl: ""
   webTitlePrefix: ""
+
+notifications:
+  webhookAllowPrivateNetworks: false
 
 database:
   driver: "sqlite"

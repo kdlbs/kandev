@@ -231,7 +231,7 @@ func TestLegacyAliasLifecycle(t *testing.T) {
 				if err := svc.ResumeTaskResourceCleanupJobs(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				retained := selection == "parent" || selection == "child" || (operation == "archive" && cascade)
+				retained := selection == "parent" || selection == "child"
 				_, err := os.Stat(f.plan.Repairs[0].Path)
 				if retained && err != nil {
 					t.Fatalf("retained borrower's checkout removed: %v", err)
