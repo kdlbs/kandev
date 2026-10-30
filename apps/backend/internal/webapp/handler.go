@@ -1,11 +1,13 @@
 package webapp
 
 import (
+	"bytes"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/i18n"
@@ -103,15 +105,30 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	defer func() {
-		_ = file.Close()
-	}()
+	defer func(original fs.File) {
+		_ = original.Close()
+	}(file)
 
 	stat, err := file.Stat()
 	if err != nil || stat.IsDir() {
 		return false
 	}
 
+	varyAssetEncoding(w.Header())
+	gzipQuality, identityQuality := assetEncodingQualities(strings.Join(r.Header.Values("Accept-Encoding"), ","))
+	if gzipQuality > 0 && gzipQuality >= identityQuality && (path.Ext(name) == ".js" || path.Ext(name) == ".css") {
+		if compressed, openErr := h.assets.Open(name + ".gz"); openErr == nil {
+			defer func() { _ = compressed.Close() }()
+			if compressedStat, statErr := compressed.Stat(); statErr == nil && !compressedStat.IsDir() {
+				file, stat = compressed, compressedStat
+				w.Header().Set("Content-Encoding", "gzip")
+			}
+		}
+	}
+	if w.Header().Get("Content-Encoding") == "" && identityQuality == 0 {
+		w.WriteHeader(http.StatusNotAcceptable)
+		return true
+	}
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
@@ -120,13 +137,19 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		data, readErr := io.ReadAll(file)
 		if readErr != nil {
+			w.Header().Del("Content-Encoding")
 			http.Error(w, i18n.T(i18n.FromRequest(r), "webapp.assetReadFailed"), http.StatusInternalServerError)
 			return true
 		}
-		_, _ = w.Write(data)
-		return true
+		seeker = bytes.NewReader(data)
 	}
-	http.ServeContent(w, r, stat.Name(), stat.ModTime(), seeker)
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	if w.Header().Get("Content-Encoding") == "gzip" && strings.Contains(r.Header.Get("Range"), ",") {
+		// A multipart range envelope cannot carry the asset's gzip content encoding.
+		r = r.Clone(r.Context())
+		r.Header.Del("Range")
+	}
+	http.ServeContent(assetResponseWriter{w}, r, name, stat.ModTime(), seeker)
 	return true
 }
 

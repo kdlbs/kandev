@@ -3,6 +3,8 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
+import { precompressedAssets } from "./scripts/precompress-assets.mjs";
+
 import { shouldBundlePseudoLocale } from "./lib/i18n/bundling";
 
 const LOCALES_DIR = path.resolve(__dirname, "src/locales");
@@ -36,7 +38,7 @@ function escapeRegExp(value: string): string {
 
 export default defineConfig({
   base: process.env.VITE_KANDEV_BASE_PATH || "/",
-  plugins: [react(), pseudoLocaleBundling()],
+  plugins: [react(), pseudoLocaleBundling(), precompressedAssets()],
   server: {
     port: readPort(process.env.PORT),
     strictPort: Boolean(process.env.PORT),

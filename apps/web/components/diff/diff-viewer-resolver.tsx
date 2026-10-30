@@ -6,7 +6,7 @@ import {
   DiffViewer as PierreDiffViewer,
   DiffViewInline as PierreDiffViewInline,
 } from "./diff-viewer";
-import { MonacoDiffViewer } from "@/components/editors/monaco/monaco-diff-viewer";
+import { LazyMonacoDiffViewer as MonacoDiffViewer } from "@/components/editors/monaco/lazy-editors";
 import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import type { RevertBlockInfo } from "./diff-viewer";
 export type { RevertBlockInfo };
