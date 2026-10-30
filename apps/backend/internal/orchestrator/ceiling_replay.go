@@ -923,20 +923,32 @@ func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task 
 
 // replayCeilingLaunchResume replays an AC-42 "resume" record.
 func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Task, payload map[string]interface{}) ceilingReplayResult {
-	execution, err := s.ResumeTaskSessionWithOptions(
-		ctx, task.ID,
-		stringField(payload, metaKeySessionID),
-		executor.ResumeOptions{
-			AllowBranchReplacement:          boolField(payload, "allow_branch_replacement"),
-			AllowCompletedSessionResume:     boolField(payload, resumePayloadAllowCompletedKey),
-			RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
-			Origin:                          string(launchOriginAutomatic),
-		},
-	)
+	sessionID := stringField(payload, metaKeySessionID)
+	options := executor.ResumeOptions{
+		AllowBranchReplacement:          boolField(payload, "allow_branch_replacement"),
+		AllowCompletedSessionResume:     boolField(payload, resumePayloadAllowCompletedKey),
+		RequireIdleSuspensionProvenance: boolField(payload, resumePayloadIdleProvenanceKey),
+		Origin:                          string(launchOriginAutomatic),
+	}
+	if stringField(payload, resumePayloadRecoveryActionKey) == recoveryActionResume {
+		options.RecoveryAction = recoveryActionResume
+		options.SettingsPolicy = executor.ResumeSettingsPolicy(stringField(payload, resumePayloadSettingsPolicyKey))
+		options.DeferInitialPrompt = true
+		options.StartAgentSynchronously = true
+		if attemptID := stringField(payload, resumePayloadHistoryAttemptKey); attemptID != "" {
+			ctx = context.WithValue(ctx, automaticHistoryAttemptKey{}, attemptID)
+		}
+	}
+	execution, err := s.ResumeTaskSessionWithOptions(ctx, task.ID, sessionID, options)
 	if errors.Is(err, ErrIdleSuspensionProvenanceRequired) {
 		// The session is no longer parked by the idle policy, so the focus
 		// resume this record carries no longer applies.
 		return ceilingReplaySupersededResult()
+	}
+	if err == nil && execution != nil && options.RecoveryAction == recoveryActionResume {
+		if err = s.acknowledgeNativeResumeDelivery(ctx, sessionID); err == nil {
+			err = s.resolveSessionRecoveryBlock(ctx, sessionID, recoveryActionResume)
+		}
 	}
 	return ceilingReplayResultFromExecution(execution, err)
 }

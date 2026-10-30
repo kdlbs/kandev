@@ -54,6 +54,7 @@ const (
 	MethodThreadStart                  = "thread/start"
 	MethodThreadRead                   = "thread/read"
 	MethodThreadResume                 = "thread/resume"
+	MethodThreadUnarchive              = "thread/unarchive"
 	MethodThreadFork                   = "thread/fork"
 	MethodBackgroundTerminalsList      = "thread/backgroundTerminals/list"
 	MethodBackgroundTerminalsTerminate = "thread/backgroundTerminals/terminate"
@@ -244,6 +245,7 @@ type ThreadStartResponse struct {
 }
 
 type Thread struct {
+	Path           *string         `json:"path,omitempty"`
 	ID             string          `json:"id"`
 	Turns          []Turn          `json:"turns,omitempty"`
 	Status         json.RawMessage `json:"status,omitempty"`

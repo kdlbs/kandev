@@ -508,6 +508,9 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	AutoStartPendingWork    bool `mapstructure:"auto_start_pending_work" json:"autoStartPendingWork"`
+	AutoContinueFromHistory bool `mapstructure:"auto_continue_from_history" json:"autoContinueFromHistory"`
+	AutoRetryUnsentRequests bool `mapstructure:"auto_retry_unsent_requests" json:"autoRetryUnsentRequests"`
 	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
 	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 

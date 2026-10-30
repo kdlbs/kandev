@@ -2025,6 +2025,7 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		Extra:                      map[string]string{"allow_archived_thread_restore": lookupEnvValue(m.cfg.AgentEnv, "KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY")},
 	}
 
 	// Configure one-shot mode when a continue command is provided.

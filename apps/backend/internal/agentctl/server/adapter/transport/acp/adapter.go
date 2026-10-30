@@ -138,8 +138,9 @@ type Adapter struct {
 	sessionID string
 
 	// Agent info (populated after Initialize)
-	agentInfo    *AgentInfo
-	capabilities acp.AgentCapabilities
+	agentInfo                       *AgentInfo
+	capabilities                    acp.AgentCapabilities
+	archivedSessionRestoreSupported bool
 
 	// promptQueueing caches the negotiated prompt-queueing advertisement from the
 	// initialize response. It is derived once under `mu` rather than re-read from
@@ -631,7 +632,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil, a.cfg.Extra["allow_archived_thread_restore"] == "true"),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -652,6 +653,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	a.archivedSessionRestoreSupported = codexArchiveCapability(resp.Meta)
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 	promptSuggestionSupport, suggestionEvidence := claudePromptSuggestionSupport(
 		a.agentInfo.Name, a.agentInfo.Version, resp.AgentCapabilities,
