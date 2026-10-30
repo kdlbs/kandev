@@ -1129,6 +1129,7 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
+	builtinPolicyReader       BuiltinPolicyReader
 	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
 	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
 	agentManager              AgentManagerClient

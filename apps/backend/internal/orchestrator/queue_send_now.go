@@ -501,9 +501,12 @@ func (s *Service) executeSendNowClaimWithContext(
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
 	ctx = s.queuedRecoveryContext(ctx, reservation)
+	allowFollowupDrain := true
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.drainQueuedDispatchIfPending(ctx, sessionID)
+		if allowFollowupDrain {
+			s.drainQueuedDispatchIfPending(ctx, sessionID)
+		}
 	}()
 
 	restore := func() {
@@ -538,6 +541,9 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if isBuiltinIntentError(err) {
+		allowFollowupDrain = false
+	}
 	if errors.Is(err, errSendNowInitialPromptUncertain) {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
 		defer cancel()
@@ -600,6 +606,11 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 
 //nolint:nestif // Send Now keeps transcript, ceiling, and created-session ownership in one dispatch boundary.
 func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) (bool, error) {
+	var intentErr error
+	ctx, intentErr = s.prepareQueuedBuiltinIntent(ctx, &claim.Dispatch)
+	if intentErr != nil {
+		return false, intentErr
+	}
 	sessionID := claim.Dispatch.SessionID
 	deliveryAttempted := false
 	attachments := queuedMessageAttachmentsToV1(claim.Dispatch.Attachments)

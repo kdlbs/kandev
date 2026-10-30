@@ -29,7 +29,7 @@ async function openChat(
 }
 
 async function loadKandevCatalog(session: SessionPage) {
-  await session.sendMessage("e2e:mcp:kandev:list_workspaces_kandev({})");
+  await session.sendMessage("e2e:mcp:kandev:list_agents_kandev({})");
   await session.waitForChatIdle({ timeout: 30_000 });
 }
 

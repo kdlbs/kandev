@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -563,6 +564,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 }
 
 type wsQueueMessageRequest struct {
+	BuiltinIntent         builtinintent.Intent             `json:"builtin_intent,omitempty"`
 	SessionID             string                           `json:"session_id"`
 	TaskID                string                           `json:"task_id"`
 	SessionIncarnationID  string                           `json:"session_incarnation_id"`
@@ -584,6 +586,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	var req wsQueueMessageRequest
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if err := req.BuiltinIntent.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	req.ClientQueueID = strings.TrimSpace(req.ClientQueueID)
 
@@ -635,6 +640,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		req.EntityReferences = references
 	}
 
+	if err := builtinintent.ValidateRequest(ctx, h.queueDrainer, req.TaskID, req.SessionID, req.BuiltinIntent); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
 	// entries (queued_by="agent") is always meaningful.
@@ -643,6 +652,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		queuedBy = messagequeue.QueuedByUser
 	}
 	metadata := orchestrator.NewUserMessageMeta().
+		WithBuiltinIntent(req.BuiltinIntent).
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()

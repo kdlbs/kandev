@@ -1,4 +1,5 @@
 "use client";
+import { TaskCreateBuiltinPackages } from "./task-create-builtin-packages";
 
 import {
   FormEvent,
@@ -230,6 +231,13 @@ function DialogFormBody(props: DialogFormBodyProps) {
         launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
+      {isCreateMode && props.workspaceId && props.fs.setBuiltinMCPPreferences && (
+        <TaskCreateBuiltinPackages
+          workspaceId={props.workspaceId}
+          draft={props.fs.builtinMCPPreferences}
+          onChange={props.fs.setBuiltinMCPPreferences}
+        />
+      )}
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
         isEditMode={props.isEditMode}

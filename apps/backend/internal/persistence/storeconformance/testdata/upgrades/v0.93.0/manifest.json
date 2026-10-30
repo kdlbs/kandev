@@ -459,6 +459,7 @@
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
+      "task_builtin_mcp_preferences",
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",

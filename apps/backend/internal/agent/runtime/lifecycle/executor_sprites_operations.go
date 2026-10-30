@@ -452,6 +452,12 @@ func (r *SpritesExecutor) createAgentInstance(
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	if err := requireBuiltinRemoteHelper(stepCtx, req, func(ctx context.Context) ([]byte, error) {
+		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
+	}); err != nil {
+		return 0, err
+	}
+
 	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
 		fmt.Sprintf("curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' -d @-",
 			r.agentctlPort))

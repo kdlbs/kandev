@@ -115,8 +115,7 @@ func (r *Repository) updateTaskTransferRelations(
 	inventory transferRelationInventory,
 ) error {
 	for _, projection := range projections {
-		query := fmt.Sprintf(`UPDATE %s SET workspace_id = ? WHERE %s = ?`, projection.table, projection.taskColumn)
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(query), command.DestinationWorkspaceID, command.TaskID); err != nil {
+		if err := r.updateTaskTransferProjection(ctx, tx, command, projection); err != nil {
 			return err
 		}
 	}
@@ -154,4 +153,14 @@ func (r *Repository) updateTaskTransferRelations(
 		}
 	}
 	return nil
+}
+
+func (r *Repository) updateTaskTransferProjection(ctx context.Context, tx *sqlx.Tx, command models.TaskTransferCommand, projection transferWorkspaceProjection) error {
+	if projection.table == "task_builtin_mcp_preferences" && command.ExpectedSourceWorkspaceID != command.DestinationWorkspaceID {
+		_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_builtin_mcp_preferences SET workspace_id = ?, packages_json = '{}', revision = revision + 1, updated_by = ?, updated_at = ? WHERE task_id = ?`), command.DestinationWorkspaceID, command.Actor.ID, r.nowUTC(), command.TaskID)
+		return err
+	}
+	query := fmt.Sprintf(`UPDATE %s SET workspace_id = ? WHERE %s = ?`, projection.table, projection.taskColumn)
+	_, err := tx.ExecContext(ctx, r.db.Rebind(query), command.DestinationWorkspaceID, command.TaskID)
+	return err
 }

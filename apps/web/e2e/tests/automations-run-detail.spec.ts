@@ -71,12 +71,20 @@ async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
     seed.agentProfileId,
     {
       description: "/sleep 30",
+      start_agent: false,
+      metadata: { automation_id: automation.id },
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
       repository_ids: [seed.repositoryId],
     },
   );
   await apiClient.setTaskOrigin(task.id, "automation_run");
+  const launched = await apiClient.launchSession({
+    task_id: task.id,
+    agent_profile_id: seed.agentProfileId,
+    intent: "start",
+  });
+  task.session_id = launched.session_id;
   await expect
     .poll(
       async () => {

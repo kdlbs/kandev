@@ -119,7 +119,7 @@ function richOutputScript(): string {
     },
   };
   return [
-    `e2e:mcp:kandev:show_rich_output_kandev(${JSON.stringify(payload)})`,
+    `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify(payload)})`,
     'e2e:message("Rich output complete.")',
   ].join("\n");
 }
@@ -146,7 +146,7 @@ export async function seedRichOutputTask({
   let description = richOutputScript();
   if (failureRetry) description = 'e2e:message("Rich output retry fixture ready.")';
   if (payload)
-    description = `e2e:mcp:kandev:show_rich_output_kandev(${JSON.stringify(payload)})\ne2e:message("Rich output complete.")`;
+    description = `e2e:mcp:kandev-rich-output:show_rich_output_kandev(${JSON.stringify(payload)})\ne2e:message("Rich output complete.")`;
   if (historical) description = 'e2e:message("Historical replay fixture.")';
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,

@@ -177,3 +177,22 @@ func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
 	}
 	t.Fatal("coordinator entry not found in the catalog")
 }
+
+func TestBuiltinMCPPolicyTablesAreRequired(t *testing.T) {
+	expected := map[string]string{"task": "task_builtin_mcp_preferences", "agent-settings": "workspace_builtin_mcp_policies"}
+	for _, descriptor := range Catalog() {
+		table, applicable := expected[descriptor.ID]
+		if !applicable {
+			continue
+		}
+		found := false
+		for _, actual := range descriptor.RequiredTables {
+			if actual == table {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s does not probe required policy table %s", descriptor.ID, table)
+		}
+	}
+}

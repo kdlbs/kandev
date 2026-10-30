@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -117,6 +118,7 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
+	builtinPackages            map[mcpprofile.PackageID]*builtinPackageServer
 	backend                    BackendClient
 	sessionID                  string
 	taskID                     string
@@ -207,8 +209,10 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
+		server.WithStateful(s.profile.BuiltinPackages != nil),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
+	s.initializeBuiltinTransports(port)
 	return s
 }
 
@@ -328,15 +332,20 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.unregisterMCPConnection(session.SessionID())
 	})
 	s.registerTools()
+	s.initializeBuiltinPackages()
 	s.running = true
 	return s
 }
 
 func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
+	s.presentPackageToolNames(s.mcpServer, result)
+}
+
+func (s *Server) presentPackageToolNames(registry *server.MCPServer, result *mcp.ListToolsResult) {
 	if !s.namespacesMCPToolsByServer || result == nil {
 		return
 	}
-	registeredTools := s.mcpServer.ListTools()
+	registeredTools := registry.ListTools()
 	for index := range result.Tools {
 		name := result.Tools[index].Name
 		if !strings.HasSuffix(name, mcpToolNameSuffix) {
@@ -353,14 +362,18 @@ func (s *Server) presentTransportToolNames(result *mcp.ListToolsResult) {
 }
 
 func (s *Server) restoreCanonicalToolName(request *mcp.CallToolRequest) {
+	s.restorePackageToolName(s.mcpServer, request)
+}
+
+func (s *Server) restorePackageToolName(registry *server.MCPServer, request *mcp.CallToolRequest) {
 	if !s.namespacesMCPToolsByServer || request == nil {
 		return
 	}
-	if s.mcpServer.GetTool(request.Params.Name) != nil {
+	if registry.GetTool(request.Params.Name) != nil {
 		return
 	}
 	canonicalName := request.Params.Name + mcpToolNameSuffix
-	if s.mcpServer.GetTool(canonicalName) != nil {
+	if registry.GetTool(canonicalName) != nil {
 		request.Params.Name = canonicalName
 	}
 }
@@ -402,6 +415,7 @@ func (s *Server) SetAttachmentReporter(reporter func(streams.MCPAttachmentEviden
 // MCP endpoint observations belong. It is called only by the local agentctl
 // API before handing configuration to an agent adapter.
 func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	attempt.BuiltinPackages = s.Profile().BuiltinPackages
 	s.attachmentMu.Lock()
 	defer s.attachmentMu.Unlock()
 	s.attachmentAttempt = attempt
@@ -427,8 +441,8 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
 }
 
-func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
-	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil)
+func (s *Server) observeMCPRequest(ctx context.Context, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string, serverNames ...string) {
+	s.observeMCPRequestWithTools(ctx, kind, toolCount, summary, nil, serverNames...)
 }
 
 func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
@@ -439,12 +453,12 @@ func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
-func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool) {
+func (s *Server) observeMCPToolsListForRequest(ctx context.Context, tools []mcp.Tool, serverNames ...string) {
 	summaries := make([]streams.MCPToolSummary, 0, len(tools))
 	for _, tool := range tools {
 		summaries = append(summaries, summarizeMCPTool(tool))
 	}
-	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
+	s.observeMCPRequestWithTools(ctx, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries, serverNames...)
 }
 
 func summarizeMCPTool(tool mcp.Tool) streams.MCPToolSummary {
@@ -498,11 +512,12 @@ func (s *Server) observeMCPRequestWithTools(
 	toolCount int,
 	summary string,
 	tools []streams.MCPToolSummary,
+	serverNames ...string,
 ) {
 	if !server.IsModernRequest(ctx) {
 		connectionID := mcpConnectionID(ctx)
 		s.attachmentMu.RLock()
-		attempt, ok := s.attachmentAttempts[connectionID]
+		attempt, ok := s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)]
 		reporter := s.attachmentReporter
 		if !ok && connectionID != "" && kind == streams.MCPAttachmentEvidenceInitializeObserved {
 			// Streamable HTTP registers a legacy POST initialize session after
@@ -515,7 +530,7 @@ func (s *Server) observeMCPRequestWithTools(
 		if !ok || reporter == nil || attempt.AttemptID == "" {
 			return
 		}
-		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
+		s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools, serverNames...)
 		return
 	}
 
@@ -529,33 +544,33 @@ func (s *Server) observeMCPRequestWithTools(
 	if reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools)
+	s.reportMCPConnectionWithTools(reporter, attempt, "", kind, toolCount, summary, tools, serverNames...)
 }
 
-func (s *Server) registerMCPConnection(connectionID string) {
+func (s *Server) registerMCPConnection(connectionID string, serverNames ...string) {
 	s.attachmentMu.Lock()
 	attempt := s.attachmentAttempt
 	reporter := s.attachmentReporter
 	if connectionID != "" && attempt.AttemptID != "" {
-		s.attachmentAttempts[connectionID] = attempt
+		s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)] = attempt
 	}
 	s.attachmentMu.Unlock()
 	if reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceSessionAccepted, 0, "")
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceSessionAccepted, 0, "", serverNames...)
 }
 
-func (s *Server) unregisterMCPConnection(connectionID string) {
+func (s *Server) unregisterMCPConnection(connectionID string, serverNames ...string) {
 	s.attachmentMu.Lock()
-	attempt, ok := s.attachmentAttempts[connectionID]
+	attempt, ok := s.attachmentAttempts[mcpAttachmentKey(connectionID, serverNames...)]
 	reporter := s.attachmentReporter
-	delete(s.attachmentAttempts, connectionID)
+	delete(s.attachmentAttempts, mcpAttachmentKey(connectionID, serverNames...))
 	s.attachmentMu.Unlock()
 	if !ok || reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceConnectionClosed, 0, "")
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceConnectionClosed, 0, "", serverNames...)
 }
 
 func (s *Server) reportMCPConnection(
@@ -565,8 +580,9 @@ func (s *Server) reportMCPConnection(
 	kind streams.MCPAttachmentEvidenceKind,
 	toolCount int,
 	summary string,
+	serverNames ...string,
 ) {
-	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil)
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil, serverNames...)
 }
 
 func (s *Server) reportMCPConnectionWithTools(
@@ -577,6 +593,7 @@ func (s *Server) reportMCPConnectionWithTools(
 	toolCount int,
 	summary string,
 	tools []streams.MCPToolSummary,
+	serverNames ...string,
 ) {
 	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
 		// Bound summaries at the publication boundary before the callback can
@@ -585,8 +602,9 @@ func (s *Server) reportMCPConnectionWithTools(
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
 	reporter(streams.MCPAttachmentEvidence{
+		BuiltinPackage:     builtinEvidencePackage(attempt.BuiltinPackages, mcpEvidenceServerName(serverNames...)),
 		AttemptID:          attempt.AttemptID,
-		ServerName:         "kandev",
+		ServerName:         mcpEvidenceServerName(serverNames...),
 		Kind:               kind,
 		OccurredAt:         time.Now().UTC(),
 		Source:             streams.MCPServerSourceKandev,
@@ -626,9 +644,10 @@ func opaqueMCPConnectionID(connectionID string) string {
 // RegisterRoutes adds MCP routes to the gin router at the root.
 // Used by agentctl which serves the MCP transport at /sse, /message, /mcp.
 func (s *Server) RegisterRoutes(router gin.IRouter) {
+	s.registerBuiltinRoutes(router)
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
+	router.Any("/mcp", s.serveCurrentStreamableHTTP)
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -656,6 +675,7 @@ func (s *Server) Close(ctx context.Context) error {
 		return nil
 	}
 	s.running = false
+	s.closeBuiltinPackages(ctx)
 
 	if s.sseServer != nil {
 		if err := s.sseServer.Shutdown(ctx); err != nil {
@@ -791,6 +811,9 @@ func (s *Server) SetMode(mode string) {
 	}
 
 	normalizedMode := normalizeMode(mode)
+	if s.profile.BuiltinPackages != nil && surfaceForMode(normalizedMode) != s.profile.Surface {
+		return
+	}
 	if s.mode == normalizedMode {
 		return
 	}
@@ -812,7 +835,9 @@ func (s *Server) SetMode(mode string) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)
 	}
 	s.mode = normalizedMode
+	manifest := s.profile.BuiltinPackages.Clone()
 	s.profile = mcpprofile.New(surfaceForMode(normalizedMode), capabilities, s.mcpProviders)
+	s.profile.BuiltinPackages = manifest
 	if normalizedMode == ModeTaskTitlePending {
 		s.profile = s.profile.WithCapability(mcpprofile.CapabilityTaskTitle)
 	} else {
@@ -879,6 +904,10 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	defer s.mu.Unlock()
 
 	profileContext = mcpprofile.Normalize(profileContext)
+	if s.profile.BuiltinPackages != nil && profileContext.Surface != s.profile.Surface {
+		return
+	}
+	profileContext.BuiltinPackages = s.profile.BuiltinPackages.Clone()
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return
 	}
@@ -910,6 +939,9 @@ func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bo
 }
 
 func sameProfile(left, right mcpprofile.Context) bool {
+	if !reflect.DeepEqual(left.BuiltinPackages, right.BuiltinPackages) {
+		return false
+	}
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
 	}
@@ -946,7 +978,7 @@ func (s *Server) rebuildTools() {
 	// until the complete replacement is ready. mcp-go emits one notification
 	// for SetTools, while registering directly would expose every intermediate
 	// AddTool state to initialized clients.
-	s.mcpServer.SetTools(s.assembleTools()...)
+	s.publishBuiltinTools(s.assembleTools())
 }
 
 // SetPluginTools validates and atomically replaces sideloaded tools. SetTools
@@ -1289,6 +1321,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
+	s.registerSelectedConfiguration()
 	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}

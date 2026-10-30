@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
@@ -120,6 +121,8 @@ type Manager struct {
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
 	cfg                      *config.InstanceConfig
+	builtinCatalogMu         sync.RWMutex
+	builtinCatalog           func() map[mcpprofile.PackageID][]string
 	logger                   *logger.Logger
 	managedGitTools          installedManagedGitTools
 	materializeGitHelperPath string
@@ -2387,6 +2390,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	}
 
 	m.cfg.AgentCommand = command
+	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()

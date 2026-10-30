@@ -3,6 +3,7 @@ package api
 
 import (
 	"encoding/json"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -84,6 +85,9 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
+	if mcpServer != nil {
+		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
 		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
@@ -94,7 +98,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -272,6 +276,8 @@ func (s *Server) setupRoutes() {
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
+		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
@@ -387,6 +393,11 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	// MCP endpoint for external coding agents, and no launch path can emit it.
 	if !mcpmode.IsInstanceMode(req.Mode) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
+		return
+	}
+	current := s.mcpServer.Profile()
+	if current.BuiltinPackages != nil && mcpprofile.Legacy(req.Mode, false, nil).Surface != current.Surface {
+		c.JSON(http.StatusForbidden, gin.H{"error": "built-in MCP surface is bound until the next process start"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

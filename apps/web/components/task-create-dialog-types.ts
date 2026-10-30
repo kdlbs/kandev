@@ -1,3 +1,4 @@
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
@@ -402,6 +403,8 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
+  setBuiltinMCPPreferences?: (value: BuiltinMCPCreateDraft | undefined) => void;
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
@@ -538,6 +541,7 @@ export type DialogFormState = {
 };
 
 export type SubmitHandlersDeps = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   isSessionMode: boolean;
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */

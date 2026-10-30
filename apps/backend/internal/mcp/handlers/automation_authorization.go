@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -21,6 +22,9 @@ type guardedMCPDispatcher struct {
 
 func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFunc) {
 	d.Dispatcher.RegisterFunc(action, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if execution, ok := streams.MCPExecutionContextFromContext(ctx); ok && (!execution.BuiltinAuthority.Allows(msg.Action) || (execution.BuiltinAuthority.Required && !mcpscope.BuiltinPrincipalMatches(ctx, execution.BuiltinAuthority.Manifest))) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "tool is not available in this execution", nil)
+		}
 		ctx = d.handlers.withCoordinatorCaller(ctx)
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {

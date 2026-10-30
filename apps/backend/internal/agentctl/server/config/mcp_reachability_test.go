@@ -45,7 +45,10 @@ func TestNewInstanceConfigMCPURLsReachConfiguredListener(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
-	instance := (&Config{AuthToken: "test-token", ListenHostOverride: host}).NewInstanceConfig(port, nil)
+	instance, err := (&Config{AuthToken: "test-token", ListenHostOverride: host}).NewInstanceConfig(port, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
 	for _, mcpServer := range instance.McpServers {
 		response, err := client.Get(mcpServer.URL)

@@ -2037,7 +2037,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			}
 		}
 		if opts.McpProfile == nil {
-			profileContext, profileErr := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, opts.StartAgent)
+			profileContext, profileErr := e.launchMCPProfile(ctx, task.ID, session, opts.StartAgent)
 			if profileErr != nil {
 				return nil, profileErr
 			}
@@ -3333,6 +3333,9 @@ func (e *Executor) configureExistingWorkspace(
 ) error {
 	if request == nil {
 		return errors.New("existing workspace launch request is required")
+	}
+	if err := e.prepareExistingWorkspaceBuiltin(ctx, executionID, request.McpProfile); err != nil {
+		return err
 	}
 	credentialReq := &LaunchAgentRequest{
 		TaskID:            task.ID,

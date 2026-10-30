@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"io"
 	"net/http"
 	"strconv"
@@ -1025,23 +1026,24 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID            string                    `json:"workspace_id"`
-	WorkflowID             string                    `json:"workflow_id"`
-	WorkflowStepID         string                    `json:"workflow_step_id"`
-	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
-	Title                  string                    `json:"title"`
-	Description            string                    `json:"description,omitempty"`
-	AutoTitle              bool                      `json:"auto_title,omitempty"`
-	Autopilot              bool                      `json:"autopilot,omitempty"`
-	Priority               string                    `json:"priority,omitempty"`
-	State                  *v1.TaskState             `json:"state,omitempty"`
-	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position               int                       `json:"position,omitempty"`
-	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
-	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
-	StartAgent             bool                      `json:"start_agent,omitempty"`
-	PrepareSession         bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	WorkspaceID            string                                `json:"workspace_id"`
+	WorkflowID             string                                `json:"workflow_id"`
+	WorkflowStepID         string                                `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string                     `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                                `json:"title"`
+	Description            string                                `json:"description,omitempty"`
+	AutoTitle              bool                                  `json:"auto_title,omitempty"`
+	Autopilot              bool                                  `json:"autopilot,omitempty"`
+	Priority               string                                `json:"priority,omitempty"`
+	State                  *v1.TaskState                         `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	Position               int                                   `json:"position,omitempty"`
+	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
+	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences  *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
+	StartAgent             bool                                  `json:"start_agent,omitempty"`
+	PrepareSession         bool                                  `json:"prepare_session,omitempty"`
+	AgentProfileID         string                                `json:"agent_profile_id,omitempty"`
 	// AssigneeAgentProfileID names an Office agent instance to seat as the
 	// task's runner at create time. Optional, and always workspace-scoped;
 	// see service.ValidateAssigneeAgentProfile for eligibility rules.
@@ -1277,6 +1279,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Metadata:                              metadata,
 		MCPServerIDs:                          body.MCPServerIDs,
 		Attachments:                           body.Attachments,
+		BuiltinMCPPreferences:                 body.BuiltinMCPPreferences,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,

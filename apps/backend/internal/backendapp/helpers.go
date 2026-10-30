@@ -1816,6 +1816,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 func configureMCPServices(
 	p routeParams,
 ) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	configureBuiltinMCPServices(p)
 	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
 	if !ok {
 		return nil, nil, nil
@@ -2724,6 +2725,7 @@ func registerMCPAndDebugRoutes(
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
+	wireBuiltinMCPActions(p)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)
 		p.log.Debug("In-session MCP dispatch scoped to task owner")

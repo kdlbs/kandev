@@ -268,6 +268,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
+	metadataJSON, err = r.retainBuiltinBindingTx(ctx, tx, running, metadataJSON)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, execution_profile_id, executor_id, runtime, status, idle_suspension_state, resumable, resume_token,

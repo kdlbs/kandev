@@ -40,6 +40,7 @@ type StreamCallbacks struct {
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
+	builtinActionResolver          BuiltinActionResolver
 	logger                         *logger.Logger
 	callbacks                      StreamCallbacks
 	reconciliationMu               sync.Mutex

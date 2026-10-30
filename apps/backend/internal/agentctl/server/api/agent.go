@@ -930,6 +930,9 @@ func (s *Server) sessionMCPServers(requested []types.McpServer) ([]types.McpServ
 	if err != nil {
 		return nil, err
 	}
+	if s.cfg.McpProfile != nil && s.cfg.McpProfile.BuiltinPackages != nil {
+		return s.builtinSessionMCPServers(servers)
+	}
 	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
 		return nil, errors.New("managed conversation MCP broker is unavailable")
 	}
@@ -950,6 +953,9 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 		ExecutionID: s.cfg.InstanceID,
 		AgentID:     s.cfg.AgentType,
 		StartedAt:   time.Now().UTC(),
+	}
+	if s.cfg.McpProfile != nil {
+		attempt.BuiltinPackages = s.cfg.McpProfile.BuiltinPackages.Clone()
 	}
 	s.procMgr.PublishMCPAttachmentAttempt(attempt)
 	if s.mcpServer != nil {
@@ -1023,19 +1029,20 @@ func mcpAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(mcpServer.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if mcpServer.Name == kandevMcpServerName {
+	if mcpServer.Name == kandevMcpServerName || mcpServer.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
 	return streams.MCPAttachmentEvidence{
-		AttemptID:  attemptID,
-		ServerName: mcpServer.Name,
-		Kind:       kind,
-		OccurredAt: time.Now().UTC(),
-		Source:     source,
-		Transport:  mcpServer.Type,
-		Target:     target,
-		ReasonCode: reasonCode,
-		Summary:    streams.SanitizeMCPErrorSummary(summary),
+		BuiltinPackage: mcpServer.BuiltinPackage,
+		AttemptID:      attemptID,
+		ServerName:     mcpServer.Name,
+		Kind:           kind,
+		OccurredAt:     time.Now().UTC(),
+		Source:         source,
+		Transport:      mcpServer.Type,
+		Target:         target,
+		ReasonCode:     reasonCode,
+		Summary:        streams.SanitizeMCPErrorSummary(summary),
 	}
 }
 

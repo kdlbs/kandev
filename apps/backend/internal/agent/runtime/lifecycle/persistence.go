@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"strconv"
 	"strings"
@@ -154,7 +155,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
 				// Current execution metadata owns claim state. Copying an absent
 				// claim or clock from a prior row would undo its removal.
 				continue
