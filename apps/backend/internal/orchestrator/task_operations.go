@@ -10088,6 +10088,12 @@ func (s *Service) DrainQueuedMessageIfAutoRun(ctx context.Context, sessionID str
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	return s.drainQueuedMessageIfAutoRunLocked(ctx, sessionID)
+}
+
+// drainQueuedMessageIfAutoRunLocked is DrainQueuedMessageIfAutoRun's body; the
+// caller holds sessionID's cancel-in-flight guard.
+func (s *Service) drainQueuedMessageIfAutoRunLocked(ctx context.Context, sessionID string) (bool, error) {
 	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return false, nil
 	}
