@@ -1,8 +1,16 @@
 ---
-spec: docs/specs/agents/requirements/agent-rich-output.md
+requirements:
+  - REQ-AGENTS-AGENT-RICH-OUTPUT-001
+  - REQ-AGENTS-AGENT-RICH-OUTPUT-002
+  - REQ-AGENTS-AGENT-RICH-OUTPUT-003
+system_design:
+  - ../../specs/agents/system-design/agent-rich-output.md
 created: 2026-08-14
 status: complete
 ---
+
+Requirements: [Agent rich output](../../specs/agents/requirements/agent-rich-output.md).
+
 
 # Implementation Plan: Agent Rich Output
 
@@ -145,6 +153,7 @@ replay from normalized tool-call input. CSV charts reuse the existing
 8. [x] [Real-agent ACP delivery](task-08-real-agent-acp-delivery.md)
 9. [x] [Compact MCP guidance](task-09-compact-mcp-guidance.md)
 10. [x] [Agent routing regression](task-10-agent-routing-regression.md)
+11. [x] [Zod catalog schema refresh](task-11-zod-catalog-schema-refresh.md)
 
 Execution is sequential in the primary conversation. No subagents are
 authorized.
