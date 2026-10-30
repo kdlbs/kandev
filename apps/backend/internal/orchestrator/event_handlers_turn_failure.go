@@ -23,10 +23,12 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	data = s.withPromptAttemptEvidence(data)
-	if data.DynamicRouteAttempt || s.activeContinuationFailureOwns(data.SessionID) {
-		// Continuation acceptance failures belong to the existing recovery
+	if data.DynamicRouteAttempt ||
+		(s.activeContinuationFailureOwns(data.SessionID) && !retainedCapacityFailureOwns(data)) {
+		// Non-capacity continuation failures belong to the existing recovery
 		// owner, which preserves continuation evidence and manual replay
-		// policy. Generic retained-turn settlement must not replace it.
+		// policy. Capacity episodes keep retained-turn settlement so their
+		// retry budget and capacity projection stay intact.
 		s.handleAgentFailed(ctx, data)
 		return
 	}
@@ -75,6 +77,11 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 	}
 }
 
+func retainedCapacityFailureOwns(data watcher.AgentEventData) bool {
+	classified := classifyKanbanFailure(data)
+	return classified != nil && classified.Code == routingerr.CodeModelCapacity
+}
+
 func (s *Service) activeContinuationFailureOwns(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -84,7 +91,13 @@ func (s *Service) activeContinuationFailureOwns(sessionID string) bool {
 		return false
 	}
 	entry, ok := value.(*transientRetryEntry)
-	return ok && entry != nil && entry.mode == recoveryModeContinue
+	if !ok || entry == nil || entry.mode != recoveryModeContinue {
+		return false
+	}
+	// Only saved-history continuation acceptance failures used to settle
+	// through handleAgentFailed. Capacity and agent-managed live continuations
+	// keep their retained-turn settlement and refusal reasons.
+	return entry.continuationPolicy == continuationPolicySavedHistoryRestore
 }
 
 func validRetainedTurnFailureEvent(data watcher.AgentEventData) bool {
