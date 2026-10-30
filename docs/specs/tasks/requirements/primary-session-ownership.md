@@ -55,12 +55,27 @@ return to an earlier conversation.
   become primary.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.4:** An automatic promotion shall
   not move queued messages between sessions or change an explicit session
-  selection.
+  selection, except under the opt-in hand-off of
+  AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5.
+- **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5:** When the
+  `features.terminalPrimaryQueueHandoff` flag is on and the primary role moves
+  off a session in a terminal state, the messages still queued on that session
+  shall move to the new primary through the existing queue transfer and drain
+  only when the new primary's Auto-run allows it. The hand-off shall keep the
+  new primary's Auto-run setting, including a change made while the hand-off
+  waits, and shall deliver to the session that holds the primary role when
+  the messages move, so successive or concurrent promotions do not strand
+  messages. The flag is off in every
+  shipped profile; with it off, queued messages keep their session target. A
+  live previous primary always keeps its queue. At transfer admission, a source
+  that recovered or still owns an unaccepted startup shall keep its queue; an
+  unreadable session or a recovery-blocked receiver shall refuse transfer
+  without changing either session's queue or Auto-run policy.
 
 ## Out of scope
 
-- Moving queued messages to the new primary session. Ordinary Send keeps its
-  session target under the
+- Moving queued messages to the new primary session by default. Ordinary Send
+  keeps its session target under the
   [plan comment decision](../../../decisions/2026-09-02-task-owned-plan-comments.md).
 - Workflow recipient selection, which
   [workflow session lifecycle](workflow-profile-session-lifecycle.md) owns.
