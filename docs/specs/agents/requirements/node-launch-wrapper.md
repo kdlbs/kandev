@@ -36,7 +36,7 @@ The design is in the [node launch wrapper system design](../system-design/node-l
 
 - **AC-AGENTS-NODEWRAP-001.1:** agentctl shall read the node wrapper only from the file named by `--node-launch-wrapper-file`. No API request, profile field, task input, or agent environment shall set, replace, or clear it.
 - **AC-AGENTS-NODEWRAP-001.2:** The file shall hold one wrapper envelope with version 1 and source `node`. An envelope with another source, unknown fields, an unknown or misplaced runtime reference, an empty or flag-like executable, or a non-absolute executable shall be refused. Source `profile` shall keep its present behavior and shall not accept source `node`.
-- **AC-AGENTS-NODEWRAP-001.3:** agentctl shall refuse to start when the file, the wrapper executable, or any directory above either is not owned by the owner or root, or is group- or world-writable. A sticky directory owned by root is accepted. The owner shall be configurable through `--node-launch-wrapper-owner-uid` and shall not be fixed to an account.
+- **AC-AGENTS-NODEWRAP-001.3:** agentctl shall refuse to start when the file, the wrapper executable, or any directory above either is not owned by the owner or root, or is group- or world-writable. A sticky bit grants no exception. The owner shall be configurable through `--node-launch-wrapper-owner-uid` and shall not be fixed to an account.
 - **AC-AGENTS-NODEWRAP-001.4:** `--require-node-launch-wrapper` without a file shall refuse startup. A named file that is missing or invalid shall refuse startup whether or not it is required.
 
 ### REQ-AGENTS-NODEWRAP-002: Outermost composition
@@ -71,10 +71,20 @@ The design is in the [node launch wrapper system design](../system-design/node-l
 - **AC-AGENTS-NODEWRAP-004.2:** No route shall return the wrapper path, arguments, or file contents.
 - **AC-AGENTS-NODEWRAP-004.3:** The capability shall mean only that the wrapper is applied. It shall not claim confinement, as in AC-AGENTS-WRAPPERS-005.3.
 
+### REQ-AGENTS-NODEWRAP-005: Backend passthrough fails closed
+
+**Intent:** An agent launch that cannot be wrapped never runs bare on a node that requires wrapping.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-NODEWRAP-005.1:** The kandev backend's own passthrough runner runs in the backend process and cannot apply an agentctl node wrapper. Its use is outside the wrapper contract for that process.
+- **AC-AGENTS-NODEWRAP-005.2:** When the agentctl the backend adopted advertises `node-launch-wrapper.v1`, the backend's passthrough runner shall refuse every agent launch with an error that says it cannot apply the wrapper, and shall start no process. User shells are not agent launches.
+- **AC-AGENTS-NODEWRAP-005.3:** When that capability is absent, the runner shall behave as before.
+- **AC-AGENTS-NODEWRAP-005.4:** The capability is the only signal the backend has. A node wrapper that the backend did not learn about through an adopted agentctl is not detected, and this contract does not claim to cover it.
+
 ## Exclusions
 
 No per-task or per-profile override, automatic permission grant, provider-name exception, sandbox plugin API, approval transport, or policy learning ships with this contract.
 Processes that are not agent launches are outside it: scripts and user processes, user shells, language servers, code-server, ACP client terminals, and MCP server processes.
-The kandev backend's own passthrough runner runs outside agentctl and is outside it.
 A deployment that must confine those paths needs a separate contract.
 No new rendered controls or layout changes are required.

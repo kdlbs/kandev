@@ -7,6 +7,7 @@ requirements:
   - REQ-AGENTS-NODEWRAP-002
   - REQ-AGENTS-NODEWRAP-003
   - REQ-AGENTS-NODEWRAP-004
+  - REQ-AGENTS-NODEWRAP-005
 ---
 
 # Node launch wrapper system design
@@ -26,6 +27,7 @@ It adds no provider registry entry, plugin API, or profile field.
 | REQ-AGENTS-NODEWRAP-002 | Composition |
 | REQ-AGENTS-NODEWRAP-003 | Launch coverage, Failure modes |
 | REQ-AGENTS-NODEWRAP-004 | Identity |
+| REQ-AGENTS-NODEWRAP-005 | Launch coverage, Backend passthrough runner |
 
 ## Configuration
 
@@ -58,7 +60,7 @@ It never falls back to an unwrapped launch.
 1. The path is resolved with symlinks evaluated. The checks below apply to the resolved path.
 2. The file is opened once. Owner and mode come from `fstat` on that descriptor, and the content is read from it, so the checked file is the read file.
 3. The file shall be a regular file owned by the owner, with no group or world write bit.
-4. Every directory above the file shall be owned by the owner or root and shall not be group- or world-writable. A sticky directory owned by root is accepted, which admits the system temporary directory.
+4. Every directory above the file shall be owned by the owner or root and shall not be group- or world-writable. No sticky exception exists: a sticky bit does not excuse a group- or world-writable directory. Production wrapper paths such as `/opt/...` are never sticky, so the system temporary directory is not a valid location.
 5. The executable at `argv[0]` shall be a regular executable file and meet rules 3 and 4 after symlink resolution.
 6. The envelope shall decode strictly and pass token validation.
 
@@ -100,10 +102,17 @@ Every place agentctl starts an agent goes through `PrepareNode`.
 | Runtime observation | `collectRuntimeObservation` | Skipped while a node wrapper is active, as for a profile wrapper, so no agent-adjacent executable runs unwrapped |
 
 Not agent launches, and not covered: scripts and user processes (`ProcessRunner.Start`, `StartPiped`), user shells, ACP client terminals, language servers, code-server, git and GitHub helpers, MCP server processes.
-The kandev backend's own `InteractiveRunner` in the standalone executor runs in the backend process and cannot read agentctl flags.
-A deployment that uses it for passthrough shall not rely on this feature for that path.
+The kandev backend's own `InteractiveRunner` is covered by a fail-closed rule, described next.
 
 A launch seam is refused, not left unwrapped, when a wrapper is required and not loaded.
+
+## Backend passthrough runner
+
+The standalone executor's `InteractiveRunner` runs in the backend process and cannot read agentctl flags or apply a node wrapper.
+The backend has no configuration for a node wrapper. Its only signal is the capability set of the agentctl it adopted at startup: `node-launch-wrapper.v1` is present only while that agentctl has a wrapper loaded.
+When the capability is present, `backendapp` marks the runner with `SetNodeLaunchWrapper(Node{Required: true})`. `InteractiveRunner.Start` then refuses any non-user-shell request that carries no wrapper of its own, with an error that names the missing capability and starts no process. All passthrough starts, including restart and resume, go through `Start`.
+This is a fail-closed rule, not coverage: the runner never applies a wrapper.
+Gap: when the backend has no adopted agentctl, for example it launched its own child without the node flags, or the node wrapper was added after adoption, no signal exists and the runner behaves as before. No new host contract is introduced for that case.
 
 ## Failure modes
 
@@ -113,6 +122,7 @@ A launch seam is refused, not left unwrapped, when a wrapper is required and not
 | File missing, unreadable, not owned, writable, bad JSON, wrong source, bad token | agentctl refuses to start |
 | Required, wrapper absent from configuration at launch | Launch refused, no child |
 | Wrapper executable missing or not executable at launch, work directory missing | Launch refused with the existing generic classification, no child |
+| Backend passthrough runner, peer advertises the capability | Launch refused, no child |
 | Wrapper fails or exits non-zero | Treated as a process failure with the existing sanitized messages, no unwrapped retry |
 
 Messages and logs name the stage and never include the wrapper argv or wrapper stderr.
