@@ -67,7 +67,17 @@ go test ./internal/agent/runtime/lifecycle -run 'TestManagerExecuteInference|Tes
 go test ./internal/agent/runtime/lifecycle -run '^TestRunOwnerRegistrationPersistsWithoutTaskSession$'  pass
 go test ./internal/backendapp -run 'Inference|Capacity'  pass
 go test ./internal/agentctl/server/process -run 'TestNewManager|TestManagerJournalClosesWhenTeardownDrainExpires'  pass
+go test ./internal/system/sessioncapacity -run '^TestInferenceBindingStoreRoundTripsExactIdentity$'  pass
+go test ./internal/orchestrator -run '^TestInferenceAdmissionLimitClassificationAndExactOwner$'  pass
+go test ./internal/backendapp -run '^TestNativeInferenceRoot|^TestInferenceRefreshReadFailureKeepsHeldBindingAndFailsClosed$'  pass
+go test ./internal/agentctl/server/utility -run '^TestAttempt|^TestRetainedHandoff'  pass
 ```
+
+Persistent regression cases live in existing test files:
+`sessioncapacity/store_test.go` (exact binding identity), `orchestrator/ceiling_release_test.go`
+(admission limit classification and exact owner), `backendapp/message_queue_settings_test.go`
+(root settlement plus read-failure isolation), and `agentctl/server/utility/runtime_observation_test.go`
+(child attempt prepare/consume/cancel and retained-handoff identity/active/continuity guards).
 
 Disposable overlay proofs outside normal collection also pass:
 
