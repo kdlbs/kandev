@@ -177,6 +177,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: InternalConfigHomeFileEnv, class: "exclusion"},
 		{envVar: InternalAgentctlStartupConfigEnv, class: "exclusion"},
 		{envVar: "KANDEV_LAUNCHER_PARENT_PID", class: "exclusion"},
+		{envVar: "KANDEV_INTERNAL_WINDOWS_JOB_NAME", class: "exclusion"},
 		{envVar: "KANDEV_BACKEND_PID_FILE", class: "exclusion"},
 		{envVar: "KANDEV_DESKTOP_HEALTH_TOKEN", class: "exclusion"},
 		{envVar: "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", class: "exclusion"},
