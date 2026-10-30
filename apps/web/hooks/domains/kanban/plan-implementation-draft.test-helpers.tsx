@@ -474,7 +474,8 @@ export function setupTransport() {
     onConnectionStatus: subscribe,
     onRawSessionEvent: subscribe,
     registerCoreSessionRecovery: subscribe,
-    subscribeUser: subscribe,
+    subscribeUser: noop,
+    unsubscribeUser: noop,
   } as unknown as WebSocketClient);
   setupFetch(unexpected, serverPlanMode);
   return {
