@@ -60,9 +60,10 @@ func writeExecutable(t *testing.T, dir, name, body string) string {
 
 func secureDir(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
+	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	dir = filepath.Join(dir, "node")
+	trustBoundaryForTest(t, root)
+	dir := filepath.Join(root, "node")
 	require.NoError(t, os.Mkdir(dir, 0o755))
 	require.NoError(t, os.Chmod(dir, 0o755))
 	return dir

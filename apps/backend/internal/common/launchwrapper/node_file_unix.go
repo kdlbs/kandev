@@ -12,9 +12,16 @@ import (
 
 const maxNodeFileBytes = 64 << 10
 
+// nodeTrustBoundary names a directory whose own chain is trusted, so ancestor
+// checks stop below it. Production never changes it: the empty default checks
+// every ancestor up to the filesystem root. Tests replace it to treat their
+// temporary directory as the root of trust.
+var nodeTrustBoundary = func() string { return "" }
+
 // LoadNodeFile reads a node wrapper file and refuses anything an unprivileged
 // party could have altered. ownerUID < 0 means the process's effective user.
-// Root also counts as an owner of directories above the file.
+// Root also counts as an owner of directories above the file. No directory may
+// be group or world writable; a sticky bit does not excuse it.
 func LoadNodeFile(path string, ownerUID int) (Spec, error) {
 	if ownerUID < 0 {
 		ownerUID = os.Geteuid()
@@ -75,7 +82,7 @@ func resolveTrusted(path string, ownerUID int) (string, error) {
 		return "", err
 	}
 	for _, p := range []string{abs, resolved} {
-		for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
+		for dir := filepath.Dir(p); dir != nodeTrustBoundary(); dir = filepath.Dir(dir) {
 			dirInfo, err := os.Stat(dir)
 			if err != nil {
 				return "", nodeFileError("stat directory", err)
@@ -100,8 +107,7 @@ func checkOwnedNotWritable(info os.FileInfo, ownerUID int, directory bool) error
 	if uid != ownerUID && (!directory || uid != 0) {
 		return fmt.Errorf("%w: unexpected owner", ErrNodeFile)
 	}
-	stickyRootDir := directory && uid == 0 && info.Mode()&os.ModeSticky != 0
-	if info.Mode().Perm()&0o022 != 0 && !stickyRootDir {
+	if info.Mode().Perm()&0o022 != 0 {
 		return fmt.Errorf("%w: writable by group or others", ErrNodeFile)
 	}
 	return nil

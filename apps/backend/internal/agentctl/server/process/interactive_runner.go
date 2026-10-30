@@ -126,6 +126,10 @@ type InteractiveRunner struct {
 	statusCallback       StatusCallback
 	stateCallback        AgentStateCallback
 
+	// node is set when this runner's owner needs a node wrapper it cannot
+	// apply itself. Agent launches without their own wrapper are then refused.
+	node launchwrapper.Node
+
 	mu        sync.RWMutex
 	processes map[string]*interactiveProcess
 
@@ -209,3 +213,8 @@ func (r *InteractiveRunner) HasObservedFirstIdle(processID string) bool {
 		return false
 	}
 }
+
+// SetNodeLaunchWrapper records that a node wrapper governs this runner's host.
+// A runner whose owner cannot apply it fails closed for agent launches: a
+// request that carries no wrapper of its own is refused rather than run bare.
+func (r *InteractiveRunner) SetNodeLaunchWrapper(node launchwrapper.Node) { r.node = node }

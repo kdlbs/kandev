@@ -116,6 +116,9 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 	if req.NodeLaunchWrapper.Required && req.NodeLaunchWrapper.Spec.IsZero() {
 		return nil, launchwrapper.ErrNodeRequired
 	}
+	if r.node.Required && !req.IsUserShell && req.NodeLaunchWrapper.Spec.IsZero() {
+		return nil, fmt.Errorf("%w: this runner cannot apply it", launchwrapper.ErrNodeRequired)
+	}
 	id := uuid.New().String()
 	if req.ProcessID != "" {
 		id = req.ProcessID
