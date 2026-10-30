@@ -1,4 +1,6 @@
 import { type Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import {
   waitForActiveQuickChatForegroundActivity,
@@ -11,6 +13,7 @@ import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
 import {
   openQuickChatSetup,
+  selectAgentIfNeeded,
   startQuickChatFromSetup,
   sendQuickChatMessage,
   waitForQuickChatDirectInput,
@@ -19,8 +22,14 @@ import {
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 
-async function openSettledQuickChat(page: Page, apiClient: ApiClient, navigateHome = true) {
+async function openSettledQuickChat(
+  page: Page,
+  apiClient: ApiClient,
+  navigateHome = true,
+  preferredAgentName?: string,
+) {
   const dialog = await openQuickChatSetup(page, navigateHome);
+  if (preferredAgentName) await selectAgentIfNeeded(dialog, page, preferredAgentName);
   const started = await startQuickChatFromSetup(dialog, page, "/e2e:simple-message");
   await waitForAgentMessage(
     apiClient,
@@ -43,9 +52,26 @@ function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
+let releaseProfileId: string | undefined;
+let releaseFilePath: string | undefined;
+
 test.describe("Quick Chat cancellation palette and composer", () => {
   test.describe.configure({ retries: 0 });
-  test.afterEach(async ({ backend }, testInfo) => {
+  test.afterEach(async ({ backend, apiClient }, testInfo) => {
+    try {
+      try {
+        // Release any held cancel first so a mid-test failure cannot leave the mock blocked.
+        if (releaseFilePath) fs.writeFileSync(releaseFilePath, "release");
+      } finally {
+        if (releaseProfileId) await apiClient.deleteAgentProfile(releaseProfileId, true);
+      }
+    } finally {
+      releaseProfileId = undefined;
+      if (releaseFilePath) {
+        fs.rmSync(releaseFilePath, { force: true });
+        releaseFilePath = undefined;
+      }
+    }
     if (testInfo.status === testInfo.expectedStatus) return;
     await testInfo.attach("quick-chat-cancellation-backend.log", {
       path: backend.logPath,
@@ -133,8 +159,24 @@ test.describe("Quick Chat cancellation palette and composer", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+    // Buffer settlement frames from the cancelled Quick Chat session so the
+    // pending/disabled observation cannot be raced by the prompt release.
+    const cancellation = await holdCancellationSettlement(testPage);
+    // Release the mock cancel hold from the exact cancelled session instead of
+    // letting the 8s hold outlive agentctl's acknowledgement window.
+    releaseFilePath = path.join(backend.tmpDir, "quick-chat-cancel-release");
+    const { agents } = await apiClient.listAgents();
+    const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+    if (!mockAgent) throw new Error("The mock agent is unavailable");
+    const releaseProfileName = `Quick Chat cancel release ${Date.now()}`;
+    const releaseProfile = await apiClient.createAgentProfile(mockAgent.id, releaseProfileName, {
+      model: "mock-fast",
+      env_vars: [{ key: "E2E_MOCK_AGENT_CANCEL_RELEASE_FILE", value: releaseFilePath }],
+    });
+    releaseProfileId = releaseProfile.id;
     const { session } = await seedRunningGeneratingSession(
       testPage,
       apiClient,
@@ -149,7 +191,10 @@ test.describe("Quick Chat cancellation palette and composer", () => {
       testPage,
       apiClient,
       false,
+      releaseProfileName,
     );
+    const openedSession = await apiClient.getTaskSession(quickSessionId);
+    expect(openedSession.session.agent_profile_id).toBe(releaseProfile.id);
     const acceptanceMarker = "Quick Chat palette cancellation accepted";
     await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
     await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
@@ -157,16 +202,22 @@ test.describe("Quick Chat cancellation palette and composer", () => {
       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).toBeVisible({ timeout: 15_000 });
 
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${modifier}+k`);
-    const palette = commandDialog(testPage);
-    await expect(palette).toBeVisible({ timeout: 10_000 });
-    await palette.getByRole("combobox").fill("cancel");
-    const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
-    await expect(cancelOption).toHaveCount(1);
-    await cancelOption.click();
+    try {
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await testPage.keyboard.press(`${modifier}+k`);
+      const palette = commandDialog(testPage);
+      await expect(palette).toBeVisible({ timeout: 10_000 });
+      await palette.getByRole("combobox").fill("cancel");
+      const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
+      await expect(cancelOption).toHaveCount(1);
+      cancellation.arm(quickSessionId);
+      await cancelOption.click();
+      fs.writeFileSync(releaseFilePath!, "release");
 
-    await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+      await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    } finally {
+      cancellation.release();
+    }
     await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
