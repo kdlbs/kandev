@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,6 +38,31 @@ func stringArrayArg(req mcp.CallToolRequest, key string) []string {
 	default:
 		return nil
 	}
+}
+
+// workflowAgentOverridesArg reads the create_task workflow_agent_overrides
+// argument losslessly: an omitted, null, or empty object means no overrides,
+// but a non-object or a non-string value is a validation error rather than a
+// silently dropped entry, so the backend never sees a partial selection built
+// from a malformed input.
+func workflowAgentOverridesArg(req mcp.CallToolRequest) (map[string]string, error) {
+	raw, present := req.GetArguments()["workflow_agent_overrides"]
+	if !present || raw == nil {
+		return nil, nil
+	}
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("workflow_agent_overrides must be an object mapping source profile IDs to replacement profile IDs")
+	}
+	out := make(map[string]string, len(obj))
+	for name, value := range obj {
+		str, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("workflow_agent_overrides[%q] must be a string", name)
+		}
+		out[name] = str
+	}
+	return out, nil
 }
 
 // addTaskDependencyHandler backs add_task_dependency_kandev.

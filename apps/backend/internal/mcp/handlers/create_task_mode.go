@@ -3,11 +3,14 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/authz"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
@@ -23,6 +26,7 @@ type mcpCreateTaskRequest struct {
 	WorkspaceID            string               `json:"workspace_id"`
 	WorkflowID             string               `json:"workflow_id"`
 	WorkflowStepID         string               `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string    `json:"workflow_agent_overrides"`
 	WorkspaceMode          string               `json:"workspace_mode"`
 	Title                  string               `json:"title"`
 	Description            string               `json:"description"`
@@ -375,6 +379,179 @@ func (h *Handlers) mcpCreateTaskReference(ctx context.Context, id string) (*mode
 
 func isMCPOfficeWorkspace(workspace *models.Workspace) bool {
 	return workspace != nil && workspace.OfficeWorkflowID != ""
+}
+
+// preflightMCPFoundCreateTask returns an already-held external_id before any
+// create-specific resolution (override normalization, profile/step lookup,
+// launch metadata) runs, per the external-id-idempotency request-ordering
+// contract: lookup precedes remaining-request validation, and Found wins over
+// disabled profiles, changed steps, and stale launch metadata. It mirrors
+// Service.CreateTask's order (TaskWrite authorization, external_id
+// normalization, reserved-prefix refusal, then the Find) explicitly here
+// because the shared lookup (GetTaskByExternalID) only applies read-scope
+// authorization and ID normalization: without the explicit steps a
+// coordinator-proposal identity would return Found through this preflight
+// while CreateTask refuses it. The MCP Found isolation check
+// (validateMCPFoundCreateTask) still applies, and the response matches the
+// post-CreateTask Found branch below, without side effects.
+//
+// handled=false (nil response) means "no identity held": the caller continues
+// to the normal create path, where CreateTask repeats the lookup and its
+// unique-violation backstop still protects the race. A lookup error that is
+// not a genuine miss surfaces with CreateTask's own meaning instead of being
+// treated as a miss.
+func (h *Handlers) preflightMCPFoundCreateTask(
+	ctx context.Context,
+	msg *ws.Message,
+	req *mcpCreateTaskRequest,
+	admission mcpCreateTaskAdmission,
+) (*ws.Message, bool) {
+	if h.taskSvc == nil {
+		return nil, false
+	}
+	if err := h.taskSvc.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
+		return h.preflightMCPAuthorizationFailure(msg, err)
+	}
+	externalID, err := service.NormalizeExternalID(req.ExternalID)
+	if err != nil {
+		return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeValidation, err.Error())
+	}
+	if strings.HasPrefix(externalID, service.ReservedExternalIDPrefixCoordinatorProposal) {
+		return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeValidation, fmt.Sprintf("%s: external_id may not use the reserved prefix %q", service.ErrExternalIDInvalid, service.ReservedExternalIDPrefixCoordinatorProposal))
+	}
+	found, lookupErr := h.taskSvc.GetTaskByExternalID(ctx, req.WorkspaceID, externalID)
+	if lookupErr != nil {
+		return h.preflightMCPLookupFailure(msg, lookupErr)
+	}
+	if err := h.validateMCPFoundCreateTask(ctx, req, found); err != nil {
+		code := mcpCreateTaskAdmissionErrorCode(err)
+		message := mcpCreateTaskAdmissionErrorMessage(err)
+		h.logMCPCreateAdmissionRejection(ctx, code, message)
+		return mcpCreateTaskErrorResponse(msg, code, message)
+	}
+	return mcpFoundCreateTaskResponse(msg, found, admission)
+}
+
+// preflightMCPAuthorizationFailure maps the preflight TaskWrite authorization
+// failure with CreateTask's meaning: a forbidden target stays forbidden,
+// WorkspaceNotFound stays not-found, and any other storage failure surfaces
+// through the create error classification instead of being reshaped.
+func (h *Handlers) preflightMCPAuthorizationFailure(
+	msg *ws.Message,
+	err error,
+) (*ws.Message, bool) {
+	if service.IsForbidden(err) {
+		return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeForbidden, "target workspace is not writable")
+	}
+	if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		return h.preflightMCPFoundError(msg, err)
+	}
+	return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeNotFound, "task not found")
+}
+
+// preflightMCPLookupFailure maps the external-ID lookup outcome: a genuine miss
+// continues the normal create path, not-found and invalid-ID failures keep
+// their own meaning, and any other storage failure interrupts with its own
+// meaning instead of being treated as a miss.
+func (h *Handlers) preflightMCPLookupFailure(
+	msg *ws.Message,
+	err error,
+) (*ws.Message, bool) {
+	switch {
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		return nil, false
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound), service.IsForbidden(err):
+		return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeNotFound, "task not found")
+	case errors.Is(err, service.ErrExternalIDInvalid):
+		return mcpCreateTaskErrorResponse(msg, ws.ErrorCodeValidation, err.Error())
+	default:
+		return h.preflightMCPFoundError(msg, err)
+	}
+}
+
+func mcpCreateTaskErrorResponse(msg *ws.Message, code, message string) (*ws.Message, bool) {
+	resp, respErr := ws.NewError(msg.ID, msg.Action, code, message, nil)
+	if respErr != nil {
+		return nil, false
+	}
+	return resp, true
+}
+
+func mcpFoundCreateTaskResponse(
+	msg *ws.Message,
+	found *models.Task,
+	admission mcpCreateTaskAdmission,
+) (*ws.Message, bool) {
+	resp, respErr := ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+		TaskDTO:          dto.FromTask(found),
+		Deduplicated:     true,
+		CreationComplete: found.ExternalIDSettledAt != nil,
+		ParentResolution: admission.parentResolution.forOutcome(false),
+	})
+	if respErr != nil {
+		return nil, false
+	}
+	return resp, true
+}
+
+// recoverMCPFoundAfterPreCreateFailure re-reads a held external_id after a
+// pre-create failure (for example an override validation that drifted after
+// the preflight miss), following the service lookup/backstop contract: a hit
+// returns the existing task as Found with the MCP isolation check, a genuine
+// miss lets the original error surface, and any other lookup outcome keeps
+// the original error. It performs no writes, settlement, or launch.
+func (h *Handlers) recoverMCPFoundAfterPreCreateFailure(
+	ctx context.Context,
+	msg *ws.Message,
+	req *mcpCreateTaskRequest,
+	admission mcpCreateTaskAdmission,
+) (*ws.Message, bool) {
+	if h.taskSvc == nil || strings.TrimSpace(req.ExternalID) == "" {
+		return nil, false
+	}
+	externalID, err := service.NormalizeExternalID(req.ExternalID)
+	if err != nil || strings.HasPrefix(externalID, service.ReservedExternalIDPrefixCoordinatorProposal) {
+		return nil, false
+	}
+	found, lookupErr := h.taskSvc.GetTaskByExternalID(ctx, req.WorkspaceID, externalID)
+	if lookupErr != nil {
+		return nil, false
+	}
+	if err := h.validateMCPFoundCreateTask(ctx, req, found); err != nil {
+		code := mcpCreateTaskAdmissionErrorCode(err)
+		message := mcpCreateTaskAdmissionErrorMessage(err)
+		h.logMCPCreateAdmissionRejection(ctx, code, message)
+		return mcpCreateTaskErrorResponse(msg, code, message)
+	}
+	return mcpFoundCreateTaskResponse(msg, found, admission)
+}
+
+// preflightMCPFoundError surfaces a preflight storage/authorization failure
+// with the same meaning the CreateTask failure branch gives it: it reuses
+// classifyCreateTaskError, carries the error text on non-internal codes, and
+// attaches the typed executor-profile detail. It never reshapes the failure
+// into not-found and never treats it as a miss.
+func (h *Handlers) preflightMCPFoundError(
+	msg *ws.Message,
+	err error,
+) (*ws.Message, bool) {
+	if h.logger != nil {
+		h.logger.Error("MCP task creation preflight lookup failed", zap.Error(err))
+	}
+	code := classifyCreateTaskError(err)
+	message := "Failed to create task"
+	if code != ws.ErrorCodeInternalError {
+		message = err.Error()
+	}
+	var details map[string]interface{}
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		details = map[string]interface{}{"error_code": repoerrors.ExecutorProfileNotFoundCode}
+	}
+	resp, respErr := ws.NewError(msg.ID, msg.Action, code, message, details)
+	if respErr != nil {
+		return nil, false
+	}
+	return resp, true
 }
 
 func mcpCreateTaskAdmissionErrorCode(err error) string {

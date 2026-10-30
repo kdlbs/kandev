@@ -314,6 +314,9 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrTaskTitleTooLong) {
 		return true
 	}
+	if errors.Is(err, service.ErrExplicitAgentProfileRequired) {
+		return true
+	}
 	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {
 		return true
 	}
