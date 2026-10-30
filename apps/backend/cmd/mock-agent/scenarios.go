@@ -70,6 +70,9 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"turn-history-integrity":           scenarioTurnHistoryIntegrity,
 	"turn-history-conflict":            scenarioTurnHistoryConflict,
 	"turn-history-conflict-setup":      scenarioTurnHistoryConflictSetup,
+	"turn-title-rename-only":           scenarioTurnTitleRenameOnly,
+	"turn-title-rename-edit":           scenarioTurnTitleRenameEdit,
+	"turn-title-rename-switch":         scenarioTurnTitleRenameSwitch,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup

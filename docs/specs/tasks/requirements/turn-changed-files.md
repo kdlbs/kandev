@@ -86,6 +86,10 @@ Older captures retain an explicit repository-snapshot label because they lack th
   Other checkouts with valid comparisons shall remain usable.
 - **AC-TASKS-TURN-CHANGES-002.13:** Legacy captures shall retain their existing files and counts with an explicit repository-snapshot label.
   An upgrade shall not manufacture missing historical evidence from the current checkout or silently replace retained comparisons.
+- **AC-TASKS-TURN-CHANGES-002.14:** When Kandev verifies its title-driven generated-branch rename and other history checks pass, the turn comparison shall retain continuity.
+  An unchanged tree shall produce a successful zero-file comparison. Local file edits shall retain their correct files, counts, and historical content.
+- **AC-TASKS-TURN-CHANGES-002.15:** When branch continuity lacks proof, the affected checkout shall report unavailable history.
+  A genuine branch switch shall remain unavailable even when both branches point to the same commit and contain identical trees.
 
 ### REQ-TASKS-TURN-CHANGES-003: Ordered capture lifecycle
 
@@ -159,6 +163,7 @@ Older captures retain an explicit repository-snapshot label because they lack th
 - [Unified compaction contract](../../system-page/requirements/tool-payload-retention.md)
 - [Preservation retry plan](../../../plans/turn-change-preservation-retry/plan.md)
 - [History integrity fix plan](../../../plans/turn-change-history-integrity/plan.md)
+- [Generated-branch continuity fix plan](../../../plans/turn-change-title-branch-continuity/plan.md)
 - [Presentation requirements](turn-changed-files-presentation.md)
 - [Actor attribution](human-assignee.md)
 

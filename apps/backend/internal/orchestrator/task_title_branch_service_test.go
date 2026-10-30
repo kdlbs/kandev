@@ -20,9 +20,10 @@ type titleBranchRuntimeStub struct {
 }
 
 type titleBranchRuntimeCall struct {
-	sessionID string
-	newName   string
-	repo      string
+	sessionID      string
+	expectedBranch string
+	newName        string
+	repo           string
 }
 
 type failingTitleBranchSnapshotStore struct {
@@ -38,17 +39,13 @@ func (s *failingTitleBranchSnapshotStore) UpdateTaskEnvironmentRepo(context.Cont
 	return s.err
 }
 
-func (s *titleBranchRuntimeStub) RenameBranchForSession(_ context.Context, sessionID, newName, repo string) (*agentctlclient.GitOperationResult, error) {
-	s.calls = append(s.calls, titleBranchRuntimeCall{sessionID: sessionID, newName: newName, repo: repo})
+func (s *titleBranchRuntimeStub) RenameGeneratedBranchForSession(_ context.Context, sessionID, expectedBranch, newName, repo string, primary bool) (*agentctlclient.GitOperationResult, error) {
+	s.calls = append(s.calls, titleBranchRuntimeCall{sessionID: sessionID, expectedBranch: expectedBranch, newName: newName, repo: repo})
+	s.primaryCalls = append(s.primaryCalls, primary)
 	if s.err != nil {
 		return nil, s.err
 	}
 	return &agentctlclient.GitOperationResult{Success: true, Operation: "rename_branch"}, nil
-}
-
-func (s *titleBranchRuntimeStub) RenameBranchForSessionWithPrimary(ctx context.Context, sessionID, newName, repo string, primary bool) (*agentctlclient.GitOperationResult, error) {
-	s.primaryCalls = append(s.primaryCalls, primary)
-	return s.RenameBranchForSession(ctx, sessionID, newName, repo)
 }
 
 func TestRenameGeneratedBranchesForTaskTitleUsesFinalTitleAndPersistsSnapshots(t *testing.T) {
@@ -90,7 +87,8 @@ func TestRenameGeneratedBranchesForTaskTitleUsesFinalTitleAndPersistsSnapshots(t
 	require.Len(t, result.Renamed, 1)
 	require.Equal(t, "feature/final-title", result.Renamed[0].To)
 	require.Equal(t, []titleBranchRuntimeCall{{
-		sessionID: "session-title-branch", newName: "feature/final-title", repo: "",
+		sessionID: "session-title-branch", expectedBranch: "feature/provisional",
+		newName: "feature/final-title", repo: "",
 	}}, runtime.calls)
 	require.Equal(t, []bool{true}, runtime.primaryCalls)
 
@@ -250,7 +248,7 @@ func TestRenameGeneratedBranchesForTaskTitleScopesMixedRepositories(t *testing.T
 	require.Equal(t, "repo-mixed-backend", result.Renamed[0].RepositoryID)
 	require.Len(t, result.Preserved, 1)
 	require.Equal(t, "repo-mixed-frontend", result.Preserved[0].RepositoryID)
-	require.Equal(t, []titleBranchRuntimeCall{{sessionID: "session-mixed-branches", newName: "feature/final-title", repo: "backend"}}, runtime.calls)
+	require.Equal(t, []titleBranchRuntimeCall{{sessionID: "session-mixed-branches", expectedBranch: "feature/provisional-backend", newName: "feature/final-title", repo: "backend"}}, runtime.calls)
 	require.Equal(t, []bool{true}, runtime.primaryCalls)
 }
 
@@ -297,7 +295,7 @@ func TestRenameGeneratedBranchesForTaskTitleScopesOwnerSession(t *testing.T) {
 	result, err := service.RenameGeneratedBranchesForTaskTitle(ctx, "task-owner-scope", "session-owner-scope", "Final title")
 	require.NoError(t, err)
 	require.Equal(t, TitleBranchStatusRenamed, result.Status)
-	require.Equal(t, []titleBranchRuntimeCall{{sessionID: "session-owner-scope", newName: "feature/final-title", repo: ""}}, runtime.calls)
+	require.Equal(t, []titleBranchRuntimeCall{{sessionID: "session-owner-scope", expectedBranch: "feature/owner-provisional", newName: "feature/final-title", repo: ""}}, runtime.calls)
 
 	// Both sessions share the task environment, so both observe the renamed
 	// branch — the rename is scoped to the environment, not per session.

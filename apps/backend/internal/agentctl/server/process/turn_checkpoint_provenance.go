@@ -51,6 +51,7 @@ func (g *GitOperator) captureTurnCheckpointProvenance(
 		Unborn:              unborn,
 		HeadCommitOID:       headCommit,
 		HeadRef:             headRef,
+		HeadBindingID:       g.observeTurnCheckpointBinding(headRef),
 		OperationState:      turnCheckpointOperationState(gitDir),
 		TreeMergeCapability: g.turnCheckpointTreeMergeCapability(ctx),
 		CapturedAt:          time.Now().UTC(),
@@ -234,6 +235,7 @@ func (g *GitOperator) verifyTurnCheckpointProvenance(
 		return err
 	}
 	if after.HeadCommitOID != before.HeadCommitOID || after.HeadRef != before.HeadRef ||
+		after.HeadBindingID != before.HeadBindingID ||
 		after.Unborn != before.Unborn || after.TargetCommitOID != before.TargetCommitOID ||
 		after.MergeBaseOID != before.MergeBaseOID || after.TargetStatus != before.TargetStatus ||
 		after.OperationState != before.OperationState {

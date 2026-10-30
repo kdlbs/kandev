@@ -470,6 +470,12 @@ branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch 
 before the title call is preserved as well. Multi-repository tasks apply these rules independently to
 each repository, and a Git or snapshot persistence failure does not undo the accepted title.
 
+Kandev verifies the recorded generated branch at the Git boundary before it renames anything. The
+current turn's change comparison keeps its original interval across that verified rename. A
+rename-only turn therefore stays a zero-file result, and local edits keep their captured files and
+historical content. A manual or external branch switch is not a verified rename, so its history
+remains unavailable.
+
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
 ### Deleting a task with local worktree changes

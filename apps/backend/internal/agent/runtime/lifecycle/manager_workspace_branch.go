@@ -46,7 +46,7 @@ func (m *Manager) RenameBranchForSession(
 	newName string,
 	repo string,
 ) (*agentctlclient.GitOperationResult, error) {
-	return m.renameBranchForSession(ctx, sessionID, newName, repo, repo == "")
+	return m.renameBranchForSession(ctx, sessionID, "", newName, repo, repo == "")
 }
 
 // RenameBranchForSessionWithPrimary is the multi-repository variant of
@@ -60,12 +60,30 @@ func (m *Manager) RenameBranchForSessionWithPrimary(
 	repo string,
 	primary bool,
 ) (*agentctlclient.GitOperationResult, error) {
-	return m.renameBranchForSession(ctx, sessionID, newName, repo, primary)
+	return m.renameBranchForSession(ctx, sessionID, "", newName, repo, primary)
+}
+
+// RenameGeneratedBranchForSession performs Kandev's verified generated-branch
+// rename. expectedBranch is the branch recorded by the title handoff; agentctl
+// refuses the mutation unless that branch is still checked out.
+func (m *Manager) RenameGeneratedBranchForSession(
+	ctx context.Context,
+	sessionID string,
+	expectedBranch string,
+	newName string,
+	repo string,
+	primary bool,
+) (*agentctlclient.GitOperationResult, error) {
+	if expectedBranch == "" {
+		return nil, fmt.Errorf("expected generated branch is required")
+	}
+	return m.renameBranchForSession(ctx, sessionID, expectedBranch, newName, repo, primary)
 }
 
 func (m *Manager) renameBranchForSession(
 	ctx context.Context,
 	sessionID string,
+	expectedBranch string,
 	newName string,
 	repo string,
 	primary bool,
@@ -93,7 +111,12 @@ func (m *Manager) renameBranchForSession(
 		return nil, fmt.Errorf("agentctl client for session %s is unavailable", sessionID)
 	}
 
-	result, err := client.GitRenameBranch(ctx, newName, repo)
+	var result *agentctlclient.GitOperationResult
+	if expectedBranch != "" {
+		result, err = client.GitRenameGeneratedBranch(ctx, expectedBranch, newName, repo)
+	} else {
+		result, err = client.GitRenameBranch(ctx, newName, repo)
+	}
 	if err != nil {
 		return result, err
 	}
