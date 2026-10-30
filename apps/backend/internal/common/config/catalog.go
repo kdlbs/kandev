@@ -114,6 +114,8 @@ var startupCatalog = []CatalogEntry{
 	{Key: officeSelfTriggerTotalAllowanceKey, EnvVars: []string{"KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE"}, Owner: "office", Default: "8"},
 	{Key: officeGateFailureThresholdKey, EnvVars: []string{"KANDEV_OFFICE_GATE_FAILURE_THRESHOLD"}, Owner: "office", Default: "3"},
 	{Key: "githubCredentialBroker.publicBaseUrl", EnvVars: []string{"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL"}, Owner: "github credential broker", Default: ""},
+	{Key: "azureDevOps.oauthClientId", EnvVars: []string{"KANDEV_AZURE_DEVOPS_OAUTH_CLIENT_ID"}, Owner: "azure devops", Default: "", Description: "Microsoft Entra application (client) ID for Azure DevOps Microsoft account sign-in. Empty uses Kandev's published application."},
+	{Key: "azureDevOps.oauthRedirectUrl", EnvVars: []string{"KANDEV_AZURE_DEVOPS_OAUTH_REDIRECT_URL"}, Owner: "azure devops", Default: "", Description: "Redirect URL registered on the Entra application. Empty uses http://localhost:<server.port>/api/v1/azure-devops/oauth/callback."},
 	{Key: "tasks.preparationTimeout", EnvVars: []string{"KANDEV_TASK_PREPARATION_TIMEOUT"}, Owner: "task lifecycle", Default: "10m"},
 	{Key: "tasks.stallDetectionThreshold", EnvVars: []string{"KANDEV_TASK_STALL_DETECTION_THRESHOLD"}, Owner: "task lifecycle", Default: "2h"},
 	{Key: "tasks.deliveryRetention.payloadGrace", EnvVars: []string{"KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE"}, Owner: "task delivery retention", Default: "1h"},

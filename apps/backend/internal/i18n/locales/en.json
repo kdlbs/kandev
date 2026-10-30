@@ -1,4 +1,6 @@
 {
+  "azureDevOps.oauthCallback.instructions": "Return to Kandev to finish signing in. If this window does not close, copy its address and paste it into Kandev.",
+  "azureDevOps.oauthCallback.title": "Microsoft sign-in",
   "share.brandTag": "shared task",
   "share.builtWith": "Built with",
   "share.ctaTryKandev": "Try kandev on GitHub",

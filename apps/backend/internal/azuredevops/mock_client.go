@@ -21,6 +21,9 @@ type MockState struct {
 	WorkItemComments map[int][]WorkItemComment   `json:"workItemComments"`
 	PullRequests     []PullRequest               `json:"pullRequests"`
 	Feedback         map[int]PullRequestFeedback `json:"feedback"`
+	// OAuthError makes the mock Microsoft sign-in return this OAuth error,
+	// such as access_denied.
+	OAuthError string `json:"oauthError"`
 }
 
 // MockClient implements Client with in-memory state for browser tests.
@@ -411,4 +414,11 @@ func (c *MockClient) Feedback(id int) (PullRequestFeedback, bool) {
 
 func mockNotFound(kind string, id int) error {
 	return &APIError{StatusCode: 404, Endpoint: "mock", Body: fmt.Sprintf("%s %d not found", kind, id)}
+}
+
+// OAuthError returns the error the mock Microsoft sign-in reports, if any.
+func (c *MockClient) OAuthError() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.state.OAuthError
 }

@@ -167,7 +167,8 @@ CREATE INDEX IF NOT EXISTS idx_azure_devops_pull_request_watch_tasks_watch
 
 const selectConfigColumns = `workspace_id, organization_url, default_project_id,
 	default_project_name, auth_method, last_checked_at, last_ok, last_error,
-	created_at, updated_at, saved_views`
+	created_at, updated_at, saved_views, oauth_account, oauth_tenant_id,
+	token_expires_at, oauth_reauth_required, oauth_client_id, oauth_redirect_url`
 
 // NewStore creates the store and initializes its replay-safe schema.
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
@@ -201,6 +202,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	}
 	if err := store.migrateExecutorCreators(); err != nil {
 		return nil, err
+	}
+	if err := store.initOAuthSchema(); err != nil {
+		return nil, fmt.Errorf("azure devops oauth schema init: %w", err)
 	}
 	return store, nil
 }

@@ -3636,6 +3636,22 @@ export class ApiClient {
     );
   }
 
+  async deleteAzureDevOpsConfig(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async getAzureDevOpsConfig(
+    workspaceId: string,
+  ): Promise<{ authMethod: string; hasSecret: boolean; organizationUrl: string } | null> {
+    return this.request(
+      "GET",
+      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
   async associateAzureDevOpsTaskPR(
     workspaceId: string,
     taskId: string,

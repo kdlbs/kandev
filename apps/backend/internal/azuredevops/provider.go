@@ -28,10 +28,14 @@ func Provide(
 	var mock *MockClient
 	if os.Getenv(mockEnvVar) == "true" {
 		mock = NewMockClient()
-		factory = func(*Config, string) Client { return mock }
+		factory = func(*Config, Authorizer) Client { return mock }
 	}
 	service := NewService(store, secrets, factory, log)
 	service.SetEventBus(eventBus)
 	service.mock = mock
+	if mock != nil {
+		service.oauth = OAuthSettings{ClientID: mockOAuthClientID, RedirectURL: OAuthCallbackPath}
+		service.entra = &mockEntra{}
+	}
 	return service, func() error { return nil }, nil
 }

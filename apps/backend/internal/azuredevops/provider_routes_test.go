@@ -38,7 +38,7 @@ func TestProvideBuildsAServiceAndOnlyMocksWhenAsked(t *testing.T) {
 		t.Fatalf("Provide did not wire a mock client with %s=true", mockEnvVar)
 	}
 	// The mock client is what the factory hands back for any workspace.
-	if client := mocked.clientFn(&Config{OrganizationURL: "https://dev.azure.com/acme"}, "pat"); client != mocked.MockClient() {
+	if client := mocked.clientFn(&Config{OrganizationURL: "https://dev.azure.com/acme"}, NewPATAuthorizer("pat")); client != mocked.MockClient() {
 		t.Fatalf("client factory = %T, want the mock client", client)
 	}
 }
@@ -50,7 +50,7 @@ func TestRegisterMockRoutesOnlyMountsWhenAMockIsWired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	plain := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return &invalidClient{} }, logger.Default())
+	plain := NewService(store, newFakeSecretStore(), func(*Config, Authorizer) Client { return &invalidClient{} }, logger.Default())
 	plainRouter := gin.New()
 	RegisterMockRoutes(plainRouter, plain, logger.Default())
 	if response := performRequest(t, plainRouter, http.MethodPost, "/api/v1/azure-devops/mock/state", MockState{}); response.Code != http.StatusNotFound {
@@ -59,7 +59,7 @@ func TestRegisterMockRoutesOnlyMountsWhenAMockIsWired(t *testing.T) {
 	RegisterMockRoutes(plainRouter, nil, logger.Default())
 
 	mock := NewMockClient()
-	service := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return mock }, logger.Default())
+	service := NewService(store, newFakeSecretStore(), func(*Config, Authorizer) Client { return mock }, logger.Default())
 	service.mock = mock
 	router := gin.New()
 	RegisterMockRoutes(router, service, logger.Default())
@@ -99,7 +99,7 @@ func TestRegisterMockRoutesOnlyMountsWhenAMockIsWired(t *testing.T) {
 // factory never returns a client that silently succeeds when the workspace
 // configuration is missing.
 func TestDefaultClientFactoryFailsClosedWithoutConfig(t *testing.T) {
-	client := DefaultClientFactory(nil, "pat")
+	client := DefaultClientFactory(nil, NewPATAuthorizer("pat"))
 	ctx := context.Background()
 	calls := map[string]func() error{
 		"TestAuth":              func() error { _, err := client.TestAuth(ctx); return err },
@@ -123,8 +123,8 @@ func TestDefaultClientFactoryFailsClosedWithoutConfig(t *testing.T) {
 		})
 	}
 
-	rest, ok := DefaultClientFactory(&Config{OrganizationURL: "https://dev.azure.com/acme"}, "pat").(*RESTClient)
-	if !ok || rest.organization != "acme" || rest.pat != "pat" || rest.initErr != nil {
+	rest, ok := DefaultClientFactory(&Config{OrganizationURL: "https://dev.azure.com/acme"}, NewPATAuthorizer("pat")).(*RESTClient)
+	if !ok || rest.organization != "acme" || authorizerPAT(rest.auth) != "pat" || rest.initErr != nil {
 		t.Fatalf("configured factory = %+v, ok = %t", rest, ok)
 	}
 }

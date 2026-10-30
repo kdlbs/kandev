@@ -1,4 +1,6 @@
 {
+  "azureDevOps.oauthCallback.instructions": "Volte ao Kandev para concluir o início de sessão. Se esta janela não fechar, copie o endereço e cole-o no Kandev.",
+  "azureDevOps.oauthCallback.title": "Início de sessão Microsoft",
   "share.brandTag": "tarefa partilhada",
   "share.builtWith": "Criado com",
   "share.ctaTryKandev": "Experimente o kandev no GitHub",

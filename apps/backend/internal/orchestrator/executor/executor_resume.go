@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -672,17 +671,17 @@ func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (repoclone.RemoteRefState, error) {
 	authCloner, ok := e.repoCloner.(strictAuthenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
+	if !ok || e.azureDevOpsCredentials == nil {
 		return repoclone.RemoteRefStateUnknown, errors.New("azure DevOps repository refresh authentication is unavailable")
 	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	username, password, err := e.azureDevOpsCredentials.ResolveAzureDevOpsCloneCredentials(ctx, repo.WorkspaceID)
 	if err != nil {
 		return repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps refresh credential: %w", err)
 	}
 	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
 		state, err := stateCloner.RefreshWorkspaceRepositoryWithBasicAuthAndState(
 			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-			repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+			repo.ProviderOwner, repo.ProviderName, repo.LocalPath, username, password,
 		)
 		if err != nil {
 			return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
@@ -691,7 +690,7 @@ func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
 	}
 	if err := authCloner.RefreshWorkspaceRepositoryWithBasicAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost, cloneURL,
-		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, "kandev", pat,
+		repo.ProviderOwner, repo.ProviderName, repo.LocalPath, username, password,
 	); err != nil {
 		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh Azure DevOps repository before worktree: %w", err)
 	}

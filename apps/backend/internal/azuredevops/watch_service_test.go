@@ -11,7 +11,7 @@ import (
 
 func TestTriggerWorkItemWatchPublishesOnlyNewMatches(t *testing.T) {
 	client := &fakeReadClient{work: &WorkItemSearchResult{Items: []WorkItem{{ID: 101, Title: "Fix build", WebURL: "https://azure/item/101"}}}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestTriggerWorkItemWatchPublishesOnlyNewMatches(t *testing.T) {
 
 func TestTriggerPullRequestWatchPublishesOnlyNewMatches(t *testing.T) {
 	client := &fakeReadClient{prPage: &PullRequestPage{Items: []PullRequest{{ID: 42, ProjectID: "project-1", RepositoryID: "azure-repo-1", WebURL: "https://azure/pr/42", Title: "Ship it"}}}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestAzurePollerRunsEnabledWatchers(t *testing.T) {
 		work:   &WorkItemSearchResult{Items: []WorkItem{{ID: 101, WebURL: "https://azure/item/101"}}},
 		prPage: &PullRequestPage{Items: []PullRequest{{ID: 42, ProjectID: "project-1", RepositoryID: "azure-repo-1", WebURL: "https://azure/pr/42"}}},
 	}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}

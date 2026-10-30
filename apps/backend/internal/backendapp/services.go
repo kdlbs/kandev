@@ -610,6 +610,9 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize azure devops: %w", recordErr)
 	}
 	if azureDevOpsSvc != nil {
+		azureDevOpsSvc.ConfigureOAuth(azuredevops.ResolveOAuthSettings(
+			cfg.AzureDevOps.OAuthClientID, cfg.AzureDevOps.OAuthRedirectURL, cfg.Server.Port,
+		))
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
 		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}

@@ -144,6 +144,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_GATE_FAILURE_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
+		{envVar: "KANDEV_AZURE_DEVOPS_OAUTH_CLIENT_ID", class: "catalog"},
+		{envVar: "KANDEV_AZURE_DEVOPS_OAUTH_REDIRECT_URL", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE", class: "catalog"},

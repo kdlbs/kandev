@@ -129,7 +129,7 @@ func (d *recordingDeleter) ids() []string {
 
 func newWatchService(t *testing.T, client Client) (*Service, *Store) {
 	t.Helper()
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {

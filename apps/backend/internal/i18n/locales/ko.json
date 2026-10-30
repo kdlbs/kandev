@@ -1,4 +1,6 @@
 {
+  "azureDevOps.oauthCallback.instructions": "Kandev로 돌아가 로그인을 완료하세요. 이 창이 닫히지 않으면 주소를 복사하여 Kandev에 붙여 넣으세요.",
+  "azureDevOps.oauthCallback.title": "Microsoft 로그인",
   "share.brandTag": "공유된 작업",
   "share.builtWith": "기반으로 제작",
   "share.ctaTryKandev": "GitHub에서 kandev 사용해보기",

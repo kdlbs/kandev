@@ -1,4 +1,6 @@
 {
+  "azureDevOps.oauthCallback.instructions": "Kandev に戻ってサインインを完了してください。このウィンドウが閉じない場合は、アドレスをコピーして Kandev に貼り付けてください。",
+  "azureDevOps.oauthCallback.title": "Microsoft サインイン",
   "share.brandTag": "共有タスク",
   "share.builtWith": "構築",
   "share.ctaTryKandev": "GitHub で kandev を試す",

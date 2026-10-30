@@ -5,8 +5,12 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/azuredevops"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+// The executor clones Azure Repos with credentials resolved by the service.
+var _ executor.AzureDevOpsCredentialResolver = (*azuredevops.Service)(nil)
 
 func TestServicesExposeAzureDevOps(t *testing.T) {
 	field, ok := reflect.TypeOf(Services{}).FieldByName("AzureDevOps")

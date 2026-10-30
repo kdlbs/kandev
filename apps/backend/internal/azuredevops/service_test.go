@@ -15,6 +15,8 @@ type fakeSecretStore struct {
 	values         map[string]string
 	setFailures    int
 	deleteFailures int
+	// failSetKeys fails the next Set of each listed secret ID once.
+	failSetKeys map[string]bool
 }
 
 func newFakeSecretStore() *fakeSecretStore {
@@ -36,6 +38,10 @@ func (f *fakeSecretStore) Set(_ context.Context, id, _ string, value string) err
 	defer f.mu.Unlock()
 	if f.setFailures > 0 {
 		f.setFailures--
+		return errors.New("injected secret set failure")
+	}
+	if f.failSetKeys[id] {
+		delete(f.failSetKeys, id)
 		return errors.New("injected secret set failure")
 	}
 	f.values[id] = value
@@ -98,7 +104,7 @@ func newTestService(t *testing.T, factory ClientFactory) (*Service, *Store, *fak
 // transport goroutine behind — which is what goleak_test.go now fails on, so
 // a reintroduction cannot pass silently.
 func offlineClientFactory() ClientFactory {
-	return func(*Config, string) Client {
+	return func(*Config, Authorizer) Client {
 		return &fakeClient{result: &TestConnectionResult{OK: true}}
 	}
 }
@@ -133,7 +139,7 @@ func TestOrganizationURLValidation(t *testing.T) {
 func TestListBranchesRejectsOrganizationMismatch(t *testing.T) {
 	t.Parallel()
 	clientCalls := 0
-	service, _, _ := newTestService(t, func(*Config, string) Client {
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		clientCalls++
 		return &invalidClient{}
 	})
@@ -185,8 +191,8 @@ func TestConfigWorkspaceIsolationAndReconstruction(t *testing.T) {
 
 func TestConfigTestUsesSubmittedAndStoredCredentialsWithoutPersistence(t *testing.T) {
 	var captures []capturedCredentials
-	factory := func(cfg *Config, pat string) Client {
-		captures = append(captures, capturedCredentials{config: *cfg, pat: pat})
+	factory := func(cfg *Config, auth Authorizer) Client {
+		captures = append(captures, capturedCredentials{config: *cfg, pat: authorizerPAT(auth)})
 		return &fakeClient{result: &TestConnectionResult{OK: true, DisplayName: "Alice"}}
 	}
 	svc, _, _ := newTestService(t, factory)
@@ -216,7 +222,7 @@ func TestConfigTestUsesSubmittedAndStoredCredentialsWithoutPersistence(t *testin
 
 func TestSetConfigProbesImmediately(t *testing.T) {
 	probeCalls := 0
-	svc, _, _ := newTestService(t, func(*Config, string) Client {
+	svc, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		probeCalls++
 		return &fakeClient{result: &TestConnectionResult{OK: true}}
 	})
@@ -237,7 +243,7 @@ func TestSetConfigProbesImmediately(t *testing.T) {
 }
 
 func TestSetConfigPersistsProbeFailure(t *testing.T) {
-	svc, store, secrets := newTestService(t, func(*Config, string) Client {
+	svc, store, secrets := newTestService(t, func(*Config, Authorizer) Client {
 		return &fakeClient{result: &TestConnectionResult{OK: false, Error: "401 unauthorized"}}
 	})
 
@@ -306,7 +312,7 @@ func TestConfigRecordAuthHealthPersistsPerWorkspace(t *testing.T) {
 		"acme":  {result: &TestConnectionResult{OK: true}},
 		"other": {result: &TestConnectionResult{OK: false, Error: "401 unauthorized"}},
 	}
-	factory := func(cfg *Config, _ string) Client {
+	factory := func(cfg *Config, _ Authorizer) Client {
 		org := cfg.OrganizationURL[len("https://dev.azure.com/"):]
 		return clients[org]
 	}
@@ -393,7 +399,7 @@ func TestSetConfigRestoresPATWhenStoreFails(t *testing.T) {
 
 func TestSetConfigProbesOnlyWhenCredentialsChange(t *testing.T) {
 	probeCalls := 0
-	svc, store, _ := newTestService(t, func(*Config, string) Client {
+	svc, store, _ := newTestService(t, func(*Config, Authorizer) Client {
 		probeCalls++
 		return &fakeClient{result: &TestConnectionResult{OK: true}}
 	})
@@ -494,7 +500,7 @@ func TestDeleteConfigRestoresPATWhenStoreFails(t *testing.T) {
 }
 
 func TestRecordAuthHealthIgnoresParentCancellation(t *testing.T) {
-	svc, _, _ := newTestService(t, func(*Config, string) Client {
+	svc, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		return &fakeClient{err: context.Canceled}
 	})
 	if _, err := svc.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{

@@ -22,7 +22,7 @@ func newRouteFixture(t *testing.T, client Client) (*gin.Engine, *Service) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	service := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return client }, logger.Default())
+	service := NewService(store, newFakeSecretStore(), func(*Config, Authorizer) Client { return client }, logger.Default())
 	router := gin.New()
 	RegisterRoutes(router, service, logger.Default())
 	return router, service

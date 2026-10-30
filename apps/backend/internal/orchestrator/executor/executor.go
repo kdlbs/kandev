@@ -18,7 +18,6 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
-	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
@@ -1116,6 +1115,13 @@ type GitLabCredentialResolver interface {
 	ResolveGitLabExecutionCredentials(ctx context.Context, workspaceID string) (host, token string, err error)
 }
 
+// AzureDevOpsCredentialResolver returns the Git Basic credentials of exactly
+// one workspace's Azure DevOps connection, renewing them when they expire.
+// Implementations must not fall back across workspaces.
+type AzureDevOpsCredentialResolver interface {
+	ResolveAzureDevOpsCloneCredentials(ctx context.Context, workspaceID string) (username, password string, err error)
+}
+
 // CoordinatorLookup resolves a coordinator conversation task to its
 // coordinator and reports whether that coordinator's agent and executor
 // profiles are both usable, for the fail-closed coordinator-session-start
@@ -1138,6 +1144,7 @@ type Executor struct {
 	shellPrefs                ShellPreferenceProvider
 	capabilities              ExecutorTypeCapabilities
 	gitlabCredentials         GitLabCredentialResolver
+	azureDevOpsCredentials    AzureDevOpsCredentialResolver
 	logger                    *logger.Logger
 	canvasesEnabled           bool
 
@@ -1379,23 +1386,22 @@ func (e *Executor) ensureClonedWithWorkspaceAuthForSessionAndState(
 		return path, repoclone.RemoteRefStateHasRefs, err
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
-	if !ok || e.secretStore == nil {
+	if !ok || e.azureDevOpsCredentials == nil {
 		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("azure DevOps repository clone authentication is unavailable")
 	}
-	pat, err := e.secretStore.Reveal(ctx, cloneauth.AzureDevOpsPATKey(repo.WorkspaceID))
+	username, password, err := e.azureDevOpsCredentials.ResolveAzureDevOpsCloneCredentials(ctx, repo.WorkspaceID)
 	if err != nil {
 		return "", repoclone.RemoteRefStateUnknown, fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
-	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
 	if stateCloner, ok := e.repoCloner.(remoteStateAuthenticatedRepoCloner); ok {
 		return stateCloner.EnsureWorkspaceClonedWithBasicAuthAndState(
 			ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-			cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+			cloneURL, repo.ProviderOwner, repo.ProviderName, username, password,
 		)
 	}
 	path, err := authCloner.EnsureWorkspaceClonedWithBasicAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
-		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+		cloneURL, repo.ProviderOwner, repo.ProviderName, username, password,
 	)
 	return path, repoclone.RemoteRefStateHasRefs, err
 }
@@ -1707,6 +1713,11 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// SetAzureDevOpsCredentialResolver wires workspace-scoped Azure Repos clone auth.
+func (e *Executor) SetAzureDevOpsCredentialResolver(resolver AzureDevOpsCredentialResolver) {
+	e.azureDevOpsCredentials = resolver
 }
 
 // SetCoordinatorLookup wires the coordinator lookup used by the fail-closed

@@ -225,11 +225,11 @@ func (s *Service) mentionSearchContext(
 }
 
 func (s *Service) configuredMentionClient(ctx context.Context, workspaceID string) (*Config, Client, error) {
-	cfg, pat, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
+	cfg, auth, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
 	if err != nil {
 		return nil, nil, err
 	}
-	client := s.clientFn(cfg, pat)
+	client := s.clientFn(cfg, auth)
 	if client == nil {
 		return nil, nil, ErrNotConfigured
 	}

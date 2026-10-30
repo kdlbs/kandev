@@ -406,7 +406,7 @@ func TestRESTClientRejectsNonCanonicalOrganizationURLBeforeRequest(t *testing.T)
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := NewRESTClient(server.URL, "pat", server.Client()).ListProjects(context.Background())
+	_, err := NewRESTClient(server.URL, NewPATAuthorizer("pat"), server.Client()).ListProjects(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "invalid azure devops organization URL") {
 		t.Fatalf("ListProjects error = %v, want invalid organization URL", err)
 	}
@@ -422,7 +422,7 @@ func newTestRESTClient(t *testing.T, server *httptest.Server, pat string) *RESTC
 		server.Config.Handler.ServeHTTP(response, req)
 		return response.Result(), nil
 	})}
-	return NewRESTClient("https://dev.azure.com/acme", pat, httpClient)
+	return NewRESTClient("https://dev.azure.com/acme", NewPATAuthorizer(pat), httpClient)
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

@@ -25,11 +25,11 @@ type PullRequestFeedback struct {
 }
 
 func (s *Service) clientForWorkspace(ctx context.Context, workspaceID string) (Client, error) {
-	cfg, pat, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
+	cfg, auth, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
 	if err != nil {
 		return nil, err
 	}
-	return s.clientFn(cfg, pat), nil
+	return s.clientFn(cfg, auth), nil
 }
 
 func (s *Service) ListProjectsForWorkspace(ctx context.Context, workspaceID string) ([]Project, error) {
@@ -67,7 +67,7 @@ func (s *Service) ListBranchesForWorkspace(
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(repositoryID) == "" {
 		return nil, fmt.Errorf("%w: project and repository required", ErrInvalidConfig)
 	}
-	cfg, pat, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
+	cfg, auth, err := s.resolveCredentials(ctx, workspaceID, &SetConfigRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *Service) ListBranchesForWorkspace(
 			return nil, fmt.Errorf("%w: requested organization does not match workspace configuration", ErrInvalidConfig)
 		}
 	}
-	client := s.clientFn(cfg, pat)
+	client := s.clientFn(cfg, auth)
 	reader, ok := client.(branchClient)
 	if !ok {
 		return nil, errors.New("azure devops: branch listing is unavailable")

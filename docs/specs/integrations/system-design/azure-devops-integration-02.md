@@ -377,7 +377,8 @@ hint and revalidated from the configured provider before persistence or clone.
 ## Out Of Scope
 
 - Azure DevOps Server or Team Foundation Server installations.
-- Microsoft Entra OAuth, service principals, and managed identities.
+- Service principals and managed identities. Microsoft Entra delegated sign-in is
+  designed in [Azure DevOps Microsoft sign-in](azure-devops-oauth.md).
 - Creating, deleting, or changing the type of work items.
 - Editing titles, tags, descriptions, priorities, estimates, parent
   relationships, area paths, iteration paths, or arbitrary provider-specific

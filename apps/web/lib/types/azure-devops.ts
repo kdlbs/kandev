@@ -1,4 +1,4 @@
-export type AzureDevOpsAuthMethod = "pat";
+export type AzureDevOpsAuthMethod = "pat" | "oauth";
 
 export type AzureDevOpsConfig = {
   workspaceId: string;
@@ -12,6 +12,14 @@ export type AzureDevOpsConfig = {
   lastError?: string;
   createdAt: string;
   updatedAt: string;
+  /** Signed-in Microsoft identity of an `oauth` connection, for display only. */
+  oauthAccount?: string;
+  tokenExpiresAt?: string | null;
+  /** True when only a new Microsoft sign-in can restore access. */
+  reauthRequired?: boolean;
+  /** Entra application (client) ID the workspace signed in with. */
+  oauthClientId?: string;
+  oauthRedirectUrl?: string;
 };
 
 export type SetAzureDevOpsConfigRequest = {
@@ -20,6 +28,32 @@ export type SetAzureDevOpsConfigRequest = {
   defaultProjectName?: string;
   authMethod: AzureDevOpsAuthMethod;
   pat?: string;
+};
+
+export type StartAzureDevOpsOAuthRequest = {
+  organizationUrl: string;
+  defaultProjectId?: string;
+  defaultProjectName?: string;
+  /** Workspace Entra application; omitted values use the installation defaults. */
+  clientId?: string;
+  redirectUrl?: string;
+};
+
+export type AzureDevOpsOAuthAvailability = {
+  /** Whether the installation has a default Entra application. */
+  available: boolean;
+  defaultClientId: string;
+  defaultRedirectUrl: string;
+};
+
+export type StartAzureDevOpsOAuthResponse = {
+  authUrl: string;
+  state: string;
+};
+
+export type CompleteAzureDevOpsOAuthRequest = {
+  code: string;
+  state: string;
 };
 
 export type TestAzureDevOpsConnectionResult = {

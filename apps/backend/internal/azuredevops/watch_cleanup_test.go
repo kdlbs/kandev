@@ -67,7 +67,7 @@ func (c recordingTaskSessionChecker) HasUserAuthoredMessage(context.Context, str
 
 func TestCleanupWorkItemWatchHonorsAutoEngagementAndTerminalState(t *testing.T) {
 	client := &cleanupClient{workItem: &WorkItem{ID: 101, State: "Closed"}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestCleanupWorkItemWatchHonorsAutoEngagementAndTerminalState(t *testing.T) 
 
 func TestCleanupPullRequestWatchHonorsNeverPolicy(t *testing.T) {
 	client := &cleanupClient{pullRequest: &PullRequest{ID: 42, Status: "completed"}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestCleanupSkipsHistoricalTasks(t *testing.T) {
 		workItem:    &WorkItem{ID: 101, State: "Closed"},
 		pullRequest: &PullRequest{ID: 201, Status: "completed"},
 	}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}

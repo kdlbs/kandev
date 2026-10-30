@@ -70,7 +70,7 @@ func TestServiceMentionSearchBuildsSafeWIQLAndProjectLevelPRQuery(t *testing.T) 
 			},
 		},
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "workspace-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", DefaultProjectID: "project-1",
 		DefaultProjectName: "Platform", PAT: "secret",
@@ -116,7 +116,7 @@ func TestServiceMentionSearchBoundsProjectDiscovery(t *testing.T) {
 		client.projects = append(client.projects, Project{ID: id, Name: fmt.Sprintf("Project %d", index)})
 		client.workItems[id] = []WorkItem{{ID: index, Title: "Match", Project: id}}
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "workspace-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "secret",
 	}); err != nil {
@@ -149,7 +149,7 @@ func TestServiceMentionPullRequestSearchPaginatesUntilMatch(t *testing.T) {
 		invalidClient: &invalidClient{},
 		pullRequests:  map[string][]PullRequest{"project-1": pullRequests},
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "workspace-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", DefaultProjectID: "project-1",
 		DefaultProjectName: "Platform", PAT: "secret",
@@ -178,7 +178,7 @@ func TestServiceResolveMentionScopeRejectsForeignWorkspaceProject(t *testing.T) 
 			"project-1": {{ID: "repo-1", Name: "widgets", ProjectID: "project-1", ProjectName: "Platform"}},
 		},
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "workspace-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "secret",
 	}); err != nil {

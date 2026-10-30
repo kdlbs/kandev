@@ -14,7 +14,7 @@ type fakeBoardReader struct {
 
 func TestServiceBoardReadsAuthorizeWorkspaceBeforeCreatingClient(t *testing.T) {
 	clientCalls := 0
-	service, _, _ := newTestService(t, func(*Config, string) Client {
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		clientCalls++
 		return &invalidClient{}
 	})
@@ -34,7 +34,7 @@ func TestServiceBoardReadsAuthorizeWorkspaceBeforeCreatingClient(t *testing.T) {
 }
 
 func TestServiceBoardCapabilitiesReportNotConfigured(t *testing.T) {
-	service, _, _ := newTestService(t, func(*Config, string) Client { return &invalidClient{} })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return &invalidClient{} })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{OrganizationURL: "https://dev.azure.com/acme", PAT: "pat"}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestServiceBoardReads(t *testing.T) {
 		boards:   []BoardReference{{ID: "board-1", Name: "Stories"}},
 		snapshot: &BoardSnapshot{Board: Board{ID: "board-1", Name: "Stories"}, Items: []BoardWorkItem{{WorkItem: WorkItem{ID: 101, Title: "Fix build"}}}},
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client {
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		return &struct {
 			invalidClient
 			*fakeBoardReader
@@ -103,7 +103,7 @@ func TestServiceBoardReads(t *testing.T) {
 func TestServiceUpdateBoardWorkItemIdentity(t *testing.T) {
 	reader := &fakeBoardReader{snapshot: &BoardSnapshot{Board: Board{ID: "board-1"}}}
 	writer := &fakeBoardWriter{fakeBoardReader: reader}
-	service, _, _ := newTestService(t, func(*Config, string) Client {
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client {
 		return &struct {
 			invalidClient
 			*fakeBoardWriter

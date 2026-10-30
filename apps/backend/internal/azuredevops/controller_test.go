@@ -120,7 +120,7 @@ func newControllerFixture(t *testing.T) (*gin.Engine, *Service) {
 		comments:  &WorkItemCommentPage{Comments: []WorkItemComment{{ID: 9, Content: "Looks good"}}},
 		identity:  &Identity{ID: "me", DisplayName: "Ada"},
 	}
-	service := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return client }, logger.Default())
+	service := NewService(store, newFakeSecretStore(), func(*Config, Authorizer) Client { return client }, logger.Default())
 	if _, err := service.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {
@@ -315,7 +315,7 @@ func TestControllerPullRequestFeedbackAggregation(t *testing.T) {
 
 func TestPullRequestSearchResolvesCurrentUserSentinel(t *testing.T) {
 	router, service := newControllerFixture(t)
-	client := service.clientFn(nil, "").(*fakeReadClient)
+	client := service.clientFn(nil, nil).(*fakeReadClient)
 	response := performRequest(
 		t, router, http.MethodGet,
 		"/api/v1/azure-devops/pull-requests?workspace_id=ws-1&project=project-1&repository=repo-1&reviewer=%40me", nil,

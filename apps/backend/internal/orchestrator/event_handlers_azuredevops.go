@@ -8,7 +8,14 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 )
+
+// SetAzureDevOpsCredentialResolver binds Azure Repos clone auth to the task
+// workspace.
+func (s *Service) SetAzureDevOpsCredentialResolver(resolver executor.AzureDevOpsCredentialResolver) {
+	s.executor.SetAzureDevOpsCredentialResolver(resolver)
+}
 
 // SetAzureDevOpsService wires Azure's watcher dedup surface into the shared
 // watcher coordinator. It is nil-safe so test and partially configured boots

@@ -51,6 +51,9 @@ rename. It adds no provider mutation or new detail interaction.
 Saved-view ordering is scoped to one mounted workspace page. Multi-tab consistency,
 new backend concurrency contracts, and ordering across page remounts are excluded.
 
+Microsoft account sign-in as an alternative to the PAT credential is owned by
+[Azure DevOps Microsoft Sign-In](azure-devops-oauth.md).
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/azure-devops-integration-01.md), [part 2](../system-design/azure-devops-integration-02.md).

@@ -939,6 +939,7 @@ func startAgentInfrastructure(
 	// polling. Watch matches flow through the shared orchestrator coordinator.
 	if services.AzureDevOps != nil {
 		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
+		orchestratorSvc.SetAzureDevOpsCredentialResolver(services.AzureDevOps)
 		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
 		if lifecycleErr != nil {

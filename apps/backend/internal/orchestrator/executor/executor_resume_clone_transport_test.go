@@ -590,9 +590,7 @@ func TestResolveTaskRepoInfoRefreshesAzureDevOpsBeforeWorktree(t *testing.T) {
 	cloner := &cloneTransportTestCloner{}
 	exec := newTestExecutor(t, &mockAgentManager{}, repositoryStore)
 	exec.SetRepoCloner(cloner, nil)
-	exec.secretStore = &mockSecretStore{secrets: map[string]string{
-		"azure_devops:workspace-1:pat": "azure-token",
-	}}
+	exec.SetAzureDevOpsCredentialResolver(&fakeAzureDevOpsCredentials{password: "azure-token"})
 
 	info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", &models.TaskRepository{
 		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main",

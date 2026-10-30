@@ -22,15 +22,31 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
-import {
-  IntegrationAuthStatusBanner,
-  type IntegrationAuthHealth,
-} from "@/components/integrations/auth-status-banner";
+import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { AzureDevOpsDefaultQueriesSection } from "@/components/azure-devops/azure-devops-default-queries";
 import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
 import { AzureDevOpsQuickActionsSection } from "@/components/azure-devops/azure-devops-quick-actions";
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
+import {
+  AzureDevOpsAuthMethodField,
+  AzureDevOpsOAuthFields,
+} from "@/components/azure-devops/azure-devops-oauth-fields";
+import {
+  azureDevOpsOrganization,
+  azureDevOpsPATURL,
+  canSubmitForm,
+  configToForm,
+  configToHealth,
+  EMPTY_FORM,
+  normalizedOrganization,
+  requestFromForm,
+  savedPATMatches,
+  signedInWithMicrosoft,
+  startRequestFromForm,
+  withFieldUpdate,
+  type FormState,
+} from "@/components/azure-devops/azure-devops-settings-form";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
@@ -42,98 +58,12 @@ import {
   setAzureDevOpsConfig,
   testAzureDevOpsConnection,
 } from "@/lib/api/domains/azure-devops-api";
-import type {
-  AzureDevOpsConfig,
-  SetAzureDevOpsConfigRequest,
-  TestAzureDevOpsConnectionResult,
-} from "@/lib/types/azure-devops";
+import {
+  useDefaultOAuthClientId,
+  useOAuthSignOut,
+} from "@/hooks/domains/azure-devops/use-azure-devops-oauth";
+import type { AzureDevOpsConfig, TestAzureDevOpsConnectionResult } from "@/lib/types/azure-devops";
 import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
-
-type FormState = {
-  organizationUrl: string;
-  defaultProjectId: string;
-  defaultProjectName: string;
-  pat: string;
-};
-
-const EMPTY_FORM: FormState = {
-  organizationUrl: "",
-  defaultProjectId: "",
-  defaultProjectName: "",
-  pat: "",
-};
-
-function configToForm(config: AzureDevOpsConfig | null): FormState {
-  if (!config) return EMPTY_FORM;
-  return {
-    organizationUrl: config.organizationUrl,
-    defaultProjectId: config.defaultProjectId ?? "",
-    defaultProjectName: config.defaultProjectName ?? "",
-    pat: "",
-  };
-}
-
-function configToHealth(config: AzureDevOpsConfig | null): IntegrationAuthHealth | null {
-  if (!config?.hasSecret) return null;
-  return {
-    ok: config.lastOk,
-    error: config.lastError ?? "",
-    checkedAt: config.lastCheckedAt ? new Date(config.lastCheckedAt) : null,
-  };
-}
-
-function normalizedOrganization(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-function azureDevOpsPATURL(value: string): string | null {
-  let organizationURL: URL;
-  try {
-    organizationURL = new URL(value.trim());
-  } catch {
-    return null;
-  }
-
-  const organization = organizationURL.pathname.split("/").filter(Boolean);
-  if (
-    organizationURL.protocol !== "https:" ||
-    organizationURL.hostname.toLowerCase() !== "dev.azure.com" ||
-    organizationURL.port ||
-    organizationURL.username ||
-    organizationURL.password ||
-    organizationURL.search ||
-    organizationURL.hash ||
-    organization.length !== 1 ||
-    !/^[a-z0-9-]+$/i.test(organization[0])
-  ) {
-    return null;
-  }
-
-  return `https://dev.azure.com/${organization[0]}/_usersSettings/tokens`;
-}
-
-function savedPATMatches(config: AzureDevOpsConfig | null, form: FormState): boolean {
-  return (
-    !!config?.hasSecret &&
-    normalizedOrganization(config.organizationUrl) === normalizedOrganization(form.organizationUrl)
-  );
-}
-
-function requestFromForm(
-  form: FormState,
-  savedConfig: AzureDevOpsConfig | null,
-): SetAzureDevOpsConfigRequest {
-  const organizationMatches =
-    normalizedOrganization(form.organizationUrl) ===
-    normalizedOrganization(savedConfig?.organizationUrl ?? "");
-  return {
-    organizationUrl: normalizedOrganization(form.organizationUrl),
-    defaultProjectId: organizationMatches ? form.defaultProjectId : undefined,
-    defaultProjectName: organizationMatches ? form.defaultProjectName : undefined,
-    authMethod: "pat",
-    pat: form.pat || undefined,
-  };
-}
 
 function useConfigRefresh(
   workspaceId: string,
@@ -177,17 +107,17 @@ function useAzureDevOpsSettings(workspaceId: string) {
 
   useEffect(() => void load(), [load]);
   useConfigRefresh(workspaceId, setConfig);
+  const defaultOAuthClientId = useDefaultOAuthClientId(workspaceId);
+
+  const applyConfig = useCallback((next: AzureDevOpsConfig) => {
+    setConfig(next);
+    setForm(configToForm(next));
+    setTestResult(null);
+  }, []);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
-      setForm((current) => ({
-        ...current,
-        [key]: value,
-        ...(key === "organizationUrl" &&
-        normalizedOrganization(String(value)) !== normalizedOrganization(current.organizationUrl)
-          ? { defaultProjectId: "", defaultProjectName: "" }
-          : {}),
-      })),
+      setForm((current) => withFieldUpdate(current, key, value)),
     [],
   );
 
@@ -206,10 +136,7 @@ function useAzureDevOpsSettings(workspaceId: string) {
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      const next = await setAzureDevOpsConfig(workspaceId, requestFromForm(form, config));
-      setConfig(next);
-      setForm(configToForm(next));
-      setTestResult(null);
+      applyConfig(await setAzureDevOpsConfig(workspaceId, requestFromForm(form, config)));
       toast({ description: t("azuredevops:configurationSaved"), variant: "success" });
     } catch (err) {
       toast({
@@ -219,7 +146,7 @@ function useAzureDevOpsSettings(workspaceId: string) {
     } finally {
       setSaving(false);
     }
-  }, [config, form, t, toast, workspaceId]);
+  }, [applyConfig, config, form, t, toast, workspaceId]);
 
   const remove = useCallback(async () => {
     try {
@@ -237,12 +164,15 @@ function useAzureDevOpsSettings(workspaceId: string) {
   }, [t, toast, workspaceId]);
 
   return {
+    workspaceId,
     config,
     form,
     loading,
     saving,
     testing,
     testResult,
+    defaultOAuthClientId,
+    applyConfig,
     health: configToHealth(config),
     update,
     test,
@@ -347,6 +277,30 @@ function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
   );
 }
 
+function PATField({ state, canReusePAT }: { state: SettingsState; canReusePAT: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1 sm:min-h-7">
+        <Label htmlFor="azure-devops-pat">{t("azuredevops:personalAccessToken")}</Label>
+        <PATSetupHelp organizationUrl={state.form.organizationUrl} />
+      </div>
+      <Input
+        id="azure-devops-pat"
+        type="password"
+        value={state.form.pat}
+        onChange={(event) => state.update("pat", event.target.value)}
+        placeholder={canReusePAT ? t("azuredevops:savedCredential") : t("azuredevops:pastePat")}
+        disabled={state.loading}
+        autoComplete="new-password"
+        aria-describedby="azure-devops-pat-help"
+        data-testid="azure-devops-pat"
+        className={settingsCredentialClassName()}
+      />
+    </div>
+  );
+}
+
 function ConnectionFields({
   state,
   projects,
@@ -359,6 +313,7 @@ function ConnectionFields({
   projectSelectionEnabled: boolean;
 }) {
   const { t } = useTranslation();
+  const signOut = useOAuthSignOut(state.workspaceId, state.applyConfig);
   const projectPlaceholder = projects.loading
     ? t("azuredevops:loadingProjects")
     : t("azuredevops:optional");
@@ -377,6 +332,27 @@ function ConnectionFields({
             data-testid="azure-devops-organization"
           />
         </div>
+        <AzureDevOpsAuthMethodField
+          value={state.form.authMethod}
+          onChange={(method) => state.update("authMethod", method)}
+          disabled={state.loading}
+        />
+        {state.form.authMethod === "oauth" && (
+          <AzureDevOpsOAuthFields
+            workspaceId={state.workspaceId}
+            config={state.config}
+            request={startRequestFromForm(state.form, window.location.origin)}
+            clientId={state.form.oauthClientId}
+            defaultClientId={state.defaultOAuthClientId}
+            onClientIdChange={(value) => state.update("oauthClientId", value)}
+            onSignOut={signOut.signOut}
+            signingOut={signOut.signingOut}
+            signedIn={signedInWithMicrosoft(state.config, state.form)}
+            organizationValid={azureDevOpsOrganization(state.form.organizationUrl) !== null}
+            disabled={state.loading}
+            onConnected={state.applyConfig}
+          />
+        )}
         <div className="space-y-1.5">
           <div className="sm:flex sm:min-h-7 sm:items-center">
             <Label htmlFor="azure-devops-project">{t("azuredevops:defaultProject")}</Label>
@@ -407,24 +383,7 @@ function ConnectionFields({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1 sm:min-h-7">
-            <Label htmlFor="azure-devops-pat">{t("azuredevops:personalAccessToken")}</Label>
-            <PATSetupHelp organizationUrl={state.form.organizationUrl} />
-          </div>
-          <Input
-            id="azure-devops-pat"
-            type="password"
-            value={state.form.pat}
-            onChange={(event) => state.update("pat", event.target.value)}
-            placeholder={canReusePAT ? t("azuredevops:savedCredential") : t("azuredevops:pastePat")}
-            disabled={state.loading}
-            autoComplete="new-password"
-            aria-describedby="azure-devops-pat-help"
-            data-testid="azure-devops-pat"
-            className={settingsCredentialClassName()}
-          />
-        </div>
+        {state.form.authMethod === "pat" && <PATField state={state} canReusePAT={canReusePAT} />}
       </div>
       {projects.error && (
         <p className="text-sm text-destructive" role="alert">
@@ -546,8 +505,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
     !!state.config?.hasSecret &&
     normalizedOrganization(state.config.organizationUrl) ===
       normalizedOrganization(state.form.organizationUrl);
-  const missingPAT = !canReusePAT && !state.form.pat;
-  const disabled = state.loading || !state.form.organizationUrl || missingPAT;
+  const disabled = state.loading || !canSubmitForm(state.config, state.form);
 
   return (
     <SettingsSection

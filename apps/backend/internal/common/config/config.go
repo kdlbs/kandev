@@ -53,6 +53,7 @@ type Config struct {
 	Office                 OfficeConfig                 `mapstructure:"office"`
 	Features               FeaturesConfig               `mapstructure:"features"`
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+	AzureDevOps            AzureDevOpsConfig            `mapstructure:"azureDevOps"`
 	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
 }
@@ -171,6 +172,21 @@ func validatePublicBaseURL(field, raw string) error {
 		return fmt.Errorf("%s must use HTTPS outside loopback development", field)
 	}
 	return nil
+}
+
+// AzureDevOpsConfig holds the Microsoft Entra application identity used for
+// Azure DevOps Microsoft account sign-in. Empty values select the built-in
+// Kandev application and the local callback.
+type AzureDevOpsConfig struct {
+	OAuthClientID    string `mapstructure:"oauthClientId"`
+	OAuthRedirectURL string `mapstructure:"oauthRedirectUrl"`
+}
+
+func (c AzureDevOpsConfig) validate() error {
+	if strings.TrimSpace(c.OAuthRedirectURL) == "" {
+		return nil
+	}
+	return validatePublicBaseURL("azureDevOps.oauthRedirectUrl", c.OAuthRedirectURL)
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -1024,6 +1040,9 @@ func validate(cfg *Config) error {
 	}
 
 	if err := cfg.GitHubCredentialBroker.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := cfg.AzureDevOps.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
 

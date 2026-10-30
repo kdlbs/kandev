@@ -3541,12 +3541,9 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
 func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	t.Parallel()
 	cloner := &recordingAuthenticatedCloner{}
-	exec := &Executor{
-		repoCloner: cloner,
-		secretStore: &mockSecretStore{secrets: map[string]string{
-			"azure_devops:workspace-1:pat": "workspace-pat",
-		}},
-	}
+	azureCredentials := &fakeAzureDevOpsCredentials{password: "workspace-pat"}
+	exec := &Executor{repoCloner: cloner}
+	exec.SetAzureDevOpsCredentialResolver(azureCredentials)
 	azure := &models.Repository{
 		WorkspaceID: "workspace-1", Provider: "azure_devops", ProviderOwner: "Platform", ProviderName: "api",
 	}
@@ -3559,6 +3556,9 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
 		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
 		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
+	}
+	if len(azureCredentials.workspaceIDs) != 1 || azureCredentials.workspaceIDs[0] != "workspace-1" {
+		t.Fatalf("Azure credentials resolved for %v, want only workspace-1", azureCredentials.workspaceIDs)
 	}
 
 	github := &models.Repository{

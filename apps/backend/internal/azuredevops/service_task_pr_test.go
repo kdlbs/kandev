@@ -226,7 +226,7 @@ func newTaskPRServiceFixture(t *testing.T) (*Service, *taskPRClient) {
 		reviewers: []Reviewer{{Identity: Identity{ID: "reviewer-1"}, Vote: -5}},
 		policies:  []PolicyEvaluation{{ID: "policy-1", Status: "running", IsBlocking: true}},
 	}
-	svc := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return client }, nil)
+	svc := NewService(store, newFakeSecretStore(), func(*Config, Authorizer) Client { return client }, nil)
 	if _, err := svc.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {

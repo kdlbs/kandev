@@ -5,10 +5,13 @@ import "github.com/kandev/kandev/internal/integrations/cloneauth"
 
 import "time"
 
-const AuthMethodPAT = "pat"
+const (
+	AuthMethodPAT   = "pat"
+	AuthMethodOAuth = "oauth"
+)
 
 // Config is the workspace-scoped Azure DevOps connection configuration. The
-// PAT is stored separately in the encrypted secret store.
+// PAT or Microsoft tokens are stored separately in the encrypted secret store.
 type Config struct {
 	WorkspaceID        string     `json:"workspaceId" db:"workspace_id"`
 	OrganizationURL    string     `json:"organizationUrl" db:"organization_url"`
@@ -22,6 +25,16 @@ type Config struct {
 	CreatedAt          time.Time  `json:"createdAt" db:"created_at"`
 	UpdatedAt          time.Time  `json:"updatedAt" db:"updated_at"`
 	SavedViewsJSON     string     `json:"-" db:"saved_views"`
+	// OAuthAccount is the signed-in Microsoft identity, for display only.
+	OAuthAccount  string `json:"oauthAccount,omitempty" db:"oauth_account"`
+	OAuthTenantID string `json:"oauthTenantId,omitempty" db:"oauth_tenant_id"`
+	// OAuthClientID is the Entra application that signed in; renewal must use
+	// the same application.
+	OAuthClientID    string     `json:"oauthClientId,omitempty" db:"oauth_client_id"`
+	OAuthRedirectURL string     `json:"oauthRedirectUrl,omitempty" db:"oauth_redirect_url"`
+	TokenExpiresAt   *time.Time `json:"tokenExpiresAt,omitempty" db:"token_expires_at"`
+	// ReauthRequired means only a new Microsoft sign-in can restore access.
+	ReauthRequired bool `json:"reauthRequired" db:"oauth_reauth_required"`
 }
 
 // SavedView is a workspace-scoped Azure browse query. It contains only

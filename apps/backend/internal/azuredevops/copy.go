@@ -12,7 +12,8 @@ var (
 )
 
 // CopyConfigToWorkspace copies connection settings and the PAT, but not health
-// state, from one workspace to another.
+// state, from one workspace to another. A Microsoft account connection is
+// copied without tokens and requires sign-in in the target.
 func (s *Service) CopyConfigToWorkspace(
 	ctx context.Context,
 	sourceWorkspaceID string,
@@ -39,6 +40,9 @@ func (s *Service) CopyConfigToWorkspace(
 	}
 	if source == nil {
 		return nil, ErrNothingToCopy
+	}
+	if source.AuthMethod == AuthMethodOAuth {
+		return s.copyOAuthConfig(ctx, source, targetWorkspaceID)
 	}
 	pat, err := s.revealPAT(ctx, sourceWorkspaceID)
 	if err != nil {

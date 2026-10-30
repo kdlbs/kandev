@@ -228,7 +228,7 @@ func TestRESTClientBoardSnapshotPropagatesBacklogItemFailure(t *testing.T) {
 
 func TestRESTClientWrapsTransportFailure(t *testing.T) {
 	transportErr := errors.New("dial tcp: connection refused")
-	client := NewRESTClient("https://dev.azure.com/acme", "pat", &http.Client{
+	client := NewRESTClient("https://dev.azure.com/acme", NewPATAuthorizer("pat"), &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, transportErr }),
 	})
 
@@ -248,7 +248,7 @@ func (b failingBody) Read([]byte) (int, error) { return 0, b.err }
 func (b failingBody) Close() error             { return nil }
 
 func TestRESTClientWrapsResponseBodyReadFailure(t *testing.T) {
-	client := NewRESTClient("https://dev.azure.com/acme", "pat", &http.Client{
+	client := NewRESTClient("https://dev.azure.com/acme", NewPATAuthorizer("pat"), &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -535,7 +535,7 @@ func TestRESTClientUpdateBoardWorkItemFallsBackToRequestedPlacement(t *testing.T
 
 func TestRESTClientRejectsUpdateBoardWorkItemWithoutRevision(t *testing.T) {
 	called := false
-	client := NewRESTClient("https://dev.azure.com/acme", "pat", &http.Client{
+	client := NewRESTClient("https://dev.azure.com/acme", NewPATAuthorizer("pat"), &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			called = true
 			return nil, errors.New("must not be reached")

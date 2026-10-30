@@ -35,7 +35,7 @@ func TestServiceGetWorkItemDetail(t *testing.T) {
 		comments: &WorkItemCommentPage{Comments: []WorkItemComment{{ID: 9, Content: "Looks good"}}},
 		identity: &Identity{ID: "me", DisplayName: "Ada"},
 	}
-	service, _, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {
@@ -57,7 +57,7 @@ func TestServiceGetWorkItemDetail(t *testing.T) {
 }
 
 func TestServiceDetailCapabilitiesReportNotConfigured(t *testing.T) {
-	service, _, _ := newTestService(t, func(*Config, string) Client { return &invalidClient{} })
+	service, _, _ := newTestService(t, func(*Config, Authorizer) Client { return &invalidClient{} })
 	if _, err := service.SetConfigForWorkspace(t.Context(), "ws-1", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {

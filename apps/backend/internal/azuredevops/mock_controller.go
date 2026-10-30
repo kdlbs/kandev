@@ -26,5 +26,8 @@ func RegisterMockRoutes(router *gin.Engine, service *Service, log *logger.Logger
 		service.MockClient().Seed(MockState{Authenticated: true, User: TestConnectionResult{OK: true, ID: "mock-user", DisplayName: "Mock User"}})
 		ctx.JSON(http.StatusOK, gin.H{"reset": true})
 	})
+	api.GET("/oauth/authorize", func(ctx *gin.Context) {
+		ctx.Redirect(http.StatusFound, mockAuthorizeRedirect(ctx.Query("state"), service.MockClient().OAuthError()))
+	})
 	log.Info("registered Azure DevOps mock control endpoints")
 }

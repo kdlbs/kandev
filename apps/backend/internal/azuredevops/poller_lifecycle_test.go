@@ -320,7 +320,7 @@ func TestPollCleanupSkipsWatchesItMustNotTouch(t *testing.T) {
 
 func TestAuthProberReportsConfiguredWorkspacesAndPersistsHealth(t *testing.T) {
 	client := &fakeClient{result: &TestConnectionResult{OK: false, Error: "401 unauthorized"}}
-	service, store, _ := newTestService(t, func(*Config, string) Client { return client })
+	service, store, _ := newTestService(t, func(*Config, Authorizer) Client { return client })
 	prober := authProber{service: service}
 
 	configured, err := prober.HasConfig(t.Context())

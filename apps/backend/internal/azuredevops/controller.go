@@ -27,6 +27,7 @@ func RegisterRoutes(router *gin.Engine, service *Service, log *logger.Logger) {
 	api.DELETE("/config", controller.deleteConfig)
 	api.POST("/config/test", controller.testConfig)
 	api.POST("/config/copy", controller.copyConfig)
+	registerOAuthRoutes(api, controller)
 	api.GET("/views", controller.getSavedViews)
 	api.PUT("/views", controller.setSavedViews)
 	api.GET("/workspace-settings", controller.getWorkspaceSettings)
@@ -607,6 +608,10 @@ func (c *Controller) writeTaskPRSync(
 func (c *Controller) writeError(ctx *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	code := ""
+	if oauthStatus, oauthCode, ok := oauthErrorStatus(err); ok {
+		ctx.JSON(oauthStatus, gin.H{"error": err.Error(), "code": oauthCode})
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalidWorkspaceID), errors.Is(err, ErrInvalidConfig),
 		errors.Is(err, ErrInvalidTaskPRAssociation):

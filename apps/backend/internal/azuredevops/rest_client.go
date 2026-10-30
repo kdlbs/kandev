@@ -3,7 +3,6 @@ package azuredevops
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,26 +44,29 @@ func AsAPIError(err error, target **APIError) bool { return errors.As(err, targe
 // RESTClient reads Azure DevOps Services directly over HTTP.
 type RESTClient struct {
 	organization string
-	pat          string
+	auth         Authorizer
 	httpClient   *http.Client
 	initErr      error
 }
 
-func NewRESTClient(organizationURL, pat string, httpClient *http.Client) *RESTClient {
+func NewRESTClient(organizationURL string, auth Authorizer, httpClient *http.Client) *RESTClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	if auth == nil {
+		return &RESTClient{httpClient: httpClient, initErr: errors.New("azure devops: credential is required")}
 	}
 	validatedURL, err := ValidateOrganizationURL(organizationURL)
 	if err != nil {
 		return &RESTClient{
-			pat: pat, httpClient: httpClient,
+			auth: auth, httpClient: httpClient,
 			initErr: fmt.Errorf("invalid azure devops organization URL: %w", err),
 		}
 	}
 	organization := strings.TrimPrefix(validatedURL, "https://dev.azure.com/")
 	return &RESTClient{
 		organization: organization,
-		pat:          pat,
+		auth:         auth,
 		httpClient:   httpClient,
 	}
 }
@@ -620,27 +622,16 @@ func (c *RESTClient) doJSONWithContentTypeAndResponseHeaders(ctx context.Context
 	if c.initErr != nil {
 		return c.initErr
 	}
-	var body io.Reader
+	var encoded []byte
 	if requestBody != nil {
-		encoded, err := json.Marshal(requestBody)
-		if err != nil {
+		var err error
+		if encoded, err = json.Marshal(requestBody); err != nil {
 			return fmt.Errorf("encode azure devops request: %w", err)
 		}
-		body = bytes.NewReader(encoded)
 	}
-	requestURL := "https://dev.azure.com/" + url.PathEscape(c.organization) + endpoint
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+	resp, err := c.send(ctx, method, endpoint, encoded, contentType)
 	if err != nil {
-		return fmt.Errorf("create azure devops request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(":"+c.pat)))
-	if requestBody != nil {
-		req.Header.Set("Content-Type", contentType)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("azure devops request %s: %w", endpointPath(endpoint), err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -665,9 +656,56 @@ func (c *RESTClient) doJSONWithContentTypeAndResponseHeaders(ctx context.Context
 	}
 	return nil
 }
+
+// send performs one request and, when Azure rejects the credential and the
+// authorizer renews it, repeats the request exactly once.
+func (c *RESTClient) send(ctx context.Context, method, endpoint string, body []byte, contentType string) (*http.Response, error) {
+	resp, authorization, err := c.sendOnce(ctx, method, endpoint, body, contentType)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	renewed, err := c.auth.Renew(ctx, authorization)
+	if err != nil {
+		_ = resp.Body.Close()
+		return nil, err
+	}
+	if !renewed {
+		return resp, nil
+	}
+	_ = resp.Body.Close()
+	resp, _, err = c.sendOnce(ctx, method, endpoint, body, contentType)
+	return resp, err
+}
+
+func (c *RESTClient) sendOnce(ctx context.Context, method, endpoint string, body []byte, contentType string) (*http.Response, string, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	requestURL := "https://dev.azure.com/" + url.PathEscape(c.organization) + endpoint
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
+	if err != nil {
+		return nil, "", fmt.Errorf("create azure devops request: %w", err)
+	}
+	authorization, err := c.auth.Header(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", authorization)
+	if body != nil {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("azure devops request %s: %w", endpointPath(endpoint), err)
+	}
+	return resp, authorization, nil
+}
+
 func (c *RESTClient) decodeAPIError(resp *http.Response, endpoint string) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-	body := strings.ReplaceAll(string(data), c.pat, "[REDACTED]")
+	body := c.auth.Redact(string(data))
 	return &APIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: body}
 }
 

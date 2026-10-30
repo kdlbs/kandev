@@ -59,6 +59,9 @@ type Service struct {
 	mu                  sync.RWMutex
 	cascadeTaskDeleter  watchreset.TaskDeleter
 	taskSessionChecker  TaskSessionChecker
+	oauth               OAuthSettings
+	entra               entraIdentityProvider
+	oauthLocks          workspaceLocks
 }
 
 // SetEventBus wires watcher events and preserves the nil-safe local test path.
@@ -136,7 +139,7 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 	if log == nil {
 		log = logger.Default()
 	}
-	return &Service{store: store, secrets: secrets, clientFn: clientFn, log: log}
+	return &Service{store: store, secrets: secrets, clientFn: clientFn, log: log, entra: newEntraHTTPClient()}
 }
 
 // Store exposes the configuration store to health-poller adapters.
@@ -174,9 +177,13 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 	if err != nil || cfg == nil || s.secrets == nil {
 		return cfg, err
 	}
-	cfg.HasSecret, err = s.secrets.Exists(ctx, SecretKeyForWorkspace(workspaceID))
+	if cfg.AuthMethod == AuthMethodOAuth {
+		cfg.HasSecret, err = s.oauthCredentialExists(ctx, workspaceID)
+	} else {
+		cfg.HasSecret, err = s.secrets.Exists(ctx, SecretKeyForWorkspace(workspaceID))
+	}
 	if err != nil {
-		return nil, fmt.Errorf("check azure devops PAT: %w", err)
+		return nil, fmt.Errorf("check azure devops credential: %w", err)
 	}
 	return cfg, nil
 }
@@ -203,6 +210,9 @@ func (s *Service) SetConfigForWorkspace(
 		return nil, fmt.Errorf("read existing azure devops config: %w", err)
 	}
 	organizationChanged := previousConfig != nil && previousConfig.OrganizationURL != cfg.OrganizationURL
+	if cfg.AuthMethod == AuthMethodOAuth {
+		return s.saveOAuthSettings(ctx, workspaceID, cfg, previousConfig)
+	}
 	if req.PAT == "" {
 		if err := s.requireStoredPAT(ctx, workspaceID); err != nil {
 			return nil, err
@@ -241,6 +251,7 @@ func (s *Service) setConfigWithPAT(
 			s.restorePAT(ctx, workspaceID, previous),
 		)
 	}
+	s.discardOAuthCredential(ctx, workspaceID)
 	patChanged := !previous.exists || previous.value != pat
 	return s.finishConfigUpdate(ctx, workspaceID, organizationChanged || patChanged)
 }
@@ -281,6 +292,11 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 	}
 	if err := s.store.DeleteConfig(ctx, workspaceID); err != nil {
 		return joinMutationError(err, s.restorePAT(ctx, workspaceID, previous))
+	}
+	s.discardOAuthCredential(ctx, workspaceID)
+	if err := s.store.DeleteOAuthFlowsByWorkspace(ctx, workspaceID); err != nil {
+		s.log.Warn("azure devops: delete pending microsoft sign-ins failed",
+			zap.String("workspace_id", workspaceID), zap.Error(err))
 	}
 	return nil
 }
@@ -334,11 +350,11 @@ func (s *Service) TestConnectionForWorkspace(
 	workspaceID string,
 	req *SetConfigRequest,
 ) (*TestConnectionResult, error) {
-	cfg, pat, err := s.resolveCredentials(ctx, workspaceID, req)
+	cfg, auth, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
-	return s.clientFn(cfg, pat).TestAuth(ctx)
+	return s.clientFn(cfg, auth).TestAuth(ctx)
 }
 
 // ProbeAuthForWorkspace tests the workspace's stored credentials.
@@ -378,12 +394,12 @@ func (s *Service) resolveCredentials(
 	ctx context.Context,
 	workspaceID string,
 	req *SetConfigRequest,
-) (*Config, string, error) {
+) (*Config, Authorizer, error) {
 	if err := validateWorkspaceID(workspaceID); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if req == nil {
 		req = &SetConfigRequest{}
@@ -399,16 +415,53 @@ func (s *Service) resolveCredentials(
 		}
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
-	pat := req.PAT
-	if pat == "" {
-		pat, err = s.revealPAT(ctx, workspaceID)
+	if req.PAT != "" {
+		return cfg, NewPATAuthorizer(req.PAT), nil
+	}
+	if cfg.AuthMethod == AuthMethodOAuth {
+		stored, err := s.store.GetConfig(ctx, workspaceID)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, fmt.Errorf("read azure devops config: %w", err)
 		}
+		if err := requireSignedInOrganization(stored, cfg.OrganizationURL); err != nil {
+			return nil, nil, err
+		}
+		return cfg, oauthAuthorizer{service: s, workspaceID: workspaceID}, nil
 	}
-	return cfg, pat, nil
+	pat, err := s.revealPAT(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cfg, NewPATAuthorizer(pat), nil
+}
+
+// ResolveAzureDevOpsCloneCredentials returns the Git Basic credentials of one
+// workspace's connection for server-side Azure Repos clone and refresh.
+func (s *Service) ResolveAzureDevOpsCloneCredentials(
+	ctx context.Context,
+	workspaceID string,
+) (username, password string, err error) {
+	if err := validateWorkspaceID(workspaceID); err != nil {
+		return "", "", err
+	}
+	cfg, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return "", "", fmt.Errorf("read azure devops config: %w", err)
+	}
+	if cfg != nil && cfg.AuthMethod == AuthMethodOAuth {
+		token, err := s.accessToken(ctx, workspaceID)
+		if err != nil {
+			return "", "", err
+		}
+		return cloneUsername, token, nil
+	}
+	pat, err := s.revealPAT(ctx, workspaceID)
+	if err != nil {
+		return "", "", err
+	}
+	return cloneUsername, pat, nil
 }
 
 func (s *Service) requireStoredPAT(ctx context.Context, workspaceID string) error {
@@ -451,8 +504,8 @@ func configFromRequest(workspaceID string, req *SetConfigRequest) (*Config, erro
 	if authMethod == "" {
 		authMethod = AuthMethodPAT
 	}
-	if authMethod != AuthMethodPAT {
-		return nil, fmt.Errorf("%w: authMethod must be pat", ErrInvalidConfig)
+	if authMethod != AuthMethodPAT && authMethod != AuthMethodOAuth {
+		return nil, fmt.Errorf("%w: authMethod must be pat or oauth", ErrInvalidConfig)
 	}
 	return &Config{
 		WorkspaceID:        workspaceID,

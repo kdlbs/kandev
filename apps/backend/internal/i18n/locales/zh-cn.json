@@ -1,4 +1,6 @@
 {
+  "azureDevOps.oauthCallback.instructions": "请返回 Kandev 完成登录。如果此窗口没有关闭，请复制其地址并粘贴到 Kandev 中。",
+  "azureDevOps.oauthCallback.title": "Microsoft 登录",
   "share.brandTag": "分享的任务",
   "share.builtWith": "基于",
   "share.ctaTryKandev": "在 GitHub 上试用 kandev",

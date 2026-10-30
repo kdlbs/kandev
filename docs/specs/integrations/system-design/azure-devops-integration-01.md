@@ -190,7 +190,7 @@ One row per workspace:
 | `organization_url`     | text     | required, canonical `https://dev.azure.com/<organization>` URL |
 | `default_project_id`   | text     | optional project GUID                                          |
 | `default_project_name` | text     | optional display name                                          |
-| `auth_method`          | text     | `pat` in the first release                                     |
+| `auth_method`          | text     | `pat` or `oauth` ([Microsoft sign-in](azure-devops-oauth.md))  |
 | `last_checked_at`      | datetime | nullable                                                       |
 | `last_ok`              | boolean  | required, default false                                        |
 | `last_error`           | text     | required, default empty                                        |

@@ -25,16 +25,16 @@ type Client interface {
 }
 
 // ClientFactory constructs a client from one workspace's configuration and
-// PAT. Tests inject a deterministic fake at this boundary.
-type ClientFactory func(cfg *Config, pat string) Client
+// credential. Tests inject a deterministic fake at this boundary.
+type ClientFactory func(cfg *Config, auth Authorizer) Client
 
 // DefaultClientFactory constructs the direct REST implementation. No Azure or
 // GitHub CLI is consulted.
-func DefaultClientFactory(cfg *Config, pat string) Client {
+func DefaultClientFactory(cfg *Config, auth Authorizer) Client {
 	if cfg == nil {
 		return &invalidClient{err: errors.New("azure devops: config is required")}
 	}
-	return NewRESTClient(cfg.OrganizationURL, pat, nil)
+	return NewRESTClient(cfg.OrganizationURL, auth, nil)
 }
 
 type invalidClient struct{ err error }
