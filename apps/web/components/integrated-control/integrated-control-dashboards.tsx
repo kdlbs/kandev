@@ -4,6 +4,9 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlAggregateOverview } from "./control-aggregate-overview";
+import { ControlGroupedHistory } from "./control-grouped-history";
+import { ControlNativeComparison } from "./control-native-comparison";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -37,6 +40,18 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           />
         </div>
       )}
+      {view === "overview" && control.officeEnabled && (
+        <>
+          <ControlAggregateOverview
+            aggregate={control.aggregate}
+            controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+          />
+          <ControlNativeComparison workspaces={workspaces} revision={control.data} />
+        </>
+      )}
+      {view === "history" && control.officeEnabled && (
+        <ControlGroupedHistory aggregate={control.aggregate} />
+      )}
       {view === "workspaces" || view === "overview" ? (
         <div className="grid gap-3">
           {workspaces.map((workspace) => (
@@ -54,11 +69,6 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
                     : "sidebar:integratedControl.readAccess",
                 )}
               </p>
-              {byWorkspace[workspace.id]?.error && (
-                <p role="alert" className="mt-2 text-sm text-destructive">
-                  {t("sidebar:integratedControl.loadError")}
-                </p>
-              )}
             </section>
           ))}
         </div>
@@ -68,11 +78,6 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
-        </p>
-      )}
-      {Object.values(byWorkspace).some((list) => list.error) && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("sidebar:integratedControl.partialData")}
         </p>
       )}
       {workspaces.length === 0 && (
