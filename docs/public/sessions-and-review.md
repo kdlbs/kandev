@@ -618,6 +618,10 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+The device preference also makes Kandev's grid, rotating, and pulsing status
+indicators static. Their labels and status updates remain visible. Changes to
+the preference apply while the page is open; no reload is needed.
+
 Select **Jump to latest** above the composer to return to the newest message,
 including agent replies. The action appears only when newer content is below
 the transcript. It does not change the session's auto-scroll preference.

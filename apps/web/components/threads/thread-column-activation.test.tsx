@@ -99,6 +99,8 @@ function ActivationFixture({
   return (
     <div ref={activation.boardRef} data-testid="activation-board">
       <output data-testid="preload-ids">{[...activation.preloadTaskIds].join(",")}</output>
+      <output data-testid="visibility-known">{String(activation.visibleTaskIds !== null)}</output>
+      <output data-testid="visible-ids">{[...(activation.visibleTaskIds ?? [])].join(",")}</output>
       <output data-testid="detail-ids">{[...activation.detailTaskIds].join(",")}</output>
       <output data-testid={MOBILE_TASK_ID}>{activation.mobileTaskId}</output>
       {ids.map((id) => (
@@ -363,6 +365,13 @@ describe("column activation windows", () => {
     );
   });
 
+  it("keeps motion visibility unknown when geometry cannot be observed", () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    expect(ids(DETAIL_IDS)).toEqual([TASK_A]);
+    expect(screen.getByTestId("visibility-known").textContent).toBe("false");
+  });
+
   it("gives phone only the nearest visible snap column as detail owner", () => {
     responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobileBreakpoint());
     render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C]} />);
@@ -393,5 +402,6 @@ describe("column activation windows", () => {
     expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
     expect(ids("detail-ids")).toHaveLength(1);
     expect(ids(PRELOAD_IDS)).toEqual([TASK_A, TASK_B, TASK_C]);
+    expect(ids("visible-ids")).toEqual([TASK_A, TASK_B]);
   });
 });
