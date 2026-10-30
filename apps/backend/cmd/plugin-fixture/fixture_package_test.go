@@ -30,6 +30,8 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, "https://github.com/kdlbs/kandev-plugin-template", m.RepoURL)
 	require.Equal(t, "/ui/bundle.js", m.UI.Bundle)
 	require.True(t, m.HasEvent("task.created"))
+	require.Contains(t, m.Capabilities.APIRead, "tasks")
+	require.Contains(t, m.Capabilities.APIWrite, "tasks")
 	require.True(t, m.Capabilities.State)
 	require.True(t, m.Capabilities.UserState)
 	require.Equal(t, []string{"fixture-source-control"}, m.RepositoryProviders)
@@ -72,12 +74,14 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Len(t, m.AgentTools, 1)
 	require.Equal(t, "test_echo", m.AgentTools[0].Name)
 
-	require.Len(t, m.Webhooks, 2)
-	require.Equal(t, "test-hook", m.Webhooks[0].Key)
-	require.Equal(t, "POST", m.Webhooks[0].Method)
-	require.Equal(t, manifest.WebhookAccessAuthenticated, m.Webhooks[0].EffectiveAccess(m.APIVersion), "test-hook exercises the private (auth-gated) webhook path")
-	require.Equal(t, "public-hook", m.Webhooks[1].Key)
-	require.Equal(t, manifest.WebhookAccessPublic, m.Webhooks[1].EffectiveAccess(m.APIVersion), "public-hook exercises the anonymous auth-gate opt-in")
+	require.Len(t, m.Webhooks, 3)
+	require.Equal(t, "priority", m.Webhooks[0].Key)
+	require.Equal(t, manifest.WebhookAccessAuthenticated, m.Webhooks[0].EffectiveAccess(m.APIVersion), "priority exercises the private Host write path")
+	require.Equal(t, "test-hook", m.Webhooks[1].Key)
+	require.Equal(t, "POST", m.Webhooks[1].Method)
+	require.Equal(t, manifest.WebhookAccessAuthenticated, m.Webhooks[1].EffectiveAccess(m.APIVersion), "test-hook exercises the private (auth-gated) webhook path")
+	require.Equal(t, "public-hook", m.Webhooks[2].Key)
+	require.Equal(t, manifest.WebhookAccessPublic, m.Webhooks[2].EffectiveAccess(m.APIVersion), "public-hook exercises the anonymous auth-gate opt-in")
 }
 
 func TestManagedConversationEnsureReturnsOpaqueTaskAndSessionIDs(t *testing.T) {
