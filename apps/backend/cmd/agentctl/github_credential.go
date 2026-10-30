@@ -17,19 +17,9 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
-type githubBrokerResolveRequest struct {
-	Lease             string `json:"lease,omitempty"`
-	ReissueCapability string `json:"reissue_capability,omitempty"`
-	TaskID            string `json:"task_id"`
-	SessionID         string `json:"session_id"`
-	RepositoryID      string `json:"repository_id"`
-	Owner             string `json:"owner"`
-	Repo              string `json:"repo"`
-	Host              string `json:"host"`
-	Path              string `json:"path,omitempty"`
-	ProviderID        string `json:"provider_id,omitempty"`
-	ParentProviderID  string `json:"parent_provider_id,omitempty"`
-}
+// githubBrokerResolveRequest is the helper's request shape. The alias makes it
+// the broker wire contract shared with the handler instead of a local copy.
+type githubBrokerResolveRequest = githubauth.CredentialBrokerRequest
 
 type githubBrokerCredential struct {
 	Username string `json:"username"`
