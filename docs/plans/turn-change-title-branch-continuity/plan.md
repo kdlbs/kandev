@@ -242,6 +242,9 @@ Implementation and browser checks on 2026-10-30:
 - Review follow-up RED: a verified rename to `feature/b` followed by recreating `feature/a` at the
   same HEAD produced a direct comparison until the equal-ref/different-ID rule was added; it now
   returns unavailable history. Legacy receipts without IDs retain the equal-ref fallback.
+- Fixup follow-up RED: a verified rename, then an ordinary rename through an intermediate name, then
+  recreating that intermediate name reused the stale binding until ordinary renames cleared it; the
+  regression now returns unavailable history.
 - Backend: the work-order `go test -race` command passed for `turnchanges`, `process`, `api`,
   `agentctl`, `lifecycle`, `orchestrator`, and `mcp/handlers`; `backendapp` compiled; changed-Go
   lint reported 0 issues; `git diff --check` passed.

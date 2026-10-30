@@ -124,6 +124,27 @@ func TestTurnCheckpointBranchBindingRejectsUnprovenChanges(t *testing.T) {
 			turnchanges.ReasonHistoryContextChanged)
 	})
 
+	t.Run("generic rename then recreated intermediate branch", func(t *testing.T) {
+		repoDir, operator := newGeneratedBranchOperator(t, "feature/a")
+		changeSetID, checkoutID := uuid.NewString(), uuid.NewString()
+		start := captureHistoryEndpoint(t, operator, changeSetID, checkoutID, turnchanges.CheckpointStart)
+		renameGeneratedBranch(t, operator, "feature/a", "feature/b")
+		result, err := operator.RenameBranch(context.Background(), "feature/c")
+		if err != nil || result == nil || !result.Success {
+			t.Fatalf("generic rename = %+v, %v", result, err)
+		}
+		runGit(t, repoDir, "checkout", "-q", "-b", "feature/b")
+		end := captureHistoryEndpoint(t, operator, changeSetID, checkoutID, turnchanges.CheckpointEnd)
+		if start.Provenance.HeadCommitOID != end.Provenance.HeadCommitOID {
+			t.Fatalf("fixture moved HEAD: %s -> %s", start.Provenance.HeadCommitOID, end.Provenance.HeadCommitOID)
+		}
+		if start.Provenance.HeadBindingID == end.Provenance.HeadBindingID {
+			t.Fatal("generic rename left the stale binding attached to the recreated branch")
+		}
+		assertUnavailableComparison(t, compareHistoryEndpoints(t, operator, changeSetID, checkoutID),
+			turnchanges.ReasonHistoryContextChanged)
+	})
+
 	t.Run("generic rename", func(t *testing.T) {
 		_, operator := newGeneratedBranchOperator(t, "feature/provisional")
 		changeSetID, checkoutID := uuid.NewString(), uuid.NewString()

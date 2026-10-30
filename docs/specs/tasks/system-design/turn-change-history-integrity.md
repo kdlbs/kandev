@@ -151,7 +151,7 @@ Detached HEAD has no binding ID. Receipt retries read the original checkpoint bo
 They never restore live binding state from an old receipt.
 
 Only the title owner's verified generated-branch path can carry a binding across ref names.
-The orchestrator passes the recorded old branch through a proposed
+The orchestrator passes the recorded old branch through the
 `RenameGeneratedBranchForSession` method and an optional `expected_generated_branch`
 field on the existing agentctl rename request.
 Ordinary rename callers omit that field.
@@ -166,6 +166,8 @@ Capture and generated rename serialize through `acquireTurnCheckpointLock`.
 Binding reads and writes also obey the operator's memory synchronization.
 Capture verifies its binding ID with the other before/after provenance fields.
 Generic renames and external branch switches cannot transfer a binding.
+An ordinary rename clears the live binding, so a recreated branch name cannot
+reuse an earlier checkout identity.
 The next capture observes the different ref and creates a new ID.
 Failed, mismatched, or raced renames never transfer the previous binding.
 

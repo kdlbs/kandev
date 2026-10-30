@@ -144,11 +144,12 @@ Completed on 2026-10-30.
 - Added `RenameGeneratedBranch`, `GitRenameGeneratedBranch`, and
   `RenameGeneratedBranchForSession`; ordinary rename payloads remain unchanged.
 - Regression coverage includes edits and exported content, same-commit switches, a verified rename
-  followed by recreating the original branch name at the same HEAD, generic renames,
-  missing/malformed IDs, target changes, active operations, expected-ref refusal, capture/rename
-  serialization, fresh-operator receipt replay, process replacement, mixed repositories, and
-  primary/repository scoping. Known binding IDs must match even when both receipts name the same
-  ref; receipts without IDs keep the legacy equal-ref fallback.
+  followed by recreating the original branch name at the same HEAD, a verified rename followed by a
+  generic rename and recreating the intermediate name, generic renames, missing/malformed IDs,
+  target changes, active operations, expected-ref refusal, capture/rename serialization,
+  fresh-operator receipt replay, process replacement, mixed repositories, and primary/repository
+  scoping. Known binding IDs must match even when both receipts name the same ref; receipts without
+  IDs keep the legacy equal-ref fallback.
 - Verification: the work-order `go test -race` command passed for all seven packages;
   `backendapp` compiled; changed-Go lint reported 0 issues; `git diff --check` passed.
 - Review follow-up: the targeted `TestTurnCheckpoint(BranchBinding|GeneratedBranch)` race run and

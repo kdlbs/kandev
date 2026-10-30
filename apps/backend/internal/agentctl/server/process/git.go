@@ -1264,6 +1264,10 @@ func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOpe
 	}
 
 	result.Success = true
+	// A generic rename is not the verified title handoff. It must not carry
+	// branch-binding continuity to the new name, and it invalidates any binding
+	// still attached to the old checkout identity.
+	g.clearTurnCheckpointBinding()
 	g.logger.Info("branch renamed",
 		zap.String("from", currentBranch),
 		zap.String("to", newName))
