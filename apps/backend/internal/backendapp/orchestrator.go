@@ -874,6 +874,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
+		ParentID:       req.ParentID,
 		Title:          req.Title,
 		Description:    req.Description,
 		Metadata:       req.Metadata,

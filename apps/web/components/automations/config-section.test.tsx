@@ -88,6 +88,10 @@ vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: vi.fn(),
 }));
 
+vi.mock("@/hooks/domains/settings/use-automation-parent-candidates", () => ({
+  useAutomationParentCandidates: () => ({ candidates: [], loading: false }),
+}));
+
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
   useRepositories: () => ({ repositories: mockRepositories }),
 }));
@@ -142,10 +146,12 @@ function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> =
     <ConfigSection
       workspaceId={WORKSPACE_ID}
       workflowId=""
+      parentTaskId=""
       agentProfileId=""
       executorProfileId=""
       repositorySelections={[]}
       onWorkflowChange={() => {}}
+      onParentChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}

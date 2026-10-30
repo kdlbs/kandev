@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -267,8 +268,16 @@ type taskOriginGetter interface {
 // (loop-guard) and scope workspace matching without importing the task service
 // into the automation package.
 type automationTaskOriginLookupAdapter struct {
-	svc taskOriginGetter
-	log *logger.Logger
+	svc     taskOriginGetter
+	parents hierarchy.TaskHierarchyAdmission
+	log     *logger.Logger
+}
+
+func (a *automationTaskOriginLookupAdapter) ValidateAutomationParent(ctx context.Context, workspaceID, parentID string) error {
+	if a.parents == nil {
+		return errors.New("task hierarchy admission is unavailable")
+	}
+	return a.parents.ValidateTaskCreationParent(ctx, workspaceID, parentID, hierarchy.CreationParentValidatorForWorkspace(workspaceID))
 }
 
 func (a *automationTaskOriginLookupAdapter) TaskWorkspaceAndAutomationOrigin(ctx context.Context, taskID string) (string, bool, bool) {
