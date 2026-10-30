@@ -1319,6 +1319,16 @@ func (e *Executor) resumeSession(
 	if err != nil {
 		return nil, err
 	}
+	replacement, err := e.replaceFailedEnvironmentForResume(ctx, task, session, requestedExecutorType)
+	if err != nil {
+		return nil, err
+	}
+	replacementPublished := false
+	defer func() {
+		if !replacementPublished {
+			e.markTaskEnvironmentMaterializationFailed(context.WithoutCancel(ctx), replacement, session.ID)
+		}
+	}()
 	preflight := &resumePreflight{ctx: ctx, persistedEnvironmentID: session.TaskEnvironmentID}
 	defer func() {
 		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
@@ -1454,6 +1464,7 @@ func (e *Executor) resumeSession(
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
+			replacementPublished = true
 			return nil, ErrExecutionAlreadyRunning
 		}
 		e.logger.Info("cleaning up stale execution and retrying launch",
@@ -1525,6 +1536,7 @@ func (e *Executor) resumeSession(
 		}
 		return nil, err
 	}
+	replacementPublished = true
 	if err := e.persistResumeWorkspaceBinding(launchCtx, session, startAgent); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 		var superseded *SessionStateSupersededError
@@ -2432,6 +2444,9 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			if inherited != nil && inherited.IsRetired() {
+				return nil, fmt.Errorf("%w: inherited task environment is retired", models.ErrWorkspaceReuseUnsafe)
 			}
 			if inherited != nil {
 				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {

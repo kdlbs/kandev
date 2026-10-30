@@ -65,6 +65,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureTaskEnvironmentRecoveryOperationsSchema,
 		r.ensureWorkspaceAdoptionsSchema,
 		r.ensureArchivedBranchCandidatesIndex,
+		r.ensureTaskEnvironmentRetirementSchema,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
