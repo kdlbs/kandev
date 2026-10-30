@@ -87,9 +87,12 @@ None.
 - Added the matrix, unjoinable-hold, removal, mixed-retention, reclaim,
   deferral, deferred-job wake, and restart tests named in the plan. The removal
   and deferred-job wake regressions fail before the query change with
-  `active_reference` retention.
+  `active_reference` retention. The wake test keeps the future recheck in place
+  so only startup wake can admit the job.
 - Updated the inventory-repair cascade controls: an archived terminal borrower
   no longer keeps the shared checkout, while its session association remains.
+- The shared worktree system design declares both requirements the work order
+  lists, so the trusted PR documentation coverage evaluator reports `covered`.
 - All verification commands pass, including the exact
   `bash scripts/lint-go-changed` command (0 issues) and the inventory-repair
   race run. `go build -trimpath ./...` also succeeds.

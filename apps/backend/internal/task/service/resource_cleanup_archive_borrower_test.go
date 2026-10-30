@@ -136,15 +136,16 @@ func TestStartupWakeReclaimsDeferredArchiveJobAfterBorrowerArchive(t *testing.T)
 		t.Fatalf("live borrower must keep the shared worktree: %v", err)
 	}
 
-	// The borrower is archived after the owner. Age the waiting job so the next
-	// startup wake admits it instead of mistaking it for a just-deferred job.
+	// The borrower is archived after the owner. Keep the recheck in the future
+	// so ordinary due-job processing skips the job, and age updated_at so the
+	// next startup wake admits it instead of treating it as just deferred.
 	if err := repo.ArchiveTask(ctx, borrower.taskID); err != nil {
 		t.Fatalf("archive borrower: %v", err)
 	}
-	aged := time.Now().UTC().Add(-time.Hour)
+	now := time.Now().UTC()
 	if _, err := repo.DB().ExecContext(ctx, `
 		UPDATE task_resource_cleanup_jobs SET updated_at = ?, next_attempt_at = ? WHERE id = ?
-	`, aged, aged, job.ID); err != nil {
+	`, now.Add(-time.Hour), now.Add(time.Hour), job.ID); err != nil {
 		t.Fatalf("age deferred reclaim: %v", err)
 	}
 

@@ -129,10 +129,13 @@ manager, SQL jobs, and filesystem.
   mixed live/released retention all match the rule.
 - Focused archive reclaim tests pass: borrower history survives release, a live
   borrower defers, restart reclaim removes a checkout pinned before this change,
-  and startup wake succeeds for a deferred reclaim job after the borrower is
-  archived.
+  and startup wake succeeds for a deferred reclaim job whose future recheck
+  means only the wake can admit it.
 - The removal and deferred-job wake regressions reproduced `active_reference`
   retention before the query change and pass after it.
+- The trusted PR documentation coverage evaluator reproduces locally as
+  `covered`: the shared worktree design declares both requirements that the
+  work order lists.
 - The inventory-repair cascade controls pass with the new expectation that an
   archived terminal borrower releases the shared checkout.
 - `go test -trimpath -race -tags fts5 -timeout 20m ./internal/task/service ./internal/worktree -count=1`: pass.

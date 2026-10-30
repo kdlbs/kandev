@@ -2,6 +2,7 @@
 status: current
 system: tasks
 requirements:
+  - REQ-TASKS-RUNTIME-CLEANUP-001
   - REQ-TASKS-SHARED-WORKTREE-HOLDS-001
 created: 2026-10-30
 updated: 2026-10-30
