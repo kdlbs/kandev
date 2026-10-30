@@ -63,6 +63,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "server.webInternalUrl", EnvVars: []string{"KANDEV_WEB_INTERNAL_URL"}, Owner: "launcher/backend", Default: ""},
 	{Key: "server.webTitlePrefix", EnvVars: []string{"KANDEV_WEB_TITLE_PREFIX"}, Owner: "backend", Default: ""},
 	{Key: "server.trustedProxies", EnvVars: []string{"KANDEV_TRUSTED_PROXIES"}, Owner: "backend", Default: ""},
+	{Key: "notifications.webhookAllowPrivateNetworks", EnvVars: []string{"KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS"}, Owner: "notifications", Default: "false", Description: "Allow webhook destinations on private or local networks. Disabled by default."},
 	{Key: "database.driver", EnvVars: []string{"KANDEV_DATABASE_DRIVER"}, Owner: "database", Default: "sqlite"},
 	{Key: "database.path", EnvVars: []string{"KANDEV_DATABASE_PATH"}, Owner: "launcher/backend", Default: "<home>/data/kandev.db"},
 	{Key: "database.host", EnvVars: []string{"KANDEV_DATABASE_HOST"}, Owner: "database", Default: "localhost"},

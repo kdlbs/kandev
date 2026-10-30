@@ -176,7 +176,7 @@ func newOwnershipTestService(t *testing.T, repo notificationstore.Repository, ta
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
 	}
-	svc := NewService(repo, tasks, nil, log, func() bool { return authEnforced })
+	svc := NewService(repo, tasks, nil, log, func() bool { return authEnforced }, false)
 	capture := &captureProvider{}
 	svc.providers[models.ProviderTypeLocal] = capture
 	return svc, capture

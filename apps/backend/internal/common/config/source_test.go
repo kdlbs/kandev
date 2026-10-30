@@ -214,6 +214,51 @@ func TestConfigPrecedenceEnvironmentOverYAML(t *testing.T) {
 	}
 }
 
+func TestWebhookPrivateNetworkSettingUsesYAMLAndEnvironmentPrecedence(t *testing.T) {
+	const envVar = "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS"
+	t.Setenv(envVar, "")
+
+	defaults, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath defaults: %v", err)
+	}
+	if defaults.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("webhook private networks must be disabled by default")
+	}
+	if got := defaults.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceDefault {
+		t.Fatalf("default source = %q, want %q", got, SourceDefault)
+	}
+
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte("notifications:\n  webhookAllowPrivateNetworks: true\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	configured, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath yaml: %v", err)
+	}
+	if !configured.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("YAML setting must allow private webhook destinations")
+	}
+	if got := configured.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceConfiguration {
+		t.Fatalf("YAML source = %q, want %q", got, SourceConfiguration)
+	}
+
+	t.Setenv(envVar, "false")
+	overridden, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath environment override: %v", err)
+	}
+	if overridden.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("environment value must override YAML")
+	}
+	if got := overridden.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceEnvironment {
+		t.Fatalf("environment source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
 func TestEmptyCredentialsEnvironmentClearsYAML(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("credentials:\n  file: /run/secrets/credentials\n"), 0o600); err != nil {

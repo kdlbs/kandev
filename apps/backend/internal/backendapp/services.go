@@ -106,6 +106,9 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+	taskSvc.SetWorkspaceCollaboration(&workspaceCollaborationBoundary{
+		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
+	}, repos.Task)
 
 	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
 
@@ -126,6 +129,10 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	pluginsSvc := integrations.pluginsSvc
+	if pluginsSvc != nil {
+		boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
+		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
+	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
 	if services.Plugins != nil {
@@ -531,6 +538,9 @@ func wireTaskWorkflowCrossReferences(
 	// package owns steps, templates and export/import, but a workflow's owner
 	// is its workspace's owner, which only the task service can resolve.
 	workflowSvc.SetWorkflowAccessChecker(taskSvc.AuthorizeWorkflowAccess)
+	workflowSvc.SetWorkflowAuthorizationRequiredChecker(taskSvc.WorkflowAuthorizationRequired)
+	workflowSvc.SetWorkflowMutationReadOnlyChecker(taskSvc.WorkflowMutationReadOnly)
+	workflowSvc.SetWorkspaceMutationReadOnlyChecker(taskSvc.WorkspaceWorkflowMutationReadOnly)
 	workflowSvc.SetExecutorMutationChecker(taskSvc.AuthorizeWorkflowExecutorMutation)
 	workflowSvc.SetWorkspaceAccessChecker(taskSvc.AuthorizeWorkspaceAccess)
 	// A step's queue_run action names the task it starts work on, so the
@@ -2097,7 +2107,7 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		}
 		req.State = &state
 	}
-	task, err := a.svc.GetTask(ctx, in.ID)
+	identity, err := a.taskMutationIdentity(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -2110,7 +2120,7 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		return nil, status.Error(codes.InvalidArgument, "invalid task update")
 	}
 	updated, err := a.svc.UpdateTaskExact(ctx, in.ID, taskservice.ExactTaskUpdateRequest{
-		WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		WorkspaceID: identity.WorkspaceID, ExpectedResourceVersion: identity.ResourceVersion,
 		OperationID: operationID, PayloadDigest: payloadDigest,
 		ClaimFence: claimFence,
 		Title:      req.Title, Description: req.Description, State: req.State, Priority: req.Priority,
@@ -2169,7 +2179,7 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 	if err != nil {
 		return nil, err
 	}
-	task, err := a.svc.GetTask(ctx, in.TaskID)
+	identity, err := a.taskMutationIdentity(ctx, in.TaskID)
 	if err != nil {
 		return nil, classifyPluginMoveError(err)
 	}
@@ -2186,16 +2196,16 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
 		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
 		ExactOperation: &taskservice.ExactTaskMoveOperation{
-			WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			WorkspaceID: identity.WorkspaceID, ExpectedResourceVersion: identity.ResourceVersion,
 			OperationID: operationID, PayloadDigest: payloadDigest, ClaimFence: claimFence,
 		},
 	}
 	if in.WorkflowID == nil {
-		// workflowID above was inherited from a separate GetTask pre-read
+		// workflowID above was inherited from a separate mutation identity read
 		// (resolvePluginMoveWorkflowID), not named explicitly by the plugin.
 		// Guard against a concurrent reassignment landing between that read
 		// and the write below: MoveTaskWithOptions re-checks this against the
-		// task's WorkflowID from its own fresh GetTask and fails the move
+		// task's WorkflowID from its own fresh task read and fails the move
 		// instead of silently reverting the concurrent change.
 		opts.ExpectedWorkflowID = &workflowID
 	}
@@ -2228,7 +2238,13 @@ func (a pluginsTaskWriterAdapter) legacyTaskManagementFence(ctx context.Context,
 	if !ok {
 		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
 	}
-	claim, err := reader.GetTaskManagementClaim(ctx, taskID)
+	readClaim := reader.GetTaskManagementClaim
+	if mutationReader, ok := a.svc.(interface {
+		GetTaskManagementClaimForMutation(context.Context, string) (*taskmodels.TaskManagementClaim, error)
+	}); ok {
+		readClaim = mutationReader.GetTaskManagementClaimForMutation
+	}
+	claim, err := readClaim(ctx, taskID)
 	if err != nil {
 		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
 	}
@@ -2397,7 +2413,7 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 	if in.WorkflowID != nil {
 		return *in.WorkflowID, nil
 	}
-	task, err := a.svc.GetTask(ctx, in.TaskID)
+	identity, err := a.taskMutationIdentity(ctx, in.TaskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
 			// classifyPluginMoveError's fixed "task not found" message, not a
@@ -2413,7 +2429,7 @@ func (a pluginsTaskWriterAdapter) resolvePluginMoveWorkflowID(ctx context.Contex
 		// other unexpected lookup failure to a fixed Internal status.
 		return "", classifyPluginMoveError(err)
 	}
-	return task.WorkflowID, nil
+	return identity.WorkflowID, nil
 }
 
 // classifyPluginMoveError maps MoveTaskWithOptions' bare validation errors to

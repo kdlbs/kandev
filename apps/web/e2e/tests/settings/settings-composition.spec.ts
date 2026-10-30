@@ -95,7 +95,7 @@ test.describe("Settings composition", () => {
     const notificationsContent = testPage.locator('[data-settings-page-content="true"]');
     await expect(notificationsContent).toBeVisible();
     await expect(notificationsContent.locator(':scope > [data-slot="card"]')).toHaveCount(0);
-    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(5);
+    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(6);
     await expect(notificationsContent.getByTestId("web-push-status")).toBeVisible();
 
     await testPage.goto("/settings/preferences/terminal-editors");

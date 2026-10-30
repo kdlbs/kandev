@@ -415,12 +415,18 @@ resolve the interrupted operation, and verify before restarting.
 
 After restart, resume the affected session or retry archive or confirmed delete
 through the normal task controls. Check the resulting cleanup job separately.
-**Metadata verification does not mean cleanup completed.** Borrowed workspaces
-remain protected, and dirty-file, branch, commit, ownership, and deletion-consent
-checks still apply. An archived borrower session can continue to protect a
-shared checkout. A cascade delete can report pending cleanup after deleting the
-task rows. Inspect the durable cleanup jobs and workspace-group status separately;
-a completed task cleanup job does not clear an older group cleanup error.
+**Metadata verification does not mean cleanup completed.** Dirty-file, branch,
+commit, ownership, and deletion-consent checks still apply. A borrowed workspace
+stays protected while the borrower can still use it: a live borrower, or one
+whose runtime stop failed, holds a shared checkout. Archiving the borrower
+releases that hold once its session is terminal and no runtime remains. Releasing
+the hold removes nothing while the owner is live. When the owner's archived
+worktree is reclaimed, the shared checkout and any uncommitted borrower files in
+it are removed. If the owner was archived first, reclaim runs on the next 24-hour
+recheck or after a backend restart. A cascade delete can report pending cleanup
+after deleting the task rows. Inspect the durable cleanup jobs and workspace-group
+status separately; a completed task cleanup job does not clear an older group
+cleanup error.
 
 ### Named branch policies
 

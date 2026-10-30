@@ -76,5 +76,20 @@
   "filtersButton_one": "Filtros ({{count}})",
   "filtersButton_other": "Filtros ({{count}})",
   "appliedWorkflow": "Fluxo de trabalho: {{name}}",
-  "appliedRepository": "Repositório: {{name}}"
+  "appliedRepository": "Repositório: {{name}}",
+  "ungrouped": "Sem grupo",
+  "collaborationTitle": "Colaboração entre espaços de trabalho",
+  "collaborationDescription": "{{task}} em {{workspace}}. Gerir o acesso desta conversa a outros espaços de trabalho.",
+  "collaborationNativePermissions": "Leitura, relatório, mensagem e controlo são independentes. As permissões nativas do utilizador continuam a aplicar-se. Desmarcar as quatro opções revoga o acesso.",
+  "collaborationRead": "Leitura",
+  "collaborationReport": "Relatório",
+  "collaborationPrompt": "Mensagem",
+  "collaborationControl": "Controlo",
+  "collaborationTargetUnavailable": "Este destino está fora do seu acesso nativo de leitura atual. A permissão guardada é apresentada sem permitir alterações.",
+  "collaborationLoadDenied": "Não tem permissão para gerir o acesso desta conversa a espaços de trabalho.",
+  "collaborationLoadFailed": "Não foi possível carregar o acesso. As alterações foram mantidas; volte a carregar antes de guardar.",
+  "collaborationSaveDenied": "Esta linha não foi guardada porque a permissão foi recusada. As alterações foram mantidas.",
+  "collaborationSaveFailed": "Não foi possível guardar esta linha. As alterações foram mantidas.",
+  "collaborationNoTargets": "Não há outros espaços de trabalho disponíveis.",
+  "collaborationRetry": "Voltar a carregar"
 }

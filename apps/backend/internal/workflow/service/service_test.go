@@ -151,6 +151,12 @@ func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
 	require.NoError(t, err)
 }
 
+func createSyncedStepFixture(t *testing.T, svc *Service, step *models.WorkflowStep) {
+	// Seed synced workflow fixtures directly. The public mutation path must reject them.
+	err := svc.repo.CreateStep(context.Background(), step)
+	require.NoError(t, err)
+}
+
 func TestCreateStepRejectsConfigureSessionWithProfile(t *testing.T) {
 	svc, db := setupTestService(t)
 	insertWorkflow(t, db, "wf-1", "Test Workflow")

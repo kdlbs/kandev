@@ -2125,6 +2125,14 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
+	}
+}
+
 // SetCoordinatorLookup forwards the coordinator lookup to the executor's
 // fail-closed coordinator-session-start check. Guarded by the caller on the
 // coordinator feature flag (docs/specs/coordinator/system-design/copilot.md#fail-closed).

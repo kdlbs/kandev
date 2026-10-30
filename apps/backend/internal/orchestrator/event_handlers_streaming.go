@@ -35,6 +35,25 @@ const (
 // shared with another namespace.
 var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
 
+// continuationActivityEventFrom copies the bounded stream fields the
+// continuation-activity observer needs without leaking runtime payload types
+// into the orchestrator's neutral activity record.
+func continuationActivityEventFrom(data *lifecycle.AgentStreamEventData) continuationActivityEvent {
+	if data == nil {
+		return continuationActivityEvent{}
+	}
+	return continuationActivityEvent{
+		Type:                        data.Type,
+		PromptGeneration:            data.PromptGeneration,
+		Text:                        data.Text,
+		Role:                        data.Role,
+		ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+		ToolCallID:                  data.ToolCallID,
+		ParentToolCallID:            data.ParentToolCallID,
+		Normalized:                  data.Normalized,
+	}
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
@@ -158,6 +177,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	if eventType != agentEventToolCall {
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
+	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
@@ -211,6 +233,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
+		// Observe after the handler records the finalized tool ownership. This
+		// prevents an unclassified or background call from confirming recovery.
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 
 	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)

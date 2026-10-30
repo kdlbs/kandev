@@ -126,6 +126,7 @@ func provideGateway(
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
 	acquireSessionFence func(string) func(),
+	webhookPrivateNetworksAllowed bool,
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -439,7 +440,8 @@ func provideGateway(
 		notificationTasks = taskRepo
 	}
 	notificationSvc := notificationservice.NewService(
-		notificationRepo, notificationTasks, gateway.Hub, log, notificationAuthEnforced(authSvc))
+		notificationRepo, notificationTasks, gateway.Hub, log,
+		notificationAuthEnforced(authSvc), webhookPrivateNetworksAllowed)
 	configureWebPush(notificationSvc, notificationRepo, notificationSettings, log, registerCleanup)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {

@@ -17,6 +17,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 	}
 	for _, key := range []string{
 		"server.trustedProxies",
+		"notifications.webhookAllowPrivateNetworks",
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
@@ -91,6 +92,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_INTERNAL_URL", class: "catalog"},
 		{envVar: "KANDEV_WEB_TITLE_PREFIX", class: "catalog"},
 		{envVar: "KANDEV_TRUSTED_PROXIES", class: "catalog"},
+		{envVar: "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_DRIVER", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_PATH", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_HOST", class: "catalog"},

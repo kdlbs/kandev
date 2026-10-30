@@ -838,7 +838,7 @@ export type {
   ApproveSessionResponse,
 } from "./http-session-responses";
 
-export type NotificationProviderType = "local" | "apprise" | "system" | "webpush";
+export type NotificationProviderType = "local" | "apprise" | "system" | "webhook" | "webpush";
 
 export type NotificationProvider = {
   id: string;

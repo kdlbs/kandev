@@ -25,6 +25,7 @@ import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
+import { WorkspaceCollaborationAction } from "@/components/task/workspace-collaboration-action";
 import { useTranslation } from "react-i18next";
 import {
   RemoteRepositoryProviderIcon,
@@ -309,6 +310,15 @@ function MobileTopBarActions({
         presentation="mobile"
       />
     ) : undefined;
+  const taskActions =
+    !isArchived && taskId && workspaceId ? (
+      <WorkspaceCollaborationAction
+        taskId={taskId}
+        workspaceId={workspaceId}
+        title={taskTitle}
+        mobile
+      />
+    ) : undefined;
 
   return (
     <div className="flex shrink-0 items-center gap-1" data-testid="mobile-topbar-actions">
@@ -328,7 +338,11 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <AppNavSheet onOpenTaskViews={onTaskPickerClick} pluginActions={pluginActions} />
+      <AppNavSheet
+        onOpenTaskViews={onTaskPickerClick}
+        pluginActions={pluginActions}
+        taskActions={taskActions}
+      />
     </div>
   );
 }

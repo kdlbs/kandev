@@ -192,7 +192,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		changed = changed || stepChanged
 	}
 	for _, st := range toDelete {
-		if err := s.DeleteStep(ctx, st.ID); err != nil {
+		if err := s.deleteStep(ctx, wf.ID, st.ID); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to remove step %q: %v", wf.Name, st.Name, err))
 			return
 		}

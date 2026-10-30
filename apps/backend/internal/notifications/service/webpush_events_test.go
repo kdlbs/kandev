@@ -45,7 +45,7 @@ func TestEnsureWebPushProviderCreatesOneProviderWithAttentionEvents(t *testing.T
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
 	}
-	svc := NewService(repo, nil, nil, log, nil)
+	svc := NewService(repo, nil, nil, log, nil, false)
 	ctx := context.Background()
 
 	if err := svc.EnsureWebPushProvider(ctx, "u1"); err == nil {
