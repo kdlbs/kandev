@@ -228,3 +228,48 @@ func TestNodeWrapperDoesNotWrapUserShells(t *testing.T) {
 func passthroughStartForTest(f nodeFixture) types.PassthroughStartRequest {
 	return types.PassthroughStartRequest{SessionID: "s", OperationID: "o", Command: []string{f.child}}
 }
+
+// @covers AC-AGENTS-NODEWRAP-005.2
+func TestRunnerThatCannotWrapRefusesAgentLaunchWhenRequired(t *testing.T) {
+	f := newNodeFixture(t)
+	runner := NewInteractiveRunner(nil, newTestLogger(t), 1024)
+	runner.SetNodeLaunchWrapper(launchwrapper.Node{Required: true})
+	for _, immediate := range []bool{true, false} {
+		_, err := runner.Start(context.Background(), InteractiveStartRequest{
+			SessionID: "s", Command: []string{f.child}, WorkingDir: f.dir, ImmediateStart: immediate,
+			Env: map[string]string{"RECEIPT": f.receipt},
+		})
+		require.ErrorIs(t, err, launchwrapper.ErrNodeRequired)
+		require.Contains(t, err.Error(), "cannot apply")
+	}
+	require.Empty(t, f.receiptLines(t), "nothing ran unwrapped")
+
+	info, err := runner.Start(context.Background(), InteractiveStartRequest{
+		SessionID: "s", Command: []string{f.child}, WorkingDir: f.dir, ImmediateStart: true, IsUserShell: true,
+		Env: map[string]string{"RECEIPT": f.receipt},
+	})
+	require.NoError(t, err, "user shells are not agent launches")
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = runner.Stop(ctx, info.ID)
+	})
+}
+
+// @covers AC-AGENTS-NODEWRAP-005.3
+func TestRunnerWithoutRequirementBehavesAsToday(t *testing.T) {
+	f := newNodeFixture(t)
+	runner := NewInteractiveRunner(nil, newTestLogger(t), 1024)
+	runner.SetNodeLaunchWrapper(launchwrapper.Node{})
+	info, err := runner.Start(context.Background(), InteractiveStartRequest{
+		SessionID: "s", Command: []string{f.child}, WorkingDir: f.dir, ImmediateStart: true,
+		Env: map[string]string{"RECEIPT": f.receipt},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = runner.Stop(ctx, info.ID)
+	})
+	require.Eventually(t, func() bool { return f.receiptLines(t) == "child\n" }, 3*time.Second, 10*time.Millisecond)
+}

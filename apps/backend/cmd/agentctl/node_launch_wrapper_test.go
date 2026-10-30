@@ -36,8 +36,20 @@ func nodeWrapperFile(t *testing.T, mode os.FileMode) (string, string) {
 // @covers AC-AGENTS-NODEWRAP-001.1 AC-AGENTS-NODEWRAP-004.1
 func TestApplyNodeLaunchWrapperLoadsFile(t *testing.T) {
 	path, wrapper := nodeWrapperFile(t, 0o600)
+	// The ownership rules have their own tests; this one covers the plumbing,
+	// and the OS temp directory is not a trustworthy ancestor chain everywhere.
+	previous := loadNodeLaunchWrapperFile
+	t.Cleanup(func() { loadNodeLaunchWrapperFile = previous })
+	var gotPath string
+	var gotOwner int
+	loadNodeLaunchWrapperFile = func(p string, owner int) (launchwrapper.Spec, error) {
+		gotPath, gotOwner = p, owner
+		return launchwrapper.Spec{Version: launchwrapper.Version, Source: launchwrapper.SourceNode, Argv: []string{wrapper, "--"}}, nil
+	}
 	cfg := &config.Config{}
-	require.NoError(t, applyNodeLaunchWrapper(cfg, path, true, -1))
+	require.NoError(t, applyNodeLaunchWrapper(cfg, path, true, 1234))
+	require.Equal(t, path, gotPath)
+	require.Equal(t, 1234, gotOwner)
 	require.Equal(t, []string{wrapper, "--"}, cfg.NodeLaunchWrapper.Spec.Argv)
 	require.True(t, cfg.NodeLaunchWrapper.Required)
 	inst := cfg.NewInstanceConfig(0, nil)

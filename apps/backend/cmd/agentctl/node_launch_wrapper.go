@@ -7,6 +7,9 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
+// loadNodeLaunchWrapperFile is replaced only by tests of the flag plumbing.
+var loadNodeLaunchWrapperFile = launchwrapper.LoadNodeFile
+
 // applyNodeLaunchWrapper loads the operator-owned wrapper. It never falls back
 // to an unwrapped launch: a required wrapper without a file, or a named file
 // that cannot be trusted, is an error.
@@ -17,7 +20,7 @@ func applyNodeLaunchWrapper(cfg *config.Config, path string, required bool, owne
 		}
 		return nil
 	}
-	spec, err := launchwrapper.LoadNodeFile(path, ownerUID)
+	spec, err := loadNodeLaunchWrapperFile(path, ownerUID)
 	if err != nil {
 		return err
 	}

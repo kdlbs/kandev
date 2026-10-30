@@ -71,6 +71,7 @@ func provideLifecycleManager(
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer
+	configurePassthroughRunner(interactiveRunner, peerCapabilities)
 	standaloneExec.SetInteractiveRunner(interactiveRunner)
 
 	executorRegistry.Register(standaloneExec)
