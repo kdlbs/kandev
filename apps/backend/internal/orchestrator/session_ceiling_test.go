@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"go.uber.org/zap"
 )
 
@@ -399,5 +400,32 @@ func TestNativeReservationSurvivesStaleSweep(t *testing.T) {
 	c.mu.Unlock()
 	if !nativeHeld || taskHeld {
 		t.Fatalf("native held = %v, task held = %v; want native retained and task released", nativeHeld, taskHeld)
+	}
+}
+
+// A retained review binding is the exact review run, not every review run for
+// the same task: a distinct run must not be refused as already retained.
+func TestNativeRouteRetainedUsesExactReviewRunIdentity(t *testing.T) {
+	active := map[string]sessioncapacity.InferenceBinding{
+		"binding-a": {ReviewRunID: "run-a", TaskID: "task-1", SessionID: "session-1"},
+	}
+	other := NativeInferenceRoute{ID: "native:review-run:run-b", ReviewRunID: "run-b", TaskID: "task-1", SessionID: "session-1"}
+	if nativeRouteRetained(other, active) {
+		t.Fatal("a different review run for the same task must not be treated as retained")
+	}
+	same := NativeInferenceRoute{ID: "native:review-run:run-a", ReviewRunID: "run-a", TaskID: "task-1", SessionID: "session-1"}
+	if !nativeRouteRetained(same, active) {
+		t.Fatal("the same retained review run must be detected")
+	}
+}
+
+// A retained utility call is still detected by its own call identity.
+func TestNativeRouteRetainedDetectsSameCall(t *testing.T) {
+	active := map[string]sessioncapacity.InferenceBinding{
+		"binding-call": {CallID: "call-1"},
+	}
+	route := NativeInferenceRoute{ID: "native:utility-call:call-1", CallID: "call-1"}
+	if !nativeRouteRetained(route, active) {
+		t.Fatal("the retained utility call must be detected")
 	}
 }

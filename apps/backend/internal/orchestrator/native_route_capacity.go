@@ -42,7 +42,7 @@ func nativeRouteRetained(route NativeInferenceRoute, active map[string]sessionca
 		if route.CallID != "" && route.CallID == held.CallID && held.ReviewRunID == "" {
 			return true
 		}
-		if route.ReviewRunID != "" && held.ReviewRunID != "" && (held.TaskID == "" || held.TaskID == route.TaskID) {
+		if route.ReviewRunID != "" && held.ReviewRunID == route.ReviewRunID {
 			return true
 		}
 	}
