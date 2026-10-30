@@ -24,8 +24,14 @@ func WithStopObservation(ctx context.Context, collector *StopObservationCollecto
 	return context.WithValue(ctx, stopObservationKey{}, collector)
 }
 
-func (c *StopObservationCollector) record(result *utility.InferenceStopObservation) {
-	if result == nil || result.InstanceID != c.instanceID {
+// record keeps the observation for this exact delete target. The transport has
+// already checked the response against targetInstanceID; the constructor ID is
+// only a fallback for callers that know the target identity in advance.
+func (c *StopObservationCollector) record(targetInstanceID string, result *utility.InferenceStopObservation) {
+	if result == nil || result.InstanceID == "" {
+		return
+	}
+	if result.InstanceID != targetInstanceID && result.InstanceID != c.instanceID {
 		return
 	}
 	c.mu.Lock()

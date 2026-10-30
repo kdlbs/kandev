@@ -33,7 +33,7 @@ func observeDeletedInference(ctx context.Context, instanceID string, body io.Rea
 	}
 	observation := &utility.InferenceStopObservation{InstanceID: instanceID, Evidence: "unavailable"}
 	if collector != nil {
-		defer collector.record(observation)
+		defer collector.record(instanceID, observation)
 	}
 	var result struct {
 		Attempts *utility.AttemptSnapshot `json:"inference_attempts"`
