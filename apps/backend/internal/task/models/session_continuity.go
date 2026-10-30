@@ -241,6 +241,11 @@ const (
 
 	RecoveryBlockOpen     = "open"
 	RecoveryBlockResolved = "resolved"
+
+	// RecoveryBlockActionTaskArchived marks a bookkeeping closure of an
+	// archived task's recovery fence. It is not a delivery outcome or a
+	// recovery authorization.
+	RecoveryBlockActionTaskArchived = "task_archived"
 )
 
 // InterruptedContinuationCommit binds a verified native restore to its admitted instruction.

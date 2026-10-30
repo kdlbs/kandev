@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -567,6 +568,43 @@ func (r *Repository) ListOpenSessionRecoveryBlocks(
 	return blocks, rows.Err()
 }
 
+// ListOpenRecoveryBlocksForArchivedTasks returns open blocks whose owning task
+// is archived and whose session is terminal. Those owners cannot be resumed or
+// restored while archived, so the blocked causes are bookkeeping only.
+func (r *Repository) ListOpenRecoveryBlocksForArchivedTasks(
+	ctx context.Context,
+	limit int,
+) ([]string, error) {
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT b.id
+		FROM session_recovery_blocks b
+		JOIN task_sessions ts ON ts.id = b.session_id
+		JOIN tasks t ON t.id = ts.task_id
+		WHERE b.state = ?
+		  AND t.archived_at IS NOT NULL
+		  AND ts.state IN (?, ?, ?)
+		ORDER BY b.created_at, b.id
+		LIMIT ?`), models.RecoveryBlockOpen,
+		models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled,
+		limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // GetSessionRecoveryBlock returns a block by stable identity, including
 // resolved blocks that autonomous consumers use to release their parked work.
 func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*models.SessionRecoveryBlock, error) {
@@ -587,13 +625,52 @@ func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*m
 }
 
 func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error) {
+	return r.resolveSessionRecoveryBlock(ctx, id, action, resolvedAt, false)
+}
+
+// ResolveSessionRecoveryBlockForArchivedTask resolves an open block only while
+// its owning task is still archived and its session is terminal. The task row
+// lock and the re-check inside the transaction prevent a sweep racing an
+// unarchive from closing a fence that has become live again.
+func (r *Repository) ResolveSessionRecoveryBlockForArchivedTask(
+	ctx context.Context,
+	id, action string,
+	resolvedAt time.Time,
+) (bool, error) {
+	return r.resolveSessionRecoveryBlock(ctx, id, action, resolvedAt, true)
+}
+
+func (r *Repository) resolveSessionRecoveryBlock(
+	ctx context.Context,
+	id, action string,
+	resolvedAt time.Time,
+	requireArchivedOwner bool,
+) (bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if requireArchivedOwner {
+		eligible, err := r.archivedTaskRecoveryBlockEligibleTx(ctx, tx, id)
+		if err != nil {
+			return false, err
+		}
+		if !eligible {
+			return false, tx.Commit()
+		}
+	}
+	return r.resolveSessionRecoveryBlockRecord(ctx, tx, id, action, resolvedAt)
+}
+
+func (r *Repository) resolveSessionRecoveryBlockRecord(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	id, action string,
+	resolvedAt time.Time,
+) (bool, error) {
 	var sessionID, streamID, consumerReference string
-	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT session_id, delivery_stream_id, consumer_reference
 		FROM session_recovery_blocks WHERE id = ?`), id).Scan(&sessionID, &streamID, &consumerReference)
 	if err == sql.ErrNoRows {
@@ -629,6 +706,102 @@ func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+func (r *Repository) archivedTaskRecoveryBlockEligibleTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	blockID string,
+) (bool, error) {
+	var taskID string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT ts.task_id
+		FROM session_recovery_blocks b
+		JOIN task_sessions ts ON ts.id = b.session_id
+		WHERE b.id = ?`), blockID).Scan(&taskID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var locked string
+		err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+			SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&locked)
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+	var eligible bool
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM session_recovery_blocks b
+			JOIN task_sessions ts ON ts.id = b.session_id
+			JOIN tasks t ON t.id = ts.task_id
+			WHERE b.id = ? AND b.state = ?
+			  AND t.archived_at IS NOT NULL
+			  AND ts.state IN (?, ?, ?)
+		)`), blockID, models.RecoveryBlockOpen,
+		models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled).Scan(&eligible)
+	return eligible, err
+}
+
+// reopenTaskArchivedRecoveryBlocksTx restores fences closed for an archived
+// owner. It runs in the unarchive transaction so recovery eligibility cannot
+// observe the task as active while its old fence is still closed.
+func (r *Repository) reopenTaskArchivedRecoveryBlocksTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) error {
+	now := time.Now().UTC()
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT DISTINCT b.session_id
+		FROM session_recovery_blocks b
+		JOIN task_sessions ts ON ts.id = b.session_id
+		WHERE ts.task_id = ? AND b.state = ? AND b.authorized_action = ?`),
+		taskID, models.RecoveryBlockResolved, models.RecoveryBlockActionTaskArchived)
+	if err != nil {
+		return err
+	}
+	sessionIDs := make([]string, 0)
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE session_recovery_blocks
+		SET state = ?, authorized_action = '', resolved_at = NULL, updated_at = ?
+		WHERE state = ? AND authorized_action = ?
+		  AND session_id IN (SELECT id FROM task_sessions WHERE task_id = ?)`),
+		models.RecoveryBlockOpen, now, models.RecoveryBlockResolved,
+		models.RecoveryBlockActionTaskArchived, taskID); err != nil {
+		return err
+	}
+	for _, sessionID := range sessionIDs {
+		if err := r.advanceRecoverySessionRevisionTx(ctx, tx, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func boolToInt(value bool) int {

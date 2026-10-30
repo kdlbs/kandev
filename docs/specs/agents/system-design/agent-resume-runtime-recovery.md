@@ -59,6 +59,29 @@ a direct restore request cannot bypass archive state. Reuse
 `executor.ErrTaskArchived`; do not weaken runtime terminal-state or task cleanup
 barriers. A status read is not authorization for a later launch.
 
+### Archived-owner recovery fence closure
+
+An archived task whose sessions are terminal cannot be resumed or restored
+while archived, so its open recovery blocks no longer gate live work. A bounded
+reconciliation pass resolves those blocks with
+`authorized_action='task_archived'`. This is bookkeeping only: the submission,
+stream, delivery outcome, and row remain; it does not settle uncertainty,
+release a queue claim, or authorize a prompt. Blocks of unarchived tasks,
+including terminal non-primary sessions that a manual resume can revive, remain
+open.
+
+The Office recovery-park consumer ignores archive-only closure. It retains the
+run's block reference and does not requeue it for admission merely because the
+block is resolved by bookkeeping. Actual explicit session recovery retains its
+existing release behavior after unarchive.
+
+Unarchive restores only blocks closed with `task_archived` in the same
+transaction that clears `archived_at`, and advances the affected session
+revision before recovery eligibility is evaluated. Retention treats such a
+block as still protecting prompt and terminal proof so a reopened fence keeps
+its historical payload. No schema migration is required; the authorized action
+is the discriminator.
+
 The `session.launch` handler maps this sentinel to the existing WebSocket
 conflict envelope with `details.kind = task_archived`. It returns a short
 message directing the user to unarchive. Expected archive rejections use a

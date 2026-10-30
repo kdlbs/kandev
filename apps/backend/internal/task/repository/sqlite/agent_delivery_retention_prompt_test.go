@@ -107,6 +107,65 @@ func TestDeliveryRetentionPrompt(t *testing.T) {
 	}
 }
 
+func TestDeliveryRetentionTaskArchivedBlockKeepsPromptPayload(t *testing.T) {
+	for _, engine := range []string{"SQLite", "Postgres"} {
+		t.Run(engine, func(t *testing.T) {
+			repo, event, advance := seedRetentionPromptSubmission(t, engine, "task-archived")
+			putRetentionWorkflowOutcome(t, repo, event, "not_required", retentionPromptTurnID(t, event))
+			completed, err := repo.CompleteAgentDeliveryTerminalSettlement(
+				context.Background(), terminalRetentionEffectKey(event), time.Time{},
+			)
+			if err != nil || !completed {
+				t.Fatalf("complete fully proved terminal = %v, %v", completed, err)
+			}
+			resolvedAt := time.Now().UTC()
+			if _, err := repo.db.ExecContext(context.Background(), repo.db.Rebind(`
+				INSERT INTO session_recovery_blocks
+				(id, session_id, incarnation_id, expected_generation, reason, state,
+				 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+				 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+				"task-archived-retention-block", event.SessionID, event.IncarnationID,
+				event.HarnessGeneration, "archived_owner_retention", models.RecoveryBlockResolved,
+				"agent_delivery", event.SubmissionID, event.StreamID, event.Sequence,
+				retentionPromptTurnID(t, event), "completed", models.RecoveryBlockActionTaskArchived,
+				resolvedAt, resolvedAt, resolvedAt,
+			); err != nil {
+				t.Fatalf("persist task_archived recovery block: %v", err)
+			}
+			stored, err := repo.GetSessionRecoveryBlock(context.Background(), "task-archived-retention-block")
+			if err != nil {
+				t.Fatalf("read task_archived recovery block: %v", err)
+			}
+			if stored.State != models.RecoveryBlockResolved || stored.AuthorizedAction != models.RecoveryBlockActionTaskArchived ||
+				stored.DeliverySubmissionID != event.SubmissionID || stored.ExpectedGeneration != event.HarnessGeneration {
+				t.Fatalf("stored task_archived block = %+v", stored)
+			}
+			advance(26 * time.Hour)
+			batch, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{
+				MaxCandidates: 1,
+			})
+			if err != nil {
+				t.Fatalf("run retention with task_archived block: %v", err)
+			}
+			if batch.PromptPayloadsPruned != 0 || batch.PayloadBytesPruned != 0 {
+				t.Fatalf("task_archived block did not protect prompt payload: %+v", batch)
+			}
+			var payload []byte
+			var payloadPrunedAt sql.NullTime
+			if err := repo.db.QueryRowx(repo.db.Rebind(`
+				SELECT payload, payload_pruned_at FROM agent_delivery_submissions WHERE id = ?`), event.SubmissionID).Scan(
+				&payload, &payloadPrunedAt,
+			); err != nil {
+				t.Fatalf("read protected prompt payload: %v", err)
+			}
+			if len(payload) == 0 || payloadPrunedAt.Valid {
+				t.Fatalf("protected prompt payload = %d bytes, pruned=%v", len(payload), payloadPrunedAt)
+			}
+		})
+	}
+}
+
 func TestDeliveryRetentionIndependentBlocks(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
