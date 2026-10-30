@@ -146,6 +146,10 @@ func (r *Repository) advanceUsageProjectionWorkOrCutoverTx(ctx context.Context, 
 	if err != nil || worked {
 		return false, err
 	}
+	worked, err = r.advanceUsageProjectionProviderOptionsTx(ctx, tx, scope, generation, active, limit)
+	if err != nil || worked {
+		return false, err
+	}
 	err = r.cutoverUsageProjectionTx(ctx, tx, scope, generation, active)
 	return err == nil, err
 }
@@ -177,11 +181,11 @@ func (r *Repository) scanUsageProjectionPageTx(ctx context.Context, tx *sqlx.Tx,
 	if err := tx.SelectContext(ctx, &ids, r.db.Rebind(query), scope, last, upper, limit); err != nil {
 		return err
 	}
-	for _, id := range ids {
-		if err := r.copyUsageProjectionSourceTx(ctx, tx, scope, generation, table, id); err != nil {
-			return err
-		}
-		last = id
+	if err := r.copyUsageProjectionSourcePageTx(ctx, tx, scope, generation, table, ids); err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		last = ids[len(ids)-1]
 	}
 	complete := 0
 	if len(ids) < limit {

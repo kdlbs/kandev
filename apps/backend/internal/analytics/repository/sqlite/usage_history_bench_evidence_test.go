@@ -16,14 +16,15 @@ import (
 const usageBenchReceiptPrefix = "usage-history-worker4-bench-"
 
 type usageBenchStorage struct {
-	RetainedNative         int    `json:"retained_native_observations"`
-	RetainedExternal       int    `json:"retained_external_observations"`
-	PublishedContributions int64  `json:"published_metric_contributions"`
-	PublishedFacts         int64  `json:"published_canonical_facts"`
-	DailySummaries         int64  `json:"daily_summary_rows"`
-	LifetimeSummaries      int64  `json:"lifetime_summary_rows"`
-	DiskBytes              int64  `json:"fixture_disk_bytes"`
-	DiskScope              string `json:"fixture_disk_scope"`
+	RetainedNative           int    `json:"retained_native_observations"`
+	RetainedExternal         int    `json:"retained_external_observations"`
+	PublishedContributions   int64  `json:"published_metric_contributions"`
+	PublishedFacts           int64  `json:"published_canonical_facts"`
+	DailySummaries           int64  `json:"daily_summary_rows"`
+	LifetimeSummaries        int64  `json:"lifetime_summary_rows"`
+	ProviderOptionDimensions int64  `json:"provider_option_dimension_rows"`
+	DiskBytes                int64  `json:"fixture_disk_bytes"`
+	DiskScope                string `json:"fixture_disk_scope"`
 }
 
 type usageBenchEvidence struct {

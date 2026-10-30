@@ -14,22 +14,23 @@ import (
 )
 
 type indexedObservation struct {
-	Measurement models.SessionUsageMeasurement
-	Table       string
-	ItemID      string
-	EventID     string
-	WorkKey     string
-	WorkStatus  string
-	CoverageKey string
-	Metadata    string
-	Retired     int
-	Bundle      string
-	Segment     string
-	GroupKey    string
-	Layout      int
-	TokenBundle string
-	CostBundle  string
-	ScanKey     string
+	Measurement    models.SessionUsageMeasurement
+	Table          string
+	ItemID         string
+	EventID        string
+	WorkKey        string
+	WorkStatus     string
+	CoverageKey    string
+	Metadata       string
+	Retired        int
+	Bundle         string
+	Segment        string
+	GroupKey       string
+	Layout         int
+	TokenBundle    string
+	CostBundle     string
+	ScanKey        string
+	CommitSequence int64
 }
 
 func contractCoverageKey(m models.SessionUsageMeasurement) string {
@@ -112,6 +113,28 @@ func (r *Repository) observationReceiptTx(ctx context.Context, tx *sqlx.Tx, item
 }
 
 func (r *Repository) recordUsageMutationTx(ctx context.Context, tx *sqlx.Tx, operation string, before, after *indexedObservation) (models.UsageMutation, error) {
+	change := usageMutationFromRows(operation, before, after)
+	for _, pair := range []struct {
+		row *indexedObservation
+	}{{before}, {after}} {
+		if pair.row == nil {
+			continue
+		}
+		row := pair.row
+		partition := row.partition()
+		value := row.Measurement
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_dirty_partitions (scope_id, subject_id, partition_key, updated_at) VALUES (?, ?, ?, ?)
+			ON CONFLICT(scope_id, subject_id, partition_key) DO UPDATE SET updated_at = excluded.updated_at`), partition.ScopeID, partition.SubjectID, partition.PartitionID, value.CollectedAt); err != nil {
+			return change, err
+		}
+	}
+	if err := r.appendUsageProjectionMutationTx(ctx, tx, &change, before, after); err != nil {
+		return change, err
+	}
+	return change, nil
+}
+
+func usageMutationFromRows(operation string, before, after *indexedObservation) models.UsageMutation {
 	change := models.UsageMutation{Operation: operation}
 	for _, pair := range []struct {
 		row *indexedObservation
@@ -130,15 +153,8 @@ func (r *Repository) recordUsageMutationTx(ctx context.Context, tx *sqlx.Tx, ope
 		} else {
 			change.After, change.NewPartition, change.AfterPayload = &value, &partition, payload
 		}
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_dirty_partitions (scope_id, subject_id, partition_key, updated_at) VALUES (?, ?, ?, ?)
-			ON CONFLICT(scope_id, subject_id, partition_key) DO UPDATE SET updated_at = excluded.updated_at`), partition.ScopeID, partition.SubjectID, partition.PartitionID, value.CollectedAt); err != nil {
-			return change, err
-		}
 	}
-	if err := r.appendUsageProjectionMutationTx(ctx, tx, &change, before, after); err != nil {
-		return change, err
-	}
-	return change, nil
+	return change
 }
 
 func (r *Repository) indexLegacyUsageTx(ctx context.Context, tx *sqlx.Tx, table string, m models.SessionUsageMeasurement) error {

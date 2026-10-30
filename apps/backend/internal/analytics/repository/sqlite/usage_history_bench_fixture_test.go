@@ -22,6 +22,10 @@ const usageBenchWorkspace = "usage-bench-main"
 
 type usageBenchSize struct{ Native, External int }
 
+func usageBenchSQLiteTraceEnabled() bool {
+	return os.Getenv("KANDEV_USAGE_BENCH_TRACE_SQLITE") == "1"
+}
+
 type usageBenchSubject struct {
 	workspace, scope, subject, task, session, binding, work, generation string
 	actor, actorStatus, transcript                                      string
@@ -46,6 +50,7 @@ type usageBenchFixture struct {
 	targets               map[string]retainedTarget
 	ordinaryAdmission     bool
 	retained              map[string]int
+	retentionPages        int
 	projectionSteps       int
 	expectedFacts         map[string]int64
 	expectedContributions map[string]int64
@@ -67,12 +72,20 @@ func newUsageBenchFixture(t testing.TB, engine string, size usageBenchSize) *usa
 		if dsn == "" {
 			t.Fatal("PostgreSQL benchmark requires KANDEV_TEST_POSTGRES_DSN; no skipped parity")
 		}
-		f.database = testutil.OpenIsolatedPostgres(t, dsn)
-		usageBenchMust(t, f.database.Get(&f.schema, `SELECT current_schema()`))
+		owner := testutil.OpenIsolatedPostgres(t, dsn)
+		usageBenchMust(t, owner.Get(&f.schema, `SELECT current_schema()`))
 		var version int
-		usageBenchMust(t, f.database.Get(&version, `SHOW server_version_num`))
+		usageBenchMust(t, owner.Get(&version, `SHOW server_version_num`))
 		if version < 180000 {
 			t.Fatal("PostgreSQL benchmark requires PostgreSQL 18 or newer")
+		}
+		f.database = owner
+		if usageBenchPostgresTraceEnabled() {
+			scopedDSN := testutil.PostgresDSNWithSearchPath(t, dsn, f.schema)
+			traced, err := usageBenchPostgresPool(scopedDSN, f.observer)
+			usageBenchMust(t, err)
+			f.database = traced
+			t.Cleanup(func() { _ = traced.Close() })
 		}
 	} else {
 		f.path = filepath.Join(t.TempDir(), "usage-history.db")
@@ -81,6 +94,9 @@ func newUsageBenchFixture(t testing.TB, engine string, size usageBenchSize) *usa
 		f.database = sqlx.NewDb(raw, "sqlite3")
 		t.Cleanup(func() { _ = f.database.Close() })
 		usageBenchMust(t, setUsageBenchSQLiteCollection(context.Background(), f.database.DB, false))
+		if usageBenchSQLiteTraceEnabled() {
+			usageBenchMust(t, attachUsageBenchSQLite(context.Background(), f.database.DB, f.observer))
+		}
 	}
 	tasks, err := tasksqlite.NewWithDB(f.database, f.database, nil)
 	usageBenchMust(t, err)
@@ -146,14 +162,21 @@ func (f *usageBenchFixture) seedSubjects(t testing.TB, tasks *tasksqlite.Reposit
 func (f *usageBenchFixture) seedRecent(t testing.TB) {
 	t.Helper()
 	start := time.Now()
+	t.Logf("usage fixture recent phase start native=%d external=%d", f.size.Native/5, f.size.External/5)
 	f.seedRange(t, "recent", 2025, 2026, f.size.Native/5, f.size.External/5)
+	t.Log("usage fixture recent range inserts complete")
 	f.seedSpecial(t)
+	t.Log("usage fixture special records complete")
 	f.seedRange(t, "other", 2025, 2026, 8, 8)
+	t.Log("usage fixture second scope inserts complete")
 	f.publish(t)
+	t.Logf("usage fixture recent publication complete pages=%d", f.projectionSteps)
 	// Exercise real preservation/deletion after capture and publication.
 	usageBenchMust(t, f.tasks.DeleteTask(t.Context(), f.subjects[2].task))
+	t.Log("usage fixture deleted-task preservation complete")
 	_, err := f.database.Exec(f.database.Rebind(`UPDATE tasks SET archived_at=? WHERE id=?`), time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), f.subjects[1].task)
 	usageBenchMust(t, err)
+	t.Log("usage fixture archived-task preservation complete")
 	f.phase = "one_year"
 	f.seedTime += time.Since(start)
 }

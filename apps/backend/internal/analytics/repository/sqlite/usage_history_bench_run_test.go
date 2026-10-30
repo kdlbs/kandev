@@ -73,6 +73,9 @@ func benchmarkUsageHistory(b *testing.B, engine string) {
 		b.Fatal("benchmark requires KANDEV_USAGE_BENCH_EVIDENCE_DIR for durable evidence")
 	}
 	fixture := newUsageBenchFixture(b, engine, usageBenchSize{Native: 1_000_000, External: 100_000})
+	if engine == "sqlite" && usageBenchSQLiteTraceEnabled() {
+		fixture.observer.startWithLimit(64, true)
+	}
 	fixture.seedRecent(b)
 	fixture.validateStorage(b, false)
 	before := runUsageBenchPhase(b, fixture)

@@ -77,7 +77,11 @@ func (r *Repository) nextUsageProjection(ctx context.Context) (string, string, e
 		 SELECT 1 FROM usage_projection_generations b WHERE b.scope_id=s.scope_id AND b.state IN ('scan','replay')) ORDER BY s.updated_at LIMIT 1`,
 		`SELECT s.scope_id, s.active_generation FROM usage_projection_scopes s JOIN usage_projection_generations g
 		 ON g.scope_id = s.scope_id AND g.generation = s.active_generation WHERE s.commit_sequence > g.replay_sequence
-		 OR EXISTS(SELECT 1 FROM usage_projection_work w WHERE w.scope_id = s.scope_id AND w.generation = s.active_generation) ORDER BY s.updated_at LIMIT 1`,
+		 OR EXISTS(SELECT 1 FROM usage_projection_work w WHERE w.scope_id = s.scope_id AND w.generation = s.active_generation)
+		 OR EXISTS(SELECT 1 FROM usage_projection_history h JOIN usage_projection_applied a
+			ON a.scope_id=h.scope_id AND a.generation=h.generation AND a.work_key=h.work_key
+			WHERE h.scope_id=s.scope_id AND h.generation=s.active_generation AND (h.provider_options_ready=0 OR h.provider_options_version=0))
+		 ORDER BY s.updated_at LIMIT 1`,
 		`SELECT scope_id, generation FROM usage_projection_generations WHERE state IN ('scan', 'replay') ORDER BY updated_at LIMIT 1`,
 		`SELECT scope_id, active_generation FROM usage_projection_scopes s WHERE active_generation = '' AND NOT EXISTS (
 		 SELECT 1 FROM usage_projection_generations g WHERE g.scope_id = s.scope_id AND g.state <> 'retired') ORDER BY updated_at LIMIT 1`,

@@ -16,7 +16,8 @@ import (
 
 type usageProjectionSnapshot struct {
 	models.UsageProjectionMetadata
-	generation string
+	generation           string
+	providerOptionsReady bool
 }
 
 func (r *Repository) listProjectedUsagePage(parent context.Context, filter models.SessionUsageFilter) ([]models.SessionUsageMeasurement, models.UsageProjectionState, error) {
@@ -122,7 +123,7 @@ func (r *Repository) readUsageCanonicalFacts(ctx context.Context, filter models.
 }
 
 func (r *Repository) usageProjectionMetadataTx(ctx context.Context, tx *sqlx.Tx, scope string) (usageProjectionSnapshot, error) {
-	metadata := usageProjectionSnapshot{UsageProjectionMetadata: models.UsageProjectionMetadata{UsageProjectionState: models.UsageProjectionState{Status: "preparing", Pending: true}}}
+	metadata := usageProjectionSnapshot{UsageProjectionMetadata: models.UsageProjectionMetadata{UsageProjectionState: models.UsageProjectionState{Status: "preparing", Pending: true}}, providerOptionsReady: true}
 	var head, replay, facts, dated, lifetime, intervals, native int64
 	var indexedVersion, requiredVersion, segmentVersion int64
 	var accountingVersion, accountingSequence int64
@@ -149,7 +150,20 @@ func (r *Repository) usageProjectionMetadataTx(ctx context.Context, tx *sqlx.Tx,
 	err = tx.GetContext(ctx, &pending, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM usage_projection_work WHERE scope_id = ? AND generation = ?)
 		OR EXISTS(SELECT 1 FROM usage_projection_generations WHERE scope_id = ? AND state IN ('scan', 'replay'))
 		OR EXISTS(SELECT 1 FROM usage_subjects WHERE scope_id=? AND work_repair_pending=1)`), scope, metadata.generation, scope, scope)
+	if err != nil {
+		return metadata, err
+	}
+	var providerOptionsPending bool
+	err = tx.GetContext(ctx, &providerOptionsPending, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM usage_projection_history
+		WHERE scope_id=? AND generation=? AND (provider_options_ready=0 OR provider_options_version=0))`), scope, metadata.generation)
+	if err != nil {
+		return metadata, err
+	}
+	metadata.providerOptionsReady = !providerOptionsPending
 	metadata.Status, metadata.Pending = projectionReady, pending || replay < head || segmentVersion == 0 || accountingVersion < nativeUsageAccountingRepairVersion || replay < accountingSequence
+	if providerOptionsPending {
+		metadata.Status, metadata.Pending = "preparing", true
+	}
 	metadata.Generation = metadata.generation + "." + strconv.FormatInt(metadata.Revision, 36)
 	metadata.HasHistory, metadata.HasDated, metadata.HasUndated = facts > 0, dated > 0, lifetime > 0
 	metadata.HasIntervals, metadata.HasNative = intervals > 0, native > 0

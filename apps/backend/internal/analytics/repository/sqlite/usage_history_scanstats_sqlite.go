@@ -88,6 +88,7 @@ func attachUsageBenchSQLite(ctx context.Context, database *sql.DB, observer *usa
 				}
 				if info.EventCode == sqlite3.TraceProfile && observer.active() {
 					statement, err := readUsageBenchSQLite(info.StmtHandle)
+					statement.DurationNS = info.RunTimeNanosec
 					observer.record(statement, err)
 				}
 				return 0

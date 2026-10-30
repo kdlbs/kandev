@@ -79,7 +79,7 @@ func TestUsageHistoryGenerationCapturedTransferAndErasure(t *testing.T) {
 	shadow, err := repo.StartUsageHistoryRebuild(ctx, scope)
 	require.NoError(t, err)
 	require.NoError(t, repo.EraseOrganizationUsage(ctx, "org-a"))
-	for _, table := range []string{"usage_projection_scopes", "usage_projection_log", "usage_projection_partitions", "usage_projection_source_versions", "usage_projection_generations", "usage_projection_checkpoints", "usage_projection_items", "usage_projection_work", "usage_projection_applied", "usage_projection_resolutions", "usage_projection_replay_groups", "usage_projection_builds", "usage_canonical_facts", "usage_projection_contributions", "usage_projection_summary_queue", "usage_daily_summaries", "usage_lifetime_summaries", "usage_projection_history"} {
+	for _, table := range []string{"usage_projection_scopes", "usage_projection_log", "usage_projection_partitions", "usage_projection_source_versions", "usage_projection_generations", "usage_projection_checkpoints", "usage_projection_items", "usage_projection_work", "usage_projection_applied", "usage_projection_resolutions", "usage_projection_replay_groups", "usage_projection_builds", "usage_canonical_facts", "usage_projection_contributions", "usage_projection_provider_options", "usage_projection_summary_queue", "usage_daily_summaries", "usage_lifetime_summaries", "usage_projection_history"} {
 		var count int
 		require.NoError(t, repo.db.Get(&count, repo.db.Rebind(`SELECT COUNT(*) FROM `+table+` WHERE scope_id = ?`), scope))
 		require.Zero(t, count, table)
@@ -118,7 +118,7 @@ func TestUsageHistoryGenerationResetRejectsStaleCheckpoint(t *testing.T) {
 	require.NoError(t, repo.ResetWorkspaceUsageHistory(ctx, "ws-1"))
 	var tables []string
 	require.NoError(t, repo.db.Select(&tables, `SELECT name FROM sqlite_master WHERE type = 'table' AND (name LIKE 'usage_projection_%' OR name IN ('usage_canonical_facts', 'usage_daily_summaries', 'usage_lifetime_summaries'))`))
-	require.Len(t, tables, 18)
+	require.Len(t, tables, 19)
 	for _, table := range tables {
 		var count int
 		require.NoError(t, repo.db.Get(&count, repo.db.Rebind(`SELECT COUNT(*) FROM `+table+` WHERE scope_id = ?`), scope))

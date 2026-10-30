@@ -53,7 +53,7 @@ func (r *Repository) readRetainedUsageReport(ctx context.Context, filter models.
 	if err := r.usageReportGrid(ctx, tx, filter, metadata); err != nil {
 		return nil, err
 	}
-	if err := r.readUsageReportRows(ctx, tx, scope, metadata.generation, filter, report); err != nil {
+	if err := r.readUsageReportRows(ctx, tx, scope, metadata.generation, metadata.providerOptionsReady, filter, report); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS usage_report_range`); err != nil {
@@ -100,7 +100,7 @@ func (r *Repository) usageReportGap(ctx context.Context, tx *sqlx.Tx, workspace 
 	return tx.GetContext(ctx, gap, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM usage_history_migration_gaps g JOIN workspaces w ON w.id=g.workspace_id AND COALESCE(w.org_id,'')=g.organization_id WHERE g.workspace_id=?)`), workspace)
 }
 
-func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope, generation string, filter models.SessionUsageFilter, report *models.TokenUsageReport) error {
+func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope, generation string, providersReady bool, filter models.SessionUsageFilter, report *models.TokenUsageReport) error {
 	cached, err := r.prepareUsageReportRange(ctx, tx, scope, generation, filter)
 	if err != nil {
 		return err
@@ -137,10 +137,13 @@ func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope
 	report.Summary = report.Totals
 	report.HasMore = filter.Offset+len(rows) < report.TotalRows
 	report.HasRangeData = report.TotalRows > 0 && (isDatedUsageGroup(filter.GroupBy) || total.DatedCount > 0)
+	if !providersReady {
+		return nil
+	}
 	providerFilter := filter
 	providerFilter.Provider = ""
-	providers := usageReportReadSource(scope, generation, providerFilter, false, cached && filter.Provider == "")
-	return tx.SelectContext(ctx, &report.Providers, r.db.Rebind(`SELECT DISTINCT CASE WHEN provider='' THEN '__unknown_provider__' ELSE provider END FROM (`+providers.sql+`) report_providers ORDER BY 1`), providers.args...)
+	providers := usageReportProviderOptionsSource(scope, generation, providerFilter, cached && filter.Provider == "")
+	return tx.SelectContext(ctx, &report.Providers, r.db.Rebind(providers.sql), providers.args...)
 }
 
 func markUsageReportTotalsMonth(report *models.TokenUsageReport, filter models.SessionUsageFilter) {

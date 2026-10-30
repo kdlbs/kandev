@@ -4,6 +4,7 @@ package sqlite
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,66 @@ func TestUsageHistoryReportRecentVisitsExcludeUnrelatedYears(t *testing.T) {
 			require.LessOrEqual(t, visits, baseline.visits+128, "all statements, including totals/options/metadata, must exclude unrelated years; measured SQLite NVISIT is not a result-row count")
 		})
 	}
+}
+
+func TestUsageHistoryAllTimeProviderOptionsUsePublishedDimensions(t *testing.T) {
+	fixture := newUsageBenchFixture(t, "sqlite", usageBenchSize{Native: 10_000, External: 1_000})
+	fixture.seedRecent(t)
+	fixture.validateStorage(t, false)
+	observer := &usageBenchObserver{}
+	require.NoError(t, attachUsageBenchSQLite(t.Context(), fixture.database.DB, observer))
+	var scenario *usageBenchCase
+	for _, item := range fixture.cases {
+		if item.Name == "native" {
+			scenario = item
+			break
+		}
+	}
+	require.NotNil(t, scenario)
+	observer.start()
+	started := time.Now()
+	_, statements := observeRetainedReport(t, fixture, observer, scenario)
+	queryDuration := time.Since(started)
+	var providerQuery *usageBenchStatement
+	for i := range statements {
+		if strings.Contains(statements[i].SQL, "report_providers") {
+			providerQuery = &statements[i]
+			break
+		}
+	}
+	require.NotNil(t, providerQuery, "the report must return provider options")
+	require.Contains(t, providerQuery.SQL, "usage_projection_provider_options")
+	require.NotContains(t, providerQuery.SQL, "usage_projection_contributions")
+	require.NotContains(t, providerQuery.SQL, "usage_canonical_facts")
+	require.NotContains(t, providerQuery.SQL, "usage_daily_summaries")
+	require.NotContains(t, providerQuery.SQL, "usage_lifetime_summaries")
+	var visits int64
+	var indexed bool
+	for _, loop := range providerQuery.SQLiteLoops {
+		visits += loop.Visits
+		t.Logf("all-time provider-options plan: %s; NLOOP=%d NVISIT=%d", loop.Plan, loop.Loops, loop.Visits)
+		indexed = indexed || strings.Contains(loop.Plan, "idx_usage_projection_provider_options_report") || strings.Contains(loop.Plan, "idx_usage_projection_provider_options_work")
+	}
+	t.Logf("all-time report duration=%s; provider option SQL visits=%d, published provider dimensions=%d, raw contributions=%d", queryDuration, visits, fixture.storage.ProviderOptionDimensions, fixture.storage.PublishedContributions)
+	require.True(t, indexed, "all-time provider options must use a scoped provider dimension index")
+	require.LessOrEqual(t, visits, fixture.storage.ProviderOptionDimensions+8, "all-time provider options must stay bounded by compact provider dimensions, not point contributions")
+}
+
+func TestUsageHistoryAllTimeProviderOptionsPostgres(t *testing.T) {
+	if os.Getenv("KANDEV_TEST_POSTGRES_DSN") == "" {
+		t.Skip("actual PostgreSQL control requires the private test DSN")
+	}
+	fixture := newUsageBenchFixture(t, "postgres", usageBenchSize{Native: 1_000, External: 100})
+	fixture.seedRecent(t)
+	var scenario *usageBenchCase
+	for _, item := range fixture.cases {
+		if item.Name == "native" {
+			scenario = item
+			break
+		}
+	}
+	require.NotNil(t, scenario)
+	fixture.readAndValidate(t, scenario)
 }
 
 func TestUsageHistoryReportExactUtcSummarySkipsPointFallback(t *testing.T) {

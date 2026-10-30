@@ -1,12 +1,10 @@
 package sqlite
 
 import (
-	"context"
 	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/analytics/models"
 )
 
@@ -18,6 +16,12 @@ const (
 
 var usageProjectionAmountColumns = []string{"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "total_tokens", "source_total_tokens", "turns", "cost_subcents", "rate_tokens"}
 var usageProjectionDimensionColumns = []string{"metric_kind", "actor_id", "actor_status", "actor_kind", "source", "model", "provider", "agent_client", "semantics", "currency", "calendar", "usage_date"}
+var usageProjectionContributionColumns = []string{
+	"scope_id", "generation", "build_id", "fact_key", "work_key", "summary_key", "coverage_kind", "coverage_start", "coverage_end",
+	"metric_kind", "actor_id", "actor_status", "actor_kind", "source", "model", "provider", "agent_client", "semantics", "currency", "calendar", "usage_date",
+	"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "total_tokens", "source_total_tokens", "turns",
+	"cost_subcents", "rate_tokens", "partial", "estimated", "stale", "cost_basis",
+}
 
 type usageProjectionPeriod struct {
 	Calendar string
@@ -110,33 +114,4 @@ func usageProjectionRateAvailable(fact models.UsageCanonicalFact) bool {
 		fact.TokenSource.ActorKind == fact.CostSource.ActorKind &&
 		!fact.Partial && m.Coverage == usageCoverageComplete && m.CostCoverage == usageCoverageComplete &&
 		m.CostBasis != usageUnknown && m.CostBasis != usageMixedValue && m.Currency != "" && m.CostSubcents != nil && m.TotalTokens != nil
-}
-
-func (r *Repository) stageUsageProjectionContributionsTx(ctx context.Context, tx *sqlx.Tx, work usageProjectionWork, fact models.UsageCanonicalFact) error {
-	periods, err := usageProjectionPeriods(fact)
-	if err != nil {
-		return err
-	}
-	for _, period := range periods {
-		for _, metric := range []string{projectionMetricTokens, projectionMetricCost} {
-			if metric == projectionMetricTokens && fact.TokenMetricAbsent || metric == projectionMetricCost && fact.CostMetricAbsent {
-				continue
-			}
-			row := usageProjectionContribution(work, fact, metric, period)
-			_, err := tx.NamedExecContext(ctx, `INSERT INTO usage_projection_contributions (
-				scope_id, generation, build_id, fact_key, work_key, summary_key, coverage_kind, coverage_start, coverage_end,
-				metric_kind, actor_id, actor_status, actor_kind, source, model, provider, agent_client, semantics, currency, calendar, usage_date,
-				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, source_total_tokens, turns,
-				cost_subcents, rate_tokens, partial, estimated, stale, cost_basis) VALUES (
-				:scope_id, :generation, :build_id, :fact_key, :work_key, :summary_key, :coverage_kind, :coverage_start, :coverage_end,
-				:metric_kind, :actor_id, :actor_status, :actor_kind, :source, :model, :provider, :agent_client, :semantics, :currency, :calendar, :usage_date,
-				:input_tokens, :output_tokens, :cache_read_tokens, :cache_write_tokens, :reasoning_tokens, :total_tokens, :source_total_tokens, :turns,
-				:cost_subcents, :rate_tokens, :partial, :estimated, :stale, :cost_basis)
-				ON CONFLICT(scope_id, generation, build_id, fact_key, metric_kind, calendar, usage_date) DO NOTHING`, row)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }

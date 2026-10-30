@@ -23,6 +23,11 @@ func (r *Repository) ensureUsageProjectionSchema(ctx context.Context) error {
 		`ALTER TABLE usage_canonical_facts ADD COLUMN collected_at TIMESTAMP`,
 		`ALTER TABLE usage_projection_history ADD COLUMN collected_at TIMESTAMP`,
 		`ALTER TABLE usage_projection_generations ADD COLUMN collected_at TIMESTAMP`,
+		`ALTER TABLE usage_projection_history ADD COLUMN provider_options_ready INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_projection_history ADD COLUMN provider_options_version INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE usage_projection_history ADD COLUMN provider_options_build_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_projection_history ADD COLUMN provider_options_cursor TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE usage_projection_history ADD COLUMN provider_options_phase TEXT NOT NULL DEFAULT 'clear'`,
 	} {
 		if _, err := r.db.ExecContext(ctx, statement); err != nil && !db.IsDuplicateColumnError(err) {
 			return err
@@ -36,7 +41,10 @@ func (r *Repository) ensureUsageProjectionSchema(ctx context.Context) error {
 	if _, err := r.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_usage_projection_publication_group ON usage_projection_work(scope_id, generation, publish_group, state)`); err != nil {
 		return err
 	}
-	return r.ensureUsageProjectionSegmentSchema(ctx)
+	if err := r.ensureUsageProjectionSegmentSchema(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 var usageReportingIndexes = []string{
@@ -49,6 +57,10 @@ var usageReportingIndexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_points ON usage_projection_contributions(scope_id, generation, calendar, coverage_kind, coverage_start)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_overlap ON usage_projection_contributions(scope_id, generation, coverage_kind, coverage_end, coverage_start)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_coarse_range ON usage_projection_contributions(scope_id, generation, coverage_end, coverage_start) WHERE coverage_kind IN ('calendar','interval')`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_undated_interval_options ON usage_projection_contributions(scope_id, generation, model, source, provider, work_key, build_id) WHERE coverage_kind='interval' AND usage_date=''`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_projection_provider_options_report ON usage_projection_provider_options(scope_id, generation, model, source, provider, work_key)`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_projection_provider_options_work ON usage_projection_provider_options(scope_id, generation, work_key, model, source, provider)`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_projection_provider_options_pending ON usage_projection_history(scope_id, generation, work_key) WHERE provider_options_ready=0 OR provider_options_version=0`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_provider_points ON usage_projection_contributions(scope_id, generation, provider, calendar, coverage_kind, coverage_start, coverage_end)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_canonical_lifetime ON usage_canonical_facts(scope_id, generation, work_key, model, provider, subject_id, build_id) WHERE coverage_kind='lifetime'`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_collected ON usage_projection_history(scope_id, generation, collected_at)`,
@@ -128,6 +140,10 @@ var usageProjectionSchema = []string{
 		` + usageProjectionAmountsDDL + `, partial INTEGER NOT NULL, estimated INTEGER NOT NULL, stale INTEGER NOT NULL,
 		cost_basis TEXT NOT NULL,
 		PRIMARY KEY(scope_id, generation, build_id, fact_key, metric_kind, calendar, usage_date))`,
+	`CREATE TABLE IF NOT EXISTS usage_projection_provider_options (
+		scope_id TEXT NOT NULL, generation TEXT NOT NULL, work_key TEXT NOT NULL,
+		model TEXT NOT NULL, source TEXT NOT NULL, provider TEXT NOT NULL,
+		PRIMARY KEY(scope_id, generation, work_key, model, source, provider))`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_summary ON usage_projection_contributions(scope_id, generation, summary_key, build_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_time ON usage_projection_contributions(scope_id, generation, coverage_start, coverage_end)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_work ON usage_projection_contributions(scope_id, generation, work_key, build_id)`,
@@ -141,7 +157,11 @@ var usageProjectionSchema = []string{
 		scope_id TEXT NOT NULL, generation TEXT NOT NULL, work_key TEXT NOT NULL,
 		fact_count BIGINT NOT NULL, dated_count BIGINT NOT NULL, lifetime_count BIGINT NOT NULL,
 		interval_count BIGINT NOT NULL, native_count BIGINT NOT NULL, earliest TIMESTAMP, latest TIMESTAMP,
+		provider_options_ready INTEGER NOT NULL DEFAULT 0, provider_options_version INTEGER NOT NULL DEFAULT 0,
+		provider_options_build_id TEXT NOT NULL DEFAULT '', provider_options_cursor TEXT NOT NULL DEFAULT '',
+		provider_options_phase TEXT NOT NULL DEFAULT 'clear',
 		PRIMARY KEY(scope_id, generation, work_key))`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_projection_history_mixed_coverage ON usage_projection_history(scope_id, generation) WHERE lifetime_count > 0 AND dated_count > 0`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_earliest ON usage_projection_history(scope_id, generation, earliest)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_latest ON usage_projection_history(scope_id, generation, latest)`,
 }

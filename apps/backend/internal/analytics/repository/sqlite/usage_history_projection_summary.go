@@ -86,10 +86,13 @@ func (r *Repository) updateUsageProjectionHistoryTx(ctx context.Context, tx *sql
 		return err
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_projection_history
-		(scope_id, generation, work_key, fact_count, dated_count, lifetime_count, interval_count, native_count, earliest, latest, collected_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope_id, generation, work_key) DO UPDATE SET
+		(scope_id, generation, work_key, fact_count, dated_count, lifetime_count, interval_count, native_count, earliest, latest, collected_at,
+		provider_options_ready,provider_options_version,provider_options_build_id,provider_options_cursor,provider_options_phase)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, '', 'clear') ON CONFLICT(scope_id, generation, work_key) DO UPDATE SET
 		fact_count = excluded.fact_count, dated_count = excluded.dated_count, lifetime_count = excluded.lifetime_count,
-		interval_count = excluded.interval_count, native_count = excluded.native_count, earliest = excluded.earliest, latest = excluded.latest, collected_at = excluded.collected_at`), work.Scope, work.Generation, work.Work, current.Facts, current.Dated, current.Lifetime, current.Interval, current.Native, current.Earliest, current.Latest, current.Collected)
+		interval_count = excluded.interval_count, native_count = excluded.native_count, earliest = excluded.earliest, latest = excluded.latest, collected_at = excluded.collected_at,
+		provider_options_ready=0,provider_options_version=1,provider_options_build_id=excluded.provider_options_build_id,
+		provider_options_cursor='',provider_options_phase='clear'`), work.Scope, work.Generation, work.Work, current.Facts, current.Dated, current.Lifetime, current.Interval, current.Native, current.Earliest, current.Latest, current.Collected, work.Build)
 	if err != nil {
 		return err
 	}

@@ -34,6 +34,7 @@ func TestUsageHistoryLegacyLifetimePartialNativeAlternative(t *testing.T) {
 				require.Equal(t, models.Int64(500), report.Totals.CostSubcents)
 				require.Len(t, report.Rows, 1)
 				require.Equal(t, "plugin:legacy-lifetime", report.Rows[0].Source)
+				require.Equal(t, []string{"anthropic"}, report.Providers, "provider options must exclude dated providers suppressed by an authoritative lifetime alternative")
 				require.Equal(t, models.UsageCostBasisEstimated, report.Rows[0].CostBasis)
 
 				saved, state, err := repo.ListRetainedCanonicalUsagePage(t.Context(), filter)

@@ -9,6 +9,7 @@ import (
 
 var usageProjectionTableKeys = []struct{ table, key string }{
 	{"usage_projection_contributions", "scope_id, generation, build_id, fact_key, metric_kind, calendar, usage_date"},
+	{"usage_projection_provider_options", "scope_id, generation, work_key, model, source, provider"},
 	{"usage_canonical_facts", "scope_id, generation, build_id, fact_key"},
 	{"usage_daily_summaries", "scope_id, generation, summary_key"},
 	{"usage_lifetime_summaries", "scope_id, generation, summary_key"},

@@ -78,7 +78,7 @@ func validateUsageBenchStatements(engine string, statements []usageBenchStatemen
 			}
 		}
 		metadata = metadata || strings.Contains(statement.SQL, "usage_projection_scopes")
-		amounts = amounts || strings.Contains(statement.SQL, "usage_projection_contributions") || strings.Contains(statement.SQL, "usage_daily_summaries")
+		amounts = amounts || strings.Contains(statement.SQL, "usage_projection_contributions") || strings.Contains(statement.SQL, "usage_daily_summaries") || strings.Contains(statement.SQL, "usage_projection_provider_options")
 		providers = providers || strings.Contains(statement.SQL, "report_providers")
 		loops += len(statement.SQLiteLoops)
 		if engine == "postgres" && usageBenchReadSQL(statement.SQL) && len(statement.PostgresPlan) == 0 {

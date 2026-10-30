@@ -30,6 +30,7 @@ func (f *usageBenchFixture) seedRange(t testing.TB, prefix string, first, until,
 		name  string
 		count int
 	}{{usageSourceNative, nativeCount}, {"plugin:bench", externalCount}} {
+		t.Logf("usage fixture source insert start range=%s source=%s records=%d", prefix, source.name, source.count)
 		batch := make([]usageBenchSeedRecord, 0, usageBenchBatch)
 		for index := range source.count {
 			subject := f.subjects[index%4]
@@ -70,6 +71,7 @@ func (f *usageBenchFixture) seedRange(t testing.TB, prefix string, first, until,
 			}
 		}
 		f.insertBatch(t, batch)
+		t.Logf("usage fixture source insert complete range=%s source=%s records=%d", prefix, source.name, source.count)
 	}
 }
 

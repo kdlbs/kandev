@@ -70,3 +70,34 @@ func usageReportReadSource(scope, generation string, filter models.SessionUsageF
 	}
 	return usageReportSource(scope, generation, filter, totals)
 }
+
+func usageReportProviderOptionsSource(scope, generation string, filter models.SessionUsageFilter, cached bool) usageReportQuery {
+	if cached {
+		return usageReportProviderOptionsProjection(usageReportReadSource(scope, generation, filter, false, true))
+	}
+	if filter.Start != nil || filter.End != nil || len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0 {
+		return usageReportProviderOptionsProjection(usageReportReadSource(scope, generation, filter, false, false))
+	}
+	predicate := reportScopePredicate(scope, generation, filter)
+	if !isDatedUsageGroup(filter.GroupBy) {
+		// All-time options use a compact per-work dimension that already applies
+		// the same lifetime-alternative mask as the report source.
+		query := `SELECT c.provider FROM usage_projection_provider_options c WHERE ` + predicate.sql
+		return usageReportProviderOptionsProjection(usageReportQuery{sql: query, args: predicate.args})
+	}
+	// Dated options come from dated summaries. Undated intervals have no
+	// calendar summary row, so include their indexed published contribution.
+	query := `SELECT provider FROM usage_daily_summaries c WHERE ` + predicate.sql
+	args := append([]any(nil), predicate.args...)
+	intervalPredicate := reportScopePredicate(scope, generation, filter)
+	query += ` UNION ALL SELECT c.provider FROM usage_projection_contributions c
+ JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id
+ WHERE ` + intervalPredicate.sql + ` AND c.coverage_kind='interval' AND c.usage_date=''`
+	args = append(args, intervalPredicate.args...)
+	return usageReportProviderOptionsProjection(usageReportQuery{sql: query, args: args})
+}
+
+func usageReportProviderOptionsProjection(source usageReportQuery) usageReportQuery {
+	source.sql = `SELECT DISTINCT CASE WHEN provider='' THEN '__unknown_provider__' ELSE provider END FROM (` + source.sql + `) report_providers ORDER BY 1`
+	return source
+}

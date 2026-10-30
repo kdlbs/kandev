@@ -7,7 +7,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,6 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 )
+
+func usageBenchPostgresTraceEnabled() bool {
+	return os.Getenv("KANDEV_USAGE_BENCH_TRACE_POSTGRES") == "1"
+}
 
 type usageBenchConnector struct {
 	driver.Connector
@@ -35,17 +43,120 @@ type usageBenchConnection struct {
 }
 
 func (c *usageBenchConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
-	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+	if !c.observer.limitedTrace() {
+		return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+	}
+	started := time.Now()
+	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, options)
+	if err != nil {
+		c.observer.record(usageBenchStatement{SQL: "<BEGIN>", DurationNS: time.Since(started).Nanoseconds(), Error: err.Error()}, err)
+		return nil, err
+	}
+	if c.observer.limitedTrace() {
+		return &usageBenchTransaction{Tx: tx, observer: c.observer}, nil
+	}
+	return tx, nil
 }
 
 func (c *usageBenchConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.observer.record(usageBenchStatement{SQL: query, Args: append([]driver.NamedValue(nil), args...)}, nil)
-	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	if !c.observer.active() {
+		return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	}
+	if !c.observer.limitedTrace() {
+		c.observer.record(usageBenchStatement{SQL: query, Args: append([]driver.NamedValue(nil), args...)}, nil)
+		return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	}
+	started := time.Now()
+	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
+	statement := usageBenchStatement{SQL: query, DurationNS: time.Since(started).Nanoseconds(), Args: append([]driver.NamedValue(nil), args...)}
+	if err != nil {
+		statement.Error = err.Error()
+	}
+	c.observer.record(statement, err)
+	return result, err
 }
 
 func (c *usageBenchConnection) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.observer.record(usageBenchStatement{SQL: query, Args: append([]driver.NamedValue(nil), args...)}, nil)
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if !c.observer.active() {
+		return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	}
+	if !c.observer.limitedTrace() {
+		c.observer.record(usageBenchStatement{SQL: query, Args: append([]driver.NamedValue(nil), args...)}, nil)
+		return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	}
+	started := time.Now()
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	statement := usageBenchStatement{SQL: query, Args: append([]driver.NamedValue(nil), args...)}
+	if err != nil {
+		statement.DurationNS, statement.Error = time.Since(started).Nanoseconds(), err.Error()
+		c.observer.record(statement, err)
+		return nil, err
+	}
+	return &usageBenchRows{Rows: rows, observer: c.observer, statement: statement, started: started}, nil
+}
+
+type usageBenchTransaction struct {
+	driver.Tx
+	observer *usageBenchObserver
+}
+
+func (tx *usageBenchTransaction) Commit() error {
+	started := time.Now()
+	err := tx.Tx.Commit()
+	statement := usageBenchStatement{SQL: "<COMMIT>", DurationNS: time.Since(started).Nanoseconds()}
+	if err != nil {
+		statement.Error = err.Error()
+	}
+	tx.observer.record(statement, err)
+	return err
+}
+
+func (tx *usageBenchTransaction) Rollback() error {
+	started := time.Now()
+	err := tx.Tx.Rollback()
+	statement := usageBenchStatement{SQL: "<ROLLBACK>", DurationNS: time.Since(started).Nanoseconds()}
+	if err != nil && !errors.Is(err, sql.ErrTxDone) {
+		statement.Error = err.Error()
+	}
+	if errors.Is(err, sql.ErrTxDone) {
+		err = nil
+	}
+	tx.observer.record(statement, err)
+	return err
+}
+
+type usageBenchRows struct {
+	driver.Rows
+	observer  *usageBenchObserver
+	statement usageBenchStatement
+	started   time.Time
+	once      sync.Once
+}
+
+func (rows *usageBenchRows) Next(destination []driver.Value) error {
+	err := rows.Rows.Next(destination)
+	if err != nil {
+		rows.finish(err)
+	}
+	return err
+}
+
+func (rows *usageBenchRows) Close() error {
+	err := rows.Rows.Close()
+	rows.finish(err)
+	return err
+}
+
+func (rows *usageBenchRows) finish(err error) {
+	rows.once.Do(func() {
+		rows.statement.DurationNS = time.Since(rows.started).Nanoseconds()
+		if err != nil && !errors.Is(err, io.EOF) {
+			rows.statement.Error = err.Error()
+		} else {
+			err = nil
+		}
+		rows.observer.record(rows.statement, err)
+	})
 }
 
 func usageBenchPostgresPool(dsn string, observer *usageBenchObserver) (*sqlx.DB, error) {

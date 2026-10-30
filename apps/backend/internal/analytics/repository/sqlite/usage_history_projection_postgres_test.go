@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
+	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	"github.com/kandev/kandev/internal/common/usagehistory"
 	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -68,7 +69,7 @@ func TestUsageHistoryPostgresGenerationCapturedScopeErasure(t *testing.T) {
 	require.Error(t, err, "erasure must fence the shadow before source or checkpoint writes")
 	require.Contains(t, err.Error(), "erasing")
 	require.NoError(t, f.first.EraseOrganizationUsage(ctx, "captured-org"))
-	for _, table := range []string{"usage_projection_scopes", "usage_projection_generations", "usage_projection_checkpoints", "usage_projection_log", "usage_projection_items", "usage_projection_work", "usage_projection_applied", "usage_projection_resolutions", "usage_projection_replay_groups", "usage_projection_builds", "usage_projection_history", "usage_projection_source_versions", "usage_projection_partitions", "usage_projection_summary_queue", "usage_canonical_facts", "usage_projection_contributions", "usage_daily_summaries", "usage_lifetime_summaries"} {
+	for _, table := range []string{"usage_projection_scopes", "usage_projection_generations", "usage_projection_checkpoints", "usage_projection_log", "usage_projection_items", "usage_projection_work", "usage_projection_applied", "usage_projection_resolutions", "usage_projection_replay_groups", "usage_projection_builds", "usage_projection_history", "usage_projection_source_versions", "usage_projection_partitions", "usage_projection_summary_queue", "usage_canonical_facts", "usage_projection_contributions", "usage_projection_provider_options", "usage_daily_summaries", "usage_lifetime_summaries"} {
 		var count int
 		require.NoError(t, f.database.Get(&count, f.database.Rebind(`SELECT COUNT(*) FROM `+table+` WHERE scope_id = ?`), f.scope))
 		require.Zero(t, count, table)
@@ -115,4 +116,59 @@ func TestUsageHistoryPostgresGenerationCutoverCrashRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 40, *rows[0].TotalTokens)
 	require.True(t, strings.HasPrefix(state.Generation, shadow+"."))
+}
+
+func TestUsageHistoryPostgresProviderOptionsMigrationRestartConcurrentPublication(t *testing.T) {
+	f := newProjectionDatabaseFixture(t, true)
+	ctx := context.Background()
+	generation, err := f.first.StartUsageHistoryRebuild(ctx, f.scope)
+	require.NoError(t, err)
+	finishExternalProjection(t, f.first, f.scope, generation)
+
+	_, err = f.database.Exec(f.database.Rebind(`DELETE FROM usage_projection_provider_options WHERE scope_id=? AND generation=?`), f.scope, generation)
+	require.NoError(t, err)
+	_, err = f.database.Exec(f.database.Rebind(`UPDATE usage_projection_history SET provider_options_ready=0,provider_options_version=0,
+		provider_options_build_id='',provider_options_cursor='',provider_options_phase='clear' WHERE scope_id=? AND generation=?`), f.scope, generation)
+	require.NoError(t, err)
+
+	restarted, err := analyticssqlite.NewWithDB(f.database, f.database)
+	require.NoError(t, err)
+	var options int
+	require.NoError(t, f.database.Get(&options, f.database.Rebind(`SELECT COUNT(*) FROM usage_projection_provider_options WHERE scope_id=? AND generation=?`), f.scope, generation))
+	require.Zero(t, options, "repository restart must not synchronously rebuild historical provider options")
+	incomplete, err := restarted.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "projection-ws", GroupBy: "model", Limit: 25})
+	require.NoError(t, err)
+	require.Equal(t, "preparing", incomplete.ProjectionStatus)
+	require.True(t, incomplete.ProjectionPending)
+	require.Empty(t, incomplete.Providers)
+
+	provider := "concurrent-publication-provider"
+	correction := f.item
+	correction.ModelProvider = &provider
+	correction = sealProjectionItem(t, correction, 2, 40)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := f.second.AdvanceUsageHistoryProjection(ctx, f.scope, generation, 17)
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := f.first.ReportUsageObservations(ctx, "collector", pluginsdk.UsageObservationBatchV1{
+			SchemaVersion: pluginsdk.UsageObservationSchemaVersionV1, Observations: []pluginsdk.UsageObservationV1{correction},
+		})
+		results <- err
+	}()
+	close(start)
+	for range 2 {
+		require.NoError(t, <-results)
+	}
+	finishProjectionBatches(t, restarted)
+
+	complete, err := restarted.ListSessionUsage(ctx, models.SessionUsageFilter{WorkspaceID: "projection-ws", GroupBy: "model", Limit: 25})
+	require.NoError(t, err)
+	require.Equal(t, "ready", complete.ProjectionStatus)
+	require.False(t, complete.ProjectionPending)
+	require.Equal(t, []string{provider}, complete.Providers)
 }

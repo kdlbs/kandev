@@ -90,6 +90,11 @@ func (r *Repository) publishUsageProjectionGroupTx(ctx context.Context, tx *sqlx
 			return err
 		}
 	}
+	if len(members) > 0 {
+		if err := r.rebuildUsageProjectionSummariesTx(ctx, tx, work.Scope, work.Generation); err != nil {
+			return err
+		}
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM usage_projection_replay_groups WHERE scope_id = ? AND generation = ? AND NOT EXISTS (
 		SELECT 1 FROM usage_projection_work w WHERE w.scope_id = usage_projection_replay_groups.scope_id AND w.generation = usage_projection_replay_groups.generation AND w.work_key = usage_projection_replay_groups.work_key)`), work.Scope, work.Generation)
 	return err

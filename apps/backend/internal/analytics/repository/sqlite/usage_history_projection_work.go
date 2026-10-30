@@ -47,10 +47,8 @@ func (r *Repository) advanceUsageProjectionWorkTx(ctx context.Context, tx *sqlx.
 	if err != nil {
 		return true, err
 	}
-	for _, fact := range page.Facts {
-		if err := r.stageUsageProjectionFactTx(ctx, tx, work, fact); err != nil {
-			return true, err
-		}
+	if err := r.stageUsageProjectionFactsTx(ctx, tx, work, page.Facts); err != nil {
+		return true, err
 	}
 	if page.Preparing {
 		if page.NextCursor != "" {
@@ -101,35 +99,6 @@ func (r *Repository) prepareUsageProjectionWorkTx(ctx context.Context, tx *sqlx.
 	return err
 }
 
-func (r *Repository) stageUsageProjectionFactTx(ctx context.Context, tx *sqlx.Tx, work usageProjectionWork, fact models.UsageCanonicalFact) error {
-	fact.NativeAccountingVersion = normalizeNativeCanonicalAccounting(&fact, fact.NativeAccountingVersion)
-	if fact.CoverageKind == usageCoveragePoint && fact.Measurement.CoverageStart != nil {
-		end := fact.Measurement.CoverageStart.Add(time.Nanosecond)
-		fact.Measurement.CoverageEnd = &end
-	}
-	payload, err := encodeUsageProjection(fact)
-	if err != nil {
-		return err
-	}
-	m := fact.Measurement
-	tokenSource, costSource := "", ""
-	if fact.TokenSource != nil {
-		tokenSource = fact.TokenSource.Source
-	}
-	if fact.CostSource != nil {
-		costSource = fact.CostSource.Source
-	}
-	start, end := usageProjectionFactBounds(fact)
-	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_canonical_facts
-		(scope_id, generation, build_id, fact_key, work_key, subject_id, task_id, session_id, coverage_kind, coverage_start, coverage_end,
-		source_date, calendar, model, provider, token_source, cost_source, payload, collected_at, segment_key, bundle_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(scope_id, generation, build_id, fact_key) DO UPDATE SET payload = excluded.payload, collected_at = excluded.collected_at`), work.Scope, work.Generation, work.Build, fact.Key, work.Work, m.SubjectID, m.TaskID, m.SessionID, fact.CoverageKind, start, end, m.SourceDate, m.SourceTimezone, m.Model, m.Provider, tokenSource, costSource, payload, m.CollectedAt, fact.SegmentKey, fact.BundleKey)
-	if err != nil {
-		return err
-	}
-	return r.stageUsageProjectionContributionsTx(ctx, tx, work, fact)
-}
-
 func (r *Repository) publishUsageProjectionWorkTx(ctx context.Context, tx *sqlx.Tx, work usageProjectionWork) error {
 	args := []any{work.Scope, work.Generation, work.Work, work.Build}
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_projection_summary_queue (scope_id, generation, summary_key)
@@ -146,9 +115,6 @@ func (r *Repository) publishUsageProjectionWorkTx(ctx context.Context, tx *sqlx.
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_projection_applied (scope_id, generation, work_key, build_id, commit_sequence) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(scope_id, generation, work_key) DO UPDATE SET build_id = excluded.build_id, commit_sequence = excluded.commit_sequence`), work.Scope, work.Generation, work.Work, work.Build, work.Selected)
 	if err != nil {
-		return err
-	}
-	if err := r.rebuildUsageProjectionSummariesTx(ctx, tx, work.Scope, work.Generation); err != nil {
 		return err
 	}
 	if err := r.updateUsageProjectionHistoryTx(ctx, tx, work); err != nil {
