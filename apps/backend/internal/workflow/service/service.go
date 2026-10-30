@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 )
 
 // WorkflowProvider gives the workflow service access to workflows owned by the task domain.
@@ -30,6 +31,8 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
+	promptSourceWorkflowPublisher  func(context.Context, string, *taskmodels.Workflow)
+	promptSourceStepPublisher      *stepevents.Publisher
 	executorMutationChecker        func(context.Context, string) error
 	workflowMutationPolicyChecker  func(context.Context, string) (bool, bool, error)
 	workspaceMutationPolicyChecker func(context.Context, string) (bool, error)
@@ -1063,12 +1066,17 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	} else {
 		events = models.ConvertReviewProfileToID(events, matchProfile)
 	}
+	stageType := sp.StageType
+	if stageType == "" {
+		stageType = models.StageTypeCustom
+	}
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
 		Name:                        sp.Name,
 		Position:                    sp.Position,
 		Color:                       sp.Color,
+		StageType:                   stageType,
 		Prompt:                      sp.Prompt,
 		Events:                      events,
 		IsStartStep:                 sp.IsStartStep,
@@ -1084,7 +1092,6 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
-		StageType:                   sp.StageType,
 	}
 	if matchDirectProfile && sp.AgentProfile != nil {
 		if s.lookupProfile != nil && !suppressLookup {

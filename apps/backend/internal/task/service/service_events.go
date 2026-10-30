@@ -976,6 +976,12 @@ func (s *Service) publishWorkspaceAccessChanged(ctx context.Context, workspace *
 	s.publishWorkspaceEvent(ctx, events.WorkspaceUpdated, workspace)
 }
 
+// PublishWorkflowEvent publishes a committed workflow definition written by a
+// native transaction that does not pass through ordinary task-service writes.
+func (s *Service) PublishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {
+	s.publishWorkflowEvent(ctx, eventType, workflow)
+}
+
 func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, workflow *models.Workflow) {
 	if s.eventBus == nil || workflow == nil {
 		return

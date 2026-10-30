@@ -352,7 +352,10 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   // Workflows synced from a configured GitHub repo are read-only: the
   // backend rejects definition mutations with a 409, so the UI disables the
   // matching affordances (name/agent-profile/steps/delete) up front.
-  const readOnly = workflow.source === "github" || props.isImproveWorkspace === true;
+  const readOnly =
+    workflow.source === "github" ||
+    workflow.source === "prompt_source" ||
+    props.isImproveWorkspace === true;
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
   const {
     workflowSteps,

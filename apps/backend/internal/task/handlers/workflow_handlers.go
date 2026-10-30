@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -214,6 +215,9 @@ const workspaceReadOnlyMsg = "this workspace is managed by Improve Kandev and is
 // ("", false) so callers keep their existing not-found handling.
 func (h *WorkflowHandlers) readOnlyWorkflowMessage(ctx context.Context, id string) (string, bool) {
 	synced, workspaceReadOnly, err := h.service.WorkflowMutationReadOnly(ctx, id)
+	if errors.Is(err, models.ErrPromptSourceLocked) {
+		return models.ErrPromptSourceLocked.Error(), true
+	}
 	if err != nil {
 		return "", false
 	}
