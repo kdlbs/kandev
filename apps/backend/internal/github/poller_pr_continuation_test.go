@@ -293,6 +293,7 @@ func TestPRMonitorContinuation_PrunesObsoleteWorkAndStops(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			poller, _, store, executor := newPRStatusProgressTest(t)
 			_, searching := seedPRMonitorContinuationWatches(t, store)
+			searchKey := prWatchDiscoveryTargetKey(searching)
 			executor.deferredBranches = 1
 			executor.deferDelay = 10 * time.Minute
 			poller.checkPRWatches(pollerContext(context.Background()))
@@ -303,7 +304,8 @@ func TestPRMonitorContinuation_PrunesObsoleteWorkAndStops(t *testing.T) {
 			// phase can complete during this verification pass.
 			time.Sleep(2 * time.Second)
 			poller.checkPRWatches(pollerContext(context.Background()))
-			require.Empty(t, pendingTargetKeys(poller), "removed targets must not keep pending work")
+			require.NotContains(t, pendingTargetKeys(poller), searchKey,
+				"removed targets must not keep pending work")
 
 			// A fresh deferral on a new target is cleared by shutdown.
 			seedTask(t, store, "task-stop", false)
@@ -463,6 +465,12 @@ func TestPRMonitorContinuation_RepeatedDeferralRearmsForward(t *testing.T) {
 		numberedCalls, _ = executor.counts()
 		require.Equal(t, 3, numberedCalls)
 		requireProgressTaskPRState(t, store, "task-rearm", "success")
+
+		// The workflow phase owns a second, shorter boundary after the status
+		// phase completes. Let the monitor loop resume it before asserting the
+		// inventory is empty.
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
 		require.Empty(t, pendingTargetKeys(poller))
 	})
 }
@@ -560,8 +568,12 @@ func TestPRMonitorContinuation_CredentialReplacementDropsStaleBoundary(t *testin
 
 		numberedCalls, _ := executor.counts()
 		require.Equal(t, 2, numberedCalls, "the new principal is admitted at the next normal attempt")
-		require.Empty(t, pendingTargetKeys(poller))
 		requireProgressTaskPRState(t, store, "task-credential", "success")
+
+		// The completed status pass leaves only the short workflow boundary.
+		time.Sleep(2 * time.Second)
+		poller.resumePRMonitorPending(pollerContext(context.Background()))
+		require.Empty(t, pendingTargetKeys(poller))
 	})
 }
 

@@ -79,3 +79,20 @@ workspace entry when its credential fingerprint changed, so a new principal or a
 retire/resume lifetime is admitted at the next normal attempt. Timer wakes
 recheck admission, never run the transport fallback, and do not suppress a
 replacement lifetime. Do not add a second scheduler or a per-watch goroutine.
+
+After both status phases apply, a third workflow phase owns Actions attention.
+It reads the applied `TaskPR` rows through one dedicated suite query per 20 PRs
+and one `checkRuns(totalCount)` query per 50 qualifying suite IDs, writes a
+head-guarded `workflow_attention` observation, and publishes
+`github.task_pr.updated` only for a meaningful change. It owns the
+`batched-workflow:` singleflight and progress key, so step-1 evidence and
+step-2 counts survive a deferred wake. A local deferral returns workflow-only
+pending watches; the monitor resumes that phase alone. Unsupported GraphQL or an
+invalid-query classification falls back to the serial REST collector. A
+per-alias GraphQL error marks only the PRs (or suite IDs) its path names
+unavailable; the resolved siblings keep their evidence, and only an error
+without a usable path fails the chunk. Converted suites carry the PR
+association so any event on the PR's head matches, not only `pull_request`.
+A missing job count and a changed or overflowing suite page are unavailable
+evidence, not approval. Empty-head rows are skipped and the store rejects an
+empty expected head, so every write stays head-scoped.

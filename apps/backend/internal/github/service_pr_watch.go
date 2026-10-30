@@ -1153,7 +1153,7 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 					zap.String("workspace_id", workspaceID), zap.Error(outcome.Err))
 				return
 			}
-			fallbackWatches := prWatchPendingWatches(outcome.Pending)
+			fallbackWatches := prWatchStatusPendingWatches(outcome.Pending)
 			if len(fallbackWatches) == 0 {
 				fallbackWatches = allWatches
 			}
@@ -2113,7 +2113,7 @@ func (s *Service) runBatchedOrPerWatchSync(
 		}
 		s.logger.Debug("batched PR sync failed; falling back to per-watch",
 			zap.String("task_id", taskID), zap.Error(outcome.Err))
-		fallbackWatches := prWatchPendingWatches(outcome.Pending)
+		fallbackWatches := prWatchStatusPendingWatches(outcome.Pending)
 		if len(fallbackWatches) == 0 {
 			fallbackWatches = watches
 		}
