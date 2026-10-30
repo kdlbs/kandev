@@ -197,3 +197,28 @@ func (s *compareAndSwapRawStore) CompareAndSwap(
 	s.found = true
 	return true, nil
 }
+
+func TestInferenceBindingStoreRoundTripsExactIdentity(t *testing.T) {
+	raw := &compareAndSwapRawStore{}
+	store := NewStore(raw)
+	ctx := context.Background()
+	binding := InferenceBinding{
+		Key: "inference:owner:attempt", InstanceID: "instance", OwnerID: "owner",
+		AttemptID: "attempt", PreparationID: "preparation", Grade: "A", GradeKnown: true,
+		State: "reserved", SettlementKind: "not_required",
+	}
+	if err := store.UpdateInferenceBindings(ctx, func(active map[string]InferenceBinding) error {
+		active[binding.Key] = binding
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held, err := store.LoadInferenceBindings(ctx)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("load = %+v, %v", held, err)
+	}
+	got := held[binding.Key]
+	if got.OwnerID != "owner" || got.AttemptID != "attempt" || got.PreparationID != "preparation" || !got.GradeKnown {
+		t.Fatalf("binding identity lost: %+v", got)
+	}
+}
