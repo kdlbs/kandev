@@ -86,16 +86,30 @@ func TestDurabilityBarrierCoalescesWaiters(t *testing.T) {
 		t.Fatal("barrier run did not start")
 	}
 
-	arrived := make(chan struct{})
+	arrived := make(chan struct{}, 1)
+	barrier.mu.Lock()
+	barrier.awaitHook = func() {
+		select {
+		case arrived <- struct{}{}:
+		default:
+		}
+	}
+	barrier.mu.Unlock()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		close(arrived)
 		errs <- barrier.Await(ctx)
 	}()
-	<-arrived
-	time.Sleep(10 * time.Millisecond)
+	registered := false
+	select {
+	case <-arrived:
+		registered = true
+	case <-time.After(5 * time.Second):
+	}
 	close(release)
+	if !registered {
+		t.Fatal("waiter did not register before the run was released")
+	}
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -127,4 +141,62 @@ func TestDurabilityBarrierFailureDiscardsConnection(t *testing.T) {
 	require.NoError(t, barrier.Await(ctx))
 	require.NoError(t, database.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&level))
 	require.Equal(t, 1, level)
+}
+
+// @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1
+func TestDurabilityBarrierCanceledCallerKeepsRun(t *testing.T) {
+	ctx := t.Context()
+	database := openBarrierTestDB(t)
+	barrier := newDurabilityBarrier(database, 40*time.Millisecond)
+
+	var mu sync.Mutex
+	runs := 0
+	started := make(chan struct{})
+	release := make(chan struct{})
+	barrier.observe = func(context.Context, *sql.Conn) error {
+		mu.Lock()
+		runs++
+		current := runs
+		mu.Unlock()
+		if current == 1 {
+			close(started)
+			<-release
+		}
+		return nil
+	}
+
+	begin := make(chan struct{})
+	canceledCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 2)
+	go func() {
+		<-begin
+		errs <- barrier.Await(canceledCtx)
+	}()
+	go func() {
+		<-begin
+		errs <- barrier.Await(ctx)
+	}()
+	close(begin)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("barrier run did not start")
+	}
+
+	cancel()
+	select {
+	case err := <-errs:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("canceled caller did not stop waiting while the run was blocked")
+	}
+
+	close(release)
+	require.NoError(t, <-errs, "the shared run must complete for the other caller")
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, 1, runs, "canceling one caller must not cancel or restart the shared run")
 }

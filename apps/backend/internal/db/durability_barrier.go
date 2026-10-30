@@ -38,8 +38,9 @@ const (
 //
 // Concurrent callers coalesce into one run. A caller that arrives while a run
 // is in flight waits for the next run, because the in-flight run may have
-// started before that caller's commit. The caller that starts a run executes
-// it; the barrier owns no goroutine.
+// started before that caller's commit. Each run executes in a short-lived
+// goroutine, so a canceled caller can stop waiting without canceling a run
+// other callers depend on; the barrier owns no long-lived goroutine.
 type DurabilityBarrier struct {
 	db     *sql.DB
 	window time.Duration
@@ -47,6 +48,9 @@ type DurabilityBarrier struct {
 	// observe is a test seam that runs after the FULL pragma is applied and
 	// before the barrier commit. It never runs in production.
 	observe func(context.Context, *sql.Conn) error
+	// awaitHook is a test seam that runs after a caller registers its ticket
+	// and before it waits. It never runs in production.
+	awaitHook func()
 
 	mu       sync.Mutex
 	running  bool
@@ -84,6 +88,12 @@ func (b *DurabilityBarrier) Await(ctx context.Context) error {
 	b.mu.Lock()
 	ticket := b.arrivals
 	b.arrivals++
+	hook := b.awaitHook
+	b.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	b.mu.Lock()
 	for {
 		if b.covered > ticket {
 			b.mu.Unlock()
@@ -92,7 +102,7 @@ func (b *DurabilityBarrier) Await(ctx context.Context) error {
 		if !b.running {
 			b.running = true
 			b.mu.Unlock()
-			return b.lead()
+			return b.lead(ctx)
 		}
 		changed := b.changed
 		b.mu.Unlock()
@@ -105,9 +115,25 @@ func (b *DurabilityBarrier) Await(ctx context.Context) error {
 	}
 }
 
-// lead waits the coalescing window, then makes every arrival seen so far
-// durable. A failure releases the next caller to retry with its own run.
-func (b *DurabilityBarrier) lead() error {
+// lead starts one coalesced run and lets this caller stop waiting when its own
+// context ends. The run keeps its independent lifetime so other callers that
+// depend on it are not canceled with this one.
+func (b *DurabilityBarrier) lead(ctx context.Context) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- b.run()
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// run waits the coalescing window and commits one FULL generation. It is
+// short-lived and owns no state beyond the barrier's fields.
+func (b *DurabilityBarrier) run() error {
 	timer := time.NewTimer(b.window)
 	<-timer.C
 

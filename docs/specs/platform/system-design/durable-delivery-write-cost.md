@@ -135,9 +135,10 @@ Coalescing: callers that arrive while no run is in flight start one after a
 coalescing window of at most 10 ms. Callers that arrive while a run is in flight
 wait for the next run, because the in-flight run may have started before their
 commit. One run therefore serves every caller that arrived before it started.
-Cancellation of one waiter does not cancel a run that other waiters depend on.
-The barrier owns no long-lived goroutine; the caller that starts a run executes
-it.
+Cancellation of one waiter does not cancel a run that other waiters depend on:
+each run executes in a short-lived goroutine, so a caller whose context ends
+stops waiting while the shared run continues. The barrier owns no long-lived
+goroutine.
 
 On PostgreSQL, `Await` returns immediately: commits already use synchronous
 commit, and the existing note that deployments with disabled persistence cannot

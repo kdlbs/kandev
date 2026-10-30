@@ -122,8 +122,8 @@ marked done.
 
 - `internal/db.DurabilityBarrier` commits one FULL `kandev_meta` generation on
   the actual writer connection, coalesces callers for at most 10 ms, discards
-  the connection on failure, and runs the commit independently of the leader's
-  cancellation.
+  the connection on failure, and runs each coalesced commit in a short-lived
+  goroutine so a canceled caller stops waiting while the shared run continues.
 - `internal/db.OpenSQLite` uses `_synchronous=NORMAL`.
   `TestSQLiteWriterUsesNormalWithBarrier` replaces the old FULL assertion;
   `TestDurabilityBarrierCommitsWithFull`,

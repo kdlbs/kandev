@@ -28,7 +28,8 @@ with NORMAL before PR 4425 and were never part of that guarantee.
   write committed on the actual writer connection with `synchronous=FULL` and
   started after the call. A FULL commit synchronizes the whole WAL file, which
   covers every earlier commit. Concurrent callers share one run, with a
-  coalescing window of at most 10 ms.
+  coalescing window of at most 10 ms. A caller can stop waiting when its own
+  context ends; the shared run continues in a short-lived goroutine.
 - Every backend request that lets agentctl release journal data, namely event
   acknowledgment and submission retirement, goes through one lifecycle releaser
   that awaits the barrier first. A structural test prevents new bypasses.
