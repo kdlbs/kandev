@@ -351,6 +351,9 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
 		state.taskError = &copy
 	}
+	if summary.TurnError != nil {
+		state.turnError = cloneTurnError(summary.TurnError)
+	}
 	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
 		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)

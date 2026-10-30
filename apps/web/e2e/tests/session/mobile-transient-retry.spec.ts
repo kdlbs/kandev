@@ -5,9 +5,18 @@ import { test, expect } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { listTransientRetryNotices } from "../../helpers/transient-retry";
+import { SessionPage } from "../../pages/session-page";
 import { openMobileQuickChatSetup } from "../chat/quick-chat-saved-prompt-delivery-helpers";
 import { completeQuickChatOpening } from "../chat/quick-chat-opening-composer-helpers";
 import { prepareMockCodexProfile, selectAgentIfNeeded } from "../chat/quick-chat-helpers";
+async function expectRetainedTurnAfterRetryCancel(session: SessionPage) {
+  const chat = session.activeChat();
+  await expect(chat.getByTestId("session-recovery-action-message")).toBeVisible();
+  await expect(chat.getByTestId("turn-error-dismiss-button")).toBeVisible();
+  await expect(session.recoveryResumeButton()).toHaveCount(0);
+  await expect(session.transientRetryCard()).toBeHidden();
+  await expect(chat.getByTestId("chat-input-area")).toBeVisible();
+}
 
 test.describe("mobile: transient provider error retry", () => {
   test("Quick Chat opening prompt recovers from a Codex 429 after reload", async ({
@@ -137,7 +146,7 @@ test.describe("mobile: transient provider error retry", () => {
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 
-  test("yellow retry card + Cancel works on mobile and surfaces recovery", async ({
+  test("yellow retry card + Cancel works on mobile and surfaces the retained error", async ({
     testPage,
     apiClient,
     seedData,
@@ -167,7 +176,7 @@ test.describe("mobile: transient provider error retry", () => {
     expect(retryNotice.attempt).toBeGreaterThanOrEqual(1);
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    // Tap Cancel → red recovery banner.
+    // Tap Cancel → retained inline error with a usable composer.
     await session.recoveryCancelRetryButton().tap();
     await expect
       .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
@@ -175,14 +184,7 @@ test.describe("mobile: transient provider error retry", () => {
         message: `retry notice ${retryNoticeId} should be deleted after cancel`,
       })
       .toBe(0);
-    await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toBeHidden();
-    await expect(testPage.getByTestId("session-recovery-card")).toContainText(
-      "Automatic recovery was cancelled. Resume or start fresh to continue.",
-    );
-    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
-      "after several retries",
-    );
+    await expectRetainedTurnAfterRetryCancel(session);
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

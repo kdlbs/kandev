@@ -23,7 +23,10 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	data = s.withPromptAttemptEvidence(data)
-	if data.DynamicRouteAttempt {
+	if data.DynamicRouteAttempt || s.activeContinuationFailureOwns(data.SessionID) {
+		// Continuation acceptance failures belong to the existing recovery
+		// owner, which preserves continuation evidence and manual replay
+		// policy. Generic retained-turn settlement must not replace it.
 		s.handleAgentFailed(ctx, data)
 		return
 	}
@@ -70,6 +73,18 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 			zap.String("session_id", data.SessionID), zap.String("execution_id", data.AgentExecutionID),
 			zap.Uint64("prompt_generation", data.PromptGeneration))
 	}
+}
+
+func (s *Service) activeContinuationFailureOwns(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	value, ok := s.transientRetries.Load(sessionID)
+	if !ok {
+		return false
+	}
+	entry, ok := value.(*transientRetryEntry)
+	return ok && entry != nil && entry.mode == recoveryModeContinue
 }
 
 func validRetainedTurnFailureEvent(data watcher.AgentEventData) bool {
