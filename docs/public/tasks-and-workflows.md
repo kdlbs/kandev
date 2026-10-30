@@ -960,12 +960,14 @@ while its page refreshes. Expanding shows already available rows immediately;
 any additional rows appear when the refresh finishes. This also applies in the
 phone **Tasks** drawer and navigation menu.
 
-If loading fails, Kandev retries the sidebar read automatically for up to about
-thirty seconds. The current rows stay in place, and no warning appears while
-those retries continue. If recovery stops, the sidebar shows one message, and
-**Retry** starts another bounded attempt. Rows already shown remain visible. A
-temporary problem that clears during the retry window needs no action. If a
-filter is invalid, use **Filters** to correct the indicated selection instead.
+If a temporary sidebar read fails, Kandev retries it automatically for up to
+about thirty seconds. The current rows stay in place, and no warning appears
+while those retries continue. If recovery stops, the sidebar shows one message,
+and **Retry** starts another bounded attempt. Rows already shown remain visible.
+A temporary problem that clears during the retry window needs no action. Access
+or missing-resource failures are reported immediately without automatic retries.
+If a filter is invalid, use **Filters** to correct the indicated selection
+instead.
 Repository and workflow selections support up to 1,000 values per filter; the
 limits apply to each selected value, not to the combined selection.
 

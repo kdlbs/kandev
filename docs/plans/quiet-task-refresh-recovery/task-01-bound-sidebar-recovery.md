@@ -73,13 +73,13 @@ Run from the repository root. Install workspace dependencies first if this workt
 The managed E2E runner rebuilds the application. Run desktop and phone commands sequentially.
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/api/temporary-read-error.test.ts lib/sidebar/sidebar-task-page-recovery.test.ts lib/sidebar/sidebar-task-page-cache.test.ts hooks/domains/kanban/use-sidebar-task-page.test.tsx hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx components/task/sidebar-task-query-status.test.tsx lib/state/task-navigation-reads.test.ts lib/state/task-navigation-reads-retry.test.ts lib/state/task-navigation-reads-budget.test.ts)
+(cd apps/web && pnpm exec vitest run lib/api/temporary-read-error.test.ts lib/sidebar/sidebar-task-page-recovery.test.ts lib/sidebar/sidebar-task-page-cache.test.ts hooks/domains/kanban/use-sidebar-task-page.test.tsx hooks/domains/kanban/use-sidebar-task-page.recovery.test.tsx hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx components/task/sidebar-task-query-status.test.tsx lib/state/task-navigation-reads.test.ts lib/state/task-navigation-reads-retry.test.ts lib/state/task-navigation-reads-budget.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint lib/api/temporary-read-error.ts lib/sidebar/sidebar-task-page-recovery.ts lib/sidebar/sidebar-task-page-cache.ts hooks/domains/kanban/use-sidebar-task-page.ts components/task/sidebar-task-query-status.tsx lib/state/task-navigation-reads.ts)
+(cd apps/web && pnpm exec eslint lib/api/temporary-read-error.ts lib/sidebar/sidebar-task-page-recovery.ts lib/sidebar/sidebar-task-page-cache.ts hooks/domains/kanban/use-sidebar-task-page.ts hooks/domains/kanban/sidebar-task-page-load.ts hooks/domains/kanban/sidebar-task-page-refresh.ts components/task/sidebar-task-query-status.tsx lib/state/task-navigation-reads.ts)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/sidebar-task-pagination.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-pagination.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-pagination.spec.ts tests/layout/mobile-sidebar-read-recovery.spec.ts)
 git diff --check
 ```
 
@@ -89,7 +89,7 @@ git diff --check
 - `apps/web/lib/sidebar/sidebar-task-page-recovery.ts` and `.test.ts` (new).
 - `apps/web/lib/sidebar/sidebar-task-page-cache.ts` and `.test.ts`.
 - `apps/web/lib/state/task-navigation-reads.ts` and its classification tests.
-- `apps/web/hooks/domains/kanban/use-sidebar-task-page.ts` and its three test files.
+- `apps/web/hooks/domains/kanban/use-sidebar-task-page.ts`, `sidebar-task-page-load.ts`, `sidebar-task-page-refresh.ts`, and their test files, including the recovery suite.
 - `apps/web/components/task/sidebar-task-query-status.tsx` and `.test.tsx`.
 - `apps/web/e2e/tests/task/sidebar-view-reuse-fixtures.ts`.
 - `apps/web/e2e/tests/task/sidebar-task-pagination.spec.ts` and `mobile-sidebar-task-pagination.spec.ts`.
@@ -130,7 +130,7 @@ Implemented on 2026-10-29. All acceptance checks passed.
 
 Focused verification passed:
 
-- `vitest`: 10 files, 126 tests for classification, the recovery cycle, the page cache, the hook, disclosure, removal, the query status, and task-navigation reads.
+- `vitest`: 11 files, 126 tests for classification, the recovery cycle, the page cache, the hook including admission rules, disclosure, removal, the query status, and task-navigation reads.
 - `pnpm run typecheck`, ESLint on changed files, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, and `pnpm run e2e:sleep-ratchet` passed.
 - Desktop `sidebar-task-pagination.spec.ts`: 3 passed, including the view-reuse recovery scenario (2.6 minutes).
 - Phone `mobile-sidebar-task-pagination.spec.ts` and `mobile-sidebar-read-recovery.spec.ts`: 5 passed, including the exhausted Retry and drawer recovery scenarios (3.5 minutes).

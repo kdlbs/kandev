@@ -87,7 +87,7 @@ Run from the repository root after Task 01. Run the managed desktop and phone co
 If copy changes, generate Traditional Chinese and pseudo catalogs before the i18n checks.
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/state/task-navigation-reads.test.ts lib/state/task-navigation-reads-retry.test.ts lib/state/task-navigation-reads-budget.test.ts lib/state/task-navigation-recovery-clock.test.ts src/task-detail-route-recovery.test.tsx src/task-detail-route-view.test.ts components/task/task-page-content.test.tsx components/task/task-page-mobile-feedback.test.ts)
+(cd apps/web && pnpm exec vitest run lib/state/task-navigation-reads.test.ts lib/state/task-navigation-reads-retry.test.ts lib/state/task-navigation-reads-budget.test.ts lib/state/task-navigation-recovery-clock.test.ts src/task-detail-route-recovery.test.tsx src/task-detail-route-view.test.ts components/task/task-page-content.test.tsx components/task/task-page-mobile-feedback.test.ts components/task/task-load-progress-state.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint lib/state/task-navigation-reads.ts src/task-detail-route.tsx components/task/task-page-content.tsx components/task/task-page-content-helpers.ts components/task/task-navigation-read-feedback.tsx components/task/task-layout.tsx)
 (cd apps/web && pnpm run i18n:check)
