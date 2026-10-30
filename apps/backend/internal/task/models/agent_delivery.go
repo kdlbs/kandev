@@ -170,6 +170,10 @@ type AgentDeliveryCursor struct {
 type CanonicalAgentDeliveryProjectionResult struct {
 	CanonicalMessageID string
 	Appended           bool
+	// AlreadyProjected reports that the inbox row was projected before this
+	// call. The canonical message identity is still returned so a caller can
+	// acknowledge the cursor without notifying the UI again.
+	AlreadyProjected bool
 }
 
 // AgentDeliveryEffect is a durable idempotency key for a projected workflow

@@ -65,12 +65,14 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - foreign_keys=on: enforce FK constraints consistently.
 	// - busy_timeout: wait briefly on locks to reduce transient "database is locked".
 	// - journal_mode=WAL: better read concurrency with a single writer.
-	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
+	// - synchronous=NORMAL: commits survive process termination. Power-loss
+	//   durability for journal release comes from db.DurabilityBarrier, which
+	//   commits on this connection with FULL before any journal release.
 	// - cache=shared: allow multiple connections to share a page cache.
 	// - txlock=immediate: acquire the writer before transaction predicate reads.
 	// journal_size_limit has no DSN parameter; applyWriterPragmas sets it.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
+		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)

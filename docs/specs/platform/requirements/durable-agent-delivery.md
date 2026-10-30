@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-09-10
-updated: 2026-10-27
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -146,6 +146,8 @@ This requirement extends recovery for existing installations. It does not change
 
 - [Delivery record recovery design](../system-design/durable-agent-record-recovery.md).
 - [Missing delivery record fix package](../../../plans/durable-agent-record-recovery/plan.md).
+
+- [Delivery write cost](durable-delivery-write-cost.md).
 
 ## Out of scope
 

@@ -103,11 +103,9 @@ func (r *Repository) projectCanonicalDeliveryAttempt(ctx context.Context, stream
 
 	var projectedSequence int64
 	var boundary sql.NullInt64
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT projected_sequence, message_segment_boundary_sequence
-		FROM agent_delivery_cursors WHERE stream_id = ?`),
-		streamID).Scan(&projectedSequence, &boundary); err != nil {
-		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
+	projectedSequence, boundary, err = loadCanonicalDeliveryCursorTx(ctx, tx, r.db.Rebind, streamID)
+	if err != nil {
+		return nil, err
 	}
 	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
@@ -168,6 +166,7 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 			if err := flushGroup(); err != nil {
 				return err
 			}
+			results[i].AlreadyProjected = true
 			results[i].CanonicalMessageID = stored.CanonicalMessageID
 			if results[i].CanonicalMessageID == "" && stored.PayloadPrunedAt == nil && len(stored.Payload) > 0 {
 				var projectedEvent streams.AgentEvent

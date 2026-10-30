@@ -21,7 +21,7 @@ import (
 type sqliteFactoryFixture struct{ writer, waiter, observer, reader *sqlx.DB }
 
 // @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1
-func TestSQLiteWriterPowerLossDurability(t *testing.T) {
+func TestSQLiteWriterUsesNormalWithBarrier(t *testing.T) {
 	ctx := t.Context()
 	writer, err := internaldb.OpenSQLite(filepath.Join(t.TempDir(), "delivery.db"))
 	require.NoError(t, err)
@@ -33,14 +33,28 @@ func TestSQLiteWriterPowerLossDurability(t *testing.T) {
 		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode))
 		require.Equal(t, "wal", mode)
 		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous))
-		require.Equal(t, 2, synchronous, "journal pruning requires a power-loss-durable WAL commit")
+		require.Equal(t, 1, synchronous, "the writer returns to NORMAL; the barrier owns power-loss durability")
 	}
 	check()
 	conn, err := writer.Conn(ctx)
 	require.NoError(t, err)
-	// Discard the physical connection; the pool must reopen with the same durability.
+	// Discard the physical connection; the pool must reopen with the same level.
 	require.ErrorIs(t, conn.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
 	_ = conn.Close()
+	check()
+
+	_, err = writer.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS kandev_meta (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL DEFAULT ''
+	)`)
+	require.NoError(t, err)
+	barrier := internaldb.NewDurabilityBarrier(writer)
+	var before, after string
+	require.NoError(t, writer.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM kandev_meta WHERE key = 'durability_barrier'), '')`).Scan(&before))
+	require.NoError(t, barrier.Await(ctx))
+	require.NoError(t, writer.QueryRowContext(ctx, `SELECT value FROM kandev_meta WHERE key = 'durability_barrier'`).Scan(&after))
+	require.NotEmpty(t, after)
+	require.NotEqual(t, before, after)
 	check()
 }
 

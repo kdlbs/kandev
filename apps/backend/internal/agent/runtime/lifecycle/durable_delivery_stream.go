@@ -37,6 +37,12 @@ type canonicalAgentDeliveryBatchProjector interface {
 	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
+// canonicalAgentDeliveryBatchReceiver is implemented by the repository that
+// can admit and project one compatible output batch in one writer transaction.
+type canonicalAgentDeliveryBatchReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64) ([]models.CanonicalAgentDeliveryProjectionResult, error)
+}
+
 type agentDeliveryAcknowledger interface {
 	AcknowledgeDelivery(ctx context.Context, streamID string, sequence uint64) error
 }
@@ -514,19 +520,6 @@ func deliveryHarnessGeneration(
 		case <-timer.C:
 		}
 	}
-}
-
-func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return nil
-	}
-	if acknowledger == nil {
-		return errors.New("agent delivery acknowledger is unavailable")
-	}
-	if err := acknowledger.AcknowledgeDelivery(ctx, event.DeliveryStreamID, event.DeliverySequence); err != nil {
-		return fmt.Errorf("acknowledge durable agent event: %w", err)
-	}
-	return nil
 }
 
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {

@@ -51,6 +51,9 @@ The bounded intake budget is 4 MiB; storage work does not hold control-response 
 Every original event retains its sequence and effect identity.
 Tool, permission, terminal, turn, and owner changes flush the preceding batch.
 Canonical message changes and projected cursor advancement commit atomically.
+For a batched event, inbox receipt and received-cursor advancement join that
+same transaction; see [delivery write cost](durable-delivery-write-cost.md).
+Unbatched events keep a separate receipt transaction.
 Notification follows successful projection and does not depend on HTTP acknowledgment success.
 
 ### Canonical text segments
