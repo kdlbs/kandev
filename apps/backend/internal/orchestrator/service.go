@@ -70,6 +70,10 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// ResumeQueueAfterSilentRestore re-enables Auto-run that a successful
+	// silent restart restore paused.
+	ResumeQueueAfterSilentRestore bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
