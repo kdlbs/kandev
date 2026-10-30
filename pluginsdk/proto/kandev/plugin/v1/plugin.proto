@@ -76,6 +76,8 @@ service Host {
   rpc SendTaskMessageExact(SendTaskMessageExactRequest) returns (SendTaskMessageExactResponse);
   rpc IssueTaskDirectiveExact(IssueTaskDirectiveExactRequest) returns (IssueTaskDirectiveExactResponse);
   rpc ResolveTaskDirectiveExact(ResolveTaskDirectiveExactRequest) returns (ResolveTaskDirectiveExactResponse);
+  rpc ReportTaskChangeRequestExact(ReportTaskChangeRequestExactRequest) returns (ReportTaskChangeRequestExactResponse);
+  rpc RemoveTaskChangeRequestExact(RemoveTaskChangeRequestExactRequest) returns (RemoveTaskChangeRequestExactResponse);
   rpc AcquireTaskManagementClaimExact(AcquireTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
   rpc ReleaseTaskManagementClaimExact(ReleaseTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
   rpc TransferTaskManagementClaimExact(TransferTaskManagementClaimExactRequest) returns (TaskManagementClaimExactResponse);
@@ -877,6 +879,55 @@ message ResolveTaskDirectiveExactRequest {
 message ResolveTaskDirectiveExactResponse {
   HostCommandResult result = 1;
   TaskDirective directive = 2;
+}
+
+// ReportTaskChangeRequestExact records one plugin-reported task change
+// request. The host owns the row; the plugin only reports what it observes
+// on its own code host. The provider id must be one of the calling plugin's
+// manifest-declared repository_providers, so a plugin cannot report on
+// another provider's behalf.
+message ReportTaskChangeRequestExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string provider_id = 4;
+  string provider_host = 5;
+  string repository_id = 6;
+  int64 number = 7;
+  string url = 8;
+  string title = 9;
+  string state = 10; // open | merged | closed
+  string head_branch = 11;
+  string base_branch = 12;
+  string created_at = 13;
+  string merged_at = 14;
+  string closed_at = 15;
+  string idempotency_key = 16;
+  uint64 approval_revision = 17;
+  string manifest_digest = 18;
+}
+
+message ReportTaskChangeRequestExactResponse {
+  HostCommandResult result = 1;
+  TaskChangeRequest change_request = 2;
+}
+
+// RemoveTaskChangeRequestExact deletes one plugin-reported task change
+// request owned by the calling installation. Removing a missing row is not
+// an error.
+message RemoveTaskChangeRequestExactRequest {
+  string request_id = 1;
+  string workspace_id = 2;
+  string provider_id = 3;
+  string repository_id = 4;
+  int64 number = 5;
+  string idempotency_key = 6;
+  uint64 approval_revision = 7;
+  string manifest_digest = 8;
+}
+
+message RemoveTaskChangeRequestExactResponse {
+  HostCommandResult result = 1;
 }
 
 message ManagedAgentConversationDescriptor {
@@ -2558,6 +2609,26 @@ message TaskInboxItem {
   string created_at = 7;
   string resource_version = 8;
 }
+// TaskChangeRequest is one Host-owned, plugin-reported task change request.
+message TaskChangeRequest {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string provider_id = 4;
+  string provider_host = 5;
+  string repository_id = 6;
+  int64 number = 7;
+  string url = 8;
+  string title = 9;
+  string state = 10; // open | merged | closed
+  string head_branch = 11;
+  string base_branch = 12;
+  string created_at = 13;
+  optional string merged_at = 14;
+  optional string closed_at = 15;
+  string resource_version = 16;
+}
+
 message TaskDirective {
   string id = 1;
   string workspace_id = 2;

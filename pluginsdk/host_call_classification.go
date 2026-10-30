@@ -14,6 +14,9 @@ var hostCallCallerExempt = map[string]struct{}{
 	pluginv1.Host_CommentSourceIssueExact_FullMethodName:         {},
 	pluginv1.Host_TransitionSourceIssueExact_FullMethodName:      {},
 
+	pluginv1.Host_ReportTaskChangeRequestExact_FullMethodName: {},
+	pluginv1.Host_RemoveTaskChangeRequestExact_FullMethodName: {},
+
 	pluginv1.Host_EnsureManagedAgentConversationExact_FullMethodName:        {},
 	pluginv1.Host_GetManagedAgentConversationStatusExact_FullMethodName:     {},
 	pluginv1.Host_ListManagedAgentConversationsExact_FullMethodName:         {},

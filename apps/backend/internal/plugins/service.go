@@ -98,28 +98,29 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir                 string
-	store                      store.Store
-	approvals                  *approvalLedger
-	registry                   *Registry
-	state                      *state.Store
-	exactCommandStore          *state.CommandStore
-	userState                  *state.UserStore
-	instances                  *instances.Store
-	instanceState              *state.InstanceStore
-	webArtifacts               *webapp.ArtifactStore
-	webRuntime                 *webapp.Runtime
-	eventHub                   *webapp.EventHub
-	eventSubscription          bus.Subscription
-	userStateCleanup           userStateCleanupStore
-	agentConvs                 AgentConversationService
-	managedConvs               ManagedAgentConversationService
-	managedAutomationSchedules ManagedConversationScheduleService
-	automationHistoryData      AutomationHistoryDataSource
-	eventBus                   bus.EventBus
-	conversationTokens         *conversationTokenManager
-	conversationEpoch          string
-	log                        *logger.Logger
+	pluginsDir                   string
+	store                        store.Store
+	approvals                    *approvalLedger
+	registry                     *Registry
+	state                        *state.Store
+	exactCommandStore            *state.CommandStore
+	userState                    *state.UserStore
+	instances                    *instances.Store
+	instanceState                *state.InstanceStore
+	webArtifacts                 *webapp.ArtifactStore
+	webRuntime                   *webapp.Runtime
+	eventHub                     *webapp.EventHub
+	eventSubscription            bus.Subscription
+	workspaceDeletedSubscription bus.Subscription
+	userStateCleanup             userStateCleanupStore
+	agentConvs                   AgentConversationService
+	managedConvs                 ManagedAgentConversationService
+	managedAutomationSchedules   ManagedConversationScheduleService
+	automationHistoryData        AutomationHistoryDataSource
+	eventBus                     bus.EventBus
+	conversationTokens           *conversationTokenManager
+	conversationEpoch            string
+	log                          *logger.Logger
 
 	deliverer                       Deliverer
 	agentToolCatalogListener        AgentToolCatalogListener
@@ -159,6 +160,7 @@ type Service struct {
 	// taskPRs is guarded by mu and read through taskPRSourceDep, because hosts can
 	// outlive the late SetTaskPRSource wiring.
 	taskPRs               taskPRSource
+	changeRequests        *state.ChangeRequestStore
 	taskWriter            taskWriter
 	workspaceAdminWriter  WorkspaceAdminWriter
 	sourceIssueController SourceIssueController
@@ -599,6 +601,24 @@ func (s *Service) taskPRSourceDep() taskPRSource {
 	return s.taskPRs
 }
 
+// SetChangeRequestStore wires the Host-owned task change-request ledger
+// behind the exact Report/Remove RPCs. Wired at Provide time with the other
+// state stores; a nil store leaves those RPCs returning Unavailable.
+func (s *Service) SetChangeRequestStore(store *state.ChangeRequestStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.changeRequests = store
+}
+
+// changeRequestStoreDep returns the currently wired change-request ledger,
+// guarded by s.mu against the SetChangeRequestStore write. Hosts read it at
+// call time so late wiring reaches already-running plugins.
+func (s *Service) changeRequestStoreDep() *state.ChangeRequestStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.changeRequests
+}
+
 func (s *Service) SetInteractionResponder(responder interactionResponder) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -791,6 +811,7 @@ func (s *Service) Shutdown() {
 
 // Close stops plugin runtimes after workers stop.
 func (s *Service) Close() error {
+	s.closeWorkspaceDeletedEvents()
 	s.Shutdown()
 	return nil
 }
@@ -902,6 +923,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		messageData:                s.messageData,
 		interactionData:            s.interactionData,
 		taskPRsDep:                 s.taskPRSourceDep,
+		changeRequestsDep:          s.changeRequestStoreDep,
 		pendingTaskTransitions:     s.pendingTaskTransitionSourceDep,
 		taskWriter:                 s.taskWriter,
 		workspaceAdminWriter:       s.workspaceAdminWriter,
