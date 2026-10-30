@@ -87,7 +87,8 @@ This contract adds consistent wrapper execution and explicit refusal where suppo
 
 ## Exclusions
 
-No executor-level wrapper setting, task override, automatic permission grant, provider-name exception, or sandbox plugin API ships in this increment.
+No task override, automatic permission grant, provider-name exception, or sandbox plugin API ships in this increment.
+Node-level operator wrappers are specified in [Node launch wrapper requirements](node-launch-wrapper.md). No other executor-level wrapper setting ships.
 Native non-ACP utility transports may refuse wrapper contexts explicitly.
 Package installation, login commands, repository setup, user shells, and MCP server processes are separate execution contracts.
 No new rendered controls or layout changes are required. Existing desktop and phone profile workflows retain their state and recovery behavior.
