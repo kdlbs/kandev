@@ -541,6 +541,57 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 });
 
+describe("ActionMessage — confirmed continuation activity", () => {
+  it("renders neutral feedback only after attested resumed activity", () => {
+    const message = retryMessage({ content: "Agent resumed" });
+    message.metadata = {
+      ...message.metadata,
+      variant: "default",
+      failure_code: "agent_transport_lost",
+      provider_name: "Cursor",
+      model_id: "claude-sonnet",
+      recovery_mode: "continue",
+      recovery_phase: "continuing",
+      recovery_activity_confirmed: true,
+    };
+    renderAction(message, "RUNNING");
+    const card = screen.getByTestId(RETRY_CARD_TEST_ID);
+    expect(card.textContent).toContain("Agent resumed");
+    expect(card.textContent).toContain("Cursor · claude-sonnet");
+    expect(card.textContent).toContain("Previous conversation is preserved.");
+    expect(card.textContent).not.toContain("Attempt 1 of 5");
+    expect(screen.queryByLabelText("Retry countdown")).toBeNull();
+    expect(screen.getByTestId(CANCEL_TEST_ID)).toBeTruthy();
+    expect(card.getAttribute("role")).toBe("status");
+    expect(card.getAttribute("aria-live")).toBe("polite");
+    expect(card.className).not.toContain("amber");
+    expect(card.className).not.toContain("red");
+  });
+
+  it.each([
+    ["omitted", {}],
+    ["false", { recovery_activity_confirmed: false }],
+    ["malformed", { recovery_activity_confirmed: "true" }],
+  ])("keeps warning feedback when the resumed marker is %s", (_label, marker) => {
+    renderAction(
+      retryMessage({
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "agent_transport_lost",
+          recovery_mode: "continue",
+          recovery_phase: "continuing",
+          ...marker,
+        },
+      }),
+      "RUNNING",
+    );
+    const card = screen.getByTestId(RETRY_CARD_TEST_ID);
+    expect(card.textContent).toContain("Agent connection lost");
+    expect(card.textContent).toContain("Attempt 1 of 5");
+    expect(card.textContent).not.toContain("Agent resumed");
+  });
+});
+
 describe("ActionMessage recovery ownership", () => {
   it("keeps a retained provider turn error visible after a later session completion", () => {
     const error = recoveryMessage(true);

@@ -161,11 +161,14 @@ previous results. It does not resend the original request or create a replacemen
 conversation automatically.
 
 Recovery shares the existing five-attempt budget and paced backoff. One notice
-shows waiting, reconnecting, or continuing, with **Cancel** available while the
-continued turn runs. Cancellation returns control to Chat when the ACP runtime
-is still usable; normal recovery actions remain available if it is not. An
-exhaustion message reports attempts that actually started; a refused recovery
-does not claim retries ran. Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
+shows waiting, reconnecting, or continuing. Once actual output or attributable
+foreground tool activity confirms that the agent resumed, the notice changes to
+neutral **Agent resumed** feedback. **Cancel** stays available while the
+continued turn runs, and the change does not extend or reset the attempt budget.
+Cancellation returns control to Chat when the ACP runtime is still usable; normal
+recovery actions remain available if it is not. An exhaustion message reports
+attempts that actually started; a refused recovery does not claim retries ran.
+Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
 prevent automatic continuation. So do subagents, background work, unresolved,
 denied or cancelled permissions, and overlapping work after a turn handoff. If the
 runtime remains usable, send a follow-up in the same conversation. If it is
