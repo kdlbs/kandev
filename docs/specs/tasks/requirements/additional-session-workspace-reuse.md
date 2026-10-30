@@ -66,6 +66,18 @@ reconstructs or resumes its runtime.
   checkouts shall retain exact selection and fail safely when it cannot be
   proven, without modifying files or repository inventory.
 
+For the existing continuity criteria 002.1 and 002.2, a detached historical
+LOCAL repository preference is not a current task attachment. Resume shall
+keep the session's ready or stopped task-owned workspace rather than recreate
+that source. The same rule applies to an `inherit_parent` child only when its
+exact direct parent's same-workspace environment is validated, the parent is
+not archived and has no repository attachments, and the child's sole matching
+LOCAL inventory row is deleted with no worktree, path, clone or common-directory
+materialization. Cold WorkspaceInfo projection shall use that same environment.
+This does not make a deleted physical checkout attachable: normal inventory,
+executor and recovery checks remain in force for every other case. Historical
+session preferences and attachments shall not be rewritten by this adaptation.
+
 ### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003: Executor Transition Workspace Validation
 
 **Intent:** Prevent a session launched with a different executor type from

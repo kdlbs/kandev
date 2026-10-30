@@ -2243,11 +2243,11 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	req.McpProviders = deriveMCPProviders(allRepos)
-	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
+	repositoryID, allRepos, err := e.applyResumeRepositoryContext(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
 		return "", nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	applyResumeRepositoryFlags(req, allRepos)
 	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.admitResumeWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos, options); err != nil {
@@ -2669,6 +2669,12 @@ func (e *Executor) applyResumeRepoConfig(
 				zap.String("repository_id", repositoryID),
 				zap.Error(err))
 			return "", err
+		}
+		if detachedLocalResumeUsesTaskWorkspace(task, session, req, existingEnv, allRepos, repository) {
+			req.RepositoryID = ""
+			req.Branch = ""
+			req.WorkspacePath = existingEnv.WorkspacePath
+			return "", nil
 		}
 		// A persisted session repository may legitimately be absent from the
 		// current task attachment set. Resolve that one exceptional repository,
