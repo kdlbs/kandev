@@ -822,12 +822,16 @@ export const i18nGuardFiles = [
   //     interpolated value into the visible sentence, the placeholder and the
   //     input's aria-label, so shown and compared cannot drift.
   //   - Backend-owned copy, on the same contract as #2193's `PermissionSetting`:
-  //     `RuntimeFlagState.label` / `.description` / `.risk_description` are
-  //     authored in `runtimeflags/registry.go`; `HealthIssue.title` /
-  //     `.message` / `.fix_label`, `HealthCheckSummary.name`, `SystemJob.message`,
-  //     `RestartCapability.reason`, and `UpdatesResponse.apply_unsupported_reason`
-  //     / `.manual_commands` are all rendered by the API. Localizing them needs
-  //     a key/value split in Go, not a frontend change.
+  //     `HealthIssue.title` / `.message` / `.fix_label`,
+  //     `HealthCheckSummary.name`, `SystemJob.message`, `RestartCapability.reason`,
+  //     and `UpdatesResponse.apply_unsupported_reason` / `.manual_commands` are
+  //     rendered by the API and need a key/value split in Go, not a frontend
+  //     change. `RuntimeFlagState.label` / `.description` / `.risk_description`
+  //     are still authored in `runtimeflags/registry.go`, but the feature toggle
+  //     card now resolves them through
+  //     `system:featureToggleFlag.<key>.<field>` and passes the backend text as
+  //     `defaultValue`, so a locale with an entry reads translated and any other
+  //     flag falls back to English.
   //   - Wire values, each rendered beside its own translated label: the runtime
   //     flag `key` and `env_var` (the persisted registry identity — never
   //     translate either), the user `role` / `status` (the `value` on each
