@@ -56,8 +56,18 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 	}
 
 	launchQueue, launchQueueObserved := summaryReconcileLaunchQueue(task, current, launchQueueValues)
-	turnError := taskTurnErrorSummary(task)
-	turnErrorObserved := task.Metadata != nil
+	// Read turn-error metadata after the summary revision used for repair, not
+	// from the caller's older task-list snapshot. A dismissal can land between
+	// that snapshot and the summary map; reading the row now prevents writing
+	// the pre-dismissal error back at the next revision.
+	turnErrorTask := task
+	if s.tasks != nil {
+		if loaded, loadErr := s.tasks.GetTask(ctx, task.ID); loadErr == nil && loaded != nil {
+			turnErrorTask = loaded
+		}
+	}
+	turnError := taskTurnErrorSummary(turnErrorTask)
+	turnErrorObserved := turnErrorTask.Metadata != nil
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err

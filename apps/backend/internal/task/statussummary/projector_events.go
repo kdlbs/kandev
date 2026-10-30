@@ -425,6 +425,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreTaskTurnError(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}

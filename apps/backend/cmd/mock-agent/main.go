@@ -731,6 +731,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(promptErrorCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))

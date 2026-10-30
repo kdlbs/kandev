@@ -73,3 +73,19 @@ func TestPromptErrorContinuityFailsThenReportsTheAttempt(t *testing.T) {
 		t.Fatal("scenario command was not recognized")
 	}
 }
+
+func TestCloseSessionClearsPromptErrorCounter(t *testing.T) {
+	const sid acp.SessionId = "prompt-error-close-session"
+	if _, _, handled := (&mockAgent{}).handlePromptErrorContinuity(context.Background(), sid, "/prompt-error:2"); !handled {
+		t.Fatal("scenario command was not recognized")
+	}
+	if _, err := os.Stat(promptErrorCounterPath(sid)); err != nil {
+		t.Fatalf("counter file missing before close: %v", err)
+	}
+	if _, err := (&mockAgent{}).CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: sid}); err != nil {
+		t.Fatalf("CloseSession: %v", err)
+	}
+	if _, err := os.Stat(promptErrorCounterPath(sid)); !os.IsNotExist(err) {
+		t.Fatalf("counter file survived CloseSession: %v", err)
+	}
+}

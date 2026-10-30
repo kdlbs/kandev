@@ -154,3 +154,53 @@ func TestTaskTurnErrorSummaryIsNotBlockingRecovery(t *testing.T) {
 		t.Fatal("turn attention must participate in semantic equality")
 	}
 }
+
+type rejectingOnceTurnErrorStore struct {
+	*projectorTestStore
+	rejected bool
+}
+
+func (s *rejectingOnceTurnErrorStore) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *StoredTaskStatusSummary,
+) (bool, error) {
+	if !s.rejected {
+		s.rejected = true
+		return false, nil
+	}
+	return s.projectorTestStore.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
+func TestTaskTurnErrorAttentionSurvivesRejectedWriteRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	baseStore := newProjectorTestStore()
+	store := &rejectingOnceTurnErrorStore{projectorTestStore: baseStore}
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	t.Cleanup(eventBus.Close)
+	source := &mutableTurnErrorSource{}
+	source.set(turnErrorSummary("error-rejected", "session-a",
+		time.Date(2026, 10, 29, 20, 32, 55, 0, time.UTC)))
+	projector := NewProjector(ProjectorConfig{
+		Store:    store,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadTaskTurnError: source.load,
+		RetryBackoff:      func(context.Context, int) error { return nil },
+		Now:               func() time.Time { return time.Date(2026, 10, 29, 20, 33, 0, 0, time.UTC) },
+	})
+	if err := projector.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(projector.Close)
+
+	publishProjectorEvent(t, eventBus, events.TaskUpdated, events.TaskUpdated, map[string]interface{}{
+		"task_id": "turn-error-rejected", "workspace_id": "workspace-1",
+	})
+	summary := baseStore.summary("turn-error-rejected")
+	if summary == nil || summary.TurnError == nil || summary.TurnError.Stamp != "error-rejected" {
+		t.Fatalf("summary turn error = %+v, want attention after a rejected write retry", summary)
+	}
+}
