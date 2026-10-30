@@ -168,8 +168,10 @@ func TestFormatKandevContext_UserQuestionIsHardInputBarrier(t *testing.T) {
 
 	assert.Contains(t, context, "hard user-input barrier")
 	assert.Contains(t, context, "do no more work, make no tool calls, or send a final response until completed answers or structured rejection")
+	assert.Contains(t, context, "With async=true")
+	assert.Contains(t, context, "list_question_answers_kandev")
 	assert.Contains(t, context, "On validation error before question creation, correct and retry")
-	assert.Contains(t, context, "If an accepted call returns incomplete")
+	assert.Contains(t, context, "If an accepted blocking call returns incomplete")
 	assert.Contains(t, context, "end the turn without inferring an answer or continuing work")
 }
 

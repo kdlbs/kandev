@@ -620,6 +620,8 @@ func (b bootStateBuilder) officeDashboard(ctx context.Context, activeID string) 
 	return officedashboard.NewDashboardResponse(data, summaries)
 }
 
+const bootInboxDefaultLimit = 50
+
 // addNeedsYouInboxState adds the Needs-you Inbox boot-hydration producer: the
 // second of the count's two allowed producers (needs-you-inbox
 // design-01#Data-and-contracts), run at the same default limit and
@@ -645,6 +647,17 @@ func (b bootStateBuilder) addNeedsYouInboxState(
 	if err != nil {
 		b.logBootError("get needs-you inbox boot summary", err)
 		return
+	}
+	if b.p.services != nil && b.p.services.AsyncQuestions != nil {
+		asyncCount, asyncErr := b.p.services.AsyncQuestions.CountInboxForUser(ctx, workspaceID, clarification.InboxUserID(ctx))
+		if asyncErr != nil {
+			b.logBootError("get async question inbox boot count", asyncErr)
+			return
+		}
+		count += asyncCount
+		if asyncCount > bootInboxDefaultLimit {
+			hasMore = true
+		}
 	}
 	state["needsYouInboxBoot"] = map[string]any{
 		bootStateKeyWorkspaceID: workspaceID,

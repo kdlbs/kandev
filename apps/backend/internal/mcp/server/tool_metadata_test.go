@@ -129,10 +129,22 @@ func TestAskUserQuestionPublishesAndReturnsStructuredOutput(t *testing.T) {
 	require.NotEmpty(t, tool.Tool.RawOutputSchema)
 	var schema map[string]interface{}
 	require.NoError(t, json.Unmarshal(tool.Tool.RawOutputSchema, &schema))
-	assert.Equal(t, "object", schema["type"])
-	assert.Contains(t, schema["properties"], "rejected")
-	assert.Contains(t, schema["properties"], "reject_reason")
-	assert.NotNil(t, schema["additionalProperties"])
+	branches, ok := schema["oneOf"].([]interface{})
+	require.True(t, ok, "output schema must be a discriminated union")
+	var blocking map[string]interface{}
+	for _, branch := range branches {
+		candidate, ok := branch.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, isObject := candidate["additionalProperties"].(map[string]interface{}); isObject {
+			blocking = candidate
+		}
+	}
+	require.NotNil(t, blocking)
+	assert.Contains(t, blocking["properties"], "rejected")
+	assert.Contains(t, blocking["properties"], "reject_reason")
+	assert.NotNil(t, blocking["additionalProperties"])
 
 	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
 		"questions": []map[string]interface{}{{

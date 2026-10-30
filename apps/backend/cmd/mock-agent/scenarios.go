@@ -37,6 +37,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"multi-file-modify":                scenarioMultiFileModify,
 	"untracked-file-setup":             scenarioUntrackedFileSetup,
 	"untracked-file-modify":            scenarioUntrackedFileModify,
+	"async-question":                   scenarioAsyncQuestion,
+	"async-question-wait":              scenarioAsyncQuestionWait,
 	"clarification":                    scenarioClarification,
 	"clarification-no-other":           scenarioClarificationNoOther,
 	"clarification-markdown":           scenarioClarificationMarkdown,

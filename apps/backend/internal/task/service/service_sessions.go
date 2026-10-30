@@ -102,6 +102,12 @@ func (s *Service) DeleteSessionAndPublishRemoval(ctx context.Context, sessionID 
 	if err := s.sessions.DeleteTaskSession(ctx, session); err != nil {
 		return err
 	}
+	if s.asyncQuestions != nil {
+		if _, err := s.asyncQuestions.MarkSessionStale(context.WithoutCancel(ctx), sessionID, "session_deleted"); err != nil {
+			s.logger.Warn("failed to stale async questions on session delete",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
 	if s.eventBus == nil {
 		return nil
 	}

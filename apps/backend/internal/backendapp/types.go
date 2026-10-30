@@ -43,6 +43,7 @@ import (
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/deliveryretention"
+	taskquestions "github.com/kandev/kandev/internal/task/questions"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -92,6 +93,7 @@ type Services struct {
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
 	Task                     *taskservice.Service
+	AsyncQuestions           *taskquestions.Service
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
 	Org           *org.Service

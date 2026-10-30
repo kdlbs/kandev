@@ -7065,6 +7065,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if err != nil {
 		return nil, err
 	}
+	// A newer accepted prompt supersedes an older explicit question gate. The
+	// questions themselves stay open; only the captured wait is cancelled. This
+	// runs after all admission/rejection boundaries so a rejected prompt does
+	// not erase a wait that still owns the session.
+	if s.asyncQuestionGate != nil {
+		if err := s.asyncQuestionGate.CancelActiveWait(ctx, sessionID, "newer_prompt"); err != nil {
+			s.logger.Warn("failed to cancel superseded async question wait",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
 	if options.internalContinuation {
 		effectivePrompt = prompt
 	}

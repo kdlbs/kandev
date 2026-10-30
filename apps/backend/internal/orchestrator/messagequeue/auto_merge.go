@@ -46,7 +46,8 @@ func latestQueuedAt(first, second time.Time) time.Time {
 
 func autoMergeAllowed(target, source *QueuedMessage) bool {
 	if target == nil || source == nil || isManagedInputQueueEntry(target) || isManagedInputQueueEntry(source) ||
-		target.IsDurableDelivery() || source.IsDurableDelivery() {
+		target.IsDurableDelivery() || source.IsDurableDelivery() ||
+		target.IsAsyncQuestionNotification() || source.IsAsyncQuestionNotification() {
 		return false
 	}
 	if target.TaskID != source.TaskID || target.Model != source.Model || target.PlanMode != source.PlanMode {

@@ -11,12 +11,14 @@ export type QuestionImageState =
 
 type Snapshot = { key: string; states: Record<string, QuestionImageState> };
 
+// eslint-disable-next-line max-params -- each parameter is an independent cache/refresh identity component
 export function useQuestionImages(
   pendingId: string,
   questionId: string,
   images: readonly QuestionImage[],
   active: boolean,
   owner: string,
+  apiPath = "clarification",
 ) {
   const [attempt, setAttempt] = useState(0);
   const [snapshot, setSnapshot] = useState<Snapshot>({ key: "", states: {} });
@@ -43,7 +45,7 @@ export function useQuestionImages(
           const blob = await scheduleQuestionImage(
             JSON.stringify([pendingId, questionId, owner]),
             controller.signal,
-            () => fetchQuestionImage(pendingId, questionId, image.id, controller.signal),
+            () => fetchQuestionImage(pendingId, questionId, image.id, controller.signal, apiPath),
           );
           if (controller.signal.aborted) return;
           const url = URL.createObjectURL(blob);
@@ -61,7 +63,7 @@ export function useQuestionImages(
       urls.forEach((url) => URL.revokeObjectURL(url));
       setSnapshot({ key: "", states: {} });
     };
-  }, [active, pendingId, questionId, imageKey, key, owner]);
+  }, [active, apiPath, pendingId, questionId, imageKey, key, owner]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   return { states: snapshot.key === key ? snapshot.states : {}, retry };
 }

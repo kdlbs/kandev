@@ -17,6 +17,10 @@ type askUserQuestionRequest struct {
 	Questions         []clarification.Question `json:"questions"`
 	Context           string                   `json:"context"`
 	AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
+	// Async requests a durable request receipt instead of a blocking waiter.
+	Async bool `json:"async,omitempty"`
+	// RequestID is an optional async-only stable retry identity.
+	RequestID string `json:"request_id,omitempty"`
 	// RetryKey is the connection-scoped transport identity the MCP server
 	// attaches so an exact retry maps to the same durable bundle.
 	RetryKey string `json:"retry_key"`
@@ -42,6 +46,11 @@ func decodeAskUserQuestion(msg *ws.Message) (askUserQuestionRequest, *ws.Message
 	}
 	if errMsg := validateQuestions(req.Questions); errMsg != "" {
 		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
+		return req, response, err
+	}
+	if !req.Async && req.RequestID != "" {
+		response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"request_id is valid only with async=true", nil)
 		return req, response, err
 	}
 
@@ -159,6 +168,9 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	req, response, err := decodeAskUserQuestion(msg)
 	if response != nil || err != nil {
 		return response, err
+	}
+	if req.Async {
+		return h.handleAsyncOperatorQuestion(ctx, msg, req)
 	}
 	if protocol.HasQuestionImages(req.Questions) {
 		session, lookupErr := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
