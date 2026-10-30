@@ -202,10 +202,11 @@ mirroring Obsidian's community-plugin registry: each plugin lives in its own
 public GitHub repository and publishes its package as a GitHub **Release**
 asset; the official catalog is a curated pointer list that names *which repos*
 are included. The descriptive metadata (name, description, version, tarball
-URL, stars) is read from your latest release, so a listing cannot drift from
-what actually ships. Catalog attribution instead follows the owner of the
-curated repository, so a manifest cannot rename the publisher of a listed
-entry.
+URL, stars) is read from the repository at your latest release. Package
+verification checks the archive's identity and digest, not display-name parity
+with the repository manifest. Catalog attribution follows the owner of the
+curated repository, so a manifest cannot override the listing's catalog
+attribution.
 
 ### 1. Publish the plugin package as a release
 
