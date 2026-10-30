@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -459,7 +460,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 			return fail(cleanupReasonAPIUnreachable, err)
 		}
 	}
-	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory.workspacePath())
+	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory)
 	control.Close()
 	if err != nil {
 		return fail("instance_create", err)
@@ -480,8 +481,9 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	return client, token, nil
 }
 
-func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest, workspacePath string) (uint32, error) {
-	instanceReq := agentctlInstanceRequest(req, workspacePath)
+func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest, inventory pluginExecutorInventory) (uint32, error) {
+	instanceReq := agentctlInstanceRequest(req, inventory.workspacePath())
+	instanceReq.DurableJournalPath = pluginExecutorJournalPath(req, inventory)
 	created, err := control.CreateInstance(ctx, &instanceReq)
 	if err != nil {
 		return 0, err
@@ -490,6 +492,17 @@ func createPluginAgentctlInstance(ctx context.Context, control *agentctl.Control
 		return 0, errors.New("agentctl created an instance without a usable port")
 	}
 	return uint32(created.Port), nil
+}
+
+// pluginExecutorJournalPath keeps delivery state below the provider-declared
+// workspace, which survives a backend restart and is removed with the
+// environment. A provider without a workspace descriptor has no known writable
+// worker path, so its agentctl keeps legacy delivery.
+func pluginExecutorJournalPath(req *ExecutorCreateRequest, inventory pluginExecutorInventory) string {
+	if req == nil || req.DurableJournalOwnerID == "" || inventory.WorkspaceDescriptor == nil {
+		return ""
+	}
+	return path.Join(inventory.WorkspaceDescriptor.Path, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt")
 }
 
 func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor, client *agentctl.Client, token string) (*ExecutorInstance, error) {
