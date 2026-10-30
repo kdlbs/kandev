@@ -70,12 +70,24 @@ describe("service worker push handling", () => {
     );
   });
 
-  it("stays silent while a Kandev window is focused and visible", async () => {
-    const { handlers, scope } = await loadWorker([makeClient(`${ORIGIN}/`, true)]);
-    const { event, settled } = waitUntilEvent({ data: { text: () => '{"title":"x"}' } });
+  it("stays silent when a focused visible window shows the notified task", async () => {
+    const { handlers, scope } = await loadWorker([makeClient(`${ORIGIN}/t/1`, true)]);
+    const { event, settled } = waitUntilEvent({
+      data: { text: () => JSON.stringify({ title: "x", url: "/t/1", taskId: "1" }) },
+    });
     handlers.push(event);
     await settled();
     expect(scope.registration.showNotification).not.toHaveBeenCalled();
+  });
+
+  it("shows a notification when the focused visible window shows another task", async () => {
+    const { handlers, scope } = await loadWorker([makeClient(`${ORIGIN}/t/2`, true)]);
+    const { event, settled } = waitUntilEvent({
+      data: { text: () => JSON.stringify({ title: "x", url: "/t/1", taskId: "1" }) },
+    });
+    handlers.push(event);
+    await settled();
+    expect(scope.registration.showNotification).toHaveBeenCalledTimes(1);
   });
 
   it("still shows a generic notification for a malformed payload", async () => {

@@ -205,13 +205,6 @@ surface.
   When a UI projection adds normalized collection data for grouping, preserve scalar filter fields such as
   `repositoryPath` and test both grouping and filtered views.
 
-## PWA and Web Push
-
-- The service worker source is `sw/service-worker.ts` (logic in `sw/sw-core.ts`, unit-tested). `vite-plugins/service-worker.ts` builds it to an unhashed `/sw.js` after the main bundle and injects the precache list; it must stay a classic, dependency-free script served from the origin root.
-- The worker must never intercept `/api/`, `/ws`, `/debug/`, or `/mcp`, and must never store a navigation, redirect, opaque, or HTML response as an app file. The app is commonly served behind a cookie-gated access proxy whose login redirect would otherwise be cached as the shell.
-- Registration lives in `lib/pwa/register-sw.ts` (production only, skipped under `navigator.webdriver`). Subscribing to push happens only from a user gesture in Settings (`hooks/domains/settings/use-web-push.ts`), never on load.
-- The backend serves `sw.js`, `manifest.webmanifest`, and `offline.html` with `Cache-Control: no-cache`; keep new fixed-URL PWA files in `revalidatedAssets` in `apps/backend/internal/webapp/handler.go`.
-
 ## Internationalization (i18n)
 
 **Externalization is complete.** A hardcoded user-facing literal is a

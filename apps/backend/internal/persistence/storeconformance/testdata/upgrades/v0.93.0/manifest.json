@@ -440,6 +440,7 @@
     "gitlab",
     "jira",
     "linear",
+    "notification",
     "sentry",
     "azure-devops",
     "workflow-sync",
