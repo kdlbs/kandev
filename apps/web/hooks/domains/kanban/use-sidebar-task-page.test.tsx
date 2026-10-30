@@ -10,6 +10,9 @@ import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 
+const QUERY_REFRESH_FAILED: string = "sidebar:queryRefreshFailed";
+const PAGE_LOAD_FAILED: string = "sidebar:pageLoadFailed";
+
 const mocks = vi.hoisted(() => ({
   state: {
     workspaces: { activeId: "ws-1" },
@@ -236,7 +239,7 @@ describe("useSidebarTaskPage", () => {
     );
 
     act(() => result.current.goToPage(2));
-    await waitFor(() => expect(result.current.error).toBe("sidebar:queryRefreshFailed"));
+    await waitFor(() => expect(result.current.error).toBe(QUERY_REFRESH_FAILED));
     expect(result.current.response?.page).toBe(1);
     expect(querySidebarTasks).toHaveBeenLastCalledWith(
       "ws-1",
@@ -254,7 +257,7 @@ describe("useSidebarTaskPage", () => {
 
     await waitFor(() => expect(result.current.response?.page).toBe(1));
     act(() => result.current.goToPage(2));
-    await waitFor(() => expect(result.current.error).toBe("sidebar:queryRefreshFailed"));
+    await waitFor(() => expect(result.current.error).toBe(QUERY_REFRESH_FAILED));
     act(() => result.current.retry());
     await waitFor(() => expect(result.current.error).toBeNull());
     expect(result.current.response?.page).toBe(1);
@@ -459,7 +462,7 @@ it("localizes rejected filters without exposing raw server text", async () => {
   mocks.state.workspaces.activeId = "ws-invalid";
   vi.mocked(querySidebarTasks).mockRejectedValueOnce(new Error("private server detail"));
   const { result } = renderHook(() => useSidebarTaskPage("ws-invalid"));
-  await waitFor(() => expect(result.current.error).toBe("sidebar:pageLoadFailed"));
+  await waitFor(() => expect(result.current.error).toBe(PAGE_LOAD_FAILED));
 });
 
 // Contract coverage for shared request ownership and context fencing.
@@ -565,12 +568,23 @@ it("offers Retry for a transient failure after correcting an invalid filter", as
       }),
     )
     .mockResolvedValueOnce(response(1, false, false))
-    .mockRejectedValueOnce(new ApiError("private", 503, {}));
+    .mockRejectedValue(new ApiError("private", 503, {}));
   const hook = renderHook(() => useSidebarTaskPage("ws-1"));
   await waitFor(() => expect(hook.result.current.canRetry).toBe(false));
   act(() => hook.result.current.refresh());
   await waitFor(() => expect(hook.result.current.response).not.toBeNull());
+
+  vi.useFakeTimers();
   act(() => hook.result.current.refresh());
-  await waitFor(() => expect(hook.result.current.error).toBe("sidebar:queryRefreshFailed"));
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  expect(hook.result.current.error).toBeNull();
+  expect(hook.result.current.requestedPage).toBe(1);
+  expect(hook.result.current.response).not.toBeNull();
+
+  await act(async () => vi.advanceTimersByTimeAsync(30_000));
+  expect(hook.result.current.error).toBe(QUERY_REFRESH_FAILED);
   expect(hook.result.current.canRetry).toBe(true);
+  expect(hook.result.current.response).not.toBeNull();
+  expect(querySidebarTasks).toHaveBeenCalledTimes(7);
+  vi.useRealTimers();
 });

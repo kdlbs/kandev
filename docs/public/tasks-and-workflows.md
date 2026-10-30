@@ -960,11 +960,14 @@ while its page refreshes. Expanding shows already available rows immediately;
 any additional rows appear when the refresh finishes. This also applies in the
 phone **Tasks** drawer and navigation menu.
 
-If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
-failure; rows already shown remain visible during a failed refresh. If a filter
-is invalid, use **Filters** to correct the indicated selection instead. Repository
-and workflow selections support up to 1,000 values per filter; the limits apply
-to each selected value, not to the combined selection.
+If loading fails, Kandev retries the sidebar read automatically for up to about
+thirty seconds. The current rows stay in place, and no warning appears while
+those retries continue. If recovery stops, the sidebar shows one message, and
+**Retry** starts another bounded attempt. Rows already shown remain visible. A
+temporary problem that clears during the retry window needs no action. If a
+filter is invalid, use **Filters** to correct the indicated selection instead.
+Repository and workflow selections support up to 1,000 values per filter; the
+limits apply to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
 - On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
@@ -1280,7 +1283,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
-- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
+- **A task or task list shows as temporarily unavailable:** Kandev retries the task, session, and sidebar reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. Warnings appear only after those automatic retries stop. Then select **Retry**, or use **Back to task overview**. Task details and rows that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

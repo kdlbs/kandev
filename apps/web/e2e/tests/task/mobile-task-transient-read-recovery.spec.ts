@@ -291,8 +291,9 @@ test.describe("Mobile task transient read recovery", () => {
     });
     await testPage.goto(`/t/${taskId}`);
 
-    const errorState = testPage.getByTestId("task-load-error-state");
-    await expect(errorState).toBeVisible();
+    const progressState = testPage.getByTestId("task-read-progress-state");
+    await expect(progressState).toBeVisible();
+    await expect(testPage.getByTestId("task-load-error-state")).toHaveCount(0);
     await expect(testPage.getByTestId("task-unavailable-overview-link")).toBeVisible();
     const retry = testPage.getByRole("button", { name: "Retry" });
     await expect(retry).toBeDisabled();
@@ -301,7 +302,7 @@ test.describe("Mobile task transient read recovery", () => {
     if (retryBox) expect(retryBox.height).toBeGreaterThanOrEqual(44);
 
     expect((await recoveredRead).ok()).toBe(true);
-    await expect(errorState).toHaveCount(0);
+    await expect(progressState).toHaveCount(0);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
     expect(failedReads).toBe(3);
     await testInfo.attach("phone-task-timed-read-recovery", {
