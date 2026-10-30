@@ -1910,6 +1910,11 @@ message ExecutorResourceDescriptor {
   // repositories is set only by a provider with workspace_preparation
   // provider: the repositories it prepared inside workspace_path.
   repeated ExecutorRepositoryState repositories = 10;
+  // worker_api_url is set only by a provider that declared the worker_api_url
+  // capability: the loopback http base URL on the worker through which the
+  // provider's forward reaches the host API. The host probes it instead of
+  // host_api_url. Empty means the worker reaches host_api_url as sent.
+  string worker_api_url = 11;
 }
 
 // ExecutorRepositoryIntent is one repository the host approved for a

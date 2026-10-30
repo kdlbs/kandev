@@ -273,6 +273,7 @@ type pluginExecutorLaunchState struct {
 	snapshot         *pluginsdk.ExecutorProfileSnapshot
 	apiURL           string
 	hostAPIURL       string
+	workerAPIURL     string
 	nonce            string
 	inventory        pluginExecutorInventory
 	intent           []*pluginsdk.ExecutorRepositoryIntent
@@ -390,9 +391,9 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_rejected", pluginExecutorProviderError(provisioned.GetError()))
 	}
-	if err := validatePluginExecutorResourceForProvider(launch.profile.Provider, resource); err != nil {
+	if stage, err := launch.checkProvisionedDescriptor(resource); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
-			"resource_descriptor", err)
+			stage, err)
 	}
 	if err := rejectSecretInProviderState(launch.profile.SecretValues, resource); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,

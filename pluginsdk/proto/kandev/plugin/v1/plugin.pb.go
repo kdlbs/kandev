@@ -15317,7 +15317,12 @@ type ExecutorResourceDescriptor struct {
 	WorkspaceIdentity string `protobuf:"bytes,9,opt,name=workspace_identity,json=workspaceIdentity,proto3" json:"workspace_identity,omitempty"`
 	// repositories is set only by a provider with workspace_preparation
 	// provider: the repositories it prepared inside workspace_path.
-	Repositories  []*ExecutorRepositoryState `protobuf:"bytes,10,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	Repositories []*ExecutorRepositoryState `protobuf:"bytes,10,rep,name=repositories,proto3" json:"repositories,omitempty"`
+	// worker_api_url is set only by a provider that declared the worker_api_url
+	// capability: the loopback http base URL on the worker through which the
+	// provider's forward reaches the host API. The host probes it instead of
+	// host_api_url. Empty means the worker reaches host_api_url as sent.
+	WorkerApiUrl  string `protobuf:"bytes,11,opt,name=worker_api_url,json=workerApiUrl,proto3" json:"worker_api_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15420,6 +15425,13 @@ func (x *ExecutorResourceDescriptor) GetRepositories() []*ExecutorRepositoryStat
 		return x.Repositories
 	}
 	return nil
+}
+
+func (x *ExecutorResourceDescriptor) GetWorkerApiUrl() string {
+	if x != nil {
+		return x.WorkerApiUrl
+	}
+	return ""
 }
 
 // ExecutorRepositoryIntent is one repository the host approved for a
@@ -26334,7 +26346,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\apreview\x18\x05 \x01(\bR\apreview\x12\x1a\n" +
 	"\breattach\x18\x06 \x01(\bR\breattach\x12\x1c\n" +
 	"\tretention\x18\a \x01(\tR\tretention\x128\n" +
-	"\x18maximum_lifetime_seconds\x18\b \x01(\x04R\x16maximumLifetimeSeconds\"\xdb\x03\n" +
+	"\x18maximum_lifetime_seconds\x18\b \x01(\x04R\x16maximumLifetimeSeconds\"\x81\x04\n" +
 	"\x1aExecutorResourceDescriptor\x12'\n" +
 	"\x0fresource_handle\x18\x01 \x01(\tR\x0eresourceHandle\x12\x1d\n" +
 	"\n" +
@@ -26348,7 +26360,8 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x0eworkspace_path\x18\b \x01(\tR\rworkspacePath\x12-\n" +
 	"\x12workspace_identity\x18\t \x01(\tR\x11workspaceIdentity\x12M\n" +
 	"\frepositories\x18\n" +
-	" \x03(\v2).kandev.plugin.v1.ExecutorRepositoryStateR\frepositories\"\xa0\x01\n" +
+	" \x03(\v2).kandev.plugin.v1.ExecutorRepositoryStateR\frepositories\x12$\n" +
+	"\x0eworker_api_url\x18\v \x01(\tR\fworkerApiUrl\"\xa0\x01\n" +
 	"\x18ExecutorRepositoryIntent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\alocator\x18\x02 \x01(\tR\alocator\x12\x16\n" +

@@ -477,6 +477,13 @@ twice within 10 seconds. If the host does not see its token arrive, the launch
 is rolled back and the environment is cleaned up with the cleanup reason
 `api_unreachable`.
 
+A provider on a remote worker can also require `worker_api_url` (it needs
+`api_url_forward`) and return `worker_api_url` in the provision resource: the
+`http://127.0.0.1:<port>` (or `localhost`, `[::1]`) base URL of its forward on
+the worker. The reachability probe then calls that URL instead of
+`host_api_url`. Any other scheme, a non-loopback host, a missing port, user
+info, a path, a query or a fragment rolls the launch back.
+
 A connection lease has a `transport`: `https` (the default) or `host_tunnel`.
 A provider may return `host_tunnel` only if its manifest requires the
 `tunnel_transport` capability, and the lease then carries no `base_url`. Kandev

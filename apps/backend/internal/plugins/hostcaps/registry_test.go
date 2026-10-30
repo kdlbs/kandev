@@ -12,7 +12,7 @@ func TestRegistryHoldsTheClosedNameSetAtVersionOne(t *testing.T) {
 		"workspace_descriptor", "repository_intent", "tunnel_transport", "api_url_forward",
 		"drain_receipt", "destroy_checkpoints", "durable_bootstrap", "admission_context",
 		"pending_placement", "provider_operations", "provider_maintenance", "launch_policy",
-		"preparation_hints", "typed_profile_values", "secret_references", "provision_refusal",
+		"preparation_hints", "typed_profile_values", "secret_references", "provision_refusal", "worker_api_url",
 	}
 	got := Registry()
 	if len(got) != len(want) {
@@ -53,6 +53,8 @@ func TestValidateRequirements(t *testing.T) {
 		{"provision refusal needs checkpoints", []Requirement{{"provision_refusal", 1}}, `capability "provision_refusal" requires "destroy_checkpoints"`},
 		{"launch policy needs descriptor", []Requirement{{"launch_policy", 1}}, `capability "launch_policy" requires "workspace_descriptor"`},
 		{"preparation hints need intent", []Requirement{{"preparation_hints", 1}}, `capability "preparation_hints" requires "repository_intent"`},
+		{"worker api url needs the forward", []Requirement{{"worker_api_url", 1}}, `capability "worker_api_url" requires "api_url_forward"`},
+		{"worker api url with the forward", []Requirement{{"worker_api_url", 1}, {"api_url_forward", 1}}, ""},
 		{"dependency satisfied", []Requirement{{"provider_maintenance", 1}, {"provider_operations", 1}}, ""},
 		{"typed values need nothing", []Requirement{{"typed_profile_values", 1}, {"secret_references", 1}}, ""},
 	}
