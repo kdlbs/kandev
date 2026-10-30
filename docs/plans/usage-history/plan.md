@@ -191,83 +191,177 @@ Use deterministic transcript fixtures. Run affected browser cases with retries d
 - [ ] [Task 05: Serve retained statistics with bounded SQL](task-05-retained-reporting.md)
 - [ ] [Task 06: Adopt the generic contract in Session Cost](task-06-session-cost-adapter.md)
 
+### Planned implementation sequence (historical)
+
 Dependency order: 01 -> 02 -> 03 -> 04 -> 05 -> 06.
-The integration handoffs follow this order because they share schema, projection rules, and SDK contracts.
+The integration handoffs followed this order because the tasks share schema, projection rules, and SDK contracts.
 Independent phases may overlap when their write sets are disjoint.
-Task 03's tested SDK phase allows Task 06 adapter and fixture tests while core lifecycle work continues.
-Task 05 may implement frontend presentation and component tests against additive DTO fields while Task 04 owns backend projection work.
-Its SQL mapping, benchmarks, and browser runs wait for the tested projection handoff.
-Real Host validation, browser evidence, and the final immutable SDK pin remain gated on core integration.
-Task 04 preparation identified selector and replay dependencies; its implementation waits for those handoffs.
+Task 03's tested SDK phase allowed Task 06 adapter and fixture tests while core lifecycle work continued.
+The plan allowed Task 05 to implement frontend presentation and component tests against additive DTO fields while Task 04 handled backend projection work.
+Task 05's SQL mapping, benchmarks, and browser runs were gated on the tested projection handoff.
+Real Host validation, browser evidence, and the final immutable SDK pin remain open under the remaining integration gates described below.
+Task 04 preparation identified selector and replay dependencies; its current implementation and validation status is summarized below.
 
 ## Verification results
 
-### Latest integration checkpoint
+### Current validation status (2026-10-30, NOT FINAL)
 
-Current-main integration passed the full analytics suite, focused lifecycle tests, persistence conformance, backend static checks, and the backend build.
-Frontend component tests, typechecking, lint, localization, and a production build also passed.
-Browser execution then exposed fixture/selector defects and a stamped-turn transaction defect.
-The reviewed corrections preserve the original accounting and authorization assertions.
-Their focused helper tests and normal/race backend regressions pass. Go formatting, scoped backend vet and lint, frontend formatting and lint, and full TypeScript checks pass; fresh browser validation remains pending.
+The validated core source revision is `6a4b002a22ba959dbd636f2fb42eefc31c7dafd2` on exact main `aebac5d5395e9983124b398198bace146d38506b`.
+The SDK tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`.
 
-A conflict-free rebase candidate preserves all 94 existing patches and every feature path.
-Its incoming pull-request fetch regression passes. Primary adoption and delivery remain pending.
-Both full five-year benchmarks, the reachable SDK pin, final packages, installed-plugin browsers, pushes, and current-head CI remain required.
-Earlier checkpoints below are historical evidence, not current completion claims.
+A6 replayed 97 feature commits onto main. Ninety-six were range-equal, and one persistence-catalog commit adapted automatically.
+The replay dropped zero commits and had zero conflicts. All 550 original feature paths remain.
+The catalog keeps `workspace_collaboration_grants` and every usage feature table.
 
-Implementation: In progress. The design-package results below predate code changes.
+Commit `f306b7081105c231f56e309e18378372b8c6472d` classifies background `UpsertSessionUsage`, `ListSessionUsage`, `ListUsageCollectionTargetsV1`, `ReportUsageObservationsV1`, and `ListStateKeys` calls as plugin-owned capability calls.
+Exact task usage remains caller-bound. Capability checks, workspace visibility, source ownership, and binding checks remain active.
+Normal source commit `7d5fd6ee76cb6791fc2fa77b8dd6c87582371cf7` replayed range-equal as validated source `6a4b002a22ba959dbd636f2fb42eefc31c7dafd2` on A6.
+The integration control reports all four C4 source files and the 15 A6 scoped files match their recorded hashes.
+The four C4 source findings remain closed: provider query projection, undated interval providers, bounded resumable migration and per-work pages, and snapshot revision invalidation.
+
+At A6 HEAD `f306b7081105c231f56e309e18378372b8c6472d`, the full SDK, standalone consumer, and focused Host authorization, state-key, task-deletion, archive-borrower, native-publisher, continuation, and caller checks passed.
+At current HEAD `6a4`, the integration control records an SDK race pass for three packages. The generated protobuf package has no tests.
+The first analytics attempt did not export the PostgreSQL DSN. Required PostgreSQL cases failed, and optional cases skipped, so that attempt is invalid.
+The corrected run used an exported, isolated PostgreSQL 18.6 DSN and passed all seven analytics packages.
+It recorded 463 passing tests and subtests, with zero failures and zero skips. Three packages had tests, and four had no tests.
+Receipt: [integrated source verification](evidence/usage-history-integrated-20261030/verification.json), including the analytics event log and SDK race log.
+
+| Task | Current status | Evidence or open gates |
+| --- | --- | --- |
+| 01 — Retained admission | Included in the integrated source. | Seven-package analytics validation passed on PostgreSQL 18.6. Full-scale and delivery gates remain open. |
+| 02 — Lifecycle and migration | Included in the integrated source. | Full-scale measurements and storage/resource review remain open. |
+| 03 — Collector contract | Included in the integrated source. | Final SDK pin and actual Host integration remain open. |
+| 04 — Daily projection | Included in the integrated source. | Full SQLite and PostgreSQL five-year runs remain open. |
+| 05 — Retained reporting | Included in the integrated source. | Current frontend build, browser evidence, screenshots, and scale review remain open. |
+| 06 — Session Cost adapter | In progress. | Final SDK pin, five rebuilt archives, actual Host cases, and installed browser checks remain open. |
+
+Recorded passes apply only to their stated source and scope. They do not close the benchmark, package, Host, browser, or delivery gates.
+
+### Full five-year measurement status (PENDING)
+
+Both full runs remain pending on the current source: SQLite and real PostgreSQL 18.6, each with 1,000,000 native rows, 100,000 external rows, and ten samples.
+
+| Required run | Status |
+| --- | --- |
+| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Pending. |
+| Current-source PostgreSQL 18.6, same fixture and sample count | Pending. |
+| C4 construction diagnostics, SQLite | Complete at 20,000/2,000 rows in 59.597 seconds and 100,000/10,000 rows in 664.684 seconds. |
+| 100,000/10,000 actual rows | 100,005 native, 10,013 external, 110,017 facts, and 220,032 contributions. The recorder dropped zero SQL statements. |
+
+The completed coverage trace made 100,012 calls and recorded 1,250,150,022 row visits in 245.712 seconds.
+Native pending repair made 552 calls and recorded 55,102,763 visits in 129.948 seconds.
+
+The diagnosis traced the quadratic coverage cost to overlap query access. Disjoint point-start access and a coarse-interval `coverage_end` partial index reduce the measured lookup work.
+Overlap responses contain at most 201 references. Complete result sets of at most 200 references are sorted in Go; larger sets return `Preparing` before consumption.
+Ordered scalar first-row probes now handle pending-accounting checks. SQLite uses its existing-index hint, and PostgreSQL uses its default planner.
+The fix adds no readiness fast path. Source, count, oracle, and benchmark deadline contracts remain unchanged.
+C4 diagnostics do not grant C-ready or full-performance approval.
+
+SQLite and PostgreSQL passed exact result parity for native events, coarse intervals, and touching boundaries.
+The proof includes two distinct native events at one point. SQLite normal and race scan proofs passed.
+Focused repair and oversized-resume cases passed normally on both engines. Focused race passed on SQLite, and scoped lint and vet passed.
+The PostgreSQL coarse case read 53 rows after the fix, versus 52 before. Buffer use fell from 26 to 20.
+Per-query results are in [the C4 overlap proof](evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/README.md).
+
+Temporary profiling touched nine test-only files. The patch is archived at `evidence/usage-history-luna-C4-construction-diagnosis-20261030T2040Z/diagnostic-instrumentation.patch`.
+The original seven committed harness files were restored byte-for-byte.
+Two untracked profiling tests were archived. The preservation record is `/tmp/usage-history-C4-diagnostic-source-preservation.json`, and its patch check passed.
+The tagged package compile with the restored harness and scan proof passed without running tests. Receipt: `/tmp/usage-history-C4-restored-harness-compile-final.log`.
+The parent corrected an initial cross-filesystem move error. Backups remain intact, and this orchestration error was not a product fault.
+
+### Earlier source-frame receipts (historical)
+
+At core HEAD `90767205f97f4b8268526255b935c3626c1a07fe`, seven analytics packages passed normally in 185.084 seconds with an actual PostgreSQL DSN.
+Fifteen tagged cases passed on both database engines in 268.785 seconds. Thirty compatibility bridge, user-store, and session-list cases also passed.
+The parent harness linted 205 files, passed 19 harness tests, and passed 36 spec tests. These results apply to `907`, not current HEAD `6a4`.
+
+C3 failed at page 2,453 after 1,681 seconds and produced zero samples. The C3 failure receipt remains unchanged.
+The C4 run on core `907` stopped after 48 minutes 4 seconds. Its recent phase published 200,005 native rows, 20,013 external rows, 220,017 facts, and 440,032 contributions.
+That phase recorded 64,362 calls over 2,201.321 seconds, with ten samples for each of 16 recent cases.
+A later phase inserted 300,160 native rows but published no result. It inserted zero older external rows, and the 1,000,000/100,000 phase did not complete.
+The interrupted C4 receipt remains unchanged. It is incomplete and is not a current-source full run.
+
+The C2 SQLite attempt also ended at its deadline with zero samples. Its scaled `seedRecent` control expected 2,010 external rows and recorded 2,013.
+The C4 dense plan fixture had 50,001 facts and 100,002 contributions. Of those facts, 401 came from real admission; the remaining rows were plan-only.
+The bounded query recorded 200 fact visits and 400 contribution visits on each engine.
+The C2 receipts remain in `evidence/usage-history-luna-C2-20261030T1032Z/` and `evidence/usage-history-luna-C2-20261030T1211Z/`.
+
+At this prepublication checkpoint, the new core and plugin source remain unpushed. Public core and plugin heads are `9aecf156c65e7522a43f2a1c8310737179c25d70` and `127bc4a6e98f9121c216135b71c5e17aa8832cf1`.
+The parent plans to publish reviewed core after integrated checks, so CI can run alongside the remaining manual gates.
+Acceptance remains unchanged. Merge readiness requires both full runs, the final SDK pin, and five rebuilt archives.
+It also requires five actual Host cases, older-host checks, and browser evidence. Current-head CI must pass with zero flaky artifacts.
+The final current-head review audit remains pending.
+
+### Earlier coordinator review (historical, superseded)
+
+A3 prepared candidate `b43760b` over main `8380430` by replaying 96 patches. Ninety-four patches were identical. Two conflict resolutions regenerated the protobuf descriptor and retained both Automation history and Retained usage rows in the authoring guide. At that checkpoint, the parent harness passed 19 tests, linted 204 harness files, passed 36 spec-linter tests, and passed full spec lint. The current source and remaining gates are listed above.
+
+I3's scoped reruns for the old CI frontend failures passed two navigation tests and 108 scroll tests. Scoped ESLint had no diagnostics, so no source edit was needed. Those checks did not replace the full frontend suite, build, or current-head CI.
+
+H3/K3/J3 prepared installed acceptance cases for authorization, pruning, ownership transfer, erasure, and plugin-state privacy. Those preparations and syntax checks were not installed Host passes. J4/L3 were adapting the live smoke helper at that checkpoint.
+
+### Earlier integration checkpoint (historical)
+
+The earlier current-main integration checkpoint recorded full analytics, focused lifecycle, persistence conformance, backend static checks, and backend build passes. Frontend component tests, typechecking, lint, localization, and a production build also passed. Browser runs then exposed fixture/selector defects and a stamped-turn transaction defect. The reviewed corrections preserved the original accounting and authorization assertions. Focused helper tests and normal/race backend regressions passed; fresh browser validation was still pending at that checkpoint.
+
+A prior rebase candidate preserved 94 patches and passed its incoming pull-request fetch regression. A3 later prepared the 96-patch candidate described above. These historical notes do not describe the current source frame. Earlier checkpoints below are historical evidence, not current completion claims.
+
+Overall implementation remains in progress. The design-package results below predate code changes. The dated notes below preserve earlier states and do not override the current snapshot above.
+
+### Historical implementation and review notes
+
 Each work order's Results owns its actual implementation and test evidence.
 Tasks 01 and 02 reopened for scoped lint cleanup found during Task 03 integration.
 Their original workers completed helper extractions, then Task 03's combined lint, race, real PostgreSQL, and static checks passed.
-Tasks 01 through 03 have initial implementation/test handoffs. Coordinator review is checking components after their own tests pass.
+Tasks 01 through 03 had initial implementation/test handoffs. Coordinator review then checked components after their own tests passed.
 
 Coordinator review on 2026-10-29 reopened Task 03 after its tested handoff.
 Shared transcripts across subjects need one accounting contribution, and a fresh binding must not assign earlier organization usage to a new owner.
 Collection-target discovery must also bound metadata refresh per request.
-The original contract worker owns these corrections. The plugin worker owns the related cache, import-state, startup-scan, and source-day rollover findings.
-Their earlier passing receipts remain recorded; they do not close the new findings.
-The full scale retry and final browser, review, push, and CI gates remain open.
+At that time, the contract worker owned these corrections. The plugin worker owned the related cache, import-state, startup-scan, and source-day rollover findings.
+At that checkpoint, earlier passing receipts had not closed the new findings. C4 later closed the source findings listed in the current snapshot above.
+The full-scale retry and final browser, review, push, and CI gates were still open at that checkpoint.
 
-Review also reopened Task 02: preservation must advance to the last copied row, rather than the end of all remaining rows.
-The lifecycle fix now passes SQLite and PostgreSQL race tests with 451 native events, measurements, and dated buckets each.
-The optional state-key API and bounded plugin cleanup also pass their focused tests. Final Host integration remains open.
+Review also reopened Task 02: preservation had to advance to the last copied row, rather than the end of all remaining rows.
+The lifecycle fix passed SQLite and PostgreSQL race tests with 451 native events, measurements, and dated buckets each.
+The optional state-key API and bounded plugin cleanup also passed their focused tests. Final Host integration remained open at that checkpoint.
 Task 01 reopened for native turn-count and reasoning-subset corrections, including repair of already published values.
-Task 03 also needs distinct model groups to survive selection, and current source checks must avoid archive-wide lookup.
-Task 05 is correcting client aggregation that can recreate an unavailable server rate. Its final checks remain open.
+Task 03 also needed distinct model groups to survive selection, and current source checks had to avoid archive-wide lookup.
+Task 05 was correcting client aggregation that could recreate an unavailable server rate. Its final checks remained open at that checkpoint.
 
-Native turn/reasoning integration now passes 13 focused cases normally and under race on SQLite and PostgreSQL 18.6.
-The client rate and numeric-sort corrections also pass their focused tests, lint, and typechecking.
+Native turn/reasoning integration passed 13 focused cases normally and under race on SQLite and PostgreSQL 18.6.
+The client rate and numeric-sort corrections also passed their focused tests, lint, and typechecking.
 Task 04 reopened for model-segment selection and projection repair. New sessions must not reindex unrelated history.
-The projection worker owns this work; the lifecycle worker owns bounded current-target lookup and source-scope safety.
-The plugin passes its full Go/race suite against the typed eligibility/preparation checkpoint.
-It still needs the final lookup/segment contract, actual Host proof, immutable source pin, packaging, and browser checks.
+The projection worker owned this work; the lifecycle worker owned bounded current-target lookup and source-scope safety.
+The plugin passed its full Go/race suite against the typed eligibility/preparation checkpoint.
+It still needed the final lookup/segment contract, actual Host proof, immutable source pin, packaging, and browser checks at that checkpoint.
 
-At the 2026-10-29 15:12 UTC checkpoint, shared usage labels distinguish unallocated work from deleted subjects.
-The focused component cases, lint, typechecking, and locale checks pass. Five public and contract guides also pass validation.
-The core's focused frozen-transcript and targeted context-repair cases pass; final source-selection integration remains open.
-Current-target privacy and erasure cases pass on PostgreSQL, while an actual SQL-visit regression still requires correction.
-The plugin's point/explicit-segment checkpoint passes its full Go and race suites.
-Ordinary Tokscale group declarations and ambiguous membership handling remain in progress after verification of the pinned producer source.
-The complete benchmarks, browser cases, final rebase, source pin, package, pushes, and current-head CI remain required.
+At the 2026-10-29 15:12 UTC checkpoint, shared usage labels distinguished unallocated work from deleted subjects.
+The focused component cases, lint, typechecking, and locale checks passed. Five public and contract guides also passed validation.
+The core's focused frozen-transcript and targeted context-repair cases passed; final source-selection integration remained open.
+Current-target privacy and erasure cases passed on PostgreSQL, while an actual SQL-visit regression still required correction.
+The plugin's point/explicit-segment checkpoint passed its full Go and race suites.
+Ordinary Tokscale group declarations and ambiguous membership handling were still in progress after verification of the pinned producer source.
+The complete benchmarks, browser cases, final rebase, source pin, package, pushes, and current-head CI were still required then.
 
-The 16:02 UTC checkpoint closes the focused lookup test gate: race cases pass on SQLite and PostgreSQL 18.6.
-Actual SQL visits remain constant after adding 902 unrelated sessions. Full frontend and normal documentation validation also pass.
-The plugin's producer checkpoint passes 152 Go functions and 105 subtests in normal and race runs, plus 58 UI cases.
-Core coverage-window selection now preserves disjoint days across collectors in both databases, including the oversized path.
-Review still requires fixes for unknown lifetime cost, selected-cost estimate metadata, and canonical metric applicability across the Host boundary.
-The plugin consumer must distinguish an absent metric from an unknown value through the typed contract.
-Core production remains unfrozen, and every final integration and delivery gate remains open.
+The 16:02 UTC checkpoint closed the focused lookup test gate: race cases passed on SQLite and PostgreSQL 18.6.
+Actual SQL visits remained constant after adding 902 unrelated sessions. Full frontend and normal documentation validation also passed.
+The plugin's producer checkpoint passed 152 Go functions and 105 subtests in normal and race runs, plus 58 UI cases.
+Core coverage-window selection then preserved disjoint days across collectors in both databases, including the oversized path.
+Review then required fixes for unknown lifetime cost, selected-cost estimate metadata, and canonical metric applicability across the Host boundary.
+The plugin consumer had to distinguish an absent metric from an unknown value through the typed contract.
+Core production was unfrozen, and final integration and delivery gates remained open at that checkpoint.
 
-Coordinator integration checkpoint on 2026-10-29:
+The coordinator integration checkpoint on 2026-10-29 recorded:
 
-Component implementations have tested, reviewed handoffs. Integration remains in progress.
+Component implementations had tested, reviewed handoffs. Integration remained in progress.
 The full analytics package passed 390 test/subtest results before the final lifecycle and transfer corrections.
 Those corrections passed focused normal and race cases on SQLite and PostgreSQL 18.6.
 They protect uncopied native records, stale completed checkpoints, and captured ownership after actual task transfers.
 The migration fixture retains its original assertions and now also runs on PostgreSQL.
 The standalone SDK, frontend components, plugin, and persistence conformance have passing component receipts.
 Small benchmark fixtures pass on both engines through real admission and production publication.
-The large five-year runs, fresh browsers, final SDK pin/packages, primary rebase, pushes, and current-head CI remain required.
+The large five-year runs, fresh browsers, final SDK pin/packages, primary rebase, pushes, and current-head CI were still required at that checkpoint.
 Earlier failed receipts remain historical evidence and are not relabeled as passes.
 
 Package checks on 2026-10-28:

@@ -1,0 +1,19 @@
+{
+  "pid": 1010393,
+  "path": "/tmp/go-build3302403302/b001/sqlite.test",
+  "sha256": "ad18f1b769c1624dc16cc516024fa7c5b92ad119be1ab43cc5dd96b8449c0fdd",
+  "size_bytes": 38309224,
+  "go_build_info": [
+    "/tmp/go-build3302403302/b001/sqlite.test: go1.26.0",
+    "\tpath\tgithub.com/kandev/kandev/internal/analytics/repository/sqlite.test",
+    "\tmod\tgithub.com/kandev/kandev\t(devel)\t",
+    "\tbuild\t-buildmode=exe",
+    "\tbuild\t-compiler=gc",
+    "\tbuild\t-tags=sqlite_trace,usage_history_scanstatus",
+    "\tbuild\t-trimpath=true",
+    "\tbuild\tCGO_ENABLED=1",
+    "\tbuild\tGOARCH=amd64",
+    "\tbuild\tGOOS=linux",
+    "\tbuild\tGOAMD64=v1"
+  ]
+}

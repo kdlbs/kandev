@@ -1,0 +1,135 @@
+{
+  "captured_at_utc": "2026-10-30T12:01:30.104269+00:00",
+  "repo_head": "0c40960504818901f3cabcd03597fdd699052cca",
+  "repo_tree": "a76f4d0101940fd0d1036ebd4a7b7f573b113aae",
+  "worktree_dirty": true,
+  "worktree_status": [
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_postgres_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_publish_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_seed_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats.go",
+    "?? apps/backend/internal/analytics/repository/sqlite/usage_history_bench_scale_control_test.go",
+    "?? docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1032Z/"
+  ],
+  "benchmark_tagged_source_inputs": [
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_cases_test.go",
+      "sha256": "55b66752efafd38188fd67eff6bfc71534c00657cbba0694c7ee599f88773f6e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_comparison_test.go",
+      "sha256": "501874347dc88a8520b10aba33dfe67437b43a6cd7c0bbe2be862a4b1c4c49e9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_evidence_test.go",
+      "sha256": "623ebce9f0000271fc671ca8418ba2c4b208f74d818972fb9f5f10ecd16bebda"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_check_test.go",
+      "sha256": "92c2a3dfc038390e2004a30798f2d5a88d44d2fdcd60d319c1f5dc4df9f25eff"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_test.go",
+      "sha256": "29a80f858e4de75abf1ebdebff9b781170af8f6a027bb349bfe8e93d25a51612"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_instrumentation_test.go",
+      "sha256": "d2244ace64f5f2b01cb983d66564f9ca629a2b3a1a81299c427f709b01dd14b0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_metrics_test.go",
+      "sha256": "461f0e29268dbc355d9cdd52537d42359d36c14cbf541d63de2c807b2d2d40f7"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_occurrence_test.go",
+      "sha256": "93a180a852494465569b40711d7e56a74d69848c2497978636fe3d87d9c64f9b"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_postgres_test.go",
+      "sha256": "6aa9ed6fa03d963d9edd65840e63f018f7b8e882f9d639fadc0cc8edd367e441"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_process_test.go",
+      "sha256": "dc84ba8f9c96a425b43fe94451ef8f7bc340fff68189f6787b9d9ca1f2622439"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_publish_test.go",
+      "sha256": "73d11307188fb20d09bbd9a9c4de6d6b72fd49a5838af9b4f0bb209da7ee550f"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go",
+      "sha256": "80a4843dee2a319186a3910a822c170785202fd6cfdaafa79bb0cb0e1d44b427"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_scale_control_test.go",
+      "sha256": "9b734a8dcd4e2909a9a205e02a73927da061588fe1cc9b1b844f89488fc382d6"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_seed_test.go",
+      "sha256": "67d10d5807eab8befd37dcff9a914559f961cf1acba143cce0dc3aad36439177"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_source_test.go",
+      "sha256": "995bf1f833ce0a007f3cc8254e025ea4e67b668a902de09c36af622eabf176d9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_special_test.go",
+      "sha256": "a19379d08aaa5d8045eaf1c21b55e57813ea24d1d259a013a69c45c2bd2932a0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats.go",
+      "sha256": "922cec136da833997347aa98cdce92acf7e53c46102e745a475cc023379957e3"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats_sqlite.go",
+      "sha256": "cac086b9055da5219073a176898fd6f949ddfb8819c582bf0fc6f210af50269c"
+    }
+  ],
+  "benchmark_tagged_source_count": 18,
+  "benchmark_tagged_source_manifest_sha256": "6fb1cd13a7537e13d520088c71a5dd4954135c38278c48ec2493537189b88c25",
+  "unchanged_dependency_source_count": 3782,
+  "unchanged_dependency_source_manifest_sha256": "b8e5e24aeae1b8a6be41da1eb4b3c5ad3383f18e6257f50aed254cef96087fcf",
+  "base_tagged_15_sha256": "0f85c405d317506219b24ce825583c05537ff76e5e4911964eb80f02567f53e3",
+  "production_source_changes": [],
+  "go_version": "go version go1.24.4 linux/amd64",
+  "go_env": [
+    "go1.24.4",
+    "linux",
+    "amd64",
+    "1",
+    "/dev/null",
+    ""
+  ],
+  "build_environment": {
+    "CGO_ENABLED": "1",
+    "CGO_CFLAGS": "-O2 -g -DSQLITE_ENABLE_STMT_SCANSTATUS",
+    "GOMAXPROCS": "2",
+    "GOMEMLIMIT": "3GiB",
+    "GOFLAGS": "-p=1",
+    "tags": [
+      "sqlite_trace",
+      "usage_history_scanstatus"
+    ]
+  },
+  "compiled_test_binary": {
+    "pid": 1034960,
+    "path": "/tmp/go-build1915156791/b001/sqlite.test",
+    "sha256": "8d8c366d166d7fc9db6a6fca9f5ef55ca82536fd9fb412ae5e6fc6cfb3556ebe",
+    "size_bytes": 38313320,
+    "go_build_info": [
+      "/tmp/go-build1915156791/b001/sqlite.test: go1.26.0",
+      "\tpath\tgithub.com/kandev/kandev/internal/analytics/repository/sqlite.test",
+      "\tmod\tgithub.com/kandev/kandev\t(devel)\t",
+      "\tbuild\t-buildmode=exe",
+      "\tbuild\t-compiler=gc",
+      "\tbuild\t-tags=sqlite_trace,usage_history_scanstatus",
+      "\tbuild\t-trimpath=true",
+      "\tbuild\tCGO_ENABLED=1",
+      "\tbuild\tGOARCH=amd64",
+      "\tbuild\tGOOS=linux",
+      "\tbuild\tGOAMD64=v1"
+    ]
+  },
+  "captured_for_run": "sqlite-full-diagnostic.log"
+}

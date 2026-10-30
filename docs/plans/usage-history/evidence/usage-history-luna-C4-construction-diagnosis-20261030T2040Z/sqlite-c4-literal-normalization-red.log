@@ -1,0 +1,5 @@
+--- FAIL: TestUsageBenchObserverAggregatesBoundedSQLStats (0.00s)
+    usage_history_scanstats_aggregate_test.go:77: dropped statements = 3, want 1
+FAIL
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	0.013s
+FAIL

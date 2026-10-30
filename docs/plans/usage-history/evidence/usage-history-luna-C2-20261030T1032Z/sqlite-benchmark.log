@@ -1,0 +1,6 @@
+--- FAIL: BenchmarkUsageHistoryFiveYears
+    usage_history_bench_run_test.go:76: analytics busy: context deadline exceeded
+FAIL
+exit status 1
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	198.978s
+FAIL

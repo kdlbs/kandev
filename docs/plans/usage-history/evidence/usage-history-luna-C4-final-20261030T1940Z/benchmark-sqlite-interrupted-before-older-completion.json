@@ -1,0 +1,158 @@
+{
+  "recorded_at_utc": "2026-10-30T20:30:08Z",
+  "status": "worker_stopped_before_older_projection/full gate; no full-history claim",
+  "reason": "16 recent one-year cases completed at 10 samples, but after 47m+ the fixture was still in older-source construction and only 200005 native/20013 external retained rows were verified; remaining 13m on documented 60m test timeout cannot complete required 1000000/100000 rebuild. Stop at phase checkpoint to avoid a predictable timeout and preserve time for diagnosis/fix.",
+  "owned_test_pid": 2303435,
+  "owned_go_parent_pid": 2303375,
+  "command": "/tmp/go-build598797507/b001/sqlite.test -test.paniconexit0 -test.run=^$ -test.bench=^BenchmarkUsageHistoryFiveYears$ -test.benchtime=10x -test.benchmem=true -test.count=1 -test.timeout=1h0m0s ",
+  "elapsed_seconds_observed": 2856,
+  "recent_case_count": 16,
+  "recent_cases_with_10_samples": 16,
+  "recent_case_receipts": [
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-deleted_task.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-dst_new_york.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-empty_range.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-five_years-America-New_York.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-five_years-Asia-Kathmandu.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-five_years-Europe-Lisbon.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-five_years-UTC.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-foreign_coarse.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-foreign_coarse_boundary.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-lifetime.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-mixed_actors.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-native.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-recent-America-New_York.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-recent-Asia-Kathmandu.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-recent-Europe-Lisbon.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    },
+    {
+      "file": "usage-history-worker4-bench-sqlite-one_year-recent-UTC.json",
+      "samples": 10,
+      "native": 200005,
+      "external": 20013,
+      "projection_pages": 64362
+    }
+  ],
+  "main_process_io": {
+    "rchar": 3216448910437,
+    "wchar": 159098110625,
+    "syscr": 785231050,
+    "syscw": 68942236,
+    "read_bytes": 4015882240,
+    "write_bytes": 129215942656,
+    "cancelled_write_bytes": 40321798144
+  },
+  "open_fixture_files": [
+    {
+      "fd": "4",
+      "path": "/tmp/BenchmarkUsageHistoryFiveYears2030732138/001/usage-history.db",
+      "bytes": 5571145728
+    },
+    {
+      "fd": "7",
+      "path": "/tmp/BenchmarkUsageHistoryFiveYears2030732138/001/usage-history.db-wal",
+      "bytes": 67108864
+    },
+    {
+      "fd": "8",
+      "path": "/tmp/BenchmarkUsageHistoryFiveYears2030732138/001/usage-history.db-shm",
+      "bytes": 163840
+    }
+  ],
+  "go_test_timeout_seconds": 3600,
+  "required_actual_after_older": {
+    "native": 1000000,
+    "external": 100000
+  },
+  "source_head": "90767205f97f4b8268526255b935c3626c1a07fe",
+  "source_frame": "8cf1d340a152397e58c30922e132f41c2f41755b9681b2d7f63a76658df8d03f"
+}

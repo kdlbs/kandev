@@ -1,0 +1,15 @@
+{
+  "captured_at_utc": "2026-10-30T10:37:41.959433+00:00",
+  "benchmark_go_pid": 739376,
+  "runtime_test_binary_pid": 742450,
+  "process": "739376 Sl        53 sqlite.test",
+  "executable_link": "/tmp/go-build2478480078/b001/sqlite.test",
+  "runtime_test_binary_sha256": "0cbbae6de6b5d2c4b4467288e9c9b134ba98523b7076dc33dbf5fafe26e63986",
+  "runtime_test_binary_size_bytes": 38284424,
+  "source_head": "0c40960504818901f3cabcd03597fdd699052cca",
+  "source_tree": "a76f4d0101940fd0d1036ebd4a7b7f573b113aae",
+  "compiled_input_manifest_sha256": "b8e5e24aeae1b8a6be41da1eb4b3c5ad3383f18e6257f50aed254cef96087fcf",
+  "tagged_harness_sha256": "0f85c405d317506219b24ce825583c05537ff76e5e4911964eb80f02567f53e3",
+  "go_version": "go version go1.26.0 linux/amd64",
+  "command": "go test -p 1 -trimpath -tags \"sqlite_trace usage_history_scanstatus\" ./internal/analytics/repository/sqlite -run \"^$\" -bench \"^BenchmarkUsageHistoryFiveYears$\" -benchtime=10x -benchmem -count=1 -timeout=60m"
+}

@@ -1,0 +1,44 @@
+File: sqlite.test
+Build ID: 6538e8b0418a47dbe5202e73214218198d03de3a
+Type: cpu
+Time: 2026-10-30 20:42:31 WET
+Duration: 58.71s, Total samples = 52.61s (89.61%)
+Showing nodes accounting for 43.89s, 83.43% of 52.61s total
+Dropped 819 nodes (cum <= 0.26s)
+Showing top 35 nodes out of 202
+      flat  flat%   sum%        cum   cum%
+    39.78s 75.61% 75.61%     41.64s 79.15%  runtime.cgocall
+     0.53s  1.01% 76.62%      0.53s  1.01%  runtime.memmove
+     0.46s  0.87% 77.49%      0.71s  1.35%  runtime.tryDeferToSpanScan
+     0.43s  0.82% 78.31%      0.43s  0.82%  runtime.nextFreeFast (inline)
+     0.36s  0.68% 79.00%      0.36s  0.68%  runtime.memclrNoHeapPointers
+     0.27s  0.51% 79.51%      0.75s  1.43%  runtime.scanObject
+     0.21s   0.4% 79.91%      0.39s  0.74%  runtime.reentersyscall
+     0.19s  0.36% 80.27%      2.91s  5.53%  runtime.mallocgc
+     0.16s   0.3% 80.57%      1.21s  2.30%  runtime.mallocgcSmallScanNoHeader
+     0.13s  0.25% 80.82%      0.34s  0.65%  runtime.pcvalue
+     0.11s  0.21% 81.03%      0.90s  1.71%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind
+     0.10s  0.19% 81.22%      1.01s  1.92%  encoding/gob.(*Decoder).compileDec
+     0.09s  0.17% 81.39%      0.95s  1.81%  database/sql.(*Rows).close
+     0.08s  0.15% 81.54%     20.26s 38.51%  database/sql.withLock
+     0.08s  0.15% 81.70%      0.95s  1.81%  encoding/gob.(*Encoder).encodeStruct
+     0.08s  0.15% 81.85%      0.30s  0.57%  runtime.(*unwinder).resolveInternal
+     0.07s  0.13% 81.98%      0.59s  1.12%  runtime.mallocgcSmallNoscan
+     0.07s  0.13% 82.11%      0.29s  0.55%  runtime.wbBufFlush1
+     0.06s  0.11% 82.23%      1.52s  2.89%  github.com/mattn/go-sqlite3.traceCallbackTrampoline
+     0.06s  0.11% 82.34%      0.48s  0.91%  runtime.(*mcentral).cacheSpan
+     0.06s  0.11% 82.46%      0.36s  0.68%  runtime.adjustframe
+     0.06s  0.11% 82.57%      0.41s  0.78%  runtime.newproc1
+     0.06s  0.11% 82.68%      0.33s  0.63%  runtime.sweepone
+     0.04s 0.076% 82.76%      0.87s  1.65%  encoding/gob.(*Decoder).decodeStruct
+     0.04s 0.076% 82.84%      0.90s  1.71%  encoding/gob.(*Encoder).sendActualType
+     0.04s 0.076% 82.91%      0.88s  1.67%  runtime.newobject
+     0.04s 0.076% 82.99%      0.53s  1.01%  runtime.scanSpan
+     0.03s 0.057% 83.05%      0.90s  1.71%  encoding/gob.(*Decoder).decOpFor
+     0.03s 0.057% 83.10%      1.08s  2.05%  encoding/gob.(*Decoder).getDecEnginePtr
+     0.03s 0.057% 83.16%      1.54s  2.93%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).stageUsageProjectionFactsTx
+     0.03s 0.057% 83.22%      7.80s 14.83%  github.com/mattn/go-sqlite3.(*SQLiteConn).query
+     0.03s 0.057% 83.27%     19.57s 37.20%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked
+     0.03s 0.057% 83.33%      1.55s  2.95%  runtime.cgocallbackg1
+     0.03s 0.057% 83.39%      0.44s  0.84%  runtime.growslice
+     0.02s 0.038% 83.43%      1.01s  1.92%  database/sql.(*Rows).Next.func1

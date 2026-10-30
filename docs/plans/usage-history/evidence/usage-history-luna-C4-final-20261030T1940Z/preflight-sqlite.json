@@ -1,0 +1,24 @@
+{
+  "started_at_utc": "2026-10-30T19:42:02Z",
+  "head": "90767205f97f4b8268526255b935c3626c1a07fe",
+  "source_frame": "8cf1d340a152397e58c30922e132f41c2f41755b9681b2d7f63a76658df8d03f",
+  "logical_cpus": 12,
+  "affinity": "0-7,9-11",
+  "cgroup_cpu_max": "max 100000",
+  "cgroup_memory_max": "max",
+  "load_average_at_start": "0.95, 1.52, 2.91",
+  "relevant_foreign_go_compile_node_browser_processes": [],
+  "gomaxprocs": 1,
+  "gomemlimit": "3GiB",
+  "go": "1.26.0",
+  "configured_native": 1000000,
+  "configured_external": 100000,
+  "required_actual_after_older_phase": {
+    "native": 1000000,
+    "external": 100000
+  },
+  "samples_per_case": 10,
+  "timeout": "60m (task-05 documented benchmark timeout)",
+  "command": "go test -p 1 -trimpath -tags \"sqlite_trace usage_history_scanstatus\" ./internal/analytics/repository/sqlite -run \"^$\" -bench \"^BenchmarkUsageHistoryFiveYears$\" -benchtime=10x -benchmem -count=1 -timeout=60m",
+  "evidence_directory": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C4-final-20261030T1940Z"
+}

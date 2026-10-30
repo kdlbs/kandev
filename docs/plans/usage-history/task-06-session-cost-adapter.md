@@ -119,8 +119,12 @@ Changing the measurement source must not create another cumulative contribution 
 
 ## Results
 
-Task 06 remains in progress pending core integration. SDK-layout preparation completed against the current local core:
-new module imports/replacement, sparse checkouts, and package-tool layout are adapted.
+Task 06 remains in progress. The component results below are earlier checks against local SDK states; they do not prove the final SDK pin, package, or Host integration.
+
+### Prior Phase B and C component results (historical)
+
+SDK-layout preparation completed against the then-current local core:
+new module imports/replacement, sparse checkouts, and package-tool layout were adapted.
 `go test ./server/...`, `go vet ./server/...`, explicit-output Go build, `make check-format`, `make test`, and `make verify-package` passed.
 The package covered all five declared platforms and 44 UI tests. Workflow YAML parsing and repeated tidy also passed.
 Phase B implemented retained bindings, durable revision replay, bounded observation batches, corrections/supersession,
@@ -136,11 +140,65 @@ The 23 new Go fixtures cover replay, deletion/resume, correction, partial absenc
 Receipts and integration details: `/tmp/kandev-plugin-session-cost-phase-b/integration-handoff.txt` and `final-scope.txt`.
 These are fixture/package results, not real Host or browser evidence.
 Task 03 added trusted target dates and canonical-generation metadata after the Phase B handoff.
-Phase C consumes those fields for bounded dated import after deletion and restart-safe saved canonical values during preparing/pending work.
+Phase C used those fields for bounded dated import after deletion and restart-safe saved canonical values during preparing/pending work.
 Generation tokens remain opaque. Tokscale parsed message counts do not populate Kandev turns.
 Phase C focused metadata/import/refresh tests, 16 new metadata test functions, full Go checks, 49 UI tests,
 focused race checks, tidy, and diff checks passed. Commands and SDK hashes are in `/tmp/kandev-plugin-session-cost-phase-c/handoff.txt`.
-The existing package archive still contains Phase B; final package/browser validation must rebuild it after integration.
-Tokscale model-label changes remain ambiguous without stable source-record evidence.
-Real Host selection/readback, lifecycle/uninstall retention, packaged desktop/mobile smoke, and the final reachable core pin remain pending.
-The coordinator will resume the same worker after the core handoffs. No complete Task 06 result is claimed yet.
+The Phase B package archive did not contain the Phase C changes; final package/browser validation must rebuild it after integration.
+At the Phase C handoff, Tokscale model-label changes were treated as ambiguous without stable source-record evidence.
+Real Host selection/readback, lifecycle/uninstall retention, packaged desktop/mobile smoke, and the final reachable core pin were pending at that checkpoint.
+At that checkpoint, the coordinator planned to resume the worker after the core handoffs. No complete Task 06 result was claimed.
+
+### Earlier adapter preparation checkpoint (historical; NOT COMPLETE)
+
+E2 prepared a packaged Host test matrix for native tokens, external cost, corrections, nullable values, currencies, action scope, and retention.
+E2 added a guard that rechecks the current task/session binding in the verified workspace before canonical reads.
+E2R and E2R2 prepared the unsupported-Host response for a missing history interface, unimplemented point lookup, or missing point-lookup acknowledgement.
+Those cases return upgrade guidance before canonical reads or source commands. Denied and malformed responses remain fail-closed.
+E2T prepared the installed-smoke revision sequence. Its live Host run had not run at that checkpoint.
+
+The E2 preparation receipts record syntax, formatting, and whitespace checks only. E2 did not run Go tests or the full Node suite during the C2 benchmark window.
+After E3a corrected the legacy Host fixture, the full `server/...` Go suite passed normally and under race. Vet, tidy, format, and all 61 Node tests also passed.
+The E3a Go checks use the sibling local SDK. They do not set the final SDK pin or prove package and Host integration. Receipt: `/tmp/usage-history-luna-E3a-ready.json`.
+
+H3/K3/J3 prepared installed checks for authorization, pruning, ownership transfer, erasure, and plugin-state privacy. These preparations were not actual Host or browser passes. J4/L3 were adapting the live smoke helper at that checkpoint.
+At that checkpoint, the C3 full SQLite run appeared in progress. It later failed at page 2453 after 1,681 seconds with zero samples.
+The later core `907` checkpoint stopped the C4 SQLite run before the full fixture completed. The full PostgreSQL run had not started at that checkpoint.
+Current-source full-run status is in the parent plan.
+E2 preparation receipts: `/tmp/usage-history-luna-E2-prep.json`, `/tmp/usage-history-luna-E2R-prep.json`, `/tmp/usage-history-luna-E2R2-prep.json`, and `/tmp/usage-history-luna-E2T-prep.json`.
+
+### Current integration status (2026-10-30, NOT COMPLETE)
+
+The validated core source revision is `6a4b002a22ba959dbd636f2fb42eefc31c7dafd2` on main `aebac5d5395e9983124b398198bace146d38506b`.
+The SDK tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`.
+A6 replayed 97 feature commits: 96 were range-equal and one persistence-catalog change adapted automatically. No commits were dropped, and no conflicts occurred.
+All 550 feature paths remain. The adaptation preserves `workspace_collaboration_grants` and every usage feature table.
+Background `UpsertSessionUsage`, `ListSessionUsage`, `ListUsageCollectionTargetsV1`, `ReportUsageObservationsV1`, and `ListStateKeys` calls now use plugin-owned capability classification.
+Exact task usage stays caller-bound. Capability, workspace-visibility, source-ownership, and binding checks remain active.
+
+Candidate `f306b7081105c231f56e309e18378372b8c6472d` passed the full SDK, standalone consumer, and focused Host authorization, state-key, task-deletion, archive-borrower, native-publisher, continuation, and caller checks.
+At current primary HEAD `6a4`, the integration control records an SDK race pass for three packages. The generated protobuf package has no tests.
+The corrected-export run passed all seven analytics packages with an actual PostgreSQL 18.6 DSN.
+It recorded 463 passing tests and subtests, with zero failures and zero skips. Three packages had tests, and four had no tests.
+The initial attempt lacked the exported DSN and does not count as product evidence.
+
+The plugin tree remains at HEAD `0fbccfb4eac3de587a80540f9858a51947062b5e`, with reviewed but uncommitted adapter and M3 security changes.
+Plugin PR #10 still points to `127bc4a6e98f9121c216135b71c5e17aa8832cf1`. The new source is not pushed, merged, or released.
+The `.kandev-sdk-ref` pin remains `9aecf156c65e7522a43f2a1c8310737179c25d70`, an older core revision.
+
+The M3 security review is complete. The legacy webhook returns constant upgrade guidance, including for authenticated callers.
+Metrics remain available only through the authenticated current-target workspace action. Manifest API v1 access is authenticated, and no Host version floor is guessed.
+Q3 passed normal and race Go checks on the older SDK, 61 bundle tests, seven privacy-validator tests, and syntax checks for 11 Node files.
+These checks do not prove the final package or actual Host integration. Receipt: `/tmp/usage-history-luna-Q3-ready.json`.
+
+The E4 production web build and local plugin SDK consumer passed on core `90767205f97f4b8268526255b935c3626c1a07fe` and SDK tree `e9f0d45ede0390e9a31f079aa7ec88524dc700b9`.
+The recorded frontend digest `b12ea9ee` belongs to that earlier source frame. Main changed the frontend and SDK, so the old build and consumer do not close current gates.
+Receipt: `/tmp/usage-history-luna-E4-prebuild-ready.json`.
+
+The five current-Host cases and older-Host compatibility matrix are prepared but unrun. All five 0.5.0 archives need the final reachable core pin and a rebuild.
+Earlier v0.97/v0.86 compatibility checks and Phase B archives use older source and do not prove final compatibility.
+
+Task 06 remains open for the published SDK pin, current plugin consumer, final build, and verification of all five archives.
+Actual Host and older-Host cases also remain open.
+Lifecycle and uninstall-retention evidence, packaged desktop and phone runs, and final README and companion-plan results also remain open.
+The public PR and current-head CI still need updates after the implementation is pushed. No complete Task 06 result is claimed.
