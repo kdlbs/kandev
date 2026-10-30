@@ -6267,6 +6267,8 @@ type autoStartStepPromptState struct {
 	promptReferenceContext         string
 	dispatchInputPresent           bool
 	userMessageRecorded            bool
+	createdAdmission               *workflowStartPromptAttempt
+	createdHandoffRequeue          sync.Once
 }
 
 func (s *Service) autoStartStepPromptWithPromptContext(
@@ -6461,6 +6463,11 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 		s.requeueAutoStartStepMessage(state)
 		return newWorkflowAutoStartSessionTerminalizedError(fresh)
 	}
+	if fresh.State != models.TaskSessionStateCreated {
+		lock.Unlock()
+		release()
+		return s.continueAutoStartAfterCreatedStateLost(state, fresh)
+	}
 	var releaseOnce sync.Once
 	heldRelease := func() {
 		releaseOnce.Do(func() {
@@ -6486,6 +6493,7 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 		state.dispatchInputPresent, queueIdentity, workflowEntry, workflowEntryRequired,
 	)
 	workflowAttempt.workflowEntryRequired = workflowEntryRequired
+	state.createdAdmission = workflowAttempt
 	workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
 	launchCtx := withWorkflowStartPromptAttempt(state.ctx, workflowAttempt)
 	execution, err := s.startCreatedSessionWithComposedPrompt(
@@ -6495,6 +6503,16 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 	)
 	if execution == nil {
 		workflowAttempt.retire()
+	}
+	if isCreatedStateLostError(err) {
+		workflowAttempt.retire()
+		heldRelease()
+		latest, reloadErr := s.repo.GetTaskSession(state.ctx, state.sessionID)
+		if reloadErr != nil {
+			s.requeueAutoStartStepMessage(state)
+			return reloadErr
+		}
+		return s.continueAutoStartAfterCreatedStateLost(state, latest)
 	}
 	if err != nil {
 		workflowAttempt.retire()
@@ -6519,6 +6537,10 @@ func (s *Service) retryAutoStartStepPrompt(state *autoStartStepPromptState) erro
 				fallbackLaunchPrompt:      state.recordedPrompt,
 				fallbackRetryPrompt:       state.dispatchPrompt,
 				promptReferenceContext:    state.promptReferenceContext,
+				beforeDispatch:            autoStartStepPromptAdmissionFromContext(state.ctx),
+				beforeProviderAdmission:   autoStartStepPromptAdmissionFromContext(state.ctx),
+				expectedSessionIdentity:   createdAutoStartSessionIdentity(state),
+				cancellationFence:         createdAutoStartCancellationFence(state),
 			},
 		)
 		stop, result := s.handleAutoStartPromptAttemptError(state, err)
@@ -6545,6 +6567,10 @@ func (s *Service) handleAutoStartPromptAttemptError(
 	err error,
 ) (bool, error) {
 	if err == nil {
+		return true, nil
+	}
+	if isCreatedAutoStartContinuationSuperseded(state.ctx, err) {
+		s.requeueAutoStartStepMessage(state)
 		return true, nil
 	}
 	if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
@@ -6582,6 +6608,16 @@ func (s *Service) handleAutoStartPromptAttemptError(
 }
 
 func (s *Service) queueOrRestoreAutoStartPrompt(state *autoStartStepPromptState) error {
+	if autoStartStepPromptAdmissionFromContext(state.queueCtx) != nil {
+		err := s.queueCreatedAutoStartContinuation(state)
+		if err != nil {
+			s.requeueAutoStartStepMessage(state)
+			if isCreatedAutoStartContinuationSuperseded(state.ctx, err) {
+				return nil
+			}
+		}
+		return err
+	}
 	if err := s.queueAutoStartPrompt(
 		state.queueCtx, state.taskID, state.sessionID, state.prompt, state.planMode,
 		state.attachments, state.origin, state.userMessageRecorded, state.references, state.handoffForQueue,
@@ -6593,9 +6629,16 @@ func (s *Service) queueOrRestoreAutoStartPrompt(state *autoStartStepPromptState)
 }
 
 func (s *Service) requeueAutoStartStepMessage(state *autoStartStepPromptState) {
-	if state.takenMsg != nil {
-		s.requeueMessage(state.ctx, state.takenMsg, state.takenMsg.QueuedBy)
+	requeue := func() {
+		if state.takenMsg != nil {
+			s.requeueMessage(state.ctx, state.takenMsg, state.takenMsg.QueuedBy)
+		}
 	}
+	if autoStartStepPromptAdmissionFromContext(state.ctx) != nil {
+		state.createdHandoffRequeue.Do(requeue)
+		return
+	}
+	requeue()
 }
 
 // fallbackFreshLaunchOnMissingExecution recovers from a PromptTask that returned
@@ -6646,26 +6689,15 @@ func (s *Service) fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
 	lifecycleLockHeld bool,
 ) error {
 	requeue := func() {
+		if restoreAutoStartStepPromptHandoff(ctx) {
+			return
+		}
 		if takenMsg != nil {
 			s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
 		}
 	}
 
-	// Keep coordinator stop outside the reset-to-CREATED / fresh-runtime
-	// registration window. If fallback wins, stop observes the newly
-	// registered execution after this guard is released; if stop won earlier,
-	// the guarded state CAS below sees CANCELLED and aborts the replacement.
-	cancelLock, releaseCancelLock := s.acquireCancelInFlightGuard(sessionID)
-	cancelLock.Lock()
-	if s.isCancelInFlight(sessionID) {
-		cancelLock.Unlock()
-		releaseCancelLock()
-		requeue()
-		return &executor.SessionStateSupersededError{SessionID: sessionID, State: models.TaskSessionStateCancelled}
-	}
-	fresh, err := s.resetSessionForFreshFallback(ctx, sessionID)
-	cancelLock.Unlock()
-	releaseCancelLock()
+	fresh, err := s.resetSessionForFreshFallbackWithAdmission(ctx, taskID, sessionID)
 	if err != nil {
 		requeue()
 		return err
