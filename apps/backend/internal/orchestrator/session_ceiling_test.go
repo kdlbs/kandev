@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -364,5 +365,39 @@ func TestConcurrentAdmissionsForOneFreeSlotAdmitExactlyOne(t *testing.T) {
 	}
 	if got := mustPopulation(t, c); got != 2 {
 		t.Fatalf("population = %d, want 2 (the ceiling)", got)
+	}
+}
+
+// The Office run-session bridge is inert unless the shared execution capacity
+// is opted in (G1 default off): no reservation, no reason, no error.
+func TestReserveRunSessionCapacityDisabledWhenPolicyOff(t *testing.T) {
+	c := newTestController(t, 10, &fakeAdmittedLister{})
+	svc := &Service{sessionCeiling: c}
+	reservation, reason, err := svc.ReserveRunSessionCapacity(context.Background(), "office-run-1", "grade-a")
+	if err != nil || reason != "" || reservation != nil {
+		t.Fatalf("opt-in off reserve = (%v, %q, %v), want (nil, empty, nil)", reservation, reason, err)
+	}
+}
+
+// A live native reservation owns its own cleanup; elapsed launch time alone
+// must not release it, while an ordinary stale launch reservation still is.
+func TestNativeReservationSurvivesStaleSweep(t *testing.T) {
+	c := newTestController(t, 10, &fakeAdmittedLister{})
+	stale := time.Now().Add(-48 * time.Hour)
+	route := &NativeInferenceRoute{ID: "native:utility-call:call-1", CallID: "call-1"}
+	c.mu.Lock()
+	c.reservations[route.ID] = &ceilingReservation{sessionID: route.ID, takenAt: stale, nativeOwner: route}
+	c.reservations["task-stale"] = &ceilingReservation{sessionID: "task-stale", takenAt: stale}
+	c.mu.Unlock()
+
+	if released := c.expireStaleReservations(); released != 1 {
+		t.Fatalf("released = %d, want 1 (the ordinary stale launch)", released)
+	}
+	c.mu.Lock()
+	_, nativeHeld := c.reservations[route.ID]
+	_, taskHeld := c.reservations["task-stale"]
+	c.mu.Unlock()
+	if !nativeHeld || taskHeld {
+		t.Fatalf("native held = %v, task held = %v; want native retained and task released", nativeHeld, taskHeld)
 	}
 }

@@ -5,6 +5,8 @@ package scheduler
 import (
 	"testing"
 
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/routing"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 
 	"github.com/kandev/kandev/internal/office/shared"
@@ -61,5 +63,48 @@ func TestActorFromRunContext_MirrorsNormalizeActorsDowngradeRule(t *testing.T) {
 					gotCounted, tc.wantCounted, before, after)
 			}
 		})
+	}
+}
+
+// Task-owned attempts keep the existing provider cap even when the run carries
+// the Office task-capacity context; only taskless Office capacity waits are
+// exempt from spending the budget.
+func TestProviderAttemptCountKeepsTaskOwnedCap(t *testing.T) {
+	prior := []officemodels.RouteAttempt{
+		{Outcome: RouteAttemptOutcomeDeferredCapacity},
+		{Outcome: RouteAttemptOutcomeLaunched},
+	}
+	run := &runsmodels.Run{Payload: `{"task_id":"t-1"}`}
+	if got := providerAttemptCount(run, prior); got != len(prior) {
+		t.Fatalf("task-owned providerAttemptCount = %d, want %d", got, len(prior))
+	}
+}
+
+// A taskless Office capacity wait reuses its existing attempt instead of
+// consuming provider-attempt budget.
+func TestProviderAttemptCountSkipsOfficeCapacityWait(t *testing.T) {
+	prior := []officemodels.RouteAttempt{
+		{Outcome: RouteAttemptOutcomeDeferredCapacity},
+		{Outcome: RouteAttemptOutcomeLaunched},
+	}
+	run := &runsmodels.Run{Payload: `{}`}
+	if got := providerAttemptCount(run, prior); got != 1 {
+		t.Fatalf("taskless providerAttemptCount = %d, want 1", got)
+	}
+}
+
+// The queued launch origin and resolved workflow selection are preserved by
+// recognising the unchanged deferred candidate as the same waiting identity.
+func TestSameWaitingCandidatePreservesQueuedSelection(t *testing.T) {
+	candidate := routing.Candidate{ExecutionProfileID: "p-1", ProviderID: routing.ProviderID("claude-acp"), Model: "m-1"}
+	attempt := officemodels.RouteAttempt{
+		Outcome: RouteAttemptOutcomeDeferredCapacity, ExecutionProfileID: "p-1",
+		ProviderID: "claude-acp", Model: "m-1", Tier: "balanced", TierSource: "role",
+	}
+	if !sameWaitingCandidate(attempt, candidate, routing.Tier("balanced"), "role") {
+		t.Fatal("same deferred candidate should match")
+	}
+	if sameWaitingCandidate(attempt, candidate, routing.Tier("frontier"), "role") {
+		t.Fatal("a changed tier must not match the waiting candidate")
 	}
 }
