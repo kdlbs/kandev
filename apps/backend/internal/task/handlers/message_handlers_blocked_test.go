@@ -60,6 +60,28 @@ type messageAddSwitchRepo struct {
 	promptHistoryCalls           int
 	promptHistoryBarrier         chan struct{}
 	promptHistoryBarrierAfter    int
+	acknowledgedTurnError        string
+	turnErrorAckErr              error
+}
+
+func (r *messageAddSwitchRepo) RecordTaskTurnError(context.Context, string, models.TaskTurnError) (bool, error) {
+	return false, nil
+}
+
+func (r *messageAddSwitchRepo) AcknowledgeTaskTurnErrorIfStamp(
+	_ context.Context,
+	_ string,
+	stamp string,
+	_ time.Time,
+	_ string,
+) (models.TurnErrorAcknowledgementResult, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
+	if r.turnErrorAckErr != nil {
+		return models.TurnErrorAcknowledgementMissing, r.turnErrorAckErr
+	}
+	r.acknowledgedTurnError = stamp
+	return models.TurnErrorAcknowledgementStored, nil
 }
 
 func (r *messageAddSwitchRepo) messageCount() int {

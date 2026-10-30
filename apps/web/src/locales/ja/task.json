@@ -3031,5 +3031,8 @@
   "storageRecoveryDiskTitle": "ディスク容量不足によりセッションが中断されました",
   "storageAdvisoryPressureGuidanceOversized": "出力が配信サイズの上限を超えたため、新しい出力がブロックされています。より小さな出力で新しいターンを開始してください。",
   "storageAdvisoryPressureGuidanceLimit": "設定された配信上限により新しい出力がブロックされています。再開する前に保持された出力と配信の進行状況を確認してください。",
-  "storageAdvisoryPressureGuidanceWriteFailed": "ストレージの書き込み失敗により新しい出力がブロックされています。再開する前にランタイムのストレージを確認してください。"
+  "storageAdvisoryPressureGuidanceWriteFailed": "ストレージの書き込み失敗により新しい出力がブロックされています。再開する前にランタイムのストレージを確認してください。",
+  "dismissTurnError": "ターンのエラーを閉じる",
+  "failedToDismissTurnError": "ターンのエラーを閉じるのに失敗しました",
+  "turnErrorAcknowledgementFailed": "メッセージは受け付けられましたが、ターンのエラー表示を閉じられませんでした。手動で閉じてください。"
 }

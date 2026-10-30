@@ -84,6 +84,8 @@ export type TaskSwitcherItem = {
   queuedCount?: number;
   /** Automatic session launch waiting for capacity or ownership. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  /** Current failed-turn attention. Drives the task-menu dismissal action. */
+  turnError?: { stamp: string; preview: string; sessionId?: string } | null;
   /** Destination-resident WIP queue position, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   isPRReview?: boolean;

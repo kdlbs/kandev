@@ -344,6 +344,9 @@ func provideGateway(
 			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
 				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
 			},
+			LoadTaskTurnError: func(ctx context.Context, taskID string) (statussummary.TaskTurnErrorObservation, error) {
+				return loadTaskTurnErrorObservation(ctx, taskRepo, taskID)
+			},
 			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
 				return loadTaskPendingActions(ctx, taskRepo, taskID)
 			},
@@ -445,7 +448,7 @@ func provideGateway(
 			taskID, _ := data["task_id"].(string)
 			sessionID, _ := data["session_id"].(string)
 			turnID, _ := data["id"].(string)
-			if isAbandonedTurnCompletion(data) {
+			if !shouldNotifyTurnCompleted(data) {
 				return nil
 			}
 			notificationSvc.HandleTaskTurnFinished(ctx, taskID, sessionID, turnID)
@@ -567,6 +570,37 @@ func loadTaskSessionObservations(
 		snapshot.Sessions = append(snapshot.Sessions, input)
 	}
 	return snapshot, nil
+}
+
+// loadTaskTurnErrorObservation projects the task-owned failed-turn attention
+// pointer. An absent key is authoritative and clears the projection; a
+// malformed value is not, so the last valid summary survives a partial write.
+func loadTaskTurnErrorObservation(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (statussummary.TaskTurnErrorObservation, error) {
+	task, err := taskRepo.GetTask(ctx, taskID)
+	if err != nil {
+		return statussummary.TaskTurnErrorObservation{}, err
+	}
+	if task == nil {
+		return statussummary.TaskTurnErrorObservation{}, fmt.Errorf("task %q not found", taskID)
+	}
+	if _, present := task.Metadata[models.MetaKeyLastTurnError]; !present {
+		return statussummary.TaskTurnErrorObservation{Observed: true}, nil
+	}
+	value, ok := models.LoadTaskTurnError(task.Metadata)
+	if !ok {
+		return statussummary.TaskTurnErrorObservation{}, nil
+	}
+	if value.Acknowledged() {
+		return statussummary.TaskTurnErrorObservation{Observed: true}, nil
+	}
+	return statussummary.TaskTurnErrorObservation{
+		Observed: true,
+		Error:    statussummary.TurnErrorSummaryFromMetadata(task.Metadata),
+	}, nil
 }
 
 func loadTaskLaunchErrorObservation(
@@ -740,6 +774,24 @@ func isAbandonedTurnCompletion(data map[string]interface{}) bool {
 	startedAt, started := data["started_at"].(time.Time)
 	completedAt, completed := data["completed_at"].(*time.Time)
 	return started && completed && completedAt != nil && startedAt.Equal(*completedAt)
+}
+
+// shouldNotifyTurnCompleted reports whether a completed turn represents a
+// successful outcome worth a turn-finished notification.
+func shouldNotifyTurnCompleted(data map[string]interface{}) bool {
+	return !isAbandonedTurnCompletion(data) && !isErrorTerminatedTurnCompletion(data)
+}
+
+// isErrorTerminatedTurnCompletion reports a turn that ended because the agent
+// failed. Its inline error row is the failure feedback; pushing a successful
+// turn notification for it would be false.
+func isErrorTerminatedTurnCompletion(data map[string]interface{}) bool {
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	terminated, _ := metadata[models.TurnMetaKeyErrorTerminated].(bool)
+	return terminated
 }
 
 func clarificationNotificationOccurrence(data map[string]interface{}) (taskID, sessionID, pendingID string, ok bool) {

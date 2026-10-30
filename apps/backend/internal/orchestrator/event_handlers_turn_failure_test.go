@@ -625,3 +625,145 @@ func retainedTurnFailureData() watcher.AgentEventData {
 		EvidenceKnown: true, OutputObserved: true, EffectObserved: true,
 	}
 }
+
+// testTurnErrorRecorder applies the real metadata ordering rules so tests can
+// assert that a delayed older settlement cannot replace newer attention.
+type testTurnErrorRecorder struct {
+	mu       sync.Mutex
+	metadata map[string]interface{}
+}
+
+func (r *testTurnErrorRecorder) RecordTaskTurnErrorAttention(
+	_ context.Context,
+	_ string,
+	value models.TaskTurnError,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.metadata == nil {
+		r.metadata = make(map[string]interface{})
+	}
+	return models.SetTaskTurnError(r.metadata, value), nil
+}
+
+func (r *testTurnErrorRecorder) current(t *testing.T) models.TaskTurnError {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	value, ok := models.LoadTaskTurnError(r.metadata)
+	require.True(t, ok)
+	return value
+}
+
+func genericRetainedTurnFailureData() watcher.AgentEventData {
+	data := retainedTurnFailureData()
+	data.AgentID = "custom-acp"
+	data.AgentProfileID = "profile-custom"
+	data.ErrorMessage = "Internal error: Failed to execute statement"
+	data.ProviderError = &streams.ProviderError{
+		Source: streams.ProviderErrorSourceACPPrompt, ProviderID: "custom-acp",
+		Message: "Internal error: Failed to execute statement", RPCCode: -32603,
+	}
+	data.CapacityContinuation = nil
+	data.ContinuationSafety = nil
+	return data
+}
+
+// TestAgentTurnFailedGenericPromptError proves a provider-neutral retained
+// prompt error settles the same durable turn failure as a classified capacity
+// error, without stopping the runtime or granting automatic recovery.
+func TestAgentTurnFailedGenericPromptError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	recorder := &testTurnErrorRecorder{}
+	svc.SetTaskTurnErrorRecorder(recorder)
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+
+	data := genericRetainedTurnFailureData()
+	svc.handleAgentTurnFailed(ctx, data)
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Len(t, mc.sessionMessages, 1)
+	message := mc.sessionMessages[0]
+	require.Equal(t, "error", message.metadata["variant"])
+	require.Equal(t, "turn", message.metadata["failure_scope"])
+	require.Equal(t, true, message.metadata["runtime_retained"])
+	require.NotEqual(t, true, message.metadata["recovery_actions"])
+	require.Nil(t, message.metadata["recovery_disposition"],
+		"an unknown error class gains manual continuity only, with no recovery disposition")
+	require.Equal(t, 0, message.metadata["attempts_started"])
+	require.Equal(t, "Internal error: Failed to execute statement", message.content)
+	require.Equal(t, message.id, recorder.current(t).StampValue,
+		"the real recorder must persist attention for the settled failed turn")
+
+	svc.handleAgentTurnFailed(ctx, data)
+	require.Len(t, mc.sessionMessages, 1, "duplicate delivery must not re-arm the failed turn")
+	agentMgr.mu.Lock()
+	require.Empty(t, agentMgr.stopAgentWithReasonArgs, "a retained generic failure must keep the process alive")
+	agentMgr.mu.Unlock()
+	_, retryOwned := svc.transientRetries.Load("s1")
+	require.False(t, retryOwned, "a generic prompt error must not start an automatic retry")
+}
+
+// TestGenericRetainedPromptErrorDoesNotRetry pins that retention is not retry
+// admission: the generic error settles the failed turn with no recovery owner.
+func TestGenericRetainedPromptErrorDoesNotRetry(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	t.Cleanup(svc.cancelAllTransientRetries)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	recorder := &testTurnErrorRecorder{}
+	svc.SetTaskTurnErrorRecorder(recorder)
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+
+	svc.handleAgentTurnFailed(ctx, genericRetainedTurnFailureData())
+
+	_, retryOwned := svc.transientRetries.Load("s1")
+	require.False(t, retryOwned, "generic retention must not enqueue a transient retry")
+	require.Len(t, mc.sessionMessages, 1)
+	require.Nil(t, mc.sessionMessages[0].metadata["recovery_disposition"],
+		"generic retention must not look like a refused automatic recovery")
+	require.Equal(t, 0, mc.sessionMessages[0].metadata["attempts_started"])
+	require.Equal(t, "turn-1", recorder.current(t).TurnID)
+}
+
+func TestDelayedOlderTurnErrorCannotReplaceNewerAttention(t *testing.T) {
+	ctx := context.Background()
+	svc := &Service{}
+	createdAt := map[string]time.Time{
+		"older-message": time.Date(2026, 10, 29, 20, 0, 0, 0, time.UTC),
+		"newer-message": time.Date(2026, 10, 29, 20, 32, 0, 0, time.UTC),
+	}
+	svc.messageCreator = &mockMessageCreator{sessionMessageCreatedAt: createdAt}
+	recorder := &testTurnErrorRecorder{}
+	svc.SetTaskTurnErrorRecorder(recorder)
+	newer := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "session-b", AgentExecutionID: "execution-b",
+		ErrorMessage: "newer sibling failure",
+	}
+	older := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "session-a", AgentExecutionID: "execution-a",
+		ErrorMessage: "older delayed failure",
+	}
+	if err := svc.recordTaskTurnErrorAttention(ctx, newer, "turn-b", "newer-message"); err != nil {
+		t.Fatalf("record newer attention: %v", err)
+	}
+	if err := svc.recordTaskTurnErrorAttention(ctx, older, "turn-a", "older-message"); err != nil {
+		t.Fatalf("record delayed older attention: %v", err)
+	}
+	current := recorder.current(t)
+	require.Equal(t, "newer-message", current.StampValue,
+		"the persisted message time, not recording time, orders attention")
+	require.False(t, current.Acknowledged())
+}

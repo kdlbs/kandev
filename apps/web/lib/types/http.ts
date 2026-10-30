@@ -1202,6 +1202,8 @@ export type Message = {
    * created_at ascending, ties by id); present only on user messages from an
    * indexed server payload, omitted on older payloads. */
   prompt_index?: number;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 export type Turn = {

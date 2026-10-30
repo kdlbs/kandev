@@ -577,6 +577,10 @@ type wsQueueMessageRequest struct {
 	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef  `json:"preview_feedback_refs,omitempty"`
 	RequirePrimarySession bool                             `json:"require_primary_session,omitempty"`
 	UserID                string                           `json:"user_id,omitempty"`
+	// ObservedTurnErrorStamp is the task turn-error stamp the client had
+	// rendered for this session before queueing. Only this new submission can
+	// acknowledge that exact attention; drain, retry, and Send now cannot.
+	ObservedTurnErrorStamp string `json:"observed_turn_error_stamp,omitempty"`
 }
 
 // wsQueueMessage handles ActionMessageQueueAdd, appending a new entry to the session queue.
@@ -586,6 +590,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	req.ClientQueueID = strings.TrimSpace(req.ClientQueueID)
+	req.ObservedTurnErrorStamp = strings.TrimSpace(req.ObservedTurnErrorStamp)
 
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
@@ -646,10 +651,13 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if req.ObservedTurnErrorStamp != "" {
+		metadata[messagequeue.MetadataObservedTurnErrorStamp] = req.ObservedTurnErrorStamp
+	}
 	if identifiedOrdinary {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
 		metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
 	}
 	var snapshot *models.TaskPlanCommentSnapshot
@@ -723,11 +731,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		h.publishPlanCommentSnapshot(ctx, snapshot)
 		h.publishPreviewFeedbackSnapshot(ctx, previewSnapshot)
 	}
+	turnErrorAckFailed := false
+	if !replay {
+		turnErrorAckFailed = h.acknowledgeObservedTurnError(ctx, req)
+	}
 	h.publishStatusForIdentity(ctx, identity, queued)
 	if h.queueReadiness != nil {
 		h.queueReadiness.CheckQueueAdmissionReadiness(ctx, identity)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, queued)
+	return ws.NewResponse(msg.ID, msg.Action, queueMessageResponse{
+		QueuedMessage:                  queued,
+		TurnErrorAcknowledgementFailed: turnErrorAckFailed,
+	})
 }
 
 var (
@@ -905,6 +920,39 @@ func (h *QueueHandlers) admitIdentifiedQueuedMessage(
 		req.PlanMode, req.Attachments, metadata, claim,
 	)
 	return queued, err
+}
+
+// acknowledgeObservedTurnError retires the exact task attention the client had
+// rendered when it queued this new prompt. Queue acceptance is the durable
+// boundary; a later drain keeps no new acknowledgement authority.
+func (h *QueueHandlers) acknowledgeObservedTurnError(ctx context.Context, req wsQueueMessageRequest) bool {
+	if req.ObservedTurnErrorStamp == "" {
+		return false
+	}
+	acknowledger, ok := h.accessAuthorizer.(interface {
+		AcknowledgeTaskTurnError(context.Context, string, string, string) error
+	})
+	if !ok {
+		return false
+	}
+	if err := acknowledger.AcknowledgeTaskTurnError(
+		ctx, req.TaskID, req.SessionID, req.ObservedTurnErrorStamp,
+	); err != nil {
+		h.logger.Warn("failed to acknowledge observed task turn error",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
+}
+
+// queueMessageResponse carries the accepted queue row plus nonfatal
+// acknowledgement feedback. Embedding keeps the existing row shape intact for
+// clients that do not know the new field.
+type queueMessageResponse struct {
+	*messagequeue.QueuedMessage
+	TurnErrorAcknowledgementFailed bool `json:"turn_error_acknowledgement_failed,omitempty"`
 }
 
 func (h *QueueHandlers) lookupIdentifiedQueuedMessage(

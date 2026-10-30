@@ -239,6 +239,8 @@ export type QueuedMessage = {
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 /** Capacity info kept alongside the entry list. */

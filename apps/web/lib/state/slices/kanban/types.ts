@@ -444,6 +444,13 @@ export type KanbanSliceActions = {
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
   removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
+  /** Retains one live task summary for consumers whose task is not a board row
+   * (for example an ephemeral Quick Chat task). */
+  recordSidebarStatusSummary: (
+    workspaceId: string,
+    taskId: string,
+    summary: TaskStatusSummary,
+  ) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

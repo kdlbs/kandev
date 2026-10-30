@@ -313,6 +313,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreTaskLaunchError(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreTaskTurnError(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
@@ -404,6 +407,8 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.errorsObserved = false
 	state.taskError = nil
 	state.taskErrorObserved = false
+	state.turnError = nil
+	state.turnErrorObserved = false
 	state.git = make(map[string]GitSummary)
 	state.gitBaseline = nil
 	state.gitObserved = false
@@ -582,6 +587,50 @@ func (p *Projector) refreshTaskLaunchError(
 	}
 	state.taskErrorObserved = true
 	state.taskError = next
+	return true, nil
+}
+
+func (p *Projector) restoreTaskTurnError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadTaskTurnError == nil {
+		return nil
+	}
+	observation, err := p.loadTaskTurnError(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task turn error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return nil
+	}
+	state.turnErrorObserved = true
+	state.turnError = cloneTurnError(observation.Error)
+	return nil
+}
+
+func (p *Projector) refreshTaskTurnError(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	observation, err := p.loadTaskTurnError(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("refresh task turn error for status summary %q: %w", taskID, err)
+	}
+	if !observation.Observed {
+		return false, nil
+	}
+	next := cloneTurnError(observation.Error)
+	if equalTurnError(state.turnError, next) && state.turnErrorObserved {
+		if state.current == nil && next != nil {
+			return true, nil
+		}
+		return false, nil
+	}
+	state.turnErrorObserved = true
+	state.turnError = next
 	return true, nil
 }
 

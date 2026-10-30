@@ -822,6 +822,37 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 	})
 }
 
+type dismissTaskTurnErrorRequest struct {
+	Stamp string `json:"stamp"`
+}
+
+// httpDismissTaskTurnError acknowledges exactly the observed task turn-error
+// attention. Inline Chat and task-menu dismissal share this operation.
+func (h *TaskHandlers) httpDismissTaskTurnError(c *gin.Context) {
+	var req dismissTaskTurnErrorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Stamp) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stamp is required"})
+		return
+	}
+	err := h.service.DismissTaskTurnError(c.Request.Context(), c.Param("id"), req.Stamp)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, gin.H{"dismissed": true})
+	case errors.Is(err, service.ErrTurnErrorStale):
+		c.JSON(http.StatusConflict, gin.H{"error": "turn error stamp is stale"})
+	case errors.Is(err, service.ErrTurnErrorNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "turn error not found"})
+	case errors.Is(err, service.ErrTurnErrorStampRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stamp is required"})
+	default:
+		handleNotFound(c, h.logger, err, "task not found")
+	}
+}
+
 type markSessionReadRequest struct {
 	MessageID string `json:"message_id"`
 }
