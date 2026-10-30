@@ -79,3 +79,44 @@ func TestPluginCleanupAfterFrozenAgentctlDestroysWithUncertainDrain(t *testing.T
 	require.Equal(t, pluginDrainOutcomeUncertain, operations.destroyRequest.GetDrainOutcome())
 	require.Nil(t, operations.destroyRequest.GetDrainReceipt())
 }
+
+// A read lease held across a call to a frozen agentctl (a git status snapshot
+// waits out the 60 s client timeout) must not keep the stop waiting for the
+// write side of the lifecycle lock either, before or after the runtime stop.
+func TestStopAgentWithReason_PluginRemoteBusyAgentctlLeaseLeavesBudgetForCleanup(t *testing.T) {
+	log := newTestRegistryLogger()
+	backend := &MockExecutor{name: executor.NamePluginRemote}
+	registry := NewExecutorRegistry(log)
+	registry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	execution := &AgentExecution{
+		ID: "exec-plugin-busy", SessionID: "session-plugin-busy", TaskID: "task-plugin-busy",
+		RuntimeName: executor.NamePluginRemote, agentctl: hungAgentctlClient(t),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	_, release := execution.AcquireAgentCtlClient()
+	leaseReleased := time.AfterFunc(5*time.Second, release)
+	t.Cleanup(func() {
+		if leaseReleased.Stop() {
+			release()
+		}
+	})
+
+	const budget = 3 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	err := mgr.StopAgentWithReason(ctx, "exec-plugin-busy", StopReasonTaskTreeArchived, false)
+
+	require.NoError(t, err)
+	require.NoError(t, ctx.Err(), "waiting for the busy client consumed the entire archive budget")
+	require.Len(t, backend.stopInstanceCalls, 1)
+	require.True(t, backend.stopInstanceCalls[0].AgentStopFailed)
+	_, exists := mgr.executionStore.Get("exec-plugin-busy")
+	require.False(t, exists)
+
+	require.Eventually(t, func() bool {
+		return execution.currentAgentCtlClient() == nil
+	}, 10*time.Second, 50*time.Millisecond, "the detach must finish once the lease is released")
+}

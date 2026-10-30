@@ -1468,9 +1468,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// section before any cleanup or event snapshot can acquire prompt state.
 	// Failed runtime stops intentionally retain the closed-but-reusable client so
 	// a later retry can issue the agentctl stop request again.
-	execution.agentctlLifecycleMu.Lock()
-	execution.detachAgentctlClient()
-	execution.agentctlLifecycleMu.Unlock()
+	execution.detachAgentctlAfterStop(ctx)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1582,7 +1580,19 @@ func (m *Manager) stopExecutionAgentctl(
 	execution *AgentExecution,
 	force bool,
 ) bool {
-	execution.agentctlLifecycleMu.Lock()
+	if execution.RuntimeName == executor.NamePluginRemote {
+		lockCtx, cancelLock := pluginRemoteGracefulStopContext(ctx, execution.RuntimeName)
+		locked := execution.lockAgentctlLifecycleWithin(lockCtx)
+		cancelLock()
+		if !locked {
+			m.logger.Warn("agentctl is busy; stopping without a graceful agentctl stop",
+				zap.String("execution_id", executionID))
+			execution.closeAgentctlWhenIdle()
+			return true
+		}
+	} else {
+		execution.agentctlLifecycleMu.Lock()
+	}
 	defer execution.agentctlLifecycleMu.Unlock()
 	client := execution.currentAgentCtlClient() // protected by agentctlLifecycleMu
 	if client == nil {
