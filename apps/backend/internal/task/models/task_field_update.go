@@ -4,6 +4,7 @@ import v1 "github.com/kandev/kandev/pkg/api/v1"
 
 // TaskFieldUpdate retains request presence until the current task row is locked.
 type TaskFieldUpdate struct {
+	ExecutionGrade *string
 	Title          *string
 	Description    *string
 	Priority       *string

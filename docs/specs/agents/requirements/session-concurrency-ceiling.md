@@ -139,9 +139,34 @@ bounded instance capacity, so that one installation does not overload its host.
   separate limit. The default maximum offered after enabling shall not activate
   the ceiling before the user saves.
 
+### REQ-AGENTS-SESSION-CEILING-003: Opt into total and execution-grade limits
+
+**Intent:** Administrators can explicitly include manual task launches in a
+shared total and per-grade capacity policy without changing automatic-only defaults.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-003.1:** The absent setting remains disabled with
+  the automatic-only policy. The optional all-execution policy applies the total
+  and configured grade limits together; saving settings preserves admitted work.
+- **AC-AGENTS-SESSION-CEILING-003.2:** Profiles and tasks accept explicit grade
+  names. An empty value is unconfigured. A task's nonempty grade overrides its
+  selected logical profile's grade. Prepared profiles preserve the value, and
+  admission freezes it on the session rather than rereading later edits.
+- **AC-AGENTS-SESSION-CEILING-003.3:** Missing configuration and unknown admitted
+  grades remain distinguishable from zero usage. Reservations and persisted
+  active sessions are counted once under the existing admission owner lock.
+- **AC-AGENTS-SESSION-CEILING-003.4:** All-policy deferred launches replay in
+  arrival order. A selected workflow destination retains its identity through
+  admission and rechecks capacity if that selection loses its promotion.
+- **AC-AGENTS-SESSION-CEILING-003.5:** Settings expose total and grade limits;
+  queue status exposes the same admission snapshot, including unavailable and
+  stale observations. This policy does not change workflow WIP limits.
+
 ## Out of scope
 
 - Per-workspace or per-user ceilings.
-- Changing workflow WIP limits or imposing a hard limit on manual launches.
+- Changing workflow WIP limits or changing manual-launch behavior under the
+  default automatic-only policy.
 - A new release toggle, YAML setting, or automatic CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.

@@ -37,11 +37,11 @@ func (s *Service) publishTaskUpdatedByID(ctx context.Context, taskID string) {
 	s.publishTaskUpdated(ctx, task)
 }
 
-// deferCeilingRefusal persists a ceiling_deferred record for an automatic launch
+// deferCeilingRefusal persists a ceiling_deferred record for a refused launch
 // the admission controller refused, merging it into whatever the task's shared
 // deferred_launch value already holds (AC-46/AC-46a) under a row-locked
-// compare-and-set (AC-12e/AC-40). The stored origin is always automatic: AC-13c
-// states a manual launch is never deferred, so there is nothing else to record.
+// compare-and-set (AC-12e/AC-40). All-policy admission can defer manual launches,
+// so the trusted admission origin must survive alongside the first payload.
 //
 // kind and payload describe the launch to replay; reasonCode is carried onto the
 // record's bookkeeping (AC-22a) and is never nested with the payload. sessionID,
@@ -49,7 +49,7 @@ func (s *Service) publishTaskUpdatedByID(ctx context.Context, taskID string) {
 // card carrier; sessionID is empty for seam 1, which AC-49 excludes entirely.
 func (s *Service) deferCeilingRefusal(
 	ctx context.Context, taskID, sessionID string, kind models.CeilingLaunchKind, payload map[string]interface{},
-	reasonCode string, population int, populationKnown bool, ceiling int,
+	reasonCode string, population int, populationKnown bool, ceiling int, origins ...launchOrigin,
 ) error {
 	// The admission lock protects only the read/merge/CAS sequence. State
 	// repair, card surfacing, and task publication can invoke other runtime
@@ -77,7 +77,7 @@ func (s *Service) deferCeilingRefusal(
 			deferral := models.CeilingDeferral{
 				Kind:            kind,
 				Payload:         payload,
-				Origin:          string(launchOriginAutomatic),
+				Origin:          string(ceilingAdmissionOrigin(origins...)),
 				ReasonCode:      reasonCode,
 				QueuedAt:        time.Now(),
 				Population:      population,
@@ -92,7 +92,7 @@ func (s *Service) deferCeilingRefusal(
 					result = fmt.Errorf("comparing deferred launch payloads for task %s: %w", taskID, cmpErr)
 					return
 				}
-				if !equivalent {
+				if !equivalent || !sameCeilingAdmissionOrigin(existingCeiling, deferral) {
 					// A different launch: retain the one already stored and report
 					// the collision rather than losing either payload silently.
 					s.logger.Zap().Warn("ceiling refusal superseded by an earlier pending deferral for the same task",

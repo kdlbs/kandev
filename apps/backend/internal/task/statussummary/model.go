@@ -98,9 +98,13 @@ type LaunchQueueSummary struct {
 }
 
 type LaunchQueueCapacity struct {
-	InUse      int       `json:"in_use"`
-	Limit      int       `json:"limit"`
-	ObservedAt time.Time `json:"observed_at"`
+	Policy             string         `json:"policy,omitempty"`
+	GradeInUse         map[string]int `json:"grade_in_use,omitempty"`
+	GradeLimits        map[string]int `json:"grade_limits,omitempty"`
+	NeedsConfiguration bool           `json:"needs_configuration,omitempty"`
+	InUse              int            `json:"in_use"`
+	Limit              int            `json:"limit"`
+	ObservedAt         time.Time      `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {

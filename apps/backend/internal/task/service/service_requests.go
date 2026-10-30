@@ -73,6 +73,7 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
+	ExecutionGrade string                `json:"execution_grade,omitempty"`
 	WorkspaceID    string                `json:"workspace_id"`
 	WorkflowID     string                `json:"workflow_id"`
 	WorkflowStepID string                `json:"workflow_step_id"`
@@ -195,6 +196,7 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest contains the data for updating a task
 type UpdateTaskRequest struct {
+	ExecutionGrade *string                `json:"execution_grade,omitempty"`
 	Title          *string                `json:"title,omitempty"`
 	Description    *string                `json:"description,omitempty"`
 	Priority       *string                `json:"priority,omitempty"`

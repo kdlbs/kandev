@@ -916,6 +916,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		name string
 		stmt string
 	}{
+		{"execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
 		{"archived_by_cascade_id", `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`},
 		{"initial_workspace_layout", `ALTER TABLE tasks ADD COLUMN initial_workspace_layout TEXT NOT NULL DEFAULT ''`},
 		{"wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`},
@@ -972,6 +973,7 @@ func taskPriorityMigrationStatements() []string {
 			state TEXT DEFAULT 'TODO',
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
+			execution_grade TEXT NOT NULL DEFAULT '',
 			position INTEGER DEFAULT 0,
 			wip_admitted INTEGER NOT NULL DEFAULT 1,
 			queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1009,7 +1011,7 @@ func taskPriorityMigrationStatements() []string {
 		// meaningful "no identity" state.
 		`INSERT INTO tasks_priority_new (
 			executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
+			state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
 			labels, identifier,
@@ -1018,7 +1020,7 @@ func taskPriorityMigrationStatements() []string {
 		) SELECT
 			COALESCE(executor_actor_user_id,''), id, COALESCE(workspace_id,''), COALESCE(initial_workspace_layout,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), workflow_agent_overrides, title, COALESCE(description,''),
-			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
+			COALESCE(state,'TODO'), 'medium', execution_grade, COALESCE(position,0),
 			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),
 			COALESCE(parent_id,''), COALESCE(autopilot_enabled,0), archived_at,
