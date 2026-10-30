@@ -177,6 +177,12 @@ The backend persists the snapshot hash and submission association before deliver
 Retries reuse the same snapshot and final prompt hash.
 An uncertain delivery cannot clear the checkpoint or cause another automatic injection.
 
+The replacement runs on the next harness generation with its own delivery stream.
+Kandev commits that generation only after launch, so setup events can be retained
+first. Delivery replays them from the start of the stream and admits them only
+after the commit, as specified in
+[successor setup replay](../../platform/system-design/durable-agent-stream-processing.md#successor-setup-replay).
+
 ## Workspace identity
 
 The agent-visible CWD differs from the host source path and worktree display name.
@@ -339,3 +345,22 @@ Root `AGENTS.md` documents the family when implementation ships.
 - [Durable sessions across harness generations](../../../decisions/2026-09-10-durable-harness-session-boundaries.md)
 - [Runtime configuration after context reset](../../../decisions/2026-08-18-context-reset-preserves-runtime-configuration.md)
 - [Explicit branch recovery](../../../decisions/2026-08-31-explicit-new-branch-session-recovery.md)
+
+
+## Legacy generation-zero continuation setup
+
+The existing explicit continuation producer can authorize expected generation
+zero and prepare snapshot generation one before any canonical generation
+exists. A native-bound or resumed candidate cannot use ordinary fresh-bootstrap
+replay. On typed positive absence only, the successor setup preflight may use
+an optional read-only repository check for that exact authorized unfinished
+blocked attempt, prepared snapshot and current execution/incarnation. A missing
+reader, failed read, cancelled session, completed/unauthorized attempt, changed
+identity or existing generation/submission/cursor does not grant the exception.
+
+Retained journal setup must remain complete and unacknowledged with no
+unresolved, retained or truncated submissions. Admission permits reading setup
+from zero only. The existing cancellable first-generation wait still prevents
+receipts/projection until the real native generation commits; no new deadline,
+recovery mode, schema, business-prompt replay or unknown-outcome resolution is
+introduced.

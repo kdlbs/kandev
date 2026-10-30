@@ -253,3 +253,27 @@ The predecessor's retained stream, submissions and recovery block stay as
 history; current-generation admission no longer consults them. Fresh start never
 receives, projects, or acknowledges the predecessor stream.
 Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).
+
+## Successor setup replay
+
+An authorized context continuation commits its successor generation only after
+launch, and a fresh start commits it from the ACP session-created event. Either
+successor can retain setup events on its own stream before that commit. When the
+stream has no SQL cursor, preflight accepts a replay from zero only for an
+execution that replaces its predecessor, an adjacent pending successor in SQL,
+a fully retained and unacknowledged stream, and no unresolved or retained prompt
+submissions. Authenticated descriptor validation still runs first. Preflight
+writes no cursor or receipt. Event processing for both successor kinds waits
+under the bounded successor wait for the committed generation and checks the
+live owner before any receipt or projection.
+Delivery: [Successor setup replay](../../../plans/continuation-setup-replay/plan.md).
+
+
+## Legacy generation-zero continuation setup
+
+The explicit legacy continuation preflight uses the optional read-only pending
+checkpoint predicate described in [harness continuity](../../agents/system-design/harness-session-continuity.md#legacy-generation-zero-continuation-setup).
+Admission permits retained setup replay from zero; the existing first-generation
+wait still prevents receipts/projection until the canonical native generation
+commits and remains caller-cancellable. Ordinary fresh/successor behavior,
+unknown delivery reconciliation, proof/claim authority and deadlines are unchanged.

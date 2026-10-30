@@ -88,6 +88,43 @@ func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecutio
 	return errors.Is(err, models.ErrTaskSessionNotFound)
 }
 
+// A fresh-start replacement or authorized context continuation can retain
+// setup events before SQL commits its successor generation. Replay them from
+// zero; event processing still waits for that commit before any receipt.
+func canReplaySuccessorSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
+	stream := status.Stream
+	if !execution.replacesPredecessorGeneration() || stream == nil || stream.FirstRetained != 1 || stream.Acknowledged != 0 ||
+		status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
+		return false
+	}
+	reader, supported := delivery.(harnessGenerationReader)
+	if !supported {
+		return false
+	}
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	if execution.ForceContextContinuation && errors.Is(err, models.ErrTaskSessionNotFound) {
+		return canReplayLegacyContinuationSetupEvents(ctx, execution, delivery)
+	}
+	return err == nil && replacementGenerationPending(execution, current)
+}
+
+type legacyContinuationBootstrapReader interface {
+	HasPreparedLegacyContinuationBootstrap(context.Context, string, string, string) (bool, error)
+}
+
+func canReplayLegacyContinuationSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository) bool {
+	if execution.DeliveryHarnessGeneration != 1 || !execution.deliveryBootstrap.Load() ||
+		execution.SessionID == "" || execution.DeliveryIncarnationID == "" || execution.ID == "" {
+		return false
+	}
+	prepared, supported := delivery.(legacyContinuationBootstrapReader)
+	if !supported {
+		return false
+	}
+	valid, err := prepared.HasPreparedLegacyContinuationBootstrap(ctx, execution.SessionID, execution.DeliveryIncarnationID, execution.ID)
+	return err == nil && valid
+}
+
 func canUseLegacyEmptyDelivery(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, err error) bool {
 	var response *agentctl.DeliveryHTTPError
 	if execution.DeliveryMode == DurableDeliveryV1 || !errors.As(err, &response) ||
