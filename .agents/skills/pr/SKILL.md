@@ -153,9 +153,12 @@ required screenshot embedding in step 7 is complete.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
-   - Keep captures for one spec file in one test, or use separate spec files.
-     `PrAssetCapture.flush()` replaces that spec file's manifest entries, so
-     several tests that flush separately leave only the last test's assets.
+   - Keep captures for one spec file in a single test and use that test's one
+     shared `prCapture` instance. Each test fixture flushes, and
+     `PrAssetCapture.flush()` replaces manifest entries with the same capture
+     key, so multiple tests or default-key instances leave only the last
+     flush's assets. If multiple instances are necessary, give them distinct
+     `captureKey` values or use separate spec files.
    - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
      managed-runner invocation. Capture desktop and mobile assets in one
      invocation when possible; if separate runs are necessary, preserve/merge

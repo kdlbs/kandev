@@ -88,7 +88,7 @@ gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>
 gh run download <run-id> --name e2e-retry-summary --dir <tmp>
 python3 scripts/playwright-blob-audit <tmp>
 jq '{counts, flake, flaky_or_retried: [.tests[] | select(.outcome == "flaky" or .attempts > 1) | {key, attempts, statuses, outcome}]}' \
-  <tmp>/e2e-retry-summary/retry-summary.json
+  <tmp>/retry-summary.json
 ```
 
 The blob audit reports retries, errors, parse failures, and unexpected statuses.
