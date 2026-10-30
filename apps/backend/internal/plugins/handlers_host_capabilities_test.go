@@ -28,8 +28,8 @@ func TestHostCapabilitiesReadIsAdminOnlyAndListsTheRegistry(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Capabilities) != 16 {
-		t.Fatalf("capabilities = %d, want the 16 registry names", len(body.Capabilities))
+	if len(body.Capabilities) != 17 {
+		t.Fatalf("capabilities = %d, want the 17 registry names", len(body.Capabilities))
 	}
 	first := body.Capabilities[0]
 	if first.Name == "" || first.MinVersion != 1 || first.MaxVersion != 1 || first.IntroducedIn == "" || first.Deprecated {

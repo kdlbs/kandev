@@ -66,6 +66,7 @@ var registry = []Entry{
 	{Name: "typed_profile_values", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "secret_references", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "provision_refusal", Min: 1, Max: 1, IntroducedIn: firstRelease, Requires: []string{destroyCheckpoints}},
+	{Name: "worker_api_url", Min: 1, Max: 1, IntroducedIn: firstRelease, Requires: []string{"api_url_forward"}},
 }
 
 // retired is append-only. testdata/retired.golden holds the previous release's

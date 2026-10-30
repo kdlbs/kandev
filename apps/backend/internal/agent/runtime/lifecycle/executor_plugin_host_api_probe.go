@@ -52,7 +52,7 @@ func (r *PluginRemoteExecutor) probeForwardedHostAPI(ctx context.Context, launch
 	probe := r.hostAPIProbes.Begin(launch.request.TaskEnvironmentID)
 	defer probe.End()
 	for attempt := 1; ; attempt++ {
-		err := control.ProbeHostAPI(ctx, launch.hostAPIURL, probe.Token())
+		err := control.ProbeHostAPI(ctx, launch.probeBaseURL(), probe.Token())
 		if err == nil || probe.Reached() {
 			return nil
 		}

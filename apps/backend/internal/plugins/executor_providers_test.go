@@ -126,8 +126,8 @@ func TestContractProbeSendsTheRegistryAndPassesEachResponseToTheObserver(t *test
 	if !errors.Is(err, ErrExecutorCapabilityMismatch) {
 		t.Fatalf("a provider that requires a capability and echoes none must be rejected at activation, got %v", err)
 	}
-	if len(probe.request.GetHostCapabilities()) != 16 {
-		t.Fatalf("probe carried %d registry rows, want 16", len(probe.request.GetHostCapabilities()))
+	if len(probe.request.GetHostCapabilities()) != 17 {
+		t.Fatalf("probe carried %d registry rows, want 17", len(probe.request.GetHostCapabilities()))
 	}
 	probe.response = &pluginsdk.ValidateExecutorProfileResponse{
 		ImplementedCapabilities: []*pluginsdk.ExecutorCapabilityVersion{{Name: "workspace_descriptor", Version: 1}},
