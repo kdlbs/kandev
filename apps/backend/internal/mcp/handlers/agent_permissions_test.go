@@ -164,6 +164,21 @@ func TestAgentPermissionHandlersPreserveStableDomainFailures(t *testing.T) {
 	}
 }
 
+func TestAgentPermissionHandlersPreserveAuditCodeForPostDeliveryFinalizationFailure(t *testing.T) {
+	h := &Handlers{
+		agentPermissionSvc: &permissionServiceStub{resolveErr: orchestrator.ErrPermissionFinalizationFailed},
+		logger:             testLogger(t).WithFields(),
+	}
+	resp, err := h.handleResolveAgentPermission(mcporigin.WithTrustedExternalTransport(context.Background()), makeWSMessage(t, ws.ActionMCPResolveAgentPermission, map[string]any{
+		"task_id": "task-1", "session_id": "session-1", "request_id": "request-1",
+		"pending_id": "pending-1", "option_id": "allow-once",
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Contains(t, string(resp.Payload), `"code":"permission_audit_failed"`)
+	assert.Contains(t, string(resp.Payload), "Permission resolution could not be recorded")
+}
+
 func TestAgentPermissionHandlersHideUnexpectedErrors(t *testing.T) {
 	stub := &permissionServiceStub{listErr: errors.New("database password SECRET_CANARY")}
 	h := &Handlers{agentPermissionSvc: stub, logger: testLogger(t).WithFields()}

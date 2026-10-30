@@ -1718,6 +1718,27 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 	return nil
 }
 
+// UpdatePermissionPresentation conditionally changes one exact permission
+// row's presentation. Only a matched update publishes a message event, so a
+// concurrent claim or replacement never produces a presentation change.
+func (s *Service) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	message, updated, err := s.messages.UpdatePermissionPresentation(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to update permission presentation",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("presentation", string(request.Presentation)),
+			zap.Error(err))
+		return nil, false, err
+	}
+	if updated && message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	}
+	return message, updated, nil
+}
+
 // ClaimPermissionResolution durably serializes the first resolver before any
 // option is delivered to the live agent process.
 func (s *Service) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {

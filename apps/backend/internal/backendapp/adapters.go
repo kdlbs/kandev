@@ -1835,7 +1835,7 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 }
 
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1844,8 +1844,13 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
-	if decision != nil {
-		metadata["permission_decision"] = decision
+	presentation := messageOptions.Presentation
+	if presentation == "" {
+		presentation = models.PermissionPresentationInteractive
+	}
+	metadata[models.PermissionPresentationMetadataKey] = string(presentation)
+	if messageOptions.Decision != nil {
+		metadata["permission_decision"] = messageOptions.Decision
 		metadata["status"] = string(models.PermissionStatusApproved)
 	}
 
@@ -1872,6 +1877,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		return "", err
 	}
 	return msg.ID, nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// transcript row's presentation.
+func (a *messageCreatorAdapter) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return a.svc.UpdatePermissionPresentation(ctx, request)
 }
 
 // UpdatePermissionMessage updates a permission message's status
