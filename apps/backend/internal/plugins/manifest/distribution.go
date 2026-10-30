@@ -9,6 +9,7 @@ import (
 const (
 	DistributionSchemaVersion = 1
 	DistributionKindCanvas    = "canvas"
+	DistributionKindTheme     = "theme"
 	SourceModeStatic          = "static"
 	SourceModeProject         = "project"
 )
@@ -31,6 +32,9 @@ func (m *Manifest) IsCanvasDistribution() bool {
 func (m *Manifest) validateDistribution() []error {
 	if m.Distribution == nil {
 		return nil
+	}
+	if m.IsThemeDistribution() {
+		return m.validateThemes()
 	}
 	errs := validateDistributionDeclaration(m)
 	errs = append(errs, validateDistributionApplication(m)...)

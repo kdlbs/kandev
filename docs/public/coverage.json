@@ -1108,6 +1108,29 @@
         "scripts/lint-harness-files.test.py",
         ".github/scripts/lint-action-pinning_test.py"
       ]
+    },
+    {
+      "id": "application-themes",
+      "audiences": [
+        "user",
+        "operator",
+        "contributor"
+      ],
+      "stability": "stable",
+      "docs": [
+        "appearance",
+        "themes-authoring"
+      ],
+      "sources": [
+        "apps/backend/internal/plugins/themes/validate.go",
+        "apps/backend/internal/plugins/theme_reviews.go",
+        "apps/web/components/theme/app-theme.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/plugins/themes/sample_test.go",
+        "apps/web/e2e/tests/settings/application-themes.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-application-themes.spec.ts"
+      ]
     }
   ],
   "exclusions": {

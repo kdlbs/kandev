@@ -143,7 +143,7 @@ func (s *Service) RunAutoUpdatePass(ctx context.Context) (AutoUpdateOutcome, err
 	if err != nil {
 		return AutoUpdateOutcome{}, fmt.Errorf("plugins: auto-update catalog fetch: %w", err)
 	}
-	return s.applyAutoUpdates(ctx, catalog.Plugins), nil
+	return s.applyAutoUpdates(ctx, append(catalog.Plugins, catalog.Themes...)), nil
 }
 
 // autoUpdateCandidates returns the set of active, opted-in plugin ids eligible
@@ -183,7 +183,7 @@ func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.Ca
 			continue
 		}
 		from := entry.InstalledVersion
-		if _, err := s.InstallFromURL(ctx, entry.PackageURL); err != nil {
+		if _, err := s.installMarketplaceUpdate(ctx, entry); err != nil {
 			outcome.Failed = append(outcome.Failed, AutoUpdateFailure{ID: entry.ID, To: entry.Version, Error: err.Error()})
 			s.log.Warn("plugins: auto-update failed",
 				zap.String("plugin_id", entry.ID), zap.String("from", from),

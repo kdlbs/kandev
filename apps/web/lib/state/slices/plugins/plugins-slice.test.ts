@@ -90,3 +90,15 @@ describe("plugins slice", () => {
     expect(store.getState().plugins.items.map((p) => p.id)).toEqual(["a", "c"]);
   });
 });
+
+// @covers AC-UI-APP-THEMES-002.3
+it("retains newer theme inventory and clears content on identity reset", () => {
+  const store = makeStore();
+  store.getState().setThemeInventory({ boot_id: "boot", revision: 2, themes: [] });
+  store.getState().setThemeInventory({ boot_id: "boot", revision: 1, themes: [] });
+  expect(store.getState().themeInventory?.revision).toBe(2);
+  store.getState().setThemeDefinition("digest", { schema_version: 1, base: "dark" });
+  store.getState().resetThemes();
+  expect(store.getState().themeInventory).toBeNull();
+  expect(store.getState().themeDefinitions).toEqual({});
+});

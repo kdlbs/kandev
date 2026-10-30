@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
-import type { BeforeMount, OnMount } from "@monaco-editor/react";
-import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE, KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
+import type { OnMount } from "@monaco-editor/react";
+import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from "@/lib/theme/editor-theme";
 import type { PromptReference } from "@/lib/prompts/expand-prompt-references";
 import {
   createPlaceholderCompletionProvider,
@@ -11,7 +11,11 @@ import {
   scopeCompletionProviderToModel,
   type ScriptPlaceholder,
 } from "./script-editor-completions";
+import { useTheme } from "@/components/theme/app-theme";
+import { initMonacoThemes } from "@/components/editors/monaco/monaco-init";
 import { useTranslation } from "react-i18next";
+
+initMonacoThemes();
 
 // A component rather than an inline literal so the label resolves at render:
 // `dynamic()` is evaluated at module load, where a `t()` would freeze the copy
@@ -173,9 +177,7 @@ export function ScriptEditor({
     executorType,
     mentionPrompts,
   });
-  const handleBeforeMount: BeforeMount = useCallback((monaco) => {
-    monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
-  }, []);
+  const { effectiveTheme, resolvedTheme } = useTheme();
 
   return (
     <div data-testid={testId} className="h-full w-full">
@@ -184,9 +186,8 @@ export function ScriptEditor({
         language={language}
         value={value}
         onChange={(v) => onChange(v ?? "")}
-        beforeMount={handleBeforeMount}
         onMount={handleMount}
-        theme="kandev-dark"
+        theme={effectiveTheme.definition ? "kandev-custom" : `kandev-${resolvedTheme}`}
         options={{
           ariaLabel,
           minimap: { enabled: false },

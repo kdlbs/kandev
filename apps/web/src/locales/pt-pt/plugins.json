@@ -273,5 +273,19 @@
   "webAppUnavailable": "Este canvas não está disponível.",
   "workspace": "Área de trabalho",
   "writeCapabilities": "Acesso de escrita",
-  "yes": "sim"
+  "yes": "sim",
+  "themes": "Temas",
+  "themeImport": "Importar tema",
+  "themeImportDescription": "Reveja um pacote de temas ou ficheiro JSON do VS Code antes de instalar.",
+  "themeFile": "Ficheiro de tema (.tar.gz, .json, .jsonc)",
+  "themeBase": "Aspeto base (automático quando declarado)",
+  "themeReview": "Rever tema",
+  "themeInstall": "Instalar temas",
+  "themeInstalled": "Instalado. Escolha um tema em Aspeto para o aplicar.",
+  "themeDataOnly": "Este pacote contém apenas dados de cores e não tem permissões de execução.",
+  "themeReport": "Mapeados: {{mapped}}. Aproximados: {{approximated}}. Ignorados: {{ignored}}. Funções com cores base: {{fallback}}.",
+  "themeCompatibility": "As cores não suportadas usam a paleta base selecionada. A sintaxe pode variar entre visualizadores. Reveja o contraste antes de guardar.",
+  "themeEmpty": "Não foram encontrados temas. Importe um ficheiro de tema ou adicione uma fonte ao mercado.",
+  "themeUnavailable": "O tema guardado está indisponível. A usar o aspeto base.",
+  "themeBrowse": "Explorar temas"
 }

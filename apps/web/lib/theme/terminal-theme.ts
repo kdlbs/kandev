@@ -59,7 +59,7 @@ export function getTerminalTheme(container: HTMLElement, resolvedTheme: Resolved
   const v = (name: string) => s.getPropertyValue(name).trim();
   const ansiColors = resolvedTheme === "light" ? lightAnsiColors : darkAnsiColors;
 
-  return {
+  const theme: ITheme = {
     background: v("--background"),
     foreground: v("--foreground"),
     cursor: v("--foreground"),
@@ -67,6 +67,18 @@ export function getTerminalTheme(container: HTMLElement, resolvedTheme: Resolved
     selectionBackground: v("--muted"),
     ...ansiColors,
   };
+  for (const key of Object.keys(theme) as Exclude<keyof ITheme, "extendedAnsi">[]) {
+    const role =
+      (
+        { selectionBackground: "selection", cursorAccent: "cursor-accent" } as Record<
+          string,
+          string
+        >
+      )[key] ?? key;
+    const override = v(`--theme-terminal-${role}`);
+    if (override) theme[key] = override;
+  }
+  return theme;
 }
 
 /** Build the dark palette used by terminals that are independent of the app theme. */

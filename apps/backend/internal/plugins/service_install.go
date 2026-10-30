@@ -46,6 +46,10 @@ const downloadTimeout = 60 * time.Second
 // survive) and restarts the previous version's process, so a failed upgrade
 // attempt never destroys a previously working install.
 func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
+	return s.install(ctx, r, nil)
+}
+
+func (s *Service) install(ctx context.Context, r io.Reader, review *preparedTheme) (*store.Record, error) {
 	result, err := s.extractPackage(r)
 	if err != nil {
 		return nil, err
@@ -79,6 +83,15 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock.Lock()
 	defer lock.Unlock()
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if rec, err, handled := s.installThemeProfile(result, oldRec, review); handled {
+		return rec, err
+	}
+
+	return s.installRuntimePackage(ctx, result, oldRec, hadOldRec, func() { s.agentToolInstallMu.Unlock(); catalogLocked = false })
+}
+
+func (s *Service) installRuntimePackage(ctx context.Context, result *pkgtar.InstallResult, oldRec *store.Record, hadOldRec bool, unlockCatalog func()) (*store.Record, error) {
+
 	if (hadOldRec && len(oldRec.ExecutorProviders) > 0) || len(result.Manifest.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(result.Manifest.ID)
 		defer s.reopenExecutorProviderAdmissionIfActive(result.Manifest.ID)
@@ -87,33 +100,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 
-	if hadOldRec {
-		if err := s.guardExecutorProviderUpgrade(ctx, oldRec, result.Manifest); err != nil {
-			_ = os.RemoveAll(result.InstallPath)
-			return nil, err
-		}
-	}
-	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
-		// pkgtar.Install has already atomically extracted exactly this new
-		// version before manifest-wide active-owner checks can run. Remove
-		// only that fresh version on rejection; otherwise a failed ownership
-		// check strands it and turns a later valid install into ErrVersionExists.
-		_ = os.RemoveAll(result.InstallPath)
+	wasRunning, err := s.preparePluginReplacement(ctx, result, oldRec, hadOldRec)
+	if err != nil {
 		return nil, err
-	}
-	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
-	// Replacing an active plugin is an unload/reload boundary. Its old
-	// credential binding may no longer describe the successor, even when both
-	// package versions declare the same provider, so revoke before stopping the
-	// old runtime and exposing the new record.
-	if hadOldRec && oldRec.Status == StatusActive {
-		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
-			return nil, err
-		}
-		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
-	}
-	if wasRunning {
-		s.runtime.Stop(result.Manifest.ID)
 	}
 
 	rec := &store.Record{
@@ -134,30 +123,12 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	if rec.InstallationID == "" {
 		rec.InstallationID = uuid.NewString()
 	}
-	if err := s.store.Save(rec); err != nil {
-		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
-		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
-	}
-	if err := s.reviewInstalledApprovals(rec); err != nil {
-		if hadOldRec {
-			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
-				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
-					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
-				s.registry.Add(rec)
-				return nil, errors.Join(err, fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr))
-			}
-		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
-			s.log.Warn("plugins: failed to delete plugin record after approval review error",
-				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
-			s.registry.Add(rec)
-			return nil, errors.Join(err, fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr))
-		}
-		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+	if err := s.persistInstalledRecord(rec, oldRec, hadOldRec, wasRunning, result.InstallPath); err != nil {
 		return nil, err
 	}
+
 	s.registry.Add(rec)
-	s.agentToolInstallMu.Unlock()
-	catalogLocked = false
+	unlockCatalog()
 
 	activateErr := s.activate(rec)
 	if activateErr == nil {
@@ -176,6 +147,64 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+func (s *Service) preparePluginReplacement(ctx context.Context, result *pkgtar.InstallResult, oldRec *store.Record, hadOldRec bool) (bool, error) {
+	if hadOldRec {
+		if err := s.guardExecutorProviderUpgrade(ctx, oldRec, result.Manifest); err != nil {
+			_ = os.RemoveAll(result.InstallPath)
+			return false, err
+		}
+	}
+	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
+		// pkgtar.Install has already atomically extracted exactly this new
+		// version before manifest-wide active-owner checks can run. Remove
+		// only that fresh version on rejection; otherwise a failed ownership
+		// check strands it and turns a later valid install into ErrVersionExists.
+		_ = os.RemoveAll(result.InstallPath)
+		return false, err
+	}
+	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
+	// Replacing an active plugin is an unload/reload boundary. Its old
+	// credential binding may no longer describe the successor, even when both
+	// package versions declare the same provider, so revoke before stopping the
+	// old runtime and exposing the new record.
+	if hadOldRec && oldRec.Status == StatusActive {
+		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
+			return false, err
+		}
+		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
+	}
+	if wasRunning {
+		s.runtime.Stop(result.Manifest.ID)
+	}
+
+	return wasRunning, nil
+}
+
+func (s *Service) persistInstalledRecord(rec, oldRec *store.Record, hadOldRec, wasRunning bool, installPath string) error {
+	if err := s.store.Save(rec); err != nil {
+		s.rollbackFailedInstall(installPath, oldRec, hadOldRec && wasRunning)
+		return fmt.Errorf("plugins: persist installed record: %w", err)
+	}
+	if err := s.reviewInstalledApprovals(rec); err != nil {
+		if hadOldRec {
+			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
+				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
+					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+				s.registry.Add(rec)
+				return errors.Join(err, fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr))
+			}
+		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
+			s.log.Warn("plugins: failed to delete plugin record after approval review error",
+				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+			s.registry.Add(rec)
+			return errors.Join(err, fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr))
+		}
+		s.rollbackFailedInstall(installPath, oldRec, hadOldRec && wasRunning)
+		return err
+	}
+	return nil
 }
 
 func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
@@ -399,6 +428,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	rec, err := s.Get(id)
 	if err != nil {
 		return err
+	}
+	if rec.IsThemeDistribution() {
+		return s.uninstallTheme(rec)
 	}
 	if len(rec.ExecutorProviders) > 0 {
 		s.closeExecutorProviderAdmission(id)

@@ -8,7 +8,7 @@ export type CatalogQuery = {
   q?: string;
   category?: string;
   sort?: "stars" | "name" | "recent";
-  kind?: "plugin" | "canvas";
+  kind?: "plugin" | "canvas" | "theme";
 };
 
 function toQueryString(query?: CatalogQuery): string {
@@ -37,6 +37,7 @@ export async function getMarketplaceCatalog(
   return {
     plugins: res.plugins ?? [],
     ...(res.canvases ? { canvases: res.canvases } : {}),
+    ...(res.themes ? { themes: res.themes } : {}),
     sources: res.sources ?? [],
   };
 }

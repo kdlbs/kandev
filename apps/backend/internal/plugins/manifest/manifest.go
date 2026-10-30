@@ -5,6 +5,7 @@
 package manifest
 
 import (
+	"bytes"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -25,13 +26,14 @@ const (
 
 // Manifest is the plugin registration manifest.
 type Manifest struct {
-	ID          string   `yaml:"id" json:"id"`
-	APIVersion  int      `yaml:"api_version" json:"api_version"`
-	Version     string   `yaml:"version" json:"version"`
-	DisplayName string   `yaml:"display_name" json:"display_name"`
-	Description string   `yaml:"description" json:"description"`
-	Author      string   `yaml:"author" json:"author"`
-	Categories  []string `yaml:"categories" json:"categories"`
+	Themes      []ThemeContribution `yaml:"themes,omitempty" json:"themes,omitempty"`
+	ID          string              `yaml:"id" json:"id"`
+	APIVersion  int                 `yaml:"api_version" json:"api_version"`
+	Version     string              `yaml:"version" json:"version"`
+	DisplayName string              `yaml:"display_name" json:"display_name"`
+	Description string              `yaml:"description" json:"description"`
+	Author      string              `yaml:"author" json:"author"`
+	Categories  []string            `yaml:"categories" json:"categories"`
 
 	// Icon is an optional package-relative path (e.g. "icon.svg") to an
 	// image the plugin ships for display in the marketplace and plugin
@@ -371,6 +373,13 @@ func Parse(data []byte) (*Manifest, error) {
 	var m Manifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, err
+	}
+	if m.IsThemeDistribution() {
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&m); err != nil {
+			return nil, err
+		}
 	}
 	return &m, nil
 }

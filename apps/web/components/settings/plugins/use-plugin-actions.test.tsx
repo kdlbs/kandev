@@ -2,8 +2,15 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
-import type { PluginRecord } from "@/lib/types/plugins";
+import type { PluginRecord, MarketplaceEntry } from "@/lib/types/plugins";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
+
+const prepareThemeURL = vi.fn();
+const commitThemeReview = vi.fn();
+vi.mock("@/lib/api/domains/themes-api", () => ({
+  prepareThemeURL: (...args: unknown[]) => prepareThemeURL(...args),
+  commitThemeReview: (...args: unknown[]) => commitThemeReview(...args),
+}));
 
 const loadPlugins = vi.fn(async () => {});
 const unloadPlugin = vi.fn();
@@ -80,6 +87,8 @@ function activeRecord(overrides: Partial<PluginRecord> = {}): PluginRecord {
 }
 
 beforeEach(() => {
+  prepareThemeURL.mockReset();
+  commitThemeReview.mockReset();
   loadPlugins.mockClear();
   unloadPlugin.mockClear();
   installPluginFromUrl.mockReset();
@@ -315,5 +324,87 @@ describe("usePluginActions — uninstall", () => {
     expect(toastError).toHaveBeenCalledWith("API key revoke failed");
     expect(unloadPlugin).not.toHaveBeenCalled();
     expect(result.current.uninstallBusy).toBe(false);
+  });
+});
+
+const themeRelease = {
+  id: "acme-tools",
+  kind: "theme",
+  version: "3.0.0",
+  package_url: "https://example.com/theme.tar.gz",
+  package_sha256: "a".repeat(64),
+} as MarketplaceEntry;
+
+describe("marketplace theme updates", () => {
+  it("prepares the exact release and commits it without loading executable UI", async () => {
+    const plugin = activeRecord({
+      ui: undefined,
+      distribution: { schema_version: 1, kind: "theme" },
+    });
+    getPlugin.mockResolvedValue(plugin);
+    prepareThemeURL.mockResolvedValue({ id: "review-1" });
+    commitThemeReview.mockResolvedValue({ plugin: { ...plugin, version: "3.0.0" } });
+    const { result } = renderHook(
+      () => ({ actions: usePluginActions(), stored: useAppStore((s) => s.plugins.items[0]) }),
+      { wrapper },
+    );
+    await act(async () => {
+      expect(await result.current.actions.marketplaceUpdate(themeRelease)).toEqual({
+        ok: true,
+        pluginId: plugin.id,
+      });
+    });
+    expect(prepareThemeURL).toHaveBeenCalledWith(
+      themeRelease.package_url,
+      themeRelease.id,
+      themeRelease.version,
+      themeRelease.package_sha256,
+    );
+    expect(commitThemeReview).toHaveBeenCalledWith("review-1");
+    expect(result.current.stored?.version).toBe("3.0.0");
+    expect(installPluginFromUrl).not.toHaveBeenCalled();
+    expect(loadPlugins).not.toHaveBeenCalled();
+  });
+  it.each(["prepare", "commit", "listing-kind", "installed-kind"])(
+    "preserves the installed copy on %s failure",
+    async (failure) => {
+      const plugin = activeRecord({
+        ui: undefined,
+        distribution:
+          failure === "installed-kind" ? undefined : { schema_version: 1, kind: "theme" },
+      });
+      getPlugin.mockResolvedValue(plugin);
+      prepareThemeURL.mockResolvedValue({ id: "review-1" });
+      commitThemeReview.mockResolvedValue({ plugin });
+      if (failure === "prepare") prepareThemeURL.mockRejectedValue(new Error("digest mismatch"));
+      if (failure === "commit") commitThemeReview.mockRejectedValue(new Error("review conflict"));
+      const { result } = renderHook(() => usePluginActions(), { wrapper });
+      let outcome: { ok: boolean } | undefined;
+      await act(async () => {
+        outcome = await result.current.marketplaceUpdate({
+          ...themeRelease,
+          kind: failure === "listing-kind" ? "plugin" : "theme",
+        });
+      });
+      expect(outcome?.ok).toBe(false);
+      expect(installPluginFromUrl).not.toHaveBeenCalled();
+      expect(loadPlugins).not.toHaveBeenCalled();
+      expect(toastError).toHaveBeenCalledOnce();
+      if (failure !== "commit") expect(commitThemeReview).not.toHaveBeenCalled();
+    },
+  );
+  it("retains ordinary executable plugin updates", async () => {
+    const plugin = activeRecord();
+    getPlugin.mockResolvedValue(plugin);
+    installPluginFromUrl.mockResolvedValue({ plugin });
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+    await act(async () => {
+      expect((await result.current.marketplaceUpdate({ ...themeRelease, kind: "plugin" })).ok).toBe(
+        true,
+      );
+    });
+    expect(installPluginFromUrl).toHaveBeenCalledWith(themeRelease.package_url);
+    expect(loadPlugins).toHaveBeenCalledOnce();
+    expect(prepareThemeURL).not.toHaveBeenCalled();
   });
 });

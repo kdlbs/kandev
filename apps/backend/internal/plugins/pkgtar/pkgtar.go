@@ -210,7 +210,7 @@ func Verify(r io.Reader) (*VerifyResult, error) {
 }
 
 func verifyArchive(r io.Reader, requireAllExecutables bool) (map[string][]byte, *VerifyResult, error) {
-	files, err := readArchive(r)
+	files, err := readProfileArchive(r)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -272,6 +272,9 @@ func validatePackageManifest(files map[string][]byte, requireAllExecutables bool
 	if err := m.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
+	if m.IsThemeDistribution() {
+		return m, validateThemeFiles(m, files)
+	}
 	if !m.IsManaged() {
 		return nil, fmt.Errorf("%w: manifest is not runtime-managed (runtime.type must be \"binary\")", ErrManifestInvalid)
 	}
@@ -290,6 +293,9 @@ func validatePackageManifest(files map[string][]byte, requireAllExecutables bool
 }
 
 func validateInstallManifest(files map[string][]byte, m *manifest.Manifest) (*manifest.Manifest, string, error) {
+	if m.IsThemeDistribution() {
+		return m, "", nil
+	}
 	execPath, ok := m.ExecutableFor(runtime.GOOS, runtime.GOARCH)
 	if !ok {
 		return nil, "", fmt.Errorf("%w: %s-%s", ErrPlatformNotSupported, runtime.GOOS, runtime.GOARCH)
@@ -438,6 +444,10 @@ func Remove(destRoot, id string) error {
 // — after that bounded read, so a mismatched/lied Size cannot smuggle more
 // decompressed data past either cap.
 func readArchive(r io.Reader) (map[string][]byte, error) {
+	return readArchiveLimited(r, maxPackageFileSize, maxPackageTotalSize, 0)
+}
+
+func readArchiveLimited(r io.Reader, fileLimit, totalLimit int64, fileCount int) (map[string][]byte, error) {
 	tr, closeReader, err := openTarGz(r)
 	if err != nil {
 		return nil, err
@@ -464,22 +474,28 @@ func readArchive(r io.Reader) (map[string][]byte, error) {
 			return nil, fmt.Errorf("%w: entry %q has unsupported type (symlinks/hardlinks/devices are not allowed)", ErrPathTraversal, hdr.Name)
 		}
 
+		if fileCount > 0 && len(files) >= fileCount {
+			return nil, fmt.Errorf("pkgtar: too many files")
+		}
 		name, err := cleanArchivePath(hdr.Name)
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Size > maxPackageFileSize {
+		if hdr.Size > fileLimit {
 			// Fast pre-check: reject an implausible declared size before
 			// even attempting the (still independently bounded) read.
-			return nil, fmt.Errorf("pkgtar: file %s exceeds max size of %d bytes", name, maxPackageFileSize)
+			return nil, fmt.Errorf("pkgtar: file %s exceeds max size of %d bytes", name, fileLimit)
 		}
-		data, err := readCapped(tr, maxPackageFileSize)
+		data, err := readCapped(tr, fileLimit)
 		if err != nil {
 			return nil, fmt.Errorf("pkgtar: reading %s: %w", name, err)
 		}
 		total += int64(len(data))
-		if total > maxPackageTotalSize {
-			return nil, fmt.Errorf("pkgtar: package exceeds max total size of %d bytes", maxPackageTotalSize)
+		if total > totalLimit {
+			return nil, fmt.Errorf("pkgtar: package exceeds max total size of %d bytes", totalLimit)
+		}
+		if _, exists := files[name]; exists {
+			return nil, fmt.Errorf("pkgtar: duplicate entry %q", name)
 		}
 		files[name] = data
 	}
@@ -493,7 +509,9 @@ func openTarGz(r io.Reader) (*tar.Reader, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("pkgtar: invalid gzip stream: %w", err)
 	}
-	return tar.NewReader(gz), func() { _ = gz.Close() }, nil
+	// Bound skipped payloads and tar metadata as well as extracted files.
+	// The extra MiB accommodates headers and block padding beyond file contents.
+	return tar.NewReader(io.LimitReader(gz, maxPackageTotalSize+(1<<20))), func() { _ = gz.Close() }, nil
 }
 
 // readCapped reads at most maxSize+1 bytes from r and errors if that many

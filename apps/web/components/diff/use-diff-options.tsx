@@ -2,7 +2,7 @@ import { useCallback, useMemo, type ReactNode } from "react";
 import { useTheme } from "@/components/theme/app-theme";
 import type { FileDiffOptions, SelectedLineRange, FileDiffMetadata } from "@pierre/diffs";
 import { IconPlus } from "@tabler/icons-react";
-import { FONT } from "@/lib/theme/colors";
+import { FONT, PIERRE_THEME } from "@/lib/theme/colors";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useDiffHeaderToolbar } from "./diff-header-toolbar";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
@@ -11,21 +11,21 @@ import { useTranslation } from "react-i18next";
 /** CSS overrides for the Pierre diff viewer, injected via unsafeCSS. */
 const DIFF_UNSAFE_CSS = `
   :host {
-    --diffs-bg: var(--background) !important;
-    --diffs-bg-context: var(--background) !important;
+    --diffs-bg: var(--theme-editor-background, var(--background)) !important;
+    --diffs-bg-context: var(--theme-editor-background, var(--background)) !important;
     --diffs-bg-buffer: var(--card) !important;
     --diffs-bg-separator: var(--card) !important;
     --diffs-bg-hover: var(--muted) !important;
-    --diffs-fg: var(--foreground) !important;
+    --diffs-fg: var(--theme-editor-foreground, var(--foreground)) !important;
     --diffs-fg-number: var(--muted-foreground) !important;
     --diffs-addition-color-override: rgb(var(--git-addition)) !important;
     --diffs-deletion-color-override: rgb(var(--git-deletion)) !important;
-    --diffs-bg-addition: rgb(var(--git-addition) / 0.1) !important;
-    --diffs-bg-deletion: rgb(var(--git-deletion) / 0.1) !important;
+    --diffs-bg-addition: var(--theme-editor-diff-added-line, rgb(var(--git-addition) / 0.1)) !important;
+    --diffs-bg-deletion: var(--theme-editor-diff-removed-line, rgb(var(--git-deletion) / 0.1)) !important;
     --diffs-bg-addition-number: rgb(var(--git-addition) / 0.15) !important;
     --diffs-bg-deletion-number: rgb(var(--git-deletion) / 0.15) !important;
-    --diffs-bg-addition-emphasis: rgb(var(--git-addition) / 0.3) !important;
-    --diffs-bg-deletion-emphasis: rgb(var(--git-deletion) / 0.3) !important;
+    --diffs-bg-addition-emphasis: var(--theme-editor-diff-added-text, rgb(var(--git-addition) / 0.3)) !important;
+    --diffs-bg-deletion-emphasis: var(--theme-editor-diff-removed-text, rgb(var(--git-deletion) / 0.3)) !important;
     --diffs-bg-selection-override: color-mix(in lab, var(--background) 74%, var(--primary)) !important;
     --diffs-bg-selection-number-override: color-mix(in lab, var(--background) 60%, var(--primary)) !important;
     --diffs-line-height: 24px !important;
@@ -145,7 +145,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onToggleExpandUnchanged,
   } = args;
 
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
 
   const toggleViewMode = useCallback(
@@ -198,6 +198,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
   const options = useMemo<FileDiffOptions<AnnotationMetadata>>(() => {
     return {
       diffStyle: globalViewMode,
+      theme: effectiveTheme?.definition ? `kandev-${effectiveTheme.digest}` : PIERRE_THEME,
       themeType: resolvedTheme === "dark" ? "dark" : "light",
       enableLineSelection: enableComments,
       // "line-info" shows expand buttons when full deletionLines/additionLines are on metadata;
@@ -217,6 +218,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
   }, [
     globalViewMode,
     resolvedTheme,
+    effectiveTheme,
     enableComments,
     showHeader,
     handleLineSelectionEnd,

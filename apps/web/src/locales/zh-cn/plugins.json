@@ -273,5 +273,19 @@
   "webAppUnavailable": "此画布不可用。",
   "workspace": "工作区",
   "writeCapabilities": "写入权限",
-  "yes": "是"
+  "yes": "是",
+  "themes": "主题",
+  "themeImport": "导入主题",
+  "themeImportDescription": "安装前检查主题包或 VS Code JSON 文件。",
+  "themeFile": "主题文件（.tar.gz、.json、.jsonc）",
+  "themeBase": "基础外观（已声明时自动选择）",
+  "themeReview": "检查主题",
+  "themeInstall": "安装主题",
+  "themeInstalled": "已安装。请在外观设置中选择主题以应用。",
+  "themeDataOnly": "此包仅包含颜色数据，没有运行时权限。",
+  "themeReport": "已映射：{{mapped}}。近似转换：{{approximated}}。已忽略：{{ignored}}。使用基础颜色的角色：{{fallback}}。",
+  "themeCompatibility": "不支持的颜色使用所选基础调色板。不同查看器中的语法颜色可能不同。保存前请检查对比度。",
+  "themeEmpty": "未找到主题。请导入主题文件或添加市场来源。",
+  "themeUnavailable": "已保存的主题不可用。正在使用基础外观。",
+  "themeBrowse": "浏览主题"
 }

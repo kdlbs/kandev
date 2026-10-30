@@ -10,7 +10,7 @@ const TITLEBAR_THEME_COLORS = {
 const OVERLAY_THEME_COLOR_SELECTOR = 'meta[data-kandev-window-controls-theme-color="true"]';
 
 function DesktopPwaThemeColor() {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
 
   useEffect(() => {
     if (typeof navigator === "undefined") return;
@@ -28,7 +28,8 @@ function DesktopPwaThemeColor() {
 
       const themeColor = activeThemeColor ?? document.createElement("meta");
       themeColor.name = "theme-color";
-      themeColor.content = TITLEBAR_THEME_COLORS[resolvedTheme];
+      themeColor.content =
+        effectiveTheme?.definition?.ui?.background ?? TITLEBAR_THEME_COLORS[resolvedTheme];
       themeColor.dataset.kandevWindowControlsThemeColor = "true";
       if (!activeThemeColor) document.head.prepend(themeColor);
     };
@@ -39,8 +40,22 @@ function DesktopPwaThemeColor() {
       overlay.removeEventListener("geometrychange", syncThemeColor);
       document.head.querySelector(OVERLAY_THEME_COLOR_SELECTOR)?.remove();
     };
-  }, [resolvedTheme]);
+  }, [resolvedTheme, effectiveTheme]);
 
+  return null;
+}
+
+function MonacoThemeBridge() {
+  const { effectiveTheme } = useTheme();
+  useEffect(() => {
+    let current = true;
+    void import("@/components/editors/monaco/monaco-init").then(({ setMonacoColorTheme }) => {
+      if (current) setMonacoColorTheme(effectiveTheme);
+    });
+    return () => {
+      current = false;
+    };
+  }, [effectiveTheme]);
   return null;
 }
 
@@ -56,6 +71,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       disableTransitionOnChange
     >
       <DesktopPwaThemeColor />
+      <MonacoThemeBridge />
       {children}
     </AppThemeProvider>
   );

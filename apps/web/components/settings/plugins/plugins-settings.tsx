@@ -16,6 +16,8 @@ import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-s
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
 import { InstallPluginDialog } from "./install-plugin-dialog";
 import { MarketplaceBrowser } from "./marketplace-browser";
+import { useSearchParams } from "@/lib/routing/client-router";
+import { ThemeMarketplace } from "./theme-marketplace";
 import { CanvasMarketplace } from "./canvas-marketplace";
 import { PluginRow, type PluginRowUpdateState } from "./plugin-row";
 import { PluginUpdateStatus } from "./plugin-update-status";
@@ -32,6 +34,7 @@ import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
  */
 export function PluginsSettings() {
   const { t } = useTranslation();
+  const searchParams = useSearchParams();
   const canManage = useIsAdmin();
   const canvasesEnabled = useFeature("canvases");
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -41,7 +44,7 @@ export function PluginsSettings() {
   const updates = usePluginUpdates();
   const installedIds = useMemo(() => new Set(list.items.map((p) => p.id)), [list.items]);
   const updateAction = usePluginUpdateAction(
-    actions.marketplaceInstall,
+    actions.marketplaceUpdate,
     updates.reload,
     installedIds,
     updates.markUpdated,
@@ -63,8 +66,11 @@ export function PluginsSettings() {
       showSaveButton={false}
       contentFrame="none"
     >
-      <Tabs defaultValue="installed" className="space-y-4">
-        <TabsList>
+      <Tabs
+        defaultValue={searchParams.get("tab") === "themes" ? "themes" : "installed"}
+        className="space-y-4"
+      >
+        <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start [&>[role=tab]]:h-7 [&>[role=tab]]:text-foreground/80 [&>[role=tab][data-state=active]]:bg-background [&>[role=tab][data-state=active]]:text-foreground max-md:[&>[role=tab]]:h-11 [@media(pointer:coarse)]:[&>[role=tab]]:h-11">
           <TabsTrigger
             value="installed"
             data-testid="plugins-tab-installed"
@@ -74,6 +80,9 @@ export function PluginsSettings() {
           </TabsTrigger>
           <TabsTrigger value="browse" data-testid="plugins-tab-browse" className="cursor-pointer">
             {t("plugins:tabBrowse")}
+          </TabsTrigger>
+          <TabsTrigger value="themes" data-testid="plugins-tab-themes" className="cursor-pointer">
+            {t("plugins:themes")}
           </TabsTrigger>
           {canvasesEnabled && (
             <TabsTrigger
@@ -98,6 +107,9 @@ export function PluginsSettings() {
           />
         </TabsContent>
 
+        <TabsContent value="themes">
+          <ThemeMarketplace />
+        </TabsContent>
         <TabsContent value="browse">
           <MarketplaceBrowser onInstallUrl={handleMarketplaceInstall} canManage={canManage} />
         </TabsContent>

@@ -4,6 +4,11 @@ package manifest
 // values. Registry callers can mutate the result without changing stored state.
 func (m Manifest) Clone() Manifest {
 	clone := m
+	clone.Themes = append([]ThemeContribution(nil), m.Themes...)
+	if m.Distribution != nil {
+		distribution := *m.Distribution
+		clone.Distribution = &distribution
+	}
 	clone.Categories = cloneStrings(m.Categories)
 	clone.Webhooks = cloneWebhooks(m.Webhooks)
 	clone.Actions = cloneActions(m.Actions)
