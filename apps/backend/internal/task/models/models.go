@@ -1909,6 +1909,9 @@ type Workflow struct {
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
 	Hidden bool `json:"hidden,omitempty"`
+	// IsSystem marks a built-in workflow materialized from an embedded
+	// template. Startup reconciliation owns its visibility.
+	IsSystem bool `json:"-"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom". Empty / unknown
 	// values fall back to "kanban" via the schema default. Backend code

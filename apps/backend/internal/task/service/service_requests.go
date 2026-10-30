@@ -237,6 +237,8 @@ type UpdateWorkflowRequest struct {
 	Description       *string    `json:"description,omitempty"`
 	Prompt            *string    `json:"prompt,omitempty"`
 	AgentProfileID    *string    `json:"agent_profile_id,omitempty"`
+	// Hidden archives (true) or restores (false) the workflow; nil keeps it.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
