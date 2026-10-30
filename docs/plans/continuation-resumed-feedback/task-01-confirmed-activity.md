@@ -196,4 +196,7 @@ Implemented the persisted activity transition and the neutral renderer.
   covers attempt 6 with 5 started attempts, a late continuing-phase rewrite, and
   a later interruption; all persist `max_attempts: 11` and the same window
   instead of the transport policy's `5`.
+- Review fix: tool-call confirmation now runs after `handleToolCallEvent`
+  records the finalized ownership and requires a foreground result. A terminal
+  call with no live ownership no longer counts as resumed activity.
 - `git diff --check` passed.

@@ -194,6 +194,16 @@ func TestInterruptionContinuationActivityRejectsStaleEvidence(t *testing.T) {
 					})
 			},
 		},
+		{
+			name: "terminal tool call without live ownership",
+			event: func(executionID string, generation uint64) *lifecycle.AgentStreamEventPayload {
+				return continuationActivityPayload(agentEventToolCall, executionID, generation,
+					lifecycle.AgentStreamEventData{
+						ToolCallID: "terminal-tool",
+						ToolStatus: agentEventComplete,
+					})
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, entry := acceptedContinuationFixture(t)

@@ -136,9 +136,10 @@ func (s *Service) continuationActivityTarget(
 	if !s.continuationPromptAttemptMatches(sessionID, eventExecutionID, event.PromptGeneration) {
 		return nil, false
 	}
-	if event.Type == agentEventToolUpdate &&
-		!s.foregroundContinuationTool(sessionID, event.ToolCallID, eventExecutionID) {
-		return nil, false
+	if event.Type == agentEventToolCall || event.Type == agentEventToolUpdate {
+		if !s.foregroundContinuationTool(sessionID, event.ToolCallID, eventExecutionID) {
+			return nil, false
+		}
 	}
 	return entry, true
 }
