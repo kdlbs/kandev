@@ -77,7 +77,7 @@ Persistent regression cases live in existing test files:
 `sessioncapacity/store_test.go` (exact binding identity), `orchestrator/ceiling_release_test.go`
 (admission limit classification and exact owner), `backendapp/message_queue_settings_test.go`
 (root settlement plus read-failure isolation), and `agentctl/server/utility/runtime_observation_test.go`
-(child attempt prepare/consume/cancel and retained-handoff identity/active/continuity guards).
+(child attempt prepare/consume/cancel, retained-handoff identity/active/continuity guards, and the starting-without-PID unknown case).
 
 Disposable overlay proofs outside normal collection also pass:
 
