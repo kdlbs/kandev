@@ -399,3 +399,94 @@ func TestCleanPathLeavesNoPendingAndLogsNothing(t *testing.T) {
 		t.Fatalf("expected no log entries on the clean path, got %d", observed.Len())
 	}
 }
+
+func TestKeywordCircuitScopeAndDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	a := Candidate{ID: "a", Enabled: true, BindingKey: "binding", ModelID: "m", KeywordAccountID: "account", KeywordContextEnabled: true}
+	b, c := a, a
+	b.ID, b.ModelID = "b", "other-model"
+	c.ID, c.BindingKey, c.KeywordAccountID = "c", "other-path", "other-account"
+	for _, tc := range []struct {
+		scope                   string
+		sharesModel, sharesPath bool
+	}{
+		{"path_model", false, false}, {"model", false, true}, {"account", true, false},
+	} {
+		failure := &routingerr.Error{Code: routingerr.CodeProviderUnavailable,
+			Keyword: &routingerr.KeywordDecision{Scope: tc.scope, Action: "try_next", Backoff: 5 * time.Minute}}
+		key := keywordCircuitKey(a, failure)
+		if (key == keywordCircuitKey(b, failure)) != tc.sharesModel || (key == keywordCircuitKey(c, failure)) != tc.sharesPath {
+			t.Fatalf("%s scope leaked across model/path/account", tc.scope)
+		}
+		engine := NewEngine(WithClock(func() time.Time { return now }))
+		reset := now.Add(2 * time.Minute)
+		failure.ResetHint = &reset
+		engine.openCircuitForFailure(Profile{Candidates: []Candidate{a}}, a.ID, failure)
+		if !engine.Circuits().IsOpen(key, now) {
+			t.Fatalf("%s circuit was not opened", tc.scope)
+		}
+		if _, ok := engine.Circuits().AcquireProbe(key, time.Minute); ok {
+			t.Fatal("probe acquired before explicit reset")
+		}
+		now = reset
+		if _, ok := engine.Circuits().AcquireProbe(key, time.Minute); !ok {
+			t.Fatal("explicit reset did not override default backoff")
+		}
+	}
+	off := a
+	off.KeywordContextEnabled = false
+	if key := keywordCircuitKey(off, &routingerr.Error{Keyword: &routingerr.KeywordDecision{Scope: "account"}}); key != off.BindingKey {
+		t.Fatalf("disabled circuit changed legacy key: %s", key)
+	}
+}
+
+func TestKeywordProbeRollbackAndRelease(t *testing.T) {
+	now := time.Unix(1000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	candidate := Candidate{ID: "candidate", Enabled: true, BindingKey: "binding", ModelID: "m", KeywordContextEnabled: true}
+	keys := append([]string{candidate.BindingKey}, keywordCircuitKeys(candidate)...)
+	for _, key := range keys {
+		engine.Circuits().Open(key, now.Add(-time.Second), routingerr.CodeProviderUnavailable)
+	}
+	busy, ok := engine.Circuits().AcquireProbe(keys[1], time.Minute)
+	if !ok || engine.acquireCandidateProbes(candidate, "session", 1, now) {
+		t.Fatal("contended keyword probe did not reject selection")
+	}
+	rolledBack, ok := engine.Circuits().AcquireProbe(keys[0], time.Minute)
+	if !ok || len(engine.probes) != 0 {
+		t.Fatal("failed keyword probe acquisition leaked an earlier lease")
+	}
+	engine.Circuits().ReleaseProbe(rolledBack, false, 0)
+	engine.Circuits().ReleaseProbe(busy, false, 0)
+	decision, err := engine.Select("session", Profile{ID: "profile", Candidates: []Candidate{candidate}}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.ReleaseProbe(decision, true)
+	for _, key := range keys {
+		if engine.Circuits().IsOpen(key, now) {
+			t.Fatalf("successful probe left circuit open: %s", key)
+		}
+	}
+}
+
+func TestKeywordDefaultActionPreservesSavedPolicies(t *testing.T) {
+	base := Candidate{KeywordContextEnabled: true}
+	off, saved, legacy := base, base, base
+	off.KeywordContextEnabled = false
+	saved.Policies.Version = 1
+	legacy.Rules = map[string]Action{string(routingerr.CodeQuotaLimited): ActionStop}
+	failure := &routingerr.Error{FallbackAllowed: true, Keyword: &routingerr.KeywordDecision{Action: "try_next"}}
+	for _, tc := range []struct {
+		candidate Candidate
+		want      Action
+	}{{base, ActionTryNext}, {off, ActionStop}, {saved, ActionStop}, {legacy, ActionStop}} {
+		if got := keywordDefaultAction(tc.candidate, failure, ActionStop); got != tc.want {
+			t.Fatalf("saved/OFF policy displaced: %s, want %s", got, tc.want)
+		}
+	}
+	failure.FallbackAllowed = false
+	if got := keywordDefaultAction(base, failure, ActionStop); got != ActionStop {
+		t.Fatalf("fallback admission bypassed: %s", got)
+	}
+}

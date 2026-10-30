@@ -91,6 +91,7 @@ const (
 // account/workspace identifiers. RemediationURL is only ever populated by the
 // adapter-specific allowlist validator; it is never reconstructed from prose.
 type ProviderError struct {
+	HTTPStatus int    `json:"http_status,omitempty"`
 	Source     string `json:"source,omitempty"`
 	ProviderID string `json:"provider_id,omitempty"`
 	ModelID    string `json:"model_id,omitempty"`

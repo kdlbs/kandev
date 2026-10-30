@@ -848,6 +848,9 @@ func startAgentInfrastructure(
 		services.DynamicProfileResolver,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
+	if services.DynamicProfileResolver != nil {
+		services.DynamicProfileResolver.SetKeywordCredentialBindingResolver(keywordCredentialBindingResolver(lifecycleMgr, agentRegistry))
+	}
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.

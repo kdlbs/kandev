@@ -1,8 +1,9 @@
 ---
 created: 2026-10-08
-status: implemented
+status: in_progress
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
 system_design:
   - ../../specs/agents/system-design/provider-error-signatures.md
 legacy_specs: []
@@ -54,6 +55,15 @@ does not reopen task 01's completed prose-safety change.
   packages on the base revision.
 - `golangci-lint run ./internal/agent/runtime/routingerr/...`
 - `make -C apps/backend build`
+
+## Opt-in keyword/context follow-up
+
+[Task 02](task-02-keyword-context.md) implements requirement 002 as a separate
+default-off unmatched diagnostic classifier on the current base. Existing typed
+and known rules retain priority. It includes trusted context and existing
+consumer/circuit integration; it does not import the pending literal catalog.
+Verification uses disposable overlays, focused checks, normal hooks and exact
+delta review. No permanent suite, external loader or operator activation is added.
 
 ## Bounded catalogue follow-up
 

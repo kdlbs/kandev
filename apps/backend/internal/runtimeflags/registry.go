@@ -62,6 +62,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerKeywordContext",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT",
+			Kind:            KindFeature,
+			Label:           "Provider keyword and context classification",
+			Description:     "Classifies unmatched provider diagnostics using structural signals, keyword groups, and invocation context.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "May change recovery classification for new provider diagnostics. Existing candidate policies and invocation safety checks still apply.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderKeywordContext },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderKeywordContext = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.integratedControl",
 			EnvVar:          "KANDEV_FEATURES_INTEGRATED_CONTROL",
 			Kind:            KindFeature,

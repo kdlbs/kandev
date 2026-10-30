@@ -45,7 +45,7 @@ type circuit struct {
 // held reports whether the circuit stays open until an owner release: it has
 // no expiry and admits no probe.
 func (c circuit) held() bool {
-	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
+	return c.state == CircuitOpen && (routingerr.HoldsUntilRelease(c.code) || (c.code == routingerr.CodeModelUnavailable && c.until.IsZero()))
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.

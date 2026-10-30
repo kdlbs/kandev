@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -80,14 +81,71 @@ func TestDynamicLaunchKeepsAnExistingClassification(t *testing.T) {
 	existing := &routingerr.Error{
 		Code: routingerr.CodeAuthRequired, Confidence: routingerr.ConfHigh, FallbackAllowed: true,
 	}
-	err := launchDynamicDownstreamWithError(t, fmt.Errorf("launch agent: %w", existing))
-	var classified *routingerr.Error
-	if !errors.As(err, &classified) || classified != existing {
-		t.Fatalf("classified launch failure = %v, want the original classification preserved", err)
+	for _, enabled := range []bool{false, true} {
+		err := launchDynamicDownstreamWithError(t, fmt.Errorf("launch agent: %w", existing), enabled)
+		var classified *routingerr.Error
+		if !errors.As(err, &classified) || classified != existing {
+			t.Fatalf("classified launch failure = %v, want the original classification preserved", err)
+		}
 	}
 }
 
-func launchDynamicDownstreamWithError(t *testing.T, launchErr error) error {
+func TestDynamicLaunchKeywordFallbackAcceptsTrustedStartupWrappers(t *testing.T) {
+	for _, tc := range []struct {
+		wrapper string
+		phase   routingerr.Phase
+	}{
+		{"failed to start agent", routingerr.PhaseProcessStart},
+		{"failed to initialize ACP", routingerr.PhaseSessionInit},
+	} {
+		t.Run(tc.wrapper, func(t *testing.T) {
+			startup := routingerr.NewAgentStartupFailure(tc.phase, "provider-test",
+				fmt.Errorf("%s: %w", tc.wrapper, errors.New("Error: capacity busy")))
+			err := launchDynamicDownstreamWithError(t, startup, true)
+			var classified *routingerr.Error
+			if !errors.As(err, &classified) || classified.Code != routingerr.CodeProviderUnavailable {
+				t.Fatalf("trusted startup diagnostic did not reach keyword fallback: %v", err)
+			}
+		})
+	}
+}
+
+func TestDynamicLaunchKeywordFallbackPreservesAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, diagnostic string
+		enabled          bool
+		trusted          bool
+	}{
+		{"OFF", "failed to start agent: Error: capacity busy", false, true},
+		{"prose", "failed to start agent: capacity busy", true, true},
+		{"quoted", `failed to start agent: Error: "capacity busy"`, true, true},
+		{"negated", "failed to start agent: Error: not capacity busy", true, true},
+		{"oversize", "failed to start agent: Error: capacity busy " + strings.Repeat("x", 1024), true, true},
+		{"internal", "failed to start agent: Error: capacity busy", true, false},
+		{"wrong stage", "failed to initialize ACP: Error: capacity busy", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := errors.New(tc.diagnostic)
+			if tc.trusted {
+				err = routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, "provider-test", err)
+			}
+			got := classifyDynamicLaunchFailure(err, "profile-test", tc.enabled)
+			var classified *routingerr.Error
+			if errors.As(got, &classified) {
+				t.Fatalf("inadmissible startup diagnostic classified: %v", got)
+			}
+		})
+	}
+	known := routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, "provider-test",
+		errors.New("failed to initialize ACP: API Error: service temporarily unavailable"))
+	var classified *routingerr.Error
+	if !errors.As(classifyDynamicLaunchFailure(known, "profile-test", true), &classified) ||
+		strings.HasPrefix(classified.ClassifierRule, "keyword_context.") {
+		t.Fatal("existing known rule did not retain priority")
+	}
+}
+
+func launchDynamicDownstreamWithError(t *testing.T, launchErr error, keywordEnabled ...bool) error {
 	t.Helper()
 	ctx := context.Background()
 	const (
@@ -104,6 +162,7 @@ func launchDynamicDownstreamWithError(t *testing.T, launchErr error) error {
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.config.ProviderKeywordContext = len(keywordEnabled) != 0 && keywordEnabled[0]
 	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
 	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
 	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, "")

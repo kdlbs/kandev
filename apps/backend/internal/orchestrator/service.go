@@ -62,10 +62,11 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	RetryClock RetryClock
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderKeywordContext bool
+	RetryClock             RetryClock
+	Scheduler              scheduler.SchedulerConfig
+	QueueSize              int
+	QueueGroup             string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -1719,6 +1720,9 @@ func (s *Service) SetRouteActionHandler(handler func(context.Context, RouteActio
 // task and workflow launches.
 func (s *Service) SetProfileExecutionResolver(resolver *agentruntime.ProfileExecutionResolver) {
 	s.profileExecutionResolver = resolver
+	if resolver != nil {
+		resolver.SetKeywordContextEnabled(s.config.ProviderKeywordContext)
+	}
 }
 
 func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {

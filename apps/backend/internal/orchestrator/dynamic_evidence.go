@@ -20,6 +20,7 @@ import (
 // durable dynamic continuation package is stored with the route generation
 // separately.
 type promptAttemptEvidence struct {
+	keywordHistory   []keywordObservation
 	mu               sync.Mutex
 	executionID      string
 	promptGeneration uint64
@@ -87,7 +88,9 @@ func (s *Service) beginPromptAttempt(
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
+	history := s.previousKeywordHistory(sessionID)
 	s.dynamicAttemptEvidence.Store(sessionID, &promptAttemptEvidence{
+		keywordHistory:   history,
 		executionID:      executionID,
 		promptGeneration: promptGeneration,
 		evidenceKnown:    true,
