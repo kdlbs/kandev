@@ -1297,6 +1297,13 @@ var ErrNoExecutionForSession = errors.New("no execution for session")
 // execution ready, but the agent never acknowledged the cancel. Callers should
 // still reconcile session-level state (e.g. transition the task session to
 // WAITING_FOR_INPUT) — the user's intent was unambiguous.
+const (
+	// pluginRemoteGracefulStopTimeout caps the graceful agentctl stop of a
+	// plugin_remote runtime; the caller's remaining budget share caps it lower.
+	pluginRemoteGracefulStopTimeout     = 15 * time.Second
+	pluginRemoteGracefulStopBudgetShare = 3
+)
+
 var ErrCancelEscalated = errors.New("cancel escalated: agent did not acknowledge within timeout")
 
 // CancelAgentBySessionID cancels the current agent turn for a specific session.
@@ -1550,6 +1557,25 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 	return nil
 }
 
+// pluginRemoteGracefulStopContext bounds the graceful agentctl stop of a
+// plugin_remote runtime. A frozen allocation never answers, and an unbounded
+// stop would spend the caller's whole budget (the 2 minute archive deadline)
+// before the archive and its environment cleanup could run. The cleanup drains
+// and destroys the environment itself, so an unconfirmed stop is reported as a
+// failed agent stop and left to it. Other runtimes keep the caller's context.
+func pluginRemoteGracefulStopContext(ctx context.Context, runtime executor.Name) (context.Context, context.CancelFunc) {
+	if runtime != executor.NamePluginRemote {
+		return ctx, func() {}
+	}
+	timeout := pluginRemoteGracefulStopTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if share := time.Until(deadline) / pluginRemoteGracefulStopBudgetShare; share < timeout {
+			timeout = share
+		}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 func (m *Manager) stopExecutionAgentctl(
 	ctx context.Context,
 	executionID string,
@@ -1566,7 +1592,9 @@ func (m *Manager) stopExecutionAgentctl(
 	if force {
 		return false
 	}
-	if err := client.Stop(ctx); err != nil {
+	stopCtx, cancelStop := pluginRemoteGracefulStopContext(ctx, execution.RuntimeName)
+	defer cancelStop()
+	if err := client.Stop(stopCtx); err != nil {
 		// During shutdown the instance may already be stopping through another
 		// lifecycle path, so a failed HTTP call is expected.
 		if m.IsShuttingDown() {
