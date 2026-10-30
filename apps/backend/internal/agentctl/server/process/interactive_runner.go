@@ -22,6 +22,7 @@ import (
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
 	LaunchWrapper        launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	NodeLaunchWrapper    launchwrapper.Node `json:"-"`
 	InitialPromptChunks  int                `json:"-"`
 	ProcessID            string             `json:"-"`
 	OwnProcessGroup      bool               `json:"-"`
@@ -51,7 +52,7 @@ type InteractiveStartRequest struct {
 // commandForLog returns the command to log: the redacted LogCommand when the
 // caller supplied one, otherwise the raw Command.
 func (r InteractiveStartRequest) commandForLog() []string {
-	if !r.LaunchWrapper.IsZero() {
+	if !r.LaunchWrapper.IsZero() || r.NodeLaunchWrapper.Active() {
 		return []string{"[wrapped agent]"}
 	}
 	if len(r.LogCommand) > 0 {

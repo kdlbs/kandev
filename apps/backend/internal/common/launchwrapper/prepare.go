@@ -20,6 +20,10 @@ func Prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
+	return prepare(spec, inner, ctx)
+}
+
+func prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
 	if len(inner) == 0 || strings.TrimSpace(inner[0]) == "" {
 		return nil, ErrInvalid
 	}

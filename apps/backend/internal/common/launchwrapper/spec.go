@@ -10,6 +10,7 @@ import (
 const (
 	Version         = 1
 	SourceProfile   = "profile"
+	SourceNode      = "node"
 	Capability      = "launch-wrapper.v1"
 	WorkDir         = "{{kandev.work_dir}}"
 	ManagedNPMDir   = "{{kandev.managed_npm_dir}}"

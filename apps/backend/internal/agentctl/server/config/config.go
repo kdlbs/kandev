@@ -68,6 +68,10 @@ type Config struct {
 	// Shell configuration
 	ShellEnabled bool // Enable auto-shell feature (default: true)
 
+	// NodeLaunchWrapper is the operator-owned wrapper applied outside every
+	// agent launch. It is set only from the startup flag, never from a request.
+	NodeLaunchWrapper launchwrapper.Node
+
 	// Logging configuration
 	LogLevel   string
 	LogFormat  string
@@ -271,6 +275,10 @@ type InstanceConfig struct {
 	AgentArgs             []string
 	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
+
+	// NodeLaunchWrapper is copied from the agentctl startup configuration. It is
+	// never serialized, so recovery state and requests cannot carry or clear it.
+	NodeLaunchWrapper launchwrapper.Node `json:"-"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string
@@ -690,6 +698,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		McpMode:                    "task",
 		AuthToken:                  c.AuthToken,
 		CreateReadyMillis:          &atomic.Int64{},
+		NodeLaunchWrapper:          c.NodeLaunchWrapper,
 	}
 
 	applyOverrides(cfg, overrides)

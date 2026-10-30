@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -17,6 +18,12 @@ type Handler struct {
 	codexExecutor        *CodexAppServerInferenceExecutor
 	logger               *zap.Logger
 	authenticatedControl func(*gin.Context) bool
+}
+
+// SetNodeLaunchWrapper installs the operator-owned wrapper on every executor.
+func (h *Handler) SetNodeLaunchWrapper(node launchwrapper.Node) {
+	h.acpExecutor.SetNodeLaunchWrapper(node)
+	h.codexExecutor.SetNodeLaunchWrapper(node)
 }
 
 // NewHandler creates a new inference handler.

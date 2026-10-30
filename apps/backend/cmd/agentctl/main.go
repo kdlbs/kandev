@@ -43,6 +43,10 @@ var (
 	agentCommandFlag = flag.String("agent-command", "", "Command to run the agent")
 	workDirFlag      = flag.String("workdir", "", "Working directory for the agent")
 	portFlag         = flag.Int("port", 0, "HTTP server port")
+
+	nodeLaunchWrapperFileFlag = flag.String("node-launch-wrapper-file", "", "File holding the operator-owned launch wrapper applied to every agent launch")
+	requireNodeLaunchWrapper  = flag.Bool("require-node-launch-wrapper", false, "Refuse to start or launch unless a node launch wrapper is loaded")
+	nodeLaunchWrapperOwnerUID = flag.Int("node-launch-wrapper-owner-uid", -1, "User id that must own the node launch wrapper and its directories (default: the agentctl process owner)")
 )
 
 func main() {
@@ -107,6 +111,11 @@ func runMain() int {
 	}
 	if *portFlag != 0 {
 		cfg.Port = *portFlag
+	}
+
+	if err := applyNodeLaunchWrapper(cfg, *nodeLaunchWrapperFileFlag, *requireNodeLaunchWrapper, *nodeLaunchWrapperOwnerUID); err != nil {
+		fmt.Fprintf(os.Stderr, "node launch wrapper refused: %v\n", err)
+		return 1
 	}
 
 	applySIGPIPEDisposition(cfg, signal.Ignore)
