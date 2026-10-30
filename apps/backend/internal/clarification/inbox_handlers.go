@@ -215,12 +215,25 @@ func (h *Handlers) httpListInbox(c *gin.Context) {
 
 	userID := InboxUserID(ctx)
 	now := h.now()
-	blockingCursorAt, blockingCursorID := cursorCreatedAt, cursorPendingID
-	asyncCursorAt, asyncCursorID := cursorCreatedAt, cursorPendingID
-	if kind, _ := inboxCursorSource(cursorPendingID); kind == "a" {
-		blockingCursorAt, blockingCursorID = time.Time{}, ""
-	} else if kind == "b" {
-		asyncCursorAt, asyncCursorID = time.Time{}, ""
+	blockingCursorAt, blockingCursorID := time.Time{}, ""
+	asyncCursorAt, asyncCursorID := time.Time{}, ""
+	if !cursorCreatedAt.IsZero() {
+		kind, storedID := inboxCursorSource(cursorPendingID)
+		switch kind {
+		case "a":
+			// Async sorts before blocking at the same instant, so blocking rows
+			// at T remain after the cursor while async resumes by ID.
+			blockingCursorAt = cursorCreatedAt
+			asyncCursorAt, asyncCursorID = cursorCreatedAt, storedID
+		case "b":
+			// Blocking sorts after async at T, so async must resume strictly
+			// after T to avoid replaying rows before the cursor.
+			blockingCursorAt, blockingCursorID = cursorCreatedAt, storedID
+			asyncCursorAt = cursorCreatedAt.Add(time.Nanosecond)
+		default:
+			blockingCursorAt, blockingCursorID = cursorCreatedAt, storedID
+			asyncCursorAt = cursorCreatedAt.Add(time.Nanosecond)
+		}
 	}
 	page, err := h.inboxBundles.ListUnresolvedClarificationBundles(ctx, taskmodels.ListClarificationBundlesOptions{
 		Unscoped:        true,
@@ -529,7 +542,7 @@ func (h *Handlers) buildInboxAsyncView(
 		Waiting:         h.inboxAsync.HasParkedWait(ctx, question.SessionID),
 		Status:          string(question.Status),
 		Context:         question.Context,
-		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Questions:       question.Questions,
 		Outcome:         question.Outcome,
 		WithdrawReason:  question.WithdrawReason,
@@ -544,7 +557,7 @@ func (h *Handlers) buildInboxHiddenAsyncViews(
 	if h.inboxAsync == nil {
 		return []inboxHiddenAsyncQuestionView{}, 0, nil
 	}
-	questions, _, _, err := h.inboxAsync.ListHiddenInboxAsyncQuestions(ctx, workspaceID, userID, limit, now)
+	questions, total, _, err := h.inboxAsync.ListHiddenInboxAsyncQuestions(ctx, workspaceID, userID, limit, now)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -567,7 +580,7 @@ func (h *Handlers) buildInboxHiddenAsyncViews(
 			SnoozeUntil:            formatOptionalInboxTime(state.SnoozeUntil),
 		})
 	}
-	return views, len(views), nil
+	return views, total, nil
 }
 
 func inboxAsyncSidecarKey(questionID string) string {
@@ -619,7 +632,7 @@ func (h *Handlers) buildInboxBundleViews(
 			PendingID:    b.PendingID,
 			TaskID:       b.TaskID,
 			SessionID:    b.SessionID,
-			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339Nano),
 			Context:      content.Context,
 			Messages:     content.Messages,
 			TaskTitle:    taskTitles[b.TaskID],

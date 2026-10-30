@@ -77,7 +77,7 @@ export function AsyncQuestionActions({
       <Button
         type="button"
         variant="ghost"
-        className="min-h-11 cursor-pointer px-4"
+        className="min-h-7 cursor-pointer px-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         onClick={onReject}
         disabled={submitting}
         data-testid="async-question-reject"
@@ -86,7 +86,7 @@ export function AsyncQuestionActions({
       </Button>
       <Button
         type="button"
-        className="min-h-11 cursor-pointer px-4"
+        className="min-h-7 cursor-pointer px-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         onClick={onSubmit}
         disabled={submitting}
         data-testid="async-question-submit"
@@ -202,7 +202,7 @@ function AsyncQuestionOption({
       data-testid="async-question-option"
       data-selected={selected ? "true" : "false"}
       className={cn(
-        "flex min-h-11 w-full items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+        "flex min-h-7 w-full items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
         selected
           ? "border-blue-500/50 bg-blue-500/15 text-foreground"
           : "border-border text-foreground/90 hover:border-border/80 hover:bg-muted/40",

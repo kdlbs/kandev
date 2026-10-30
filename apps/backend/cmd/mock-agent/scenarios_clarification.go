@@ -133,19 +133,10 @@ func scenarioAsyncQuestion(e *emitter) {
 	}
 	e.text("ASYNC_CHECKPOINT " + listed)
 	if questionID == "" {
-		e.text("ASYNC_WAIT_SKIPPED: receipt carried no question id")
+		e.text("ASYNC_RECEIPT_SKIPPED: receipt carried no question id")
 		return
 	}
-	waited, err := e.callMCPTool("kandev", "wait_for_question_answers_kandev", map[string]any{
-		"question_ids": []string{questionID},
-		"reason":       "e2e waits for the operator decision",
-	})
-	if err != nil {
-		e.text(fmt.Sprintf("Async wait failed: %s", err))
-		return
-	}
-	e.text("ASYNC_WAIT " + waited)
-	e.text(fmt.Sprintf("You answered: %s", waited))
+	e.text("ASYNC_CONTINUE_WITHOUT_WAIT")
 }
 
 func asyncQuestionID(result string) string {

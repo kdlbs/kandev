@@ -6,6 +6,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func TestAsyncQuestionsSchemaModes(t *testing.T) {
@@ -69,4 +71,15 @@ func TestAsyncQuestionsUnsupportedSurfaceRejectsAsyncCreation(t *testing.T) {
 		}},
 	})
 	require.True(t, result.IsError)
+}
+
+func TestAsyncQuestionsRootCanReadChildQuestions(t *testing.T) {
+	backend := &testBackend{}
+	log := newTestLogger(t)
+	server := NewWithProfile(backend, "root-session", "root-task", 10005, log, "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+	tools := getRegisteredToolNames(server)
+	assert.Contains(t, tools, "list_question_answers_kandev")
+	assert.NotContains(t, tools, "ask_user_question_kandev")
+	assert.NotContains(t, tools, "wait_for_question_answers_kandev")
 }

@@ -52,7 +52,7 @@ type HTTPHandlers struct {
 
 // RegisterRoutes mounts the async question REST group.
 func RegisterRoutes(router *gin.Engine, service *Service, tasks WorkspaceAuthorizer, directory TaskDirectory, logger *zap.Logger, imageReaders ...QuestionImageReader) {
-	if router == nil || service == nil {
+	if router == nil || service == nil || tasks == nil {
 		return
 	}
 	h := &HTTPHandlers{service: service, tasks: tasks, directory: directory, logger: logger}
@@ -109,11 +109,9 @@ func (h *HTTPHandlers) list(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	if h.tasks != nil {
-		if err := h.tasks.AuthorizeWorkspaceScope(ctx, query.workspaceID, authz.ScopeWorkspaceRead); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "workspace access is not authorized"})
-			return
-		}
+	if err := h.tasks.AuthorizeWorkspaceScope(ctx, query.workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "workspace access is not authorized"})
+		return
 	}
 	page, handled := h.readListPage(c, query)
 	if handled {
@@ -250,11 +248,13 @@ func (h *HTTPHandlers) respond(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
-	if h.tasks != nil && question.WorkspaceID != "" {
-		if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeTaskWrite); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "workspace access is not authorized"})
-			return
-		}
+	if h.tasks == nil || question.WorkspaceID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+	if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeTaskWrite); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "workspace access is not authorized"})
+		return
 	}
 	input := AnswerInput{Rejected: body.Rejected, RejectReason: body.RejectReason}
 	for _, answer := range body.Answers {
@@ -298,11 +298,13 @@ func (h *HTTPHandlers) image(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "image not found"})
 		return
 	}
-	if h.tasks != nil {
-		if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead); err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "image not found"})
-			return
-		}
+	if h.tasks == nil || question.WorkspaceID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "image not found"})
+		return
+	}
+	if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "image not found"})
+		return
 	}
 	ref, ok := findAsyncQuestionImage(question.Questions, c.Query("question_id"), c.Param("imageID"))
 	if !ok {
@@ -420,7 +422,7 @@ func buildQuestionView(
 		Outcome:         question.Outcome,
 		WithdrawReason:  question.WithdrawReason,
 		Waiting:         waitingBySession[question.SessionID],
-		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:       question.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }

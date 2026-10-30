@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -169,6 +170,10 @@ func TestAsyncQuestionsOperatorCheckpointRead(t *testing.T) {
 	}
 	if deliveries[0].Kind != models.AsyncQuestionDeliveryOwner {
 		t.Fatalf("kind = %s", deliveries[0].Kind)
+	}
+	if !strings.Contains(deliveries[0].Content, "Which value belongs in the field?") ||
+		!strings.Contains(deliveries[0].Content, "Default") {
+		t.Fatalf("correlated answer must carry the original questions and labels: %s", deliveries[0].Content)
 	}
 }
 
@@ -693,4 +698,74 @@ func TestAsyncQuestionsAuthorityInvalidatedByTransferCancelAndIncarnation(t *tes
 			}
 		})
 	}
+}
+
+func TestAsyncQuestionsWorkerLifecycleIsIdempotent(t *testing.T) {
+	svc, _ := newQuestionsService(t)
+	svc.SetDeliveryQueue(&recordingQueue{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.Start(ctx)
+	svc.Start(ctx)
+	svc.Stop()
+	svc.Stop()
+	svc.Start(ctx)
+	svc.Stop()
+}
+
+func TestAsyncQuestionsWaitAcknowledgementDoesNotOverwriteFencedRelease(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	result := createOperatorQuestion(t, svc, repo, "session-wait-fenced")
+	waitResult, err := svc.Wait(ctx, questions.WaitInput{
+		TaskID: "task-session-wait-fenced", SessionID: "session-wait-fenced",
+		Dependencies: []string{result.Question.ID}, Reason: "dependency",
+	})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	// The answer commits release_requested before the pause acknowledgement.
+	if err := repo.SetAsyncQuestionWaitStatus(ctx, waitResult.Wait.ID, models.AsyncQuestionWaitReleaseRequested, "test"); err != nil {
+		t.Fatalf("fence release: %v", err)
+	}
+	status, err := svc.AcknowledgeWaitPause(ctx, waitResult.Wait.ID)
+	if err != nil {
+		t.Fatalf("acknowledge: %v", err)
+	}
+	if status != models.AsyncQuestionWaitReleased {
+		t.Fatalf("status = %s, want released", status)
+	}
+	if svc.HasParkedWait(ctx, "session-wait-fenced") {
+		t.Fatal("a fenced release must not be overwritten as parked")
+	}
+}
+
+func TestAsyncQuestionsChildrenRequireCurrentParent(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	seedExplicitQuestionBinding(t, repo, "task-child-current", "session-child-current", "workspace-session-child-current", "task-parent-current")
+	seedExplicitQuestionBinding(t, repo, "task-parent-current", "session-parent-current", "workspace-session-parent-current", "")
+	result, err := svc.Create(ctx, questions.CreateInput{
+		TaskID: "task-child-current", WorkspaceID: "workspace-session-child-current", SessionID: "session-child-current",
+		SessionIncarnationID: "inc-session-child-current",
+		Recipient:            models.AsyncQuestionRecipientParent, ParentTaskID: "task-parent-current", ParentSession: "session-parent-current",
+		ParentSessionIncarnationID: "inc-session-parent-current",
+		Questions:                  []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
+		RequestID:                  "child-current",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	page, err := svc.ListChildren(ctx, "task-parent-current", nil, nil, 10, "", "")
+	if err != nil || len(page.Questions) != 1 {
+		t.Fatalf("children before reparent = %d err=%v", len(page.Questions), err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = ? WHERE id = ?", "task-parent-other", "task-child-current"); err != nil {
+		t.Fatalf("reparent: %v", err)
+	}
+	page, err = svc.ListChildren(ctx, "task-parent-current", nil, nil, 10, "", "")
+	if err != nil || len(page.Questions) != 0 {
+		t.Fatalf("a former parent must not read child questions: %d err=%v", len(page.Questions), err)
+	}
+	_ = result
 }

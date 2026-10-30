@@ -136,7 +136,8 @@ func (s *Service) createWaitGate(ctx context.Context, input WaitInput, unique []
 // releaseRacedWait closes a fresh gate whose dependency resolved before the
 // pause started, so the caller resumes instead of stranding the turn.
 func (s *Service) releaseRacedWait(ctx context.Context, sessionID string, unique []string, waitID string) (*WaitResult, error) {
-	if err := s.store.SetAsyncQuestionWaitStatus(ctx, waitID, models.AsyncQuestionWaitReleased, "answer_raced_wait"); err != nil {
+	if _, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
+		models.AsyncQuestionWaitRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait"); err != nil {
 		return nil, err
 	}
 	snapshots, err := s.store.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
@@ -190,30 +191,61 @@ func (s *Service) AcknowledgeWaitPause(ctx context.Context, waitID string) (mode
 	}
 	switch wait.Status {
 	case models.AsyncQuestionWaitReleaseRequested:
-		if err := s.store.SetAsyncQuestionWaitStatus(ctx, waitID, models.AsyncQuestionWaitReleased, "pause_acknowledged"); err != nil {
-			return "", err
-		}
-		s.wakeWaitDestination(ctx, wait)
-		return models.AsyncQuestionWaitReleased, nil
+		return s.acknowledgeFencedRelease(ctx, wait)
 	case models.AsyncQuestionWaitRequested:
-		raced, raceErr := s.hasTerminalDependency(ctx, wait)
-		if raceErr != nil {
-			return "", raceErr
-		}
-		if raced {
-			if err := s.store.SetAsyncQuestionWaitStatus(ctx, waitID, models.AsyncQuestionWaitReleased, "answer_raced_pause"); err != nil {
-				return "", err
-			}
-			s.wakeWaitDestination(ctx, wait)
-			return models.AsyncQuestionWaitReleased, nil
-		}
-		if err := s.store.SetAsyncQuestionWaitStatus(ctx, waitID, models.AsyncQuestionWaitParked, "pause"); err != nil {
-			return "", err
-		}
-		return models.AsyncQuestionWaitParked, nil
+		return s.acknowledgeRequestedPause(ctx, wait)
 	default:
 		return wait.Status, nil
 	}
+}
+
+func (s *Service) acknowledgeFencedRelease(ctx context.Context, wait *models.AsyncQuestionWait) (models.AsyncQuestionWaitStatus, error) {
+	won, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, wait.ID,
+		models.AsyncQuestionWaitReleaseRequested, models.AsyncQuestionWaitReleased, "pause_acknowledged")
+	if err != nil {
+		return "", err
+	}
+	if won {
+		s.wakeWaitDestination(ctx, wait)
+	}
+	return s.canonicalWaitStatus(ctx, wait.ID)
+}
+
+func (s *Service) acknowledgeRequestedPause(ctx context.Context, wait *models.AsyncQuestionWait) (models.AsyncQuestionWaitStatus, error) {
+	raced, err := s.hasTerminalDependency(ctx, wait)
+	if err != nil {
+		return "", err
+	}
+	if raced {
+		if _, err := s.acknowledgeFencedRelease(ctx, wait); err != nil {
+			return "", err
+		}
+		return s.canonicalWaitStatus(ctx, wait.ID)
+	}
+	won, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, wait.ID,
+		models.AsyncQuestionWaitRequested, models.AsyncQuestionWaitParked, "pause")
+	if err != nil {
+		return "", err
+	}
+	if won {
+		return models.AsyncQuestionWaitParked, nil
+	}
+	latest, err := s.store.GetAsyncQuestionWait(ctx, wait.ID)
+	if err != nil || latest == nil {
+		return "", err
+	}
+	if latest.Status == models.AsyncQuestionWaitReleaseRequested {
+		return s.acknowledgeFencedRelease(ctx, latest)
+	}
+	return latest.Status, nil
+}
+
+func (s *Service) canonicalWaitStatus(ctx context.Context, waitID string) (models.AsyncQuestionWaitStatus, error) {
+	wait, err := s.store.GetAsyncQuestionWait(ctx, waitID)
+	if err != nil || wait == nil {
+		return "", err
+	}
+	return wait.Status, nil
 }
 
 func (s *Service) wakeWaitDestination(ctx context.Context, wait *models.AsyncQuestionWait) {

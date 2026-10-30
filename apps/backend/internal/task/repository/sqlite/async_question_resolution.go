@@ -442,8 +442,8 @@ func (r *Repository) releaseAsyncQuestionWaitsTx(
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE task_async_question_waits
 			   SET status = ?, released_by = ?, updated_at = ?
-			 WHERE id = ? AND status IN ('requested', 'release_requested', 'parked')`),
-			string(next), releasedBy, now, wait.ID); err != nil {
+			 WHERE id = ? AND status = ?`),
+			string(next), releasedBy, now, wait.ID, string(wait.Status)); err != nil {
 			return nil, err
 		}
 	}

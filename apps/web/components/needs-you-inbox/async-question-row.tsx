@@ -14,6 +14,7 @@ import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { formatRelativeTime } from "@/lib/i18n/formats";
+import { generateUUID } from "@/lib/uuid";
 import {
   respondToAgentQuestion,
   type AgentQuestionAnswer,
@@ -103,11 +104,7 @@ function useAsyncSubmit(question: ClarificationInboxAsyncQuestion, onSettled: ()
   const { t } = useTranslation();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const submissionIdRef = useRef<string>(
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${question.question_id}-${Date.now()}`,
-  );
+  const submissionIdRef = useRef<string>(generateUUID());
   const submit = useCallback(
     async (draft: Draft, rejected: boolean) => {
       if (submitting) return;
@@ -239,7 +236,7 @@ function AsyncQuestionHeader({
           type="button"
           variant="ghost"
           size="sm"
-          className="min-h-11 shrink-0 cursor-pointer"
+          className="min-h-7 shrink-0 cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           disabled={dismissDisabled}
           onClick={onDismiss}
           data-testid="async-question-dismiss"
@@ -266,6 +263,10 @@ function AsyncQuestionPhoneSurface({
 }) {
   const { t } = useTranslation();
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const onBackRef = useRef(onBack);
+  useEffect(() => {
+    onBackRef.current = onBack;
+  }, [onBack]);
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
@@ -274,7 +275,7 @@ function AsyncQuestionPhoneSurface({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onBack();
+        onBackRef.current();
         return;
       }
       if (event.key !== "Tab" || !surfaceRef.current) return;
@@ -298,7 +299,7 @@ function AsyncQuestionPhoneSurface({
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
-  }, [onBack]);
+  }, []);
   return (
     <div
       ref={surfaceRef}

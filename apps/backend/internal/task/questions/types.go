@@ -53,6 +53,7 @@ type Store interface {
 	GetAsyncQuestionWait(ctx context.Context, waitID string) (*models.AsyncQuestionWait, error)
 	ListAsyncQuestionWaits(ctx context.Context, statuses []models.AsyncQuestionWaitStatus, limit int) ([]*models.AsyncQuestionWait, error)
 	SetAsyncQuestionWaitStatus(ctx context.Context, waitID string, status models.AsyncQuestionWaitStatus, releasedBy string) error
+	SetAsyncQuestionWaitStatusFrom(ctx context.Context, waitID string, from, to models.AsyncQuestionWaitStatus, releasedBy string) (bool, error)
 	CancelAsyncQuestionWaitsForSession(ctx context.Context, sessionID, reason string) (int, error)
 	MarkStaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string) (int, error)
 	DeleteAsyncQuestionsForTask(ctx context.Context, taskID string) error

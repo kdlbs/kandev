@@ -1214,6 +1214,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
 		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
+		{name: "async-question-read", enabled: kanban, register: func(s *Server) { s.addListQuestionAnswersTool() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
@@ -1965,6 +1966,7 @@ func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
 }
 
 const askUserQuestionOutputSchema = `{
+  "type": "object",
   "oneOf": [
     {
       "type": "object",

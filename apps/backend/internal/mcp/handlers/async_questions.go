@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/questions"
@@ -252,6 +253,13 @@ func (h *Handlers) readQuestionAnswerPage(
 		return h.questionSvc.ListOwn(ctx, session.ID, statuses, req.QuestionIDs, req.Limit, cursorAt, cursorID)
 	}
 	if scope == asyncScopeChildren {
+		task, taskErr := h.taskSvc.GetTask(ctx, session.TaskID)
+		if taskErr != nil || task == nil {
+			return nil, fmt.Errorf("%w: parent task not found", questions.ErrUnauthorized)
+		}
+		if authErr := h.taskSvc.AuthorizeWorkspaceScope(ctx, task.WorkspaceID, authz.ScopeWorkspaceRead); authErr != nil {
+			return nil, fmt.Errorf("%w: parent workspace is not accessible", questions.ErrUnauthorized)
+		}
 		cursorAt, cursorID, err := decodeAsyncCursor(req.Cursor)
 		if err != nil {
 			return nil, fmt.Errorf("%w: cursor is malformed", questions.ErrValidation)
@@ -342,7 +350,12 @@ func (h *Handlers) handleWaitForQuestionAnswers(ctx context.Context, msg *ws.Mes
 	if errResp != nil || err != nil {
 		return errResp, err
 	}
-	turnID := h.captureQuestionWaitTurn(ctx, session.ID)
+	turnID, captureErr := h.captureQuestionWaitTurn(ctx, session.ID)
+	if captureErr != nil {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to capture the turn for the explicit question wait", nil)
+		return response, responseErr
+	}
 	task, err := h.taskSvc.GetTask(ctx, session.TaskID)
 	if err != nil || task == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -394,10 +407,10 @@ func readyWaitResponse(questions []*models.AsyncQuestion) map[string]interface{}
 // and records the settled gate.
 func (h *Handlers) pauseForExplicitWait(ctx context.Context, session *models.TaskSession, wait *models.AsyncQuestionWait, turnID string) error {
 	pauseCtx := context.WithoutCancel(ctx)
-	h.setSessionWaitingForInput(pauseCtx, session.TaskID, session.ID)
 	if err := h.performGuardedPause(pauseCtx, session.ID, wait.ID, turnID); err != nil {
 		return err
 	}
+	h.setSessionWaitingForInput(pauseCtx, session.TaskID, session.ID)
 	if _, err := h.questionSvc.AcknowledgeWaitPause(pauseCtx, wait.ID); err != nil {
 		h.logger.Warn("failed to acknowledge explicit async question wait",
 			zap.String("wait_id", wait.ID), zap.Error(err))
@@ -429,18 +442,19 @@ func (h *Handlers) performGuardedPause(ctx context.Context, sessionID, waitID, t
 	return nil
 }
 
-func (h *Handlers) captureQuestionWaitTurn(ctx context.Context, sessionID string) string {
+func (h *Handlers) captureQuestionWaitTurn(ctx context.Context, sessionID string) (string, error) {
 	capturer, ok := h.inputPauser.(clarificationTurnCapturer)
 	if !ok {
-		return ""
+		return "", nil
 	}
 	turnID, err := capturer.CaptureActiveTurnID(ctx, sessionID)
 	if err != nil {
-		h.logger.Warn("failed to capture the explicit question wait turn",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return ""
+		return "", err
 	}
-	return turnID
+	if turnID == "" {
+		return "", errors.New("no active turn to bind the explicit question wait")
+	}
+	return turnID, nil
 }
 
 func asyncStatuses(value string) ([]models.AsyncQuestionStatus, error) {

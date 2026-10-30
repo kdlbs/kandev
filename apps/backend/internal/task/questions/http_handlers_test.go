@@ -269,3 +269,22 @@ func TestAsyncQuestionsImageRoute(t *testing.T) {
 		"/api/v1/agent-questions/"+result.Question.ID+"/images/missing?question_id=q1", nil)
 	require.Equal(t, http.StatusNotFound, response.Code)
 }
+
+func TestAsyncQuestionsRespondFailsClosedWithoutWorkspace(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	question := &taskmodels.AsyncQuestion{
+		ID: "q-empty-workspace", TaskID: "task-empty-workspace", SessionID: "session-empty-workspace",
+		Recipient: taskmodels.AsyncQuestionRecipientUser,
+		Questions: []protocol.Question{{ID: "q1", Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
+		RetryKey:  "empty-workspace", PayloadDigest: "digest", Status: taskmodels.AsyncQuestionStatusPending, Version: 1,
+	}
+	if _, _, err := repo.CreateAsyncQuestion(ctx, question, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	router := newQuestionsRouter(t, svc, allowAllWorkspaceAuthorizer{})
+	response := doRequest(router, http.MethodPost,
+		"/api/v1/agent-questions/q-empty-workspace/respond",
+		map[string]any{"answers": []map[string]any{{"question_id": "q1", "selected_options": []string{"a"}}}})
+	require.Equal(t, http.StatusNotFound, response.Code)
+}

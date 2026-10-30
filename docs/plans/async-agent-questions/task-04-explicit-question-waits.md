@@ -106,8 +106,11 @@ before registering the gate and binds the forced pause to that turn. A successor
 turn returns a stale-pause outcome without cancelling it; pause failures
 propagate instead of being parked; a `requested` gate is fenced to
 `release_requested` when an answer races the pause and is only released after
-pause acknowledgement. Startup reconciliation closes requested gates that did
-not survive restart and releases fenced gates with a wake.
+pause acknowledgement. The acknowledgement uses conditional status transitions,
+so a release fenced while the pause settles can never be overwritten as parked.
+Session/task waiting writes run only after the guarded pause accepts the
+captured turn. Startup reconciliation closes requested gates that did not
+survive restart and releases fenced gates with a wake.
 
 Verification passed: questions wait/race/reconciliation tests, orchestrator
 captured-turn and completion/drain tests, and MCP wait handler tests. These use

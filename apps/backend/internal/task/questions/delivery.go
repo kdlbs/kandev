@@ -117,14 +117,16 @@ func formatParentNotification(question *models.AsyncQuestion) string {
 
 func formatOutcomeForOwner(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) string {
 	data, _ := json.MarshalIndent(outcome, "", "  ")
-	return fmt.Sprintf("ASYNC QUESTION ANSWERED\n\nQuestion ID: %s\nOriginal context: %s\nOutcome:\n%s\n\nThis is the correlated decision for a question you asked earlier. Read it at your next checkpoint. It does not cancel or steer your current turn; continue your work and use the answer where it applies.",
-		question.ID, strings.TrimSpace(question.Context), data)
+	questions, _ := json.MarshalIndent(question.Questions, "", "  ")
+	return fmt.Sprintf("ASYNC QUESTION ANSWERED\n\nQuestion ID: %s\nOriginal context: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThis is the correlated decision for a question you asked earlier. Read it at your next checkpoint. It does not cancel or steer your current turn; continue your work and use the answer where it applies.",
+		question.ID, strings.TrimSpace(question.Context), questions, data)
 }
 
 func formatOutcomeForParent(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) string {
 	data, _ := json.MarshalIndent(outcome, "", "  ")
-	return fmt.Sprintf("ASYNC CHILD QUESTION RESOLVED\n\nChild task: %s\nQuestion ID: %s\nOutcome:\n%s\n\nThe canonical child request is now closed. No manual relay is required.",
-		question.TaskID, question.ID, data)
+	questions, _ := json.MarshalIndent(question.Questions, "", "  ")
+	return fmt.Sprintf("ASYNC CHILD QUESTION RESOLVED\n\nChild task: %s\nQuestion ID: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThe canonical child request is now closed. No manual relay is required.",
+		question.TaskID, question.ID, questions, data)
 }
 
 // ReconcileOnce admits every due durable intent. It returns the number of
@@ -191,13 +193,23 @@ func (s *Service) Start(parent context.Context) {
 	if err := s.ReconcileWaitGates(parent); err != nil {
 		s.logger.Warn("failed to reconcile async question waits on startup", zap.Error(err))
 	}
-	if s.queue == nil {
+	s.lifecycleMu.Lock()
+	if s.running || s.queue == nil {
+		s.lifecycleMu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
+	wake := make(chan struct{}, 1)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	s.running = true
 	s.cancel = cancel
+	s.wake = wake
+	s.stop = stop
+	s.done = done
+	s.lifecycleMu.Unlock()
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -207,33 +219,42 @@ func (s *Service) Start(parent context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-s.stop:
+			case <-stop:
 				return
-			case <-s.wake:
+			case <-wake:
 			case <-ticker.C:
 			}
 		}
 	}()
 }
 
-// Stop cancels and joins the reconciliation worker.
+// Stop cancels and joins the reconciliation worker. Repeated calls are safe,
+// and a later Start creates fresh lifecycle channels.
 func (s *Service) Stop() {
-	if s.cancel == nil {
+	s.lifecycleMu.Lock()
+	if !s.running {
+		s.lifecycleMu.Unlock()
 		return
 	}
-	select {
-	case <-s.stop:
-	default:
-		close(s.stop)
-	}
-	s.cancel()
-	<-s.done
-	s.cancel = nil
+	s.running = false
+	stop := s.stop
+	cancel := s.cancel
+	done := s.done
+	s.lifecycleMu.Unlock()
+	close(stop)
+	cancel()
+	<-done
 }
 
 func (s *Service) signal() {
+	s.lifecycleMu.Lock()
+	wake := s.wake
+	s.lifecycleMu.Unlock()
+	if wake == nil {
+		return
+	}
 	select {
-	case s.wake <- struct{}{}:
+	case wake <- struct{}{}:
 	default:
 	}
 }

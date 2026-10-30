@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -39,10 +40,12 @@ type Service struct {
 	logger          *zap.Logger
 	now             func() time.Time
 
-	wake   chan struct{}
-	stop   chan struct{}
-	done   chan struct{}
-	cancel context.CancelFunc
+	lifecycleMu sync.Mutex
+	running     bool
+	wake        chan struct{}
+	stop        chan struct{}
+	done        chan struct{}
+	cancel      context.CancelFunc
 }
 
 // NewService builds the async question service. queue and notifier are
@@ -154,6 +157,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*CreateResult,
 func validateCreateInput(input *CreateInput) error {
 	if input.SessionID == "" || input.TaskID == "" {
 		return fmt.Errorf("%w: session and task are required", ErrValidation)
+	}
+	if input.WorkspaceID == "" {
+		return fmt.Errorf("%w: workspace is required", ErrValidation)
 	}
 	if input.Recipient == "" {
 		input.Recipient = models.AsyncQuestionRecipientUser
@@ -272,6 +278,7 @@ func (s *Service) ListChildren(ctx context.Context, parentTaskID string, statuse
 	}
 	opts.ParentTaskID = parentTaskID
 	opts.IncludeUnforwardedParents = true
+	opts.RequireCurrentParent = true
 	return s.store.ListAsyncQuestions(ctx, opts)
 }
 

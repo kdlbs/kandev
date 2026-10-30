@@ -115,8 +115,12 @@ per-session incarnation capture, current task/session/parent authority checks
 serialized with the terminal transition, atomic withdrawal wake intents, and
 session/task cleanup hooks.
 
-Verification passed: targeted SQLite async tests, service tests, sqlguard, and
-required-store catalog tests. PostgreSQL race/replay tests remain gated on
+Verification passed: targeted SQLite async tests, service tests, sqlguard,
+required-store catalog tests, and previous-stable upgrade conformance after
+registering the new tables in the v0.93.0 fixture manifest. PostgreSQL create and
+wait read-before-insert boundaries use transaction advisory locks; the
+environment-gated tests seed task/session bindings and cover concurrent create
+and wait calls. PostgreSQL race/replay tests remain gated on
 `KANDEV_TEST_POSTGRES_DSN`. Remediation regressions cover reparent, workspace
 transfer, terminal session, replacement incarnation, atomic wake, and parent
 delivery identity.

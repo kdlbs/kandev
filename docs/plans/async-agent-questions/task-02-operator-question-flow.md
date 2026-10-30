@@ -128,5 +128,7 @@ questions expose an authorized saved-image route; and `task.question.changed`
 invalidates the Inbox.
 
 Verification passed: questions, MCP server/handlers, message queue,
-clarification, and sysprompt suites plus changed-file Go lint. Browser E2E
-remains unexecuted in this environment.
+clarification, sysprompt, and previous-stable upgrade suites plus changed-file
+Go lint. HTTP routes fail closed when the workspace authorizer or stored
+workspace is absent; the output schema declares a root object; and the async
+desktop/mobile E2E specs passed locally.

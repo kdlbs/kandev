@@ -180,6 +180,9 @@ func (r *Repository) CreateAsyncQuestion(ctx context.Context, question *models.A
 		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockAsyncQuestionScopeTx(ctx, tx, "create:"+question.SessionID); err != nil {
+		return nil, false, err
+	}
 
 	existing, err := r.findExistingAsyncQuestionTx(ctx, tx, question)
 	if err != nil {
@@ -394,6 +397,9 @@ func asyncQuestionFilters(opts models.ListAsyncQuestionsOptions) (string, []any)
 	if opts.RequireAnswerable {
 		conditions = append(conditions, asyncQuestionAnswerablePredicate)
 	}
+	if opts.RequireCurrentParent {
+		conditions = append(conditions, asyncQuestionCurrentParentPredicate)
+	}
 	if opts.Sidecar != nil {
 		hide := `(s.state = 'dismissed' OR (s.state = 'snoozed' AND s.snooze_until > ?))`
 		prefix := "NOT EXISTS"
@@ -422,7 +428,7 @@ func asyncQuestionFilters(opts models.ListAsyncQuestionsOptions) (string, []any)
 		conditions = append(conditions, "id IN ("+strings.Join(placeholders, ", ")+")")
 		args = append(args, ids...)
 	}
-	if !opts.CursorCreatedAt.IsZero() && opts.CursorID != "" {
+	if !opts.CursorCreatedAt.IsZero() {
 		conditions = append(conditions, "(created_at > ? OR (created_at = ? AND id > ?))")
 		args = append(args, opts.CursorCreatedAt, opts.CursorCreatedAt, opts.CursorID)
 	}
@@ -431,6 +437,13 @@ func asyncQuestionFilters(opts models.ListAsyncQuestionsOptions) (string, []any)
 	}
 	return " WHERE " + strings.Join(conditions, " AND "), args
 }
+
+const asyncQuestionCurrentParentPredicate = `EXISTS (
+	SELECT 1 FROM tasks parent_check
+	WHERE parent_check.id = task_async_questions.task_id
+	  AND parent_check.parent_id = task_async_questions.parent_task_id
+	  AND parent_check.workspace_id = task_async_questions.workspace_id
+	  AND parent_check.archived_at IS NULL)`
 
 const asyncQuestionAnswerablePredicate = `EXISTS (
 	SELECT 1 FROM task_sessions ts
@@ -526,3 +539,13 @@ func (r *Repository) NextHiddenAsyncQuestionSnooze(ctx context.Context, workspac
 // true only for the call that won; a losing call receives the winner without
 // another delivery. Deliveries supplied by the caller are inserted in the same
 // transaction with the winning outcome version.
+
+// lockAsyncQuestionScopeTx serializes the read-before-insert boundaries in the
+// async lifecycle for PostgreSQL. SQLite already serializes the writer.
+func (r *Repository) lockAsyncQuestionScopeTx(ctx context.Context, tx *sqlx.Tx, key string) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "async-question:"+key)
+	return err
+}

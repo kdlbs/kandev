@@ -66,14 +66,12 @@ func questionReceiptResult(receipt map[string]interface{}) *mcp.CallToolResult {
 }
 
 func (s *Server) registerAsyncOperatorQuestionTools() {
-	s.addListQuestionAnswersTool()
 	s.addWithdrawQuestionTool()
 	s.addForwardQuestionTool()
 	s.addWaitForQuestionAnswersTool()
 }
 
 func (s *Server) registerAsyncParentQuestionTools() {
-	s.addListQuestionAnswersTool()
 	s.addWithdrawQuestionTool()
 	s.addWaitForQuestionAnswersTool()
 }

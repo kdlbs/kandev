@@ -1,112 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { listAgentQuestions } from "@/lib/api/domains/agent-questions-api";
 import { AsyncQuestionRow } from "@/components/needs-you-inbox/async-question-row";
-import type { ClarificationInboxAsyncQuestion } from "@/lib/types/clarification-inbox";
-
-type ReadState = {
-  status: "loading" | "ready" | "error";
-  questions: ClarificationInboxAsyncQuestion[];
-  hasMore: boolean;
-  nextCursor?: string;
-  loadingMore?: boolean;
-  loadMoreFailed?: boolean;
-};
-
-/**
- * Read-only terminal async questions for the existing History tab. Answered
- * and withdrawn requests keep their outcome and reason; they are never
- * actionable.
- */
-export function AsyncQuestionHistory({
-  workspaceId,
-  refreshTick,
-}: {
-  workspaceId: string | null;
-  refreshTick: number;
-}) {
-  const [state, setState] = useState<ReadState>({
-    status: "loading",
-    questions: [],
-    hasMore: false,
-  });
-  const [retryTick, setRetryTick] = useState(0);
-
-  const load = useCallback(
-    async (signal: AbortSignal) => {
-      if (!workspaceId) {
-        setState({ status: "ready", questions: [], hasMore: false });
-        return;
-      }
-      setState((current) => ({ ...current, status: "loading" }));
-      try {
-        const page = await listAgentQuestions(
-          workspaceId,
-          { status: "history", limit: 50 },
-          { init: { signal } },
-        );
-        if (signal.aborted) return;
-        setState({
-          status: "ready",
-          questions: page.questions,
-          hasMore: page.has_more,
-          nextCursor: page.next_cursor,
-        });
-      } catch {
-        if (signal.aborted) return;
-        setState({ status: "error", questions: [], hasMore: false });
-      }
-    },
-    [workspaceId],
-  );
-
-  const loadMore = useCallback(async () => {
-    if (!workspaceId || !state.nextCursor || state.loadingMore) return;
-    setState((current) => ({ ...current, loadingMore: true, loadMoreFailed: false }));
-    try {
-      const page = await listAgentQuestions(workspaceId, {
-        status: "history",
-        limit: 50,
-        cursor: state.nextCursor,
-      });
-      setState((current) => ({
-        ...current,
-        status: "ready",
-        questions: [...current.questions, ...page.questions],
-        hasMore: page.has_more,
-        nextCursor: page.next_cursor,
-        loadingMore: false,
-      }));
-    } catch {
-      setState((current) => ({ ...current, loadingMore: false, loadMoreFailed: true }));
-    }
-  }, [state.loadingMore, state.nextCursor, workspaceId]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
-  }, [load, refreshTick, retryTick]);
-
-  if (!workspaceId) return null;
-  return (
-    <AsyncQuestionHistoryView
-      state={state}
-      onRetry={() => setRetryTick((value) => value + 1)}
-      onLoadMore={() => void loadMore()}
-    />
-  );
-}
+import {
+  useAsyncQuestionHistory,
+  type AsyncQuestionHistoryState,
+} from "@/hooks/domains/needs-you-inbox/use-async-question-history";
 
 function AsyncQuestionHistoryView({
   state,
   onRetry,
   onLoadMore,
 }: {
-  state: ReadState;
+  state: AsyncQuestionHistoryState;
   onRetry: () => void;
   onLoadMore: () => void;
 }) {
@@ -155,5 +62,23 @@ function AsyncQuestionHistoryView({
         <p className="text-xs text-destructive">{t("needsYouInbox:asyncHistoryReadFailed")}</p>
       )}
     </section>
+  );
+}
+
+/**
+ * Read-only terminal async questions for the existing History tab. The
+ * workspace-scoped hook rejects stale first-page and load-more responses.
+ */
+export function AsyncQuestionHistory({
+  workspaceId,
+  refreshTick,
+}: {
+  workspaceId: string | null;
+  refreshTick: number;
+}) {
+  const { state, retry, loadMore } = useAsyncQuestionHistory(workspaceId, refreshTick);
+  if (!workspaceId) return null;
+  return (
+    <AsyncQuestionHistoryView state={state} onRetry={retry} onLoadMore={() => void loadMore()} />
   );
 }

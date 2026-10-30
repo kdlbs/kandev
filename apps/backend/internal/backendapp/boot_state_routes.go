@@ -658,6 +658,14 @@ func (b bootStateBuilder) addNeedsYouInboxState(
 		if asyncCount > bootInboxDefaultLimit {
 			hasMore = true
 		}
+		_, _, asyncNext, asyncErr := b.p.services.AsyncQuestions.ListHiddenInboxAsyncQuestions(
+			ctx, workspaceID, clarification.InboxUserID(ctx), 1, time.Now().UTC(),
+		)
+		if asyncErr != nil {
+			b.logBootError("get async question hidden snooze expiry", asyncErr)
+			return
+		}
+		nextSnoozeExpiry = earlierBootTime(nextSnoozeExpiry, asyncNext)
 	}
 	state["needsYouInboxBoot"] = map[string]any{
 		bootStateKeyWorkspaceID: workspaceID,
@@ -671,6 +679,16 @@ func (b bootStateBuilder) addNeedsYouInboxState(
 // (JSON null) when absent -- mirrors the list endpoint's own
 // next_snooze_expiry encoding so the boot value and every later read agree on
 // format (needs-you-inbox design-01#Data-and-contracts).
+func earlierBootTime(first, second *time.Time) *time.Time {
+	if first == nil {
+		return second
+	}
+	if second == nil || first.Before(*second) {
+		return first
+	}
+	return second
+}
+
 func formatOptionalBootTime(t *time.Time) *string {
 	if t == nil {
 		return nil

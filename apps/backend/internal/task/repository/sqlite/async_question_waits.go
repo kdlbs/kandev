@@ -30,6 +30,9 @@ func (r *Repository) CreateAsyncQuestionWait(ctx context.Context, wait *models.A
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockAsyncQuestionScopeTx(ctx, tx, "wait:"+wait.SessionID); err != nil {
+		return nil, err
+	}
 	var activeID string
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id FROM task_async_question_waits
@@ -159,6 +162,29 @@ func (r *Repository) SetAsyncQuestionWaitStatus(ctx context.Context, waitID stri
 		 WHERE id = ? AND status IN ('requested', 'release_requested', 'parked')`),
 		string(status), releasedBy, r.nowUTC(), waitID)
 	return err
+}
+
+// SetAsyncQuestionWaitStatusFrom transitions one gate only while it still
+// holds the expected state. The bool reports whether this call won.
+func (r *Repository) SetAsyncQuestionWaitStatusFrom(
+	ctx context.Context,
+	waitID string,
+	from, to models.AsyncQuestionWaitStatus,
+	releasedBy string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_async_question_waits
+		   SET status = ?, released_by = ?, updated_at = ?
+		 WHERE id = ? AND status = ?`),
+		string(to), releasedBy, r.nowUTC(), waitID, string(from))
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func (r *Repository) asyncQuestionWaitDependencies(ctx context.Context, waitID string) ([]string, error) {

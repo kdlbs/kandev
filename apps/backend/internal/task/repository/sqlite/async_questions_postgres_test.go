@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,8 +18,7 @@ func TestAsyncQuestionsPostgresResolutionRace(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.Background()
 	question := newAsyncQuestionForTest(t, "q-postgres-race", "session-postgres-race")
-	created, isNew, err := repo.CreateAsyncQuestion(ctx, question, nil)
-	require.NoError(t, err)
+	created, isNew := createAsyncQuestionForTest(t, repo, question)
 	require.True(t, isNew)
 
 	var (
@@ -70,8 +68,7 @@ func TestAsyncQuestionsPostgresCreateReplay(t *testing.T) {
 	ctx := context.Background()
 	question := newAsyncQuestionForTest(t, "q-postgres-replay", "session-postgres-replay")
 
-	created, isNew, err := repo.CreateAsyncQuestion(ctx, question, nil)
-	require.NoError(t, err)
+	created, isNew := createAsyncQuestionForTest(t, repo, question)
 	require.True(t, isNew)
 	replayed, isNew, err := repo.CreateAsyncQuestion(ctx, newAsyncQuestionForTest(t, "q-postgres-replay", "session-postgres-replay"), nil)
 	require.NoError(t, err)
@@ -95,5 +92,55 @@ func TestAsyncQuestionsPostgresCreateReplay(t *testing.T) {
 	require.Len(t, released, 1)
 	require.Equal(t, wait.ID, released[0].ID)
 	require.False(t, withdrawn.UpdatedAt.IsZero())
-	_ = time.Now()
+}
+
+func TestAsyncQuestionsPostgresConcurrentCreateAndWait(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-postgres-concurrent", "session-postgres-concurrent")
+	seedAsyncQuestionBinding(t, repo, question)
+
+	var wg sync.WaitGroup
+	ids := make([]string, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			created, _, createErr := repo.CreateAsyncQuestion(ctx, newAsyncQuestionForTest(t,
+				"q-postgres-concurrent", "session-postgres-concurrent"), nil)
+			errs[index] = createErr
+			if created != nil {
+				ids[index] = created.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+	require.Equal(t, ids[0], ids[1], "concurrent exact retries must return one request")
+
+	waitErr := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, waitErr[index] = repo.CreateAsyncQuestionWait(ctx, &models.AsyncQuestionWait{
+				TaskID: question.TaskID, SessionID: question.SessionID,
+				DependencyIDs: []string{question.ID}, Status: models.AsyncQuestionWaitRequested,
+			})
+		}(i)
+	}
+	wg.Wait()
+	wins := 0
+	for _, err := range waitErr {
+		if err == nil {
+			wins++
+		} else {
+			require.ErrorIs(t, err, ErrAsyncQuestionWaitAlreadyActive)
+		}
+	}
+	require.Equal(t, 1, wins, "only one concurrent wait may be active per session")
 }

@@ -181,10 +181,13 @@ type ListAsyncQuestionsOptions struct {
 	// RequireAnswerable restricts reads to a current, non-terminal destination
 	// with a matching session incarnation and workspace.
 	RequireAnswerable bool
-	WorkspaceIDs      []string
-	WorkspaceID       string
-	TaskID            string
-	SessionID         string
+	// RequireCurrentParent restricts direct-child reads to children that still
+	// name this parent and remain in the same workspace.
+	RequireCurrentParent bool
+	WorkspaceIDs         []string
+	WorkspaceID          string
+	TaskID               string
+	SessionID            string
 	// AuthorSessionID restricts reads to requests authored by exactly this
 	// session (the checkpoint read).
 	AuthorSessionID string
