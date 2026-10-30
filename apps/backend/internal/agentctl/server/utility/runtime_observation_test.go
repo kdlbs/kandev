@@ -701,3 +701,17 @@ func TestSettleAbandonedPredecessorAttemptsLeavesStartingUnknown(t *testing.T) {
 		t.Fatalf("starting child without PID was settled: %+v", starting)
 	}
 }
+
+func TestRetainedHandoffRejectsDifferentInstance(t *testing.T) {
+	j, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "owner.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	prior := &inferenceOwnership{OwnerID: "old", InstanceID: "instance-a", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, Revision: 1, Phase: ownerClosed}
+	o := &attemptOwner{cfg: &config.InstanceConfig{InstanceID: "instance-b", SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1}, id: "new", journal: j, state: inferenceOwnerState{Ownership: prior, ContinuityKnown: true}}
+	o.adoptRetainedClaim(o.state)
+	if !o.storageUnavailable || o.admissionFailureReason != "retained_claim_identity_mismatch" {
+		t.Fatalf("different instance adopted: storage=%v reason=%q", o.storageUnavailable, o.admissionFailureReason)
+	}
+}

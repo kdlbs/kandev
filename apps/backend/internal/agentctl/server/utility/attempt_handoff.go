@@ -252,6 +252,7 @@ func predecessorInferenceTerminated(pid int) bool {
 }
 
 func matchingHandoffIdentity(prior, next *inferenceOwnership) bool {
-	return prior.InstanceID != "" && next.InstanceID != "" && prior.SessionID != "" && prior.SessionID == next.SessionID &&
+	return prior.InstanceID != "" && next.InstanceID != "" && prior.InstanceID == next.InstanceID &&
+		prior.SessionID != "" && prior.SessionID == next.SessionID &&
 		prior.IncarnationID == next.IncarnationID && next.HarnessGeneration >= prior.HarnessGeneration && next.HarnessGeneration-prior.HarnessGeneration <= 1
 }
