@@ -18,10 +18,10 @@ extension below is dated 2026-09-09; profile-only behavior remains compatible.
 The destination owns selection; the source owns retirement. Runtime owns
 process launch, resume, and stop. Task environments remain shared.
 
-The workflow engine selects transitions and steps; this change adds no action,
-event, or workflow state. The orchestrator handoff carries both step settings.
+The workflow engine selects transitions and steps; this adds no action, event,
+or workflow state. The orchestrator handoff carries both step settings.
 
-Conditional original-session settings remain separate. They change one
+Conditional original-session settings remain separate; they change one
 session's model settings without switching profiles.
 
 ## Requirement mapping
@@ -40,16 +40,16 @@ session's model settings without switching profiles.
 - The workflow repository persists both settings on each `workflow_steps` row.
 - `workflow/models.StepPortable` carries both settings through export, import,
   templates, and workflow sync.
-- Workflow step request and response DTOs carry both settings through create,
-  update, duplication, boot data, and WebSocket updates.
-- The transition integration supplies the source and destination steps to the
-  orchestrator session handoff.
+- Step request and response DTOs carry both settings through create, update,
+  duplication, boot data, and WebSocket updates.
+- The transition integration passes the source and destination steps to the
+  orchestrator handoff.
 - The destination start setting controls reusable-session lookup.
 - The source end setting controls completion or parking.
 - Terminal callbacks consume matching stop intents, retire that execution, and
   skip failure or workflow handling.
-- The workflow step draft and coordinated save path own the profile and both
-  lifecycle settings.
+- The step draft and coordinated save path own the profile and both lifecycle
+  settings.
 - `WorkflowStepAgentProfileSelector` shows the profile and lifecycle settings
   in one surface.
 
@@ -107,12 +107,15 @@ consumed tombstone remains durable.
 6. If the start setting is `new`, do not perform a reusable-session lookup.
 7. Preflight managed Git credentials for the selected or new destination.
 8. Prepare and promote the destination session before source mutation.
-9. If the end setting is `complete`, mark the source `COMPLETED`. Then stop
+9. If the end setting is `complete`, mark the source `COMPLETED`, then stop
    its runtime.
 10. If the end setting is `park`, persist the execution-stamped stop intent.
     Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
 11. Release the source lifecycle guard before runtime stop. If the caller owns
-    the guard, schedule the stop after the lifecycle operation returns.
+    the guard (a queued prompt's `on_turn_start`), stop after the operation
+    returns. That prompt is first requeued with `turn_start_already_processed`,
+    so a switch moves it and the new primary prompts it once; on failure it
+    stays queued.
 12. Consume only the old execution's stamped intent; treat its stream close as
     teardown acknowledgement and skip normal terminal processing.
 
@@ -462,12 +465,11 @@ Backend tests prove these four combinations:
 | `reuse` | `park` | Reuse an eligible destination and park the source |
 | `new` | `park` | Create a destination and park the source |
 
-Focused persistence tests prove separate defaults and round-trip behavior.
-Portable, template, duplication, and sync tests prove that each field remains on
-its step.
+Persistence tests prove separate defaults and round trips. Portable, template,
+duplication, and sync tests prove each field stays on its step.
 
-Transition tests prove that the source end setting and destination start setting
-come from different steps. They cover legacy, manual, queued, and direct engine
+Transition tests prove the source end setting and destination start setting come
+from different steps. They cover legacy, manual, queued, and direct engine
 entry paths. Existing tests retain delayed callback, durable intent, stop error,
 promotion race, and queue rollback coverage.
 
@@ -486,8 +488,8 @@ contains internal identifiers but no credentials or prompt content.
 
 ## Observability
 
-Profile-switch logs include source step ID, destination step ID, start setting,
-end setting, source outcome, and destination outcome. Stop-event suppression
+Profile-switch logs include source and destination step IDs, start and end
+settings, and source and destination outcomes. Stop-event suppression
 logs include session ID, execution ID, and intent stamp.
 
 ## Implementation plans

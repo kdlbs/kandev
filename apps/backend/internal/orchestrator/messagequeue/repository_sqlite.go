@@ -1164,7 +1164,11 @@ func (r *sqliteRepository) requeuePreservingFIFO(
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
 		return err
 	}
-	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+	// Reserved deliveries keep their row and are owned by its reservation
+	// token, not by an ordinary dispatch claim; the release below checks it.
+	ordinaryDispatch := msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() &&
+		!msg.IsReservedDelivery()
+	if ordinaryDispatch {
 		if err := r.validatePendingQueueDispatchTx(ctx, tx, msg); err != nil {
 			return err
 		}
@@ -1172,7 +1176,7 @@ func (r *sqliteRepository) requeuePreservingFIFO(
 	if err := r.guardSessionTx(ctx, tx, msg.SessionID, msg.TaskID); err != nil {
 		return err
 	}
-	if msg.reservationGenerationsCaptured && !msg.IsDurableLifecycle() {
+	if ordinaryDispatch {
 		if err := r.deletePendingQueueDispatchTx(ctx, tx, msg); err != nil {
 			return err
 		}
