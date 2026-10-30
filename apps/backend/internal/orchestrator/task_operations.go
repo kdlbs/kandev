@@ -1244,7 +1244,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !configMode,
+			IncludeCoordinatorTaskControls: !configMode && dbTask.Origin != models.TaskOriginAutomationRun,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
 			IncludeCanvasGuidance:          includeCanvasGuidance,
 			Autopilot:                      dbTask.Autopilot,
@@ -1758,10 +1758,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
 	defer launchClaim.releaseIfHeld(ctx)
 
-	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	promptTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
+	isOfficeTask := promptTask != nil && promptTask.IsFromOffice
 	if isOfficeTask {
 		if err := validateOfficeLaunchEnv(taskID, env); err != nil {
 			return nil, err
@@ -2090,6 +2091,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			isOfficeTask:              isOfficeTask,
 			isPassthrough:             skipKandevMCPWrap,
 			configMode:                configMode,
+			automationRun:             promptTask != nil && promptTask.Origin == models.TaskOriginAutomationRun,
 			referenceContext:          promptReferenceContext,
 			includeTaskTitleTool:      !configMode && titleOwner,
 			includeCanvasGuidance:     includeCanvasGuidance,
@@ -2216,6 +2218,7 @@ type launchPromptContext struct {
 	isOfficeTask              bool
 	isPassthrough             bool
 	configMode                bool
+	automationRun             bool
 	includeTaskTitleTool      bool
 	includeCanvasGuidance     bool
 	autopilot                 bool
@@ -2256,7 +2259,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
-		IncludeCoordinatorTaskControls: !p.configMode,
+		IncludeCoordinatorTaskControls: !p.configMode && !p.automationRun,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
 		Autopilot:                      p.autopilot,

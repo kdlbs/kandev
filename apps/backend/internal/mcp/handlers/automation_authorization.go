@@ -40,6 +40,7 @@ func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFun
 // automationSurfaceActions is the execution-time mirror of the fixed
 // SurfaceAutomation catalog. Discovery alone is not an authorization boundary
 // because an agent can still send a raw WebSocket action.
+// Child reordering is task-mode only and is deliberately absent.
 var automationSurfaceActions = map[string]struct{}{
 	ws.ActionMCPListWorkspaces:              {},
 	ws.ActionMCPListWorkflows:               {},
