@@ -386,3 +386,12 @@ The design and work orders now specify those boundaries and regression scenarios
 - An older binary can cascade-delete uncopied rows. A read rollback alone is not a safe binary downgrade.
 - Years of facts increase storage. Benchmarks must distinguish ingestion, projection, indexed reads, and expensive transcript collection.
 - Existing core/plugin PR conflicts and CI failures remain separate delivery gates. This package does not declare them resolved.
+
+
+### CI and cost-point correction
+
+The functional PostgreSQL fixtures now use the existing optional-DSN helper in SQLite-only jobs. Required PostgreSQL jobs still execute the same assertions. Functional projection cases accept the supported PostgreSQL 16 baseline; the separate PostgreSQL 18 performance gate is unchanged. Both setup failures were reproduced before the correction. The focused SQLite run passed 39 test results, with 20 PostgreSQL skips. PostgreSQL 16.14 passed 43 results under race detection with no skips. Evidence is in `evidence/usage-history-ci-fixtures-20261030/`.
+
+PostgreSQL timestamp precision collapsed a point's one-nanosecond interval, so a matching reported price was discarded. The selector now recognizes equality for explicit point coverage. Ending interval boundaries remain exclusive. Matching and unrelated prices, unknown and measured-zero costs, partial coverage, currency and actor cases pass normal and race checks on SQLite and PostgreSQL 18.6. Evidence is in `evidence/usage-history-cost-point-20261030/`. The retained projection is new in this PR, so released databases need no repair migration.
+
+These focused passes do not close delivery. The current CI artifact audit found three browser flakes after retry. Their root causes, fresh remote checks, installed-plugin flows and both complete performance gates remain open.

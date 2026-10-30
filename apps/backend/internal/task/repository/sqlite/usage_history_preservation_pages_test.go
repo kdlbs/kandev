@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -88,10 +87,7 @@ func newPreservationPageFixture(t *testing.T, postgres, prune bool) *preservatio
 	t.Helper()
 	var database *sqlx.DB
 	if postgres {
-		dsn := os.Getenv("KANDEV_TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Fatal("KANDEV_TEST_POSTGRES_DSN is required for PostgreSQL preservation parity")
-		}
+		dsn := testutil.PostgresDSNFromEnv(t)
 		database = testutil.OpenIsolatedPostgres(t, dsn)
 		var version string
 		require.NoError(t, database.Get(&version, `SHOW server_version`))

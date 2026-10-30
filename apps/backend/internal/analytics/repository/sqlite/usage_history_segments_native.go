@@ -77,10 +77,11 @@ func (r *Repository) usageSegmentNativeOverlapTx(ctx context.Context, tx *sqlx.T
 	m := row.Measurement
 	for _, table := range []string{usageMeasurementsTable, usageBucketsTable} {
 		query := `SELECT id FROM ` + table + ` WHERE scope_id=? AND selection_partition=? AND retired=0 AND ` + column + `=? AND model=?
-		 AND (coverage_end IS NULL OR coverage_end>?) AND (coverage_start IS NULL OR coverage_start<=?)
+			 AND ((coverage_end IS NULL OR coverage_end>?) OR (coverage_key LIKE 'point:%' AND coverage_start=?))
+			 AND (coverage_start IS NULL OR coverage_start<=?)
 		 AND (provider='' OR provider=?) LIMIT 1`
 		var id string
-		err := tx.GetContext(ctx, &id, r.db.Rebind(query), m.ScopeID, row.WorkKey, bundle, m.Model, m.CoverageStart, m.CoverageStart, m.Provider)
+		err := tx.GetContext(ctx, &id, r.db.Rebind(query), m.ScopeID, row.WorkKey, bundle, m.Model, m.CoverageStart, m.CoverageStart, m.CoverageStart, m.Provider)
 		if err == nil {
 			return true, nil
 		}

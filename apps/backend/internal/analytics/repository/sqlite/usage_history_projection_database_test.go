@@ -34,7 +34,7 @@ func projectionDatabases(t *testing.T, postgres bool) (*sqlx.DB, *sqlx.DB) {
 		first = testutil.OpenIsolatedPostgres(t, dsn)
 		var version int
 		require.NoError(t, first.Get(&version, `SHOW server_version_num`))
-		require.GreaterOrEqual(t, version, 180000)
+		require.GreaterOrEqual(t, version, 160000)
 		var schema string
 		require.NoError(t, first.Get(&schema, `SELECT current_schema()`))
 		raw, err := db.OpenPostgres(testutil.PostgresDSNWithSearchPath(t, dsn, schema), 4, 4)

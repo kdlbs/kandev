@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,8 +18,7 @@ func currentTargetDatabaseFixture(t *testing.T, postgres bool) (*Repository, *ta
 	t.Helper()
 	var database *sqlx.DB
 	if postgres {
-		dsn := os.Getenv("KANDEV_TEST_POSTGRES_DSN")
-		require.NotEmpty(t, dsn, "real PostgreSQL verification requires its isolated test DSN")
+		dsn := testutil.PostgresDSNFromEnv(t)
 		database = testutil.OpenIsolatedPostgres(t, dsn)
 		var version string
 		require.NoError(t, database.Get(&version, `SHOW server_version`))
