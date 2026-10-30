@@ -58,6 +58,11 @@ func (o *attemptOwner) consume(id string) (AttemptStatus, error) {
 	a.Status.State = AttemptStarting
 	a.Status.UpdatedAt = time.Now().UTC()
 	o.persistLocked(false, id)
+	if o.storageUnavailable || o.diagnostics.LastPersistResult == "write_failed" {
+		// Without durable consume evidence a successor cannot distinguish a
+		// started child from an unsent preparation, so refuse to start it.
+		return a.Status, errAttemptUnavailable
+	}
 	return a.Status, nil
 }
 

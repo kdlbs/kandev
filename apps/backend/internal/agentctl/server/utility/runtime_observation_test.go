@@ -685,3 +685,19 @@ func TestRetainedHandoffAlwaysDropsHistoricalContinuity(t *testing.T) {
 		t.Fatalf("successor continuity/adoption wrong: storage=%v continuity=%v ownership=%+v", o.storageUnavailable, o.state.ContinuityKnown, o.state.Ownership)
 	}
 }
+
+func TestSettleAbandonedPredecessorAttemptsLeavesStartingUnknown(t *testing.T) {
+	attempts := map[string]*ownedAttempt{
+		"prepared": {Status: AttemptStatus{AttemptID: "prepared", OwnerID: "old", State: AttemptPrepared}},
+		"starting": {Status: AttemptStatus{AttemptID: "starting", OwnerID: "old", State: AttemptStarting}},
+	}
+	settleAbandonedPredecessorAttempts(attempts, "new")
+	prepared := attempts["prepared"].Status
+	if !prepared.Settled || prepared.State != AttemptNotStarted {
+		t.Fatalf("unsent preparation not settled: %+v", prepared)
+	}
+	starting := attempts["starting"].Status
+	if starting.Settled {
+		t.Fatalf("starting child without PID was settled: %+v", starting)
+	}
+}
