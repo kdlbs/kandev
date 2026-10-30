@@ -24,6 +24,7 @@ type workflowPhaseProgress struct {
 	counts      map[string]int
 	unavailable map[string]struct{}
 	rest        map[string]*WorkflowAttention
+	restPRs     map[string]*PR
 	// forceREST keeps a workspace on the serial fallback once GraphQL is
 	// unsupported or rejected, including across a deferred wake.
 	forceREST bool
@@ -35,6 +36,7 @@ func newWorkflowPhaseProgress() *workflowPhaseProgress {
 		counts:      make(map[string]int),
 		unavailable: make(map[string]struct{}),
 		rest:        make(map[string]*WorkflowAttention),
+		restPRs:     make(map[string]*PR),
 	}
 }
 
@@ -74,6 +76,14 @@ type workflowPhaseResult struct {
 	useREST bool
 }
 
+// workflowPhaseSharedResult is the singleflight-owned evidence fetch. Every
+// caller applies it to its own TaskPR rows and its own unfinished watches.
+type workflowPhaseSharedResult struct {
+	progress *workflowPhaseProgress
+	deferred *AdmissionDeferredError
+	err      error
+}
+
 // runWorkflowPhase refreshes workflow attention for the open known PRs behind
 // the supplied watches. It never re-fetches status, so a continuation wake and
 // an inventory tick follow one path.
@@ -88,53 +98,59 @@ func (s *Service) runWorkflowPhase(
 	refsKey := workflowPhaseRefsKey(targets)
 	key := batchedPhaseKey(cacheScope, workflowPhaseSingleflightPrefix+refsKey, explicitRefresh)
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
-		return s.runWorkflowPhaseAttempt(ctx, client, exec, cacheScope, key, refsKey, targets), nil
+		return s.fetchWorkflowPhaseAttempt(ctx, client, exec, cacheScope, key, refsKey, targets), nil
 	})
 	if err != nil {
 		return workflowPhaseResult{Unfinished: workflowPhaseWatches(targets), Err: err}
 	}
-	result, ok := v.(workflowPhaseResult)
-	if !ok {
+	shared, ok := v.(workflowPhaseSharedResult)
+	if !ok || shared.progress == nil {
 		return workflowPhaseResult{Unfinished: workflowPhaseWatches(targets)}
 	}
-	return result
+	if shared.deferred != nil {
+		return workflowPhaseResult{
+			Unfinished: workflowPhaseWatches(targets), Deferred: shared.deferred, Err: shared.err,
+		}
+	}
+	s.classifyAndStoreWorkflowPhase(ctx, targets, shared.progress)
+	return workflowPhaseResult{Err: shared.err}
 }
 
-func (s *Service) runWorkflowPhaseAttempt(
+func (s *Service) fetchWorkflowPhaseAttempt(
 	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope, key, refsKey string,
 	targets []*workflowPhaseTarget,
-) workflowPhaseResult {
+) workflowPhaseSharedResult {
 	fetchCtx, cancel := derivedFetchContext(ctx)
 	defer cancel()
 	progress := s.workflowPhaseProgress(key, refsKey)
-	result := s.executeWorkflowPhase(fetchCtx, client, exec, cacheScope, targets, progress)
-	s.finishWorkflowPhaseProgress(key, progress, result.Deferred != nil)
+	result := s.fetchWorkflowPhaseEvidence(fetchCtx, client, exec, cacheScope, targets, progress)
+	s.finishWorkflowPhaseProgress(key, progress, result.deferred != nil)
 	return result
 }
 
-func (s *Service) executeWorkflowPhase(
+func (s *Service) fetchWorkflowPhaseEvidence(
 	ctx context.Context, client Client, exec GraphQLExecutor, cacheScope string,
 	targets []*workflowPhaseTarget, progress *workflowPhaseProgress,
-) workflowPhaseResult {
+) workflowPhaseSharedResult {
+	shared := workflowPhaseSharedResult{progress: progress}
 	if exec == nil || progress.forceREST {
-		return s.runWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
+		return s.fetchWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
 	}
 	if result := s.ensureWorkflowPhaseEvidence(ctx, exec, targets, progress); result != nil {
 		if result.useREST {
 			progress.forceREST = true
-			return s.runWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
+			return s.fetchWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
 		}
-		return *result
+		return workflowPhaseSharedResult{progress: progress, deferred: result.Deferred, err: result.Err}
 	}
 	if result := s.ensureWorkflowPhaseSuiteCounts(ctx, exec, targets, progress); result != nil {
 		if result.useREST {
 			progress.forceREST = true
-			return s.runWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
+			return s.fetchWorkflowPhaseREST(ctx, client, cacheScope, targets, progress)
 		}
-		return *result
+		return workflowPhaseSharedResult{progress: progress, deferred: result.Deferred, err: result.Err}
 	}
-	s.classifyAndStoreWorkflowPhase(ctx, targets, progress)
-	return workflowPhaseResult{}
+	return shared
 }
 
 func (s *Service) ensureWorkflowPhaseEvidence(
@@ -384,44 +400,51 @@ func (s *Service) logWorkflowPhaseFailure(message string, err error) {
 	}
 }
 
-func (s *Service) runWorkflowPhaseREST(
+func (s *Service) fetchWorkflowPhaseREST(
 	ctx context.Context, client Client, cacheScope string, targets []*workflowPhaseTarget,
 	progress *workflowPhaseProgress,
-) workflowPhaseResult {
+) workflowPhaseSharedResult {
+	shared := workflowPhaseSharedResult{progress: progress}
 	if client == nil {
-		s.classifyAndStoreWorkflowPhase(ctx, targets, progress)
-		return workflowPhaseResult{}
+		return shared
 	}
 	for _, target := range targets {
-		if attention, ok := progress.rest[target.key()]; ok {
-			s.storeWorkflowPhaseAttention(ctx, target, attention)
+		if _, ok := progress.rest[target.key()]; ok {
 			continue
 		}
-		attention, err := s.collectRESTWorkflowAttention(ctx, client, cacheScope, target)
+		attention, err := s.collectRESTWorkflowAttention(ctx, client, cacheScope, target, progress)
 		if err != nil {
 			if deferred := admissionDeferralOf(err); deferred != nil {
-				return workflowPhaseResult{Unfinished: workflowPhaseWatches(targets), Deferred: deferred}
+				shared.deferred = deferred
+				return shared
 			}
 			s.logWorkflowPhaseFailure("workflow attention read unavailable", err)
 			attention = workflowAttentionUnknown(target.headSHA)
 		}
 		progress.rest[target.key()] = attention
-		s.storeWorkflowPhaseAttention(ctx, target, attention)
 	}
-	return workflowPhaseResult{}
+	return shared
 }
 
 func (s *Service) collectRESTWorkflowAttention(
 	ctx context.Context, client Client, cacheScope string, target *workflowPhaseTarget,
+	progress *workflowPhaseProgress,
 ) (*WorkflowAttention, error) {
 	pr := &PR{
 		Number: target.number, State: "open", HeadSHA: target.headSHA, HeadBranch: target.headBranch,
 		RepoOwner: target.owner, RepoName: target.repo,
 		BaseRepoOwner: target.owner, BaseRepoName: target.repo,
 	}
-	fetched, err := client.GetPR(ctx, target.owner, target.repo, target.number)
-	if err != nil {
-		return workflowAttentionUnknown(target.headSHA), err
+	fetched := progress.restPRs[target.key()]
+	if fetched == nil {
+		var err error
+		fetched, err = client.GetPR(ctx, target.owner, target.repo, target.number)
+		if err != nil {
+			return workflowAttentionUnknown(target.headSHA), err
+		}
+		if fetched != nil {
+			progress.restPRs[target.key()] = fetched
+		}
 	}
 	if fetched == nil || (fetched.HeadSHA != "" && fetched.HeadSHA != target.headSHA) {
 		return workflowAttentionUnknown(target.headSHA), nil
@@ -430,11 +453,38 @@ func (s *Service) collectRESTWorkflowAttention(
 	pr.HeadRepoID = fetched.HeadRepoID
 	pr.HeadRepoOwner = fetched.HeadRepoOwner
 	pr.HeadRepoName = fetched.HeadRepoName
-	observation, err := s.collectWorkflowObservation(ctx, client, cacheScope, target.owner, target.repo, pr)
-	if observation == nil {
-		return workflowAttentionUnknown(target.headSHA), err
+	return s.collectRESTWorkflowRunAttention(ctx, client, cacheScope, pr)
+}
+
+// collectRESTWorkflowRunAttention keeps a job-read deferral on the returned
+// error. The classifier represents missing job evidence as unknown, but the
+// fallback must distinguish a local deferral from a completed unavailable
+// observation so it can resume instead of storing stale evidence.
+func (s *Service) collectRESTWorkflowRunAttention(
+	ctx context.Context, client Client, cacheScope string, pr *PR,
+) (*WorkflowAttention, error) {
+	if pr == nil || pr.HeadSHA == "" {
+		return workflowAttentionUnknown(""), nil
 	}
-	return observation.Attention, err
+	owner, repo := pr.RepoOwner, pr.RepoName
+	runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, owner, repo, pr.HeadSHA)
+	if err != nil {
+		return workflowAttentionUnknown(pr.HeadSHA), err
+	}
+	var jobErr error
+	attention := classifyWorkflowAttentionWithJobs(ctx, owner, repo, pr, runs,
+		func(jobCtx context.Context, runID int64, attempt int) ([]WorkflowJob, error) {
+			jobs, readErr := s.cachedWorkflowJobs(jobCtx, client, cacheScope, owner, repo, runID, attempt, true)
+			if readErr != nil && jobErr == nil {
+				jobErr = readErr
+			}
+			return jobs, readErr
+		},
+	)
+	if jobErr != nil {
+		return attention, jobErr
+	}
+	return attention, nil
 }
 
 func (s *Service) loadWorkflowPhaseTargets(

@@ -250,13 +250,18 @@ func prMonitorPendingFromOutcome(
 		(len(outcome.unfinished) == 0 && len(outcome.workflowUnfinished) == 0) {
 		return nil
 	}
-	retryAt, ok := prMonitorPendingBoundary(outcome, now)
-	if !ok {
-		return nil
+	statusBoundary, statusOK := prMonitorPendingBoundary(outcome.deferred, outcome.err, now)
+	workflowBoundary, workflowOK := prMonitorPendingBoundary(outcome.workflowDeferred, nil, now)
+	if !workflowOK {
+		workflowBoundary, workflowOK = statusBoundary, statusOK
 	}
 	targets := make(map[string]*prMonitorPendingTarget, len(outcome.unfinished)+len(outcome.workflowUnfinished))
-	addPRMonitorPendingWatches(targets, outcome.unfinished, false, retryAt)
-	addPRMonitorPendingWatches(targets, outcome.workflowUnfinished, true, retryAt)
+	if statusOK {
+		addPRMonitorPendingWatches(targets, outcome.unfinished, false, statusBoundary)
+	}
+	if workflowOK {
+		addPRMonitorPendingWatches(targets, outcome.workflowUnfinished, true, workflowBoundary)
+	}
 	if len(targets) == 0 {
 		return nil
 	}
@@ -326,8 +331,10 @@ func mergePRMonitorPendingTarget(
 // prMonitorPendingBoundary prefers the deferral's next authorization boundary,
 // then its positive delay, then the retry floor. A provider deadline is kept as
 // a lower bound and is never replaced by the floor.
-func prMonitorPendingBoundary(outcome prWatchWorkspaceBatchOutcome, now time.Time) (time.Time, bool) {
-	if deferred := outcome.deferred; deferred != nil {
+func prMonitorPendingBoundary(
+	deferred *AdmissionDeferredError, err error, now time.Time,
+) (time.Time, bool) {
+	if deferred != nil {
 		if deferred.RetryAt.After(now) {
 			return deferred.RetryAt.UTC(), true
 		}
@@ -336,7 +343,7 @@ func prMonitorPendingBoundary(outcome prWatchWorkspaceBatchOutcome, now time.Tim
 		}
 		return now.Add(prMonitorPendingRetryFloor), true
 	}
-	if retryAt := prDiscoveryRetryAtFromError(outcome.err); retryAt != nil && retryAt.After(now) {
+	if retryAt := prDiscoveryRetryAtFromError(err); retryAt != nil && retryAt.After(now) {
 		return retryAt.UTC(), true
 	}
 	return time.Time{}, false
@@ -547,6 +554,7 @@ func (p *Poller) runWorkflowPhaseWakes(
 			results:            syncOutcome.Results,
 			workflowUnfinished: prWatchWorkflowPendingWatches(syncOutcome.Pending),
 			deferred:           syncOutcome.Deferred,
+			workflowDeferred:   syncOutcome.WorkflowDeferred,
 			err:                syncOutcome.Err,
 		}
 		if len(outcome.workflowUnfinished) > 0 || outcome.deferred != nil {

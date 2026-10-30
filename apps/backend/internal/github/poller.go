@@ -287,6 +287,7 @@ type prWatchWorkspaceBatchOutcome struct {
 	state              prWatchBatchOutcomeState
 	results            []PRWatchSyncResult
 	deferred           *AdmissionDeferredError
+	workflowDeferred   *AdmissionDeferredError
 	err                error
 }
 
@@ -354,6 +355,7 @@ func (p *Poller) checkWorkspacePRWatches(
 		workflowUnfinished: prWatchWorkflowPendingWatches(syncOutcome.Pending),
 		results:            syncOutcome.Results,
 		deferred:           syncOutcome.Deferred,
+		workflowDeferred:   syncOutcome.WorkflowDeferred,
 		err:                syncOutcome.Err,
 	}
 	if errors.Is(syncOutcome.Err, errGraphQLUnsupported) {

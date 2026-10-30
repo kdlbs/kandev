@@ -52,7 +52,11 @@ type prWatchSyncOutcome struct {
 	Results  []PRWatchSyncResult
 	Pending  []prWatchSyncPending
 	Deferred *AdmissionDeferredError
-	Err      error
+	// WorkflowDeferred owns the unfinished workflow phase's own retry boundary.
+	// It stays separate from a status deferral so a completed known-PR phase is
+	// not held for an unrelated branch-discovery boundary.
+	WorkflowDeferred *AdmissionDeferredError
+	Err              error
 }
 
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
@@ -114,7 +118,9 @@ func (s *Service) runWorkspaceWorkflowPhaseForPoller(
 		exec = nil
 	}
 	result := s.runWorkflowPhase(ctx, resolved.Client, exec, resolved.CacheScope, watches, false)
-	outcome := prWatchSyncOutcome{Deferred: result.Deferred, Err: result.Err}
+	outcome := prWatchSyncOutcome{
+		Deferred: result.Deferred, WorkflowDeferred: result.Deferred, Err: result.Err,
+	}
 	if len(result.Unfinished) > 0 {
 		outcome.Pending = appendPRWatchWorkflowPending(nil, result.Unfinished)
 	}
@@ -172,7 +178,8 @@ func (s *Service) prepareWorkflowPhase(
 // prWatchSyncWorkflowFailedOutcome reports work that never reached the
 // provider. Only the workflow phase is retried.
 func prWatchSyncWorkflowFailedOutcome(watches []*PRWatch, err error) prWatchSyncOutcome {
-	outcome := prWatchSyncOutcome{Err: err, Deferred: admissionDeferralOf(err)}
+	deferred := admissionDeferralOf(err)
+	outcome := prWatchSyncOutcome{Err: err, Deferred: deferred, WorkflowDeferred: deferred}
 	outcome.Pending = appendPRWatchWorkflowPending(nil, watches)
 	return outcome
 }
@@ -388,15 +395,14 @@ func (s *Service) syncWatchesBatchedWithClient(
 	return outcome
 }
 
-// runWorkflowPhaseAfterStatus refreshes Actions attention only after every
-// status phase completed. A deferred status phase keeps its own pending work
-// and the workflow phase joins the wake that completes it.
+// runWorkflowPhaseAfterStatus refreshes Actions attention for every status
+// that already applied, even when a sibling status phase deferred. A completed
+// known-PR phase must not wait for an unrelated branch-discovery boundary.
 func (s *Service) runWorkflowPhaseAfterStatus(
 	outcome *prWatchSyncOutcome, req batchedPRWatchSync,
 	resultsByWatch map[*PRWatch]PRWatchSyncResult,
 ) {
-	if outcome == nil || outcome.Err != nil || outcome.Deferred != nil ||
-		len(prWatchStatusPendingWatches(outcome.Pending)) > 0 {
+	if outcome == nil {
 		return
 	}
 	watches := appliedWorkflowPhaseWatches(resultsByWatch)
@@ -414,10 +420,16 @@ func (s *Service) runWorkflowPhaseAfterStatus(
 		outcome.Pending = appendPRWatchWorkflowPending(outcome.Pending, result.Unfinished)
 	}
 	if result.Deferred != nil {
-		// Passive per-task sync returns the typed deferral instead of
-		// treating incomplete workflow evidence as a complete pass.
-		outcome.Deferred = result.Deferred
-		outcome.Err = result.Deferred
+		outcome.WorkflowDeferred = result.Deferred
+		if outcome.Deferred == nil {
+			// Passive per-task sync returns the typed deferral instead of
+			// treating incomplete workflow evidence as a complete pass. A status
+			// deferral keeps its own boundary so the searching wake is not moved.
+			outcome.Deferred = result.Deferred
+			if outcome.Err == nil {
+				outcome.Err = result.Deferred
+			}
+		}
 	}
 }
 

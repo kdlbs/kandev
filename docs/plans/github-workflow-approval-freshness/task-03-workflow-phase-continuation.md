@@ -23,6 +23,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/integrations/system-design/github-workflow-attention.md
   - ../../specs/integrations/system-design/github-pr-discovery-health.md
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
 ---
 
 # Task 03: Resume deferred workflow evidence
@@ -131,10 +132,12 @@ regressions passed:
 - `pnpm e2e:run -- tests/pr/mobile-pr-sidebar-automation-indicators.spec.ts --project=mobile-chrome`
   (4 passed)
 
-Review follow-up: a GraphQL rate-limit response now retains its
+Review follow-ups: a GraphQL rate-limit response now retains its
 `rateLimit.resetAt` boundary on the returned error, so the monitor's
 `prMonitorPendingBoundary` path can use it instead of dropping the provider
-deadline.
+deadline. A completed known-PR status refreshes workflow attention even when a
+sibling searching phase defers, and workflow pending targets keep their own
+short retry boundary instead of inheriting the searching phase's deadline.
 
 Verification after the review follow-ups:
 

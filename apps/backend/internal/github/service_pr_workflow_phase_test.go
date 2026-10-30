@@ -21,14 +21,28 @@ import (
 
 type workflowPhaseCountingClient struct {
 	*MockClient
-	runCalls atomic.Int64
-	jobCalls atomic.Int64
+	runCalls   atomic.Int64
+	jobCalls   atomic.Int64
+	getPRCalls atomic.Int64
+	deferRuns  atomic.Int64
+	deferJobs  atomic.Int64
+}
+
+func (c *workflowPhaseCountingClient) GetPR(
+	ctx context.Context, owner, repo string, number int,
+) (*PR, error) {
+	c.getPRCalls.Add(1)
+	return c.MockClient.GetPR(ctx, owner, repo, number)
 }
 
 func (c *workflowPhaseCountingClient) ListWorkflowRuns(
 	ctx context.Context, owner, repo, headSHA string,
 ) ([]WorkflowRun, error) {
 	c.runCalls.Add(1)
+	if c.deferRuns.Load() > 0 {
+		c.deferRuns.Add(-1)
+		return nil, &AdmissionDeferredError{Delay: time.Second, Reason: "test REST pacing"}
+	}
 	return c.MockClient.ListWorkflowRuns(ctx, owner, repo, headSHA)
 }
 
@@ -36,6 +50,10 @@ func (c *workflowPhaseCountingClient) ListWorkflowRunJobs(
 	ctx context.Context, owner, repo string, runID int64, attempt int,
 ) ([]WorkflowJob, error) {
 	c.jobCalls.Add(1)
+	if c.deferJobs.Load() > 0 {
+		c.deferJobs.Add(-1)
+		return nil, &AdmissionDeferredError{Delay: time.Second, Reason: "test REST job pacing"}
+	}
 	return c.MockClient.ListWorkflowRunJobs(ctx, owner, repo, runID, attempt)
 }
 
@@ -70,6 +88,8 @@ type workflowTestExecutor struct {
 	deferStep2   int
 	invalidStep1 bool
 	invalidStep2 bool
+	// onStep1 runs inside the executor lock before a suites response.
+	onStep1 func()
 	// aliasErrors maps a PR number to a per-alias GraphQL error message.
 	aliasErrors map[int]string
 	// jobErrors maps a suite ID to a per-node GraphQL error message.
@@ -110,6 +130,9 @@ func (e *workflowTestExecutor) ExecuteGraphQL(
 	switch {
 	case strings.Contains(query, "query WorkflowSuites"):
 		e.step1Calls++
+		if hook := e.onStep1; hook != nil {
+			hook()
+		}
 		if e.deferStep1 > 0 {
 			e.deferStep1--
 			return &AdmissionDeferredError{Delay: time.Second, Reason: "test workflow pacing"}
@@ -693,4 +716,134 @@ func TestWorkflowPhase_SkipsRowsWithoutHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, row.WorkflowAttention, "an empty-head row must never receive head-scoped evidence")
 	require.Zero(t, events())
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9
+func TestWorkflowPhase_RESTFallbackRetainsPRIdentityAcrossDeferral(t *testing.T) {
+	_, service, mockClient, store := setupPollerTest(t)
+	client := &workflowPhaseCountingClient{MockClient: mockClient}
+	client.deferRuns.Store(1)
+	pr := forkApprovalTestPR(1, "head-1")
+	watch := seedWorkflowPhaseTarget(t, store, 1, pr, nil)
+	client.AddPR(&PR{
+		Number: 1, State: "open", HeadSHA: "head-1", HeadBranch: pr.branch,
+		RepoOwner: "acme", RepoName: "widget",
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	})
+	client.ReplaceWorkflowRuns("acme", "widget", "head-1", []WorkflowRun{{
+		ID: 1001, RunAttempt: 1, WorkflowID: 11, Name: "CI", Event: "pull_request",
+		Status: "completed", Conclusion: "action_required",
+		HeadSHA: "head-1", HeadBranch: pr.branch,
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	}})
+	client.ReplaceWorkflowRunJobs("acme", "widget", 1001, 1, nil)
+
+	result := service.runWorkflowPhase(context.Background(), client, nil, "test-scope", []*PRWatch{watch}, false)
+	require.NotNil(t, result.Deferred)
+	require.Len(t, result.Unfinished, 1)
+	require.Equal(t, int64(1), client.getPRCalls.Load())
+	require.Equal(t, int64(1), client.runCalls.Load())
+
+	result = service.runWorkflowPhase(context.Background(), client, nil, "test-scope", []*PRWatch{watch}, false)
+	require.Nil(t, result.Deferred)
+	require.Empty(t, result.Unfinished)
+	require.Equal(t, int64(1), client.getPRCalls.Load(),
+		"the deferred wake must reuse the fetched PR identity, not spend another Core read")
+	require.Equal(t, int64(2), client.runCalls.Load())
+
+	row, err := store.GetTaskPRByRepoAndNumber(context.Background(), watch.TaskID, "repo-1", 1)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowAttentionApprovalRequired, row.WorkflowAttention.State)
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9
+func TestWorkflowPhase_SharedEvidenceUpdatesEveryCallerTask(t *testing.T) {
+	_, service, mockClient, store := setupPollerTest(t)
+	client := &workflowPhaseCountingClient{MockClient: mockClient}
+	executor := newWorkflowTestExecutor()
+	pr := forkApprovalTestPR(42, "head-42")
+	pr.branch = "feature-42"
+	executor.setPR(pr)
+	first := seedWorkflowPhaseTarget(t, store, 42, pr, nil)
+	secondTaskID := "workflow-phase-task-42-secondary"
+	secondRow := &TaskPR{
+		WorkspaceID: testWorkspaceID, TaskID: secondTaskID, RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42, PRURL: "https://github.com/acme/widget/pull/42",
+		PRTitle: "workflow phase PR", HeadBranch: pr.branch, BaseBranch: "main",
+		State: "open", HeadSHA: pr.storedHead, CreatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, store.CreateTaskPR(context.Background(), secondRow))
+	second := &PRWatch{
+		WorkspaceID: testWorkspaceID, TaskID: secondTaskID, SessionID: "session-" + secondTaskID,
+		RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42, Branch: pr.branch,
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	executor.onStep1 = func() {
+		once.Do(func() { close(started) })
+		<-release
+	}
+	results := make(chan workflowPhaseResult, 2)
+	go func() {
+		results <- service.runWorkflowPhase(context.Background(), client, executor, "test-scope", []*PRWatch{first}, false)
+	}()
+	<-started
+	go func() {
+		results <- service.runWorkflowPhase(context.Background(), client, executor, "test-scope", []*PRWatch{second}, false)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	firstResult, secondResult := <-results, <-results
+	require.Nil(t, firstResult.Deferred)
+	require.Nil(t, secondResult.Deferred)
+	require.Empty(t, firstResult.Unfinished)
+	require.Empty(t, secondResult.Unfinished)
+	step1, _ := executor.counts()
+	require.Equal(t, 1, step1, "concurrent callers must share one suite read")
+
+	for _, taskID := range []string{first.TaskID, second.TaskID} {
+		row, err := store.GetTaskPRByRepoAndNumber(context.Background(), taskID, "repo-1", 42)
+		require.NoError(t, err)
+		require.NotNil(t, row)
+		require.Equal(t, WorkflowAttentionApprovalRequired, row.WorkflowAttention.State,
+			"shared evidence must be applied to %s", taskID)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.10
+func TestWorkflowPhase_RESTJobDeferralLeavesObservationUntilRetry(t *testing.T) {
+	_, service, mockClient, store := setupPollerTest(t)
+	client := &workflowPhaseCountingClient{MockClient: mockClient}
+	client.deferJobs.Store(1)
+	pr := forkApprovalTestPR(1, "head-1")
+	watch := seedWorkflowPhaseTarget(t, store, 1, pr, nil)
+	client.AddPR(&PR{
+		Number: 1, State: "open", HeadSHA: "head-1", HeadBranch: pr.branch,
+		RepoOwner: "acme", RepoName: "widget",
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	})
+	client.ReplaceWorkflowRuns("acme", "widget", "head-1", []WorkflowRun{{
+		ID: 1001, RunAttempt: 1, WorkflowID: 11, Name: "CI", Event: "pull_request",
+		Status: "completed", Conclusion: "action_required",
+		HeadSHA: "head-1", HeadBranch: pr.branch,
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	}})
+	client.ReplaceWorkflowRunJobs("acme", "widget", 1001, 1, nil)
+
+	result := service.runWorkflowPhase(context.Background(), client, nil, "test-scope", []*PRWatch{watch}, false)
+	require.NotNil(t, result.Deferred, "job admission deferral must remain retryable")
+	require.Len(t, result.Unfinished, 1)
+	row, err := store.GetTaskPRByRepoAndNumber(context.Background(), watch.TaskID, "repo-1", 1)
+	require.NoError(t, err)
+	require.Nil(t, row.WorkflowAttention, "a deferred job read must not write stale unknown evidence")
+
+	result = service.runWorkflowPhase(context.Background(), client, nil, "test-scope", []*PRWatch{watch}, false)
+	require.Nil(t, result.Deferred)
+	require.Empty(t, result.Unfinished)
+	row, err = store.GetTaskPRByRepoAndNumber(context.Background(), watch.TaskID, "repo-1", 1)
+	require.NoError(t, err)
+	require.Equal(t, WorkflowAttentionApprovalRequired, row.WorkflowAttention.State)
 }

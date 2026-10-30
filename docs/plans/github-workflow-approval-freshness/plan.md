@@ -3,6 +3,7 @@ created: 2026-10-29
 status: complete
 requirements:
   - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001
+  - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002
   - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003
   - REQ-INTEGRATIONS-GITHUB-PR-POLLING-002
   - REQ-INTEGRATIONS-GITHUB-RATE-002
@@ -213,7 +214,10 @@ suite and job-count queries, and deferred workflow work resumes through the
 existing PR-monitor continuation. Review follow-ups keep resolved siblings on
 partial GraphQL errors, associate converted suites with their PR so non-
 `pull_request` events still match, retain rate-limit retry boundaries, and
-reject empty-head workflow writes. The full `internal/github` package, targeted
+reject empty-head workflow writes. Fixup evidence adds per-caller application
+of shared evidence, retained REST PR identity and job deferrals, immediate
+workflow refresh for completed status phases, and an independent workflow
+retry boundary. The full `internal/github` package, targeted
 race coverage, the summary projector package, the status-summary adapter tests,
 and both Playwright regressions passed.
 

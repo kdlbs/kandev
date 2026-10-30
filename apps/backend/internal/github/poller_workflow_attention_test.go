@@ -35,8 +35,10 @@ var (
 // workflowAttentionMonitorExecutor serves the status batch and delegates the
 // dedicated workflow queries to the workflow fixture.
 type workflowAttentionMonitorExecutor struct {
-	statusCalls atomic.Int64
-	workflow    *workflowTestExecutor
+	statusCalls     atomic.Int64
+	branchCalls     atomic.Int64
+	branchDeferrals int
+	workflow        *workflowTestExecutor
 }
 
 func (e *workflowAttentionMonitorExecutor) ExecuteGraphQL(
@@ -46,6 +48,11 @@ func (e *workflowAttentionMonitorExecutor) ExecuteGraphQL(
 	case strings.Contains(query, "query WorkflowSuites"), strings.Contains(query, "query WorkflowSuiteJobs"):
 		return e.workflow.ExecuteGraphQL(ctx, query, variables, out)
 	case strings.Contains(query, "query Branches"):
+		e.branchCalls.Add(1)
+		if e.branchDeferrals > 0 {
+			e.branchDeferrals--
+			return &AdmissionDeferredError{Delay: time.Minute, Reason: "test branch deferral"}
+		}
 		return json.Unmarshal([]byte(`{"data":{}}`), out)
 	case strings.Contains(query, "query Batch"):
 		e.statusCalls.Add(1)
@@ -519,4 +526,79 @@ func TestPRMonitorWorkflowAttention_CredentialRotationDropsPending(t *testing.T)
 				"%s must not publish approval read under the previous principal", publication.TaskID)
 		}
 	})
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9
+func TestWorkflowPhase_CompletedStatusRefreshesWhileSiblingDefers(t *testing.T) {
+	_, service, mockClient, store := setupPollerTest(t)
+	workflowExec := newWorkflowTestExecutor()
+	pr := forkApprovalTestPR(5001, "head-1")
+	pr.branch = "feature-1"
+	workflowExec.setPR(pr)
+	executor := &workflowAttentionMonitorExecutor{workflow: workflowExec, branchDeferrals: 1}
+	client := &workflowFixtureGraphQLClient{
+		workflowPhaseCountingClient: &workflowPhaseCountingClient{MockClient: mockClient},
+		exec:                        executor,
+	}
+	service.client = client
+	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
+
+	seedTask(t, store, "task-completed-status", false)
+	seedTask(t, store, "task-deferred-search", false)
+	numbered := &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-completed-status",
+		TaskID: "task-completed-status", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 5001, Branch: "feature-1",
+	}
+	searching := &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-deferred-search",
+		TaskID: "task-deferred-search", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", Branch: "feature-search",
+	}
+	require.NoError(t, store.CreatePRWatch(context.Background(), numbered))
+	require.NoError(t, store.CreatePRWatch(context.Background(), searching))
+
+	outcome := service.syncWorkspaceWatchesBatchedForPoller(
+		context.Background(), testWorkspaceID, []*PRWatch{numbered, searching},
+	)
+	require.NotNil(t, outcome.Deferred, "the searching status phase still defers after the numbered phase applies")
+
+	rows, err := store.ListTaskPRsByTask(context.Background(), "task-completed-status")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].WorkflowAttention)
+	require.Equal(t, WorkflowAttentionApprovalRequired, rows[0].WorkflowAttention.State,
+		"a completed known-PR status must refresh even when an unrelated branch phase defers")
+	step1, _ := workflowExec.counts()
+	require.Equal(t, 1, step1)
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9
+func TestPRMonitorWorkflowAttention_KeepsWorkflowBoundarySeparate(t *testing.T) {
+	now := time.Now().UTC()
+	statusWatch := &PRWatch{
+		WorkspaceID: "workspace", SessionID: "session-status", TaskID: "task-status",
+		Owner: "acme", Repo: "widget", PRNumber: 1, Branch: "feature-1",
+	}
+	workflowWatch := &PRWatch{
+		WorkspaceID: "workspace", SessionID: "session-workflow", TaskID: "task-workflow",
+		Owner: "acme", Repo: "widget", PRNumber: 2, Branch: "feature-2",
+	}
+	work := prMonitorPendingFromOutcome(prWatchWorkspaceBatchOutcome{
+		workspaceID:        "workspace",
+		watches:            []*PRWatch{statusWatch, workflowWatch},
+		unfinished:         []*PRWatch{statusWatch},
+		workflowUnfinished: []*PRWatch{workflowWatch},
+		deferred:           &AdmissionDeferredError{Delay: 10 * time.Minute},
+		workflowDeferred:   &AdmissionDeferredError{Delay: time.Second},
+		state:              prWatchBatchDeferred,
+	}, now)
+	require.NotNil(t, work)
+	statusTarget := work.targets[prWatchDiscoveryTargetKey(statusWatch)]
+	workflowTarget := work.targets[prWatchDiscoveryTargetKey(workflowWatch)]
+	require.NotNil(t, statusTarget)
+	require.NotNil(t, workflowTarget)
+	require.True(t, statusTarget.retryAt.Equal(now.Add(10*time.Minute)))
+	require.True(t, workflowTarget.retryAt.Equal(now.Add(time.Second)),
+		"workflow work must not inherit the searching phase's long boundary")
 }

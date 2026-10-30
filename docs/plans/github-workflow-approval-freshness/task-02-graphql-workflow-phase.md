@@ -170,6 +170,12 @@ Review follow-ups are also implemented:
   `withPRDiscoveryRetryAt` on the returned error.
 - Empty-head rows are skipped before the phase, and the store rejects an empty
   expected head, so every `workflow_attention` write stays head-scoped.
+- The singleflight now shares only the evidence fetch. Every caller applies it
+  to its own task rows and builds its own unfinished watches, so two tasks that
+  watch the same PR both receive the observation.
+- The REST fallback retains the fetched PR identity and a job-read deferral
+  across wakes, so non-blocking admission can advance instead of repeating
+  `GetPR` forever.
 
 Verification after the review follow-ups:
 
