@@ -11,31 +11,32 @@ type stopObservationKey struct{}
 
 // StopObservationCollector keeps one exact target result across native teardown.
 type StopObservationCollector struct {
-	mu         sync.Mutex
-	instanceID string
-	result     *utility.InferenceStopObservation
+	mu     sync.Mutex
+	target string
+	result *utility.InferenceStopObservation
 }
 
-func NewStopObservationCollector(instanceID string) *StopObservationCollector {
-	return &StopObservationCollector{instanceID: instanceID}
+func NewStopObservationCollector() *StopObservationCollector {
+	return &StopObservationCollector{}
 }
 
 func WithStopObservation(ctx context.Context, collector *StopObservationCollector) context.Context {
 	return context.WithValue(ctx, stopObservationKey{}, collector)
 }
 
-// record keeps the observation for this exact delete target. The transport has
-// already checked the response against targetInstanceID; the constructor ID is
-// only a fallback for callers that know the target identity in advance.
+// record keeps the observation for the first exact delete target seen in this
+// teardown context. A later target cannot overwrite it, and the response must
+// match the target the transport already accepted.
 func (c *StopObservationCollector) record(targetInstanceID string, result *utility.InferenceStopObservation) {
-	if result == nil || result.InstanceID == "" {
-		return
-	}
-	if result.InstanceID != targetInstanceID && result.InstanceID != c.instanceID {
+	if result == nil || result.InstanceID == "" || result.InstanceID != targetInstanceID {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.target != "" && c.target != targetInstanceID {
+		return
+	}
+	c.target = targetInstanceID
 	c.result = result
 }
 

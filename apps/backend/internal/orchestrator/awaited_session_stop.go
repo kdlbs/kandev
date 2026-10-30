@@ -47,7 +47,7 @@ func (s *Service) StopSessionAwaited(ctx context.Context, sessionID, expectedExe
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
-	collector := agentruntime.NewStopObservationCollector(expectedExecutionID)
+	collector := agentruntime.NewStopObservationCollector()
 	err = s.executor.StopExecution(agentruntime.WithStopObservation(ctx, collector), prepared.ExecutionID, reason, false)
 	result.RuntimeStopReturned = err == nil
 	result.Observation = collector.Result()

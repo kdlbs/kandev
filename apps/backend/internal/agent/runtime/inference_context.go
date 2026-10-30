@@ -40,8 +40,8 @@ func WithInferenceExecutionID(id string) InferenceClientOption {
 // Stop observations cross the same public runtime seam as inference ownership.
 type StopObservationCollector = client.StopObservationCollector
 
-func NewStopObservationCollector(instanceID string) *StopObservationCollector {
-	return client.NewStopObservationCollector(instanceID)
+func NewStopObservationCollector() *StopObservationCollector {
+	return client.NewStopObservationCollector()
 }
 
 func WithStopObservation(ctx context.Context, collector *StopObservationCollector) context.Context {
