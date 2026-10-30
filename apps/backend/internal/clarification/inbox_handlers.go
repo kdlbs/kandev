@@ -420,6 +420,7 @@ func (h *Handlers) httpListInboxHidden(c *gin.Context) {
 			resp.AsyncQuestions = resp.AsyncQuestions[:remaining]
 		}
 	}
+	resp.Count = len(resp.Bundles) + len(resp.AsyncQuestions)
 	resp.Total = summary.HiddenCount + asyncHidden
 	c.JSON(http.StatusOK, resp)
 }

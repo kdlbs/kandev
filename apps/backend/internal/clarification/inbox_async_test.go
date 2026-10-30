@@ -171,6 +171,9 @@ func TestAsyncQuestionsInboxHiddenPageKeepsOneBound(t *testing.T) {
 		t.Fatalf("merged hidden page = %d blocking + %d async, want one bounded row",
 			len(response.Bundles), len(response.AsyncQuestions))
 	}
+	if response.Count != 1 {
+		t.Fatalf("bounded page count = %d, want 1", response.Count)
+	}
 	if response.Total != 2 {
 		t.Fatalf("combined hidden total = %d, want 2", response.Total)
 	}
