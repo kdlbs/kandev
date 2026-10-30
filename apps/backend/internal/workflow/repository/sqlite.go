@@ -163,6 +163,9 @@ func (r *Repository) initSchema() error {
 	if err := r.backfillCompletionPolicy(); err != nil {
 		return fmt.Errorf("backfill task completion policy: %w", err)
 	}
+	if err := r.backfillHoldStageType(); err != nil {
+		return fmt.Errorf("backfill hold step stage type: %w", err)
+	}
 
 	// Seed system templates
 	if err := r.seedSystemTemplates(); err != nil {
@@ -727,7 +730,7 @@ func (r *Repository) createStepWithDemotedStartSteps(
 // who do not set the field stay schema-compliant.
 func normalizeStageType(s models.StageType) string {
 	switch s {
-	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom, models.StageTypeHold:
 		return string(s)
 	}
 	return string(models.StageTypeCustom)

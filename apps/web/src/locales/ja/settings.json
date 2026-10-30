@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "これらのサーバーはこのセッションに継承されなくなりました。継承を復元しても追加されません。",
   "mcpNoLongerInherited": "継承されていません",
   "mcpRestoreDisabledDescription": "継承を復元しても、無効なサーバーは有効になりません。",
-  "mcpExclusionCount": "保存されたセッションの除外：{{total}}"
+  "mcpExclusionCount": "保存されたセッションの除外：{{total}}",
+  "addWebhookProvider": "Webhook プロバイダーを追加",
+  "noWebhookProviders": "Webhook プロバイダーはまだ設定されていません。",
+  "webhookProvider": "Webhook プロバイダー",
+  "webhookUrl": "Webhook の URL",
+  "webhookHeadersPlaceholder": "ヘッダー（1 行に 1 つ、名前: 値）",
+  "webhookHeadersInvalid": "Webhook ヘッダーには有効な HTTP ヘッダー名を使用し、重複させないでください。",
+  "webhookSecret": "シークレット（任意）",
+  "webhookUrlRequired": "Webhook の URL は必須です。",
+  "webhooks": "Webhook 通知",
+  "webhooksDescription": "通知イベントを Webhook エンドポイントに送信します。"
 }

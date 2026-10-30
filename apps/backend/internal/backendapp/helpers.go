@@ -1738,6 +1738,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.features.WorkspaceCollaboration {
+		taskhandlers.RegisterWorkspaceCollaborationRoutes(p.router, p.gateway.Dispatcher, p.taskSvc)
+	}
 	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
 	if p.services != nil && p.services.Org != nil {
 		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)

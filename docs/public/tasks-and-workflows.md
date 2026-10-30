@@ -767,6 +767,22 @@ your review. If the runtime is unavailable or evidence is incomplete, Kandev
 leaves the session waiting for you. A new message, a session change, **Cancel**,
 or a backend restart stops pending automatic recovery.
 
+### Prompt errors on a usable runtime
+
+When an ACP agent returns a prompt error while its process and ACP connection
+are still usable, Kandev ends that turn with a sanitized error entry and keeps
+the same native conversation. This includes generic internal, database,
+authentication, quota, and invalid-model errors. The composer stays available,
+so your next message runs on the existing runtime instead of starting a new
+conversation.
+
+Retention is not a retry. Kandev does not replay the failed prompt and does not
+start automatic recovery for an error class that has no existing policy. The
+task row keeps an error badge until you select **Dismiss turn error**, use the
+task menu dismissal, or send a new prompt after the error appears. A real
+process exit, transport loss, or recovery failure still uses the normal runtime
+recovery controls.
+
 ### Model capacity
 
 Kandev supports live model-capacity recovery for tested Codex and OpenCode ACP

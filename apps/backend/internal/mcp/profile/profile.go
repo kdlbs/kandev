@@ -39,6 +39,9 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityWorkspaceCollaborationReport exposes the report-only delivery
+	// mode on the task message tool while collaboration enforcement is enabled.
+	CapabilityWorkspaceCollaborationReport Capability = "workspace-collaboration-report"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

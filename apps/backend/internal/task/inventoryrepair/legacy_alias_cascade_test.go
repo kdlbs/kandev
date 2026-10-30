@@ -19,12 +19,13 @@ func assertLifecycleCascade(t *testing.T, f fixture, operation string) {
 		t.Fatalf("cascade persistence: %d %v", count, err)
 	}
 	if operation == "archive" {
-		// A terminal borrower session still protects the shared checkout.
+		// The archived borrower keeps its environment association, but a
+		// terminal session with no runtime no longer holds the shared checkout.
 		if err := f.db.Get(&count, `SELECT COUNT(*) FROM task_sessions WHERE task_id='child' AND task_environment_id='env'`); err != nil || count != 1 {
 			t.Fatalf("archive lost borrower association: %d %v", count, err)
 		}
-		if err := f.db.Get(&count, `SELECT COUNT(*) FROM task_resource_cleanup_jobs WHERE state='waiting_for_clean'`); err != nil || count != 1 {
-			t.Fatalf("archive did not defer reclaim: %d %v", count, err)
+		if err := f.db.Get(&count, `SELECT COUNT(*) FROM task_resource_cleanup_jobs WHERE state='waiting_for_clean'`); err != nil || count != 0 {
+			t.Fatalf("archive deferred the released checkout reclaim: %d %v", count, err)
 		}
 		return
 	}
@@ -64,12 +65,8 @@ func TestLegacyAliasLifecycleCanonicalCascade(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertLifecycleCascade(t, f, operation)
-			_, err := os.Stat(f.plan.Repairs[0].Path)
-			if operation == "archive" && err != nil {
-				t.Fatalf("borrowed checkout removed: %v", err)
-			}
-			if operation == "delete" && !os.IsNotExist(err) {
-				t.Fatalf("durable cleanup left checkout: %v", err)
+			if _, err := os.Stat(f.plan.Repairs[0].Path); !os.IsNotExist(err) {
+				t.Fatalf("released shared checkout survived %s: %v", operation, err)
 			}
 		})
 	}

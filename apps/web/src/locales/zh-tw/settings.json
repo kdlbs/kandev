@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "這些伺服器已不再由此工作階段繼承。恢復繼承不會新增它們。",
   "mcpNoLongerInherited": "不再繼承",
   "mcpRestoreDisabledDescription": "恢復繼承不會啟用已停用的伺服器。",
-  "mcpExclusionCount": "已儲存的工作階段排除項：{{total}}"
+  "mcpExclusionCount": "已儲存的工作階段排除項：{{total}}",
+  "addWebhookProvider": "新增 Webhook 提供者",
+  "noWebhookProviders": "尚未設定 Webhook 提供者。",
+  "webhookProvider": "Webhook 提供者",
+  "webhookUrl": "Webhook 地址",
+  "webhookHeadersPlaceholder": "請求頭，每行一個（名稱：值）",
+  "webhookHeadersInvalid": "Webhook 請求標頭必須使用有效的 HTTP 標頭名稱，且不能重複。",
+  "webhookSecret": "金鑰（可選）",
+  "webhookUrlRequired": "需要 Webhook 地址。",
+  "webhooks": "Webhook 通知",
+  "webhooksDescription": "將通知事件傳送到 Webhook 端點。"
 }

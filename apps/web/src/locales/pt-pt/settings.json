@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "Estes servidores já não contribuem para esta sessão. Restaurar a herança não os adiciona.",
   "mcpNoLongerInherited": "Já não é herdado",
   "mcpRestoreDisabledDescription": "Restaurar a herança não ativa um servidor desativado.",
-  "mcpExclusionCount": "Exclusões guardadas nesta sessão: {{total}}"
+  "mcpExclusionCount": "Exclusões guardadas nesta sessão: {{total}}",
+  "addWebhookProvider": "Adicionar fornecedor Webhook",
+  "noWebhookProviders": "Ainda não há fornecedores Webhook configurados.",
+  "webhookProvider": "Fornecedor Webhook",
+  "webhookUrl": "URL do Webhook",
+  "webhookHeadersPlaceholder": "Cabeçalhos, um por linha (Nome: valor)",
+  "webhookHeadersInvalid": "Os cabeçalhos do webhook devem usar nomes de cabeçalho HTTP válidos e não podem ser repetidos.",
+  "webhookSecret": "Segredo (opcional)",
+  "webhookUrlRequired": "É obrigatório um URL de Webhook.",
+  "webhooks": "Notificações Webhook",
+  "webhooksDescription": "Envie eventos de notificação para um endpoint Webhook."
 }

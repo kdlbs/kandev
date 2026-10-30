@@ -181,7 +181,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
 			return mcpprofile.Context{}, err
 		}
-		return e.withCanvasCapability(profile), nil
+		return e.withTaskCapabilities(profile), nil
 	}
 	if noRow {
 		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
@@ -206,7 +206,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 
 	if noRow {
@@ -218,10 +218,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
+		return e.withTaskCapabilities(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -238,7 +238,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
@@ -254,9 +254,16 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
 }
 
-func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
-	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
-		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
+	if e == nil {
+		return profile
+	}
+	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	if e.workspaceCollaborationEnabled &&
+		(profile.Surface == mcpprofile.SurfaceKanbanTask || profile.Surface == mcpprofile.SurfaceAutomation) {
+		profile = profile.WithCapability(mcpprofile.CapabilityWorkspaceCollaborationReport)
 	}
 	return profile
 }

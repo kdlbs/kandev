@@ -3031,5 +3031,8 @@
   "storageRecoveryDiskTitle": "会话因磁盘空间不足而中断",
   "storageAdvisoryPressureGuidanceOversized": "新输出已被阻塞，因为它超过了交付大小限制。请使用更小的输出开始新的回合。",
   "storageAdvisoryPressureGuidanceLimit": "新输出已被配置的交付限制阻塞。恢复前请检查保留的输出和交付进度。",
-  "storageAdvisoryPressureGuidanceWriteFailed": "新输出已被存储写入失败阻塞。恢复前请检查运行时存储。"
+  "storageAdvisoryPressureGuidanceWriteFailed": "新输出已被存储写入失败阻塞。恢复前请检查运行时存储。",
+  "dismissTurnError": "忽略本轮错误",
+  "failedToDismissTurnError": "忽略本轮错误失败",
+  "turnErrorAcknowledgementFailed": "消息已接受，但无法清除本轮错误标记。请手动忽略。"
 }

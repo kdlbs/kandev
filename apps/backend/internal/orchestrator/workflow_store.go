@@ -47,6 +47,17 @@ type workflowMoveAdmissionRepository interface {
 	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
+// workflowMoveAdmissionAppliedRepository is the automatic-transition variant
+// of workflowMoveAdmissionRepository. It is separate so test fakes that only
+// exercise the unconditional path do not need to grow a method they never
+// call. applied=false means the admission refused the write because a later
+// business state owns the row; the caller must not run destination effects.
+type workflowMoveAdmissionAppliedRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+		ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+	) (admitted, applied bool, err error)
+}
+
 // workflowMoveAdmissionCASRepository is the AC-46/48 compare-and-swap
 // variant of workflowMoveAdmissionRepository. It is a separate interface
 // (rather than a new method on workflowMoveAdmissionRepository) so fakes in
@@ -686,6 +697,12 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 			)
 			return applied, err
 		}
+	}
+	if appliedRepo, ok := s.repo.(workflowMoveAdmissionAppliedRepository); ok {
+		_, applied, err := appliedRepo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+			ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit,
+		)
+		return applied, err
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {

@@ -103,6 +103,12 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 
 When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
+### Notifications
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webhookAllowPrivateNetworks` | `KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Allows webhook providers to send to private or local destinations. This setting applies to the backend process. Keep it disabled unless the destination needs it. Restart the backend after a change. |
+
 ### Database
 
 | YAML key            | Environment variable       | Default                 | Current behavior                                                          |
@@ -117,8 +123,11 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 | `database.sslMode`  | `KANDEV_DATABASE_SSLMODE`  | `disable`               | `disable`, `require`, `verify-ca`, or `verify-full`.                      |
 | `database.maxConns` | `KANDEV_DATABASE_MAXCONNS` | `25`                    | PostgreSQL maximum pool size.                                             |
 | `database.minConns` | `KANDEV_DATABASE_MINCONNS` | `5`                     | PostgreSQL minimum pool size.                                             |
+| `database.sqliteReaderConns` | `KANDEV_SQLITE_READER_CONNS` | `4` | SQLite read-only pool size. Startup-only; accepts `1`-`64` and sets both maximum open and idle readers. Invalid values fail startup when SQLite is selected. Ignored for PostgreSQL and does not reject PostgreSQL startup. |
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
+
+`database.sqliteReaderConns` is an opt-in startup override for installations where concurrent interactive reads exhaust the default four-connection SQLite read pool. It changes only the read-only pool size and requires a restart. It does not change the single-writer connection, database health probing, or PostgreSQL pool sizing. Invalid values reject a SQLite startup; a PostgreSQL selection is not rejected by this SQLite-only setting.
 
 Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
 Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
@@ -488,6 +497,9 @@ server:
   webInternalUrl: ""
   webTitlePrefix: ""
 
+notifications:
+  webhookAllowPrivateNetworks: false
+
 database:
   driver: "sqlite"
   path: ""
@@ -606,6 +618,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.agentSurvival`         | `KANDEV_FEATURES_AGENT_SURVIVAL`          | off                | Experimental. Lets the `agentctl` control server and its running agents outlive a backend restart or upgrade, for the `local_pc` and worktree executors only. The restarted backend takes the surviving server over and reconnects to the sessions still running on it. **Unavailable on Windows**, where surviving the backend means giving up the Job Object that guarantees agent processes are cleaned up. |
 | `features.agentBackgroundWork`   | `KANDEV_FEATURES_AGENT_BACKGROUND_WORK`   | on                 | Shared background-work inspection chip, summary, detail views, and retained history for supported providers. On by default in `prod`, `dev`, and `e2e`; the toggle remains an operator off switch that also gates the read and action endpoints. Provider jobs stay observation-only when the runtime advertises no controls. |
 | `features.opencodePlugin`        | `KANDEV_FEATURES_OPENCODE_PLUGIN`         | off                | Supplies the Kandev integration plugin to supported OpenCode v2 2.2.0 task launches so native shell terminal outcomes can settle existing jobs. Off in `prod`, `dev`, and `e2e`; restart required. V1, unsupported versions, and conflicting inline configuration keep ordinary ACP behavior. Requires `features.agentBackgroundWork` for shell observations. |
+| `features.workspaceCollaboration` | `KANDEV_FEATURES_WORKSPACE_COLLABORATION` | off | Experimental. Narrows verified conversation callers by workspace and independent read, report, prompt, and control grants, intersecting native permissions. Off in `prod`, `dev`, and `e2e`; restart required. With the flag off, native APIs keep their existing behavior and saved grants are retained. |
 | `debug.devMode`                  | `KANDEV_DEBUG_DEV_MODE`                   | off                | High-risk diagnostic endpoints and ACP frame logging.                                                                                                                                                                                                                                                                                                                                                          |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -632,6 +645,13 @@ for the experimental user workflow.
 development and E2E profiles. Restart Kandev after changing it because the
 backend registers the Inbox routes at startup. With the flag off, the Inbox
 routes, boot count, sidebar entry, and page are unavailable.
+
+`features.workspaceCollaboration` is off in the `prod`, `dev`, and `e2e`
+profiles and requires a restart. When enabled, conversation callers are limited
+to their own workspace plus explicit grants that a native workspace manager sets
+on the task. Read, report, prompt, and control are independent and never widen
+native permissions. Turning the flag off restores native behavior without
+deleting saved grants.
 
 For a risky release feature that has not graduated, keep the flag off in the
 shipped profiles, enable it only on a selected install through an admin override
@@ -744,6 +764,7 @@ no public YAML key:
   `KANDEV_FEATURES_AUTH`,
   `KANDEV_FEATURES_MULTI_TENANCY`,
   `KANDEV_FEATURES_NEEDS_YOU_INBOX`,
+  `KANDEV_FEATURES_WORKSPACE_COLLABORATION`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,

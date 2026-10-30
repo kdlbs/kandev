@@ -2855,6 +2855,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if req.Prompt == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
+	if req.DeliveryMode == "report" {
+		if req.ReplyToQuestionID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
+		}
+		return h.handleWorkspaceCollaborationReport(ctx, msg, req.TaskID, req.SessionID, req.Prompt)
+	}
 	if req.SenderTaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sender_task_id is required (the calling agent's MCP server must supply this)", nil)
 	}
@@ -2890,7 +2896,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// ErrTaskNotFound on no-rows, never (nil, nil). The loaded task's
 	// ParentID also tells us whether the sender is the target's parent,
 	// which decides interrupt eligibility below.
-	targetTask, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	targetTask, err := h.taskSvc.GetTaskForPrompt(ctx, req.TaskID)
 	if err != nil {
 		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
@@ -3724,7 +3730,7 @@ func (r *taskMessageReviewRollback) captureExpectedTaskState(ctx context.Context
 	if r == nil || !r.restoreTask {
 		return nil
 	}
-	task, err := taskSvc.GetTask(ctx, r.taskID)
+	task, err := taskSvc.GetTaskForPrompt(ctx, r.taskID)
 	if err != nil {
 		return err
 	}
@@ -3842,7 +3848,7 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 	if err != nil {
 		return nil, fmt.Errorf("failed to resume completed session: %w", err)
 	}
-	resumed, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	resumed, err := h.taskSvc.GetTaskSessionForPrompt(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload completed session after resume: %w", err)
 	}
@@ -4244,7 +4250,7 @@ func (h *Handlers) prepareSessionForTaskMessage(
 		// The caller addressed this exact session — never reroute to the
 		// task's primary session, just pick up any state change from
 		// on_turn_start.
-		reloaded, err := h.taskSvc.GetTaskSession(ctx, session.ID)
+		reloaded, err := h.taskSvc.GetTaskSessionForPrompt(ctx, session.ID)
 		if err != nil {
 			return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
 		}
@@ -4261,7 +4267,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if h.taskSvc == nil {
 		return taskMessageReviewRollback{}, errors.New("task service not available")
 	}
-	task, err := h.taskSvc.GetTask(ctx, taskID)
+	task, err := h.taskSvc.GetTaskForPrompt(ctx, taskID)
 	if err != nil {
 		return taskMessageReviewRollback{}, err
 	}
@@ -4668,11 +4674,11 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if h.taskSvc == nil {
 		return nil, errors.New("task service not available")
 	}
-	reloaded, err := h.taskSvc.GetTaskSession(ctx, submitted.ID)
+	reloaded, err := h.taskSvc.GetTaskSessionForPrompt(ctx, submitted.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
-	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	primary, err := h.taskSvc.GetPrimarySessionForPrompt(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve primary session after on_turn_start: %w", err)
 	}

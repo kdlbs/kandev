@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "이 서버들은 더 이상 이 세션에 상속되지 않습니다. 상속을 복원해도 추가되지 않습니다.",
   "mcpNoLongerInherited": "더 이상 상속되지 않음",
   "mcpRestoreDisabledDescription": "상속을 복원해도 비활성화된 서버가 활성화되지는 않습니다.",
-  "mcpExclusionCount": "저장된 세션 제외 항목: {{total}}"
+  "mcpExclusionCount": "저장된 세션 제외 항목: {{total}}",
+  "addWebhookProvider": "Webhook 제공자 추가",
+  "noWebhookProviders": "아직 구성된 Webhook 제공자가 없습니다.",
+  "webhookProvider": "Webhook 제공자",
+  "webhookUrl": "Webhook 주소",
+  "webhookHeadersPlaceholder": "헤더, 줄당 하나 (이름: 값)",
+  "webhookHeadersInvalid": "Webhook 헤더에는 유효한 HTTP 헤더 이름을 사용해야 하며 중복될 수 없습니다.",
+  "webhookSecret": "시크릿(선택 사항)",
+  "webhookUrlRequired": "Webhook 주소가 필요합니다.",
+  "webhooks": "Webhook 알림",
+  "webhooksDescription": "알림 이벤트를 Webhook 엔드포인트로 보냅니다."
 }

@@ -13,7 +13,6 @@ type acpDialect struct {
 	continuationSupportForError func(error) streams.ContinuationSupport
 	capacityContinuationSupport streams.CapacityContinuationSupport
 	continuationError           func(error) bool
-	retainedApplicationErr      func(error) bool
 	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,

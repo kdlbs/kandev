@@ -12,8 +12,7 @@ func newMockACPDialect() acpDialect {
 		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
 		continuationSupportForError: mockContinuationSupportForError,
 		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
-		continuationError:           mockContinuationError,
-		retainedApplicationErr:      mockRetainedApplicationError}
+		continuationError:           mockContinuationError}
 }
 
 func mockContinuationSupportForError(err error) streams.ContinuationSupport {
@@ -30,19 +29,6 @@ func mockContinuationSupportForError(err error) streams.ContinuationSupport {
 		return ""
 	}
 	return streams.ContinuationAgentManagedToolsV3
-}
-
-func mockRetainedApplicationError(err error) bool {
-	var request *sdk.RequestError
-	if !errors.As(err, &request) || request.Code != -32603 {
-		return false
-	}
-	data, ok := request.Data.(map[string]any)
-	if !ok {
-		return false
-	}
-	meta, ok := nestedMap(data, "kandevMock")
-	return ok && meta["retainedProviderCapacity"] == true
 }
 
 func mockContinuationError(err error) bool {

@@ -37,6 +37,7 @@
   "configurationChat": "設定チャット",
   "configurationChatDescription": "エージェントに Kandev の設定、ワークフロー、エージェントプロファイル、MCP 設定を更新させます。",
   "configurationChatTab": "設定チャット",
+  "continuationActivityResumed": "エージェントが再開しました",
   "continuationHistoryPreserved": "前の会話は保持されます。",
   "continuationIn": "{{countdown}} 後に続行します。",
   "continuationPhase_continuing": "前のリクエストを続行中...",

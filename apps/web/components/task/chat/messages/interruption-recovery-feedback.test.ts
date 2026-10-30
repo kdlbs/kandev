@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  continuationActivityConfirmed,
   continuationPhase,
   interruptionRecoveryKey,
   retryNoticeVisible,
@@ -45,6 +46,31 @@ describe("provider interruption feedback", () => {
     expect(
       continuationPhase({ retrying: true, recovery_mode: "continue", recovery_phase: "unknown" }),
     ).toBeUndefined();
+  });
+  it("confirms resumed activity only with boolean true and a continuing continuation", () => {
+    const confirmed = {
+      retrying: true,
+      recovery_mode: "continue",
+      recovery_phase: "continuing",
+      recovery_activity_confirmed: true,
+    };
+    expect(continuationActivityConfirmed(confirmed)).toBe(true);
+    expect(
+      continuationActivityConfirmed({ ...confirmed, recovery_activity_confirmed: false }),
+    ).toBe(false);
+    expect(
+      continuationActivityConfirmed({ ...confirmed, recovery_activity_confirmed: undefined }),
+    ).toBe(false);
+    expect(
+      continuationActivityConfirmed({
+        ...confirmed,
+        recovery_activity_confirmed: "true" as unknown as boolean,
+      }),
+    ).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, retrying: false })).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, recovery_mode: "replay" })).toBe(false);
+    expect(continuationActivityConfirmed({ ...confirmed, recovery_phase: "waiting" })).toBe(false);
+    expect(retryNoticeVisible("RUNNING", confirmed)).toBe(true);
   });
   it("reports exhaustion only with actual started attempts", () => {
     expect(

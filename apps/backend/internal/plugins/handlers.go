@@ -483,7 +483,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		Body:       body,
 	}
 
-	leasedRecord, release, err := c.svc.beginPluginDispatch(id, dispatchGeneration(record))
+	leasedRecord, release, err := c.svc.beginPluginDispatchContext(ctx.Request.Context(), id, dispatchGeneration(record))
 	if err != nil {
 		c.logWebhookFailure(id, http.StatusServiceUnavailable, webhookOriginHostLifecycle, err)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})

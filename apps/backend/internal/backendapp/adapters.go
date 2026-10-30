@@ -1834,6 +1834,16 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	return err
 }
 
+// SessionMessageCreatedAt resolves the persisted message's immutable creation
+// time, including when an idempotent replay returns an existing row.
+func (a *messageCreatorAdapter) SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool) {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil || message == nil || message.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return message.CreatedAt.UTC(), true
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{

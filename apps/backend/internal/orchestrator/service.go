@@ -115,6 +115,14 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // MessageCreator is an interface for creating messages on tasks
+// SessionMessageTimestampReader returns the immutable creation time of a
+// persisted session message. A message creator that can resolve its own rows
+// implements it so durable attention ordering uses message time, not the time
+// settlement happened to record it.
+type SessionMessageTimestampReader interface {
+	SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool)
+}
+
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
@@ -793,6 +801,9 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+	// turnErrorRecorder persists durable task attention for a manual retained
+	// failure. Nil leaves the historical settlement behavior unchanged.
+	turnErrorRecorder TaskTurnErrorRecorder
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
@@ -2079,6 +2090,11 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTaskTurnErrorRecorder wires the task-owned failed-turn attention store.
+func (s *Service) SetTaskTurnErrorRecorder(recorder TaskTurnErrorRecorder) {
+	s.turnErrorRecorder = recorder
+}
+
 // SetTransientRetryMessageService wires the task service used to write and
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2110,6 +2126,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
 	}
 }
 

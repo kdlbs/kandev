@@ -37,6 +37,7 @@
   "configurationChat": "구성 채팅",
   "configurationChatDescription": "에이전트가 Kandev 설정, 워크플로, 에이전트 프로필, MCP 구성을 업데이트하도록 합니다.",
   "configurationChatTab": "구성 채팅",
+  "continuationActivityResumed": "에이전트가 다시 시작되었습니다",
   "continuationHistoryPreserved": "이전 메시지와 완료된 작업 결과가 유지됩니다.",
   "continuationIn": "{{countdown}} 후 계속합니다.",
   "continuationPhase_continuing": "기존 대화에서 작업을 계속하는 중입니다.",

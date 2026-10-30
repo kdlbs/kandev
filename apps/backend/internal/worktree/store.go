@@ -775,8 +775,10 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 // OTHER tasks for the environment that owns the worktree. The worktree is
 // task-owned: sessions of the owning task (which share the environment) never
 // count against cleanup, while a borrower task's session protects the
-// workspace until ownership transfers. A terminal session still protects its
-// task workspace until that task's own cleanup releases the association.
+// workspace until ownership transfers or the borrower can no longer use it.
+// A borrower stops holding the workspace only once its task is archived, its
+// session reached a terminal state, and no runtime row remains; every other
+// borrower session still counts, including one whose task row cannot be joined.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
@@ -789,14 +791,26 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 			ON ter.task_environment_id = s.task_environment_id
 		INNER JOIN task_environments te
 			ON te.id = ter.task_environment_id
+		LEFT JOIN tasks bt
+			ON bt.id = s.task_id
 		WHERE ter.worktree_id = ?
 		  AND ter.status <> ?
 		  AND ter.deleted_at IS NULL
 		  AND te.task_id != s.task_id
+		  AND NOT (
+			bt.archived_at IS NOT NULL
+			AND s.state IN (?, ?, ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM executors_running er WHERE er.session_id = s.id
+			)
+		  )
 	`
 	args := []interface{}{
 		worktreeID,
 		StatusDeleted,
+		string(models.TaskSessionStateCompleted),
+		string(models.TaskSessionStateFailed),
+		string(models.TaskSessionStateCancelled),
 	}
 	if len(excludeSessionIDs) > 0 {
 		query += ` AND s.id NOT IN (?)`

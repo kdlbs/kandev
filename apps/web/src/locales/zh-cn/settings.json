@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "这些服务器已不再由此会话继承。恢复继承不会添加它们。",
   "mcpNoLongerInherited": "不再继承",
   "mcpRestoreDisabledDescription": "恢复继承不会启用已禁用的服务器。",
-  "mcpExclusionCount": "已保存的会话排除项：{{total}}"
+  "mcpExclusionCount": "已保存的会话排除项：{{total}}",
+  "addWebhookProvider": "添加 Webhook 提供商",
+  "noWebhookProviders": "尚未配置 Webhook 提供商。",
+  "webhookProvider": "Webhook 提供商",
+  "webhookUrl": "Webhook 地址",
+  "webhookHeadersPlaceholder": "请求头，每行一个（名称：值）",
+  "webhookHeadersInvalid": "Webhook 请求头必须使用有效的 HTTP 请求头名称，且不能重复。",
+  "webhookSecret": "密钥（可选）",
+  "webhookUrlRequired": "需要 Webhook 地址。",
+  "webhooks": "Webhook 通知",
+  "webhooksDescription": "将通知事件发送到 Webhook 端点。"
 }

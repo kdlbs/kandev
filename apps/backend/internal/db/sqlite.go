@@ -31,6 +31,10 @@ const (
 	// SQLite WAL mode allows many readers alongside a single writer; 4 is a
 	// reasonable default for a desktop/server workload.
 	defaultSQLiteReaderConns = 4
+
+	// maxSQLiteReaderConns bounds a configured reader pool so a mistaken
+	// setting cannot consume an unbounded number of file descriptors.
+	maxSQLiteReaderConns = 64
 )
 
 func init() {
@@ -88,10 +92,24 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-// OpenSQLiteReader opens a read-only SQLite connection pool with multiple
-// concurrent connections. Combined with WAL mode, this allows readers to
-// proceed without blocking on (or being blocked by) writes.
+// OpenSQLiteReader opens a read-only SQLite connection pool with the default
+// number of concurrent connections.
 func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
+	return OpenSQLiteReaderWithConns(dbPath, defaultSQLiteReaderConns)
+}
+
+// OpenSQLiteReaderWithConns opens a read-only SQLite connection pool with the
+// requested number of concurrent connections. Combined with WAL mode, this
+// allows readers to proceed without blocking on (or being blocked by) writes.
+// A zero value keeps the default; negative values and values above
+// maxSQLiteReaderConns are rejected.
+func OpenSQLiteReaderWithConns(dbPath string, readerConns int) (*sql.DB, error) {
+	if readerConns == 0 {
+		readerConns = defaultSQLiteReaderConns
+	}
+	if readerConns < 1 || readerConns > maxSQLiteReaderConns {
+		return nil, fmt.Errorf("sqlite reader connections must be between 1 and %d: %d", maxSQLiteReaderConns, readerConns)
+	}
 	normalizedPath := normalizeSQLitePath(dbPath)
 
 	// Reader DSN: read-only mode and FK enforcement.
@@ -108,8 +126,8 @@ func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open read-only database: %w", err)
 	}
 
-	db.SetMaxOpenConns(defaultSQLiteReaderConns)
-	db.SetMaxIdleConns(defaultSQLiteReaderConns)
+	db.SetMaxOpenConns(readerConns)
+	db.SetMaxIdleConns(readerConns)
 
 	return db, nil
 }

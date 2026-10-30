@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-26
+updated: 2026-10-30
 owners:
   - Kandev
 ---
@@ -180,7 +180,8 @@ continuing, exhausted, or deliberately unavailable.
 #### Acceptance criteria
 
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.1:** Desktop and phone task chat
-  shall show at most one current recovery notice containing the selected
+  shall show at most one current recovery notice. Before confirmed resumed
+  activity, it shall contain the selected
   provider, mode of recovery, scheduled attempt, maximum attempts, countdown
   when waiting, and visible Cancel action. Reconnecting and continuing shall
   have distinct labels; a countdown shall not imply browser-owned retry.
@@ -201,6 +202,27 @@ continuing, exhausted, or deliberately unavailable.
   44px, wrap technical details, and avoid horizontal document overflow. Status
   changes shall be announced without stealing focus or announcing every
   countdown tick. All product copy shall be localized.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.5:** When activity from the
+  accepted continuation confirms that the agent resumed work, the current notice
+  shall change to neutral recovery information before turn completion.
+  It shall remove the active failure heading, warning icon, warning colors,
+  countdown, and attempt counter. The notice shall retain a visible Cancel action
+  for the continued turn. The original failure shall remain available as diagnostic
+  history. This presentation change shall preserve the episode budget and dispatch
+  ownership defined by `002.1` and `002.2`.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.6:** A running session state or
+  accepted continuation alone shall not establish resumed activity.
+  At least one non-empty assistant or reasoning output, or attributable foreground
+  tool event, shall establish resumed activity for that accepted continuation.
+  Previous executions, previous prompts, historical output, provider diagnostics,
+  and background or nested work shall not clear a current recovery warning.
+  Ambiguous activity shall retain the existing feedback until valid evidence arrives.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.7:** Reload, another viewer, and
+  desktop or phone Chat shall show the same confirmed recovery presentation.
+  A subsequent interruption in the episode shall show its current failure and
+  remaining attempts. Delayed activity from an earlier attempt shall not downgrade
+  that new warning. Existing terminal cleanup shall remove the neutral notice
+  as well as the actionable warning.
 
 ## Out of scope
 
@@ -221,3 +243,4 @@ continuing, exhausted, or deliberately unavailable.
 - [Continuation graduation package](../../../plans/provider-interruption-continuation-graduation/plan.md)
 
 - [Pending-tool continuation package](../../../plans/cursor-pending-tool-continuation/plan.md)
+- [Resumed activity feedback package](../../../plans/continuation-resumed-feedback/plan.md)

@@ -1116,5 +1116,15 @@
   "mcpDormantExclusionsDescription": "Ţĥēśē śēŕvēŕś ńō ĺōńĝēŕ ćōńţŕĩƀũţē ţō ţĥĩś śēśśĩōń. Ŕēśţōŕĩńĝ ĩńĥēŕĩţàńćē ďōēś ńōţ àďď ţĥēḿ.",
   "mcpNoLongerInherited": "Ńō ĺōńĝēŕ ĩńĥēŕĩţēď",
   "mcpRestoreDisabledDescription": "Ŕēśţōŕĩńĝ ĩńĥēŕĩţàńćē ďōēś ńōţ ēńàƀĺē à ďĩśàƀĺēď śēŕvēŕ.",
-  "mcpExclusionCount": "Śàvēď śēśśĩōń ēxćĺũśĩōńś: {{total}}"
+  "mcpExclusionCount": "Śàvēď śēśśĩōń ēxćĺũśĩōńś: {{total}}",
+  "addWebhookProvider": "Àďď Ŵēƀĥōōķ Ƥŕōvĩďēŕ",
+  "noWebhookProviders": "Ńō ŵēƀĥōōķ ƥŕōvĩďēŕś ćōńƒĩĝũŕēď ŷēţ.",
+  "webhookProvider": "Ŵēƀĥōōķ ƥŕōvĩďēŕ",
+  "webhookUrl": "Ŵēƀĥōōķ ŨŔĹ",
+  "webhookHeadersPlaceholder": "Ĥēàďēŕś, ōńē ƥēŕ ĺĩńē (Ńàḿē: vàĺũē)",
+  "webhookHeadersInvalid": "Ŵēƀĥōōķ ĥēàďēŕś ḿũśţ ũśē vàĺĩď ĤŢŢƤ ĥēàďēŕ ńàḿēś àńď ḿũśţ ńōţ ŕēƥēàţ.",
+  "webhookSecret": "Śēćŕēţ (ōƥţĩōńàĺ)",
+  "webhookUrlRequired": "À ŵēƀĥōōķ ŨŔĹ ĩś ŕēqũĩŕēď.",
+  "webhooks": "Ŵēƀĥōōķś",
+  "webhooksDescription": "Śēńď ńōţĩƒĩćàţĩōń ēvēńţś ţō à ŵēƀĥōōķ ēńďƥōĩńţ."
 }

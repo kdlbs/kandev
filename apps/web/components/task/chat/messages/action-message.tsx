@@ -29,6 +29,9 @@ import {
   shouldShowRecoveryActions,
 } from "./action-message-recovery-model";
 import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
+import { TaskTurnErrorDismissButton } from "./turn-error-dismiss-button";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { statusSummaryTurnError } from "@/lib/task-status-summary";
 import {
   interruptionRecoveryKey,
   retainedTurnAttemptsKey,
@@ -221,6 +224,10 @@ function SettledFailureMessage({
       : readableFailureSummary(message);
   const needsDetails = safeMessage === null;
   const renderedMetadata = settledFailureMetadata(metadata, recoveryActionsVisible);
+  const statusSummary = useTaskStatusSummary(comment.task_id ?? null, undefined);
+  const turnError = statusSummaryTurnError(statusSummary);
+  const { dismissStamp: dismissTurnErrorStamp, isHistorical: isHistoricalTurnError } =
+    resolveTurnErrorDisplay(metadata, comment, turnError);
 
   const specialRecovery = renderSpecialRecovery({
     metadata: renderedMetadata,
@@ -231,11 +238,7 @@ function SettledFailureMessage({
   });
   if (specialRecovery) return specialRecovery;
 
-  const iconClass = metadata?.variant === "warning" ? "text-amber-500" : "text-red-500";
-  const textClass =
-    metadata?.variant === "warning"
-      ? "text-amber-600 dark:text-amber-400"
-      : "text-red-600 dark:text-red-400";
+  const { iconClass, textClass } = turnErrorToneClasses(isHistoricalTurnError, metadata?.variant);
   return (
     <div className="w-full" data-testid="session-recovery-action-message">
       <div className="flex items-start gap-3 w-full rounded px-2 py-1 -mx-2">
@@ -251,7 +254,17 @@ function SettledFailureMessage({
             actions: renderedMetadata?.actions,
             taskId,
             sessionId,
-            extraContent: <GitPushErrorDismissAction message={comment} />,
+            extraContent: (
+              <>
+                {dismissTurnErrorStamp && comment.task_id && (
+                  <TaskTurnErrorDismissButton
+                    taskId={comment.task_id}
+                    stamp={dismissTurnErrorStamp}
+                  />
+                )}
+                <GitPushErrorDismissAction message={comment} />
+              </>
+            ),
             isRecoveryMessage: metadata?.recovery_actions === true,
             errorStamp: metadata?.error_stamp ?? metadata?.recovery_stamp,
             onRecoveryRequested,
@@ -529,4 +542,35 @@ function MissingBranchRecovery({
       </div>
     </section>
   );
+}
+
+// resolveTurnErrorDisplay separates the current failed-turn alert from a
+// readable historical row. Only the current attention owns a dismissal control.
+function resolveTurnErrorDisplay(
+  metadata: ActionMeta | undefined,
+  comment: Message,
+  turnError: ReturnType<typeof statusSummaryTurnError>,
+) {
+  const retained =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
+  const current =
+    retained &&
+    turnError?.message_id === comment.id &&
+    turnError?.session_id === comment.session_id;
+  return {
+    dismissStamp: current ? turnError?.stamp : undefined,
+    isHistorical: retained && !current,
+  };
+}
+
+function turnErrorToneClasses(isHistorical: boolean, variant: string | undefined) {
+  if (isHistorical) {
+    return { iconClass: "text-muted-foreground/60", textClass: "text-muted-foreground" };
+  }
+  if (variant === "warning") {
+    return { iconClass: "text-amber-500", textClass: "text-amber-600 dark:text-amber-400" };
+  }
+  return { iconClass: "text-red-500", textClass: "text-red-600 dark:text-red-400" };
 }

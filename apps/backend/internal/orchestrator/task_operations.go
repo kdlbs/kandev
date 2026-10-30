@@ -10300,6 +10300,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 	if err := s.checkSessionRecoveryBlock(ctx, identity.SessionID); err != nil {
 		return false, err
 	}
+	if s.queueDrainBlockedByDynamicRoute(ctx, identity.SessionID) {
+		return false, nil
+	}
 	if s.isInitialTaskBriefDispatchPending(identity.SessionID) {
 		return false, nil
 	}

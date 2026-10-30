@@ -677,7 +677,19 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 // AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
 // manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
-	if req == nil || req.AuthorType == createdByAgent {
+	if req == nil {
+		return nil
+	}
+	if report, _ := ctx.Value(collaborationReportContextKey{}).(bool); report {
+		return s.authorizeTaskScopeAction(ctx, req.TaskID, authz.ScopeTaskWrite, models.CollaborationReport)
+	}
+	if s.collaborationApplies(ctx) {
+		if req.TaskID != "" {
+			return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		}
+		return s.AuthorizeSessionPromptAccess(ctx, req.TaskSessionID)
+	}
+	if req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {

@@ -535,6 +535,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// Generic prompt-error continuity: a real error response on a live
+	// connection, with no capacity marker or transient keyword.
+	if resp, err, handled := a.handlePromptErrorContinuity(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
 	a.mu.Unlock()
@@ -726,6 +731,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(promptErrorCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
@@ -804,6 +810,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
+		{Name: "prompt-error", Description: "Simulate a generic prompt error on a usable connection (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

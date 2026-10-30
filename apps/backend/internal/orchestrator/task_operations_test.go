@@ -4740,6 +4740,7 @@ type mockMessageCreator struct {
 	sessionMessageOnce        sync.Once
 	sessionMessageErr         error
 	idempotentSessionMessages map[string]struct{}
+	sessionMessageCreatedAt   map[string]time.Time
 	agentMessages             []mockAgentMessage
 	agentMessageWrites        int
 	agentStreamWrites         int
@@ -4772,6 +4773,7 @@ type mockUserMessage struct {
 }
 
 type mockSessionMessage struct {
+	id                                              string
 	taskID, content, sessionID, messageType, turnID string
 	metadata                                        map[string]interface{}
 	requestsInput                                   bool
@@ -4879,7 +4881,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		return nil
 	}
 	m.idempotentSessionMessages[messageID] = struct{}{}
+	if m.sessionMessageCreatedAt != nil {
+		if _, recorded := m.sessionMessageCreatedAt[messageID]; !recorded {
+			m.sessionMessageCreatedAt[messageID] = time.Now().UTC()
+		}
+	}
 	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		id:            messageID,
 		taskID:        taskID,
 		content:       content,
 		sessionID:     sessionID,
@@ -4892,6 +4900,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
 	}
 	return nil
+}
+
+func (m *mockMessageCreator) SessionMessageCreatedAt(_ context.Context, messageID string) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	createdAt, ok := m.sessionMessageCreatedAt[messageID]
+	return createdAt, ok
 }
 
 func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, taskID, content, sessionID, messageType string, metadata map[string]interface{}) error {
