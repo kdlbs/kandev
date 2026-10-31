@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
 created: 2026-08-13
-updated: 2026-10-29
+updated: 2026-10-31
 owners:
   - cfl
 ---
@@ -183,6 +183,20 @@ require the current exclusive probe lease.
   cannot release the route while no runtime backs it, and no other pass
   recovers it. A live executor row, an unreadable row, a stale generation, and
   any other parked state keep the existing exclusion.
+- A launch that fails before `MarkActive` can leave a FAILED session whose
+  route is still `starting` with no owner, so a Retry would otherwise report
+  `dynamic_route_pending` indefinitely. An explicit Retry for the current
+  generation reconciles it under the session lifecycle lock: when no runtime is
+  live and the session's executor record is the stopped standalone local or
+  worktree history row of its own execution, it marks the generation
+  `action_required` and the ordinary retry proceeds. Normal cleanup keeps that
+  stopped row for conversation and workspace resume, so the check only observes
+  it and never deletes it. A live or unprobeable runtime, an absent row (the
+  manual relaunch cold-resumes from it and cannot start without it), and any
+  other executor row keep the guard. The manual relaunch may reopen the FAILED session to
+  WAITING_FOR_INPUT for the retried prompt, re-checking the generation first,
+  and the task scheduler admits a FAILED task for that new attempt; automatic
+  relaunches keep refusing terminal sessions.
 - Queue delivery treats a route that awaits a user action as a delivery
   block, not a launch in progress (`REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`,
   AC 001.15 and 001.16). The automatic drain cores skip a session whose route

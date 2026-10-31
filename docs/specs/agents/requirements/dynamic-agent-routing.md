@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-29
+updated: 2026-10-31
 owners:
   - cfl
 ---
@@ -37,6 +37,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.15:** Automatic queue delivery shall not reserve a queued message for a session whose route is `action_required` and whose `executors_running` row is absent. The message shall stay queued and visible with the session's route recovery actions, and a successful route action shall make it deliverable again. A session with a live executor row, and a session without a dynamic route, shall keep the existing delivery behavior.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.16:** When a queued dispatch fails because a WAITING_FOR_INPUT session whose route is still `starting` has no `executors_running` row, Kandev shall mark that route `action_required` with the orphaned-starting reason, keep the message queued, and stop automatic redelivery until a route action runs. It shall not change the session state. A session whose launch is still pending shall keep its existing retry.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23:** When a start would change the logical profile of a session whose durable route is already materialized for a different logical profile, Kandev shall refuse the start before writing the session and return a validation error. The session label, concrete profile, and route shall stay unchanged and no agent shall launch. A session without a materialized route keeps its first profile selection, and a route for the requested profile resumes normally. See the [guard package](../../../plans/materialized-route-profile-guard/plan.md).
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24:** An explicit Retry route action for a FAILED session whose route generation is still `starting` shall mark that same generation `action_required` and then apply the retry, so the user can relaunch it. This applies only when the request carries the current generation, no runtime is live for the session, and the session has only the stopped standalone local or worktree history row of its own execution; that history row shall be preserved. A live runtime, an unknown liveness probe, an absent `executors_running` row, or any other executor row shall leave the session and its route unchanged and report `dynamic_route_pending`; a stale generation, another session state, and another route state keep the existing route-action behavior. The resulting manual relaunch may reopen the FAILED session for the retried prompt and reschedule its FAILED task; automatic relaunches and stale generations shall still refuse a terminal session.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
