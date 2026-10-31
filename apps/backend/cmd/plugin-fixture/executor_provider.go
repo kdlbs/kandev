@@ -595,26 +595,50 @@ const (
 	fixtureDefaultDeclaredCapabilityList = fixtureCapabilityDestroyCheckpoints + "," + fixtureCapabilityDrainReceipt
 )
 
-// fixtureDeclaresCapability reports whether the fixture acts as a provider that
-// requires the named host capability. The set is configuration, so a test can
-// run the fixture as a provider that declares none.
-func fixtureDeclaresCapability(name string) bool {
+// fixtureNeverHeldCredentialVersion is the first drain_receipt version whose
+// not_attempted is valid under every cleanup reason.
+const fixtureNeverHeldCredentialVersion = 2
+
+// fixtureDeclaredCapabilities is the configured capability list; an entry is a
+// name, optionally followed by `@version`, and a bare name means version 1.
+func fixtureDeclaredCapabilities() []string {
 	list, ok := os.LookupEnv(fixtureCapabilitiesEnv)
 	if !ok {
 		list = fixtureDefaultDeclaredCapabilityList
 	}
-	for _, declared := range strings.Split(list, ",") {
-		if strings.TrimSpace(declared) == name {
-			return true
+	return strings.Split(list, ",")
+}
+
+// fixtureCapabilityVersion returns the declared version of the capability, or 0
+// when the fixture does not act as a provider that requires it.
+func fixtureCapabilityVersion(name string) int {
+	for _, declared := range fixtureDeclaredCapabilities() {
+		declaredName, text, versioned := strings.Cut(strings.TrimSpace(declared), "@")
+		if declaredName != name {
+			continue
+		}
+		if !versioned {
+			return 1
+		}
+		if version, err := strconv.Atoi(text); err == nil && version >= 1 {
+			return version
 		}
 	}
-	return false
+	return 0
+}
+
+// fixtureDeclaresCapability reports whether the fixture acts as a provider that
+// requires the named host capability. The set is configuration, so a test can
+// run the fixture as a provider that declares none.
+func fixtureDeclaresCapability(name string) bool {
+	return fixtureCapabilityVersion(name) > 0
 }
 
 // fixtureDrainRefusal applies the destroy-time drain rules of a provider that
-// requires drain_receipt: not_attempted proves "no runtime" only under the
-// launch cleanup reason, and a drained outcome carries a receipt bound to the
-// cleanup claim of this destroy.
+// requires drain_receipt: under version 1 not_attempted proves "no runtime"
+// only under the launch cleanup reason, under version 2 it states that the host
+// never held an agentctl credential and is accepted under any reason, and a
+// drained outcome carries a receipt bound to the cleanup claim of this destroy.
 func fixtureDrainRefusal(req *pluginsdk.DestroyExecutorEnvironmentRequest) *pluginsdk.ExecutorProviderError {
 	if !fixtureDeclaresCapability(fixtureCapabilityDrainReceipt) {
 		return nil
@@ -629,7 +653,9 @@ func fixtureDrainRefusal(req *pluginsdk.DestroyExecutorEnvironmentRequest) *plug
 			return refuse()
 		}
 	case fixtureDrainOutcomeNotAttempted:
-		if req.GetCleanupReason() != fixtureLaunchFailedCleanupReason || req.GetDrainReceipt() != nil {
+		launchRollback := req.GetCleanupReason() == fixtureLaunchFailedCleanupReason
+		neverHeldCredential := fixtureCapabilityVersion(fixtureCapabilityDrainReceipt) >= fixtureNeverHeldCredentialVersion
+		if (!launchRollback && !neverHeldCredential) || req.GetDrainReceipt() != nil {
 			return refuse()
 		}
 	case "unreachable", "uncertain":

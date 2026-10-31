@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
@@ -20,6 +21,21 @@ func negotiatedDeclares(negotiated []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// negotiatedVersion returns the version a recorded `name@version` set pins for
+// the capability, or 0 when it is absent or malformed.
+func negotiatedVersion(negotiated []string, name string) int {
+	for _, pair := range negotiated {
+		recorded, text, found := strings.Cut(pair, "@")
+		if recorded != name || !found {
+			continue
+		}
+		if version, err := strconv.Atoi(text); err == nil {
+			return version
+		}
+	}
+	return 0
 }
 
 // resolvePluginExecutorWorkspace validates the workspace descriptor of a
