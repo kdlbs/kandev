@@ -235,12 +235,27 @@ func pluginNoCredentialDrainOutcome(inventory pluginExecutorInventory, token, re
 }
 
 // pluginDrainNeverHeldCredential reports whether the record proves the host
-// never held an agentctl credential. It is true only under a recorded
-// drain_receipt version that defines not_attempted that way, and only when no
-// handshake was ever started.
+// never held an agentctl credential. It requires a recorded drain_receipt
+// version that defines not_attempted that way, and no sign of a credential:
+//
+//	no handshake was ever started                       -> true
+//	a handshake started, durable_bootstrap negotiated,
+//	  credential_recorded explicitly false, none rejected -> true
+//	anything else (rejected handshake, a recorded credential, a provider
+//	  without durable_bootstrap, a record that does not carry
+//	  credential_recorded)                              -> false
+//
+// The durable_bootstrap requirement is the host's ordering guarantee that the
+// token reference is checkpointed before an instance is created with the token.
 func pluginDrainNeverHeldCredential(inventory pluginExecutorInventory) bool {
-	return negotiatedVersion(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) >= pluginDrainReceiptNeverHeldCredential &&
-		!inventory.HandshakeStarted
+	if negotiatedVersion(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) < pluginDrainReceiptNeverHeldCredential ||
+		inventory.HandshakeRejected || inventory.credentialRecorded() {
+		return false
+	}
+	if !inventory.HandshakeStarted {
+		return true
+	}
+	return pluginExecutorDurableBootstrap(inventory) && inventory.CredentialRecorded != nil
 }
 
 // classifyPluginDrainFailure maps a failed drain to the outcome it proves. Only

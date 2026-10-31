@@ -199,6 +199,10 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 		control, token, err = r.newAgentctlControlClient(claimedCtx, resolver, r.logger, record.TransientBootstrapNonce)
 	}
 	if errors.Is(err, agentctl.ErrHandshakeRejected) {
+		state.inventory.HandshakeRejected = true
+		if err := r.checkpointPluginExecutorRecord(claimedCtx, record, state.inventory); err != nil {
+			return nil, false, errors.New("plugin executor handshake rejection was not recorded; recovery stays retryable")
+		}
 		return nil, true, nil
 	}
 	if err != nil {
@@ -263,6 +267,7 @@ func (r *PluginRemoteExecutor) adoptDurableBootstrap(
 	metadata[MetadataKeyAuthTokenSecret] = id
 	record.Metadata = metadata
 	record.TransientAuthToken = token
+	state.inventory.recordCredential()
 	if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
 		return nil, err
 	}
