@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { acknowledgeNotificationSave } from "./notification-save-reconciliation";
 import {
   createNotificationProvider,
   deleteNotificationProvider,
@@ -14,14 +15,19 @@ import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import { sendTestNotification } from "./notification-test-action";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
 import { useAppStore } from "@/components/state-provider";
+import {
+  parseWebhookHeaders,
+  useWebhookFormState,
+  useWebhookProviderActions,
+  webhookConfig,
+  webhookHeadersError,
+} from "./notifications-settings-webhook-helpers";
+import {
+  buildProviderUpdate,
+  formatAppriseUrls,
+  parseAppriseUrls,
+} from "./notifications-settings-provider-updates";
 import type { NotificationProvider } from "@/lib/types/http";
-
-type ProviderUpdatePayload = {
-  enabled?: boolean;
-  events?: string[];
-  config?: NotificationProvider["config"];
-  name?: string;
-};
 
 type AppriseFormMode = "create" | "edit";
 
@@ -33,6 +39,9 @@ type NotificationDraft = {
   pendingDeletes: Set<string>;
   showAppriseForm: boolean;
   appriseFormMode: AppriseFormMode;
+  showWebhookForm: boolean;
+  webhookFormMode: AppriseFormMode;
+  webhookHeaderDrafts: Record<string, string>;
 };
 
 type NotificationHydrationSource = {
@@ -40,62 +49,6 @@ type NotificationHydrationSource = {
   events: string[] | undefined;
   appriseAvailable: boolean | undefined;
 };
-
-export function formatAppriseUrls(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string").join("\n");
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  return "";
-}
-
-export function parseAppriseUrls(value: string): string[] {
-  return value
-    .split("\n")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
-function normalizeEvents(events?: string[]): string {
-  if (!Array.isArray(events)) {
-    return "";
-  }
-  return [...events].sort().join("|");
-}
-
-function extractUrls(config: NotificationProvider["config"]): string[] {
-  if (!config) return [];
-  const urls = config.urls;
-  if (Array.isArray(urls)) {
-    return urls.filter((item): item is string => typeof item === "string");
-  }
-  if (typeof urls === "string") {
-    return parseAppriseUrls(urls);
-  }
-  return [];
-}
-
-export function buildProviderUpdate(
-  provider: NotificationProvider,
-  baseline: NotificationProvider,
-): ProviderUpdatePayload | null {
-  const updates: ProviderUpdatePayload = {};
-  if (provider.enabled !== baseline.enabled) updates.enabled = provider.enabled;
-  if (normalizeEvents(provider.events) !== normalizeEvents(baseline.events)) {
-    updates.events = provider.events;
-  }
-  if (provider.name !== baseline.name) updates.name = provider.name;
-  if (provider.type === "apprise") {
-    const urls = extractUrls(provider.config);
-    const baselineUrls = extractUrls(baseline.config);
-    if (urls.join("|") !== baselineUrls.join("|")) {
-      updates.config = { ...provider.config, urls };
-    }
-  }
-  return Object.keys(updates).length ? updates : null;
-}
 
 function buildAppriseEdits(providers: NotificationProvider[]) {
   const urls: Record<string, string> = {};
@@ -116,10 +69,15 @@ function hasDraftChanges({
   pendingDeletes,
   showAppriseForm,
   appriseFormMode,
+  showWebhookForm,
+  webhookFormMode,
+  webhookHeaderDrafts,
 }: NotificationDraft) {
   return (
     (showAppriseForm && appriseFormMode === "create") ||
+    (showWebhookForm && webhookFormMode === "create") ||
     pendingDeletes.size > 0 ||
+    Object.keys(webhookHeaderDrafts).some((providerId) => !pendingDeletes.has(providerId)) ||
     providers.some((provider) => {
       const baseline = baselineProviders.find((item) => item.id === provider.id);
       if (!baseline) return false;
@@ -187,6 +145,9 @@ function useHydrateNotificationDraft({
     draft.pendingDeletes,
     draft.providers,
     draft.showAppriseForm,
+    draft.showWebhookForm,
+    draft.webhookFormMode,
+    draft.webhookHeaderDrafts,
     loaded,
     setAppriseEdits,
     setAppriseNameEdits,
@@ -228,7 +189,14 @@ export function useNotificationsState() {
   );
   const [showAppriseForm, setShowAppriseForm] = useState(false);
   const [appriseFormMode, setAppriseFormMode] = useState<AppriseFormMode>("create");
+  const appriseFormIdentity = useRef<object>({});
+  const appriseFormRef = useRef<{ open: boolean; mode: AppriseFormMode }>({
+    open: false,
+    mode: "create",
+  });
   const [activeAppriseId, setActiveAppriseId] = useState<string | null>(null);
+  const webhookForm = useWebhookFormState();
+  const { showWebhookForm, webhookFormMode } = webhookForm;
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   useHydrateNotificationDraft({
     loaded,
@@ -245,6 +213,9 @@ export function useNotificationsState() {
       pendingDeletes,
       showAppriseForm,
       appriseFormMode,
+      showWebhookForm,
+      webhookFormMode,
+      webhookHeaderDrafts: webhookForm.webhookHeaderDrafts,
     },
     setProviders,
     setBaselineProviders,
@@ -280,6 +251,9 @@ export function useNotificationsState() {
     setAppriseFormMode,
     activeAppriseId,
     setActiveAppriseId,
+    appriseFormIdentity,
+    appriseFormRef,
+    ...webhookForm,
     pendingDeletes,
     setPendingDeletes,
     setNotificationProviders,
@@ -290,34 +264,93 @@ export type NotificationsState = ReturnType<typeof useNotificationsState>;
 export type { AppriseFormMode };
 export type PermissionRefresh = (error?: unknown) => void | Promise<void>;
 
+type AppriseCreateDraft = { name: string; urls: string[] };
+type WebhookCreateDraft = {
+  name: string;
+  url: string;
+  headers: Record<string, string>;
+  secret: string;
+};
+
+function buildAppriseCreateDraft(state: NotificationsState): AppriseCreateDraft | null {
+  if (!state.showAppriseForm || state.appriseFormMode !== "create") return null;
+  return { name: state.appriseName, urls: parseAppriseUrls(state.appriseUrls) };
+}
+
+function buildWebhookCreateDraft(state: NotificationsState): WebhookCreateDraft | null {
+  if (!state.showWebhookForm || state.webhookFormMode !== "create") return null;
+  return {
+    name: state.webhookName,
+    url: state.webhookUrl.trim(),
+    headers: parseWebhookHeaders(state.webhookHeaders),
+    secret: state.webhookSecret.trim(),
+  };
+}
+
+async function createProviderFromDrafts(
+  appriseDraft: AppriseCreateDraft | null,
+  webhookDraft: WebhookCreateDraft | null,
+): Promise<NotificationProvider | null> {
+  if (appriseDraft) {
+    return createNotificationProvider({
+      name: appriseDraft.name.trim() || "Apprise",
+      type: "apprise",
+      config: { urls: appriseDraft.urls },
+      enabled: true,
+      events: DEFAULT_NOTIFICATION_EVENTS,
+    });
+  }
+  if (webhookDraft) {
+    return createNotificationProvider({
+      name: webhookDraft.name.trim() || "Webhook",
+      type: "webhook",
+      config: {
+        url: webhookDraft.url,
+        headers: webhookDraft.headers,
+        ...(webhookDraft.secret ? { secret: webhookDraft.secret } : {}),
+      },
+      enabled: true,
+      events: DEFAULT_NOTIFICATION_EVENTS,
+    });
+  }
+  return null;
+}
+
+function assertWebhookHeadersValid(state: NotificationsState, providers: NotificationProvider[]) {
+  if (state.showWebhookForm && state.webhookFormMode === "create") {
+    const headersError = webhookHeadersError(state.webhookHeaders);
+    if (headersError) throw new Error(t(headersError));
+  }
+  for (const [providerId, rawHeaders] of Object.entries(state.webhookHeaderDrafts)) {
+    if (state.pendingDeletes.has(providerId)) continue;
+    const headersError = webhookHeadersError(rawHeaders);
+    if (headersError) throw new Error(t(headersError));
+  }
+  for (const provider of providers) {
+    if (provider.type !== "webhook") continue;
+    const headersError = webhookHeadersError(webhookConfig(provider.config).headers);
+    if (headersError) throw new Error(t(headersError));
+  }
+}
+
 export function useSaveRequest(state: NotificationsState) {
-  const {
-    providers,
-    baselineProviders,
-    setProviders,
-    setBaselineProviders,
-    setAppriseEdits,
-    setAppriseNameEdits,
-    pendingDeletes,
-    setPendingDeletes,
-    setNotificationProviders,
-    showAppriseForm,
-    appriseFormMode,
-    appriseName,
-    setAppriseName,
-    appriseUrls,
-    setAppriseUrls,
-    setShowAppriseForm,
-    setActiveAppriseId,
-  } = state;
+  const currentState = useRef(state);
+  currentState.current = state;
+  const { providers, baselineProviders, pendingDeletes, setNotificationProviders } = state;
   return useRequest(async () => {
-    const createDraft =
-      showAppriseForm && appriseFormMode === "create"
-        ? { name: appriseName, urls: parseAppriseUrls(appriseUrls) }
-        : null;
-    if (createDraft && createDraft.urls.length === 0) {
+    const formIdentity = {
+      apprise: state.appriseFormIdentity.current,
+      webhook: state.webhookFormIdentity.current,
+    };
+    const appriseDraft = buildAppriseCreateDraft(state);
+    if (appriseDraft && appriseDraft.urls.length === 0) {
       throw new Error(t("settings:appriseUrlRequired"));
     }
+    const webhookDraft = buildWebhookCreateDraft(state);
+    if (webhookDraft && !webhookDraft.url) {
+      throw new Error(t("settings:webhookUrlRequired"));
+    }
+    assertWebhookHeadersValid(state, providers);
     const updates: Array<Promise<NotificationProvider>> = [];
     for (const provider of providers) {
       const baseline = baselineProviders.find((item) => item.id === provider.id);
@@ -330,15 +363,7 @@ export function useSaveRequest(state: NotificationsState) {
       await deleteNotificationProvider(providerId);
     }
     const updated = await Promise.all(updates);
-    const created = createDraft
-      ? await createNotificationProvider({
-          name: createDraft.name.trim() || "Apprise",
-          type: "apprise",
-          config: { urls: createDraft.urls },
-          enabled: true,
-          events: DEFAULT_NOTIFICATION_EVENTS,
-        })
-      : null;
+    const created = await createProviderFromDrafts(appriseDraft, webhookDraft);
     const updatedById = new Map(updated.map((provider) => [provider.id, provider]));
     const nextProviders = providers
       .map((provider) => updatedById.get(provider.id) ?? provider)
@@ -349,29 +374,14 @@ export function useSaveRequest(state: NotificationsState) {
       loaded: true,
       loading: false,
     });
-    setProviders(nextProviders);
-    setBaselineProviders(nextProviders);
-    setAppriseEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = formatAppriseUrls(p.config?.urls);
-      }
-      return next;
+    acknowledgeNotificationSave({
+      submitted: state,
+      current: currentState.current,
+      accepted: nextProviders,
+      edits: buildAppriseEdits(nextProviders),
+      created,
+      formIdentity,
     });
-    setAppriseNameEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = p.name;
-      }
-      return next;
-    });
-    setPendingDeletes(new Set());
-    if (created) {
-      setAppriseName("");
-      setAppriseUrls("");
-      setShowAppriseForm(false);
-      setActiveAppriseId(null);
-    }
     return created ? [...updated, created] : updated;
   });
 }
@@ -385,6 +395,9 @@ export function useIsDirty(state: NotificationsState) {
     pendingDeletes,
     showAppriseForm,
     appriseFormMode,
+    showWebhookForm,
+    webhookFormMode,
+    webhookHeaderDrafts,
   } = state;
   return hasDraftChanges({
     providers,
@@ -394,7 +407,21 @@ export function useIsDirty(state: NotificationsState) {
     pendingDeletes,
     showAppriseForm,
     appriseFormMode,
+    showWebhookForm,
+    webhookFormMode,
+    webhookHeaderDrafts,
   });
+}
+
+function closeWebhookCreateDraft(state: NotificationsState) {
+  state.webhookFormRef.current = { open: false, mode: "create" };
+  state.webhookFormIdentity.current = {};
+  state.setShowWebhookForm(false);
+  state.setActiveWebhookId(null);
+  state.setWebhookName("");
+  state.setWebhookUrl("");
+  state.setWebhookHeaders("");
+  state.setWebhookSecret("");
 }
 
 function useAppriseProviderActions(state: NotificationsState) {
@@ -403,6 +430,7 @@ function useAppriseProviderActions(state: NotificationsState) {
     appriseEdits,
     appriseNameEdits,
     appriseFormMode,
+    appriseFormRef,
     activeAppriseId,
     setProviders,
     setAppriseEdits,
@@ -413,6 +441,7 @@ function useAppriseProviderActions(state: NotificationsState) {
     setAppriseFormMode,
     setActiveAppriseId,
     setPendingDeletes,
+    webhookFormRef,
   } = state;
 
   const updateProviderState = (
@@ -436,6 +465,12 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const openAppriseForm = (mode: AppriseFormMode, provider?: NotificationProvider) => {
+    const webhookForm = webhookFormRef.current;
+    if (mode === "create" && webhookForm.open && webhookForm.mode === "create") {
+      closeWebhookCreateDraft(state);
+    }
+    state.appriseFormIdentity.current = {};
+    appriseFormRef.current = { open: true, mode };
     setAppriseFormMode(mode);
     setActiveAppriseId(provider?.id ?? null);
     if (provider) {
@@ -454,6 +489,8 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const closeAppriseForm = () => {
+    state.appriseFormIdentity.current = {};
+    appriseFormRef.current = { open: false, mode: "create" };
     setShowAppriseForm(false);
     setActiveAppriseId(null);
     setAppriseName("");
@@ -502,6 +539,7 @@ export function useNotificationsActions(
 ) {
   const { setProviders } = state;
   const appriseActions = useAppriseProviderActions(state);
+  const webhookActions = useWebhookProviderActions(state);
 
   const handleToggleEvent = (provider: NotificationProvider, eventType: string) => {
     const currentEvents = provider.events ?? [];
@@ -556,6 +594,10 @@ export function useNotificationsActions(
   };
 
   const discard = () => {
+    state.appriseFormIdentity.current = {};
+    state.webhookFormIdentity.current = {};
+    state.appriseFormRef.current = { open: false, mode: "create" };
+    state.webhookFormRef.current = { open: false, mode: "create" };
     const edits = buildAppriseEdits(state.baselineProviders);
     state.setProviders(state.baselineProviders);
     state.setAppriseEdits(edits.urls);
@@ -565,6 +607,13 @@ export function useNotificationsActions(
     state.setAppriseUrls("");
     state.setShowAppriseForm(false);
     state.setActiveAppriseId(null);
+    state.setShowWebhookForm(false);
+    state.setActiveWebhookId(null);
+    state.setWebhookName("");
+    state.setWebhookUrl("");
+    state.setWebhookHeaders("");
+    state.setWebhookSecret("");
+    state.setWebhookHeaderDrafts({});
   };
 
   return {
@@ -575,5 +624,6 @@ export function useNotificationsActions(
     handleTestProvider,
     discard,
     ...appriseActions,
+    ...webhookActions,
   };
 }

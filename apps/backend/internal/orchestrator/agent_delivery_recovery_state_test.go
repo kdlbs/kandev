@@ -126,3 +126,53 @@ func TestAgentctlDisconnectPersistsRecoveryAndPublishesWithoutSettlingSession(t 
 		t.Fatalf("exact reattachment left delivery recovery blocked: %+v, %v", openBlock, err)
 	}
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestDeliveryWriterFailureUncertainPhasePersistsRecoveryBlock(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-delivery-writer", "session-delivery-writer", "step-1")
+	seedExecutorRunning(t, repo, "session-delivery-writer", "task-delivery-writer", "exec-delivery-writer")
+	session, err := repo.GetTaskSession(ctx, "session-delivery-writer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if err := repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: incarnationID, Generation: 3,
+		NativeSessionID: "native-writer", CreationReason: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: "submission-writer", SessionID: session.ID, IncarnationID: incarnationID,
+		HarnessGeneration: 3, OwnerGeneration: 1, PayloadHash: "hash-writer",
+		Payload: []byte("prompt"), State: models.DeliverySubmissionDispatching,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	service.handleAgentctlDeliveryRecovery(ctx, lifecycle.AgentctlEventPayload{
+		TaskID: session.TaskID, SessionID: session.ID, AgentExecutionID: session.AgentExecutionID,
+		FailureCode: "DURABLE_DELIVERY_UNCERTAIN", DeliveryRecoveryPhase: models.AgentDeliveryRecoveryUncertain,
+		DeliverySubmissionID: "submission-writer", DeliveryStreamID: "stream-writer",
+		DeliveryIncarnationID: incarnationID, DeliveryHarnessGeneration: 3, PromptGeneration: 9,
+		ErrorMessage: "The prompt outcome is uncertain.",
+	})
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, ok := models.LoadAgentDeliveryRecovery(stored.Metadata)
+	if !ok || recovery.Phase != models.AgentDeliveryRecoveryUncertain ||
+		recovery.SubmissionID != "submission-writer" || recovery.PromptGeneration != 9 {
+		t.Fatalf("persisted recovery = %+v, ok=%v", recovery, ok)
+	}
+	if stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("coarse session state = %s, want RUNNING while the writer outcome is uncertain", stored.State)
+	}
+	block, err := service.GetOpenSessionRecoveryBlock(ctx, session.ID)
+	if err != nil || block == nil || block.DeliverySubmissionID != "submission-writer" {
+		t.Fatalf("delivery admission block = %+v, %v", block, err)
+	}
+}

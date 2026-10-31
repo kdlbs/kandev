@@ -11,15 +11,16 @@ requirements:
 ## Purpose and boundaries
 
 The tasks system owns completion eligibility and its recovery instructions.
-This design adds diagnostics to the existing completion contract.
-It preserves the current turn stamp, signal claim, and workflow transition rules.
+This design owns turn attribution, entry-bound signal claims, and recovery
+instructions. The issue #4705 extension below is implemented; the associated work
+orders record validation. Existing diagnostics and advancement policy remain.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001 | Applicability response (`advances`/`note`) |
-| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003 | Diagnostic response, Recovery instructions, Verification |
+| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001 | Applicability response; Durable output-turn attribution |
+| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003 | Diagnostic response; Entry-bound completion; Verification |
 
 ## Applicability response (`advances`/`note`)
 
@@ -117,11 +118,166 @@ An error does not grant an agent new authority to use `move_task_kandev`.
 
 ## Persistence and compatibility
 
+### Watchdog scan projection
+
+The periodic stuck-signal watchdog uses `ListStepSignalWatchdogSessions`, a
+read-only projection of session ID, task ID, state, passthrough status, and only
+the `pending_step_completion_signal` metadata entry. It retains the general
+active-session reader's CREATED, STARTING, RUNNING, and WAITING_FOR_INPUT scope
+and start-time ordering, including sessions on archived and automation tasks.
+It does not join workspace/execution tables or load configuration snapshots,
+worktrees, MCP attachments, or model catalogs. The general active-session
+reader continues returning full sessions for its other consumers.
+
+SQLite and PostgreSQL extract the pending metadata entry in SQL. This bounds
+payload transfer and Go decoding by the signal size; database JSON evaluation
+can still read the original metadata. No schema, index, retention, or archive
+policy changes. The projected sessions are observations only: recovery still
+re-reads full sessions and turns under the existing cancellation, generation,
+liveness, and delivery guards. Office detection and deduplication retain the
+same pending-signal population and never gain transition authority.
+
 There is no schema change, new response envelope, or new MCP argument.
 `workflow_step_id_at_start` remains an immutable historical fact.
-The task-at-step conditional signal claim and duplicate handling remain intact.
+The conditional signal claim and duplicate handling retain their behavior and
+add the entry fence described below.
 RUNNING and WAITING_FOR_INPUT sessions both retain the mismatch guard.
 Idleness does not prove that work belongs to the new step.
+
+## Durable output-turn attribution
+
+The tasks system owns fallback turn creation and completion eligibility. Platform
+owns inbox ordering, replay, and acknowledgment; its
+[delivery design](../../platform/system-design/durable-agent-delivery.md#backend-inbox-and-projection)
+remains authoritative for that transport. This implements AC-001.4 and AC-001.5.
+The [entry-bound attribution decision](../../../decisions/2026-10-22-entry-bound-delivery-turns.md)
+records the failure and compatibility choices.
+
+### Creation and replay
+
+Only the new-row branch of `sqlite.Repository.canonicalDeliveryTurnTx` gains
+stamping. It uses `readTaskStepInTx`'s task-row locking discipline and
+`stampTurnWorkflowEntryTx` to obtain step and latest ledger ID from one locked
+state, serializes the resulting metadata, and retains the deterministic ID and
+`ON CONFLICT (id) DO NOTHING`. It stays inside the caller's projection transaction;
+calling public `CreateTurnWithStepStamp` would open a separate transaction and
+break projection atomicity. A real task with no step omits both keys. A legacy
+stepped task with no ledger row keeps the existing omission of entry ID; zero
+is an internal comparison value, never a fabricated ledger entry.
+
+The transaction commits the fallback row, canonical message or shell message,
+effect receipts, projected-at markers, and projected cursor together. A missing
+task, failed task/ledger read, serialization failure, insert failure, or commit
+failure rolls it back. No ordinary telemetry fallback commits a new unstamped
+canonical row after an error. The received inbox remains available for replay.
+
+All callers are covered:
+
+- `persistCanonicalAgentMessageTx`: text and thinking, singleton and batch.
+- `canonicalShellStartTurnTx`: foreground pending/running shell tools without
+  an explicit turn. Terminal shell-status events only resolve an open turn;
+  background tools and shell-output updates do not acquire new fallback authority.
+- Requested-turn and existing-open-turn branches return the existing identity
+  without reads that could overwrite metadata. Even an old unstamped turn stays
+  unstamped; the completion handler never searches backwards for a stamped turn.
+- Projected inbox replay skips turn creation. A deterministic-ID conflict leaves
+  the stored row and metadata unchanged, including a closed row retried directly.
+  Duplicate message content and effect identity remain governed by current replay.
+
+### Locks and retry
+
+SQLite's writer pool serializes writers; reserve the writer before reads using
+the existing write-transaction convention. Use the existing writer pool, never
+the read-only pool, for attribution.
+
+PostgreSQL projection already acquires session-turn, delivery-session, and
+stream advisory locks in `lockAgentDeliveryEventWritesMode`. A plain blocking
+`FOR UPDATE` added afterwards can invert task-first workflow paths, including
+`RecordAgentDeliveryWorkflowOutcome`. Do not introduce that wait cycle or
+reorder global session/admission locks as part of this repair.
+
+For the new fallback branch, add a narrowly scoped nonblocking mode of the same
+task-row read (`FOR UPDATE NOWAIT`). Success holds the ordinary task row lock
+through entry lookup and insertion. SQLSTATE `55P03` is projection contention:
+roll back the entire projection transaction before retrying from a fresh
+transaction and rechecking stored inbox/event identity, open turn selection,
+step, entry, effects and cursor. Retry outside all locks with a cancellable
+10 ms exponential delay capped at 250 ms, bounded by the caller context.
+Cancellation returns promptly; no sleep retains a connection or transaction.
+Other SQL/serialization errors are returned, not treated as contention.
+Ordinary `readTaskStepInTx` callers retain their blocking mode and semantics.
+
+This handles task-first movers and receipt writers without introducing a new
+advisory-lock family. An intervening normal prompt can legitimately win the
+retry and supply the existing open turn. Do not stamp against a pre-lock task
+snapshot. Prove actual independent PostgreSQL connections and observed lock
+ownership, rather than relying on a one-connection pool to appear serialized.
+
+## Entry-bound completion
+
+This implements AC-003.6 and AC-003.7. Investigation found that the current handler
+and pending signal carry only the step ID. The stored turn entry stamp is
+currently unused by completion, so A -> B -> A can accept an old turn.
+
+Resolve the latest turn's immutable step and entry stamp together. Keep missing
+step-stamp failures separate from stale-entry validation; never use an earlier
+turn or the unlocked current task to fill a missing stamp. Positive entry IDs
+must be parsed losslessly from typed and JSON-rehydrated metadata. A missing
+entry stamp is eligible only when the locked task has no ledger entry either.
+The existing no-turn compatibility path can bind to the locked task's entry
+inside the claim transaction; it must not invent turn history.
+
+`sqlite/step_completion_entry.go:ClaimStepCompletionSignal` compares the
+expected step and entry under the task row lock, using
+`getLatestTaskStepTransitionIDTx`. Keep the existing task/session ownership
+check and first-writer atomicity. Avoid adding a session-turn advisory lock
+after the task lock: ordinary turn stamping takes those locks in the reverse
+order. Production may not silently fall back to the older step-only claimer
+when entry evidence exists. The older step-only method remains for unrelated callers; production completion
+uses the entry-aware repository capability.
+
+An optional `workflow_step_transition_id` in `PendingStepCompletionSignal`
+uses the existing session JSON bag; no SQL column or new MCP argument is needed.
+The claim records the locked entry, including the legitimate zero-entry case.
+New writes preserve presence, so zero and legacy absence are distinguishable.
+The decoder retains typed/map parity. Duplicate claims compare entry as well as
+step: the first accepted payload for one entry wins; an old or unproven entry
+cannot mask a fresh eligible completion. Publish failures retry the same claim.
+
+Both turn-end implementations and the waiting-session subscriber/watchdog must
+require matching entry evidence when consuming signals. Propagate the stored
+entry into `models.WithWorkflowStepCompletionGuard` so the existing task move
+CAS (`taskStepTransitionGuardMatches`) checks it again under the task lock at
+the transition boundary. Preserve cancellation, clarification, and workflow
+policy guards. A read or fence failure creates no transition or delivery receipt
+that claims one occurred. Context guards apply only to the source task/step;
+destination entry actions keep their existing admission rules. The completion
+variant also marks ownership of the handoff carry slot: the locked CAS rebase
+retains its prepared update or removal while refreshing unrelated metadata.
+Ordinary arrival guards do not acquire that ownership. A rejected legacy
+completion move conditionally clears its observed signal and settles the finished
+turn to waiting through the existing session-state path.
+
+Delayed bus events remain wakeups to reread durable state; their payload is not
+authority to overwrite the bag. Stale cleanup must condition its removal on the
+observed signal identity, so a newer entry's signal survives a cleanup race.
+Signal handoff/blocker carry, transition audit, and both engine and legacy paths
+use only an entry-matching signal.
+
+### Compatibility and recovery
+
+Historical turns are never backfilled. New self-woken turns can complete in the
+current entry. Old turns without a step stamp retain their current internal
+error and need a fresh turn; old turns with a missing or mismatched entry cannot
+complete a known later entry. Existing entry-less pending signals remain readable
+but cannot authorize a known entry; a fresh eligible signal can replace them.
+Unledgered legacy tasks retain the zero-entry compatibility case without
+synthesizing history. No completion instruction bypasses question barriers,
+changes tool visibility, creates a user message, or moves a task to recover.
+
+`docs/public/automation-and-mcp.md` and `workflow-tips.md` explain normal
+self-wake completion and fresh-turn recovery for older/unattributed turns or
+revisited steps. No new UI or screenshots are required.
 
 ## Verification
 
@@ -151,3 +307,5 @@ compares it with the compiled `on_turn_complete` actions.
 
 - [Issue 3772 recovery package](../../../plans/step-completion-stale-turn-recovery/plan.md)
 - [Applicability response package](../../../plans/office-assignment-step-eligibility/plan.md)
+
+- [Fallback output-turn repair package](../../../plans/agent-delivery-turn-step-stamp/plan.md)

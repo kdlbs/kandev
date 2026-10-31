@@ -134,6 +134,19 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 
 For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
 
+### Set or change task priority from MCP
+
+`create_task_kandev` uses `medium` when `priority` is omitted, even when the
+parent has another priority. Use `update_task_kandev` to change priority
+without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+See [Set task priority through MCP](automation-and-mcp.md#set-task-priority-through-mcp)
+for accepted values, omission behavior, validation, and retry behavior.
+
 ## Coordinate with targeted messages
 
 `message_task_kandev` sends a message to another task's primary session by default. Supply a session ID to target a particular sibling session on the current task.
@@ -191,7 +204,7 @@ Additional messaging boundaries:
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.
 
-Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
+Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` to list a task's parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests. `task_id` defaults to the current task; another target is allowed only when it is an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. Unrelated tasks are denied, including in the same workspace. Compact output is a presentation option, not a separate metadata permission: `verbose` adds descriptions and never widens access.
 
 Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents, for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 

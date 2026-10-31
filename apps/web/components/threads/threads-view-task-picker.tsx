@@ -23,6 +23,8 @@ import {
 type Props = {
   candidates: ThreadCandidate[];
   selectedTaskIds: string[];
+  /** Shows each checked row's one-based place in `selectedTaskIds`. */
+  showSelectionPosition: boolean;
   onChange: (taskIds: string[]) => void;
   onBack: () => void;
 };
@@ -52,10 +54,12 @@ function candidateStateIconProps(candidate: ThreadCandidate): TaskStateIconProps
 function ThreadTaskPickerRow({
   candidate,
   checked,
+  position,
   onCheckedChange,
 }: {
   candidate: ThreadCandidate;
   checked: boolean;
+  position: number | null;
   onCheckedChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -71,13 +75,26 @@ function ThreadTaskPickerRow({
         id={checkboxId}
         checked={checked}
         onCheckedChange={(value) => onCheckedChange(value === true)}
-        aria-label={candidate.title}
+        aria-label={
+          position === null
+            ? candidate.title
+            : t("threads:selectionPosition", { title: candidate.title, position })
+        }
         data-testid="threads-task-picker-checkbox"
       />
       <label
         htmlFor={checkboxId}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-2"
       >
+        {position !== null && (
+          <span
+            aria-hidden="true"
+            className="w-5 shrink-0 text-center text-xs tabular-nums text-muted-foreground"
+            data-testid="threads-task-picker-position"
+          >
+            {position}
+          </span>
+        )}
         <TaskStateIcon {...iconProps} accessibleLabel={t(getTaskStateIconLabelKey(iconProps))} />
         <span className="min-w-0 flex-1 truncate">{candidate.title}</span>
         {candidate.stepTitle && (
@@ -97,10 +114,20 @@ function ThreadTaskPickerRow({
 }
 
 // eslint-disable-next-line max-lines-per-function -- Keeps search, bulk selection, and task-row updates in one picker boundary.
-export function ThreadsViewTaskPicker({ candidates, selectedTaskIds, onChange, onBack }: Props) {
+export function ThreadsViewTaskPicker({
+  candidates,
+  selectedTaskIds,
+  showSelectionPosition,
+  onChange,
+  onBack,
+}: Props) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const selected = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
+  const positionByTaskId = useMemo(
+    () => new Map(selectedTaskIds.map((taskId, index) => [taskId, index + 1])),
+    [selectedTaskIds],
+  );
   const visibleCandidates = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     if (!needle) return candidates;
@@ -187,6 +214,9 @@ export function ThreadsViewTaskPicker({ candidates, selectedTaskIds, onChange, o
               key={candidate.taskId}
               candidate={candidate}
               checked={selected.has(candidate.taskId)}
+              position={
+                showSelectionPosition ? (positionByTaskId.get(candidate.taskId) ?? null) : null
+              }
               onCheckedChange={(checked) => setSelected(candidate.taskId, checked)}
             />
           ))

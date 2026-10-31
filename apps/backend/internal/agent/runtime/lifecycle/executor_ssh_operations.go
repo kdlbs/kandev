@@ -731,6 +731,7 @@ func buildSSHCreateInstanceRequest(
 		),
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
@@ -745,6 +746,7 @@ func buildSSHCreateInstanceRequest(
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 	if req.DurableJournalOwnerID != "" {
 		// The SSH task directory is the stable remote environment. Keep the

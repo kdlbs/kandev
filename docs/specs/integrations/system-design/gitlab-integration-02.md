@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-10-13
+updated: 2026-10-22
 owners:
   - tbd
 ---
@@ -20,7 +20,127 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | --- | --- |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .11-.15) | [Discussion reply draft settlement](#discussion-reply-draft-settlement) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .20-.23) | [Watch dialog ownership](#watch-dialog-ownership) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .24-.27) | [Merge API source-head compatibility](#merge-api-source-head-compatibility) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .28-.30) | [Default merge squash choice](#default-merge-squash-choice) |
+
+
+## Merge API source-head compatibility
+
+For AC .24-.27, `Service.mergeMRWithClient` continues validating project merge
+methods and calls the selected client; interactive workspace/expected-host
+routing and `MergeMRForAutomation` retain their existing connection selection.
+`PATClient.MergeMR` reads the single MR endpoint using the same client, full
+encoded target project path and IID immediately before the merge PUT. It uses
+the response's top-level `sha`, documented as the source branch head, as the
+merge body's `sha`. A nonempty, non-whitespace source SHA is required; an error,
+missing or whitespace-only value prevents the PUT. Do not fall back to diff,
+base, pipeline, target branch, cached task or UI values. Keep the returned
+value unchanged for GitLab to validate; do not infer a reviewed-head guarantee.
+
+`convertRawMR` currently prefers `diff_refs.head_sha` for the general MR
+projection. That diff-version value can lag the top-level head, so do not use
+`GetMR`'s projected `HeadSHA` for this write and do not change the projection's
+semantics as part of this repair. Use a small provider-local raw response read;
+no `Client` interface or UI request change is needed. A fork still addresses
+the MR in its target project, while the returned top-level SHA identifies the
+source head. The provider checks the SHA atomically during its merge. Propagate
+its error, including 409, without a second read or merge retry after the PUT;
+a future independent action remains subject to existing automation scheduling.
+
+`GLabClient` embeds `PATClient` and inherits this path. Service and automation
+callers therefore get the same guard without altering mock or noop contracts.
+Keep all existing merge request fields and error wrapping, credential selection,
+method and squash policy, and no requested source-branch removal. The extra
+scoped read is mandatory even for older hosts, and its failure is fail-closed.
+The separate default-choice correction below clarifies the preserved squash
+policy without changing this guard or the other AC .24-.27 invariants.
+
+GitLab's [single MR](https://docs.gitlab.com/api/merge_requests/#get-single-merge-request)
+and [merge API](https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request)
+document the source-head field, conditional merge `sha` and mismatch response;
+its [merge implementation](https://raw.githubusercontent.com/gitlabhq/gitlabhq/master/lib/api/merge_requests.rb)
+shows the parameter passed to merge. The scoped registered-route and provider
+contract tests in the [work order](../../../plans/gitlab-required-merge-sha/task-01-bind-merge-head.md)
+prove the actual boundary with disposable servers. This is not a live GitLab
+mutation or a new public UI contract.
+
+## Default merge squash choice
+
+For AC .28-.30, `Service.mergeMRWithClient` must distinguish project
+capability from caller intent: an empty method leaves the existing squash bool
+false; explicit `squash` still validates `AllowSquash` and sets it true.
+The PAT request's existing `omitempty` omits false, so GitLab retains the MR
+choice and applies project policy. `default_off` and `default_on` both permit
+squash, but neither permission implies the user's current choice. Required
+and prohibited policies remain GitLab's decision. Other explicit method checks
+and unknown-method errors remain unchanged. `GLabClient` embeds the PAT client.
+No client interface, policy metadata, frontend option, or new setting is needed.
+
+The current desktop `MRStatusChipPopover` and phone `MRStatusChipDrawer` both
+render `MRCIPopover` and `MRMergeButton`; the MR detail confirmation also calls
+the existing `mergeMR` helper. Both pass `squash: false`, which the helper
+encodes as an omitted method in the existing workspace/expected-host request.
+The controller resolves the workspace client and automation uses the same
+service resolution with an empty method. The change is backend data behavior:
+no layout, touch interaction, navigation, or copy changes. This source trace
+does not establish rendered browser behavior; focused real-route and provider
+HTTP tests, rather than new mobile browser coverage, exercise the shared path.
+
+Independently authored disposable HTTP provider tests must observe the actual
+merge body and model GitLab's MR-choice and project-policy resolution. Cover
+both unchecked default policies, selected default-on, required and never,
+explicit squash and invalid methods, plus existing identity, head, race,
+message and source-branch guards. Exercise workspace action and automation
+wiring. The fixture models provider behavior and is not a live GitLab test.
+See the [work order](../../../plans/gitlab-squash-choice/task-01-respect-squash-choice.md).
+GitLab documents the [merge API](https://docs.gitlab.com/api/merge_requests/)
+and [squash policies](https://docs.gitlab.com/user/project/merge_requests/squash_and_merge/);
+its [merge parameter implementation](https://gitlab.com/gitlab-org/gitlab/-/raw/master/lib/api/merge_requests.rb)
+provides the omission behavior modeled by the fixture.
+
+## Watch dialog ownership
+
+AC .20-.23 use the existing `GitLabWatchSettings` actions, review/issue wrappers,
+shared `GitLabWatchDialog`, domain hooks, API and store. The shared dialog owns
+only draft, inline error, busy state and dismissal. Domain actions continue
+publishing accepted writes and their truthful parent feedback after dismissal.
+
+Render one form lifetime only while open, keyed by workspace, kind and selected
+watch ID (including create mode). Initialize local form state once from the
+selected watch/defaults. Same-ID object replacement is data hydration, not a new
+opening. Closing and reopening unmounts and creates a fresh lifetime even when
+all identity values are equal; keys alone do not represent an opening counter.
+Use a local ref activated in layout-effect setup and revoked in cleanup, plus
+synchronous revocation when the user dismisses. StrictMode setup restores the
+ref after its simulated cleanup. Do not mutate ownership during render.
+
+Capture the existing normalized payload and callbacks at Save. Await the real
+create/update unconditionally. Gate only dialog-local success dismissal, catch
+inline error and finally busy release by that form's liveness. This keeps old
+requests authoritative for their original accepted writes without granting them
+ownership of a newer form. A new form has independent busy state. No shared
+revision framework, API changes, cache rewrites or ADR are necessary: the local
+component boundary preserves the complete ownership rule.
+
+The existing watch dialog is the nearest shipped phone surface. Preserve its
+single vertical scroller, dynamic viewport bounds, stacked phone fields/actions
+and desktop paired fields. Entry is the workspace GitLab settings New watch or
+row Edit action on its existing phone card. The focused edit surface
+supports a multi-field task rather than adding a picker drawer. Desktop and
+native phone taps exercise the same domain actions; existing primitives own
+safe-area/touch sizing. No geometry or navigation redesign is included.
+
+Verification uses real parent/settings/provider/domain/API/store integration
+with controlled fetch settlement; only the unrelated Monaco renderer may be
+stubbed in jsdom while its loader exports and ScriptEditor wrapper remain real.
+Keep ordinary owned success/failure controls, old success and rejection,
+create/update and review/issue, same/different reopening, scope replacement,
+unmount/StrictMode, hydration, retry, raw focus/caret and newer busy ownership.
+Production-build desktop and mobile E2E hold only the causal HTTP response
+through a disposable mock-GitLab backend, preserving actual persistence.
+See the [one work order](../../../plans/gitlab-watch-dialog-ownership/task-01-preserve-current-watch.md).
 
 ## Pipeline job summary classification
 

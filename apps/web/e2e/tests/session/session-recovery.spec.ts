@@ -87,16 +87,10 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
 }
 
 // Worst-case wait for the manual-recovery banner after `/crash`. The mock
-// agent's crash is a real subprocess exit whose ACP-level error carries the
-// same "peer disconnected before response" text the routingerr classifier
-// now treats as a retryable transport-lost signature (see
-// docs/decisions/2026-08-08-provider-neutral-agent-error-recovery.md) — every
-// genuine production occurrence of that text also means the local subprocess
-// died, so the classifier deliberately does not special-case a crash out of
-// the retry ladder. `/crash` always re-crashes on relaunch, so recovery
-// exhausts the full Kanban backoff (5+10+20+40+60s = 135s) before the manual
-// recovery banner replaces the retry-countdown card. Give it headroom above
-// that worst case rather than the default 30s.
+// agent's crash is a real subprocess exit, which surfaces as a local
+// peer-disconnect error rather than a remote error response. It therefore
+// takes the terminal recovery path immediately instead of the retained-turn
+// or transient-retry paths. Keep a generous timeout for slow CI shards.
 const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {

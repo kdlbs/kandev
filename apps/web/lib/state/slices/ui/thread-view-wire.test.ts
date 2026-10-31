@@ -101,3 +101,22 @@ describe("thread view wire mapping", () => {
     });
   });
 });
+
+describe("thread view selection order wire mapping", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.15
+  it("keeps a selection sort and the selected task order across a round trip", () => {
+    const draft = fromApiThreadDraft({
+      base_view_id: "view-selected",
+      task_scope: { mode: "selected", task_ids: ["task-c", "task-a", "task-b"] },
+      filters: [],
+      sort: { key: "selection", direction: "desc" },
+      max_columns: 5,
+    });
+    expect(draft.sort).toEqual({ key: "selection", direction: "desc" });
+    expect(draft.taskScope).toEqual({
+      mode: "selected",
+      taskIds: ["task-c", "task-a", "task-b"],
+    });
+    expect(toApiThreadDraft(draft).sort).toEqual({ key: "selection", direction: "desc" });
+  });
+});

@@ -18,6 +18,8 @@ const (
 	mockContinuationWriteScenario                = "write"
 	mockContinuationShellScenario                = "shell"
 	mockContinuationPendingScenario              = "pending"
+	mockContinuationPendingV3Scenario            = "pending-v3"
+	mockContinuationPendingV3HoldScenario        = "pending-v3-hold"
 	mockContinuationUnknownScenario              = "unknown"
 	mockContinuationReadHoldScenario             = "read-hold"
 	mockContinuationReadRestoreTransientScenario = "read-restore-transient"
@@ -42,7 +44,8 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	if strings.HasPrefix(prompt, "/continuation-") {
 		switch scenario {
 		case mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario, mockContinuationShellScenario,
-			mockContinuationPendingScenario, mockContinuationUnknownScenario, mockContinuationReadHoldScenario,
+			mockContinuationPendingScenario, mockContinuationPendingV3Scenario, mockContinuationPendingV3HoldScenario,
+			mockContinuationUnknownScenario, mockContinuationReadHoldScenario,
 			mockContinuationReadRestoreTransientScenario, mockContinuationReadRestoreHardScenario, mockContinuationReadAmbiguousScenario:
 			return a.emitMockInterruption(ctx, sid, scenario)
 		}
@@ -64,7 +67,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 		e.text("Mock continuation acceptance uncertain.\n")
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "continuation acceptance uncertain"}, true
 	}
-	if episode.Scenario == mockContinuationReadHoldScenario {
+	if episode.Scenario == mockContinuationReadHoldScenario || episode.Scenario == mockContinuationPendingV3HoldScenario {
 		e.text(fmt.Sprintf("Mock continuation accepted: original=%d continuation=%d native=%s\n", episode.Original, episode.Continuation, sid))
 		<-ctx.Done()
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil, true
@@ -125,12 +128,12 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 		if scenario == mockContinuationShellScenario {
 			kind = acp.ToolKindExecute
 		}
-		if scenario == mockContinuationPendingScenario {
+		if scenario == mockContinuationPendingScenario || scenario == mockContinuationPendingV3Scenario || scenario == mockContinuationPendingV3HoldScenario {
 			e.startTool("completed-tool", "Completed fixture inspection", acp.ToolKindExecute, map[string]any{"command": "printf fixture"})
 			e.completeTool("completed-tool", "fixture")
 		}
 		e.startTool("interrupted-tool", "Fixture inspection", kind, map[string]any{"path": "fixture.txt"})
-		if scenario != mockContinuationPendingScenario {
+		if scenario != mockContinuationPendingScenario && scenario != mockContinuationPendingV3Scenario && scenario != mockContinuationPendingV3HoldScenario {
 			completedID := acp.ToolCallId("interrupted-tool")
 			if scenario == mockContinuationUnknownScenario {
 				completedID = "unobserved-tool"
@@ -138,5 +141,9 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 			e.completeTool(completedID, "fixture read result")
 		}
 	}
-	return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}, true
+	meta := map[string]any{"continuationInterruption": true}
+	if scenario == mockContinuationPendingV3Scenario || scenario == mockContinuationPendingV3HoldScenario {
+		meta["agentManagedPendingTools"] = true
+	}
+	return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": meta}}, true
 }

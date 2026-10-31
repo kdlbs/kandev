@@ -18,6 +18,8 @@ import {
   type NotificationsState,
 } from "@/components/settings/notifications-settings-actions";
 import { ExternalProvidersSection } from "@/components/settings/notifications-settings-external-providers";
+import { WebhookProvidersSection } from "@/components/settings/notifications-settings-webhook-providers";
+import { webhookHeadersError } from "@/components/settings/notifications-settings-webhook-helpers";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
@@ -48,33 +50,110 @@ function useNotificationPageSaveState(state: NotificationsState, soundIsDirty: b
   const { t } = useTranslation();
   const providerIsDirty = useIsDirty(state);
   const creatingApprise = state.showAppriseForm && state.appriseFormMode === "create";
-  const canSave = !creatingApprise || state.appriseUrls.trim().length > 0;
+  const creatingWebhook = state.showWebhookForm && state.webhookFormMode === "create";
+  const missingAppriseUrl = creatingApprise && state.appriseUrls.trim().length === 0;
+  const missingWebhookUrl = creatingWebhook && state.webhookUrl.trim().length === 0;
+  const createHeadersError = creatingWebhook ? webhookHeadersError(state.webhookHeaders) : null;
+  const editHeadersError = Object.entries(state.webhookHeaderDrafts)
+    .filter(([providerId]) => !state.pendingDeletes.has(providerId))
+    .map(([, headers]) => webhookHeadersError(headers))
+    .find(Boolean);
+  const headersError = createHeadersError ?? editHeadersError ?? null;
+  const canSave = !missingAppriseUrl && !missingWebhookUrl && !headersError;
   const revision = useMemo(
     () =>
       JSON.stringify({
         providers: state.providers,
         appriseEdits: state.appriseEdits,
         appriseNameEdits: state.appriseNameEdits,
+        webhookHeaderDrafts: state.webhookHeaderDrafts,
         pendingDeletes: [...state.pendingDeletes].sort(),
         createDraft: creatingApprise ? { name: state.appriseName, urls: state.appriseUrls } : null,
+        webhookDraft: creatingWebhook
+          ? {
+              name: state.webhookName,
+              url: state.webhookUrl,
+              headers: state.webhookHeaders,
+              secret: state.webhookSecret,
+            }
+          : null,
       }),
     [
       creatingApprise,
+      creatingWebhook,
       state.providers,
       state.appriseEdits,
       state.appriseNameEdits,
+      state.webhookHeaderDrafts,
       state.pendingDeletes,
       state.appriseName,
       state.appriseUrls,
+      state.webhookName,
+      state.webhookUrl,
+      state.webhookHeaders,
+      state.webhookSecret,
     ],
   );
+  let invalidReason: string | undefined;
+  if (missingWebhookUrl) invalidReason = t("settings:webhookUrlRequired");
+  else if (missingAppriseUrl) invalidReason = t("settings:appriseUrlRequired");
+  else if (headersError) invalidReason = t(headersError);
   return {
     providerIsDirty,
     cardIsDirty: providerIsDirty || soundIsDirty,
     canSave,
-    invalidReason: canSave ? undefined : t("settings:appriseUrlRequired"),
+    invalidReason,
     revision,
   };
+}
+
+function WebhookSettingsSection({
+  state,
+  actions,
+}: {
+  state: NotificationsState;
+  actions: ReturnType<typeof useNotificationsActions>;
+}) {
+  return (
+    <WebhookProvidersSection
+      providers={state.providers.filter((provider) => provider.type === "webhook")}
+      baselineProviders={state.baselineProviders}
+      formMode={state.webhookFormMode}
+      activeWebhookId={state.activeWebhookId}
+      name={state.webhookName}
+      url={state.webhookUrl}
+      headers={state.webhookHeaders}
+      headerDrafts={state.webhookHeaderDrafts}
+      secret={state.webhookSecret}
+      showForm={state.showWebhookForm}
+      appriseCreateFormOpen={state.showAppriseForm && state.appriseFormMode === "create"}
+      setName={state.setWebhookName}
+      setUrl={state.setWebhookUrl}
+      setHeaders={state.setWebhookHeaders}
+      setSecret={state.setWebhookSecret}
+      onNameEdit={(providerId, value) => {
+        actions.handleWebhookNameEdit(providerId, value);
+        state.setWebhookName(value);
+      }}
+      onUrlEdit={(providerId, value) => {
+        actions.handleWebhookEdit(providerId, { url: value });
+        state.setWebhookUrl(value);
+      }}
+      onHeadersEdit={(providerId, value) => {
+        actions.handleWebhookEdit(providerId, { headers: value });
+        state.setWebhookHeaders(value);
+      }}
+      onSecretEdit={(providerId, value) => {
+        actions.handleWebhookEdit(providerId, { secret: value });
+        state.setWebhookSecret(value);
+      }}
+      onOpenForm={actions.openWebhookForm}
+      onCloseForm={actions.closeWebhookForm}
+      onCancelForm={actions.cancelWebhookForm}
+      onDeleteProvider={actions.handleDeleteProvider}
+      onTestProvider={actions.handleTestProvider}
+    />
+  );
 }
 
 export function NotificationsSettings() {
@@ -136,6 +215,7 @@ export function NotificationsSettings() {
           appriseName={appriseName}
           appriseUrls={appriseUrls}
           showAppriseForm={showAppriseForm}
+          webhookCreateFormOpen={state.showWebhookForm && state.webhookFormMode === "create"}
           notificationProvidersLoaded={notificationProvidersLoaded}
           notificationProvidersLoading={notificationProvidersLoading}
           appriseRescanPending={appriseRescanPending}
@@ -152,6 +232,7 @@ export function NotificationsSettings() {
           onTestProvider={actions.handleTestProvider}
           onRescanApprise={rescanApprise}
         />
+        <WebhookSettingsSection state={state} actions={actions} />
         <SettingsGroup
           title={t("settings:notificationEvents")}
           description={t("settings:notificationEventsDescription")}

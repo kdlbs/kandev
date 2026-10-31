@@ -62,7 +62,7 @@ The plugin provisions and removes provider compute. Kandev owns agentctl, agent 
 
 Review each provider's retention and expiry before launch. `persistent` means the provider reports no fixed expiry. `bounded` includes a maximum lifetime. `ephemeral` means workspace data ends with the compute environment. `unknown` makes no retention promise. The task environment disclosure reports effective retention, known expiry, current status, and available cleanup actions.
 
-Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
+Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. When the profile sets both a Git name and email, Kandev writes them to the same effective global Git configuration that the agent uses, before the agent starts. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
 
 ## Embedded VS Code availability
 
@@ -448,11 +448,20 @@ Docker profiles can inject resolved environment secrets. For agent file-based au
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
-Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
+Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. A failed resume that attached to an existing container follows the same rule; a failed fresh allocation still rolls back. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
 
 ```bash
 docker ps -a --filter label=kandev.managed=true
 ```
+
+A session that resumes after a failure can be blocked before the agent starts when agentctl cannot open its delivery journal. Kandev keeps the container, the journal, and the recorded execution identity, and reports the failure instead of opening a second writer or removing the lock. Retry after the previous owner has stopped. The reported reason distinguishes the cases:
+
+- **Lock timeout**: another agentctl instance still owns the same session journal. Wait for that session to finish stopping, then retry. Do not delete `delivery.bbolt` or its lock file.
+- **Permission denied**: the journal path or its directory is not readable or writable by the agentctl user. Fix the container's permissions or storage configuration.
+- **Filesystem full or quota exceeded**: free space in Docker-managed storage. Compaction cannot succeed without writable space.
+- **I/O failure or corruption**: inspect Docker storage health. Keep the container if the workspace is still needed; a corrupt journal is not a reason to delete the workspace.
+
+Never remove a journal or force-remove a container as a routine recovery action. Those remove the evidence recovery needs and can discard unpushed work.
 
 </details>
 

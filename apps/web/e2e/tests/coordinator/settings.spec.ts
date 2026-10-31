@@ -135,6 +135,8 @@ test.describe("Coordinators settings tab", () => {
 
       // Select the enabled profile from the same, still-open dropdown.
       await testPage.getByRole("option", { name: /Coordinator E2E Agent$/ }).click();
+      await expect(passthroughOption).toHaveCount(0);
+      await expect(testPage.getByTestId("coordinator-agent-profile-picker")).toBeFocused();
       await expect(submit).toBeDisabled();
 
       await testPage.getByTestId("executor-profile-selector").first().click();

@@ -128,7 +128,11 @@ test.describe("SPA route resilience", () => {
       await route.continue();
     });
 
+    const recoveredChunk = testPage.waitForResponse(
+      (response) => SETTINGS_CHUNK_PATH.test(new URL(response.url()).pathname) && response.ok(),
+    );
     await testPage.goto(SETTINGS_URL);
+    expect(await (await recoveredChunk).finished()).toBeNull();
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Updates");
     expect(chunkRequests).toBe(2);
     expect(documentRequests()).toBe(2);
@@ -148,7 +152,13 @@ test.describe("SPA route resilience", () => {
       await route.abort("failed");
     });
 
+    let failedChunks = 0;
+    const failedAgain = testPage.waitForEvent("requestfailed", {
+      predicate: (request) =>
+        SETTINGS_CHUNK_PATH.test(new URL(request.url()).pathname) && ++failedChunks === 2,
+    });
     await testPage.goto(SETTINGS_URL);
+    await failedAgain;
     const recovery = testPage.getByRole("alert").filter({ hasText: "This page couldn’t load." });
     await expect(recovery).toBeVisible();
     await expect(recovery.getByRole("button", { name: "Reload" })).toBeVisible();

@@ -15,9 +15,11 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
 
     const { agents } = await apiClient.listAgents();
     const agent = getMockAgent(agents);
-    const profile = await apiClient.createAgentProfile(agent.id, "Navigation visibility profile", {
-      model: "mock-fast",
-    });
+    const profile = await apiClient.createAgentProfile(
+      agent.id,
+      `Navigation visibility ${test.info().testId}`,
+      { model: "mock-fast" },
+    );
     // The Settings tree's profile leaf is labelled with the profile name and
     // appends the "Disabled" badge while the profile is disabled — an
     // unanchored regex matches both states.
@@ -77,7 +79,13 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       await settingsTree.getByRole("button", { name: "Expand Mock" }).click();
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
     } finally {
-      await apiClient.deleteAgentProfile(profile.id);
+      try {
+        await apiClient.deleteAgentProfile(profile.id, true);
+      } finally {
+        await testPage.evaluate(() => {
+          window.localStorage.removeItem("kandev:agents:hideDisabledInNav:v1");
+        });
+      }
     }
   });
 });

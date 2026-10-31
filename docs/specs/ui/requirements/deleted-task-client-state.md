@@ -42,6 +42,12 @@ the window has seen since it loaded.
 - **AC-UI-DELETED-TASK-CLIENT-STATE-001.3:** Existing `task.deleted` behavior
   (local storage cleanup, queue status, sidebar and kanban removal,
   notifications, and redirects) shall not change.
+- **AC-UI-DELETED-TASK-CLIENT-STATE-001.4:** Deleted task sessions shall stop
+  scheduled and in-flight client reads without affecting reads for other tasks.
+  Late results shall not restore deleted state or restart those reads.
+- **AC-UI-DELETED-TASK-CLIENT-STATE-001.5:** A Git read for a missing session
+  shall stop automatic retries even when the client missed the deletion event.
+  Transient failures for existing sessions shall remain retryable.
 
 ## Out of scope
 
@@ -52,3 +58,4 @@ the window has seen since it loaded.
 ## Implementation plans
 
 - [Deleted task client state](../../../plans/deleted-task-client-state/plan.md)
+- [Deleted session read cleanup](../../../plans/deleted-session-read-cleanup/plan.md)

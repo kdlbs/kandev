@@ -20,6 +20,9 @@ settings persistence; this pair supplies that narrow contract. The client
 publication boundaries below preserve catalogue choices during a settings save
 and successful Add Workspace creation without changing that persistence contract.
 
+Repository settings also preserve acknowledged progress across multi-request Save
+failures under REQ-WORKSPACES-REPOSITORY-SAVE-001 below.
+
 ## Terms and boundary
 
 An **ordinary update** supplies optional workspace settings through an existing
@@ -171,7 +174,40 @@ retain their backend field-presence and merged settings-Save contracts.
   changes, current selection, entered name, open form, and existing request
   error feedback shall remain available.
 
+### REQ-WORKSPACES-REPOSITORY-SAVE-001: Repository settings acknowledgements
+
+**Intent:** Repository settings Save retains acknowledged progress when another
+request in the same save fails. This covers new and established repositories
+and their custom scripts, using the existing route-local manual-save contract.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-REPOSITORY-SAVE-001.1:** Every acknowledged repository creation
+  or metadata update and script creation, update, or deletion shall advance only
+  its accepted baseline, even when a sibling request fails. Failed operations
+  shall leave their draft changes visible and dirty. Retry shall retain canonical
+  identities and shall not recreate acknowledged resources or repeat clean script operations.
+- **AC-WORKSPACES-REPOSITORY-SAVE-001.2:** Save shall remain pending until every
+  admitted sibling operation settles. Any failure shall remain a rejected save
+  through the shared coordinator, with visible error feedback and usable retry.
+- **AC-WORKSPACES-REPOSITORY-SAVE-001.3:** Edits or removals made during Save shall
+  survive acknowledgement. Successful temporary identities shall become canonical
+  without marking newer values saved. Reset after settlement shall restore the
+  acknowledged baseline, including successful scripts and excluding successful deletions.
+- **AC-WORKSPACES-REPOSITORY-SAVE-001.4:** Desktop and phone shall provide the
+  same retry outcome through the existing settings cards and shared Save surface.
+  A completed retry shall persist exactly the intended repository and scripts
+  after reload. Complete-success and definite-failure paths shall remain usable.
+
+This is acknowledgement reconciliation in the mounted page. It does not promise
+exactly-once creation after an ambiguous transport failure, persist unfinished
+drafts across reload, or change backend API, schema, authorization, or cache ownership.
+
 ## Out of scope
+
+The repository Save refinement above changes only route-local acknowledgement
+reconciliation. The following exclusions continue to apply to workspace catalogue
+and backend updates.
 
 - New fields, transport capabilities, revision tokens, schema changes, settings
   controls, or hierarchy/runtime behavior. Client-store changes beyond the

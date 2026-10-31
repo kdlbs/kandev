@@ -125,6 +125,7 @@ func TestGHClient_FetchRateLimit(t *testing.T) {
 				"search":{"limit":30,"remaining":29,"reset":` + strconv.FormatInt(reset.Unix(), 10) + `}}}`,
 		})
 		tracker := NewRateTracker(nil, nil)
+		tracker.ObserveSecondary(ResourceCore, time.Now().Add(time.Hour), RetrySourceConservativeFallback, "secondary")
 		if err := NewGHClient().WithRateTracker(tracker).FetchRateLimit(context.Background()); err != nil {
 			t.Fatalf("FetchRateLimit: %v", err)
 		}
@@ -150,6 +151,9 @@ func TestGHClient_FetchRateLimit(t *testing.T) {
 			if !snap.ResetAt.Equal(reset) {
 				t.Errorf("%s reset = %v, want %v", want.resource, snap.ResetAt, reset)
 			}
+		}
+		if secondary := tracker.Secondary(ResourceCore); !secondary.Active {
+			t.Fatalf("rate-limit probe success cleared active secondary throttle: %+v", secondary)
 		}
 	})
 	// An all-zero bucket means gh reported nothing for that resource; recording
@@ -302,16 +306,20 @@ func TestGHClient_GetPRStatus(t *testing.T) {
 }
 
 func TestGHClient_GetPR_NormalizesCLIRateLimitStderr(t *testing.T) {
-	for _, stderr := range []string{
-		"GraphQL: API rate limit already exceeded for user",
-		"gh: HTTP 429: Too Many Requests",
+	for _, tc := range []struct {
+		stderr string
+		status int
+	}{
+		{"GraphQL: API rate limit already exceeded for user", http.StatusForbidden},
+		{"gh: HTTP 429: Too Many Requests", http.StatusTooManyRequests},
 	} {
-		t.Run(stderr, func(t *testing.T) {
-			newFakeGH(t, ghResponse{Prefix: "pr view", Stderr: stderr, Exit: 1})
+		t.Run(tc.stderr, func(t *testing.T) {
+			newFakeGH(t, ghResponse{Prefix: "pr view", Stderr: tc.stderr, Exit: 1})
 			_, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 42)
 			var apiErr *GitHubAPIError
-			if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
-				t.Fatalf("err = %v, want a typed 429 rate-limit error", err)
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tc.status ||
+				FailureKindOf(err) != FailureSecondaryRateLimit {
+				t.Fatalf("err = %v, want a typed secondary rate-limit error with status %d", err, tc.status)
 			}
 		})
 	}
@@ -494,6 +502,29 @@ func TestGHClient_GetRepoFileContent(t *testing.T) {
 }
 
 func TestGHClient_GetRepoFileContent_Errors(t *testing.T) {
+	t.Run("preserves an exhausted primary rate limit", func(t *testing.T) {
+		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "HTTP 403: API rate limit exceeded", Exit: 1})
+		resetAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+		tracker := NewRateTracker(nil, nil)
+		tracker.Record(RateSnapshot{
+			Resource: ResourceCore, Remaining: 0, RemainingObserved: true, ResetAt: resetAt,
+		})
+
+		_, err := NewGHClient().WithRateTracker(tracker).GetRepoFileContent(
+			context.Background(), "acme", "widget", "gone.txt", "",
+		)
+		var apiErr *GitHubAPIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("err = %v, want a typed API error", err)
+		}
+		if apiErr.FailureKind != FailurePrimaryRateLimit || apiErr.Resource != ResourceCore {
+			t.Fatalf("classification = %q/%q, want %q/%q", apiErr.FailureKind, apiErr.Resource, FailurePrimaryRateLimit, ResourceCore)
+		}
+		if !apiErr.RetryAt.Equal(resetAt) || apiErr.RetrySource != RetrySourcePrimaryReset {
+			t.Fatalf("retry = %v/%q, want %v/%q", apiErr.RetryAt, apiErr.RetrySource, resetAt, RetrySourcePrimaryReset)
+		}
+	})
+
 	t.Run("404 becomes a typed error", func(t *testing.T) {
 		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "gh: HTTP 404: Not Found", Exit: 1})
 		_, err := NewGHClient().GetRepoFileContent(context.Background(), "acme", "widget", "gone.txt", "")

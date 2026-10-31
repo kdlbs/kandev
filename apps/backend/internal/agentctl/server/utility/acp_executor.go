@@ -25,6 +25,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/npmresolution"
 	"go.uber.org/zap"
 )
@@ -82,20 +83,12 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		zap.String("agent_id", req.AgentID),
 		zap.String("model", model))
 
-	cmdArgs := args[1:]
-	if len(cfg.CommandPrefix) > 0 {
-		args = append(append([]string{}, cfg.CommandPrefix...), args...)
-		resolvedCmd = resolveACPCommandPrefix(args[0])
-		if resolvedCmd == "" {
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
-		}
-		cmdArgs = args[1:]
+	env := sanitizeEnvForAgent(cfg)
+	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	if prepareErr != nil {
+		return &PromptResponse{Success: false, Error: prepareErr.Error()}, nil
 	}
-	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
-	env := sanitizeEnvForAgent(req.InferenceConfig)
-	if err := managedruntime.PrepareNPMProjectPrefix(cmdArgs); err != nil {
-		return &PromptResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
-	}
+	resolvedCmd, cmdArgs := args[0], args[1:]
 	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
 	// sees is an allow-list literal, a validated command prefix, or the
 	// operator-registered command resolveSpawnCommand documents.
@@ -121,7 +114,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 
 	if err := cmd.Start(); err != nil {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
+		return &PromptResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
 	if err != nil {
@@ -139,13 +132,17 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
 	if err != nil {
-		e.logger.Error("ACP inference failed",
-			zap.String("agent_id", req.AgentID),
-			zap.Error(err),
-			zap.String("stderr", stderr.tail()))
+		failure := withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail())
+		if !cfg.LaunchWrapper.IsZero() {
+			failure = "wrapped utility execution failed"
+			e.logger.Error(failure, zap.String("agent_id", req.AgentID))
+		} else {
+			e.logger.Error("ACP inference failed", zap.String("agent_id", req.AgentID),
+				zap.Error(err), zap.String("stderr", stderr.tail()))
+		}
 		return &PromptResponse{
 			Success:    false,
-			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
+			Error:      failure,
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
@@ -487,30 +484,18 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	isOpenCode := isOpenCodeACPCommand(cfg.Command)
 	var refreshedOpenCodeModels []ProbeModel
 	if isOpenCode && req.Refresh {
-		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext, cfg)
+		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
 	}
 
 	// Probes intentionally omit the model flag so session/new returns the agent's
 	// default model and the complete availableModels list.
 	args := buildACPCommand(cfg, "")
-	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
-		return &ProbeResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+	env := sanitizeEnvForAgent(cfg)
+	args, prepareErr := prepareACPLaunch(cfg, resolvedCmd, args, env)
+	if prepareErr != nil {
+		return &ProbeResponse{Success: false, Error: prepareErr.Error(), FailureCode: ProbeFailureUnsupportedContext}, nil
 	}
-	command := resolvedCmd
-	commandArgs := args[1:]
-	if len(cfg.CommandPrefix) > 0 {
-		wrappedArgs := append(append([]string(nil), cfg.CommandPrefix...), args...)
-		command = resolveACPCommandPrefix(wrappedArgs[0])
-		if command == "" {
-			return &ProbeResponse{
-				Success:     false,
-				Error:       "profile command prefix is unsupported",
-				FailureCode: ProbeFailureUnsupportedContext,
-			}, nil
-		}
-		commandArgs = wrappedArgs[1:]
-	}
-	commandArgs = append(commandArgs, cfg.CLIFlags...)
+	command, commandArgs := args[0], args[1:]
 
 	e.logger.Info("starting ACP probe",
 		zap.String("agent_id", req.AgentID),
@@ -522,7 +507,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	//nolint:gosec // resolvedCmd is an allow-list literal or an operator-registered command
 	cmd := exec.CommandContext(ctx, command, commandArgs...)
 	cmd.Dir = workDir
-	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
 
 	// Keep the child's stderr. A probe that dies before answering otherwise
@@ -542,7 +527,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
 	if err := cmd.Start(); err != nil {
-		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
+		return &ProbeResponse{Success: false, Error: utilityStartError(cfg, err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
 	if err != nil {
@@ -566,7 +551,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
 		failureCode := managedFailureCode
 		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
-		if req.ProfileContext {
+		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 		}
 		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
@@ -579,15 +564,19 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	if len(resp.Models) == 0 && isOpenCode {
 		if len(refreshedOpenCodeModels) == 0 {
-			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext, cfg)
+			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
 		}
 		resp.Models = refreshedOpenCodeModels
+	}
+	observationPrefix := cfg.CommandPrefix
+	if !cfg.LaunchWrapper.IsZero() {
+		observationPrefix = cfg.LaunchWrapper.Argv
 	}
 	resp.RuntimeInfo = e.collectRuntimeObservation(
 		ctx,
 		req.RuntimeObservation,
 		cfg.Command,
-		cfg.CommandPrefix,
+		observationPrefix,
 		args,
 		cmd.Env,
 		cmd.Path,
@@ -675,28 +664,19 @@ func probeOpenCodeModels(
 	if refresh {
 		args = append(args, "--refresh")
 	}
-	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
-	command := resolvedCmd
-	commandArgs := args
+	cfg := &InferenceConfigDTO{WorkDir: workDir}
 	if len(configs) > 0 && configs[0] != nil {
-		cfg := configs[0]
-		if len(cfg.CommandPrefix) > 0 {
-			wrappedArgs := append(append([]string(nil), cfg.CommandPrefix...), append([]string{resolvedCmd}, args...)...)
-			command = resolveACPCommandPrefix(wrappedArgs[0])
-			if command == "" {
-				return nil, errors.New("profile command prefix is unsupported")
-			}
-			commandArgs = wrappedArgs[1:]
-		}
-		commandArgs = append(append([]string(nil), commandArgs...), cfg.CLIFlags...)
+		cfg = configs[0]
 	}
-	cmd := exec.CommandContext(ctx, command, commandArgs...)
+	env := sanitizeEnvForAgent(cfg)
+	argv, err := prepareACPLaunch(cfg, resolvedCmd, append([]string{resolvedCmd}, args...), env)
+	if err != nil {
+		return nil, err
+	}
+	//nolint:gosec // prepareACPLaunch admits the child and validates the authorized wrapper.
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workDir
-	if len(configs) > 0 && configs[0] != nil {
-		cmd.Env = sanitizeEnvForAgent(configs[0])
-	} else {
-		cmd.Env = environWithNoColor(os.Environ())
-	}
+	cmd.Env = environWithNoColor(env)
 	out, err := runACPCommandWithOutput(ctx, cmd, zap.NewNop())
 	if err != nil {
 		return nil, err
@@ -1540,7 +1520,7 @@ func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
 			env = RemoveEnvEntry(env, key)
 		}
 	}
-	return env
+	return launchwrapper.StripControlCredentials(env)
 }
 
 // RemoveEnvEntry removes all entries for the given key from the env slice.

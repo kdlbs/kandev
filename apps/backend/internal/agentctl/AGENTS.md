@@ -5,7 +5,7 @@ Scoped guidance for `apps/backend/internal/agentctl/`. Higher-level backend arch
 ## API Groups
 
 agentctl exposes these route groups (see `server/api/`):
-- `/health`, `/info`, `/status` - Health and status
+- `/health`, `/info`, `/status`, `/runtime/storage` - Health, status, and the read-only executor filesystem advisory
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
@@ -91,6 +91,20 @@ JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `in
 The adapter prefers advertised `session/resume` for any agent to restore the saved conversation without replaying its history. Both resume and load responses preserve typed configuration and legacy model state. If an agent advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Other errors preserve the saved identity. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
 
 OpenCode v1 and v2 share the `opencode-acp` identity and can access the same session database. For OpenCode only, a failed restore never falls back to `session/new`, including a recognized missing-session response. Preserve the native session ID and return the load error to the existing Kandev session.
+
+### Native prompt suggestions (Claude)
+
+`supports_prompt_suggestions` is effective enablement; the optional
+`native_prompt_suggestions_supported` is support alone (nil = unknown) and must
+never enable the composer. `dialect_claude_prompt_suggestions.go` accepts
+literal `_meta.claudeCode.promptSuggestions: true`, or, when absent, only the
+exact official bridge `@agentclientprotocol/claude-agent-acp` `0.81.2` with
+`promptQueueing: true`; false or malformed denies support, and names,
+namespaces, queueing, and models never qualify. Supported sessions configure
+new/load/resume with `claudeCode.options.promptSuggestions` plus the requested
+raw `prompt_suggestion` filter; `adapter_prompt_suggestion.go` owns window and
+origin handling. Failed or same-ID transitions keep the prior window ambiguous.
+Design: `docs/specs/agents/system-design/native-prompt-suggestion-capability.md`.
 
 ### ACP permission identity and injected MCP approval
 

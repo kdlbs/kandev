@@ -38,8 +38,6 @@ export type MobileTaskListProps = {
   onArchiveTask: (taskId: string, opts?: { cascade?: boolean }) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onDetachTask: (taskId: string) => Promise<void> | void;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;

@@ -663,3 +663,98 @@ func TestWorkspaceSourceMaterializer_FolderGitProtectionAndRollback(t *testing.T
 		})
 	}
 }
+
+type materializerRollbackErrorStore struct {
+	worktree.Store
+	rows       []*worktree.Worktree
+	listErr    error
+	cleanupErr error
+	cleanupIDs []string
+}
+
+func (s *materializerRollbackErrorStore) GetWorktreesByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return s.rows, s.listErr
+}
+
+func (s *materializerRollbackErrorStore) GetWorktreeByID(_ context.Context, id string) (*worktree.Worktree, error) {
+	return &worktree.Worktree{ID: id}, nil
+}
+
+func (s *materializerRollbackErrorStore) CountActiveWorktreeReferences(_ context.Context, id string, _ []string) (int, error) {
+	s.cleanupIDs = append(s.cleanupIDs, id)
+	return 0, s.cleanupErr
+}
+
+func materializerRollbackErrorInputs(t *testing.T, store *materializerRollbackErrorStore, known map[string]bool, newWorktrees ...*worktree.Worktree) (*workspaceSourceMaterializer, *workspaceSourceMaterializationState, *hostWorkspaceMaterialization) {
+	t.Helper()
+	mgr, err := worktree.NewManager(worktree.Config{Enabled: true}, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	const root = "workspace-root-already-exists"
+	const layout = "current_root"
+	return &workspaceSourceMaterializer{worktreeMgr: mgr, logger: newTestLogger()},
+		&workspaceSourceMaterializationState{environment: &models.TaskEnvironment{WorkspacePath: root, WorkspaceLayout: layout}},
+		&hostWorkspaceMaterialization{
+			root: root, linkRoot: root, oldPath: root, oldLayout: layout,
+			rootExisted: true, linkRootExisted: true, knownWorktree: known,
+			newWorktrees: newWorktrees,
+		}
+}
+
+func materializerRollbackErrorWorktree(id string) *worktree.Worktree {
+	return &worktree.Worktree{
+		ID: id, TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1",
+		RepositoryID: "repo-" + id, RepositoryPath: "repository-path-" + id,
+		Path: "worktree-path-" + id, Branch: "feature/" + id, BranchSlug: id,
+		Status: worktree.StatusActive,
+	}
+}
+
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.4 AC-TASKS-ATTACH-WORKSPACE-SOURCES-003.7
+func TestRollbackHostWorkspaceMaterializationJoinsCleanupErrorAndDeduplicates(t *testing.T) {
+	cleanupErr := errors.New("injected manager cleanup failure")
+	newWT, knownWT := materializerRollbackErrorWorktree("new"), materializerRollbackErrorWorktree("known")
+	store := &materializerRollbackErrorStore{
+		rows: []*worktree.Worktree{newWT, newWT, knownWT}, cleanupErr: cleanupErr,
+	}
+	m, state, materialization := materializerRollbackErrorInputs(t, store, map[string]bool{"known": true}, newWT, knownWT)
+
+	err := m.rollbackHostWorkspaceMaterialization(context.Background(), "task-1", state, materialization, nil, nil, nil)
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("rollback error = %v, want manager cleanup error", err)
+	}
+	if len(store.cleanupIDs) != 1 || store.cleanupIDs[0] != "new" {
+		t.Fatalf("cleanup IDs = %v, want exactly [new] (known IDs preserved and duplicate removed)", store.cleanupIDs)
+	}
+}
+
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-003.6 AC-TASKS-ATTACH-WORKSPACE-SOURCES-003.7
+func TestRollbackHostWorkspaceMaterializationJoinsListErrorAndCleansAdditional(t *testing.T) {
+	listErr := errors.New("injected manager list failure")
+	cleanupErr := errors.New("injected manager cleanup failure")
+	newWT, knownWT := materializerRollbackErrorWorktree("new"), materializerRollbackErrorWorktree("known")
+	store := &materializerRollbackErrorStore{listErr: listErr, cleanupErr: cleanupErr}
+	m, state, materialization := materializerRollbackErrorInputs(t, store, map[string]bool{"known": true}, knownWT, newWT, newWT)
+
+	err := m.rollbackHostWorkspaceMaterialization(context.Background(), "task-1", state, materialization, nil, nil, nil)
+	if !errors.Is(err, listErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("rollback error = %v, want both list and cleanup errors", err)
+	}
+	if len(store.cleanupIDs) != 1 || store.cleanupIDs[0] != "new" {
+		t.Fatalf("cleanup IDs = %v, want additional [new] despite list failure, without known or duplicate worktrees", store.cleanupIDs)
+	}
+}
+
+func TestRollbackHostWorkspaceMaterializationSkipsKnownWorktrees(t *testing.T) {
+	knownWT := materializerRollbackErrorWorktree("known")
+	store := &materializerRollbackErrorStore{rows: []*worktree.Worktree{knownWT}}
+	m, state, materialization := materializerRollbackErrorInputs(t, store, map[string]bool{"known": true}, knownWT)
+
+	if err := m.rollbackHostWorkspaceMaterialization(context.Background(), "task-1", state, materialization, nil, nil, nil); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if len(store.cleanupIDs) != 0 {
+		t.Fatalf("cleanup IDs = %v, want no cleanup for pre-existing worktrees", store.cleanupIDs)
+	}
+}

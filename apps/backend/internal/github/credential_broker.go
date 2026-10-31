@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -248,12 +249,12 @@ func (*gitHubCredentialProvider) Supports(providerID string) bool {
 }
 
 func (p *gitHubCredentialProvider) Binding(ctx context.Context, scope gitcredentials.Scope) (string, error) {
-	if !strings.EqualFold(scope.Host, defaultGitHubHost) {
-		return "", fmt.Errorf("%w: unsupported host", ErrCredentialScopeDenied)
-	}
 	connection, appGeneration, err := p.issueConnection(ctx, scope.WorkspaceID)
 	if err != nil {
 		return "", err
+	}
+	if !githubCredentialHostMatches(scope.Host, connection.GitHubHost) {
+		return "", fmt.Errorf("%w: host does not match the active workspace connection", ErrCredentialScopeDenied)
 	}
 	if rawBinding := strings.TrimSpace(scope.CredentialBinding); rawBinding != "" {
 		var binding taskmodels.ContributionDestinationCredentialBinding
@@ -318,6 +319,9 @@ func (p *gitHubCredentialProvider) Resolve(ctx context.Context, scope gitcredent
 	if resolved == nil || strings.TrimSpace(resolved.credential) == "" {
 		return gitcredentials.Credential{}, ErrCredentialLeaseRevoked
 	}
+	if !githubCredentialHostMatches(scope.Host, resolved.GitHubHost) {
+		return gitcredentials.Credential{}, fmt.Errorf("%w: resolved credential host does not match the lease", ErrCredentialScopeDenied)
+	}
 	if resolved.Principal.Kind == AuthPrincipalApp && !resolved.Capabilities[CapabilityGitRead] {
 		return gitcredentials.Credential{}, fmt.Errorf("%w: %s", ErrGitHubCapabilityDenied, CapabilityGitRead)
 	}
@@ -354,6 +358,7 @@ func (p *gitHubCredentialProvider) issueConnection(ctx context.Context, workspac
 }
 
 type githubCredentialBinding struct {
+	GitHubHost              string `json:"github_host"`
 	CredentialGeneration    int64  `json:"credential_generation"`
 	AppRegistrationID       string `json:"app_registration_id"`
 	AppCredentialGeneration int64  `json:"app_credential_generation"`
@@ -364,6 +369,7 @@ func githubCredentialBindingFor(connection *WorkspaceConnection, appGeneration i
 		return "", ErrGitHubNotConfigured
 	}
 	encoded, err := json.Marshal(githubCredentialBinding{
+		GitHubHost:           connection.GitHubHost,
 		CredentialGeneration: connection.CredentialGeneration, AppRegistrationID: connection.AppRegistrationID,
 		AppCredentialGeneration: appGeneration,
 	})
@@ -417,4 +423,16 @@ func destinationBindingIdentityMatchesConnection(
 		return connection.InstallationID != nil && binding.InstallationID == *connection.InstallationID
 	}
 	return binding.Login == "" || strings.EqualFold(binding.Login, connection.Login)
+}
+
+func githubCredentialHostMatches(scopeHost, connectionHost string) bool {
+	if connectionHost == "" {
+		connectionHost = defaultGitHubHost
+	}
+	scope, err := githubhost.Parse(scopeHost)
+	if err != nil {
+		return false
+	}
+	connection, err := githubhost.Parse(connectionHost)
+	return err == nil && scope.String() == connection.String()
 }

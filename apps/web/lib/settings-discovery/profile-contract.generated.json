@@ -337,6 +337,22 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.copilot_selected_plugins",
+          "field_path": "copilot_selected_plugins",
+          "label": "copilot_selected_plugins",
+          "description": "Stable Copilot plugin identities loaded natively by new local/worktree processes. Omitted updates preserve the committed selection; an explicit empty list clears it.",
+          "json_type": "array",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "replacement": true,
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.dynamic",
           "field_path": "dynamic",
           "label": "dynamic",
@@ -433,6 +449,7 @@
       "cli_passthrough",
       "command_prefix",
       "config_options",
+      "copilot_selected_plugins",
       "cursor_mcp_auth_enabled",
       "cursor_plugins_mcp_enabled",
       "dynamic",
@@ -485,6 +502,7 @@
       "message_time_display",
       "preferred_shell",
       "prevent_auto_start_agent_on_open",
+      "prompt_suggestions",
       "quick_chat_tab_order_by_workspace",
       "release_notes_last_seen_version",
       "repository_ids",

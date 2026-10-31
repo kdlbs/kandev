@@ -1,0 +1,11 @@
+{
+  "node": "24.19.0",
+  "npm": "11.21.0",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "package.json",
+    "sdk-release.json",
+    "src/index.ts"
+  ]
+}

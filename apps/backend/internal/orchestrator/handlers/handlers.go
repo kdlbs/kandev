@@ -149,6 +149,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if response, responseErr := materializedRouteProfileChangeResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
 			return response, responseErr
 		}

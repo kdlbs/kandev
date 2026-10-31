@@ -32,7 +32,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // Resource names gating the Host data API's read RPCs, per ADR 0043: each

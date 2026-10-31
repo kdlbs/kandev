@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI and automated reviews on a PR, fix valid failures and comments, disposition every review thread, verify, and push in the primary conversation.
+description: Wait for CI and automated reviews on a PR, handle CI approval according to repository permissions, fix valid failures and comments, disposition every review thread, verify, and push in the primary conversation.
 ---
 
 # PR Fixup
@@ -28,7 +28,7 @@ fallback instead.
 
 Create a visible checklist:
 
-1. Gather PR state
+1. Gather PR state and handle CI authorization
 2. Resolve an authorized PR merge conflict
 3. Fix failing CI checks
 4. Triage every review thread
@@ -76,6 +76,23 @@ Keep the helper's exit code unchanged and report any separately verified base dr
 
 For related or stacked PRs, use the semantic-conflict procedure in the same
 reference. Reconcile changed contracts and stable IDs before delivery.
+
+After every push, immediately refresh `approval_required_runs` for the current
+head; refresh again before waiting. For external-contributor PRs, GitHub may
+hold Actions at `action_required`. A fixup request authorizes approval of listed
+current-head runs; do not call `scripts/pr-await` or end the turn while an
+approvable run remains unapproved.
+
+Check the active GitHub credentials' base-repository permission with
+`gh repo view <base-owner>/<base-repo> --json viewerPermission`. If they grant
+write access, inspect the PR changes, including workflows, then approve each
+listed run with `gh api --method POST repos/<base-owner>/<base-repo>/actions/runs/<run-id>/approve`.
+Poll each run until its current-head workflow is queued, running, or terminal
+without `action_required`, then use `scripts/pr-await`; an approval response
+alone does not confirm CI started. If the credentials cannot approve, address
+review comments, run local checks, and push permitted fixes, then report that
+CI awaits maintainer approval. If access is unknown or approval fails, report
+the blocker without calling CI clean. A read-only poller cannot approve runs.
 
 For pending checks, load [waiting.md](references/waiting.md).
 Use `scripts/pr-await` and its final exit code.
@@ -165,6 +182,12 @@ fetch the exact job log and inspect the workflow step before changing docs or
 the validator. Reproduce the evaluator against the exact PR file set, then
 retry only the failed publisher job once; a successful retry without source
 changes is transient evidence, not proof that the original run was healthy.
+
+When reproducing `validateCoverage` locally, include the content of every
+referenced plan, work order, requirements, and system-design document in
+`fileContents`, including unchanged documents. The evaluator resolves
+requirement IDs from that map, so changed-path-only input can create false
+missing-definition errors.
 If duplicate publisher statuses contain only GitHub API 404/429 or rate-limit
 transport errors, collapse them to the leaf job, keep product/docs unchanged,
 restart `scripts/pr-await`, and verify the rerun and aggregate at the same head.
@@ -183,11 +206,13 @@ retry time is exposed, follow the bounded recovery in
 '{run_attempt,status,conclusion,head_sha}'` and classify only the current
 attempt after its parent workflow is terminal.
 
-For unfamiliar, infrastructure, or E2E failures, load
-`references/ci-troubleshooting.md` and, for transport or queue evidence,
+For unfamiliar or infrastructure failures, load
+`references/ci-troubleshooting.md`. For E2E failures, also load
+`references/e2e-failure-triage.md`. For transport or queue evidence, load
 `references/transport-troubleshooting.md` before changing code.
-Also load it for unexpected zero-duration or no-op manual-review runs: event
-and workflow provenance can explain them without a product-code change.
+Load CI troubleshooting for unexpected zero-duration or no-op manual-review
+runs; event and workflow provenance can explain them without a product-code
+change.
 
 An explicit request to run `pr fixup` owns every failed required check on the
 current head. Never stop by calling a failure "unrelated" only because its
@@ -295,8 +320,11 @@ the legal minimum width. Verify the actual hit target (for example,
 Commit through `/commit`, then rerun only the unit, integration, or E2E command
 affected by the remediation. Push when that targeted check passes for the exact
 current `HEAD`. For a cross-repository PR, push the exact current `HEAD` to the
-summary's authoritative head repository and ref only when
-`pr.maintainer_can_modify` is true. Re-fetch the PR afterward and require its
+summary's authoritative head repository and ref.
+The authenticated head-repository owner can push their own fork directly.
+For maintainer edits to another owner's fork, require
+`pr.maintainer_can_modify=true` and push permission.
+Re-fetch the PR afterward and require its
 `pr.head_ref_oid` to equal local `HEAD`; an upstream remote comparison is not
 sufficient. Run broad `/verify` only if the user explicitly requests it or the
 PR/CI finding requires it.
@@ -343,8 +371,9 @@ skill/reference file, run the shared harness validation in
 
 After every push, re-fetch current-head state and run
 `scripts/pr-resolve list <PR>` (and `show` for any thread you may answer), then
-`scripts/pr-state --summary <PR>` again for the new head. For explicit
-consolidation, verify the target head before commenting/closing the superseded
+`scripts/pr-state --summary <PR>` again for the new head.
+Recheck CI approval for the new head before waiting.
+For explicit consolidation, verify the target head before commenting/closing the superseded
 PR; preserve its branch unless deletion is requested. Automated reviewers may
 resolve or replace threads; do not reply to or resolve a thread that fresh state
 reports as resolved unless an authorized later code/policy change invalidates
@@ -464,4 +493,4 @@ For "monitor until merge", poll queue/PR state with bounded cadence; require
 - Do not silently dismiss an invalid finding; every invalid thread needs a
   concrete pushback disposition, and an authorized fixup or complete cleanup
   must post that explanation before resolving it.
-- Do not proceed with an unverified PR when mandatory verification is blocked.
+- Do not merge or declare the PR clean while mandatory verification is blocked.

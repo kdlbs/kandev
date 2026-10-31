@@ -36,3 +36,12 @@ export type PermissionActionType =
  *   - reject_always: rejects and remembers the decision
  */
 export type PermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+/**
+ * Controls whether a permission request is presented as user input.
+ *
+ * Mirrors the backend `models.PermissionPresentation` values. This is
+ * presentation data only: live agent requests remain the resolution authority.
+ * An absent or unknown persisted value retains legacy interactive behavior.
+ */
+export type PermissionPresentation = "automatic" | "interactive" | "unavailable";

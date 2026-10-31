@@ -2,7 +2,7 @@
 
 import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/types";
 import { useTranslation } from "react-i18next";
-import { getMcpToolCounts, mcpStatusLabelKey } from "./mcp-explorer-view-model";
+import { getMcpToolCounts, mcpStatusPresentation } from "./mcp-explorer-view-model";
 import { McpStatusDot } from "./mcp-status-presentation";
 
 function formatObservedAt(value?: string) {
@@ -34,13 +34,18 @@ export function McpServerSummary({ server }: { server: MCPAttachmentServer }) {
         <McpStatusDot status={server.status} className="h-2.5 w-2.5" />
         <h3 className="min-w-0 break-words text-[13px] font-semibold">{server.name}</h3>
         <span className="text-[13px] text-muted-foreground">
-          {t(mcpStatusLabelKey(server.status))}
+          {t(mcpStatusPresentation(server).labelKey)}
         </span>
         <span className="ml-auto text-[13px] text-muted-foreground">
           {t("task:mcpToolCount", { count: counts.total })}
         </span>
       </div>
-      {server.summary && <p className="text-[13px] text-muted-foreground">{server.summary}</p>}
+      <p className="break-words text-muted-foreground">
+        {t(mcpStatusPresentation(server).explanationKey)}
+      </p>
+      {server.summary && (!server.reason_code || server.status === "failed") && (
+        <p className="text-[13px] text-muted-foreground">{server.summary}</p>
+      )}
       <details className="text-[13px]">
         <summary className="min-h-11 cursor-pointer content-center text-muted-foreground">
           {t("task:mcpConnectionDetails")}

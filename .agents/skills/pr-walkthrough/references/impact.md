@@ -58,7 +58,7 @@ Describe the experience, not component names or CSS internals.
 
 Inspect public exports and their consumers, not only files with "plugin" in the name.
 Relevant boundaries include `apps/web/lib/plugins/types.ts`, `host-api.ts`, and the plugin API guide.
-Backend boundaries include `apps/backend/pkg/pluginsdk`, the plugin proto, and manifest/package validation.
+Backend boundaries include `pluginsdk`, the plugin proto, and manifest/package validation.
 An internal host refactor without a public contract change is `none`.
 Additions can break exhaustive consumers or version negotiation. Assess the actual contract.
 

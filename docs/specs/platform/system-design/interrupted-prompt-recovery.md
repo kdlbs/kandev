@@ -85,6 +85,14 @@ after matching every unresolved SQL row to its peer record by ID, session, incar
 generation, and payload hash. Missing or conflicting evidence prevents every retirement write.
 It then re-reads both stores and requires retained retirement for each unresolved SQL row
 before clearing the database block. Already-retired matching records make this idempotent.
+If background recovery resolves the same block while explicit Resume gathers proof,
+SQL verification revalidates the complete proof under the delivery lock. It accepts
+the completed resolution only for the same session, incarnation, generation, and
+authorized `resume` action, with no remaining open session recovery block. It does
+not update recovery metadata or timestamps again. Stale proof, a different action,
+or a new incident remains blocked.
+The resolver's change flag remains false for repeated resolution. Explicit Resume
+uses the separate verification result to report completed recovery as success.
 The eligible journal records belong to the current incarnation at or before the current generation.
 Historical blocks may predate recovery-notice metadata. After the same authenticated retirement
 check, SQL resolution accepts that case only when persisted ACP native identity matches the
@@ -117,8 +125,10 @@ The retry loop owned by `GetNativeResumeDeliveryEvidence` must match
 bounded projection wait. Never classify errors by message text.
 
 `GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
-proof. Retry only verified projection lag after authentication, cursor coverage,
-submission retirement, and identity validation. Capture session, execution,
+proof. Retry only verified projection lag or monotonic same-owner stream progress
+after authentication, cursor coverage, submission retirement, and identity
+validation. Either result starts the bounded wait, including on the first proof
+attempt. Capture session, execution,
 incarnation, stream, native session, and harness generation from that proof
 attempt. Use a 10-second maximum and 200 ms polling, shortened by caller
 cancellation/deadline. Do not detach this wait from the recovery request.

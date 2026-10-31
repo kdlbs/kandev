@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -61,7 +63,7 @@ type Repository interface {
 	ListActivityEntriesByAction(ctx context.Context, workspaceID, action string, limit int) ([]*models.ActivityEntry, error)
 	ListActivityEntriesByTarget(ctx context.Context, workspaceID, targetID string, limit int) ([]*models.ActivityEntry, error)
 	ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error)
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
 	SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*sqlite.TaskSearchResult, error)
 	ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
@@ -72,13 +74,11 @@ type Repository interface {
 	ListTaskComments(ctx context.Context, taskID string) ([]*models.TaskComment, error)
 	CreateTaskComment(ctx context.Context, comment *models.TaskComment) error
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
-	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
 	// UpdateTaskAssignee returns the task's assignment_generation after the
 	// bump, read back inside the same transaction that wrote the runner
 	// seat (see the sqlite implementation's doc comment).
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
-	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -443,6 +443,7 @@ type DashboardService struct {
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	taskStateWriter       shared.TaskStateWriter          // task repository owns transactional state changes and completion guards
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the
@@ -575,7 +576,7 @@ func (s *DashboardService) appendDeniedCommentReadEvent(
 	if s.runEvents == nil || runID == "" {
 		return
 	}
-	s.runEvents.AppendRunEvent(ctx, runID, string(models.RunEventTypeRuntimeDenied), string(models.RunEventLevelWarn), map[string]interface{}{
+	s.runEvents.AppendRunEvent(ctx, runID, string(runsmodels.RunEventTypeRuntimeDenied), string(runsmodels.RunEventLevelWarn), map[string]interface{}{
 		"action":      "read_comments",
 		"target_type": "task",
 		"target_id":   targetTaskID,
@@ -654,6 +655,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskStateWriter wires the task repository that owns transactional state
+// changes and completion guards.
+func (s *DashboardService) SetTaskStateWriter(w shared.TaskStateWriter) {
+	s.taskStateWriter = w
 }
 
 // SetTaskLifecyclePublisher wires the canonical task.updated publisher used
@@ -822,7 +829,7 @@ func (s *DashboardService) ListActivityForTarget(ctx context.Context, wsID, targ
 }
 
 // ListRuns returns run requests for a workspace.
-func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 

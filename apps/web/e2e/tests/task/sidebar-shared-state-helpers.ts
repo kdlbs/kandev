@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { StoreApi } from "zustand";
 import type { AppState } from "../../../lib/state/store";
+import { waitForCascadeArchiveCleanup } from "../../helpers/session-resume-recovery";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -13,15 +14,17 @@ async function seedSharedViews(api: ApiClient, seed: SeedData) {
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
     });
-    const { session_id } = await api.seedTaskSession(task.id, {
-      state: "COMPLETED",
-      agentProfileId: seed.agentProfileId,
-      completedAt: new Date().toISOString(),
-    });
-    await api.seedSessionMessage(session_id, {
-      type: "message",
-      content: `Conversation for ${title}`,
-    });
+    if (title === "Shared sidebar anchor") {
+      const { session_id } = await api.seedTaskSession(task.id, {
+        state: "COMPLETED",
+        agentProfileId: seed.agentProfileId,
+        completedAt: new Date().toISOString(),
+      });
+      await api.seedSessionMessage(session_id, {
+        type: "message",
+        content: `Conversation for ${title}`,
+      });
+    }
     tasks.push(task);
   }
   await api.saveUserSettings({ enable_preview_on_click: false });
@@ -77,6 +80,7 @@ export async function exerciseSharedSidebarState(
   api: ApiClient,
   seed: SeedData,
   mobile: boolean,
+  backendTmpDir: string,
 ) {
   const tasks = await seedSharedViews(api, seed);
   const [anchor, destination] = tasks;
@@ -113,6 +117,7 @@ export async function exerciseSharedSidebarState(
     await expect(surface.getByTestId("sidebar-page-controls")).toBeHidden();
     await api.archiveTask(destination.id);
     await expect(surface.locator(`[data-task-row-id="${destination.id}"]`)).toHaveCount(0);
+    await waitForCascadeArchiveCleanup(backendTmpDir, destination.id);
     await api.unarchiveTask(destination.id);
     await expect(surface.locator(`[data-task-row-id="${destination.id}"]`)).toBeVisible();
     expect(queryCount).toBe(queriesBeforeSwitch);

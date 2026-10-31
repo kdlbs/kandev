@@ -3,6 +3,8 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { SessionPage } from "../../pages/session-page";
 import { registerSilentPromptStallTests } from "../../helpers/silent-prompt-stall";
 
+test.use({ trace: "retain-on-failure" });
+
 registerSilentPromptStallTests();
 
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6

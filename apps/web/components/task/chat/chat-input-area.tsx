@@ -208,7 +208,6 @@ function completeChatSubmission(
     messageComments,
     markCommentsSent,
     handleClearPRFeedback,
-    handleClearWalkthroughComments,
     consumeSubmittedEphemeral,
     addContextFile,
     planModeEnabled,
@@ -216,7 +215,7 @@ function completeChatSubmission(
   if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
   if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
   if (pendingPRFeedback.length > 0) handleClearPRFeedback();
-  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
+  if (walkthroughComments.length > 0) markCommentsSent(walkthroughComments.map((c) => c.id));
   if (!submittedContext.sessionId) return true;
   consumeSubmittedEphemeral(submittedContext.sessionId, submittedContext.files);
   if (planModeEnabled) {

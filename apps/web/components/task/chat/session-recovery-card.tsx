@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useLayoutEffect, useState } from "react";
+import Link from "@/components/routing/app-link";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
@@ -15,6 +16,8 @@ import { useRecoveryChoices, useRecoveryPresentation } from "./session-recovery-
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
 import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { isLocalStorageCause, storageCauseFromError } from "@/lib/session-delivery-storage";
 
 function useFocusComposerAfterRecoveryCard(ref: { current: HTMLDivElement | null }) {
   useLayoutEffect(() => {
@@ -62,6 +65,7 @@ export function SessionRecoveryCard({
   const ref = useRef<HTMLDivElement>(null);
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
   const profileExists = useSessionProfileExists(model.sessionId);
+
   const projectionMatchesModel = workspaceRecoveryMatchesModel(model, actions.workspaceRecovery);
   const context = useTaskLaunchErrorContext();
   const automaticRecovery = matchingAutomaticRecovery(
@@ -86,18 +90,12 @@ export function SessionRecoveryCard({
     recoveryActions,
     context,
   );
-  const workspaceRecoveryRelevant = isWorkspaceRecoveryRelevant(
-    model,
-    actions,
-    projectionMatchesModel,
-    choices,
-  );
-  const workspaceRecoveryForActions = workspaceRecoveryForProgress(
-    actions.workspaceRecovery,
-    projectionMatchesModel,
-  );
+  const { relevant: workspaceRecoveryRelevant, forActions: workspaceRecoveryForActions } =
+    recoveryCardWorkspaceState(model, actions, projectionMatchesModel, choices);
   useFocusComposerAfterRecoveryCard(ref);
+  const storageCause = storageCauseFromError(model.error);
   if (projectionMatchesModel && actions.workspaceRecovery?.agent_ready) return null;
+
   return (
     <div
       ref={ref}
@@ -117,6 +115,7 @@ export function SessionRecoveryCard({
         failure={failure}
       />
       <div className="min-w-0 bg-card px-3 pb-3 md:px-4 md:pb-4">
+        <StorageSettingsLink cause={storageCause} />
         <RecoveryActions
           actions={choices}
           busy={busy}
@@ -148,6 +147,17 @@ export function SessionRecoveryCard({
       />
     </div>
   );
+}
+function recoveryCardWorkspaceState(
+  model: ActiveSessionRecovery,
+  actions: SessionRecoveryActions,
+  projectionMatchesModel: boolean,
+  choices: ReturnType<typeof useRecoveryChoices>,
+) {
+  return {
+    relevant: isWorkspaceRecoveryRelevant(model, actions, projectionMatchesModel, choices),
+    forActions: workspaceRecoveryForProgress(actions.workspaceRecovery, projectionMatchesModel),
+  };
 }
 
 function workspaceRecoveryMatchesModel(
@@ -311,6 +321,23 @@ function recoveryHeaderCopy(
     summary,
     suppressSummary: !copy.showSummary && !hasDistinctGuidance,
   };
+}
+
+function StorageSettingsLink({ cause }: { cause: ReturnType<typeof storageCauseFromError> }) {
+  const { t } = useTranslation();
+  if (!cause || !isLocalStorageCause(cause)) return null;
+  return (
+    <Link
+      href="/settings/system/storage"
+      data-testid="recovery-storage-settings-link"
+      className={controlSizingClassName(
+        "standard",
+        "mt-2 inline-flex w-full cursor-pointer items-center justify-center rounded border border-border px-3 text-sm font-medium hover:bg-muted hover:underline focus-visible:ring-2 focus-visible:ring-ring md:w-auto",
+      )}
+    >
+      {t("task:storageOpenSettings")}
+    </Link>
+  );
 }
 
 function AdditionalActions({ model, taskId }: { model: ActiveSessionRecovery; taskId?: string }) {

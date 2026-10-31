@@ -50,6 +50,12 @@ describe("quickChatSessionFromTaskEvent", () => {
     expect(session?.kind).toBe("config");
   });
 
+  it("carries the exact creation identity from lifecycle events", () => {
+    expect(quickChatSessionFromTaskEvent(payload({ quick_chat_creation_id: "create-1" }))).toEqual(
+      expect.objectContaining({ creationId: "create-1" }),
+    );
+  });
+
   it("leaves the placeholder title unnamed so the tab falls back to its default", () => {
     expect(quickChatSessionFromTaskEvent(payload({ title: "Quick Chat" }))?.name).toBeUndefined();
   });

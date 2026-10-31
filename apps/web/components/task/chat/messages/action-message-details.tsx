@@ -30,6 +30,7 @@ export type ActionMeta = {
   recovery_phase?: string;
   recovery_disposition?: string;
   recovery_reason?: string;
+  recovery_activity_confirmed?: boolean;
   attempts_started?: number;
   runtime_retained?: boolean;
   failure_scope?: "turn" | "execution";
@@ -43,6 +44,7 @@ export type ActionMeta = {
   max_attempts?: number;
   retry_in_seconds?: number;
   retry_at?: string;
+  retry_window_ends_at?: string;
   failure_code?: string;
   code?: string;
   causes?: AgentErrorCause[];

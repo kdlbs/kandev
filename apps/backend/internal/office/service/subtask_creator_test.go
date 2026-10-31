@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -92,7 +94,7 @@ func TestCreateOfficeSubtaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.
 		t.Fatalf("create agent: %v", err)
 	}
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
-		models.ActorKindAgent, agent.ID, ""); err != nil {
+		runsmodels.ActorKindAgent, agent.ID, ""); err != nil {
 		t.Fatalf("queue causing run: %v", err)
 	}
 	runs, err := repo.ListRuns(ctx, "ws-1")

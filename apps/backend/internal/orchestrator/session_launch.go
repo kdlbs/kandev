@@ -182,6 +182,8 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
+	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
+	reusePreparedPrimary  bool
 	TaskID                string                        `json:"task_id"`
 	Intent                SessionIntent                 `json:"intent,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
@@ -191,16 +193,17 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -212,6 +215,12 @@ type LaunchSessionRequest struct {
 	// NoInitialPrompt starts an explicitly replaced utility session without
 	// composing configuration instructions into an otherwise empty first turn.
 	NoInitialPrompt bool `json:"-"`
+	// QuickChatInitialStart identifies the deferred startup launched after a
+	// newly accepted Quick Chat response. Launch errors preserve the retained
+	// session's existing recovery state.
+	QuickChatInitialStart        bool   `json:"-"`
+	QuickChatStartAttemptID      string `json:"-"`
+	QuickChatStartAgentAttemptID string `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -378,43 +387,78 @@ func IsBenignLaunchTeardownErr(err error) bool {
 		strings.Contains(msg, sessionTerminalErrText)
 }
 
-// LaunchSession is the unified entry point for all session operations.
-func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+func (s *Service) prepareLaunchRequest(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+) (context.Context, SessionIntent, error) {
 	if req == nil {
-		return nil, errors.New("launch request is required")
+		return nil, "", errors.New("launch request is required")
 	}
 	ctx = worktree.WithRecoveryLifecycleContext(ctx, s.recoveryLifecycleContext())
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if err := validateLaunchActivationSource(req.ActivationSource); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if req.ActivationSource == LaunchActivationSourceSessionOpen && req.Prompt != "" {
-		return nil, errors.New("session_open activation cannot include a prompt")
+		return nil, "", errors.New("session_open activation cannot include a prompt")
 	}
 	intent := ResolveIntent(req)
 	if intent == IntentRestoreWorkspace && req.Prompt != "" {
-		return nil, errors.New("restore_workspace cannot include a prompt")
+		return nil, "", errors.New("restore_workspace cannot include a prompt")
 	}
 	if err := validateFocusActivationIntent(req); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	// Every intent funnels through here. SessionID is empty when creating, so
-	// that case is carried by the task check alone.
-	// Launching a session starts an agent turn: session.prompt.
-	// Workspace restoration only opens retained infrastructure. It must not
-	// require permission to start or resume an agent; lifecycle applies the
-	// session.exec check at the execution boundary.
 	if intent != IntentRestoreWorkspace {
 		if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
-	// Existing-session launches must also prove that the supplied session and
-	// task belong together; independent reach checks do not establish that
-	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
+		return nil, "", err
+	}
+	return ctx, intent, nil
+}
+
+// LaunchSession is the unified entry point for all session operations.
+func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (launchResponse *LaunchSessionResponse, launchErr error) {
+	preparedCtx, intent, err := s.prepareLaunchRequest(ctx, req)
+	if err != nil {
 		return nil, err
 	}
+	ctx = preparedCtx
+	if req.QuickChatInitialStart {
+		releaseLifecycleLock, handleStartFailure, err := s.beginQuickChatStartFailureOwnership(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseLifecycleLock()
+		defer func() {
+			if launchErr != nil {
+				launchErr = handleStartFailure(launchErr)
+			}
+		}()
+	}
+	return s.launchIntent(ctx, req, intent)
+}
+
+func (s *Service) launchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
+	if response, err := s.prepareLaunchIntent(ctx, req, intent); err != nil || response != nil {
+		return response, err
+	}
+	response, err := s.dispatchLaunchIntent(ctx, req, intent)
+	return s.finishLaunchIntent(ctx, req, intent, response, err)
+}
+
+func (s *Service) prepareLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
 	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
 		return response, err
 	}
@@ -429,11 +473,16 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {
 		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
+	return nil, nil
+}
 
-	var (
-		response *LaunchSessionResponse
-		err      error
-	)
+func (s *Service) dispatchLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+) (*LaunchSessionResponse, error) {
+	var response *LaunchSessionResponse
+	var err error
 	switch intent {
 	case IntentPrepare:
 		response, err = s.launchPrepare(ctx, req)
@@ -450,6 +499,16 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		err = fmt.Errorf("unknown intent: %s", intent)
 	}
+	return response, err
+}
+
+func (s *Service) finishLaunchIntent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	intent SessionIntent,
+	response *LaunchSessionResponse,
+	err error,
+) (*LaunchSessionResponse, error) {
 	if err != nil {
 		if req.RecoveryAction == "" {
 			if blockErr := s.recordRecoveryBlockForError(ctx, req, err); blockErr != nil {
@@ -840,6 +899,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	return &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -903,7 +965,12 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{
+			ProfileExplicit:      req.ProfileExplicit,
+			SpawnOrigin:          req.SpawnOrigin,
+			MCPServerIDs:         req.MCPServerIDs,
+			reusePreparedPrimary: req.reusePreparedPrimary,
+		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -964,7 +1031,12 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{}
+	options := startCreatedSessionOptions{lifecycleLockHeld: req.QuickChatInitialStart}
+	if req.QuickChatInitialStart {
+		options.onQuickChatStartAttemptClaimed = func(attemptID string) {
+			req.QuickChatStartAgentAttemptID = attemptID
+		}
+	}
 	if !req.NoInitialPrompt {
 		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
 			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
@@ -979,6 +1051,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
 		options.noInitialTurn = true
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,

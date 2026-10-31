@@ -17,8 +17,9 @@ permissions, event delivery, and plugin-provided capabilities.
 ## Ownership
 
 This system owns plugin manifests, marketplace behavior, plugin state,
-installation and health, host data and tool APIs, contribution points, and
-plugin security boundaries. Plugin-provided automation conditions and webhook
+installation and health, public SDK distribution and compatibility, host data
+and tool APIs, contribution points, and plugin security boundaries.
+Plugin-provided automation conditions and webhook
 adapter contracts belong here; automation admission and execution remain owned
 by the [Office system](../office/README.md).
 
@@ -47,3 +48,5 @@ canonical requirement and system-design documents. Use the catalog command to fi
   canvas export/import and the canvas-specific marketplace flow; reuses plugin
   manifests, static validation, catalog sources, and the runtime trust contract.
 - [Integrations](../integrations/README.md): supplies external connections.
+- [Release](../release/README.md): publishes SDK artifacts under the plugin
+  system's author compatibility contract.

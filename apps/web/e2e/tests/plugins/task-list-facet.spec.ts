@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const FACET = `facet:${PLUGIN_ID}:fixture-tags`;
 const PREFIX = "Facet proof";
@@ -38,7 +39,11 @@ async function putValues(apiClient: ApiClient, workspaceId: string, values: Valu
 }
 
 async function showOnlyFixtureTasks(page: Page) {
-  await page.getByTestId("kanban-header-search").getByPlaceholder("Search tasks...").fill(PREFIX);
+  const searched = waitForHttp(page, "GET", /\/api\/v1\/workspaces\/[^/]+\/tasks$/, {
+    predicate: (response) => new URL(response.url()).searchParams.get("query") === PREFIX,
+  });
+  await page.getByTestId("tasks-list-search").fill(PREFIX);
+  await searched;
   await expect(page.getByTestId("tasks-list-row-title")).toHaveCount(3);
 }
 

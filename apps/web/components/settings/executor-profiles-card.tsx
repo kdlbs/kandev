@@ -85,28 +85,33 @@ function ExecutorProfileRows({
         <div
           key={profile.id}
           data-testid={`executor-profile-card-${profile.id}`}
-          className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
+          className="flex items-center gap-1 rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
           onClick={() => onOpen(profile)}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium truncate">{profile.name}</span>
-            {profile.prepare_script && (
-              <Badge variant="outline" className={`${SETTINGS_TYPOGRAPHY.meta} shrink-0`}>
-                {t("executors:prepareScriptBadge")}
-              </Badge>
-            )}
-          </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={(event) => onDelete(event, profile.id)}
-              aria-label={t("executors:deleteProfile")}
-              data-testid="executor-profile-delete-button"
-              className={executorProfileDeleteActionClassName}
-            >
-              <IconTrash className="h-3.5 w-3.5" />
-            </Button>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center justify-between gap-2 self-stretch rounded-md text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-medium truncate">{profile.name}</span>
+              {profile.prepare_script && (
+                <Badge variant="outline" className={`${SETTINGS_TYPOGRAPHY.meta} shrink-0`}>
+                  {t("executors:prepareScriptBadge")}
+                </Badge>
+              )}
+            </div>
+          </button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(event) => onDelete(event, profile.id)}
+            aria-label={t("executors:deleteProfile")}
+            data-testid="executor-profile-delete-button"
+            className={executorProfileDeleteActionClassName}
+          >
+            <IconTrash className="h-3.5 w-3.5" />
+          </Button>
+          <div className="flex size-4 shrink-0 items-center justify-center max-md:size-11 [@media(pointer:coarse)]:size-11">
             <IconChevronRight className="h-4 w-4 text-muted-foreground" />
           </div>
         </div>

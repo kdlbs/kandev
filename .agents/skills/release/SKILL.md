@@ -5,9 +5,16 @@ description: Kandev release and version-channel conventions — unified Stable S
 
 # Release & Versioning
 
-Kandev Stable releases use a **single SemVer** `X.Y.Z` shared across all distribution channels.
+Kandev Stable releases use a **single SemVer** `X.Y.Z` shared across all runtime distribution channels.
 npm also has an explicit prerelease-only `nightly` channel; it is not part of the unified Stable
 artifact set.
+
+Plugin SDKs are a separate version family: Go
+`github.com/kdlbs/kandev/pluginsdk` and npm `@kdlbs/plugin-sdk` share a version
+starting at 0.1.0. Stable verifies or publishes them; Nightly does not. Read the
+[SDK publication and recovery procedure](../../../docs/public/release-process.md#plugin-sdk-publication)
+before changing SDK release behavior. Public availability requires release
+evidence, not the presence of package metadata in source.
 
 ## Version targets
 
@@ -42,6 +49,8 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
+8. `prepare-plugin-sdk` retains the exact tested original archive and signed receipt before creating/verifying its signed tag. `publish-plugin-sdk` uses OIDC without signing secrets, then verifies both public consumers. These jobs also run on backfill.
+9. `stable-complete` and automatic contributor notices require successful SDK verification. `bootstrap_required` is incomplete; maintainers publish only the retained bytes and retry after configuring trusted publishing. Never add a token fallback or overwrite conflicting immutable evidence.
 
 ## Contributor notices
 
@@ -111,6 +120,18 @@ node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-rel
 python3 .github/scripts/release-workflow-contract_test.py
 bash -n scripts/release/nightly-release.sh scripts/release/publish-npm.sh
 ```
+
+## Discord release announcements
+
+Normal Stable first attempts automatically call `announce-discord-release.yml` after GitHub Release, npm, Homebrew, Scoop, public SDK verification, and Stable completion succeed. Configure `DISCORD_GENERAL_WEBHOOK_URL` in the `release` environment. It sends one compact message with whole-release counts, attributed highlights, emojis, and the exact GitHub release link.
+
+Reruns and backfills skip automatic Discord delivery and require manual recovery. Nightly, dry-run, desktop-validation, cancellation before delivery, and failed publication skip it too. Missing secrets and Discord failures fail only the announcement job; check package publication separately.
+
+Use **Announce Discord release** on `main` with an exact Stable `release_tag`. The default `preview` mode requires no Discord secret. Inspect its summary and public preview artifact. Before `create`, verify publication and inspect the channel, then set `acknowledge_create=true` only if no announcement exists. To correct an existing post, use `update` and its `message_id`.
+
+Confirmed sends retain a message ID/link in the summary and a 30-day receipt artifact. The helper validates the message's webhook and release before update. Uncertain POST/PATCH outcomes and cancellation during delivery require channel inspection; do not resend automatically. Only explicit rate limits receive bounded retries. Never print or commit the webhook URL.
+
+See [release operating instructions](../../../docs/public/release-process.md#announce-a-release-on-discord) for setup and recovery.
 
 ## Release-tag signing configuration
 

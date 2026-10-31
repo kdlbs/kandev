@@ -5,7 +5,12 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/task-dependencies.md"
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+acceptance_criteria:
+  - AC-TASKS-TASK-DEPENDENCIES-001.2
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 ---
 
 # Task 01: Promote Dependency Edges to a Core Relationship
@@ -26,16 +31,18 @@ spec: "../../specs/tasks/system-design/task-dependencies.md"
   migration in `internal/task/repository/sqlite/base_migrations.go`.
 - **Deleting** a task removes its edges in both directions, on SQLite and on
   PostgreSQL, via explicit repository work rather than an `ON DELETE CASCADE`
-  the table does not have. **Archiving** does not: an archived predecessor still
-  blocks its dependents and reads as `pending` (Task 04), so its edges survive
-  and reappear if the task is unarchived.
+  the table does not have. **Archiving** preserves its edges and the
+  predecessor's persisted outcome: completed resolves, failed/cancelled fail,
+  and unfinished work stays pending. Unarchiving does not need to restore an
+  edge.
 - One batch service helper resolves, for a list of task IDs, each task's direct
   predecessors **and direct dependents**, and a per-predecessor verdict of
   `resolved` / `failed` / `pending`, using `state = COMPLETED` or
   `IsTerminalStepName` for resolved and `FAILED` / `CANCELLED` for failed.
-  Archived predecessors are `pending`. The reverse direction uses the
-  `(blocker_task_id)` index added above; it is one batched query, not one per
-  task.
+  Archived predecessors use the same state-based verdict: completed resolves,
+  failed/cancelled fail, and unfinished work stays pending. The reverse
+  direction uses the `(blocker_task_id)` index added above; it is one batched
+  query, not one per task.
 - Task DTOs over HTTP, WebSocket boot, WebSocket events, and MCP carry
   `blocked`, `blocked_reason`, `depends_on`, `blocks`, and
   `start_when_unblocked`. No `is_blocked` column is persisted.
@@ -72,9 +79,10 @@ spec: "../../specs/tasks/system-design/task-dependencies.md"
    the typed errors; a duplicate edge is idempotent; both the task-scoped and
    Office entry points hit the same validator.
 3. Failing tests for the batch derived-state helper across pending,
-   resolved-by-state, resolved-by-terminal-step, failed, cancelled, and archived
-   predecessors, asserting the batch result equals the per-task result, and that
-   the dependents (`blocks`) direction is returned for the same call.
+   resolved-by-state, resolved-by-terminal-step, failed, and cancelled
+   predecessors, including archived tasks in each persisted state. Assert the
+   batch result equals the per-task result, and that the dependents (`blocks`)
+   direction is returned for the same call.
 4. Failing DTO/event tests for the five new fields on HTTP, boot, WS, and MCP,
    including the id/title/state shape of `depends_on` and `blocks` entries.
 5. Failing handler tests for the three routes including the `409` `cycle` body

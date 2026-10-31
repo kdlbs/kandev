@@ -20,4 +20,10 @@ export type TaskDetailRouteState =
       hydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
       enrichmentIdentity?: TaskNavigationIdentity;
     }
-  | { routeKey: string; status: "error"; data: null };
+  | {
+      routeKey: string;
+      status: "error";
+      data: null;
+      temporary?: boolean;
+      sessionAdmission?: "unavailable" | "read_failed";
+    };

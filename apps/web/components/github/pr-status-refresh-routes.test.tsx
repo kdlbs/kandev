@@ -164,6 +164,7 @@ async function expectFeedbackRefresh() {
   await waitFor(() =>
     expect(getPRFeedback).toHaveBeenCalledWith("ws-1", "acme", "demo", 42, {
       cache: "no-store",
+      expectedHost: "github.com",
     }),
   );
 }

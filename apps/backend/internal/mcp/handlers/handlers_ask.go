@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/clarification"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -158,6 +159,13 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	req, response, err := decodeAskUserQuestion(msg)
 	if response != nil || err != nil {
 		return response, err
+	}
+	if protocol.HasQuestionImages(req.Questions) {
+		session, lookupErr := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
+		if lookupErr != nil || session == nil || (req.TaskID != "" && req.TaskID != session.TaskID) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "image question session does not belong to task", nil)
+		}
+		req.TaskID = session.TaskID
 	}
 	taskID := h.clarificationTaskID(ctx, req.TaskID, req.SessionID)
 	retry := h.registerClarificationRetry(req, taskID)

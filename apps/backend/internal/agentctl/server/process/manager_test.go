@@ -175,11 +175,12 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	}
 	cmd.Stderr = stderrWriter
 	m := &Manager{
-		cmd:       cmd,
-		stderr:    stderr,
-		logger:    log,
-		doneCh:    make(chan struct{}),
-		updatesCh: make(chan adapter.AgentEvent, 1),
+		processManagerID: "manager-lifetime-1",
+		cmd:              cmd,
+		stderr:           stderr,
+		logger:           log,
+		doneCh:           make(chan struct{}),
+		updatesCh:        make(chan adapter.AgentEvent, 1),
 		stderrSanitizer: stderrLineSanitizerFunc(func(string) (string, bool) {
 			return "OpenCode provider failure", true
 		}),
@@ -214,6 +215,9 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	if got, _ := data["process_manager_id"].(string); got != "manager-lifetime-1" {
+		t.Fatalf("process manager ID = %q, want manager-lifetime-1", got)
 	}
 	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
 	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
@@ -573,4 +577,32 @@ func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 		}
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
+}
+
+func TestBuildAdapterConfigPreservesPromptSuggestionsAndBackgroundWork(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		suggestions bool
+		background  bool
+	}{
+		{name: "suggestions only", suggestions: true},
+		{name: "background only", background: true},
+		{name: "both enabled", suggestions: true, background: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manager{
+				cfg: &config.InstanceConfig{
+					AgentArgs: []string{"cat"}, WorkDir: t.TempDir(), AgentEnv: []string{"PATH=/usr/bin"},
+					Protocol: agent.ProtocolACP, PromptSuggestions: tc.suggestions,
+					AgentBackgroundWorkEnabled: tc.background,
+				},
+				logger: newTestLogger(t),
+			}
+			require.NoError(t, m.buildAdapterConfig())
+			t.Cleanup(func() { _ = m.adapter.Close() })
+			shared := m.adapterCfg.ToSharedConfig()
+			require.Equal(t, tc.suggestions, shared.PromptSuggestions)
+			require.Equal(t, tc.background, shared.AgentBackgroundWorkEnabled)
+		})
+	}
 }

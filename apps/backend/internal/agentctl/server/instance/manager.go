@@ -16,8 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/netutil"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -84,6 +86,10 @@ type Manager struct {
 	// instance the control server supervises for as long as that control
 	// server runs" -- deliberately NOT reset per instance.
 	turnIDSeq atomic.Int64
+
+	// diskSampler is shared by every instance so concurrent tasks on the same
+	// proven filesystem reuse one advisory capacity read per interval.
+	diskSampler *systemmetrics.DiskCapacitySampler
 }
 
 type provisionalInstance struct {
@@ -114,6 +120,7 @@ func NewManager(cfg *config.Config, log *logger.Logger) *Manager {
 		provisional: make(map[string]*provisionalInstance),
 		portAlloc:   NewPortAllocator(cfg.Ports.Base, cfg.Ports.Max),
 		reaperStop:  make(chan struct{}),
+		diskSampler: systemmetrics.NewDiskCapacitySampler(),
 	}
 
 	if cfg.IdleTimeout > 0 {
@@ -240,7 +247,7 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
 	}
 
-	agentEnv, err := config.CollectAgentEnvWithError(req.Env)
+	agentEnv, err := config.CollectInstanceAgentEnvWithError(req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("prepare agent environment: %w", err)
 	}
@@ -292,7 +299,16 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	procMgr.SetDiskCapacitySampler(m.diskSampler)
 	bundle.setProcessManager(procMgr)
+	// A configured but unusable journal is an admission error. Reject it
+	// before publishing the instance or starting workspace trackers, so no
+	// caller can observe an instance whose delivery storage cannot work.
+	if instanceCfg.DurableJournalPath != "" {
+		if _, journalErr := procMgr.DeliveryJournal(); journalErr != nil {
+			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
+		}
+	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start
@@ -371,6 +387,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		SessionID:                  req.SessionID,
 		TaskID:                     req.TaskID,
 		DisableAskQuestion:         req.DisableAskQuestion,
+		PromptSuggestions:          req.PromptSuggestions,
 		AssumeMcpSse:               req.AssumeMcpSse,
 		AssumeMcpHttp:              req.AssumeMcpHttp,
 		McpMode:                    req.McpMode,
@@ -389,6 +406,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
 
@@ -518,13 +536,15 @@ func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.M
 			continue
 		}
 		result = append(result, config.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
+			Name:         mcp.Name,
+			URL:          mcp.URL,
+			Type:         mcp.Type,
+			Command:      mcp.Command,
+			Args:         mcp.Args,
+			Env:          mcp.Env,
+			Headers:      mcp.Headers,
+			DefinitionID: mcp.DefinitionID, DefinitionRevision: mcp.DefinitionRevision,
+			Origins: append([]agentctltypes.McpServerOrigin(nil), mcp.Origins...),
 		})
 	}
 	return result

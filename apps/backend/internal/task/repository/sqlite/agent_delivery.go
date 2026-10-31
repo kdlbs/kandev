@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -49,6 +50,7 @@ func (r *Repository) initAgentDeliverySchema() error {
 			terminal INTEGER NOT NULL DEFAULT 0,
 			received_at TIMESTAMP NOT NULL,
 			projected_at TIMESTAMP,
+			canonical_message_id TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (stream_id, sequence)
 		);
 		CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_unprojected
@@ -61,6 +63,7 @@ func (r *Repository) initAgentDeliverySchema() error {
 			harness_generation BIGINT NOT NULL,
 			received_sequence BIGINT NOT NULL DEFAULT 0,
 			projected_sequence BIGINT NOT NULL DEFAULT 0,
+			message_segment_boundary_sequence BIGINT CHECK (message_segment_boundary_sequence IS NULL OR message_segment_boundary_sequence >= 0),
 			remote_high_water BIGINT NOT NULL DEFAULT 0,
 			updated_at TIMESTAMP NOT NULL
 		);
@@ -224,17 +227,10 @@ func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id s
 }
 
 func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error) {
-	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
-		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
-		return false, fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	contentHash, err := r.prepareAgentDeliveryEventReceipt(event)
+	if err != nil {
+		return false, err
 	}
-	if event.ReceivedAt.IsZero() {
-		event.ReceivedAt = r.nowUTC()
-	}
-	contentHash := agentDeliveryEventHash(event)
-	event.ContentHash = contentHash
-	event.HashVersion = agentDeliveryPayloadHashVersion
-	event.PayloadBytes = int64(len(event.Payload))
 	if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
 		return false, err
 	}
@@ -258,6 +254,24 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 	}
 	r.refreshAgentDeliveryLag(ctx)
 	return inserted == 1, nil
+}
+
+// prepareAgentDeliveryEventReceipt validates the transport identity and stamps
+// the content hash and byte budget that the inbox stores. Preparation happens
+// before writer entry so the writer only holds admission and the insert.
+func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliveryEvent) (string, error) {
+	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
+		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
+		return "", fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	}
+	if event.ReceivedAt.IsZero() {
+		event.ReceivedAt = r.nowUTC()
+	}
+	contentHash := agentDeliveryEventHash(event)
+	event.ContentHash = contentHash
+	event.HashVersion = agentDeliveryPayloadHashVersion
+	event.PayloadBytes = int64(len(event.Payload))
+	return contentHash, nil
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
@@ -291,8 +305,8 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		}
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO agent_delivery_cursors
-			(stream_id, session_id, incarnation_id, harness_generation, updated_at)
-			VALUES (?, ?, ?, ?, ?)`), event.StreamID, event.SessionID, event.IncarnationID,
+			(stream_id, session_id, incarnation_id, harness_generation, message_segment_boundary_sequence, updated_at)
+			VALUES (?, ?, ?, ?, 0, ?)`), event.StreamID, event.SessionID, event.IncarnationID,
 			event.HarnessGeneration, event.ReceivedAt); err != nil {
 			return 0, err
 		}
@@ -426,21 +440,29 @@ func (r *Repository) insertAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx
 
 func (r *Repository) loadAgentDeliveryCursorTx(ctx context.Context, tx *sqlx.Tx, streamID string) (models.AgentDeliveryCursor, bool, error) {
 	var cursor models.AgentDeliveryCursor
+	var boundary sql.NullInt64
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT session_id, incarnation_id, harness_generation, received_sequence,
-		       projected_sequence, remote_high_water, retired_sequence, updated_at
+		       projected_sequence, message_segment_boundary_sequence, remote_high_water, retired_sequence, updated_at
 		FROM agent_delivery_cursors WHERE stream_id = ?`), streamID).Scan(
 		&cursor.SessionID, &cursor.IncarnationID, &cursor.HarnessGeneration,
-		&cursor.ReceivedSequence, &cursor.ProjectedSequence, &cursor.RemoteHighWater,
+		&cursor.ReceivedSequence, &cursor.ProjectedSequence, &boundary, &cursor.RemoteHighWater,
 		&cursor.RetiredSequence, &cursor.UpdatedAt)
 	if err == nil {
 		cursor.StreamID = streamID
+		if boundary.Valid {
+			cursor.MessageSegmentBoundarySequence = int64Pointer(boundary.Int64)
+		}
 		return cursor, true, nil
 	}
 	if err != sql.ErrNoRows {
 		return models.AgentDeliveryCursor{}, false, err
 	}
 	return models.AgentDeliveryCursor{}, false, nil
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
 }
 
 func (r *Repository) agentDeliveryStreamHasRowsTx(ctx context.Context, tx *sqlx.Tx, streamID string) (bool, error) {
@@ -467,13 +489,18 @@ func advanceReceivedCursorTx(ctx context.Context, tx *sqlx.Tx, rebind func(strin
 func (r *Repository) GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error) {
 	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT stream_id, session_id, incarnation_id, harness_generation,
-		       received_sequence, projected_sequence, remote_high_water, retired_sequence, updated_at
+		       received_sequence, projected_sequence, message_segment_boundary_sequence,
+		       remote_high_water, retired_sequence, updated_at
 		FROM agent_delivery_cursors WHERE stream_id = ?`), streamID)
 	var cursor models.AgentDeliveryCursor
+	var boundary sql.NullInt64
 	if err := row.Scan(&cursor.StreamID, &cursor.SessionID, &cursor.IncarnationID,
 		&cursor.HarnessGeneration, &cursor.ReceivedSequence, &cursor.ProjectedSequence,
-		&cursor.RemoteHighWater, &cursor.RetiredSequence, &cursor.UpdatedAt); err != nil {
+		&boundary, &cursor.RemoteHighWater, &cursor.RetiredSequence, &cursor.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if boundary.Valid {
+		cursor.MessageSegmentBoundarySequence = int64Pointer(boundary.Int64)
 	}
 	return &cursor, nil
 }
@@ -485,7 +512,7 @@ func (r *Repository) ListUnprojectedAgentDeliveryEvents(ctx context.Context, str
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT stream_id, sequence, session_id, incarnation_id, harness_generation,
 		       submission_id, event_type, payload, terminal, received_at, projected_at,
-		       content_hash, hash_version, payload_pruned_at, payload_bytes
+		       content_hash, hash_version, payload_pruned_at, payload_bytes, canonical_message_id
 		FROM agent_delivery_inbox
 		WHERE stream_id = ? AND projected_at IS NULL
 		ORDER BY sequence LIMIT ?`), streamID, limit)
@@ -532,6 +559,31 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if projectedAt.Valid {
 		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)
 	}
+	var projectedSequence int64
+	var boundary sql.NullInt64
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT projected_sequence, message_segment_boundary_sequence
+		FROM agent_delivery_cursors WHERE stream_id = ?`), event.StreamID).Scan(&projectedSequence, &boundary); err != nil {
+		return false, err
+	}
+	boundarySequence := projectedSequence
+	if boundary.Valid {
+		boundarySequence = boundary.Int64
+	}
+	topLevelToolStart := false
+	if stored.EventType == streams.EventTypeToolCall {
+		var agentEvent streams.AgentEvent
+		if err := json.Unmarshal(stored.Payload, &agentEvent); err != nil {
+			return false, fmt.Errorf("decode agent tool boundary event: %w", err)
+		}
+		topLevelToolStart = agentEvent.Type == streams.EventTypeToolCall && agentEvent.ParentToolCallID == ""
+	}
+	if topLevelToolStart {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("top-level tool boundary sequence gap: expected %d, got %d", projectedSequence+1, stored.Sequence)
+		}
+		boundarySequence = stored.Sequence
+	}
 	if err := insertProjectionEffects(ctx, tx, r.db.Rebind, effect, terminalEffect); err != nil {
 		return false, err
 	}
@@ -545,8 +597,9 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE agent_delivery_cursors SET updated_at = ? WHERE stream_id = ?`),
-		now, event.StreamID); err != nil {
+		UPDATE agent_delivery_cursors
+		SET message_segment_boundary_sequence = ?, updated_at = ?
+		WHERE stream_id = ?`), boundarySequence, now, event.StreamID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -601,7 +654,8 @@ func (r *Repository) findAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, 
 	err = row.Scan(
 		&stored.SessionID, &stored.IncarnationID, &stored.HarnessGeneration,
 		&stored.SubmissionID, &stored.EventType, &stored.Payload, &terminal, &projectedAt,
-		&stored.ContentHash, &stored.HashVersion, &payloadPrunedAt, &stored.PayloadBytes)
+		&stored.ContentHash, &stored.HashVersion, &payloadPrunedAt, &stored.PayloadBytes,
+		&stored.CanonicalMessageID)
 	if err == sql.ErrNoRows {
 		return models.AgentDeliveryEvent{}, sql.NullTime{}, false, nil
 	}
@@ -813,20 +867,26 @@ func sameAgentDeliveryEventIdentity(stored, incoming *models.AgentDeliveryEvent)
 }
 
 func sameAgentDeliveryEventPayload(stored, incoming *models.AgentDeliveryEvent) (bool, error) {
+	matchesIncoming := func(hash string) bool {
+		return hash == agentDeliveryEventHash(incoming) ||
+			hash == agentDeliveryEventHashWithoutToolOutputBytes(incoming)
+	}
 	if stored.PayloadPrunedAt != nil {
 		if stored.HashVersion != agentDeliveryPayloadHashVersion || stored.ContentHash == "" {
 			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
 		}
-		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+		return matchesIncoming(stored.ContentHash), nil
 	}
 	if stored.HashVersion == agentDeliveryPayloadHashVersion {
-		if stored.ContentHash == "" || stored.ContentHash != agentDeliveryEventHash(stored) {
+		storedHashMatches := stored.ContentHash == agentDeliveryEventHash(stored) ||
+			stored.ContentHash == agentDeliveryEventHashWithoutToolOutputBytes(stored)
+		if stored.ContentHash == "" || !storedHashMatches {
 			return false, repoerrors.ErrAgentDeliveryReceiptCorrupt
 		}
 		if bytes.Equal(stored.Payload, incoming.Payload) {
 			return true, nil
 		}
-		return stored.ContentHash == agentDeliveryEventHash(incoming), nil
+		return matchesIncoming(stored.ContentHash), nil
 	}
 	return sameAgentDeliveryPayload(stored.Payload, incoming.Payload), nil
 }
@@ -852,6 +912,7 @@ func stripLifecycleDeliveryFields(event *streams.AgentEvent) {
 	event.ControlTurnID = 0
 	event.TurnID = ""
 	event.CanonicalMessageID = ""
+	event.CanonicalMessageBaseID = ""
 	event.CanonicalProjection = false
 	event.CanonicalMessageAppend = false
 }
@@ -872,7 +933,8 @@ func scanAgentDeliveryEvents(rows deliveryEventRows) ([]*models.AgentDeliveryEve
 		if err := rows.Scan(&event.StreamID, &event.Sequence, &event.SessionID,
 			&event.IncarnationID, &event.HarnessGeneration, &event.SubmissionID,
 			&event.EventType, &event.Payload, &terminal, &event.ReceivedAt, &projected,
-			&event.ContentHash, &event.HashVersion, &payloadPrunedAt, &event.PayloadBytes); err != nil {
+			&event.ContentHash, &event.HashVersion, &payloadPrunedAt, &event.PayloadBytes,
+			&event.CanonicalMessageID); err != nil {
 			return nil, err
 		}
 		event.Terminal = terminal != 0

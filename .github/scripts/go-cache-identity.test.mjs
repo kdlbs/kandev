@@ -32,6 +32,66 @@ test("daily rollover preserves compatible restore prefix", () => {
   assert.equal(today.moduleKey, tomorrow.moduleKey);
 });
 
+test("all migrated Linux callers have finite isolated cache families", () => {
+  const families = [
+    "test-1",
+    "test-2",
+    "test-3",
+    "test-4",
+    "repository-1",
+    "repository-2",
+    "repository-3",
+    "postgres-packages",
+    "postgres-1",
+    "postgres-2",
+    "postgres-3",
+    "e2e-helpers",
+  ];
+  const identities = families.map((family) =>
+    cacheIdentity({ ...identity, family }),
+  );
+  assert.equal(new Set(identities.map((value) => value.buildPrefix)).size, families.length);
+});
+
+test("save modes bound cache publication while preserving the default", () => {
+  const lint = {
+    version: "golangci-lint 2.9.0",
+    config: "lint-config",
+    path: "/root/.cache/golangci-lint",
+  };
+  const staticIdentity = { ...identity, family: "static", lint };
+  const expected = {
+    all: { moduleSave: true, buildSave: true, lintSave: true },
+    build: { moduleSave: false, buildSave: true, lintSave: false },
+    none: { moduleSave: false, buildSave: false, lintSave: false },
+  };
+  assert.deepEqual(
+    cacheIdentity(staticIdentity),
+    cacheIdentity({ ...staticIdentity, saveMode: "all" }),
+  );
+  for (const [saveMode, flags] of Object.entries(expected)) {
+    const value = cacheIdentity({ ...staticIdentity, saveMode });
+    assert.deepEqual(
+      {
+        moduleSave: value.moduleSave,
+        buildSave: value.buildSave,
+        lintSave: value.lintSave,
+      },
+      flags,
+      saveMode,
+    );
+  }
+  assert.deepEqual(
+    {
+      moduleSave: cacheIdentity({ ...identity, saveMode: "all" }).moduleSave,
+      buildSave: cacheIdentity({ ...identity, saveMode: "all" }).buildSave,
+      lintSave: cacheIdentity({ ...identity, saveMode: "all" }).lintSave,
+    },
+    { moduleSave: true, buildSave: true, lintSave: false },
+  );
+  assert.throws(() => cacheIdentity({ ...identity, saveMode: "publish" }), /save mode/i);
+});
+
 test("same day reuses the generation", () => {
   assert.deepEqual(
     cacheIdentity(identity),
@@ -152,6 +212,7 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     for (const subdir of [
       "bin",
       "apps/backend",
+      "pluginsdk",
       ".github/docker/ci-base",
       ".github/actions/cache-go",
       ".github/scripts",
@@ -160,6 +221,8 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     for (const file of [
       "apps/backend/go.mod",
       "apps/backend/go.sum",
+      "pluginsdk/go.mod",
+      "pluginsdk/go.sum",
       "apps/backend/.golangci.yml",
       ".github/docker/ci-base/Dockerfile",
       ".github/actions/cache-go/action.yml",
@@ -191,6 +254,7 @@ test("static CLI uses the configured linter cache without unsupported subcommand
           GITHUB_WORKSPACE: directory,
           GITHUB_OUTPUT: `${directory}/output`,
           CACHE_FAMILY: "static",
+          CACHE_SAVE_MODE: "build",
           RUNNER_OS: "Linux",
           RUNNER_ARCH: "X64",
           GOLANGCI_LINT_CACHE: "/tmp/lint cache",
@@ -202,6 +266,37 @@ test("static CLI uses the configured linter cache without unsupported subcommand
     assert.match(output, /enabled=true/);
     assert.match(output, /lintPath=\/tmp\/lint cache/);
     assert.match(output, /moduleKey=go-mod-v2-/);
+    assert.match(output, /moduleSave=false/);
+    assert.match(output, /buildSave=true/);
+    assert.match(output, /lintSave=false/);
+    for (const file of ["pluginsdk/go.mod", "pluginsdk/go.sum"]) {
+      writeFileSync(`${directory}/${file}`, "changed SDK dependency");
+      const changed = spawnSync(
+        process.execPath,
+        [`${directory}/.github/scripts/go-cache-identity.mjs`],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${directory}/bin:${process.env.PATH}`,
+            GITHUB_WORKSPACE: directory,
+            GITHUB_OUTPUT: `${directory}/changed-output`,
+            CACHE_FAMILY: "static",
+            RUNNER_OS: "Linux",
+            RUNNER_ARCH: "X64",
+            GOLANGCI_LINT_CACHE: "/tmp/lint cache",
+          },
+        },
+      );
+      assert.equal(changed.status, 0, changed.stderr);
+      const next = JSON.parse(changed.stdout);
+      assert.notEqual(
+        next.moduleKey,
+        JSON.parse(result.stdout).moduleKey,
+        file,
+      );
+      writeFileSync(`${directory}/${file}`, "fixture");
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

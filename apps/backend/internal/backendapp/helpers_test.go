@@ -303,6 +303,7 @@ func TestAppendSessionStateMessage_IncludesCancellationPending(t *testing.T) {
 		session,
 		fakeCancellationPendingProvider{pending: true, revision: 7},
 		nil,
+		nil,
 	)
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))

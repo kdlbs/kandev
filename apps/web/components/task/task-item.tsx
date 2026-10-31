@@ -135,6 +135,10 @@ function handleTaskItemKeyDown(
   isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target instanceof Element) {
+    const button = e.target.closest("button");
+    if (button && e.currentTarget.contains(button)) return;
+  }
   e.preventDefault();
   if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
@@ -273,7 +277,10 @@ function TaskItemContent({
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
-          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          showChangeRequestStatus={
+            resolvedTaskRow.trailing !== "change_request_status" &&
+            resolvedTaskRow.trailing !== "none"
+          }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
         />

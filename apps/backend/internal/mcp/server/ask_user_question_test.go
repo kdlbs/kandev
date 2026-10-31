@@ -56,6 +56,33 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	assert.True(t, requiredSet["questions"], "questions should be required")
 }
 
+func TestAskUserQuestion_ConciseContextGuidance(t *testing.T) {
+	server := newTaskModeServer(t, &testBackend{}, "task-current")
+	tool := server.mcpServer.ListTools()["ask_user_question_kandev"].Tool
+
+	for _, expected := range []string{
+		"1-3 short sentences or brief bullets",
+		"about 100 words or fewer",
+		"full reports, logs, and repeated conversation outside this call, before it",
+		"questions and options self-contained",
+	} {
+		assert.Contains(t, tool.Description, expected)
+	}
+
+	schema, err := json.Marshal(tool.InputSchema)
+	require.NoError(t, err)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props := parsed["properties"].(map[string]interface{})
+	for _, fieldName := range []string{"context", "context_paragraphs"} {
+		field := props[fieldName].(map[string]interface{})
+		description, ok := field["description"].(string)
+		require.True(t, ok, "%s needs a description", fieldName)
+		assert.Contains(t, description, "1-3 short sentences or brief bullets", fieldName)
+		assert.Contains(t, description, "about 100 words or fewer", fieldName)
+	}
+}
+
 // TestAskUserQuestion_RejectsLegacyPromptShape ensures payloads using the old
 // flat shape return a validation error rather than silently dropping the call.
 func TestAskUserQuestion_RejectsLegacyPromptShape(t *testing.T) {
@@ -169,6 +196,32 @@ func TestAskUserQuestion_JoinsContextParagraphs(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_ContextParagraphsOverrideLegacy(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	args := clarificationArgsWithParagraphs()
+	args["context"] = "Legacy context should be overridden."
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_EmptyContextParagraphsUsesLegacyContextVerbatim(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	legacyContext := strings.Repeat("full report line\n", 80)
+	args := clarificationArgsWithParagraphs()
+	args["context"] = legacyContext
+	args["context_paragraphs"] = []string{}
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, legacyContext, payload["context"])
 }
 
 func TestAskParentQuestion_JoinsContextParagraphs(t *testing.T) {

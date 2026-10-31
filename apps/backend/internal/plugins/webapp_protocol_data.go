@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/webapp"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r *http.Request, host *pluginHost, binding webapp.CapabilityBinding) {
@@ -238,6 +239,7 @@ func (s *Service) sendWebAppMessage(ctx context.Context, w http.ResponseWriter, 
 	}
 	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
 	if err != nil || task == nil {
+		s.logWebAppMessageFailure("scope", err)
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
@@ -252,10 +254,22 @@ func (s *Service) sendWebAppMessage(ctx context.Context, w http.ResponseWriter, 
 	}
 	dispatch, err := host.Messages().Send(ctx, taskID, request.SessionID, request.Text)
 	if err != nil {
+		s.logWebAppMessageFailure("send", err)
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
 	writeWebAppJSON(w, r, http.StatusAccepted, dispatch)
+}
+
+func (s *Service) logWebAppMessageFailure(phase string, err error) {
+	if s.log == nil || webAppProtocolStatus(err) < http.StatusInternalServerError {
+		return
+	}
+	code := status.Code(err)
+	if err == nil {
+		code = codes.Unknown
+	}
+	s.log.Warn("web app message request failed", zap.String("phase", phase), zap.String("grpc_code", code.String()))
 }
 
 func (s *Service) listWebAppWorkflows(ctx context.Context, w http.ResponseWriter, r *http.Request, host *pluginHost, binding webapp.CapabilityBinding) {

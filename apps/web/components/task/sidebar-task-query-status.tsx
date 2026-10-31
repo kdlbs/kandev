@@ -29,7 +29,7 @@ export function SidebarTaskQueryStatus({
           <Button
             variant="link"
             size="sm"
-            className={touchTargets ? "min-h-11 min-w-11" : "h-7"}
+            className={touchTargets ? "min-h-12 min-w-12" : "h-7"}
             onClick={onRetry}
             disabled={pending}
           >

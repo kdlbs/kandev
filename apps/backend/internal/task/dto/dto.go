@@ -296,6 +296,9 @@ type TaskDTO struct {
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
+	// QuickChatCreationID is the exact retry token carried by lifecycle
+	// projections for an internally keyed Quick Chat creation.
+	QuickChatCreationID string `json:"quick_chat_creation_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -471,6 +474,9 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering is true when a send right now would be delivered into the
 	// still-generating turn (mid-turn steering) rather than blocked/queued.
 	// Derived live at serialization from the connected agent's negotiated
@@ -653,6 +659,9 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
@@ -1210,6 +1219,7 @@ func FromTaskWithSessionInfo(
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
 		ExternalID:             task.ExternalID,
+		QuickChatCreationID:    service.QuickChatCreationIDFromExternalID(task.ExternalID),
 		IsFromOffice:           task.IsFromOffice,
 	}
 }

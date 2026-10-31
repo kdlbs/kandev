@@ -28,6 +28,10 @@ func Run(args []string, build BuildInfo) int {
 	}
 	build.Version = normalizedBuildVersion(build.Version)
 	if opts.ShowVersion {
+		if opts.VersionJSON {
+			ignoreBrokenPipeSignal()
+			return printVersionJSON(os.Stdout, os.Stderr, build)
+		}
 		fmt.Println(build.Version)
 		return 0
 	}

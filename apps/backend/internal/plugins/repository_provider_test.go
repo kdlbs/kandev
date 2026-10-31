@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func TestListRepositoryProviderBranchesUsesOwnedDeclaredActionAndVerifiedWorkspace(t *testing.T) {

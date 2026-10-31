@@ -30,6 +30,7 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	profileInfo *AgentProfileInfo,
 	executorType string,
 	progress *prepareProgressRecorder,
+	operations ...*preparedMCPOperation,
 ) error {
 	if execution == nil || agentConfig == nil {
 		return nil
@@ -42,12 +43,12 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, executorType, rt.ProjectMCPStrategy, progress); err != nil {
 			return err
 		}
-		return m.reconcileAndMaterializeCursorProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy, progress)
+		return m.reconcileAndMaterializeCursorProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy, progress, operations...)
 	}
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, executorType, rt.ProjectMCPStrategy); err != nil {
 		return err
 	}
-	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy)
+	servers, err := m.runtimeProjectMCPServers(ctx, execution, agentConfig, profileInfo, executorType, rt.ProjectMCPStrategy, operations...)
 	if err != nil {
 		return err
 	}
@@ -68,8 +69,9 @@ func (m *Manager) runtimeProjectMCPServers(
 	profileInfo *AgentProfileInfo,
 	executorType string,
 	strategy mcpconfig.PassthroughMCPStrategy,
+	operations ...*preparedMCPOperation,
 ) ([]agentctltypes.McpServer, error) {
-	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, executorType, strategy)
+	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, executorType, strategy, operations...)
 	if err == nil {
 		return servers, nil
 	}

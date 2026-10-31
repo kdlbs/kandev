@@ -113,3 +113,31 @@ func TestStoredThreadPresentationNormalizesIndependently(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-UI-THREADS-SAVED-VIEWS-003.15
+func TestStoredThreadViewKeepsSelectionSortAndTaskOrder(t *testing.T) {
+	raw := `{"thread_views":[{"id":"picked","name":"Picked","task_scope":{"mode":"selected","task_ids":["task-c","task-a","task-b"]},"filters":[],"sort":{"key":"selection","direction":"asc"},"max_columns":5}],"thread_active_view_id":"picked"}`
+	settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	encoded, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	reloaded, err := scanUserSettings(settingsScanner{raw: string(encoded)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("rescan settings: %v", err)
+	}
+	if len(reloaded.ThreadViews) != 1 {
+		t.Fatalf("thread views = %+v, want one view", reloaded.ThreadViews)
+	}
+	view := reloaded.ThreadViews[0]
+	wantTaskIDs := []string{"task-c", "task-a", "task-b"}
+	if !reflect.DeepEqual(view.TaskScope.TaskIDs, wantTaskIDs) {
+		t.Fatalf("task ids = %v, want %v", view.TaskScope.TaskIDs, wantTaskIDs)
+	}
+	if view.Sort != (models.ThreadViewSort{Key: "selection", Direction: "asc"}) {
+		t.Fatalf("sort = %+v, want selection asc", view.Sort)
+	}
+}

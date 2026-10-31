@@ -93,6 +93,8 @@ const worktreeSelectCols = `
 	ter.worktree_path,
 	ter.worktree_branch,
 	COALESCE(ter.branch_slug, ''),
+	COALESCE(ter.workspace_relative_path, ''),
+	ter.position,
 	COALESCE(s.base_branch, ''),
 	COALESCE(ter.worktree_branch_owner, 'unknown'),
 	COALESCE(ter.worktree_integration_ref, ''),
@@ -141,6 +143,8 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 		&wt.Path,
 		&wt.Branch,
 		&wt.BranchSlug,
+		&wt.WorkspaceRelativePath,
+		&wt.Position,
 		&baseBranch,
 		&wt.BranchOwner,
 		&wt.IntegrationRef,
@@ -281,14 +285,22 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 
 	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
-			id, task_environment_id, repository_id, branch_slug,
+			id, task_environment_id, repository_id, branch_slug, workspace_relative_path,
 			worktree_id, worktree_path, worktree_branch,
 			worktree_branch_owner, worktree_integration_ref, worktree_recovery_head_sha,
 			worktree_source_clone_path, worktree_source_common_dir,
 			worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_environment_id, repository_id, branch_slug) DO UPDATE SET
+			workspace_relative_path = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.workspace_relative_path ELSE task_environment_repos.workspace_relative_path END,
+			position = CASE
+				WHEN task_environment_repos.status = 'deleted' AND task_environment_repos.deleted_at IS NOT NULL
+					AND excluded.status = 'active' AND excluded.deleted_at IS NULL
+				THEN excluded.position ELSE task_environment_repos.position END,
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
@@ -302,10 +314,10 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
-	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug,
+	`), uuid.New().String(), envID, wt.RepositoryID, wt.BranchSlug, wt.WorkspaceRelativePath,
 		wt.ID, wt.Path, wt.Branch, wt.BranchOwner, wt.IntegrationRef, wt.RecoveryHeadSHA,
 		wt.SourceClonePath, wt.SourceCommonDir,
-		wt.BranchCompactedAt, 0,
+		wt.BranchCompactedAt, wt.Position,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 	if err != nil {
@@ -763,8 +775,10 @@ func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, er
 // OTHER tasks for the environment that owns the worktree. The worktree is
 // task-owned: sessions of the owning task (which share the environment) never
 // count against cleanup, while a borrower task's session protects the
-// workspace until ownership transfers. A terminal session still protects its
-// task workspace until that task's own cleanup releases the association.
+// workspace until ownership transfers or the borrower can no longer use it.
+// A borrower stops holding the workspace only once its task is archived, its
+// session reached a terminal state, and no runtime row remains; every other
+// borrower session still counts, including one whose task row cannot be joined.
 func (s *SQLiteStore) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,
@@ -777,14 +791,26 @@ func (s *SQLiteStore) CountActiveWorktreeReferences(
 			ON ter.task_environment_id = s.task_environment_id
 		INNER JOIN task_environments te
 			ON te.id = ter.task_environment_id
+		LEFT JOIN tasks bt
+			ON bt.id = s.task_id
 		WHERE ter.worktree_id = ?
 		  AND ter.status <> ?
 		  AND ter.deleted_at IS NULL
 		  AND te.task_id != s.task_id
+		  AND NOT (
+			bt.archived_at IS NOT NULL
+			AND s.state IN (?, ?, ?)
+			AND NOT EXISTS (
+				SELECT 1 FROM executors_running er WHERE er.session_id = s.id
+			)
+		  )
 	`
 	args := []interface{}{
 		worktreeID,
 		StatusDeleted,
+		string(models.TaskSessionStateCompleted),
+		string(models.TaskSessionStateFailed),
+		string(models.TaskSessionStateCancelled),
 	}
 	if len(excludeSessionIDs) > 0 {
 		query += ` AND s.id NOT IN (?)`

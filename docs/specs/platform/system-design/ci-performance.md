@@ -9,6 +9,7 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-004
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
+  - REQ-PLATFORM-CI-PERFORMANCE-008
 ---
 
 # CI performance system design
@@ -38,6 +39,7 @@ No database, public API, or runtime feature flag changes are required.
 | REQ-PLATFORM-CI-PERFORMANCE-004 | Measurement and capacity assessment |
 | REQ-PLATFORM-CI-PERFORMANCE-005 | October capacity-constrained continuation |
 | REQ-PLATFORM-CI-PERFORMANCE-006 | Conservative test-only selection |
+| REQ-PLATFORM-CI-PERFORMANCE-008 | October 26 cache and partition continuation |
 
 ## Review budget
 
@@ -66,7 +68,7 @@ The installation itself must fail on lockfile or dependency errors.
 
 Keep cache keys and paths identical in any frontend jobs introduced by partitioning.
 Do not copy `node_modules` between runners or share mutable working directories.
-Limit the first repair to the confirmed frontend failure. Inventory matching E2E paths in the evidence report without changing those workflows speculatively.
+The first repair addressed the frontend failure. The October 26 continuation below covers the separately confirmed E2E cache failure.
 
 ## Test setup and workflow partitions
 
@@ -322,6 +324,108 @@ Their transitive imports, source-reading tests, and bundler inputs require stron
 E2E specifications and fixtures always retain application E2E selection.
 Push-to-main, merge-group, and dispatch behavior remains unchanged, including their existing documentation-only skips.
 No results or build artifacts are reused across different source revisions.
+
+## October 26 cache and partition continuation
+
+This continuation preserves the current job graph and matrices, including two frontend test shards.
+The maintainer confirms a shared limit of 60 concurrent GitHub Actions jobs.
+Tasks 17–20 in the existing plan own this bounded continuation.
+They do not reopen the earlier complete-CI delivery loop or authorize publication.
+
+### E2E dependency paths
+
+Before the October 26 repair, the `e2e`, `e2e-containers`, `e2e-kubernetes-compatibility`, and `desktop-e2e` jobs hardcoded a pnpm store path.
+Each repaired job resolves the store and pnpm version from `apps/` in its actual install environment.
+Use the frontend's existing platform/version/lockfile key contract.
+Keep the host build/report cache namespace and its restore-only report policy unchanged.
+Cache errors remain optional. Every job still runs its frozen installation.
+Measure cache restore, installation, and publication together before claiming a reduction.
+The browser cache and pinned-image fallback retain their separate ownership and rollout requirements.
+
+### Go cache reuse
+
+Extend `.github/actions/cache-go/action.yml` and `.github/scripts/go-cache-identity.mjs` instead of introducing another cache implementation.
+Retain the existing installed-toolchain identity, resolved `GOMODCACHE`/`GOCACHE`, daily UTC generations, and compatible restore prefixes.
+Add finite families for all four ordinary test shards, three repository cohorts, PostgreSQL cohorts/packages, and independent E2E helpers.
+The ambient and static families retain their identities.
+Set an absolute `GOLANGCI_LINT_CACHE` for the static job before identity resolution.
+
+Migrate `static_checks`, `test_shards`, `repository_tests`, `test_ambient_env`, `postgres-boot`, and E2E `helper_compile`.
+Windows, sidebar resource modes, PostgreSQL 18, and the already migrated host E2E build remain outside this migration.
+Preserve every existing command, build flag, timeout, matrix, and required join.
+Include the shared cache action and identity script in backend change detection.
+
+Add a `save-mode` input with `all`, `build`, and `none` values. Its default remains `all` for existing callers.
+Use restore actions for all eligible paths. Explicit saves remain optional and require successful work plus a primary-key miss.
+Only push-to-main jobs publish the migrated compilation generations.
+The main static job owns publication of their common module cache with mode `all`.
+Other migrated main jobs use `build`. PR, merge-group, and dispatch consumers use `none`.
+The static job also owns its lint generation. Each remaining role owns its own build generation.
+An invalid identity or mode disables the optional cache and leaves required commands operational.
+New PR dependencies still install normally until main publishes a compatible snapshot.
+Cache access remains within GitHub's existing branch scope.
+
+### Two frontend partitions
+
+Use Vitest 4.1.11's public `BaseSequencer.shard(TestSpecification[])` extension point.
+The existing `--shard=N/2` package command and default within-shard sort remain intact.
+Apply the custom sequencer only to the normal CI two-shard command.
+Unsharded, filtered local, and other local shard commands retain native behavior.
+
+Add a dependency-free `.github/scripts/frontend-timings.mjs` helper for profile validation, snapshot preparation, deterministic allocation, and report reconciliation.
+The existing `changes` job restores the latest compatible timing cache and freezes one input artifact for both shards.
+It needs no package installation or new GitHub permission.
+Use a workspace-relative cache path consistently across host and container jobs.
+Keys include a schema version and hashes of the lockfile, Vitest configuration, and reviewed project selection.
+Only successful push-to-main gates publish profiles, under run/attempt-specific keys with a compatible restore prefix.
+Timing data remains advisory, bounded JSON, never executable input or test-result authority.
+
+The snapshot contains its schema, mode, compatibility hash, checkout SHA, producer run/attempt, profile digest, and optional file estimates.
+Publish the producer attempt and snapshot digest through `changes` outputs.
+Name the input artifact with the producer run/attempt so retries cannot overwrite it.
+Cache miss, cache errors, or invalid profiles select `count-fallback` once in `changes`.
+Both consumers require the same snapshot and digest, including when only one shard is rerun.
+A missing or inconsistent required snapshot fails the consumer. Consumers never choose fallback independently.
+Irrelevant-change runs skip timing setup and retain the existing successful gate outcome.
+
+The sequencer uses the current native specifications as the complete file inventory.
+Each identity contains its project and normalized web-relative path.
+It rejects duplicate or escaping identities and unsupported CI shard indices before selection.
+Matching file hashes permit historical estimates. New or changed files receive a deterministic estimate from their project's median, or a fixed positive default.
+Sort by descending estimate, then identity. Assign each whole file to the lighter of two partitions, with a fixed tie-break.
+Both invocations calculate and validate the complete disjoint assignment before returning their selected specifications.
+Count fallback calls the native shard method on the same inventory.
+Keep project membership, isolated state, worker limits, pretest generation, and all assertions unchanged.
+
+Add a CI-only reporter using public `TestModule.diagnostic()` and reporter hooks.
+Record environment setup, preparation, collection, setup, and test/hook durations separately.
+Use their finite nonnegative sum as a scheduling weight. Do not add overlapping import-duration details again.
+Each shard retains its existing JSON result and artifact name, plus timing and assignment evidence.
+Profiles have a 10 MiB limit and at most 20,000 unique entries. Reject invalid paths, hashes, identities, and duration values.
+
+The existing frontend gate downloads both result artifacts through the existing retry action.
+A dependency-free Node command reconciles source/snapshot identity, disjoint file assignment, actual completed files, and native JSON outcomes.
+It rejects missing, duplicate, foreign, failed, or incomplete required evidence.
+Successful sibling artifacts from an earlier job attempt remain eligible when they bind to the same producer snapshot and checkout.
+The gate retains its name, runner placement, permissions, and failure/skip policy.
+It requires no pnpm installation or new scheduled job.
+Its main-only cache save follows successful reconciliation of both shards and the static job.
+Cache publication errors remain optional. Reconciliation and native test errors remain mandatory failures.
+
+### Evidence and adoption
+
+The October 26 diagnostic samples are in [the evidence note](../../../plans/ci-performance/evidence-2026-10-26.md).
+They establish faults and imbalance, not before/after savings.
+Evaluate one cache or partition change at a time within the existing fleet.
+Include cold population, restore, save, bootstrap, and gate overhead in runner-minutes.
+Use three comparable baseline/candidate pairs for a performance decision.
+Compare balanced scheduling against the current two-shard workflow, not a historical unsharded run.
+The extra-partition threshold in AC-PLATFORM-CI-PERFORMANCE-005.3 does not apply to unchanged fan-out.
+Retain balance changes only with lower median execution critical path and no higher median runner-minutes.
+Record loaded elapsed observations and reject a demonstrated feedback regression.
+Insufficient scheduling evidence remains unknown, not evidence of a routing defect or a guaranteed improvement.
+Keep reporting, successful-main timing authority, retries, and full coverage.
+Persistent Node bytecode caching and conditional green-run HTML reports remain separate experiments outside this continuation.
 
 ## Failure and recovery
 

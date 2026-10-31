@@ -12,6 +12,8 @@ export function useQueuePanelEscape(open: boolean, onClose: () => void): void {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || isEditableTarget(event.target)) return;
+      // A modal timestamp drawer owns Escape even before it receives focus.
+      if (document.querySelector('[data-queue-escape-boundary][data-state="open"]')) return;
       event.preventDefault();
       event.stopPropagation();
       onClose();

@@ -12,6 +12,26 @@ export const LAST_PROMPT_MARKER =
 const MIDDLE_FILLER_COUNT = 30;
 const TRAILING_FILLER_COUNT = 50;
 
+async function seedCompletedFiller(
+  apiClient: ApiClient,
+  sessionId: string,
+  count: number,
+  prefix = "filler message",
+): Promise<void> {
+  let fillerTurnId: string | null = null;
+  for (let i = 0; i < count; i++) {
+    const seeded = await apiClient.seedSessionMessage(sessionId, {
+      type: "message",
+      content: `${prefix} ${i + 1}`,
+      newTurn: i === 0,
+    });
+    fillerTurnId ??= seeded.turnId;
+  }
+  // Transcript history must not leave a synthetic active turn blocking
+  // the next real prompt or making a page reload report a running agent.
+  if (fillerTurnId) await apiClient.completeSessionTurn(fillerTurnId);
+}
+
 export async function persistedLastPromptId(
   apiClient: ApiClient,
   sessionId: string,
@@ -80,6 +100,7 @@ export async function seedScrolledPastLastPrompt(
     lastPromptText?: string;
     onSessionId?: (sessionId: string) => void;
     showScrollControls?: boolean;
+    reloadAfterSeeding?: boolean;
   } = {},
 ): Promise<SessionPage> {
   if (opts.showScrollControls ?? true) {
@@ -113,23 +134,53 @@ export async function seedScrolledPastLastPrompt(
     } else {
       await session.sendMessage(text);
     }
+    // An idle composer or an empty turn list can still describe the prior
+    // turn before this submission has been accepted by the backend.
+    await expect
+      .poll(
+        async () => {
+          const [{ messages }, { turns }] = await Promise.all([
+            apiClient.listSessionMessages(sessionId),
+            apiClient.listSessionTurns(sessionId),
+          ]);
+          const prompt = messages.find(
+            (message) => message.author_type === "user" && message.content === text,
+          );
+          return prompt?.turn_id
+            ? (turns.find((turn) => turn.id === prompt.turn_id)?.completed_at ?? null)
+            : null;
+        },
+        { timeout: 60_000, message: "Waiting for the submitted prompt's turn to finish" },
+      )
+      .toBeTruthy();
     await session.waitForChatIdle({ timeout: 30_000 });
   };
 
   await send(FIRST_PROMPT_MARKER);
-  await apiClient.seedAgentMessages(sessionId, MIDDLE_FILLER_COUNT, "middle filler message");
+  await seedCompletedFiller(apiClient, sessionId, MIDDLE_FILLER_COUNT, "middle filler message");
+  await expect
+    .poll(async () => {
+      const { turns } = await apiClient.listSessionTurns(sessionId);
+      return turns.filter((turn) => !turn.completed_at).length;
+    })
+    .toBe(0);
   await expect(
     session.activeChat().getByText("middle filler message " + MIDDLE_FILLER_COUNT, {
-      exact: false,
+      exact: true,
     }),
   ).toBeVisible({ timeout: 15_000 });
 
   await send(opts.lastPromptText ?? LAST_PROMPT_MARKER);
   const trailingFillerCount = opts.trailingFillerCount ?? TRAILING_FILLER_COUNT;
-  await apiClient.seedAgentMessages(sessionId, trailingFillerCount);
+  await seedCompletedFiller(apiClient, sessionId, trailingFillerCount);
+  if (opts.reloadAfterSeeding) {
+    await page.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+  }
   const lastFiller = session
     .activeChat()
-    .getByText(`filler message ${trailingFillerCount}`, { exact: false });
+    .getByText(`filler message ${trailingFillerCount}`, { exact: true });
   await expect(lastFiller).toBeVisible({ timeout: 15_000 });
   await lastFiller.scrollIntoViewIfNeeded();
 

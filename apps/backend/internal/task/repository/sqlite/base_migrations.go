@@ -82,6 +82,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.ensureExecutorOwnershipSchema(); err != nil {
 		return err
 	}
+	if err := r.migrateAgentDeliverySegmentationColumns(ctx); err != nil {
+		return err
+	}
 	// Existing transition rows have no run identity; new writes capture it
 	// from the trusted execution owner when it is available.
 	_ = r.migrate.Apply("task_step_transitions.causing_run_id", `ALTER TABLE task_step_transitions ADD COLUMN causing_run_id TEXT`)
@@ -102,6 +105,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"agent_delivery_effects.submission_id", `ALTER TABLE agent_delivery_effects ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+		{"task_session_background_work.capabilities", `ALTER TABLE task_session_background_work ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
@@ -682,6 +686,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''")
 	_ = r.migrate.Apply("workflows.created_by_user_id", "ALTER TABLE workflows ADD COLUMN created_by_user_id TEXT NOT NULL DEFAULT ''")
 
+	if err := r.migrateTurnChangeHistorySchema(); err != nil {
+		return err
+	}
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
@@ -693,6 +701,20 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("create Kubernetes environment inventory: %w", err)
 	}
 
+	return nil
+}
+
+func (r *Repository) migrateAgentDeliverySegmentationColumns(ctx context.Context) error {
+	for _, column := range agentDeliverySegmentationColumns {
+		query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", column.table, column.column, column.definition)
+		if dialect.IsPostgres(r.db.DriverName()) {
+			query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s", column.table, column.column, column.definition)
+		}
+		name := "agent_delivery_segmentation.column." + column.table + "." + column.column
+		if err := r.migrate.ApplyContext(ctx, name, query); err != nil {
+			return fmt.Errorf("apply migration %q: %w", name, err)
+		}
+	}
 	return nil
 }
 

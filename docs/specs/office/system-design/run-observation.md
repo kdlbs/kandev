@@ -67,3 +67,17 @@ Desktop/mobile E2E cover direct navigation without preloaded sidebar data and
 long names. Runtime tests retain version/hash assertions. No authorization or
 persistence migration is required for activity labels; skill snapshot columns
 are additive with empty defaults for old rows.
+
+## Live runs agent attribution
+
+`GET /workspaces/:wsId/live-runs` is served by
+`dashboard/service_agents.go:GetLiveRuns` over
+`sqlite.QueryRecentSessions`. The query selects
+`task_sessions.agent_profile_id`, which holds the persistent Office agent ID,
+and the service resolves names with one batched `ListAgentInstancesByIDs`
+call. `task_sessions.agent_execution_id` was dropped by the
+`migrateSessionsRemoveAgentExecutionID` migration (runtime execution IDs live in
+`executors_running`), so it must not be read here. Sessions without an agent
+profile keep an empty agent ID and name. Office test fixtures mirror the
+migrated `task_sessions` columns so a reference to a retired column fails in
+tests instead of only in production (AC-OFFICE-DASHBOARD-001.9).

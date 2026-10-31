@@ -187,6 +187,7 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 				CursorMCPAuthEnabled:       true,
 				MCPSelectionMode:           "selected",
 				MCPSelectedServers:         []string{"plugin-atlassian-atlassian"},
+				CopilotSelectedPlugins:     []string{"installed:copilot-plugins/spark"},
 				AutoApprove:                true,
 				DangerouslySkipPermissions: false,
 			}, nil
@@ -221,6 +222,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.MCPSelectionMode != "selected" || len(info.MCPSelectedServers) != 1 || info.MCPSelectedServers[0] != "plugin-atlassian-atlassian" {
 		t.Errorf("MCP selection = %q / %#v, want selected / exact server ID", info.MCPSelectionMode, info.MCPSelectedServers)
+	}
+	if len(info.CopilotSelectedPlugins) != 1 || info.CopilotSelectedPlugins[0] != "installed:copilot-plugins/spark" {
+		t.Errorf("Copilot plugin selection = %#v, want the concrete profile's identity", info.CopilotSelectedPlugins)
 	}
 	if info.AgentID != "agent-456" {
 		t.Errorf("expected AgentID 'agent-456', got '%s'", info.AgentID)

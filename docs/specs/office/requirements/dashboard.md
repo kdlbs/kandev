@@ -27,6 +27,7 @@ The office dashboard is the first place a user looks to understand workspace hea
 - **AC-OFFICE-DASHBOARD-001.6:** Each row carries a relative-time stamp of session start.
 - **AC-OFFICE-DASHBOARD-001.7:** Task IDs are rendered as identifiers (e.g. `KAN-14`).
 - **AC-OFFICE-DASHBOARD-001.8:** Agent IDs are rendered as agent names.
+- **AC-OFFICE-DASHBOARD-001.9:** `GET /workspaces/:wsId/live-runs` attributes each run to the Office agent stored in `task_sessions.agent_profile_id` and returns that agent's ID and current name. It reads only columns present in the migrated `task_sessions` schema, so the endpoint never fails because a retired column is missing.
 
 ## Migrated source detail
 

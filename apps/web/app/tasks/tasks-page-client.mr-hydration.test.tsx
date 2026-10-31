@@ -92,11 +92,18 @@ function renderPage(tasksListShowDetails: boolean) {
     <StateProvider
       initialState={{
         workspaces: { items: [], activeId: "ws1" },
-        userSettings: { ...defaultSettingsState.userSettings, tasksListShowDetails, loaded: true },
+        userSettings: {
+          ...defaultSettingsState.userSettings,
+          workspaceId: "ws1",
+          tasksListShowDetails,
+          loaded: true,
+        },
       }}
     >
       <TasksPageClient
         workspaces={[]}
+        initialWorkspaceId="ws1"
+        initialMetadataLoaded={{ workflows: true, repositories: true }}
         initialRepositories={[]}
         initialTasks={[]}
         initialTotal={0}

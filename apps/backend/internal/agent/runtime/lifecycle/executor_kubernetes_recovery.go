@@ -388,7 +388,8 @@ func buildRecoveredKubernetesInstance(
 	return &ExecutorInstance{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
 		RuntimeName: agentruntime.RuntimeKubernetes, Client: client, WorkspacePath: info.WorkspacePath,
-		Metadata: metadata, Env: cloneStringMap(info.Env),
+		ReusedWorkspace: true,
+		Metadata:        metadata, Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
 	}

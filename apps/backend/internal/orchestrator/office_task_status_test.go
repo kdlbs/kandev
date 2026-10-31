@@ -665,3 +665,107 @@ func TestMarkOfficeTaskCompleted_ConcurrentDeliveries_FireSideEffectsOnce(t *tes
 		t.Fatal("expected office terminal completion lock entry to be deleted after both deliveries exit")
 	}
 }
+
+// staleOfficeStatusUpdater models a dashboard write that lost its state/step
+// compare-and-set: it returns ErrAutomaticCompletionStale without writing.
+type staleOfficeStatusUpdater struct {
+	calls int
+}
+
+func (u *staleOfficeStatusUpdater) UpdateTaskStatus(context.Context, dashboard.TaskStatusUpdateRequest) error {
+	u.calls++
+	return dashboard.ErrAutomaticCompletionStale
+}
+
+// TestMarkOfficeTaskCompleted_Blocked_SkipsSeamAndSideEffects is the blocked
+// terminal-step regression for #4889: a BLOCKED Office task must not reach the
+// status seam, publish task events, or drive the parent's children-completed
+// trigger.
+func TestMarkOfficeTaskCompleted_Blocked_SkipsSeamAndSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	stepGetter := waitStepWithChildrenCompletedTrigger()
+	seedSession(t, repo, "parent-office", "parent-office-session", "step-wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-blocked-fx", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Blocked Office task", State: v1.TaskStateBlocked, ParentID: "parent-office",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	updater := &recordingOfficeStatusUpdater{repo: repo}
+	svc.SetOfficeTaskStatusUpdater(updater)
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-blocked-fx", "child_done")
+
+	if len(updater.calls) != 0 {
+		t.Fatalf("seam calls = %+v, want none for a BLOCKED task", updater.calls)
+	}
+	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
+		t.Fatalf("events = updated=%v stateChanges=%v, want none for a BLOCKED task", events.updated, events.stateChanges)
+	}
+	task, err := repo.GetTask(ctx, "office-blocked-fx")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateBlocked || task.WorkflowStepID != "child_done" {
+		t.Fatalf("task = step %q state %q, want child_done/BLOCKED", task.WorkflowStepID, task.State)
+	}
+	parent, err := repo.GetTask(ctx, "parent-office")
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	if parent.WorkflowStepID != "step-wait" {
+		t.Fatalf("parent.WorkflowStepID = %q, want unchanged step-wait", parent.WorkflowStepID)
+	}
+}
+
+// TestMarkOfficeTaskCompleted_StaleAutomaticWrite_SkipsSideEffects pins the
+// stale-completion suppression added by #4889: ErrAutomaticCompletionStale is
+// a no-op, not a failure, and must not publish completion side effects.
+func TestMarkOfficeTaskCompleted_StaleAutomaticWrite_SkipsSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	stepGetter := waitStepWithChildrenCompletedTrigger()
+	seedSession(t, repo, "parent-office", "parent-office-session", "step-wait")
+
+	now := time.Now().UTC()
+	requireCreateOfficeTask(t, repo, &models.Task{
+		ID: "office-stale-fx", WorkspaceID: "ws1", WorkflowID: "wf-child", WorkflowStepID: "child_done",
+		Title: "Stale Office task", State: v1.TaskStateInProgress, ParentID: "parent-office",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+	updater := &staleOfficeStatusUpdater{}
+	svc.SetOfficeTaskStatusUpdater(updater)
+	events := &recordingTaskEventPublisher{}
+	svc.SetTaskEventPublisher(events)
+
+	svc.markTaskCompletedForTerminalStep(ctx, "office-stale-fx", "child_done")
+
+	if updater.calls != 1 {
+		t.Fatalf("seam calls = %d, want 1", updater.calls)
+	}
+	if len(events.updated) != 0 || len(events.stateChanges) != 0 {
+		t.Fatalf("events = updated=%v stateChanges=%v, want none for a stale automatic write", events.updated, events.stateChanges)
+	}
+	task, err := repo.GetTask(ctx, "office-stale-fx")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("state = %q, want IN_PROGRESS unchanged", task.State)
+	}
+	parent, err := repo.GetTask(ctx, "parent-office")
+	if err != nil {
+		t.Fatalf("load parent: %v", err)
+	}
+	if parent.WorkflowStepID != "step-wait" {
+		t.Fatalf("parent.WorkflowStepID = %q, want unchanged step-wait", parent.WorkflowStepID)
+	}
+}

@@ -45,15 +45,7 @@ type PreservationEvidence struct {
 // InspectPreservedCheckout proves reciprocal Git identity without modifying
 // the checkout, index, refs, or object database.
 func InspectPreservedCheckout(ctx context.Context, req PreservationRequest) (*PreservationEvidence, error) {
-	repositoryPath, err := canonicalDirectory(req.RepositoryPath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: repository path", ErrPreservedCheckoutUnproven)
-	}
-	worktreePath, err := canonicalDirectory(req.WorktreePath)
-	if err != nil || req.ExpectedBranch == "" || req.WorktreeID == "" {
-		return nil, fmt.Errorf("%w: checkout path", ErrPreservedCheckoutUnproven)
-	}
-	identity, err := inspectPreservedGitIdentity(ctx, repositoryPath, worktreePath, req.ExpectedBranch)
+	worktreePath, identity, err := inspectCheckoutIdentity(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +188,11 @@ func worktreeRegistrationMatches(ctx context.Context, repositoryPath, worktreePa
 	}
 	for _, block := range strings.Split(output, "\n\n") {
 		fields := strings.Split(block, "\n")
-		if len(fields) < 3 || strings.TrimPrefix(fields[0], "worktree ") != worktreePath {
+		if len(fields) < 3 {
+			continue
+		}
+		registeredPath, pathErr := canonicalDirectory(strings.TrimPrefix(fields[0], "worktree "))
+		if pathErr != nil || registeredPath != worktreePath {
 			continue
 		}
 		return strings.TrimPrefix(fields[1], "HEAD ") == headOID && strings.TrimPrefix(fields[2], "branch ") == refName

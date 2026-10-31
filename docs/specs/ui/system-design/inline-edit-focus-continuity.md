@@ -80,11 +80,35 @@ retain it through repeated focus restoration, then discard it on pointer input,
 text input, keydown, or unmount. Do not focus the input
 from a window-focus or visibility listener.
 
+If keydown or text insertion arrives before the deferred restoration runs,
+restore the retained range before the browser applies that input. Cancel the
+deferred callback so it cannot overwrite the caret after the user's action.
+Pointer selection still replaces the retained range without restoration.
+
 Keep `useTaskTitleSelectionRestore` and its code-point clamp behavior intact.
 That hook repairs selection after value clamping, not edit entry or browser
 activation. Verify both paths together at the title length limit.
 
 ## Draft and identity ownership
+
+### Tab rename composition
+
+For `AC-UI-EDIT-FOCUS-001.4`, `TabRenameInput` keeps key propagation inside
+the editor, then returns before Enter/Escape resolution when
+`nativeEvent.isComposing` is true or `nativeEvent.keyCode` is 229. Do not
+prevent the default action for these keys or mark the edit complete. This
+matches the existing task-title input guards. The shared input owns the rule
+for Dockview session/terminal tabs, preview session tabs, and the tablet
+right-panel terminal input. Domain committers, Unicode insertion limits,
+internal blur, and at-most-once completion retain their existing ownership.
+
+Phone task views use the native Sessions picker and `MobileTerminalPane`,
+which do not expose these inline tab rename inputs. Tablet terminals use
+`TaskRightPanel` through `SessionTabletLayout`; desktop uses Dockview.
+Component tests exercise native keyboard flags and default prevention;
+browser-dispatched composition events through shipped rename entry points
+exercise real consumers and persistence. Neither establishes physical OS IME
+integration. See the [tab composition repair plan](../../../plans/tab-rename-composition/plan.md).
 
 Each component continues to own its local draft. Same-target prop refreshes
 must not seed it again during editing. Bind the top-bar edit to `taskId` so a
@@ -95,6 +119,41 @@ them on a real terminal action or task change.
 The Rename dialog already seeds on form mount. Preserve that lifetime and
 explicit dismissal behavior. Its mobile consumer uses a captured rename
 target. No global draft registry or persistent storage is introduced.
+
+### Rename request completion
+
+For `AC-UI-EDIT-FOCUS-001.7`, `useMobileTaskRename` owns the transient edit
+identity independently of task identity. Each `handleRenameTask` call creates
+a fresh target object, including reopening the same task. A submission captures
+that object. Its `finally` may clear only that exact object through a functional
+state update; another object or a dismissed edit is left unchanged. Task ID
+comparison alone cannot distinguish two edits of the same task.
+
+`TaskRenameDialog` still trims and validates the title, invokes submission,
+and closes immediately through `TaskSwitcherDialogs`. The mounted
+`SessionTaskSwitcherSheet` can admit another edit while the PATCH is pending.
+`ResponsiveTaskPicker` retains this consumer across phone-to-tablet presentation
+changes. The navigation provider also mounts it independently of its portal.
+The guard applies wherever that consumer remains mounted; it is not gated by
+viewport width. Desktop sidebar and top-bar editors retain separate handlers.
+Failure logging and toast publication remain outside the ownership guard;
+`useTaskActions` and the API retain mutation, response, cache, and WebSocket
+responsibility. No request cancellation or global queue is introduced.
+
+The regression uses real providers, dialog, action hook and API with only
+fetch held. A shipped picker browser scenario checks touch reentry and later
+Save/Cancel against a disposable backend; browser device emulation does not
+establish physical phone or runtime incident evidence. See the
+[Rename ownership plan](../../../plans/mobile-task-rename-ownership/plan.md).
+
+The separate `useTaskRowActions` producer in `task-session-sidebar.tsx` uses
+the same captured edit-object comparison at request completion. Each row Rename
+open already creates a fresh object. `SidebarDialogs` preserves immediate
+dismissal through `TaskRenameDialog`. `TaskSessionSidebar` and `TaskCommands`
+compose this producer; TaskCommands also serves phone entry points, so this is
+not a viewport-exclusive handler. Its existing failure logging remains outside
+the ownership check. The distinct mobile picker hook remains unchanged. See the
+[sidebar Rename ownership plan](../../../plans/sidebar-task-rename-ownership/plan.md).
 
 ## Consumers and responsive behavior
 

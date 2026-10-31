@@ -13,6 +13,7 @@ import { dwell } from "../../helpers/causal-waits";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
+import { composeTabRename } from "../../helpers/tab-rename-composition";
 
 test.use({ channel: "chromium" });
 
@@ -186,6 +187,9 @@ test.describe("Terminals — dockview UI", () => {
     await tabletTestPage.getByRole("menuitem", { name: /^Rename/ }).click();
     await expect(secondRenameInput).toBeVisible();
     await expect(secondRenameInput).toBeFocused();
+    // @covers AC-UI-EDIT-FOCUS-001.4 (tablet right-panel consumer)
+    await composeTabRename(secondRenameInput);
+    await expect(firstTab).toContainText("double click rename");
     await secondRenameInput.fill("context menu rename");
     await tabletTestPage.keyboard.press("Enter");
     await expect(secondTab).toContainText("context menu rename", { timeout: 10_000 });
@@ -747,6 +751,9 @@ test.describe("Terminals — dockview UI", () => {
       await expect(input).toHaveValue("build watcher");
       await expect(input).toBeVisible();
     });
+    // @covers AC-UI-EDIT-FOCUS-001.4 (desktop Dockview consumer)
+    await composeTabRename(input);
+    await input.fill("build watcher");
     await input.press("Enter");
 
     // Tab title now reads "build watcher" — proves the rename committed

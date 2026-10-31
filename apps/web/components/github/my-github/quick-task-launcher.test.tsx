@@ -307,3 +307,12 @@ describe("QuickTaskLauncher issue linking", () => {
     expect(mocks.upsertTaskIssue).not.toHaveBeenCalled();
   });
 });
+
+it("derives an Enterprise PR URL without falling back to GitHub.com", () => {
+  const initialValues = renderLauncher([], {
+    html_url: "",
+    url: "",
+    github_host: "git.company.example",
+  });
+  expect(initialValues?.githubUrl).toBe("https://git.company.example/kdlbs/kandev/pull/1567");
+});

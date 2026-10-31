@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 func TestListStuckRuns_ClaimedStuckReportedRegardlessOfAge(t *testing.T) {
@@ -14,7 +14,7 @@ func TestListStuckRuns_ClaimedStuckReportedRegardlessOfAge(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestListStuckRuns_QueuedStuckPositiveControl(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestListStuckRuns_ExcludesFutureScheduledRetry(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestListStuckRuns_ExcludesRoutingBlockedRun(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestListStuckRuns_ExcludesRunWithClaimedSibling(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	sibling := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	sibling := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, sibling); err != nil {
 		t.Fatalf("create sibling: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestListStuckRuns_ExcludesRunWithClaimedSibling(t *testing.T) {
 		t.Fatalf("claim sibling: %v", err)
 	}
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestListStuckRuns_AgesFromScheduledRetryAtOncePassed(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestListStuckRuns_ExcludesRunWithNonZeroRouteAttemptSeq(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	run := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	run := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestListStuckRuns_ClaimedOutranksOlderQueuedAndNullClaimedAtSortsFirst(t *t
 	seedAgentProfile(t, db, "agent-c", "ws-a")
 
 	// Oldest queued-stuck run.
-	queued := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	queued := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, queued); err != nil {
 		t.Fatalf("create queued: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestListStuckRuns_ClaimedOutranksOlderQueuedAndNullClaimedAtSortsFirst(t *t
 
 	// Claimed-stuck run with a recorded claimed_at, younger than the
 	// queued one but still past the claimed grace.
-	claimedWithAge := &models.Run{AgentProfileID: "agent-b", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	claimedWithAge := &runsmodels.Run{AgentProfileID: "agent-b", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, claimedWithAge); err != nil {
 		t.Fatalf("create claimed: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestListStuckRuns_ClaimedOutranksOlderQueuedAndNullClaimedAtSortsFirst(t *t
 	}
 
 	// Claimed-stuck run with NULL claimed_at.
-	claimedNull := &models.Run{AgentProfileID: "agent-c", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	claimedNull := &runsmodels.Run{AgentProfileID: "agent-c", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, claimedNull); err != nil {
 		t.Fatalf("create claimed-null: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/turnchanges"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type TurnChangeCheckout struct {
@@ -71,4 +72,56 @@ func turnChangeCheckoutsFromWorkspaceRepositories(repositories []WorkspaceReposi
 		})
 	}
 	return checkouts
+}
+
+// TurnChangeCaptureOperation reports whether the exact execution generation
+// still holds a live prompt or capture fence. A missing execution has no live
+// writer and is safe to settle.
+func (m *Manager) TurnChangeCaptureOperation(executionID string, promptGeneration int64) (bool, bool) {
+	if m == nil || executionID == "" || promptGeneration <= 0 {
+		return false, false
+	}
+	execution, found := m.executionStore.Get(executionID)
+	if !found || execution == nil {
+		return false, false
+	}
+	generation := uint64(promptGeneration)
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	active := execution.turnChangeCaptureGeneration == generation ||
+		(execution.promptGeneration == generation && execution.promptCompletionGeneration != generation)
+	return true, active
+}
+
+// TurnChangeRestoreInProgress reports whether a session execution is starting
+// without an attached agentctl client.
+func (m *Manager) TurnChangeRestoreInProgress(sessionID string) bool {
+	if m == nil || sessionID == "" {
+		return false
+	}
+	execution, found := m.executionStore.GetBySessionID(sessionID)
+	if !found || execution == nil {
+		return false
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	release()
+	return client == nil && execution.Status == v1.AgentStatusStarting
+}
+
+// AcquireTurnChangeExporter returns the retained executor client for a session
+// without creating, relaunching, or capturing anything.
+func (m *Manager) AcquireTurnChangeExporter(sessionID string) (TurnChangeCheckpointClient, func(), bool) {
+	if m == nil || sessionID == "" {
+		return nil, nil, false
+	}
+	execution, found := m.executionStore.GetBySessionID(sessionID)
+	if !found || execution == nil {
+		return nil, nil, false
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
+		return nil, nil, false
+	}
+	return client, release, true
 }

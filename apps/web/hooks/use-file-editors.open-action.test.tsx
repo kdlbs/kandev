@@ -5,6 +5,7 @@ import type { FileEditorState } from "@/lib/state/dockview-store";
 
 const mocks = vi.hoisted(() => {
   const fakeClient = {};
+  const appStore = { getState: () => ({ environmentIdBySessionId: {} }) };
   const toast = vi.fn();
   const requestFileContent = vi.fn();
   const addFileEditorPanel = vi.fn();
@@ -63,6 +64,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     fakeClient,
+    appStore,
     toast,
     requestFileContent,
     addFileEditorPanel,
@@ -79,6 +81,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { tasks: { activeSessionId: string } }) => unknown) =>
     selector({ tasks: { activeSessionId: "sess-1" } }),
+  useAppStoreApi: () => mocks.appStore,
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -184,6 +187,19 @@ describe("useFileEditors open actions", () => {
     expect(mocks.addFileEditorPanel).toHaveBeenCalledWith(FIRST_PATH, "first.ts", {
       repo: undefined,
     });
+  });
+
+  // @covers AC-UI-FILE-EDITOR-MUTATION-002.1
+  it("selects an existing repo-scoped buffer when Files uses the workspace path", async () => {
+    const { result } = renderHook(() => useFileEditors());
+    const existing = { ...fileState("src/renamed.ts", "dirty"), repo: "frontend", isDirty: true };
+    mocks.getDockState().openFiles.set("frontend:src/renamed.ts", existing);
+    await result.current.openFile("frontend/src/renamed.ts");
+    expect(mocks.requestFileContent).not.toHaveBeenCalled();
+    expect(mocks.addFileEditorPanel).toHaveBeenCalledWith("src/renamed.ts", "renamed.ts", {
+      repo: "frontend",
+    });
+    expect(mocks.getDockState().openFiles.get("frontend:src/renamed.ts")).toBe(existing);
   });
 
   it("keeps a pending markdown preview request alive when focusing an already-open file", async () => {

@@ -106,3 +106,65 @@ and follow-up assertions remain; both cases run with retries disabled. The
 Threads grid case in that shard passed on retry and its failure screenshot
 already shows the expected two-row layout; its startup timing remains under
 observation in the next CI run without a speculative production change.
+
+## Projection barrier follow-up (PR #4621)
+
+The native Resume browser regression exposed a setup `session_mode` event that
+was received before its canonical projection. Recovery proof could also capture
+a cursor behind the peer's journal high-water mark. Retain the admission fence
+and wait for complete projection before returning proof. Revalidate advancing
+stream evidence under the same owner; reject changed ownership and honor caller
+cancellation. The shared wait is bounded to 10 seconds, polls every 200 ms after
+verified lag or monotonic same-owner stream progress, and issues evidence reads
+only, without repeating Resume or sending an old prompt.
+
+The new lifecycle tests reproduced both incomplete snapshots before the change.
+Focused proof race tests and the wider native recovery regressions passed,
+including cancellation, owner changes, and advancing acknowledgments. All six
+desktop and six phone browser scenarios passed without retries. Changed Go
+package lint passed with zero issues. Public controls and recovery instructions
+are unchanged.
+
+```bash
+cd apps/backend
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 2 ./internal/agent/runtime/lifecycle -run 'Test(NativeResume|AcknowledgedUnknown|LoadedNative)' -count=1
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResumeProof' -count=1
+```
+
+Claude requested explicit byte-accounting coverage in the proof-status table.
+Both byte-only increase and decrease cases failed before the correction. Retry
+now requires a monotonic sequence-counter advance. Byte usage can decrease during
+valid pruning, so byte monotonicity is not required. The existing pruning case
+now covers that decrease. Focused proof race tests, changed-package Go lint
+(zero issues), catalog validation, and specification lint passed.
+
+Main introduced the shared projection-wait owner in PR #4623. Conflict resolution
+uses that owner, deadline, and polling cadence. It retains the journal high-water
+check and requires sequence progress rather than byte changes for a retry.
+The acknowledgement regression covers progress after verified projection lag.
+The scrolling regression uses main's observer collection
+and keeps the reader-position and disabled-follow shrink cases.
+
+The ported proof-status test rejected unchanged status and byte-only changes
+after the sequence guard was restored. Native proof/projection race tests,
+196 focused frontend tests, TypeScript, changed-package Go lint (zero issues),
+changed-file ESLint, catalog validation, and full specification lint passed.
+Managed Playwright runs passed four desktop and four phone cases with retries
+disabled, covering projection success/timeout, delayed scrolling, and retained
+failure details.
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -C apps/backend -trimpath -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResume(Proof|Projection)' -count=1
+```
+
+The outside-diff review finding also covers progress on the first proof attempt.
+That result now enters the shared wait without requiring an earlier lag result.
+The new settling-progress test and the continuous-progress deadline case both
+failed before the correction. Only authenticated monotonic sequence progress can
+start this wait; byte-only changes and other evidence failures still return.
+
+The focused lifecycle and caller race checks passed after the correction.
+Changed-package Go lint reported zero issues. Both desktop and both phone
+projection-recovery cases passed with retries disabled after rebuilding the
+runtime. Catalog validation and specification lint passed. Existing screenshots
+remain accurate because this follow-up changes no frontend source or layout.

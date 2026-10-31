@@ -32,6 +32,7 @@ import { QuickChatTabItem, type QuickChatTabDragProps } from "./quick-chat-tab-i
 import { QuickTerminalTabItem } from "./quick-terminal-tab-item";
 import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { conversationTabReference, terminalTabReference } from "./use-quick-chat-tab-order";
+import { useActiveQuickChatTabReveal } from "./use-active-quick-chat-tab-reveal";
 
 const DRAG_ACTIVATION_DISTANCE = 8;
 const TOUCH_DRAG_DELAY_MS = 250;
@@ -77,10 +78,11 @@ function QuickChatConversationTab({
 
 type SortableQuickChatTabProps = {
   reference: string;
+  isActive: boolean;
   children: (dragProps: QuickChatTabDragProps) => ReactNode;
 };
 
-function SortableQuickChatTab({ reference, children }: SortableQuickChatTabProps) {
+function SortableQuickChatTab({ reference, isActive, children }: SortableQuickChatTabProps) {
   const {
     attributes,
     listeners,
@@ -100,6 +102,7 @@ function SortableQuickChatTab({ reference, children }: SortableQuickChatTabProps
       }}
       data-testid="quick-chat-sortable-tab"
       data-tab-reference={reference}
+      data-quick-chat-active={isActive ? "" : undefined}
       className={cn("shrink-0", isDragging && "z-50")}
     >
       {children({ attributes, listeners, setActivatorNodeRef })}
@@ -171,7 +174,7 @@ function QuickChatSortableTabItem({
   moveTab,
 }: QuickChatSortableTabItemProps) {
   return (
-    <SortableQuickChatTab reference={reference}>
+    <SortableQuickChatTab reference={reference} isActive={isActive}>
       {(dragProps) => {
         if (session) {
           return (
@@ -249,10 +252,15 @@ function QuickChatTabStrip({
 }: QuickChatTabStripProps) {
   const { t } = useTranslation();
   const setupSessions = sessions.filter((session) => isQuickChatSetupSessionId(session.sessionId));
+  const activeId = activeKind === "conversation" ? activeSessionId : activeTerminalTabId;
+  const stripRef = useActiveQuickChatTabReveal(activeId ? `${activeKind}:${activeId}` : null);
 
   return (
     <div className="flex min-w-0 items-center gap-1 border-b bg-muted/20 px-2 py-1">
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
+      <div
+        ref={stripRef}
+        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide"
+      >
         {sortableOrder.map((reference, index) => {
           const session = sessionByReference.get(reference);
           const terminal = terminalByReference.get(reference);
@@ -284,15 +292,24 @@ function QuickChatTabStrip({
           );
         })}
         {setupSessions.map((session, index) => (
-          <QuickChatConversationTab
+          <div
             key={session.sessionId || `new-${index}`}
-            session={session}
-            name={quickChatTabName(t, session, sessions.indexOf(session))}
-            isActive={activeKind === "conversation" && session.sessionId === activeSessionId}
-            onActivate={() => onTabChange(session.sessionId)}
-            onClose={() => onTabClose(session.sessionId)}
-            onRename={(name) => onRename(session.sessionId, name)}
-          />
+            className="shrink-0"
+            data-quick-chat-active={
+              activeKind === "conversation" && session.sessionId === activeSessionId
+                ? ""
+                : undefined
+            }
+          >
+            <QuickChatConversationTab
+              session={session}
+              name={quickChatTabName(t, session, sessions.indexOf(session))}
+              isActive={activeKind === "conversation" && session.sessionId === activeSessionId}
+              onActivate={() => onTabChange(session.sessionId)}
+              onClose={() => onTabClose(session.sessionId)}
+              onRename={(name) => onRename(session.sessionId, name)}
+            />
+          </div>
         ))}
         <QuickTabAddMenu onNewAgent={onNewChat} onNewTerminal={onNewTerminal} />
       </div>

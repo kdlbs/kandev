@@ -35,6 +35,11 @@ for each experiment. PR #4457 already met the distinct 50% E2E-step target.
 
 ## First candidate: independent frontend and Windows work
 
+The [October 26 continuation](ci-performance.md#october-26-cache-and-partition-continuation)
+defines the E2E dependency-cache repairs.
+It also defines duration allocation within these same two frontend jobs.
+Its work orders preserve this delivery target and the current job counts.
+
 Run the existing frontend static checks and build independently of two built-in
 Vitest file shards. Keep the same package script (including pretest generation),
 production NODE_ENV guard, isolated projects, container, cache discovery and
@@ -59,11 +64,13 @@ do not derive coverage from source-name guesses. Every prior native step has
 exactly one owner. All groups remain on windows-latest and join the existing
 backend aggregate. Targeted native compilation uses GOMAXPROCS=2 and a 2 GiB
 Go soft memory limit on the existing hosted Windows runner, so cold race builds
-do not thrash under the former 512 MiB heap. Test and step alarms stay intact.
+do not thrash under the former 512 MiB heap. Test alarms stay intact.
 Persistence/settings groups first compile their exact package union with the
-same race/fts5 flags and a zero-match selector. This bounded warmup permits two
-compiler packages; it runs no selected assertions and does not change the
-subsequent test/step deadlines. Full-job measurement includes compilation.
+same race/fts5 flags and a zero-match selector. The persistence compilation
+allowance is twenty minutes; settings keeps its ten-minute allowance. This
+bounded warmup permits two compiler packages and runs no selected assertions.
+It does not change subsequent test/step deadlines or the full-job deadline.
+Full-job measurement includes compilation.
 Fail-fast stays false. This isolates compilation and groups
 related tagged persistence checks without changing test selections.
 

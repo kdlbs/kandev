@@ -149,6 +149,7 @@ desktop and phone.
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Recorded source path identity](../../../plans/recorded-source-path-identity/plan.md)
 - [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
 - [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
 

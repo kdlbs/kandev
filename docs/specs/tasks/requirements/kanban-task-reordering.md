@@ -9,10 +9,9 @@ owners:
 
 ## Overview
 
-A workflow step's task order decides which task the WIP overflow queue
-promotes next. Persisted, user-controlled card ordering makes the board and
-WIP pull share that priority: users reorder within a column, every view
-reconciles, and the top task is taken next.
+Persisted card ordering makes the board and WIP overflow queue share one
+priority: users reorder within a column, every view reconciles, and the top
+task is taken next.
 
 [Design](../system-design/kanban-task-reordering.md). Phone interactions follow
 [mobile scrolling](mobile-kanban-scroll.md); drag criteria apply to wider views.
@@ -130,7 +129,10 @@ of its step, so that it is visibly and actually the next task that step takes.
   cancel its gesture.
 - **AC-TASKS-KANBAN-TASK-REORDERING-001.13:** Dragging a card onto a different
   step shall continue to move the task to that step with its existing
-  behavior.
+  behavior. Failure shall restore only owned stage changes, skipping rejected
+  intermediate optimism from overlapping moves. Keep newer accepted stages, even
+  equal targets; never recreate departed tasks or write to replaced workspaces.
+  Desktop drag and phone card-menu moves shall share this behavior.
 - **AC-TASKS-KANBAN-TASK-REORDERING-001.38:** The Pipeline view shall render
   step order per AC-TASKS-KANBAN-TASK-REORDERING-001.2 but shall accept no
   reorder by any input, neither a pointer drag nor the keyboard commands of

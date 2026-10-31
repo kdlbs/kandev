@@ -424,3 +424,5 @@ See also the [repository placement implementation package](../../../plans/worksp
 ## Current-workspace extension
 
 The [current-workspace design](current-workspace-sources.md) supersedes the original toolbar location and repositoryless exclusion. It adds root-preserving Local/scratch attachment while retaining remote host-folder restrictions. [New plan](../../../plans/current-workspace-sources/plan.md).
+
+The [current managed source recovery design](current-managed-attachment-recovery.md) extends host attachment for absent current clone destinations. It preserves this design's session/environment admission and compensation. Missing legacy recreation is excluded.

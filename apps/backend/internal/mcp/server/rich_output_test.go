@@ -33,6 +33,18 @@ func TestRichOutputToolRegistration(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-AGENT-RICH-OUTPUT-003.14
+func TestRichOutputToolRegistrationAdvertisesStatusListValues(t *testing.T) {
+	for _, mode := range []string{ModeTask, ModeOffice} {
+		t.Run(mode, func(t *testing.T) {
+			s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, mode)
+			tool := s.mcpServer.ListTools()[richOutputToolName]
+
+			assert.Contains(t, tool.Tool.Description, "status:passed|failed|running|pending|skipped")
+		})
+	}
+}
+
 func TestRichOutputToolAcceptsValidPayload(t *testing.T) {
 	s := New(&testBackend{}, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
 
@@ -162,10 +174,12 @@ func TestRichOutputToolDescriptionStaysFocusedAndDiscoverable(t *testing.T) {
 		assert.Contains(t, tool.Description, phrase)
 	}
 	for _, phrase := range []string{
-		"chart, graph, plot, preview, KPI, or metrics request with data, call directly",
-		"No ASCII, SVG, HTML, or separate app",
-		"Kandev owns axes, legends, tooltips, layout, and styling",
-		"workspace-relative",
+		"structured comparisons",
+		"recorded checks",
+		"with data: call directly",
+		"No ASCII/SVG/HTML/separate app",
+		"Kandev owns axes/legends/tooltips/layout/style",
+		"CSV: workspace-relative",
 		"Markdown for small text tables",
 		"Label series with units",
 	} {

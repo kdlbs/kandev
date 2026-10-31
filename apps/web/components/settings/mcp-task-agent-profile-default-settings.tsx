@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useSettingsDraft } from "./use-settings-draft";
 import { SettingsInfo } from "./settings-info";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
@@ -147,18 +147,7 @@ export function MCPTaskAgentProfileDefaultSettings({
   const preference = useAppStore((state) => state.userSettings.mcpTaskAgentProfileDefault);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [saved, setSaved] = useState(preference);
-  const [draft, setDraft] = useState(preference);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-  const isDirty = draft !== saved;
-
-  useEffect(() => {
-    setSaved((previous) => {
-      if (draftRef.current === previous) setDraft(preference);
-      return preference;
-    });
-  }, [preference]);
+  const { saved, setSaved, draft, setDraft, isDirty } = useSettingsDraft(preference);
 
   useSettingsSaveContributor({
     id: "general-mcp-task-agent-profile-default",

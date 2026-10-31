@@ -44,7 +44,8 @@ export type ThreadSortKey =
   | "taskState"
   | "workflow"
   | "priority"
-  | "primaryAgent";
+  | "primaryAgent"
+  | "selection";
 export type ThreadSortDirection = "asc" | "desc";
 export type ThreadSortSpec = { key: ThreadSortKey; direction: ThreadSortDirection };
 export type ThreadLayout = "columns" | "grid";

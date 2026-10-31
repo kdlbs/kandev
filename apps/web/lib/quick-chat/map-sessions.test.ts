@@ -12,6 +12,7 @@ describe("toQuickChatSessions", () => {
           kind: "chat",
           name: "Chat 1",
           agent_profile_id: "agent-1",
+          creation_id: "create-1",
         },
       ]),
     ).toEqual([
@@ -22,6 +23,7 @@ describe("toQuickChatSessions", () => {
         workspaceId: "ws-1",
         name: "Chat 1",
         agentProfileId: "agent-1",
+        creationId: "create-1",
       },
     ]);
   });

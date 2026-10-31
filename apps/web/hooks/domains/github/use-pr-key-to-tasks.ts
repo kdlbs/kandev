@@ -1,12 +1,13 @@
 "use client";
 
+import { githubResourceKey } from "@/lib/github/host";
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useWorkspacePRs } from "./use-task-pr";
 import type { TaskPR } from "@/lib/types/github";
 
-function prKey(owner: string, repo: string, prNumber: number): string {
-  return `${owner}/${repo}#${prNumber}`;
+function prKey(owner: string, repo: string, prNumber: number, host = "github.com"): string {
+  return githubResourceKey(owner, repo, prNumber, host);
 }
 
 export function usePRKeyToTasks(workspaceId: string | null): Map<string, TaskPR[]> {
@@ -30,7 +31,7 @@ export function usePRKeyToTasks(workspaceId: string | null): Map<string, TaskPR[
       const prs = byTaskId[taskId];
       if (!Array.isArray(prs)) continue;
       for (const pr of prs) {
-        const key = prKey(pr.owner, pr.repo, pr.pr_number);
+        const key = prKey(pr.owner, pr.repo, pr.pr_number, pr.github_host);
         const existing = map.get(key) ?? [];
         existing.push(pr);
         map.set(key, existing);

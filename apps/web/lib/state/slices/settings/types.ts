@@ -440,6 +440,8 @@ export type UserSettingsState = {
   preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
+  /** Show next-prompt suggestions in the chat composer. */
+  promptSuggestions: boolean;
   autoFocusNewTasks: boolean;
   agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;

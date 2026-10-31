@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
@@ -130,13 +131,16 @@ func (i *Instance) IsIdle(now time.Time, timeout time.Duration) bool {
 
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url,omitempty"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name               string                          `json:"name"`
+	URL                string                          `json:"url,omitempty"`
+	Type               string                          `json:"type,omitempty"`
+	Command            string                          `json:"command,omitempty"`
+	Args               []string                        `json:"args,omitempty"`
+	Env                map[string]string               `json:"env,omitempty"`
+	Headers            map[string]string               `json:"headers,omitempty"`
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // CreateRequest contains the parameters for creating a new agent instance.
@@ -188,6 +192,9 @@ type CreateRequest struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
@@ -234,6 +241,10 @@ type CreateRequest struct {
 	DeliveryStreamID          string                                    `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                    `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64                                    `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

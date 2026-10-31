@@ -2,6 +2,7 @@ import { type Locator, type Page, type Response } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { WsWatcher } from "../../helpers/causal-waits";
+import type { BackendContext } from "../../fixtures/backend";
 
 /**
  * Shared Quick Chat drivers. Kept out of the spec files so several specs
@@ -47,7 +48,7 @@ export async function waitForSessionSettledBaseline(
         return (
           !!session &&
           SETTLED_SESSION_STATES.has(session.state) &&
-          turns.some((turn) => !!turn.completed_at)
+          turns.some((turn) => turn.metadata?.lifecycle_only !== true && !!turn.completed_at)
         );
       },
       {
@@ -93,28 +94,65 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
   // If a stale session tab is showing, click "+" to start a fresh setup form.
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
-    await page.getByTestId("quick-chat-new-agent").click();
+    await openNewQuickChatSetup(dialog, page);
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
   return dialog;
 }
 
-export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
+/** Finish the owned menu's exit and focus return before opening a setup picker. */
+export async function openNewQuickChatSetup(dialog: Locator, page: Page): Promise<void> {
+  const trigger = dialog.getByTestId("quick-chat-add-menu-trigger");
+  await trigger.click();
+  const menu = page.getByTestId("quick-chat-add-menu-content");
+  await menu.getByTestId("quick-chat-new-agent").click();
+  await expect(menu).toHaveCount(0, { timeout: 5_000 });
+  await expect(trigger).toBeFocused({ timeout: 5_000 });
+  await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
+}
+
+export async function prepareMockCodexProfile(apiClient: ApiClient, backend: BackendContext) {
+  await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+  const { agents } = await apiClient.listAgents();
+  const codex = agents.find((agent) => agent.name === "codex-acp");
+  if (!codex) throw new Error("E2E backend did not register the mock Codex ACP agent");
+
+  const profile =
+    codex.profiles.find((candidate) => candidate.enabled && candidate.model !== "") ??
+    (await apiClient.createAgentProfile(codex.id, "Quick Chat rate-limit retry", {
+      model: "mock-fast",
+    }));
+  if (!profile.enabled) throw new Error("mock Codex retry profile is disabled");
+}
+
+export async function selectAgentIfNeeded(
+  dialog: Locator,
+  page: Page,
+  preferredAgentName?: string,
+) {
   const selector = dialog.getByTestId("agent-profile-selector");
   await expect(selector).toBeVisible({ timeout: 10_000 });
   const selectedProfile = await selector.innerText();
-  if (selectedProfile.includes("Select agent")) {
+  const shouldSelect = preferredAgentName
+    ? !selectedProfile.includes(preferredAgentName)
+    : selectedProfile.includes("Select agent");
+  if (shouldSelect) {
     // Keep the picker open while its options render. Retrying the click can
     // toggle the popover closed before a slow profile catalog becomes usable.
     if ((await selector.getAttribute("aria-expanded")) !== "true") {
       await selector.click();
     }
     await expect(selector).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
-    const option = page.getByRole("option").first();
+    const option = preferredAgentName
+      ? page.getByRole("option").filter({ hasText: preferredAgentName }).first()
+      : page.getByRole("option").first();
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
-    await expect(selector).not.toContainText("Select agent", { timeout: 10_000 });
+    if (preferredAgentName) {
+      await expect(selector).toContainText(preferredAgentName, { timeout: 10_000 });
+    } else {
+      await expect(selector).not.toContainText("Select agent", { timeout: 10_000 });
+    }
     await expect(page.getByTestId("quick-chat-agent-picker-content")).toBeHidden({
       timeout: 5_000,
     });

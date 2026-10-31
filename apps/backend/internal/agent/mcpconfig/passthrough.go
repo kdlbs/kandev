@@ -85,9 +85,9 @@ func marshalMCPFile(v any) ([]byte, error) {
 
 // --- Claude ------------------------------------------------------------------
 
-// claudeReservedServerName is skipped by Claude Code at load time (it warns and
+// ClaudeReservedServerName is skipped by Claude Code at load time (it warns and
 // ignores it), so we never emit it.
-const claudeReservedServerName = "workspace"
+const ClaudeReservedServerName = "workspace"
 
 // claudeStreamableHTTPType is Claude Code's spelling of streamable HTTP (hyphen,
 // not underscore); Claude treats it as an alias of "http".
@@ -120,7 +120,7 @@ func (s ClaudeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 	}
 	entries := make(map[string]claudeServerEntry, len(servers))
 	for _, srv := range servers {
-		if srv.Name == "" || srv.Name == claudeReservedServerName {
+		if srv.Name == "" || srv.Name == ClaudeReservedServerName {
 			continue
 		}
 		entries[srv.Name] = claudeServerEntryFromServer(srv)

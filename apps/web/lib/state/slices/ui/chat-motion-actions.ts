@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import { readChatAnimationsEnabled, writeChatAnimationsEnabled } from "@/lib/settings/chat-motion";
 import type { ChatMotionState, UISlice } from "./types";
 
@@ -7,7 +8,7 @@ export function loadChatMotionState(): ChatMotionState {
   return { enabled, savedEnabled: enabled };
 }
 
-type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+type ImmerSet = Parameters<SliceCreator<UISlice>>[0];
 
 export function buildChatMotionActions(set: ImmerSet) {
   return {

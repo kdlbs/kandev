@@ -136,9 +136,9 @@ func taskScanColumnSQL(alias string, useExpressions bool) string {
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
 // when the task is owned by office: either it has a non-empty project_id
-// (explicit office task) or its workflow matches the workspace's
-// office_workflow_id (the canonical "office workflow"). Kanban tasks live
-// in any other workflow and have no project.
+// (explicit office task), its workflow matches the canonical office_workflow_id,
+// or it belongs to that Office workspace's system-owned builtin Routine workflow.
+// Ordinary Kanban and user-owned routine-template workflows remain distinct.
 func isFromOfficeProjection(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
@@ -150,6 +150,15 @@ func isFromOfficeProjection(alias string) string {
 			WHERE w.id = ` + alias + `.workspace_id
 			  AND COALESCE(w.office_workflow_id, '') != ''
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
+		)
+		OR EXISTS (
+			SELECT 1 FROM workspaces w
+			JOIN workflows wf ON wf.workspace_id = w.id
+			WHERE w.id = ` + alias + `.workspace_id
+			  AND COALESCE(w.office_workflow_id, '') != ''
+			  AND wf.id = ` + alias + `.workflow_id
+			  AND wf.is_system = 1
+			  AND wf.workflow_template_id = 'routine'
 		)
 	)`
 }
@@ -472,6 +481,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 			`UPDATE tasks SET assignment_generation = 1 WHERE id = ?`), task.ID); err != nil {
 			return "", err
 		}
+	}
+	if err := r.claimCreationAttachmentsTx(ctx, tx, task); err != nil {
+		return "", err
 	}
 	return entryID, nil
 }
@@ -1390,7 +1402,7 @@ func (r *Repository) updateTaskTx(
 		return "", 0, err
 	}
 	var currentState v1.TaskState
-	stateQuery := `SELECT state FROM tasks WHERE id = ?`
+	stateQuery := taskStateSelectQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
@@ -1405,7 +1417,7 @@ func (r *Repository) updateTaskTx(
 	if err != nil {
 		return "", 0, err
 	}
-	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	metadata, err = r.preserveProtectedLiveMetadata(ctx, tx, task.ID, metadata)
 	if err != nil {
 		return "", 0, err
 	}
@@ -1521,8 +1533,27 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, false)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionReportingApplied is the automatic-
+// transition variant of UpdateTaskWithWorkflowStepAdmission. It reports the
+// transition's applied state so the orchestrator can stop destination effects
+// when admission refused the write, and it guards the commit with the state
+// observed on the caller's snapshot.
+//
+// A later business-state write owns the row: when the locked current state is
+// BLOCKED, or no longer matches the caller's observed state, admission returns
+// admitted=false, applied=false and leaves the task row untouched.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+) (admitted, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, true)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
@@ -1543,7 +1574,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect,
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect, true,
 	)
 }
 
@@ -1568,7 +1599,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil, false,
 	)
 	return admitted, err
 }
@@ -1615,6 +1646,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
 			&alreadyApplied,
 			nil,
+			false,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1642,7 +1674,7 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil, false,
 	)
 	return admitted, err
 }
@@ -1665,7 +1697,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil, true)
 	return applied, err
 }
 
@@ -1686,7 +1718,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
 		effect.CreatedAt = r.nowUTC()
 	}
 	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect, true,
 	)
 	return applied, err
 }
@@ -1701,7 +1733,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil, false,
 	)
 }
 
@@ -1850,7 +1882,8 @@ func (r *Repository) deleteDeferredMoveGuardTx(
 // metadata keys) to land in between. Writing that stale snapshot would
 // silently clobber the concurrent edit. Only the fields this operation owns
 // (workflow id, the deferred-moves metadata sub-map) are carried forward
-// from the caller's request; everything else comes from the fresh row.
+// from the caller's request. Completion guards also preserve their owned handoff
+// carry update or removal; everything else comes from the fresh row.
 //
 // The unconditional (expectedStepID == "") callers — manual/bulk/feeder
 // moves — must NOT call this: their caller-built `task` already carries
@@ -1896,6 +1929,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if requestedWorkflowID == "" {
 		requestedWorkflowID = currentTask.WorkflowID
 	}
+	rebaseCompletionHandoff(ctx, task, currentTask, expectedStepID)
 	*task = *currentTask
 	if requestedWorkflowID != "" {
 		task.WorkflowID = requestedWorkflowID
@@ -1965,9 +1999,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	deferredMove *messagequeue.PendingMoveRecord,
 	workflowChangeSource *models.WorkflowChangeSource,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState)
 }
 
 type exactTaskMoveOperation struct {
@@ -1993,6 +2028,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -2012,6 +2048,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			exactOperation,
 			alreadyApplied,
 			effect,
+			guardBusinessState,
 		)
 		unlock()
 
@@ -2049,6 +2086,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
 	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2150,6 +2188,24 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		if latestTransitionID != deferredMove.Move.FromTransitionID {
 			return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+		}
+	}
+	// The automatic transition's business precondition is the locked current
+	// state. A BLOCKED task is owned by the decision that set it, and a state
+	// that no longer matches the caller's snapshot means another writer
+	// committed a newer outcome after this transition was decided. Either way
+	// the move is not applied: report it as a lost comparison, not an error,
+	// and leave the row, any delivery effect, and the destination untouched.
+	if guardBusinessState {
+		currentState, err := r.readTaskStateInTx(ctx, tx, task.ID)
+		if err != nil {
+			return false, false, err
+		}
+		if currentState == v1.TaskStateBlocked {
+			return false, false, nil
+		}
+		if task.State != "" && currentState != task.State {
+			return false, false, nil
 		}
 	}
 	if exactOperation != nil {
@@ -2357,6 +2413,17 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 	if strings.TrimSpace(expectedValue) == "" {
 		return false, nil
 	}
+	return r.removeTaskMetadataKeyIfValueWithExecutor(ctx, r.db, taskID, key, expectedValue)
+}
+
+// removeTaskMetadataKeyIfValueWithExecutor is the transaction-capable form of
+// RemoveTaskMetadataKeyIfValue, so a conditional removal can share one task
+// transaction with another metadata write.
+func (r *Repository) removeTaskMetadataKeyIfValueWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key, expectedValue string,
+) (bool, error) {
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -2375,7 +2442,7 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 		`
 		args = []interface{}{path, time.Now().UTC(), taskID, path, expectedValue}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -2970,14 +3037,14 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // writers did to the key in between.
 //
 // It must operate on the metadata bytes updateTaskTx passes in — already
-// merged by preserveLiveHandoffProvenance with the row's live handoffs/
+// merged by preserveProtectedLiveMetadata with the row's live handoffs/
 // handoff_source — rather than re-deriving from task.Metadata: re-deriving
 // would rebuild the payload from the caller's pre-transaction snapshot and
 // silently discard that merge, reverting a concurrently committed handoff
 // provenance write. Decoding into map[string]json.RawMessage rather than
 // map[string]interface{} avoids a float64 round-trip that would corrupt an
 // unrelated large or high-precision numeric field elsewhere in the document
-// (AC-27), matching preserveLiveHandoffProvenance's own approach.
+// (AC-27), matching preserveProtectedLiveMetadata's own approach.
 //
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
@@ -3536,7 +3603,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	var currentState v1.TaskState
-	stateQuery := `SELECT state FROM tasks WHERE id = ?`
+	stateQuery := taskStateSelectQuery
 	if dialect.IsPostgres(r.db.DriverName()) {
 		stateQuery += forUpdateClause
 	}
@@ -3772,6 +3839,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 		return "", err
 	}
 	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
+		return "", err
+	}
+	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
 		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -4360,6 +4430,17 @@ func (r *Repository) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*mo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+func (r *Repository) ListTasksByWorkspaceForCommandPanel(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	if workflowID == "" || query != "" {
+		return nil, 0, fmt.Errorf("command panel listing requires a workflow and empty query")
+	}
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+func (r *Repository) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, commandPanelVisible bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -4399,7 +4480,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort, commandPanelVisible)
 	} else {
 		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort)
 	}
@@ -4434,7 +4515,7 @@ func (r *Repository) ListTasksForDeletion(
 	if pageSize <= 0 {
 		pageSize = 1
 	}
-	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "")
+	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "", false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -4513,7 +4594,7 @@ func (r *Repository) RestoreTaskParentIfUnchanged(
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string, commandPanelVisible bool) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -4524,17 +4605,26 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		args = append(args, repositoryID)
 	}
 	var total int
-	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+taskFilter), args...).Scan(&total); err != nil {
+	countFilter, selectFilter := taskFilter, rewriteFilterForAlias(taskFilter, "t")
+	if commandPanelVisible {
+		countFilter += commandPanelStepPredicate("tasks")
+		selectFilter += commandPanelStepPredicate("t")
+	}
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+countFilter), args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
+		WHERE t.workspace_id = ?`+selectFilter+`
 		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func commandPanelStepPredicate(alias string) string {
+	return ` AND EXISTS (SELECT 1 FROM workflow_steps panel_step WHERE panel_step.id = ` + alias + `.workflow_step_id AND panel_step.workflow_id = ` + alias + `.workflow_id AND panel_step.show_in_command_panel = 1)`
 }
 
 func taskListOrderBy(driver, alias, sort string) string {
@@ -5731,6 +5821,76 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 		return err
 	}
 	return tx.Commit()
+}
+
+// UpdateTaskStateIfWorkflowStep atomically checks the current workflow step,
+// applies completion guards, and writes the new state.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, nil, state)
+}
+
+// UpdateTaskStateIfWorkflowStepAndState atomically checks the observed task
+// state and workflow step before applying a state transition.
+func (r *Repository) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState, state v1.TaskState,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, &expectedState, state)
+}
+
+func (r *Repository) updateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState *v1.TaskState, state v1.TaskState,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var currentState v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&currentState, &workflowID, &stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	if stepID != expectedStepID || (expectedState != nil && currentState != *expectedState) {
+		return false, nil
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, state,
+		workflowID, stepID, workflowID, stepID); err != nil {
+		return false, err
+	}
+	updateQuery := `UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?`
+	args := []any{state, r.nowUTC(), taskID, expectedStepID}
+	if expectedState != nil {
+		updateQuery += ` AND state = ?`
+		args = append(args, *expectedState)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskStateIfSessionState atomically ties a task-state write to the

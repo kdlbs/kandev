@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/agents/requirements/dynamic-agent-routing-rollout-blockers.md
+requirements:
+  - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-ROLLOUT-BLOCKERS-001
+system_design:
+  - ../../specs/agents/system-design/dynamic-agent-routing-02.md
 created: 2026-08-15
 status: completed
 ---

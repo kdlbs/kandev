@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { ThreadFilterClause, ThreadView } from "@/lib/state/slices/ui/thread-view-types";
-import { queryThreadView, selectThreadCandidates } from "./thread-view-query";
+import { effectiveThreadSort, queryThreadView, selectThreadCandidates } from "./thread-view-query";
 
 type TaskOverrides = Partial<KanbanState["tasks"][number]> & { id: string };
 const REVIEW_STEP_ID = "step-review";
@@ -331,6 +331,96 @@ describe("queryThreadView attention sort", () => {
       "review-old",
       "waiting-new",
     ]);
+  });
+});
+
+describe("queryThreadView selection order", () => {
+  // Attention would rank these needs-action, running, waiting: the reverse of
+  // the selection, so a pass proves the selection drives the order.
+  function rankedTasks(): KanbanState["tasks"] {
+    return [
+      task({
+        id: "waiting",
+        primarySessionState: "WAITING_FOR_INPUT",
+        statusSummary: summary({
+          primary_session: { id: "session-waiting", state: "WAITING_FOR_INPUT" },
+        }),
+      }),
+      task({ id: "running" }),
+      task({
+        id: "action",
+        primarySessionState: "WAITING_FOR_INPUT",
+        statusSummary: summary({
+          primary_session: { id: "session-action", state: "WAITING_FOR_INPUT" },
+          pending_action: "permission",
+        }),
+      }),
+    ];
+  }
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.15
+  it("orders a selected scope by the stored selection, ignoring attention", () => {
+    const selectionView = view({
+      taskScope: { mode: "selected", taskIds: ["waiting", "running", "action"] },
+      sort: { key: "selection", direction: "asc" },
+    });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, selectionView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "waiting",
+      "running",
+      "action",
+    ]);
+  });
+
+  it("reverses the selection order when descending", () => {
+    const selectionView = view({
+      taskScope: { mode: "selected", taskIds: ["waiting", "running", "action"] },
+      sort: { key: "selection", direction: "desc" },
+    });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, selectionView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "action",
+      "running",
+      "waiting",
+    ]);
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.17
+  it("orders a stored selection sort with the all scope as ascending attention", () => {
+    const allView = view({ sort: { key: "selection", direction: "desc" } });
+
+    const result = queryThreadView({ "workflow-1": snapshot(rankedTasks()) }, allView);
+
+    expect(result.matchingCandidates.map((candidate) => candidate.taskId)).toEqual([
+      "action",
+      "running",
+      "waiting",
+    ]);
+  });
+});
+
+describe("effectiveThreadSort", () => {
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.17
+  it("shows a stored selection sort with the all scope as ascending attention", () => {
+    expect(effectiveThreadSort({ key: "selection", direction: "desc" }, "all")).toEqual({
+      key: "attention",
+      direction: "asc",
+    });
+  });
+
+  it("keeps the stored sort for every other scope and key combination", () => {
+    expect(effectiveThreadSort({ key: "selection", direction: "desc" }, "selected")).toEqual({
+      key: "selection",
+      direction: "desc",
+    });
+    expect(effectiveThreadSort({ key: "title", direction: "desc" }, "all")).toEqual({
+      key: "title",
+      direction: "desc",
+    });
   });
 });
 

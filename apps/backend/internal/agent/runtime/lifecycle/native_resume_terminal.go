@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"math"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -28,6 +29,10 @@ func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status 
 		if err != nil {
 			return nil, err
 		}
+		row, err = nativeResumePendingTerminal(ctx, execution, status, submission, row, repository)
+		if err != nil {
+			return nil, err
+		}
 		if !peerMatchesTerminalHistory(execution, status, submission, row) {
 			return nil, fmt.Errorf("%w: native resume terminal evidence disagrees", ErrDurableAdoptionBlocked)
 		}
@@ -42,6 +47,36 @@ func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status 
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+type pendingNativeResumeTerminalVerifier interface {
+	VerifyPendingNativeResumeTerminal(context.Context, string, string, models.NativeResumeSubmissionEvidence) (bool, error)
+}
+
+// A projected terminal can outlive an interrupted workflow settlement. Derive
+// only a recovery view; settlement markers and historical records stay intact.
+func nativeResumePendingTerminal(ctx context.Context, execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission, repository AgentDeliveryRepository) (*models.AgentDeliverySubmission, error) {
+	if row == nil || row.TerminalStreamID != "" || row.TerminalSequence != 0 || row.TerminalTurnID != "" || row.FullySettledAt != nil || row.PayloadPrunedAt != nil || peer.TerminalSequence > math.MaxInt64 {
+		return row, nil
+	}
+	verifier, ok := repository.(pendingNativeResumeTerminalVerifier)
+	if !ok {
+		return row, nil
+	}
+	derived := *row
+	derived.TerminalStreamID, derived.TerminalSequence = peer.StreamID, int64(peer.TerminalSequence)
+	if !peerMatchesTerminalHistory(execution, status, peer, &derived) {
+		return row, nil
+	}
+	valid, err := verifier.VerifyPendingNativeResumeTerminal(ctx, row.SessionID, row.IncarnationID, models.NativeResumeSubmissionEvidence{
+		ID: row.ID, HarnessGeneration: row.HarnessGeneration, PayloadHash: row.PayloadHash,
+		State: row.State, Outcome: row.Outcome, StreamID: peer.StreamID,
+		TerminalStreamID: derived.TerminalStreamID, TerminalSequence: derived.TerminalSequence,
+	})
+	if err != nil || !valid {
+		return row, err
+	}
+	return &derived, nil
 }
 
 func peerMatchesTerminalHistory(execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission) bool {

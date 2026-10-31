@@ -34,6 +34,7 @@ import { isSettingsRoute } from "./app-sidebar-route";
 import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 import { SIDEBAR_ITEM_ACTIVE } from "./app-sidebar-constants";
+import { useSettingsReturnHref } from "@/components/settings/settings-navigation-provider";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
@@ -316,6 +317,7 @@ function useSettingsGearToggle(
 ) {
   const router = useRouter();
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
+  const returnHref = useSettingsReturnHref();
 
   return () => {
     const onSettingsRoute = isSettingsRoute(pathname);
@@ -324,7 +326,7 @@ function useSettingsGearToggle(
       return;
     }
     if (settingsMode && onSettingsRoute) {
-      router.push(workspaceHomeHref(activeWorkspace, startupPage), {
+      router.push(returnHref ?? workspaceHomeHref(activeWorkspace, startupPage), {
         onNavigated: onToggleSettingsMode,
       });
       return;

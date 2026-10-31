@@ -7,6 +7,7 @@ import {
   listTurnChangeHistory,
 } from "@/lib/api/domains/turn-changes-api";
 import type { TurnChangeHistoryPage, TurnChangeSetSummary } from "@/lib/types/turn-changes";
+import { useWebSocketClient } from "@/lib/ws/connection";
 
 const PAGE_SIZE = 50;
 const EMPTY_SUMMARIES: TurnChangeSetSummary[] = [];
@@ -54,7 +55,39 @@ export function clearTurnChangeRequestsForTest(): void {
   inFlightPages.clear();
 }
 
-export function useSessionTurnChanges(sessionId: string | null) {
+function useTurnChangeSubscription(
+  sessionId: string | null,
+  store: ReturnType<typeof useAppStoreApi>,
+  setError: (error: unknown) => void,
+) {
+  const client = useWebSocketClient();
+  const connectionStatus = useAppStore((state) => state.connection.status);
+  useEffect(() => {
+    if (!sessionId || !client || connectionStatus !== "connected") return;
+    const subscription = client.subscribeSessionWithReady(sessionId);
+    let active = true;
+    void subscription.ready
+      .then(async () => {
+        // The new snapshot must not join a read started before the subscription was ready.
+        await inFlightPages.get(`${sessionId}:0`)?.catch(() => undefined);
+        if (!active) return;
+        await loadPage(sessionId, 0, store);
+        if (active) setError(null);
+      })
+      .catch((error) => {
+        if (active) setError(error);
+      });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [sessionId, client, connectionStatus, store, setError]);
+}
+
+export function useSessionTurnChanges(
+  sessionId: string | null,
+  { detailActive = true }: { detailActive?: boolean } = {},
+) {
   const store = useAppStoreApi();
   const summaries = useAppStore((state) => selectTurnChangeSummaries(state.turnChanges, sessionId));
   const loaded = useAppStore((state) =>
@@ -85,6 +118,8 @@ export function useSessionTurnChanges(sessionId: string | null) {
   useEffect(() => {
     if (sessionId && !loaded) void load(0);
   }, [sessionId, loaded, load]);
+
+  useTurnChangeSubscription(detailActive ? sessionId : null, store, setError);
 
   const loadMore = useCallback(() => {
     if (nextOffset !== null) void load(nextOffset);

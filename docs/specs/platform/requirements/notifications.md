@@ -31,6 +31,15 @@ Kandev currently treats every transition to a session's generic `WAITING_FOR_INP
 - **AC-PLATFORM-NOTIFICATIONS-001.10:** An update that omits event selection shall preserve existing subscriptions. An explicitly empty selection shall remove all subscriptions. An update of a missing provider or a provider owned by another user shall fail without changing any provider or subscription rows.
 - **AC-PLATFORM-NOTIFICATIONS-001.11:** For a task-scoped Local notification, Kandev shall suppress sound and browser/native notification dispatch for current-task attention only when its document is visible, has focus, and shows that task. A visible but unfocused window, a hidden document, or a different active task shall remain eligible for existing Local delivery, subject to the existing event selection, sound preference, transport availability, and notification permission. The attention decision shall use the current state for each occurrence, including when focus changes between occurrences in the same session.
 
+- **AC-PLATFORM-NOTIFICATIONS-001.12:** When a notification settings Save succeeds, the accepted baseline and shared saved-provider snapshot advance to the acknowledged canonical configuration. Any later provider/event, Apprise name/URL, create-form, or deletion draft remains current and dirty wherever it differs from that baseline. A subsequent explicit Save persists those choices; Reset restores the acknowledged baseline. A confirmed failed Save preserves the draft and existing error behavior. This applies to the existing desktop and phone controls without changing their composition.
+
+- **AC-PLATFORM-NOTIFICATIONS-001.13:** When the Linux System provider uses `notify-send`, the selected notification title and body shall reach that transport as literal operands even when either resembles a command option. Ordinary text remains unchanged.
+- **AC-PLATFORM-NOTIFICATIONS-001.14:** The Linux System provider shall retain its configured timeout and icon behavior, report command failures to its caller, and honor cancellation of an in-flight command.
+- **AC-PLATFORM-NOTIFICATIONS-001.15:** In mock E2E mode, System delivery shall remain suppressed without invoking an operating-system notification command.
+- **AC-PLATFORM-NOTIFICATIONS-001.16:** A Local Kandev update notification with a known release version shall display its title and body in the selected application locale, including native delivery. The displayed copy shall identify the release version and shall not depend on English text supplied by the backend.
+- **AC-PLATFORM-NOTIFICATIONS-001.17:** When desktop notification permission is undecided or granted, the Notifications settings page shall display no empty warning card, warning padding, or reserved warning space. The permission, refresh, and test controls shall remain available under their existing enabled and disabled conditions.
+- **AC-PLATFORM-NOTIFICATIONS-001.18:** When notification permission is denied, unsupported, or unavailable after a failed check, the page shall display the corresponding localized warning. Denial shall distinguish browser settings from operating-system settings. Refreshing permission shall add or remove the warning surface to match the result. Desktop and phone layouts shall keep the warning readable without horizontal page scrolling.
+
 ## Migrated source detail
 
 ## Why
@@ -259,7 +268,11 @@ Notification bodies contain the task title but not the question text.
 
 ## Implementation Plan
 
+- [Notification permission layout](../../../plans/notification-permission-layout/plan.md), with the [permission feedback design](../system-design/notification-permission-feedback.md).
+- [Localized update notifications](../../../plans/localized-update-notifications/plan.md), with the [Local update notification design](../system-design/localized-update-notifications.md).
+- [Linux notification operand boundary](../../../plans/linux-notification-operands/plan.md), with the [System transport design](../system-design/linux-notification-operands.md).
 - [Notification window focus](../../../plans/notification-window-focus/plan.md), with the focused [Local notification attention design](../system-design/local-notification-attention.md).
+- [Notification Save draft preservation](../../../plans/notification-save-drafts/plan.md)
 - [Notification settings atomicity](../../../plans/notification-settings-atomicity/plan.md)
 - [Semantic notification implementation](../../../plans/semantic-notifications/plan.md)
 - [Update notification reliability remediation](../../../plans/update-notification-reliability/plan.md)

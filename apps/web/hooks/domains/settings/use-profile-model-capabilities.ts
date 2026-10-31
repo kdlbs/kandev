@@ -41,7 +41,7 @@ export function useProfileModelCapabilities(
   const isStaticContext = options.skipCapabilityProbe || !modelConfig.supports_dynamic_models;
   const launchSettings = useMemo(
     () => canonicalLaunchSettings(profile),
-    [profile.env_vars, profile.cli_flags, profile.command_prefix],
+    [profile.env_vars, profile.cli_flags, profile.command_prefix, profile.copilot_selected_plugins],
   );
   const currentLaunchKey = profileContextKey(agentName, options.profileId, launchSettings);
   const profileIdentity = `${agentName}:${options.profileId ?? "draft"}`;
@@ -82,6 +82,7 @@ export function useProfileModelCapabilities(
     discoveryState: discovery.discoveryState,
     configOptions: modelOptions.configOptions,
     configStatus: modelOptions.configStatus,
+    configReasonCode: modelOptions.configReasonCode,
     configError: modelOptions.configError,
     configIsLoading: modelOptions.configIsLoading,
     isConfigResolutionPending: modelOptions.isConfigResolutionPending,
@@ -151,6 +152,7 @@ function buildStaticProfileCapabilities({
     currentModelId: modelConfig.current_model_id,
     discovery: undefined,
     currentModeId: modelConfig.current_mode_id,
+    reasonCode: undefined,
     status: modelConfig.status ?? "ok",
     isLoading: discoveryState === "loading" || configIsLoading,
     error,
@@ -174,6 +176,7 @@ function buildDynamicProfileCapabilities({
     currentModelId: capability?.current_model_id,
     discovery: capability?.discovery,
     currentModeId: capability?.current_mode_id,
+    reasonCode: capability?.reason_code,
     status,
     isLoading: discoveryState === "loading" || configIsLoading,
     error,

@@ -30,16 +30,20 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	executorMutationChecker func(context.Context, string) error
-	repo                    *repository.Repository
-	logger                  *logger.Logger
-	workflowProvider        WorkflowProvider
-	workspaceProvider       WorkspaceProvider
-	resolveProfile          models.AgentProfileResolver
-	matchProfile            models.AgentProfileMatcher
-	importProfileCatalog    ImportProfileCatalog
-	syncOps                 SyncWorkflowOps
-	sessionAccessChecker    func(context.Context, string) error
+	executorMutationChecker        func(context.Context, string) error
+	workflowMutationPolicyChecker  func(context.Context, string) (bool, bool, error)
+	workspaceMutationPolicyChecker func(context.Context, string) (bool, error)
+	workflowAuthorizationRequired  func(context.Context) bool
+	repo                           *repository.Repository
+	logger                         *logger.Logger
+	workflowProvider               WorkflowProvider
+	workspaceProvider              WorkspaceProvider
+	resolveProfile                 models.AgentProfileResolver
+	matchProfile                   models.AgentProfileMatcher
+	lookupProfile                  models.AgentProfileLookup
+	importProfileCatalog           ImportProfileCatalog
+	syncOps                        SyncWorkflowOps
+	sessionAccessChecker           func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
 	// per-user visibility rule into this package (see access.go).
 	workflowAccessChecker  func(context.Context, string) error
@@ -88,6 +92,18 @@ func (s *Service) SetWorkspaceProvider(wp WorkspaceProvider) {
 func (s *Service) SetAgentProfileFuncs(resolve models.AgentProfileResolver, match models.AgentProfileMatcher) {
 	s.resolveProfile = resolve
 	s.matchProfile = match
+}
+
+func (s *Service) SetAgentProfileLookup(lookup models.AgentProfileLookup) { s.lookupProfile = lookup }
+
+func (s *Service) matchPortableProfile(profile *models.AgentProfilePortable, currentID string) string {
+	if s.lookupProfile != nil {
+		return s.lookupProfile(profile, currentID).ID
+	}
+	if s.matchProfile != nil {
+		return s.matchProfile(profile.AgentName, profile.Model, profile.Mode, currentID)
+	}
+	return ""
 }
 
 // NewService creates a new workflow service
@@ -361,6 +377,9 @@ func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID stri
 
 // CreateStepsFromTemplate creates workflow steps for a workflow from a template.
 func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error {
+	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+		return err
+	}
 	template, err := s.repo.GetTemplate(ctx, templateID)
 	if err != nil {
 		s.logger.Error("failed to get template for step creation",
@@ -616,11 +635,17 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
 		return err
 	}
+	return s.deleteStep(ctx, step.WorkflowID, stepID)
+}
+
+// deleteStep removes a step for an already-authorized internal operation.
+// User-facing mutations must use DeleteStep so they pass executor and access checks.
+func (s *Service) deleteStep(ctx context.Context, workflowID, stepID string) error {
 	// Clear any move_to_step references to this step
-	if err := s.repo.ClearStepReferences(ctx, step.WorkflowID, stepID); err != nil {
+	if err := s.repo.ClearStepReferences(ctx, workflowID, stepID); err != nil {
 		s.logger.Error("failed to clear step references",
 			zap.String("step_id", stepID),
-			zap.String("workflow_id", step.WorkflowID),
+			zap.String("workflow_id", workflowID),
 			zap.Error(err))
 		return err
 	}
@@ -633,7 +658,7 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 	s.logger.Info("deleted workflow step and cleared references",
 		zap.String("step_id", stepID),
-		zap.String("workflow_id", step.WorkflowID))
+		zap.String("workflow_id", workflowID))
 	return nil
 }
 
@@ -832,6 +857,9 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	if err := s.AuthorizeWorkspace(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.EnsureWorkspaceMutable(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if err := export.NormalizeCompletionPolicy(); err != nil {
 		return nil, fmt.Errorf("invalid export data: %w", err)
 	}
@@ -848,12 +876,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 		existingNames[wf.Name] = true
 	}
 
-	result := &ImportResult{}
-	for _, pw := range export.Workflows {
-		if existingNames[pw.Name] {
-			result.Skipped = append(result.Skipped, pw.Name)
-			continue
-		}
+	selection := selectWorkflowImports(export, existingNames)
+	result := &ImportResult{Skipped: selection.skipped}
+	for _, index := range selection.indexes {
+		pw := export.Workflows[index]
 		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}
@@ -868,6 +894,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 }
 
 func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) (*taskmodels.Workflow, error) {
+	return s.importSingleWorkflowWithBindings(ctx, workspaceID, pw, nil)
+}
+
+func (s *Service) importSingleWorkflowWithBindings(ctx context.Context, workspaceID string, pw models.WorkflowPortable, bindings *syncProfileBindings) (*taskmodels.Workflow, error) {
 	// Generate UUIDs for all steps and build position→ID map.
 	posToID := make(map[int]string, len(pw.Steps))
 	for _, sp := range pw.Steps {
@@ -878,7 +908,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	// any step. This keeps imports atomic with respect to validation failures.
 	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable("pending-workflow", sp, posToID, "")
+		step := s.importedStepWithBindings(sp, posToID, bindings)
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
 		}
@@ -898,11 +928,9 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 
 	needsUpdate := false
 	// Match workflow-level agent profile if present.
-	if pw.AgentProfile != nil && s.matchProfile != nil {
-		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, ""); profileID != "" {
-			wf.AgentProfileID = profileID
-			needsUpdate = true
-		}
+	if profileID := s.importedWorkflowProfile(pw.AgentProfile, bindings); profileID != "" {
+		wf.AgentProfileID = profileID
+		needsUpdate = true
 	}
 	if pw.Prompt != "" {
 		wf.Prompt = pw.Prompt
@@ -921,6 +949,25 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		}
 	}
 	return wf, nil
+}
+
+func (s *Service) importedStepWithBindings(sp models.StepPortable, positions map[int]string, bindings *syncProfileBindings) *models.WorkflowStep {
+	if bindings == nil {
+		return s.stepFromPortable("pending-workflow", sp, positions, "")
+	}
+	step := s.stepFromPortableWithMatcherOptions("pending-workflow", sp, positions, nil, "", false, true)
+	bindings.applyStep(step, sp)
+	return step
+}
+
+func (s *Service) importedWorkflowProfile(profile *models.AgentProfilePortable, bindings *syncProfileBindings) string {
+	if profile == nil {
+		return ""
+	}
+	if bindings != nil {
+		return bindings.workflow
+	}
+	return s.matchPortableProfile(profile, "")
 }
 
 // validateImportedStepReferences authorizes the tasks an imported step would
@@ -995,7 +1042,7 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 // profile IDs embedded in existing review actions while imports use the normal
 // matcher directly.
 func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepPortable, posToID map[int]string, matchProfile models.AgentProfileMatcher, existingProfileID string) *models.WorkflowStep {
-	return s.stepFromPortableWithMatcherOptions(workflowID, sp, posToID, matchProfile, existingProfileID, true)
+	return s.stepFromPortableWithMatcherOptions(workflowID, sp, posToID, matchProfile, existingProfileID, true, false)
 }
 
 // stepFromPortableWithMatcherOptions keeps review-action profile conversion
@@ -1008,7 +1055,14 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	matchProfile models.AgentProfileMatcher,
 	existingProfileID string,
 	matchDirectProfile bool,
+	suppressLookup bool,
 ) *models.WorkflowStep {
+	events := models.ConvertPositionToStepID(sp.Events, posToID)
+	if s.lookupProfile != nil && !suppressLookup {
+		events = models.ConvertReviewProfileToIDWithLookup(events, func(profile *models.AgentProfilePortable) string { return s.matchPortableProfile(profile, "") })
+	} else {
+		events = models.ConvertReviewProfileToID(events, matchProfile)
+	}
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
@@ -1016,7 +1070,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		Position:                    sp.Position,
 		Color:                       sp.Color,
 		Prompt:                      sp.Prompt,
-		Events:                      models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
+		Events:                      events,
 		IsStartStep:                 sp.IsStartStep,
 		ShowInCommandPanel:          sp.ShowInCommandPanel,
 		AllowManualMove:             sp.AllowManualMove,
@@ -1030,9 +1084,14 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
+		StageType:                   sp.StageType,
 	}
-	if matchDirectProfile && sp.AgentProfile != nil && matchProfile != nil {
-		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
+	if matchDirectProfile && sp.AgentProfile != nil {
+		if s.lookupProfile != nil && !suppressLookup {
+			step.AgentProfileID = s.matchPortableProfile(sp.AgentProfile, existingProfileID)
+		} else if matchProfile != nil {
+			step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
+		}
 	}
 	return step
 }
@@ -1041,6 +1100,9 @@ func (s *Service) SetExecutorMutationChecker(check func(context.Context, string)
 	s.executorMutationChecker = check
 }
 func (s *Service) authorizeExecutorMutation(ctx context.Context, workflowID string) error {
+	if err := s.EnsureWorkflowMutable(ctx, workflowID); err != nil {
+		return err
+	}
 	if s.executorMutationChecker == nil {
 		return nil
 	}

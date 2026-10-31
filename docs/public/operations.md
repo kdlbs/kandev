@@ -197,6 +197,8 @@ Open **Settings > Preferences > Task Behavior > Runtime** to manage install-wide
 
 **Automatically merge consecutive messages** is on by default. It is the fallback for every session that has not changed its compact **Auto-merge** queue pill. Untouched sessions follow later global changes. The first per-session change creates an explicit override that survives empty queues and restarts and remains independent for that session's lifetime. An eligible direct admission may fold into the immediate pending predecessor even at capacity because it does not create another row; staged-attachment admissions cannot use this path. Both rows must have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate when capacity permits. The earlier row survives and its ID is returned. Turning either setting on does not compact existing rows. This behavior is independent from **Enable queued message merging**, which controls the manual queue action.
 
+Each queued message shows a timestamp using your message-time display setting. Merged messages show the latest queued time among their contributing messages.
+
 To recover capacity in one session, expand its queue chip in the task workbench. The compact header contains **Auto-run** and **Auto-merge** pills beside the count. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 
 ## State and storage
@@ -279,7 +281,7 @@ manual database compaction are separate maintenance operations.
 <summary>Storage maintenance details</summary>
 
 Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
-configure cleanup. Open **Storage > Office retention** for Office history policy and status.
+configure cleanup. When Office is enabled, open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. Cleanup normally waits for active task
 resources to become idle. If they are active, the page names the work and offers **Run anyway**
@@ -494,7 +496,8 @@ the Kandev service first provides the clearest maintenance boundary.
 ## Office run history retention
 
 Open **Settings > System > Storage > Office retention** to manage automatic deletion of old
-Office run history. Deletion is enabled by default. The first sweep starts five
+Office run history. This tab is available only when the Office feature is enabled.
+Deletion is enabled by default. The first sweep starts five
 minutes after the backend starts or after you enable deletion.
 
 The first sweep for each history table is a preview. It reports the rows that
@@ -519,27 +522,30 @@ To disable automatic deletion:
 3. Select **Save changes**.
 4. Check the retention status. It must show that deletion is disabled.
 
-## Messages compaction
+## History compaction
 
-Open **Settings > System > Data & Logs > Database** to reduce old tool details in a SQLite
-database. **Message compaction** is independent of Office run history retention
-and is disabled by default. The initial period is three calendar months.
+Open **Settings > System > Data & Logs > Database** to reduce old tool details and
+historical turn diffs in a SQLite database. **History compaction** is independent of
+Office run history retention and is disabled by default. The initial period is three
+calendar months.
 
 1. Set **Tasks inactive for** to whole weeks or calendar months.
-2. Select **Analyze savings** to estimate the reduction before enabling cleanup.
-   Analysis is optional and does not remove message payloads.
+2. Select **Analyze savings** to estimate both categories before enabling cleanup.
+   Analysis is optional and does not remove message payloads or turn diffs.
 3. Select **Automatic compaction**.
 4. Choose **Create backup (recommended)** or **Continue without backup**.
 5. Select **Save changes**. A selected backup must finish verification before
    cleanup starts. If preparation fails, retry it or cancel preparation.
 
 The first cleanup starts after preparation. Later checks run every 24 hours while the
-backend is running. **Compact messages now** uses the saved policy. Disabling cleanup
-stops later batches, but does not restore details already removed.
+backend is running. **Compact history now** uses the saved policy. Disabling cleanup
+stops later batches, but does not restore content already removed. A task used
+recently, a running or waiting session, queued work, and pending input protect the
+whole task cohort. The task is rechecked when cleanup starts mutating its history.
 
 Activity includes task and session updates and conversation messages. Renaming
 a task can extend its protection. Recent activity, active or waiting sessions,
-queued work, and pending input protect a task at any age.
+queued work, pending input, and in-flight history reads protect a task at any age.
 
 Cleanup retains tool messages, titles, commands, status, timestamps, and useful
 summaries. It removes supported result bodies and generic tool inputs. Old
@@ -549,20 +555,37 @@ protected structured results, and oversized payloads appear in skipped counts.
 If an eligibility check times out, Kandev keeps that task and reports a partial
 result. The next daily pass can retry it.
 
-The estimate measures payload bytes. It does not predict a database-file size
-or backup-duration reduction. Cleanup makes space reusable inside SQLite.
-Use the separate database compaction action during a quiet period to shrink the
-file. Existing backups keep their size, and creating a backup needs more disk space.
+Each completed turn keeps its file counts, file names, and conversation anchor.
+Kandev renders a turn diff on demand from the retained Git checkpoint pair, so a
+removed worktree does not change the historical view. Local worktrees use the
+surviving common Git object store. Disposable and remote executors first transfer
+only missing accepted objects into Kandev-owned storage. Cleanup removes only
+Kandev-owned checkpoint refs and reclaims owned archive objects after every
+retained reference releases them. Shared user repositories keep their branches
+and normal Git maintenance. Task and session deletion stages its own ref-cleanup
+intent, so cascades cannot orphan archive objects. After expiry, the turn card
+keeps its summary and shows that its historical diff is no longer available.
+
+Analysis details separate tool-detail bytes, SQL history bytes, and retained Git
+checkpoint bytes. Shared Git objects are not counted as uniquely reclaimable, and
+ref deletion can leave objects for later Git maintenance. The estimate does not
+predict a database-file size or backup-duration reduction. Cleanup makes SQLite
+space reusable. Use the separate database compaction action during a quiet period
+to shrink the file. Existing backups keep their size, and creating a backup needs
+more disk space.
 
 Removal is permanent within the current database. Restoring a backup replaces
-the whole database and can remove newer changes. Keep any backup you need before
-deleting it. Other database engines show this feature as unavailable.
+the whole database and can remove newer changes. Combined backups include both the
+database image and the checkpoint sources; downloading one produces a zip with
+both parts, and restoring it verifies the checkpoint inventory against that exact
+image. Keep any backup you need before deleting it. Other database engines keep
+their existing fixed-deadline history behavior and show this feature as unavailable.
 
 ## Backend delivery retention
 
 Kandev automatically removes redundant backend transport data on SQLite and PostgreSQL.
 It preserves canonical messages, tool history, turns, and unresolved recovery evidence.
-This cleanup is separate from **Message compaction** and agentctl journal pruning.
+This cleanup is separate from **History compaction** and agentctl journal pruning.
 
 The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
 Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
@@ -586,6 +609,8 @@ Protected backlog and canonical history can continue to grow. Retention is not a
 Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
 Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
+
+After a batch deadline, that phase retries with half as many candidates, down to one, within the same row, byte and time ceilings. The `agent_delivery.retention.batch_failed` log records the phase, candidate limits and repository error. A failed batch is rolled back and remains a failure in the pass snapshot; successful batches in other phases do not imply that its payloads were removed.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -952,6 +977,8 @@ artifacts.
 
 Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
 
+Local versioned Kandev release messages follow the application language, including their browser or native desktop notifications.
+
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 
 - Desktop: use **Settings > System > Updates** when signed updater assets are available; otherwise install the new desktop package.
@@ -970,6 +997,15 @@ Before any update, finish or stop active sessions, create and export a database 
   service flags, and restart; the UI never applies it.
 - Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
+
+For a macOS user service with login-shell initialization enabled, an ordinary
+reinstall without `--shell` and a supported Apply update preserve the saved
+selection. Use `kandev service install --shell=none` to return to direct startup.
+If the service was installed with a custom `--home-dir`, repeat its existing
+path in the reset command, for example:
+`kandev service install --home-dir /path/to/existing/kandev-home --shell=none`.
+See [Run as a service](run-as-a-service.md#optional-macos-login-initialization)
+for shell startup behavior and recovery.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 
 After restart, verify `/ready`, **System > About**, **System > Status**, the database page, and one non-destructive agent session. Kandev does not perform automatic binary or database rollback. If rollback is necessary, restore a compatible pre-upgrade database and matching application release together.

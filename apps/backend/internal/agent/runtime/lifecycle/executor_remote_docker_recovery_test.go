@@ -39,6 +39,40 @@ func TestIsAgentctlAuthErrorClassifiesHealthUnauthorizedOnly(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-REMOTE-DOCKER-001.12
+func TestRemoteDockerRecoveryUsesPersistedAdoptedAgentctlInstanceID(t *testing.T) {
+	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{})
+	fixture.backendExecutionID = "new-backend-execution"
+
+	instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{
+		fixture.recordWithIDs("new-backend-execution", "adopted-agentctl-instance", "saved-token", ""),
+	})
+
+	require.Len(t, instances, 1)
+	require.Empty(t, outcomes)
+	got := instances[0]
+	require.Equal(t, "new-backend-execution", got.InstanceID, "the backend execution identity must stay fenced")
+	require.Equal(t, "adopted-agentctl-instance", got.Metadata[MetadataKeyRemoteDockerAgentctlInstanceID])
+	require.True(t, fixture.controlReadWasFor("adopted-agentctl-instance"),
+		"recovery must look up the actual remote instance, not the backend execution ID")
+	require.True(t, fixture.statusWasChecked())
+	require.Equal(t, "adopted-agentctl-instance", fixture.instance.agentctlIDForPath("/api/v1/status"),
+		"the instance client must send the actual agentctl identity")
+	require.Zero(t, fixture.createInstanceCalls(), "recovery must not create another instance")
+	require.Zero(t, fixture.engineMutationCalls(), "recovery must not mutate the retained container")
+}
+
+func (h *remoteDockerRecoveryHTTP) agentctlIDForPath(path string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.seen) - 1; i >= 0; i-- {
+		if h.seen[i].path == path {
+			return h.seen[i].agentctlID
+		}
+	}
+	return ""
+}
+
 func TestRemoteDockerRecoveryAttachesOnlyTheRecordedLiveContainerAndInstance(t *testing.T) {
 	fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{})
 	exec := fixture.executor
@@ -198,6 +232,7 @@ type remoteDockerRecoveryFixture struct {
 	instance                  *remoteDockerRecoveryHTTP
 	nonce                     string
 	containerState            string
+	backendExecutionID        string
 	connectContextHadDeadline bool
 }
 
@@ -207,7 +242,7 @@ func newRemoteDockerRecoveryFixture(
 	instance remoteDockerRecoveryInstance,
 ) *remoteDockerRecoveryFixture {
 	t.Helper()
-	fixture := &remoteDockerRecoveryFixture{containerState: containerState}
+	fixture := &remoteDockerRecoveryFixture{containerState: containerState, backendExecutionID: "execution-1"}
 	fixture.control = newRemoteDockerRecoveryHTTP(t, true, instance)
 	fixture.instance = newRemoteDockerRecoveryHTTP(t, false, instance)
 	controlPort := fixture.control.port(t)
@@ -232,7 +267,7 @@ func newRemoteDockerRecoveryFixture(
 	}
 	fixture.executor.connect = func(ctx context.Context, req *ExecutorCreateRequest) (*remoteDockerSession, error) {
 		_, fixture.connectContextHadDeadline = ctx.Deadline()
-		if req.InstanceID != "execution-1" || req.SessionID != "session-1" || req.TaskID != "task-1" {
+		if req.InstanceID != fixture.backendExecutionID || req.SessionID != "session-1" || req.TaskID != "task-1" {
 			return nil, fmt.Errorf("unexpected saved identity in recovery request: %#v", req)
 		}
 		return fixture.remoteSession, nil
@@ -251,15 +286,25 @@ func newRemoteDockerRecoveryFixture(
 }
 
 func (f *remoteDockerRecoveryFixture) record(token, nonce string) *models.ExecutorRunning {
+	return f.recordWithIDs(f.backendExecutionID, "", token, nonce)
+}
+
+func (f *remoteDockerRecoveryFixture) recordWithIDs(
+	agentExecutionID, agentctlInstanceID, token, nonce string,
+) *models.ExecutorRunning {
+	metadata := map[string]interface{}{
+		MetadataKeySSHHost:            "build-box",
+		MetadataKeySSHHostFingerprint: "SHA256:pinned",
+		MetadataKeyContainerID:        "container-preserved",
+	}
+	if agentctlInstanceID != "" {
+		metadata[MetadataKeyRemoteDockerAgentctlInstanceID] = agentctlInstanceID
+	}
 	return &models.ExecutorRunning{
-		ID: "inventory-row", AgentExecutionID: "execution-1", SessionID: "session-1", TaskID: "task-1",
+		ID: "inventory-row", AgentExecutionID: agentExecutionID, SessionID: "session-1", TaskID: "task-1",
 		Runtime: agentruntime.RuntimeRemoteDocker, ContainerID: "container-preserved",
 		TransientAuthToken: token, TransientBootstrapNonce: nonce,
-		Metadata: map[string]interface{}{
-			MetadataKeySSHHost:            "build-box",
-			MetadataKeySSHHostFingerprint: "SHA256:pinned",
-			MetadataKeyContainerID:        "container-preserved",
-		},
+		Metadata: metadata,
 	}
 }
 
@@ -349,10 +394,11 @@ type remoteDockerRecoveryHTTP struct {
 }
 
 type remoteDockerHTTPRequest struct {
-	method string
-	path   string
-	token  string
-	nonce  string
+	method     string
+	path       string
+	token      string
+	nonce      string
+	agentctlID string
 }
 
 func newRemoteDockerRecoveryHTTP(
@@ -386,7 +432,8 @@ func (h *remoteDockerRecoveryHTTP) serve(w http.ResponseWriter, request *http.Re
 func (h *remoteDockerRecoveryHTTP) recordRequest(request *http.Request) (remoteDockerHTTPRequest, bool) {
 	seen := remoteDockerHTTPRequest{
 		method: request.Method, path: request.URL.Path,
-		token: strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
+		token:      strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
+		agentctlID: request.Header.Get("X-Instance-ID"),
 	}
 	if request.URL.Path == "/auth/handshake" && request.Method == http.MethodPost {
 		var body map[string]string

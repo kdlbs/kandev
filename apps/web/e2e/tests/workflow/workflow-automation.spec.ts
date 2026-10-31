@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+test.use({ trace: "retain-on-failure" });
 
 test.describe("Workflow automation", () => {
   /**
@@ -117,8 +120,8 @@ test.describe("Workflow automation", () => {
     });
 
     // --- Send another message in Review: verify manual step stays ---
-    // Wait for agent to become idle before sending (auto-start cascade may still be settling)
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    // Wait for the persisted idle state and editable composer after the auto-start cascade.
+    await session.waitForChatIdle({ timeout: 15_000, requireEditable: true });
 
     await session.sendMessage("/e2e:simple-message");
 
@@ -517,6 +520,9 @@ test.describe("Workflow automation", () => {
     const sessions = await apiClient.listTaskSessions(task.id);
     expect(sessions.total).toBe(1);
     expect(sessions.sessions[0].state).toBe("CREATED");
+
+    // The row exists before preparation returns and selects it in the task route.
+    await waitForActiveTaskSession(testPage, task.id, sessions.sessions[0].id);
 
     // The agent was NOT started — the "Start agent" button should be visible,
     // confirming the auto-start was blocked for this non-auto-start step.

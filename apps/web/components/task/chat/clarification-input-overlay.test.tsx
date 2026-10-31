@@ -683,11 +683,13 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     );
     const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
     const metadata = message.metadata as ClarificationRequestMetadata;
-    metadata.context = "Keep `context` literal";
+    metadata.context =
+      "Keep **context** readable.\n\n| Signal | Value |\n| --- | --- |\n| Ready | yes |\n\n[Context guide](https://example.com/context)";
     metadata.question = {
       id: "q1",
       title: "Use `fast` mode",
-      prompt: "Choose **one**:\n\n1. First\n2. Second",
+      prompt:
+        "Choose **one** from the [storage guide](https://example.com/storage):\n\n1. First\n2. Second",
       options: [
         {
           option_id: "fast-mode",
@@ -704,6 +706,9 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     );
     expect(title).toBeDefined();
     expect(card.querySelector("ol")?.textContent).toContain("First");
+    const guidance = card.querySelector<HTMLAnchorElement>('a[href="https://example.com/storage"]');
+    expect(guidance?.textContent).toBe("storage guide");
+    expect(guidance?.target).toBe("_blank");
 
     const optionLabel = screen.getByTestId("clarification-option-label");
     const optionDescription = screen.getByTestId("clarification-option-description");
@@ -711,8 +716,15 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
     expect(optionDescription.querySelector("strong")?.textContent).toBe("small");
 
     const context = screen.getByTestId("clarification-context");
-    expect(context.textContent).toBe("Keep `context` literal");
-    expect(context.querySelector("code")).toBeNull();
+    expect(context.querySelector("strong")?.textContent).toBe("context");
+    expect(context.querySelector("table")?.textContent).toContain("Ready");
+    const contextGuide = context.querySelector<HTMLAnchorElement>(
+      'a[href="https://example.com/context"]',
+    );
+    expect(contextGuide?.target).toBe("_blank");
+
+    fireEvent.click(contextGuide!);
+    expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(optionLabel.querySelector("code")!);
 

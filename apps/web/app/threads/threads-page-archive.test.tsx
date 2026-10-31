@@ -27,7 +27,7 @@ vi.mock("@/lib/routing/client-router", async (original) => ({
 }));
 vi.mock("@/src/kanban-route", () => ({ useKanbanRouteBootstrap: () => {} }));
 vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
-  useAllWorkflowSnapshots: () => {},
+  useAllWorkflowSnapshots: () => ({ refresh: vi.fn(), initialSnapshotsReady: true }),
 }));
 vi.mock("@/hooks/use-task-listing-view", () => ({
   useTaskListingView: () => ({ setView }),

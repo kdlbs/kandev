@@ -89,6 +89,18 @@ happens inside `Work` directly — the assignee opens the PR as part of
 its turn — or in a delegated child task with the Kanban Default
 workflow.
 
+### Hold steps
+
+A step may declare `stage_type='hold'` to record that it parks a task on
+a person's decision. The value is stored on the step, so a consumer reads
+the stored nature instead of the step's name: renaming a hold step keeps
+it a hold, and naming a step `hold` does not make it one. The execution
+engine does not branch on it, so a hold step stops no run and moves no
+task. The value round-trips through export, import, and workflow sync,
+and a one-time backfill converts a step whose stored nature is the
+default (empty or `custom`) and whose name is a hold name, leaving a step
+that already declares `work`, `review`, `approval`, or `hold` unchanged.
+
 Users can copy either template and edit it; existing custom kanban
 workflows continue to work unchanged.
 

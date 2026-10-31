@@ -152,6 +152,8 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 - `coalesce_if_active` (default): merge into the existing run. Mark `coalesced`.
 - `always_enqueue` / `always_create`: always proceed.
 
+A routine-source wake coalesces only into an in-flight run for the same routine. If the active run belongs to another routine, the dispatcher creates a fresh run so each routine keeps its own prompt context.
+
 "Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age. A `task_created` run with no linked task is never active either — current code never produces that shape, so a row like it can only be a pre-upgrade fossil (AC-OFFICE-SCHEDULER-001.13); the next dispatch that finds it closes it as `failed` instead of skipping or coalescing into it.
 
 #### Catch-up policy

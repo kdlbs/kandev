@@ -348,12 +348,17 @@ describe("buildCreateTaskPayload priority", () => {
     ).toEqual({ "profile-luna": "profile-terra" });
     expect(buildCreateTaskPayload(base).workflow_agent_overrides).toBeUndefined();
   });
-  it("submits the selected initial workspace layout", () => {
+  it("submits MCP selections together with the selected initial workspace layout", () => {
     expect(
-      buildCreateTaskPayload({ ...base, initialWorkspaceLayout: "task_root" } as Parameters<
-        typeof buildCreateTaskPayload
-      >[0]).initial_workspace_layout,
-    ).toBe("task_root");
+      buildCreateTaskPayload({
+        ...base,
+        initialWorkspaceLayout: "task_root",
+        mcpServerIds: ["mcp-selected"],
+      }),
+    ).toMatchObject({
+      initial_workspace_layout: "task_root",
+      mcp_server_ids: ["mcp-selected"],
+    });
   });
 });
 

@@ -130,10 +130,11 @@ type ModelConfigResolutionRequest struct {
 // includes the authorization principal and profile identity; secret values
 // stay in Env only for the bounded subprocess lifetime.
 type ProfileProbeContext struct {
-	Scope         string
-	Env           map[string]string
-	CLIFlags      []string
-	CommandPrefix []string
+	Scope                  string
+	Env                    map[string]string
+	CLIFlags               []string
+	CommandPrefix          []string
+	CopilotSelectedPlugins []string
 }
 
 type ProfileCapabilityRequest struct {
@@ -144,6 +145,7 @@ type ProfileCapabilityRequest struct {
 type ProfileCapabilityResult struct {
 	Capabilities    AgentCapabilities
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // ModelConfigResolution is the provider's complete option snapshot for one
@@ -155,6 +157,7 @@ type ModelConfigResolution struct {
 	ConfigOptions   []ConfigOption
 	Error           string
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

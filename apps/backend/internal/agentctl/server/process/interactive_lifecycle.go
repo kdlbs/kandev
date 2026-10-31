@@ -12,8 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ptyexec"
 	"go.uber.org/zap"
+	"slices"
 )
 
 // Fallback terminal dimensions used when a caller supplies none, or supplies a
@@ -105,6 +107,12 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		return nil, fmt.Errorf("command is required")
 	}
 
+	if !req.LaunchWrapper.IsZero() {
+		if err := req.LaunchWrapper.Validate(); err != nil {
+			return nil, err
+		}
+		req.LaunchWrapper.Argv = slices.Clone(req.LaunchWrapper.Argv)
+	}
 	id := uuid.New().String()
 	if req.ProcessID != "" {
 		id = req.ProcessID
@@ -146,7 +154,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		info: InteractiveProcessInfo{
 			ID:         id,
 			SessionID:  req.SessionID,
-			Command:    req.Command,
+			Command:    req.commandForLog(),
 			WorkingDir: req.WorkingDir,
 			Status:     types.ProcessStatusRunning,
 			StartedAt:  now,
@@ -249,11 +257,20 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 
 	// Build command - use Background context so the process lives beyond the request
 	// The process lifecycle is managed by Stop() and wait(), not by context cancellation
-	cmd := exec.Command(proc.startCmd[0], proc.startCmd[1:]...)
+	env := launchwrapper.StripControlCredentials(mergeEnvWithStrip(proc.startEnv, req.StripEnv))
+	args := proc.startCmd
+	if !req.LaunchWrapper.IsZero() {
+		var err error
+		args, err = launchwrapper.Prepare(req.LaunchWrapper, args, launchwrapper.Context{WorkDir: proc.startDir, Env: env})
+		if err != nil {
+			return err
+		}
+	}
+	cmd := exec.Command(args[0], args[1:]...)
 	if proc.startDir != "" {
 		cmd.Dir = proc.startDir
 	}
-	cmd.Env = mergeEnvWithStrip(proc.startEnv, req.StripEnv)
+	cmd.Env = env
 	// Note: Do NOT set Setpgid when using PTY - it conflicts with terminal control
 	// The PTY session handles process group management
 
@@ -261,6 +278,9 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	// Unix: creack/pty, Windows: ConPTY
 	ptmx, err := ptyexec.Start(cmd, ptyDimension(cols, defaultPTYCols), ptyDimension(rows, defaultPTYRows))
 	if err != nil {
+		if !req.LaunchWrapper.IsZero() {
+			return launchwrapper.ErrContext
+		}
 		return fmt.Errorf("failed to start pty: %w", err)
 	}
 

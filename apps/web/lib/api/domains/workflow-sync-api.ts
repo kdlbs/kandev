@@ -1,23 +1,10 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { withWorkspace, requestOptions, type WorkspaceApiOptions } from "../workspace-options";
+import { fetchJson } from "../client";
 import type {
   WorkflowSyncConfig,
   WorkflowSyncForceSyncResponse,
   WorkflowSyncSetConfigRequest,
 } from "@/lib/types/workflow-sync";
-
-type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
-
-function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
-  if (!options?.workspaceId) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
-}
-
-function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
-  if (!options) return undefined;
-  const { workspaceId: _workspaceId, ...rest } = options;
-  return rest;
-}
 
 // getWorkflowSyncConfig returns null when the backend responds 204 (no
 // config yet for this workspace). fetchJson already maps 204 → undefined; we

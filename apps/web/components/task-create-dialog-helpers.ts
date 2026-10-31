@@ -224,6 +224,8 @@ export type BuildCreatePayloadArgs = {
   priority?: TaskPriority;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
+  /** Task-scoped MCP additions. */
+  mcpServerIds?: string[];
   initialWorkspaceLayout?: InitialWorkspaceLayout;
 };
 
@@ -299,6 +301,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
+    mcp_server_ids: nonEmptyArray(args.mcpServerIds),
   };
 }
 
@@ -401,10 +404,10 @@ export function validateCreateInputs(inputs: {
 export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
   const seen = new Map<string, string>();
   for (const row of remoteRepos) {
-    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    const parsed = parseGitHubAnyUrl(row.url ?? "", row.providerHost);
     if (!parsed) continue;
     const label = `${parsed.owner}/${parsed.repo}`;
-    const key = `${label.toLowerCase()}\u0000${row.branch}`;
+    const key = `${parsed.host ?? "github.com"}/${label.toLowerCase()}\u0000${row.branch}`;
     const existing = seen.get(key);
     if (existing) return existing;
     seen.set(key, label);

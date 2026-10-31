@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-DOCUMENTS-002
   - REQ-TASKS-DOCUMENTS-003
 created: 2026-08-28
-updated: 2026-10-08
+updated: 2026-10-21
 owners:
   - kandev
 ---
@@ -15,8 +15,8 @@ owners:
 ## Purpose and boundaries
 
 This design defines the missing-task boundary for backward-compatible task-plan
-writes, the attachment publication boundary, and local editor acknowledgement
-of successful plan saves. It does not implement the
+writes, attachment publication, local editor acknowledgement of successful plan
+saves, and snapshot admission after observed live changes. It does not implement the
 broader task-documents migration. The existing filename remains for catalog and
 plan-reference compatibility.
 
@@ -26,7 +26,7 @@ plan-reference compatibility.
 | --- | --- |
 | `REQ-TASKS-DOCUMENTS-001` | [Transactional write](#transactional-write) and [Error contract](#error-contract) |
 | `REQ-TASKS-DOCUMENTS-002` | [Attachment publication](#attachment-publication), [Candidate cleanup](#candidate-cleanup), and [Attachment consumers](#attachment-consumers) |
-| `REQ-TASKS-DOCUMENTS-003` | [Plan draft acknowledgement](#plan-draft-acknowledgement) and [Plan draft regression strategy](#plan-draft-regression-strategy) |
+| `REQ-TASKS-DOCUMENTS-003` | [Plan draft acknowledgement](#plan-draft-acknowledgement), [Plan draft regression strategy](#plan-draft-regression-strategy), and [Plan snapshot admission](#plan-snapshot-admission) |
 
 ## Components and responsibilities
 
@@ -336,3 +336,33 @@ Keep the existing draft-size-suppression, use-task-plan, header wiring, session
 switch, and TipTap editor suites in the affected regression run. The single
 sequential [work order](../../../plans/preserve-plan-typing/task-01-save-ack-continuity.md)
 owns the exact commands and implementation evidence.
+
+
+## Plan snapshot admission
+
+For AC-TASKS-DOCUMENTS-003.4 and .8, the existing session slice owns pending
+plan reads per app store. `beginTaskPlanRead` replaces the task's local token
+before transport work. `finishTaskPlanRead` admits only that token and removes
+it, publishing success plus seen state or ending loading on failure.
+Every `setTaskPlan` publication and `clearTaskPlan` retires the pending read,
+including repeated null deletion and accepted own saves. Tokens are runtime-only
+and carry no timestamp or server-version ordering. Existing notifications keep
+their publication paths and delete keeps loaded=true.
+
+Retired successes/failures cannot publish, mark seen, clear replacement loading,
+or change errors. Hook-local read errors additionally require the originating
+task view. The view identity advances in a layout effect on commit, so a
+discarded or suspended render for another task cannot invalidate the still
+committed view. Background success remains valid after navigation/unmount. Consumer
+cleanup does not cancel another consumer's store-owned read. Entries are removed
+on completion/publication/clear; no historical generations, promises, or extra
+subscriptions are retained. Later fresh reads remain supported.
+
+`use-task-plan.refresh.test.tsx` holds only real API request transport and uses
+the real provider, hooks/draft and registered notifications. Cover live update,
+create/delete against old success/absence/error, overlap, fresh reads, separate
+tasks/stores, navigation, unmount and clear. Real panel/TipTap cases in
+`task-plan-panel.snapshot.test.tsx` prove desktop/phone consumption under the
+mobile state/data exception: no layout, touch, scroll, navigation or breakpoint
+changes. No browser evidence is claimed. Own-save and size/error suites remain
+regression gates. See the [work order](../../../plans/preserve-live-plans/task-01-snapshot-admission.md).

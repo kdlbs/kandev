@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -31,11 +30,17 @@ type AgentDeliveryRepository interface {
 // that owns task messages. It must persist the canonical message and advance
 // the inbox cursor in one transaction before returning.
 type canonicalAgentDeliveryProjector interface {
-	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type canonicalAgentDeliveryBatchProjector interface {
-	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]bool, error)
+	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error)
+}
+
+// canonicalAgentDeliveryBatchReceiver is implemented by the repository that
+// can admit and project one compatible output batch in one writer transaction.
+type canonicalAgentDeliveryBatchReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64) ([]models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type agentDeliveryAcknowledger interface {
@@ -139,6 +144,11 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 ) (uint64, error) {
 	remaining := target - after
 	limit := durableDeliveryReplayPageSize
+	if execution.DeliveryDescriptor != nil && execution.DeliveryDescriptor.ReplayBytes > 0 {
+		limit = durableDeliveryReplayPageSize
+	} else {
+		limit = client.DeliveryReplayPageLimit(durableDeliveryReplayPageSize)
+	}
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}
@@ -318,18 +328,6 @@ func (sm *StreamManager) deliveryReplayCursor(ctx context.Context, repository Ag
 	return uint64(cursor.ProjectedSequence), nil
 }
 
-func (sm *StreamManager) receiveDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) (bool, error) {
-	if event.DeliverySequence > math.MaxInt64 {
-		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
-	}
-	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
-}
-
 func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	ctx context.Context,
 	deliveryEvent *models.AgentDeliveryEvent,
@@ -356,27 +354,6 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 		return false, err
 	}
 	return cursor == nil || cursor.ProjectedSequence < deliveryEvent.Sequence, nil
-}
-
-func (sm *StreamManager) projectDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) error {
-	return sm.projectDurableAgentEventWithEffect(ctx, execution, event, repository, deliveryEffectForEvent(event))
-}
-
-func (sm *StreamManager) projectDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	effect *models.AgentDeliveryEffect,
-) error {
-	return sm.projectDurableAgentDeliveryEventWithEffect(
-		ctx, durableAgentEvent(execution, event), repository, effect,
-	)
 }
 
 func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
@@ -423,47 +400,6 @@ func projectedDeliveryTerminalOutcome(event *models.AgentDeliveryEvent) models.D
 	default:
 		return ""
 	}
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-) error {
-	return sm.projectAndAcknowledgeDurableAgentEventWithEffect(
-		ctx, execution, event, repository, acknowledger, deliveryEffectForEvent(event),
-	)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	deliveryEvent := durableAgentEvent(execution, event)
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
-	ctx context.Context,
-	deliveryEvent *models.AgentDeliveryEvent,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
 }
 
 func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffect {
@@ -586,19 +522,6 @@ func deliveryHarnessGeneration(
 	}
 }
 
-func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return nil
-	}
-	if acknowledger == nil {
-		return errors.New("agent delivery acknowledger is unavailable")
-	}
-	if err := acknowledger.AcknowledgeDelivery(ctx, event.DeliveryStreamID, event.DeliverySequence); err != nil {
-		return fmt.Errorf("acknowledge durable agent event: %w", err)
-	}
-	return nil
-}
-
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
 	sessionID := ""
 	if execution != nil {
@@ -625,7 +548,8 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	if payloadEvent.TurnID == "" && execution != nil {
 		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
-	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageID = payloadEvent.CanonicalMessageBaseID
 	payloadEvent.CanonicalProjection = false
 	payloadEvent.CanonicalMessageAppend = false
 	payloadEvent.DeliveryStreamID = ""
@@ -691,6 +615,9 @@ func canonicalMessageType(event agentctl.AgentEvent) string {
 }
 
 func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEvent) string {
+	if event.CanonicalMessageBaseID != "" {
+		return event.CanonicalMessageBaseID
+	}
 	if event.CanonicalMessageID != "" {
 		return event.CanonicalMessageID
 	}

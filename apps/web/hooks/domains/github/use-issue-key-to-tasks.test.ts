@@ -66,3 +66,9 @@ describe("issueKey", () => {
     expect(issueKey("kdlbs", "kandev", 1672)).toBe("kdlbs/kandev#1672");
   });
 });
+
+it("isolates equal issue numbers on different GitHub hosts", () => {
+  expect(issueKey("acme", "site", 42, "git.company.example")).not.toBe(
+    issueKey("acme", "site", 42),
+  );
+});

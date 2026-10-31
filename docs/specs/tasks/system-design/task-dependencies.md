@@ -11,7 +11,8 @@ owners:
 
 ## Purpose and boundaries
 
-This design record preserves the technical source for the capability mapped to REQ-TASKS-TASK-DEPENDENCIES-001 while the task system completes its migration.
+Technical source for REQ-TASKS-TASK-DEPENDENCIES-001.
+Prepared-session reuse: [deferred start](deferred-start-step-entry.md#prepared-primary-on-deferred-start).
 
 ## Requirement mapping
 
@@ -60,10 +61,9 @@ running agents unattended.
   dependencies have resolved but which is not WIP-admitted (`wip_admitted =
   false`) stays queued and launches when the WIP queue promotes it. Dependency
   resolution grants **eligibility**, never a bypass.
-- A dependency resolves only on **successful** completion of the predecessor.
-  `FAILED`, `CANCELLED`, and archival do not resolve a dependency. The
-  dependent task stays blocked and its blocked reason changes to name the
-  failed predecessor, so a chain never proceeds on a failed step.
+- A dependency resolves only on **successful** completion, including archived
+  `COMPLETED` predecessors. `FAILED`/`CANCELLED` stay failed; archival alone
+  does not resolve unfinished work.
 - A dependency-failed state SHALL raise a notification and SHALL require
   explicit human action to clear (retry the predecessor, remove the edge, or
   start the dependent manually). Kandev never auto-retries a failed
@@ -129,9 +129,9 @@ CHECK (task_id != blocker_task_id)
 
 - The row reads "`task_id` is blocked by `blocker_task_id`".
 - Edges are workspace-local: both tasks MUST belong to the same workspace.
-- No new column is added. Edge deletion on task delete/archive is enforced by
-  the owning repository, not by a SQLite `ON DELETE CASCADE`, because the table
-  predates the foreign key.
+- No new column is added. The owning repository removes edges on task deletion;
+  archiving preserves them. No SQLite `ON DELETE CASCADE` is used because the
+  table predates that foreign key.
 - The table currently ships from the Office repository's
   `createTaskExtensionTables`. Reading and writing it becomes a core task
   concern; the Office reader methods stay valid against the same rows.
@@ -163,7 +163,7 @@ dependency-completion cycle.
 
 A predecessor is **failed** when `state` is `FAILED` or `CANCELLED`.
 
-A predecessor is **pending** in every other case, including archived.
+Other states are **pending**. Archival preserves this outcome and the edge.
 
 ## API surface
 
@@ -377,7 +377,7 @@ dependencies. A user who removes the edge is taking manual control.
 | Edge would create a cycle | `409` with the cycle path; no row written. |
 | Edge is a self-edge or crosses workspaces | `400`; no row written. |
 | Predecessor enters `FAILED`/`CANCELLED` | Dependent stays blocked with `blocked_reason: "failed"`; `task.dependency_failed` published; notification raised; no launch. |
-| Predecessor is archived while a dependent is blocked | Treated as pending, not resolved. The dependent stays blocked and the reason names the archived predecessor. |
+| Predecessor is archived | Preserve its state-derived status and edge: completed resolves, failed/cancelled fail, and unfinished stays pending. |
 | Predecessor is deleted | Edge is removed. The dependent may become unblocked but its launch intent does not fire. |
 | Dependent has no deferred launch intent | It unblocks and waits for a user or for its step's normal `on_enter` behavior on a later move. |
 | Dependent is not WIP-admitted when its dependencies resolve | No launch. The existing WIP promotion path launches it once capacity opens; the intent survives. |
@@ -440,7 +440,7 @@ Auto-start and chaining:
 
 - **GIVEN** B depends on A, B has a start-when-unblocked intent, and B is
   WIP-admitted, **WHEN** A completes successfully, **THEN** exactly one session
-  is created for B using the intent's recorded agent profile, executor,
+  starts for B using the intent's recorded agent profile, executor,
   executor profile, prompt, and plan-mode choice.
 - **GIVEN** A → B → C each with a start-when-unblocked intent, **WHEN** A
   completes, **THEN** B starts; **WHEN** B completes, **THEN** C starts, and A
@@ -471,8 +471,9 @@ Failure paths:
   intent fires exactly once.
 - **GIVEN** B depends on A and A is `CANCELLED`, **WHEN** the dependency state
   is read, **THEN** B is blocked with `blocked_reason: "failed"`.
-- **GIVEN** B depends on A, **WHEN** A is archived, **THEN** B stays blocked
-  and A is reported as a pending predecessor.
+- **GIVEN** B depends on A, **WHEN** A is archived, **THEN** its state-derived
+  outcome and edge remain: completed resolves, failed/cancelled fail,
+  and unfinished stays pending.
 - **GIVEN** B depends on A and B has an intent, **WHEN** A is deleted, **THEN**
   the edge is removed, B unblocks, and no session is created.
 - **GIVEN** A has completed and B has launched, **WHEN** A is reopened to

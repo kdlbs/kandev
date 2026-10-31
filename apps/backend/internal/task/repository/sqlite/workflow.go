@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // AddTaskToWorkflow adds a task to a workflow with placement. Wrapped in a
@@ -26,8 +27,19 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, taskID)
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, taskID)
 	if err != nil {
+		return err
+	}
+	if !found {
+		return tx.Commit()
+	}
+	var currentState v1.TaskState
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), taskID).Scan(&currentState); err != nil {
+		return err
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, taskID, currentState, currentState,
+		fromWorkflowID, fromStepID, workflowID, workflowStepID); err != nil {
 		return err
 	}
 

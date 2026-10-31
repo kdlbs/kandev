@@ -1,18 +1,9 @@
+import { checkMCPStatusClarity } from "../../helpers/mcp-status-clarity";
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-
-const THIRD_PARTY_MCP_CONFIG = {
-  enabled: true,
-  servers: {
-    filesystem: {
-      type: "sse",
-      url: "https://mcp.example.test/sse",
-    },
-  },
-};
 
 async function openChat(
   testPage: Page,
@@ -85,11 +76,35 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
   apiClient,
   seedData,
   prCapture,
+  backend,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "desktop-only MCP explorer");
-  await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, THIRD_PARTY_MCP_CONFIG);
+  // Exercise a profile whose legacy configuration was migrated during startup.
+  await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, {
+    enabled: true,
+    servers: {},
+  });
+  await backend.restart();
+  const previous = await apiClient.getMCPSelections(
+    "profile",
+    seedData.agentProfileId,
+    seedData.workspaceId,
+  );
+  expect(previous.legacy_import_status).toBe("complete");
+  const filesystem = await apiClient.createMCPServer(seedData.workspaceId, {
+    runtime_name: "filesystem",
+    display_name: "filesystem",
+    source: "custom",
+    execution_mode: "remote",
+    transport: "sse",
+    configuration: { url: "https://mcp.example.test/sse" },
+  });
 
   try {
+    await apiClient.replaceMCPSelections("profile", seedData.agentProfileId, seedData.workspaceId, [
+      ...previous.definition_ids,
+      filesystem.id,
+    ]);
     const session = await openChat(testPage, apiClient, seedData);
     await loadKandevCatalog(session);
     const trigger = testPage.getByTestId("mcp-status-trigger");
@@ -145,6 +160,13 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
       explorer.getByTestId("mcp-server-detail").getByText("Delivered, connection unverified"),
     ).toBeVisible();
   } finally {
+    await apiClient.replaceMCPSelections(
+      "profile",
+      seedData.agentProfileId,
+      seedData.workspaceId,
+      previous.definition_ids,
+    );
+    await apiClient.deleteMCPServer(seedData.workspaceId, filesystem.id, filesystem.revision);
     await apiClient.updateAgentProfileMcpConfig(seedData.agentProfileId, {
       enabled: false,
       servers: {},
@@ -152,4 +174,25 @@ test("desktop MCP explorer drills into tools and preserves list context", async 
   }
 
   prCapture.flush();
+});
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.14, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.15, AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.17, AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14
+test("explains mixed connections and saved changes with stable customization", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  await checkMCPStatusClarity({ page: testPage, apiClient, seedData, mobile: false });
+});
+
+// @covers AC-AGENTS-WORKSPACE-MCP-CONFIGURATION-006.14
+test("tablet MCP connections contain multiline rows and center the touch header", async ({
+  tabletTestPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  await tabletTestPage.setViewportSize({ width: 900, height: 1000 });
+  await checkMCPStatusClarity({ page: tabletTestPage, apiClient, seedData, mobile: true });
 });

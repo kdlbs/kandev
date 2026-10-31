@@ -8,7 +8,18 @@ import { renameSession } from "@/lib/api/domains/session-api";
 
 /** Mirrors the backend's maxSessionNameLength so the optimistic store update
  * matches what the rename broadcast will echo back. */
-export const MAX_SESSION_NAME_LENGTH = 120;
+const MAX_SESSION_NAME_LENGTH = 120;
+
+/** Cap by code point; during typing, preserve text after the insertion cursor. */
+export function limitSessionName(value: string, insertionEnd?: number | null): string {
+  if (insertionEnd == null) {
+    return Array.from(value).slice(0, MAX_SESSION_NAME_LENGTH).join("");
+  }
+  const prefix = Array.from(value.slice(0, insertionEnd));
+  const suffix = Array.from(value.slice(insertionEnd));
+  const available = Math.max(0, MAX_SESSION_NAME_LENGTH - suffix.length);
+  return [...prefix.slice(0, available), ...suffix].slice(0, MAX_SESSION_NAME_LENGTH).join("");
+}
 
 /** Commit a session tab rename: persist via WS and optimistically update the store. */
 export function useSessionRenameCommitter(
@@ -24,7 +35,7 @@ export function useSessionRenameCommitter(
     async (next: string) => {
       onDone();
       if (!sessionId || !taskId) return;
-      const normalized = next.trim().slice(0, MAX_SESSION_NAME_LENGTH);
+      const normalized = limitSessionName(next.trim());
       if ((currentName ?? "") === normalized) return;
       try {
         await renameSession(sessionId, normalized);

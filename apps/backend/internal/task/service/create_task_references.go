@@ -124,6 +124,15 @@ func (s *Service) rollbackPartialTask(ctx context.Context, taskID string, cause 
 		s.logger.Error("rollback delete failed; task left in inconsistent state",
 			zap.String("task_id", taskID), zap.Error(deleteErr))
 	}
+	if deleteErr == nil && s.attachmentSvc != nil {
+		// Creation attachments were claimed in the task insert transaction.
+		// Once the task row (and its association rows) is gone, release the
+		// registry rows and private bytes owned by this failed create.
+		if err := s.attachmentSvc.DeleteByTask(rollbackCtx, taskID); err != nil {
+			s.logger.Warn("rollback attachment cleanup failed",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
 	s.deleteDependencyEdgesForTask(rollbackCtx, taskID)
 	if deleteErr != nil {
 		if releaser, ok := s.workspacePolicyAttacher.(WorkspacePolicyMembershipReleaser); ok {

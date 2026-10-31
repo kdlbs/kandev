@@ -1,23 +1,24 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import {
+  armWorkspaceContextRetry,
+  workspaceContextRetryRequested,
+} from "../../helpers/workspace-context-retry";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { expectTouchControl } from "../../helpers/control-sizing";
+
+test.use({ trace: "retain-on-failure" });
 
 test("mobile task drawer retains rows while workspace context refresh recovers", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
-  const task = await apiClient.createTask(seedData.workspaceId, "Mobile retained task", {
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-  });
-
   let readsUnavailable = false;
+  const recovery = Promise.withResolvers<void>();
   await testPage.route("**/api/v1/**", async (route) => {
-    if (!readsUnavailable) {
-      await route.continue();
-      return;
-    }
     const url = new URL(route.request().url());
     const isWorkflowList =
       url.pathname === "/api/v1/workflows" &&
@@ -29,16 +30,24 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
       await route.continue();
       return;
     }
+    if (!readsUnavailable) {
+      await route.continue();
+      return;
+    }
+    if (await workspaceContextRetryRequested(testPage)) {
+      await recovery.promise;
+      await route.continue();
+      return;
+    }
     await route.fulfill({
       status: 503,
+      headers: { "Retry-After": "120" },
       contentType: "application/json",
       json: { error: "workspace context temporarily unavailable" },
     });
   });
 
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile retained task");
   await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
   readsUnavailable = true;
@@ -53,16 +62,23 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
-  const retry = drawer.getByRole("button", { name: "Retry", exact: true });
-  const retryBox = await retry.boundingBox();
-  if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
-  expect(retryBox.height).toBeGreaterThanOrEqual(44);
+  await waitForFiniteAnimations(drawer);
+  const retry = drawer
+    .getByTestId("sidebar-task-load-error")
+    .getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  await expectTouchControl(retry, "mobile sidebar retry");
 
-  readsUnavailable = false;
+  await armWorkspaceContextRetry(drawer);
   const recoveredWorkflowRead = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.ok(),
   });
-  await retry.tap();
+  try {
+    await retry.tap();
+    await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
+  } finally {
+    recovery.resolve();
+  }
   await recoveredWorkflowRead;
   await expect(drawer.getByTestId("sidebar-task-load-error")).toHaveCount(0);
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
@@ -72,7 +88,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
+}, testInfo) => {
+  test.setTimeout(120_000);
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile page retained task", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -96,6 +113,11 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
     },
   });
   let sidebarPageUnavailable = true;
+  let failedSidebarPageReads = 0;
+  let markExhausted: () => void = () => {};
+  const sidebarPageExhausted = new Promise<void>((resolve) => {
+    markExhausted = resolve;
+  });
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (
@@ -103,6 +125,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
       route.request().method() === "POST" &&
       url.pathname === `/api/v1/workspaces/${seedData.workspaceId}/sidebar/query`
     ) {
+      failedSidebarPageReads++;
+      if (failedSidebarPageReads === 5) markExhausted();
       await route.fulfill({
         status: 503,
         contentType: "application/json",
@@ -132,13 +156,19 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await failedSidebarPageRead;
+  await expect(drawer.getByTestId("sidebar-task-page-load-error")).toHaveCount(0);
+  await sidebarPageExhausted;
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 
-  const retry = drawer.getByRole("alert").getByRole("button", { name: "Retry", exact: true });
-  const retryBox = await retry.boundingBox();
-  if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
-  expect(retryBox.height).toBeGreaterThanOrEqual(44);
+  await waitForFiniteAnimations(drawer);
+  const retry = drawer
+    .getByTestId("sidebar-task-page-load-error")
+    .getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  await retry.scrollIntoViewIfNeeded();
+  await expectTouchControl(retry, "mobile sidebar page retry");
+  await testPage.screenshot({ path: testInfo.outputPath("sidebar-page-retry-mobile.png") });
 
   sidebarPageUnavailable = false;
   const recoveredSidebarPageRead = waitForHttp(

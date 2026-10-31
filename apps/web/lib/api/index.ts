@@ -18,4 +18,5 @@ export * from "./domains/workflow-sync-api";
 export * from "./domains/github-api";
 export * from "./domains/runtime-flags-api";
 export * from "./domains/background-work-api";
+export * from "./domains/mcp-api";
 export * from "./domains/conversation-search-api";

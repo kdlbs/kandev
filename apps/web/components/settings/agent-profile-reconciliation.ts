@@ -22,6 +22,7 @@ const EDITABLE_FIELDS = [
   "providerApiKeySecretId",
   "mcpSelectionMode",
   "mcpSelectedServers",
+  "copilotSelectedPlugins",
   "enabled",
   "dynamic",
 ] as const satisfies readonly (keyof AgentProfile)[];
@@ -29,6 +30,7 @@ const EDITABLE_FIELDS = [
 type EditableProfile = Pick<AgentProfile, (typeof EDITABLE_FIELDS)[number]> & {
   mcpSelectionMode: NonNullable<AgentProfile["mcpSelectionMode"]>;
   mcpSelectedServers: string[];
+  copilotSelectedPlugins: string[];
 };
 
 function canonicalize(value: unknown): unknown {
@@ -47,6 +49,7 @@ function editableSnapshot(profile: AgentProfile): EditableProfile {
     ...fields,
     mcpSelectionMode: profile.mcpSelectionMode ?? "inherit",
     mcpSelectedServers: [...(profile.mcpSelectedServers ?? [])].sort(),
+    copilotSelectedPlugins: [...(profile.copilotSelectedPlugins ?? [])].sort(),
   } as EditableProfile;
 }
 

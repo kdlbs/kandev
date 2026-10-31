@@ -15,7 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // pluginHost implements pluginsdk.Host (the kandev.plugin.v1 Host RPCs, §3
@@ -122,6 +122,7 @@ type pluginHost struct {
 	agentConversations         func() AgentConversationService
 	managedConversations       func() ManagedAgentConversationService
 	managedAutomationSchedules func() ManagedConversationScheduleService
+	automationHistoryDataDep   func() AutomationHistoryDataSource
 
 	// log receives the dependency-derivation-failure diagnostic emitted by
 	// attachDependencies (see host_data_dependencies.go). nil on a bare test
@@ -353,6 +354,9 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	}
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
+	if h.HostCallContextEnabled() {
+		event.PluginOrigin = &bus.PluginEventOrigin{PluginID: h.pluginID, Reference: pluginsdk.HostCallReference(ctx)}
+	}
 	return h.bus.Publish(ctx, subject, event)
 }
 

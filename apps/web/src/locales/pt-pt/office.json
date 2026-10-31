@@ -569,7 +569,7 @@
   "overrideTheWorkspaceTierOrProvider": "Substitua o escalão ou a ordem de fornecedores da área de trabalho para este agente.",
   "overrideWakeReasonTiers": "Substituir os escalões por motivo de despertar",
   "overrideWakeReasonTiersHelp": "Isto é raro. Substitua apenas se este agente precisar mesmo de um comportamento diferente no trabalho em segundo plano; por exemplo, um agente crítico para a segurança que tenha de usar Frontier mesmo em verificações de rotina. A maioria dos agentes deve herdar a política da área de trabalho.",
-  "overrideWhichModelTierRunsFor": "Substitua o escalão de modelo usado em tipos específicos de trabalho do agente. A maioria dos utilizadores mantém as pré-definições da área de trabalho; Economy para tarefas em segundo plano, Balanced para execuções normais. Os heartbeats, as rotinas agendadas e os alertas de orçamento são constantes em segundo plano, pelo que usar aqui um escalão mais barato pode reduzir muito o custo sem afetar o trabalho que interessa.",
+  "overrideWhichModelTierRunsFor": "Use a predefinição do espaço de trabalho ou escolha um nível de modelo para cada tipo de trabalho do agente. Modelos mais económicos podem produzir resultados diferentes.",
   "overrideWorkspacePolicyForThisAgent": "Substituir a política da área de trabalho neste agente",
   "overrideWorkspaceProviderOrder": "Substituir a ordem de fornecedores da área de trabalho",
   "overrideWorkspaceTier": "Substituir o escalão da área de trabalho",

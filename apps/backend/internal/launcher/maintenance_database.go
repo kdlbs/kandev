@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -16,7 +17,7 @@ import (
 const maintenanceHelp = `kandev maintenance database — offline SQLite retention and compaction
 
 Usage:
-  kandev maintenance database [--execute] [--compact]
+  kandev maintenance database [--execute] [--compact] [--json]
       [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 
 Without --execute, this is a read-only dry run: it reports legacy retention
@@ -37,6 +38,7 @@ as <database-path>.pre-compact-<timestamp>.bak for manual rollback (stop
 kandev if running, then move that file back over the live database path).
 
 Options:
+  --json                       Print a machine-readable JSON outcome.
   --execute                    Perform retention deletes (default: dry run).
   --compact                    Also stage and swap in a compacted copy (requires --execute).
   --keep-plan-revisions <n>    Additionally protect the n most recent non-HEAD plan revisions per task (default 0).
@@ -46,6 +48,7 @@ Options:
 `
 
 type maintenanceDatabaseArgs struct {
+	JSON              bool
 	Execute           bool
 	Compact           bool
 	KeepPlanRevisions int
@@ -73,6 +76,9 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 		fmt.Print(maintenanceHelp)
 		return 0
 	}
+	if args.JSON {
+		ignoreBrokenPipeSignal()
+	}
 
 	cfg, err := loadBootstrapConfigWithHome(args.HomeDir)
 	if err != nil {
@@ -98,14 +104,27 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 	}
 
 	outcome, err := maintenance.Run(context.Background(), homeDir, cfg.Database.Driver, databasePath, opts, nil)
-	if err != nil {
-		if outcome.Executed {
+	return finishMaintenanceOutcome(outcome, err, args.JSON, os.Stdout, os.Stderr)
+}
+
+func finishMaintenanceOutcome(outcome maintenance.Outcome, runErr error, jsonOutput bool, stdout, stderr io.Writer) int {
+	var outputErr error
+	if runErr == nil || outcome.Executed {
+		if jsonOutput {
+			outputErr = writeMaintenanceJSON(stdout, outcome)
+		} else {
 			printMaintenanceOutcome(outcome)
 		}
-		printMaintenanceFailure(err)
+	}
+	if outputErr != nil {
+		_, _ = fmt.Fprintf(stderr, "[kandev] failed to write maintenance output: %v\n", outputErr)
+	}
+	if runErr != nil {
+		printMaintenanceFailure(stderr, runErr)
+	}
+	if runErr != nil || outputErr != nil {
 		return 1
 	}
-	printMaintenanceOutcome(outcome)
 	return 0
 }
 
@@ -122,6 +141,10 @@ func parseMaintenanceDatabaseArgs(argv []string) (maintenanceDatabaseArgs, error
 		if arg == flagHelp || arg == "-h" {
 			out.ShowHelp = true
 			return out, nil
+		}
+		if arg == flagJSON {
+			out.JSON = true
+			continue
 		}
 		if arg == "--execute" {
 			out.Execute = true
@@ -195,20 +218,20 @@ func maintenanceFlagIntValue(argv []string, i int, arg, flagName string) (int, i
 	return value, next, nil
 }
 
-func printMaintenanceFailure(err error) {
+func printMaintenanceFailure(stderr io.Writer, err error) {
 	switch {
 	case errors.Is(err, maintenance.ErrUnsupportedDriver):
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] "+err.Error())
 	case errors.Is(err, maintenance.ErrOwnershipConflict):
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] "+err.Error())
 	case errors.Is(err, maintenance.ErrBackupUnverified):
-		fmt.Fprintln(os.Stderr, "[kandev] refusing to execute: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] refusing to execute: "+err.Error())
 	case errors.Is(err, maintenance.ErrInsufficientDiskSpace):
-		fmt.Fprintln(os.Stderr, "[kandev] refusing to compact: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] refusing to compact: "+err.Error())
 	case errors.Is(err, maintenance.ErrIntegrityCheckFailed):
-		fmt.Fprintln(os.Stderr, "[kandev] refusing to compact: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] refusing to compact: "+err.Error())
 	default:
-		fmt.Fprintln(os.Stderr, "[kandev] maintenance failed: "+err.Error())
+		_, _ = fmt.Fprintln(stderr, "[kandev] maintenance failed: "+err.Error())
 	}
 }
 

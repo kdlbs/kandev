@@ -98,6 +98,8 @@
   "failedToMigrateTasks": "Failed to migrate tasks",
   "failedToSaveWorkflowChanges": "Failed to save workflow changes",
   "failedToUpdateWorkflowStep": "Failed to update workflow step",
+  "holdStep": "Hold step",
+  "holdStepHelp": "Marks this step as a hold step. The classification is stored on the step, and it does not start, stop, or move a task.",
   "hopNumber": "Hop {{index}}",
   "import": "Import",
   "importCompleteTitle": "Import complete",

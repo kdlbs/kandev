@@ -118,3 +118,63 @@ func TestIsFromOfficeProjection_RealWorkspaceWorkflow(t *testing.T) {
 		})
 	}
 }
+
+func TestIsFromOfficeProjection_SystemRoutineWorkspace(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	for _, id := range []string{"office", "other-office", "kanban"} {
+		if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: id, Name: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"office", "other-office"} {
+		if _, err := repo.EnsureOfficeWorkflow(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routine, err := repo.EnsureRoutineWorkflow(ctx, "office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := repo.EnsureRoutineWorkflow(ctx, "other-office")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kanban, err := repo.EnsureRoutineWorkflow(ctx, "kanban")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		id, workspace, workflow string
+		office                  bool
+	}{
+		{"owned-routine", "office", routine, true},
+		{"foreign-routine", "office", other, false},
+		{"non-office-routine", "kanban", kanban, false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			if err := repo.CreateTask(ctx, &models.Task{ID: tc.id, WorkspaceID: tc.workspace, WorkflowID: tc.workflow, Title: tc.id, State: "TODO"}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := repo.GetTask(ctx, tc.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.IsFromOffice != tc.office {
+				t.Fatalf("Office identity = %v, want %v", got.IsFromOffice, tc.office)
+			}
+		})
+	}
+	// A user workflow cannot acquire Office identity by copying the template name.
+	_, err = repo.db.ExecContext(ctx, `UPDATE workflows SET is_system=0 WHERE id=?`, routine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetTask(ctx, "owned-routine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsFromOffice {
+		t.Fatal("a user-owned routine-template workflow must remain Kanban")
+	}
+}

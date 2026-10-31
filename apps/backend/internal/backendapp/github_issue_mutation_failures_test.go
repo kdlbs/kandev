@@ -114,15 +114,16 @@ func TestGitHubIssueMutationCancellationBoundary(t *testing.T) {
 				return issueMutationRemote(r)
 			})
 			gh, _ := issueMutationAuthenticatedGitHub(t, h, transport)
-			gh.SetTaskIssueStore(issueMutationAdmissionStore{githubTaskIssueStoreAdapter: githubTaskIssueStoreAdapter{svc: h.services[0]}, afterRepository: func(context.Context) error {
+			gh.SetTaskIssueStore(issueMutationAdmissionStore{githubTaskIssueStoreAdapter: githubTaskIssueStoreAdapter{svc: h.services[0]}, beforeMutation: func(writeCtx context.Context) error {
 				if afterValidation {
 					cancel()
 				}
-				return nil
+				return writeCtx.Err()
 			}})
 			_, err := gh.LinkTaskIssueForUser(ctx, "", "issue-task", issueMutationRequest(42))
 			if afterValidation {
 				require.NoError(t, err)
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
 			} else {
 				require.ErrorIs(t, err, context.Canceled)
 			}

@@ -18,29 +18,20 @@ import {
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { generateUUID } from "@/lib/utils";
-import { reconcileTaskOverviewRead } from "@/lib/state/slices/task-overview-merge";
+import { acceptWorkflowSnapshotOverview } from "./workflow-snapshot-overviews";
 import type { TaskCoverage, WorkflowSnapshot } from "@/lib/types/http";
 import { getWorkflowSnapshotReads } from "@/lib/state/workflow-snapshot-reads";
 import { raceSharedRead } from "@/lib/state/shared-resource-reads";
+import {
+  canUseBootSnapshots,
+  isEmptyWorkflowInventoryReady,
+  isBootHydratedSnapshot,
+  useWorkflowSnapshotReadiness,
+} from "./workflow-snapshot-readiness";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
 type WorkspaceContextRequest = { workspaceId: string; generation: number };
-
-function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
-  return !!snapshot && snapshot.isPlaceholder !== true && snapshot.fetchFailed !== true;
-}
-
-function canUseBootSnapshots(
-  connectionStatus: string,
-  workflows: Workflow[],
-  snapshots: Record<string, WorkflowSnapshotData>,
-): boolean {
-  return (
-    connectionStatus !== "connected" &&
-    workflows.every((wf) => isBootHydratedSnapshot(snapshots[wf.id]))
-  );
-}
 
 function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
   return (
@@ -301,12 +292,17 @@ async function fetchAndWriteSnapshot(
       snapshotAtFetchStart,
       existingSnapshot,
     );
-    const tasks = reconcileSnapshotOverview(store.getState(), mergedTasks, overviewRead, wf.id);
+    const tasks = acceptWorkflowSnapshotOverview(
+      store.getState(),
+      mergedTasks,
+      overviewRead,
+      wf.id,
+      snapshot.tasks,
+    );
     if (!tasks) {
       markFailed(wf.id, new Error("overview_read_expired"));
       return;
     }
-    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
 
     const workflowSnapshot = {
       workflowId: wf.id,
@@ -315,7 +311,11 @@ async function fetchAndWriteSnapshot(
       tasks,
       taskCoverage: reconciledSnapshotCoverage(snapshot, stepIds, tasks.length),
     };
-    store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
+    if (overviewRead)
+      store
+        .getState()
+        .setWorkflowSnapshot(wf.id, workflowSnapshot, { stageClaimsReconciled: true });
+    else store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
     const activeKanban = store.getState().kanban;
     if (activeKanban?.workflowId === wf.id) {
       store.getState().hydrate({
@@ -361,21 +361,6 @@ function markSnapshotIncomplete(store: StoreApi<AppState>, workflowId: string) {
       taskCoverage: current.taskCoverage ? { ...current.taskCoverage, complete: false } : undefined,
     });
   }
-}
-
-function reconcileSnapshotOverview(
-  state: AppState,
-  tasks: KanbanTask[],
-  readId: string | undefined,
-  workflowId: string,
-) {
-  const scoped = tasks.map((task) =>
-    task.workflowId === undefined ? { ...task, workflowId } : task,
-  );
-  const reconciled = state.taskOverview
-    ? reconcileTaskOverviewRead(state.taskOverview, scoped, readId, true)
-    : scoped;
-  return reconciled?.filter((task) => task.workflowId === workflowId && !task.isArchived) ?? null;
 }
 
 function reconciledSnapshotCoverage(
@@ -485,9 +470,12 @@ export function useAllWorkflowSnapshots(
   const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
   const workflows = useAppStore((state) => state.workflows.items);
+  const workflowCoverage = useAppStore((state) => state.workflows.taskWorkflowCoverage);
   const workspaceContextRetryVersion = useAppStore(
     (state) => state.workspaceContextRead?.retryVersion ?? 0,
   );
+  const { initialSnapshotsReady, markInitialSnapshotsReady } =
+    useWorkflowSnapshotReadiness(workspaceId);
   const lastFetchedRef = useRef<string>("");
   const lastRefreshNonceRef = useRef(0);
   const lastRecoveryRetryVersionRef = useRef(workspaceContextRetryVersion);
@@ -524,6 +512,11 @@ export function useAllWorkflowSnapshots(
     .map((w) => w.id)
     .sort()
     .join(",")}`;
+  const emptyWorkflowInventoryReady = isEmptyWorkflowInventoryReady(
+    workspaceId,
+    workspaceWorkflows.length,
+    workflowCoverage,
+  );
 
   // eslint-disable-next-line max-lines-per-function -- this effect owns one cancellable snapshot request lifecycle
   useEffect(() => {
@@ -548,6 +541,7 @@ export function useAllWorkflowSnapshots(
 
     const workspaceWorkflows = workspaceWorkflowsRef.current;
     if (workspaceWorkflows.length === 0) {
+      markInitialSnapshotsReady(emptyWorkflowInventoryReady);
       resolveRefreshes(fetchGenRef.current);
       lastRefreshNonceRef.current = refreshNonce;
       lastRecoveryRetryVersionRef.current = workspaceContextRetryVersion;
@@ -589,6 +583,7 @@ export function useAllWorkflowSnapshots(
       lastFetchedRef.current = key;
       lastRefreshNonceRef.current = refreshNonce;
       lastRecoveryRetryVersionRef.current = workspaceContextRetryVersion;
+      markInitialSnapshotsReady();
       resolveRefreshes(fetchGenRef.current);
       return;
     }
@@ -639,6 +634,7 @@ export function useAllWorkflowSnapshots(
         return;
       }
       store.getState().setKanbanMultiLoading(false);
+      markInitialSnapshotsReady();
       const snapshotError = workspaceWorkflows.some((wf) => failedWorkflowIdsRef.current.has(wf.id))
         ? (failure ?? "transient")
         : null;
@@ -666,12 +662,14 @@ export function useAllWorkflowSnapshots(
   }, [
     workspaceId,
     workspaceWorkflowKey,
+    emptyWorkflowInventoryReady,
     connectionStatus,
     refreshNonce,
+    markInitialSnapshotsReady,
     resolveRefreshes,
     store,
     workspaceContextRetryVersion,
   ]);
 
-  return { refresh };
+  return { refresh, initialSnapshotsReady };
 }

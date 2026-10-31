@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -31,6 +32,8 @@ type TurnChangeSetSummaryDTO struct {
 	RetainUntil             *time.Time                    `json:"retain_until,omitempty"`
 	ExpiryReason            string                        `json:"expiry_reason,omitempty"`
 	OverlapIntervals        []models.TurnChangeOverlap    `json:"overlap_intervals,omitempty"`
+	CountsAvailable         bool                          `json:"counts_available"`
+	LegacyCounts            bool                          `json:"legacy_counts"`
 	Repositories            []TurnRepositoryChangeDTO     `json:"repositories"`
 }
 
@@ -46,6 +49,11 @@ type TurnRepositoryChangeDTO struct {
 	EnumerationComplete bool                          `json:"enumeration_complete"`
 	ComparisonComplete  bool                          `json:"comparison_complete"`
 	ContentComplete     bool                          `json:"content_complete"`
+	PreservationPending bool                          `json:"preservation_pending,omitempty"`
+	ComparisonBasis     turnchanges.ComparisonBasis   `json:"comparison_basis,omitempty"`
+	ComparisonReason    models.TurnChangeReason       `json:"comparison_reason,omitempty"`
+	ExportState         models.TurnChangeExportState  `json:"export_state,omitempty"`
+	ExportReason        models.TurnChangeReason       `json:"export_reason,omitempty"`
 	OverlapIntervals    []models.TurnChangeOverlap    `json:"overlap_intervals,omitempty"`
 }
 
@@ -105,6 +113,8 @@ func TurnChangeSetSummaryFromModel(changeSet *models.TurnChangeSet, repositories
 		dto.BinaryFileCount, dto.UnknownCountFileCount, dto.RepositoryCount = changeSet.BinaryFileCount, changeSet.UnknownCountFileCount, changeSet.RepositoryCount
 		dto.RetainUntil, dto.ExpiryReason, dto.OverlapIntervals = changeSet.RetainUntil, changeSet.ExpiryReason, changeSet.OverlapIntervals
 	}
+	dto.CountsAvailable = turnChangeCountsAvailable(repositories)
+	dto.LegacyCounts = turnChangeLegacyCounts(repositories)
 	for _, repository := range repositories {
 		if repository == nil {
 			continue
@@ -115,10 +125,32 @@ func TurnChangeSetSummaryFromModel(changeSet *models.TurnChangeSet, repositories
 			RepositorySubpath: repository.RepositorySubpath, Availability: repository.Availability,
 			Reason: repository.Reason, EnumerationComplete: repository.EnumerationComplete,
 			ComparisonComplete: repository.ComparisonComplete, ContentComplete: repository.ContentComplete,
+			PreservationPending: repository.PreservationState == models.TurnChangePreservationPending,
+			ComparisonBasis:     repository.ComparisonBasis, ComparisonReason: repository.ComparisonReason,
+			ExportState: repository.ExportState, ExportReason: repository.ExportReason,
 			OverlapIntervals: repository.OverlapIntervals,
 		})
 	}
 	return dto
+}
+
+func turnChangeCountsAvailable(repositories []*models.TurnRepositoryChangeSet) bool {
+	for _, repository := range repositories {
+		if repository != nil && repository.Availability == models.TurnChangeAvailabilityReady {
+			return true
+		}
+	}
+	return false
+}
+
+func turnChangeLegacyCounts(repositories []*models.TurnRepositoryChangeSet) bool {
+	for _, repository := range repositories {
+		if repository != nil && repository.Availability == models.TurnChangeAvailabilityReady &&
+			repository.ComparisonBasis == turnchanges.ComparisonLegacyRaw {
+			return true
+		}
+	}
+	return false
 }
 
 func TurnFileChangeFromModel(file *models.TurnFileChange) TurnFileChangeDTO {

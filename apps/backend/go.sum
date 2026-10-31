@@ -243,8 +243,8 @@ github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnr
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
 github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1:6v2b51hI/fHJwM22ozAgKL4VKDeJcHhJFhtBdhmNjmU=
 github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/XSXhF0NWZEnDohbsk=
-github.com/kdlbs/acp-go-sdk v0.13.6-0.20260922084253-07a3e52f8179 h1:pRuzXC7qPQMAseD8bxcukDqRVJ89wwtmQ1T0uVL8fw8=
-github.com/kdlbs/acp-go-sdk v0.13.6-0.20260922084253-07a3e52f8179/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=
+github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9 h1:eZmB3Ez5JYYHQ2NQLXnJ+lW5hVR9Ybeq6v3LwZ6l6vY=
+github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9/go.mod h1:yKzM/3R9uELp4+nBAwwtkS0aN1FOFjo11CNPy37yFko=
 github.com/kevinburke/ssh_config v1.6.0 h1:J1FBfmuVosPHf5GRdltRLhPJtJpTlMdKTBjRgTaQBFY=
 github.com/kevinburke/ssh_config v1.6.0/go.mod h1:q2RIzfka+BXARoNexmF9gkxEX7DmvbW9P4hIVx2Kg4M=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
@@ -363,6 +363,8 @@ github.com/subosito/gotenv v1.4.2 h1:X1TuBLAMDFbaTAChgCBLu3DU3UPyELpnF2jjJ2cz/S8
 github.com/subosito/gotenv v1.4.2/go.mod h1:ayKnFf/c6rvx/2iiLrJUk1e6plDbT3edrFNGqEflhK0=
 github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b h1:m20F4on1i8Mv3nexDOJGB6JhpOG9Q4XepN45yJvd8Lc=
 github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b/go.mod h1:4zltGIGJa3HV+XumRyNn4BmhlavbUZH3Uh5xJNaDwsY=
+github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f h1:9hiVElpCmKzsBKQHkBqZ8LGzt82iLfM8egxr4sew+Ys=
+github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f/go.mod h1:8/zr1Tv0+cKpVtGCEB/7YfRXr2TszsMxMXLaT8YuBgU=
 github.com/tiktoken-go/tokenizer v0.8.1 h1:4obDoB6/dhdBt9xMweX4nww5cjdOq/nYF4ecwPq2+mg=
 github.com/tiktoken-go/tokenizer v0.8.1/go.mod h1:eLA0t6nGvn9mDc7gt90qt7pMat+gE9ViqwQ6l9B+tA4=
 github.com/tuzig/vt10x v0.0.0-20231206072048-370e51642bf7 h1:U7j2kc5ZS6dmwTg0H2VbRNGUwUxxEv9HtyxsyiYyS84=

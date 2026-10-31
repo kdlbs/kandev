@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-08
+updated: 2026-10-30
 owners:
   - Kandev
 ---
@@ -23,8 +23,11 @@ criteria `.8` and `.15`; eligible post-output recovery uses the normal
 continuation path described here, without an installation opt-in.
 
 Continuation permits output and successfully completed foreground tools,
-including shell, write, and MCP tools. Pending or uncertain tool outcomes require
-manual recovery. The same Cursor conversation receives the internal prompt
+including shell, write, and MCP tools. On a supported retained Cursor runtime,
+recognized transport loss also permits continuation with pending foreground tools.
+Cursor owns subsequent inspection and retries of that work. Kandev does not
+guarantee that the tools stopped, that their results remain available, or that
+Cursor avoids repeated or overlapping actions. The same Cursor conversation receives the internal prompt
 `continue`; that prompt does not appear in Kandev chat history. Continuation does
 not authorize original-prompt replay or promise exactly-once agent actions.
 
@@ -57,16 +60,18 @@ when conversation restoration and the interrupted work are unambiguous.
   high-confidence short-retryable provider failure in a supported
   concrete-profile task session shall permit continuation after assistant or
   thought output when the provider conversation is restorable and all foreground
-  tool outcomes are known and successful. Unsupported providers, passthrough,
+  tool outcomes are known and successful, or meet criterion `001.8`. Unsupported providers, passthrough,
   dynamic routing, Office, and utility invocations shall retain their existing
   policies.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2:** A turn containing only
   successfully completed foreground tools shall be eligible regardless of
   tool category, including writes, shell commands, and MCP invocations.
-  Pending, failed, cancelled, unknown, malformed, or conflicting outcomes,
-  active background work, subagents, and unresolved permissions shall require
-  manual recovery. A turn with both a completed tool and an unresolved tool
-  shall be refused. Missing or stale evidence shall never authorize continuation.
+  Criterion `001.8` permits observed pending foreground tools on a retained
+  Cursor runtime. Outside that exception, pending tools require manual recovery.
+  Failed, provider-cancelled, unknown, malformed, or conflicting outcomes,
+  active background work, subagents, and unresolved or denied permissions
+  shall require manual recovery. Missing or stale evidence shall never
+  authorize continuation.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.3:** Automatic continuation shall
   preserve the task session, workspace, provider conversation, selected
   execution profile, model, mode, and permission settings. It shall retain
@@ -100,6 +105,25 @@ when conversation restoration and the interrupted work are unambiguous.
   connection dropped without transport evidence. Hard quota/authentication
   errors and unknown diagnostics shall not enter this path.
 
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.8:** After recognized transient
+  transport loss settles a prompt on a supported retained Cursor runtime,
+  pending foreground tools shall not prevent automatic continuation.
+  This includes a turn with both completed and pending tools.
+  Kandev shall preserve the same conversation and send the existing internal
+  `continue` instruction without waiting for tool termination or a terminal result.
+  Cursor shall remain responsible for deciding how to inspect or retry the work.
+  Missing tool results do not establish failure, rollback, or safe repetition.
+  Known failed/cancelled tools, permissions, background work, and ownership
+  exclusions in `001.2` remain applicable. Runtime replacement does not qualify
+  for this exception. Other failure categories retain their existing policy.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.9:** Pending-tool continuation
+  shall preserve observed tool history and completed results without inventing
+  successful tool completion. Kandev shall not replay the original user request
+  or directly redispatch a tool. Its recovery guarantees concern prompt ownership
+  and dispatch count, not the number of actions Cursor chooses to execute.
+  Older components without this continuation policy shall retain their prior
+  pending-tool behavior.
+
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-002: Bounded recovery ownership
 
 **Intent:** Recovery should survive a brief connectivity gap while remaining
@@ -114,6 +138,9 @@ bounded and subordinate to user actions.
   dispatch shall consume an attempt and use the next delay; hard,
   unclassified, and ambiguous failures shall stop automatically. Model output
   alone shall not replenish the episode budget.
+  Eligible retained-runtime model-capacity recovery uses the narrower
+  [capacity timing amendment](transient-turn-runtime-continuity.md#req-platform-turn-continuity-003-continue-after-model-capacity-errors)
+  instead; transport-loss restoration retains this five-attempt policy.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.2:** Cancel, stop, archive,
   delete, start fresh, a new user prompt, and model or profile changes shall
   supersede pending automatic work. Late callbacks shall not resume the old
@@ -153,7 +180,8 @@ continuing, exhausted, or deliberately unavailable.
 #### Acceptance criteria
 
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.1:** Desktop and phone task chat
-  shall show at most one current recovery notice containing the selected
+  shall show at most one current recovery notice. Before confirmed resumed
+  activity, it shall contain the selected
   provider, mode of recovery, scheduled attempt, maximum attempts, countdown
   when waiting, and visible Cancel action. Reconnecting and continuing shall
   have distinct labels; a countdown shall not imply browser-owned retry.
@@ -174,11 +202,32 @@ continuing, exhausted, or deliberately unavailable.
   44px, wrap technical details, and avoid horizontal document overflow. Status
   changes shall be announced without stealing focus or announcing every
   countdown tick. All product copy shall be localized.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.5:** When activity from the
+  accepted continuation confirms that the agent resumed work, the current notice
+  shall change to neutral recovery information before turn completion.
+  It shall remove the active failure heading, warning icon, warning colors,
+  countdown, and attempt counter. The notice shall retain a visible Cancel action
+  for the continued turn. The original failure shall remain available as diagnostic
+  history. This presentation change shall preserve the episode budget and dispatch
+  ownership defined by `002.1` and `002.2`.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.6:** A running session state or
+  accepted continuation alone shall not establish resumed activity.
+  At least one non-empty assistant or reasoning output, or attributable foreground
+  tool event, shall establish resumed activity for that accepted continuation.
+  Previous executions, previous prompts, historical output, provider diagnostics,
+  and background or nested work shall not clear a current recovery warning.
+  Ambiguous activity shall retain the existing feedback until valid evidence arrives.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.7:** Reload, another viewer, and
+  desktop or phone Chat shall show the same confirmed recovery presentation.
+  A subsequent interruption in the episode shall show its current failure and
+  remaining attempts. Delayed activity from an earlier attempt shall not downgrade
+  that new warning. Existing terminal cleanup shall remove the neutral notice
+  as well as the actionable warning.
 
 ## Out of scope
 
 - Original-prompt replay after completed tools, and automatic continuation
-  after uncertain tool work.
+  after unknown or invalid tool evidence outside criterion `001.8`.
 - Exactly-once execution guarantees for arbitrary agent actions.
 - Detecting Wi-Fi changes, altering host networking, HTTP compatibility modes,
   provider purchase/authentication, or interpreting inactivity as a failure.
@@ -192,3 +241,6 @@ continuing, exhausted, or deliberately unavailable.
 
 - [Original implementation package](../../../plans/provider-interruption-continuation/plan.md)
 - [Continuation graduation package](../../../plans/provider-interruption-continuation-graduation/plan.md)
+
+- [Pending-tool continuation package](../../../plans/cursor-pending-tool-continuation/plan.md)
+- [Resumed activity feedback package](../../../plans/continuation-resumed-feedback/plan.md)

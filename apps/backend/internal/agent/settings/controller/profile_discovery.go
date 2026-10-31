@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
@@ -60,6 +61,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	resp.Status = string(caps.Status)
 	resp.ContextRevision = result.ContextRevision
 	resp.RuntimeInfo = caps.RuntimeInfo
+	resp.ReasonCode = profileProbeReasonCode(agentName, &profileContext, caps.Status, result.ReasonCode)
 	if caps.Error != "" {
 		message := profileFailureMessage(caps.Status)
 		resp.Error = &message
@@ -79,6 +81,20 @@ func (c *Controller) FetchProfileDynamicModels(
 		resp.Commands = append(resp.Commands, dto.CommandEntryDTO{Name: command.Name, Description: command.Description})
 	}
 	return c.finishDynamicModels(ctx, agentName, resp, req.Refresh), nil
+}
+
+func profileProbeReasonCode(
+	agentName string,
+	profileContext *hostutility.ProfileProbeContext,
+	status hostutility.Status,
+	reasonCode string,
+) string {
+	if agentName != agents.CopilotACPAgentID || profileContext == nil ||
+		len(profileContext.CopilotSelectedPlugins) == 0 || status != hostutility.StatusUnsupported ||
+		reasonCode != string(copilotplugins.ReasonPolicyUnverified) {
+		return ""
+	}
+	return reasonCode
 }
 
 func (c *Controller) resolveProfileProbeContext(
@@ -101,15 +117,22 @@ func (c *Controller) resolveProfileProbeContext(
 	if err != nil {
 		return hostutility.ProfileProbeContext{}, err
 	}
+	if len(launch.copilotPlugins) > 0 && registered.ID() != agents.CopilotACPAgentID {
+		return hostutility.ProfileProbeContext{}, ErrInvalidProfileDiscovery
+	}
 	definitions := profileProbeEnvironmentDefinitions(inference, launch.envVars)
 	resolvedEnv, _, err := runtimeenv.Resolve(ctx, definitions, c.revealProfileDiscoverySecret)
 	if err != nil {
 		return hostutility.ProfileProbeContext{}, ErrInvalidProfileDiscovery
 	}
 	scope := profileProbeScope(authorizationScope, agentID, profile)
-	return hostutility.ProfileProbeContext{
+	profileContext := hostutility.ProfileProbeContext{
 		Scope: scope, Env: resolvedEnv, CLIFlags: launch.cliTokens, CommandPrefix: launch.prefixTokens,
-	}, nil
+	}
+	if len(launch.copilotPlugins) > 0 {
+		profileContext.CopilotSelectedPlugins = launch.copilotPlugins
+	}
+	return profileContext, nil
 }
 
 func (c *Controller) resolveProfileProbeAgent(
@@ -155,9 +178,10 @@ func (c *Controller) resolveProfileDiscoveryProfile(
 }
 
 type profileProbeLaunchSettings struct {
-	envVars      []dto.ProfileEnvVarDTO
-	cliTokens    []string
-	prefixTokens []string
+	envVars        []dto.ProfileEnvVarDTO
+	cliTokens      []string
+	prefixTokens   []string
+	copilotPlugins []string
 }
 
 func (c *Controller) resolveProfileProbeLaunchSettings(
@@ -169,6 +193,7 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 	var envVars []dto.ProfileEnvVarDTO
 	var cliFlags []dto.CLIFlagDTO
 	var commandPrefix string
+	var copilotPlugins []string
 	cliPassthrough := false
 	if launchSettings == nil {
 		if profile == nil {
@@ -178,6 +203,7 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 		cliFlags = cliFlagsToDTO(profile.CLIFlags)
 		commandPrefix = profile.CommandPrefix
 		cliPassthrough = profile.CLIPassthrough
+		copilotPlugins = append([]string{}, profile.CopilotSelectedPlugins...)
 	} else {
 		if launchSettings.EnvVars == nil || launchSettings.CLIFlags == nil || launchSettings.CommandPrefix == nil {
 			return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
@@ -187,8 +213,16 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 		commandPrefix = *launchSettings.CommandPrefix
 		if profile != nil {
 			cliPassthrough = profile.CLIPassthrough
+			copilotPlugins = append([]string{}, profile.CopilotSelectedPlugins...)
+		}
+		if launchSettings.CopilotSelectedPlugins.Set {
+			if err := dto.ValidateCopilotPluginSelection(launchSettings.CopilotSelectedPlugins); err != nil {
+				return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
+			}
+			copilotPlugins = append([]string{}, launchSettings.CopilotSelectedPlugins.Value...)
 		}
 	}
+	copilotPlugins = copilotplugins.SortSelection(copilotPlugins)
 	if validateProfileEnvVarDTOs(envVars) != nil || validateCLIFlagDTOs(cliFlags) != nil || validateCommandPrefix(commandPrefix) != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
 	}
@@ -206,7 +240,9 @@ func (c *Controller) resolveProfileProbeLaunchSettings(
 	if err != nil {
 		return profileProbeLaunchSettings{}, ErrInvalidProfileDiscovery
 	}
-	return profileProbeLaunchSettings{envVars: envVars, cliTokens: cliTokens, prefixTokens: prefixTokens}, nil
+	return profileProbeLaunchSettings{
+		envVars: envVars, cliTokens: cliTokens, prefixTokens: prefixTokens, copilotPlugins: copilotPlugins,
+	}, nil
 }
 
 func profileProbeEnvironmentDefinitions(

@@ -404,7 +404,7 @@ function NewSubtaskForm({
     onAgentProfileChange: sharedHandlers.handleAgentProfileChange,
   });
   const handlers = { ...sharedHandlers, handleAgentProfileChange: parentProfile.onChange };
-  useGitHubUrlErrorEffect(fs, isOpen);
+  useGitHubUrlErrorEffect(fs, isOpen, workspaceId);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles, "task_create");
   const sessionOptions = useSessionOptions(parentTaskId);

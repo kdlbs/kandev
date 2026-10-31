@@ -90,31 +90,40 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	if shell != nil {
 		shellWriter = shell
 	}
-	go s.handleWorkspaceStreamInput(stream, shellWriter, done)
+	// A quiet instance cannot reveal a departed client through a write failure.
+	// Ending input must also release this connection's forwarding subscriptions.
+	inputDone := make(chan struct{})
+	go func() {
+		defer close(inputDone)
+		s.handleWorkspaceStreamInput(stream, shellWriter, done)
+	}()
 
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: the invalidation channel comes
 	// from instanceAuth's context value, captured atomically with this
 	// request's own accept check -- not a fresh Invalidated() call here,
 	// which would be a second, independent lock acquisition racing a
 	// concurrent rotation.
-	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, credentialInvalidatedFromContext(c))
+	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, inputDone, credentialInvalidatedFromContext(c))
 }
 
 // forwardWorkspaceStream forwards workspace events and shell output to the
-// WebSocket until the client goes away or the handler shuts down. invalidated
-// is nil when credentialSource is unset, which never fires in a select --
-// legacy behavior for every existing test constructing a Server without a
-// control server alongside it.
+// WebSocket until the client goes away (inputDone closes, or a write fails) or
+// the handler shuts down. invalidated is nil when credentialSource is unset,
+// which never fires in a select -- legacy behavior for every existing test
+// constructing a Server without a control server alongside it.
 func (s *Server) forwardWorkspaceStream(
 	stream *workspaceStreamConn,
 	sub types.WorkspaceStreamSubscriber,
 	shellOutputCh chan []byte,
 	done <-chan struct{},
+	inputDone <-chan struct{},
 	invalidated <-chan struct{},
 ) {
 	for {
 		select {
 		case <-done:
+			return
+		case <-inputDone:
 			return
 		case <-invalidated:
 			return

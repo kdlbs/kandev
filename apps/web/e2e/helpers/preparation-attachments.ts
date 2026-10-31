@@ -8,6 +8,7 @@ import type { ApiClient } from "./api-client";
 import { makeGitEnv } from "./git-helper";
 import { KanbanPage } from "../pages/kanban-page";
 import { MobileKanbanPage } from "../pages/mobile-kanban-page";
+import { SessionPage } from "../pages/session-page";
 
 type Options = {
   testPage: Page;
@@ -18,6 +19,11 @@ type Options = {
   mobile?: boolean;
   failPreparation?: boolean;
 };
+
+async function reloadChat(page: Page) {
+  await page.reload();
+  await new SessionPage(page).waitForLoad();
+}
 
 export async function assertPreparationAttachments(options: Options) {
   const {
@@ -123,7 +129,7 @@ export async function assertPreparationAttachments(options: Options) {
     }
     const file = bubble.getByTestId("message-file-attachment");
     await expect(file).toContainText("notes.txt");
-    await page.reload();
+    await reloadChat(page);
     await expect(
       bubble.getByRole("button", { name: "Open Attachment 2", exact: true }),
     ).toBeVisible();
@@ -144,7 +150,7 @@ export async function assertPreparationAttachments(options: Options) {
       .getAttribute("src");
     expect(firstSource).toBeTruthy();
     await page.route(firstSource!, (route) => route.fulfill({ status: 404, body: "not found" }));
-    await page.reload();
+    await reloadChat(page);
     await expect(bubble).toContainText("/e2e:simple-message");
     await expect(file).toBeVisible();
     await page.unroute(firstSource!);
@@ -155,7 +161,7 @@ export async function assertPreparationAttachments(options: Options) {
       await expect(panel).toHaveAttribute("data-status", "completed_with_warnings", {
         timeout: 60_000,
       });
-      await page.reload();
+      await reloadChat(page);
       await expect(
         bubble.getByRole("button", { name: "Open Attachment 2", exact: true }),
       ).toBeVisible();
@@ -170,7 +176,7 @@ export async function assertPreparationAttachments(options: Options) {
         )
         .toBe(1);
       await expect(bubble).toHaveCount(1);
-      await page.reload();
+      await reloadChat(page);
       await expect(bubble).toHaveCount(1);
       await expect(
         bubble.getByRole("button", { name: "Open Attachment 2", exact: true }),

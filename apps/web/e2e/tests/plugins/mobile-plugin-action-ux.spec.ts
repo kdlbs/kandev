@@ -9,11 +9,9 @@ import {
   setAppStatusBarEnabled,
   type AppStatusBarSettingsBaseline,
 } from "../../helpers/app-status-bar-settings";
+import { expectTouchDimension } from "../../helpers/touch-targets";
 
-function expectTouchDimension(dimension: number) {
-  // Playwright reports fractional CSS pixels; allow only float-rounding noise.
-  expect(dimension + 0.01).toBeGreaterThanOrEqual(44);
-}
+test.use({ trace: "retain-on-failure" });
 
 async function assertGlyphSize(action: Locator, size: number): Promise<void> {
   const svg = action.locator('[data-slot="surface-action-icon"] > svg');
@@ -281,8 +279,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     await expect(drawerAction).toBeVisible();
     const drawerActionBox = await drawerAction.boundingBox();
     expect(drawerActionBox).not.toBeNull();
-    expect(drawerActionBox!.height).toBeGreaterThanOrEqual(44);
-    expect(drawerActionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(drawerActionBox!.height);
+    expectTouchDimension(drawerActionBox!.width);
     await drawerAction.focus();
     await testPage.keyboard.press("Enter");
 
@@ -306,8 +304,8 @@ test.describe("Plugin action UX, composer on phone", () => {
     await expect(statusAction).toBeVisible();
     const statusActionBox = await statusAction.boundingBox();
     expect(statusActionBox).not.toBeNull();
-    expect(statusActionBox!.height).toBeGreaterThanOrEqual(44);
-    expect(statusActionBox!.width).toBeGreaterThanOrEqual(44);
+    expectTouchDimension(statusActionBox!.height);
+    expectTouchDimension(statusActionBox!.width);
     await statusAction.focus();
     await testPage.keyboard.press("Enter");
 

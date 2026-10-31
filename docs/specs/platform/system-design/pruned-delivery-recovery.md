@@ -30,14 +30,18 @@ guards, or ordinary [ordered projection](durable-agent-stream-processing.md).
 
 ## Acknowledgment durability
 
-`internal/db.OpenSQLite` opens the single writer with WAL synchronous FULL.
-Every reopened writer connection inherits FULL from its DSN. Reader connections
+Power-loss durability for journal release is established by the coalesced
+durability barrier in [delivery write cost](durable-delivery-write-cost.md),
+not by WAL synchronous FULL on every writer commit. The writer DSN uses NORMAL;
+every acknowledgment and submission-retirement request first awaits a barrier
+that commits on the actual writer connection with FULL. Reader connections
 remain read-only; their synchronous setting is connection-local and does not
 establish writer durability. Do not issue a global PRAGMA on an unrelated pool
 and assume the actual delivery writer changed.
 
-Inbox receipt and canonical projection/cursor transactions commit before the
-existing cumulative ACK scheduler can release journal records. Preserve the
+Inbox receipt and canonical projection/cursor transactions commit, and a
+durability barrier covering them completes, before the existing cumulative ACK
+scheduler can release journal records. Preserve the
 current projection-before-ACK rule and bounded batches. A failed commit cannot
 advance pending ACK. Journal `NoSync: false` remains required. PostgreSQL
 delivery writers must likewise retain synchronous commit; deployments with

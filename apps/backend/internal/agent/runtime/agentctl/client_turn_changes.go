@@ -63,6 +63,14 @@ func (c *Client) ExportTurnCheckpoint(ctx context.Context, request turnchanges.E
 	return &result, nil
 }
 
+func (c *Client) ArchiveTurnCheckpoint(ctx context.Context, request turnchanges.ArchiveRequest) (*turnchanges.CheckpointArchive, error) {
+	var result turnchanges.CheckpointArchive
+	if err := c.doTurnChangesJSON(ctx, "/api/v1/git/turn-changes/archive", request, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (c *Client) TurnCheckpointRepositoryScopes(ctx context.Context) ([]string, error) {
 	if c == nil {
 		return nil, errors.New("agentctl client is unavailable")

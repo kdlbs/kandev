@@ -62,10 +62,18 @@ type Service struct {
 // enforced the notification is dropped, otherwise it falls back to the single
 // pre-auth user. It is a constructor parameter rather than a setter so no call
 // site can silently leave the fail-closed behavior unwired.
-func NewService(repo notificationstore.Repository, taskRepo TaskContextReader, hub *gatewayws.Hub, log *logger.Logger, authEnforced AuthEnforced) *Service {
+func NewService(
+	repo notificationstore.Repository,
+	taskRepo TaskContextReader,
+	hub *gatewayws.Hub,
+	log *logger.Logger,
+	authEnforced AuthEnforced,
+	webhookPrivateNetworksAllowed bool,
+) *Service {
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
+		models.ProviderTypeWebhook: providers.NewWebhookProvider(webhookPrivateNetworksAllowed),
 	}
 	if os.Getenv(desktopNativeNotificationsEnv) != "true" {
 		providerMap[models.ProviderTypeSystem] = providers.NewSystemProvider()

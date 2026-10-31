@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -13,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -161,7 +162,7 @@ func TestQueueRun_GlobalProfileUsesTaskWorkspace(t *testing.T) {
 		AgentProfileID: "global-profile",
 		TaskID:         "global-task",
 		Reason:         "task_assigned",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue global profile task: %v", err)
 	}
@@ -460,7 +461,7 @@ func TestQueueRun_CommentStatusIgnoresMentionRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("queue task_comment: %v", err)
 	}
-	if err := repo.CreateRun(ctx, &models.Run{
+	if err := repo.CreateRun(ctx, &runsmodels.Run{
 		ID:             "mention-run",
 		AgentProfileID: "mentioned-agent",
 		Reason:         "task_mentioned",

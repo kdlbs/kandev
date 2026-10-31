@@ -56,6 +56,11 @@ type Worktree struct {
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
+	// WorkspaceRelativePath and Position are internal canonical inventory placement.
+	// Creation supplies them only for a new slot; existing slots retain their placement.
+	WorkspaceRelativePath string `json:"-"`
+	Position              int    `json:"-"`
+
 	// BranchSlug, when set, disambiguates two worktrees that share a
 	// (SessionID, RepositoryID) pair on different branches. Stored on
 	// task_environment_repos so reuse lookups can scope by branch and not
@@ -326,6 +331,9 @@ type CreateRequest struct {
 	// the owned task root. It is used for explicit nested attachments and must
 	// never be populated from an arbitrary client path.
 	WorkspaceRelativePath string
+
+	// Position is the recorded ordering of a newly attached repository slot.
+	Position int
 
 	// ScriptEnv carries resolved executor-profile environment variables
 	// (secrets already revealed) that must be exported into the repository

@@ -88,6 +88,21 @@ describe("ContextChip coarse-pointer actions", () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
+  it("exposes the preview trigger, not its remove control", () => {
+    const triggerRef = React.createRef<HTMLButtonElement>();
+    render(
+      <ContextChip
+        kind="file"
+        label="app.ts"
+        preview={<div>Preview</div>}
+        onClick={vi.fn()}
+        onRemove={vi.fn()}
+        triggerRef={triggerRef}
+      />,
+    );
+    expect(triggerRef.current).toBe(screen.getByRole("button", { name: "app.ts" }));
+  });
+
   it("opens a source-independent collection without a navigation action", () => {
     render(
       <ContextChip
@@ -105,6 +120,12 @@ describe("ContextChip coarse-pointer actions", () => {
 });
 
 describe("ContextChip fine-pointer previews", () => {
+  it("exposes the opener without a preview", () => {
+    const triggerRef = React.createRef<HTMLButtonElement>();
+    render(<ContextChip kind="file" label="app.ts" onClick={vi.fn()} triggerRef={triggerRef} />);
+    expect(triggerRef.current).toBe(screen.getByRole("button", { name: "app.ts" }));
+  });
+
   it("opens an actionable collection on click when no navigation action exists", () => {
     touchState.enabled = false;
     pointerState.isFinePointer = true;

@@ -140,4 +140,5 @@ async function selectWorktreeExecutor(page: import("@playwright/test").Page): Pr
     .getByRole("option", { name: /Worktree/i })
     .first()
     .click();
+  await expect(selector).toBeFocused();
 }

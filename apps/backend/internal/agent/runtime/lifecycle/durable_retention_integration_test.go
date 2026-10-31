@@ -41,10 +41,10 @@ func TestDeliveryRetentionIntegrationLostAckAfterCleanup(t *testing.T) {
 	retained = openRetentionLifecycleJournal(t, journalPath)
 	peer := &retentionLifecycleJournalPeer{journal: retained, sessionID: event.SessionID, incarnationID: event.IncarnationID, harnessGeneration: 2, loseAfter: true}
 	execution := &AgentExecution{ID: event.ExecutionID, TaskID: event.TaskID, SessionID: event.SessionID, DeliveryStreamID: event.StreamID, DeliveryMode: DurableDeliveryV1, DeliveryIncarnationID: event.IncarnationID, DeliveryHarnessGeneration: 2}
-	if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repo, peer, peer); !errors.Is(err, errRetentionAckResponseLost) {
+	if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repo, peer, peer, nil); !errors.Is(err, errRetentionAckResponseLost) {
 		t.Fatalf("lost committed ACK response: %v", err)
 	}
-	if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repo, peer, peer); err != nil {
+	if _, err := reconcileExpiredAgentDeliveryReplay(ctx, execution, event, repo, peer, peer, nil); err != nil {
 		t.Fatal(err)
 	}
 	if peer.ackCalls != 1 {

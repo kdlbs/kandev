@@ -24,8 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -173,6 +175,18 @@ type Config struct {
 	// launcher-side kill-path removal (Layer 5.9).
 	AgentSurvivalEnabled bool
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value for this launch, copied directly from the managed startup
+	// contract. An unmanaged/direct launch (Load(), no startup contract)
+	// resolves this to false. It gates OpenCode's provider background
+	// attestation, never the existing Claude/Codex observations.
+	AgentBackgroundWorkEnabled bool
+
+	// OpenCodePluginEnabled is the effective integration-plugin value for this
+	// launch, copied from the managed startup contract. An unmanaged/direct
+	// launch resolves it to false and keeps the legacy launch.
+	OpenCodePluginEnabled bool
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -226,11 +240,21 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID and DefinitionRevision identify the selected workspace-owned
+	// definition. Origins are sanitized scope metadata used for attachment
+	// evidence and never contain secrets or transport values.
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // InstanceConfig holds configuration for a single agent instance.
 // This is passed to the process manager and API server.
 type InstanceConfig struct {
+	// HomeDir is the resolved Kandev root for this agentctl process. Private
+	// launch files are created beneath it, never inside the workspace.
+	HomeDir string `json:"-"`
+
 	// InstanceID is the stable identifier the InstanceManager assigned to
 	// this instance. Used by the API middleware to reject requests whose
 	// X-Instance-ID header doesn't match — a stale client that still
@@ -253,7 +277,9 @@ type InstanceConfig struct {
 	AgentCommand string
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
-	AgentArgs []string
+	AgentArgs             []string
+	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string
@@ -302,6 +328,19 @@ type InstanceConfig struct {
 	// contract. It sizes the process manager's updates channel buffer.
 	DetachedEventLimit int
 
+	// AgentBackgroundWorkEnabled is the effective shared background-work
+	// feature value inherited from the server startup contract. False keeps
+	// provider background attestation off for this instance.
+	AgentBackgroundWorkEnabled bool
+
+	// OpenCodePluginEnabled carries features.opencodePlugin for this agentctl
+	// process. It is inherited from the private startup contract.
+	OpenCodePluginEnabled bool
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
+
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
@@ -323,6 +362,9 @@ type InstanceConfig struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool.
 	// Used for TUI/passthrough agents that don't need clarification tools.
 	DisableAskQuestion bool
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool
 
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
@@ -468,6 +510,8 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
 	homeDir := resolveHomeDir()
 	agentSurvivalEnabled := false
+	agentBackgroundWorkEnabled := false
+	openCodePluginEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -487,6 +531,8 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		// answer here (every managed launch states it), so it is copied
 		// unconditionally rather than guarded by a zero-value check.
 		agentSurvivalEnabled = startup.AgentSurvivalEnabled
+		agentBackgroundWorkEnabled = startup.AgentBackgroundWorkEnabled
+		openCodePluginEnabled = startup.OpenCodePluginEnabled
 	}
 
 	cfg := &Config{
@@ -504,23 +550,25 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled:              getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:                  getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:                 getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:                getEnv("KANDEV_MCP_LOG_FILE", ""),
-		VscodeCommand:             getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
-		ListenHostOverride:        getEnv("AGENTCTL_LISTEN_HOST", ""),
-		IdleTimeout:               idleTimeout,
-		IdleReaperInterval:        idleReaperInterval,
-		NotificationQueueCapacity: notificationQueueCapacity,
-		PromptCancelJoinTimeout:   promptCancelJoinTimeout,
-		OTLPEndpoint:              otlpEndpoint,
-		UnownedPeriod:             unownedPeriod,
-		DetachedEventLimit:        detachedEventLimit,
-		HomeDir:                   homeDir,
-		ServerIdentity:            generateSelfToken(),
-		DiagnosticLogPath:         resolveDiagnosticLogPath(homeDir),
-		AgentSurvivalEnabled:      agentSurvivalEnabled,
+		ShellEnabled:               getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:                   getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:                  getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:                 getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand:              getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride:         getEnv("AGENTCTL_LISTEN_HOST", ""),
+		IdleTimeout:                idleTimeout,
+		IdleReaperInterval:         idleReaperInterval,
+		NotificationQueueCapacity:  notificationQueueCapacity,
+		PromptCancelJoinTimeout:    promptCancelJoinTimeout,
+		OTLPEndpoint:               otlpEndpoint,
+		UnownedPeriod:              unownedPeriod,
+		DetachedEventLimit:         detachedEventLimit,
+		HomeDir:                    homeDir,
+		ServerIdentity:             generateSelfToken(),
+		DiagnosticLogPath:          resolveDiagnosticLogPath(homeDir),
+		AgentSurvivalEnabled:       agentSurvivalEnabled,
+		AgentBackgroundWorkEnabled: agentBackgroundWorkEnabled,
+		OpenCodePluginEnabled:      openCodePluginEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -643,24 +691,27 @@ func generateSelfToken() string {
 // If port is 0, it should be allocated by the caller.
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
-		Port:                      port,
-		MCPHost:                   c.MCPReachableHost(),
-		Protocol:                  c.Defaults.Protocol,
-		AgentCommand:              c.Defaults.AgentCommand,
-		WorkDir:                   c.Defaults.WorkDir,
-		AutoStart:                 c.Defaults.AutoStart,
-		AutoApprovePermissions:    c.Defaults.AutoApprovePermissions,
-		ShellEnabled:              c.ShellEnabled,
-		LogLevel:                  c.LogLevel,
-		LogFormat:                 c.LogFormat,
-		ProcessBufferMaxBytes:     c.Defaults.ProcessBufferMaxBytes,
-		NotificationQueueCapacity: c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
-		DetachedEventLimit:        c.DetachedEventLimit,
-		VscodeCommand:             c.VscodeCommand,
-		McpMode:                   "task",
-		AuthToken:                 c.AuthToken,
-		CreateReadyMillis:         &atomic.Int64{},
+		HomeDir:                    c.HomeDir,
+		Port:                       port,
+		MCPHost:                    c.MCPReachableHost(),
+		Protocol:                   c.Defaults.Protocol,
+		AgentCommand:               c.Defaults.AgentCommand,
+		WorkDir:                    c.Defaults.WorkDir,
+		AutoStart:                  c.Defaults.AutoStart,
+		AutoApprovePermissions:     c.Defaults.AutoApprovePermissions,
+		ShellEnabled:               c.ShellEnabled,
+		LogLevel:                   c.LogLevel,
+		LogFormat:                  c.LogFormat,
+		ProcessBufferMaxBytes:      c.Defaults.ProcessBufferMaxBytes,
+		NotificationQueueCapacity:  c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
+		DetachedEventLimit:         c.DetachedEventLimit,
+		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
+		OpenCodePluginEnabled:      c.OpenCodePluginEnabled,
+		VscodeCommand:              c.VscodeCommand,
+		McpMode:                    "task",
+		AuthToken:                  c.AuthToken,
+		CreateReadyMillis:          &atomic.Int64{},
 	}
 
 	applyOverrides(cfg, overrides)
@@ -721,6 +772,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DisableAskQuestion {
 		cfg.DisableAskQuestion = true
 	}
+	if overrides.PromptSuggestions {
+		cfg.PromptSuggestions = true
+	}
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
@@ -776,6 +830,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
+	if overrides.OpenCodePluginRuntime != nil {
+		cfg.OpenCodePluginRuntime = overrides.OpenCodePluginRuntime
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -806,6 +863,7 @@ type InstanceOverrides struct {
 	SessionID                  string
 	TaskID                     string
 	DisableAskQuestion         bool
+	PromptSuggestions          bool
 	AssumeMcpSse               bool
 	AssumeMcpHttp              bool
 	McpMode                    string
@@ -824,6 +882,7 @@ type InstanceOverrides struct {
 	DeliveryStreamID           string
 	DeliveryIncarnationID      string
 	DeliveryHarnessGeneration  uint64
+	OpenCodePluginRuntime      *agentctltypes.OpenCodePluginRuntime
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -902,6 +961,10 @@ func CollectAgentEnvWithoutAdditional() []string {
 // CollectAgentEnvWithError collects environment variables for an agent instance.
 // It rejects malformed indexed Git configuration rather than changing Git's effective config.
 func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
+	return collectAgentEnvWithError(additional, false)
+}
+
+func collectAgentEnvWithError(additional map[string]string, instance bool) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -913,6 +976,14 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
 				envMap[key] = e[idx+1:]
 			}
+		}
+	}
+
+	if instance {
+		var err error
+		envMap, err = withoutInheritedManagedGitAuthorization(envMap)
+		if err != nil {
+			return nil, err
 		}
 	}
 

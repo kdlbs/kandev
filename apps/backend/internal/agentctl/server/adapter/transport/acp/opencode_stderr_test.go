@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,57 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+func TestProviderErrorFromErrorPreservesDailyReason(t *testing.T) {
+	secret := strings.Repeat("z", 48)
+	cases := []struct {
+		name, reason, rule string
+	}{
+		{"free daily", "free-models-per-day-high-balance", "opencode.rate.free_models_per_day.v1"},
+		{"model daily", "limit_rpd/" + secret, "opencode.rate.model_per_day.v1"},
+		{"other reason", "private-limit-" + secret, "opencode.stderr.rate.v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			projected := ProviderErrorFromError(&sdk.RequestError{
+				Code: -32603, Message: "Rate limit exceeded: " + tc.reason + " token: " + secret,
+				Data: map[string]any{"credential": secret},
+			}, "opencode-acp", "configured-model")
+			if projected == nil {
+				t.Fatal("missing ACP provider diagnostic")
+			}
+			encoded, err := json.Marshal(projected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), secret) {
+				t.Fatal("provider diagnostic exposed an opaque credential")
+			}
+			var received streams.ProviderError
+			if err := json.Unmarshal(encoded, &received); err != nil {
+				t.Fatal(err)
+			}
+			got := routingerr.Classify(routingerr.Input{
+				Phase: routingerr.PhaseStreaming, ProviderID: received.ProviderID, Stderr: received.Message,
+			})
+			if got.Code != routingerr.CodeRateLimited || got.ClassifierRule != tc.rule || got.ResetHint != nil {
+				t.Fatalf("projected classification = %+v, want rate limit with rule %s and no reset hint", got, tc.rule)
+			}
+		})
+	}
+}
+
+func TestProviderErrorFromErrorPreservesUnchangedDailyIdentity(t *testing.T) {
+	for _, reason := range []string{"free-models-per-day-ok", "limit_rpd/model-name"} {
+		t.Run(reason, func(t *testing.T) {
+			message := "Rate limit exceeded: " + reason
+			got := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: message}, "opencode-acp", "model")
+			if got == nil || got.Message != message || !got.DiagnosticIdentityComplete {
+				t.Fatalf("safe provider diagnostic lost its exact identity: %+v", got)
+			}
+		})
+	}
+}
 
 // @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1, AC-AGENTS-CLAUDE-SESSION-LIMIT-001.2
 func TestProviderErrorFromErrorClaudeSessionLimit(t *testing.T) {

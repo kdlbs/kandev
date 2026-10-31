@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // fakeSpawnedProcess is a controllable spawnedProcess for unit-testing

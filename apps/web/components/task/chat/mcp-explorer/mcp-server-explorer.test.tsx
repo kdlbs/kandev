@@ -4,6 +4,7 @@ import type {
   MCPAttachmentHistory,
   MCPAttachmentServer,
 } from "@/lib/state/slices/session-runtime/types";
+import { McpStatusTooltip } from "./mcp-status-presentation";
 import { McpIndicator } from "./mcp-indicator";
 
 const testCopy = vi.hoisted(() => ({
@@ -425,4 +426,45 @@ describe("MCP explorer catalog states and touch navigation", () => {
     expect(screen.queryByTestId(MCP_TOOL_DETAIL_TEST_ID)).toBeNull();
     expect(screen.getByTestId("mcp-tool-list")).toBeTruthy();
   });
+});
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13
+it("explains transport exclusion instead of relying on a generic status", () => {
+  render(
+    <McpStatusTooltip
+      servers={[{ name: "issues", status: "filtered", reason_code: "http_unsupported" }]}
+    />,
+  );
+  expect(screen.getByTestId("mcp-tooltip-server-issues").textContent).toContain(
+    "task:mcpReasonHttpUnsupported",
+  );
+});
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.14
+it("separates saved changes from current agent evidence", () => {
+  render(
+    <McpStatusTooltip
+      servers={[{ name: "kandev", status: "active" }]}
+      selectionState={{ apply_state: "pending_idle", desired_revision: 2, applied_revision: 1 }}
+    />,
+  );
+  expect(screen.getByTestId("mcp-status-popover").textContent).toContain("task:mcpSavedChanges");
+  expect(screen.getByTestId("mcp-status-popover").textContent).toContain("task:mcpCurrentAgent");
+});
+
+it("retains sanitized failure detail alongside the plain-language state", () => {
+  render(
+    <McpStatusTooltip
+      servers={[
+        {
+          name: "reviews",
+          status: "failed",
+          reason_code: "connection_failed",
+          summary: "The agent rejected this endpoint.",
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByTestId("mcp-tooltip-server-reviews").textContent).toContain(
+    "The agent rejected this endpoint.",
+  );
 });

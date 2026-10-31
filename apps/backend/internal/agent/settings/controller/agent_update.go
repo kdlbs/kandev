@@ -799,10 +799,6 @@ func (c *Controller) validateAgentUpdateTarget(
 	return validateRuntimeCatalogueTargetForPackage(spec.Package, metadata, targetVersion)
 }
 
-func validateRuntimeCatalogueTarget(metadata RuntimeVersionMetadata, targetVersion string) error {
-	return validateRuntimeCatalogueTargetForPackage("", metadata, targetVersion)
-}
-
 func validateRuntimeCatalogueTargetForPackage(pkg string, metadata RuntimeVersionMetadata, targetVersion string) error {
 	catalogue, err := managedruntime.BuildCatalogueForPackage(pkg, metadata.Versions, metadata.Latest)
 	if err != nil {

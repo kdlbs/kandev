@@ -13,6 +13,6 @@
   "emptyTitleUnnamedWorkspace": "이 워크스페이스에서 실패한 항목이 없습니다.",
   "emptyDescription": "실패한 작업은 분류를 위해 여기에 표시됩니다. 사이드바 합계에는 포함되지 않습니다.",
   "errorTitle": "실패한 작업을 불러올 수 없습니다",
-  "errorDescription": "이 워크스페이스에서 실패한 작업을 불러오는 중 문제가 발생했습니다. 자동으로 다시 시도합니다.",
+  "errorDescription": "실패한 작업을 불러오지 못했습니다. Kandev가 자동으로 다시 시도합니다.",
   "truncatedNotice": "처음 몇 개의 실패한 작업만 표시 중입니다. 더 대기 중입니다."
 }
