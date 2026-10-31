@@ -42,7 +42,7 @@ var hostFieldBudget = []hostFieldGroup{
 	{name: "headroom", max: 2048, keys: nil},
 	{name: "coordination", max: 1536, keys: []string{
 		"phase", "placement", "admission", "launch_policy", "claim", "cleanup_requested", "handshake_started",
-		"drain_outcome", "drain_receipt_id", "drain_claim", "publish_pending",
+		"credential_recorded", "handshake_rejected", "drain_outcome", "drain_receipt_id", "drain_claim", "publish_pending",
 	}},
 }
 

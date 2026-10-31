@@ -127,6 +127,10 @@ func (m *Manager) acceptExecutorResourceCheckpoint(ctx context.Context, request 
 		existing.EnvironmentID == inventory.EnvironmentID && existing.EnvironmentGeneration == inventory.EnvironmentGeneration {
 		inventory.ExpiresAt = existing.ExpiresAt
 		inventory.WorkspaceDescriptor = existing.WorkspaceDescriptor
+		inventory.HandshakeRejected = existing.HandshakeRejected
+		if existing.CredentialRecorded != nil {
+			inventory.CredentialRecorded = existing.CredentialRecorded
+		}
 	}
 	if inventory.WorkspaceDescriptor, err = resolvePluginExecutorEarlyWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, request.GetResource()); err != nil {
 		return err
@@ -227,6 +231,7 @@ func pluginExecutorInventoryForLaunch(req *ExecutorCreateRequest, request *plugi
 		RuntimeIdentity:       request.GetExecutionId(),
 		Capabilities:          profile.Provider.Capabilities,
 		EnvironmentGeneration: int64(request.GetEnvironmentGeneration()),
+		CredentialRecorded:    initialCredentialRecorded(negotiatedCapabilities(profile.Provider)),
 	}
 }
 

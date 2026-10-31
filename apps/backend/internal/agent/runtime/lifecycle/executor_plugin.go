@@ -167,11 +167,39 @@ type pluginExecutorInventory struct {
 	DrainReceiptID         string                                `json:"drain_receipt_id,omitempty"`
 	DrainClaim             string                                `json:"drain_claim,omitempty"`
 	HandshakeStarted       bool                                  `json:"handshake_started,omitempty"`
+	CredentialRecorded     *bool                                 `json:"credential_recorded,omitempty"`
+	HandshakeRejected      bool                                  `json:"handshake_rejected,omitempty"`
 	PublishPending         bool                                  `json:"publish_pending,omitempty"`
 	CleanupRequested       bool                                  `json:"cleanup_requested,omitempty"`
 	Revision               uint64                                `json:"revision"`
 	Generation             uint64                                `json:"generation"`
 	EnvironmentGeneration  int64                                 `json:"environment_generation"`
+}
+
+// credentialRecorded reports whether the host recorded an agentctl credential
+// for the environment. The field is sticky: once true it is never cleared.
+func (i pluginExecutorInventory) credentialRecorded() bool {
+	return i.CredentialRecorded != nil && *i.CredentialRecorded
+}
+
+// recordCredential marks that the checkpoint being written names the token
+// secret. It always stores a fresh value, so inventories copied earlier are
+// not changed.
+func (i *pluginExecutorInventory) recordCredential() {
+	recorded := true
+	i.CredentialRecorded = &recorded
+}
+
+// initialCredentialRecorded is the credential_recorded a new environment is
+// admitted with: an explicit false under drain_receipt version 2, which tells a
+// host that never recorded a credential from a record written before the field
+// existed; absent under any other version, so those records keep their shape.
+func initialCredentialRecorded(negotiated []string) *bool {
+	if negotiatedVersion(negotiated, pluginExecutorCapabilityDrainReceipt) < pluginDrainReceiptNeverHeldCredential {
+		return nil
+	}
+	recorded := false
+	return &recorded
 }
 
 func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *logger.Logger) *PluginRemoteExecutor {
@@ -343,6 +371,7 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      operationID, InputDigest: digest, RuntimeIdentity: req.InstanceID, Phase: pluginExecutorPhaseAllocating,
 		Capabilities: profile.Provider.Capabilities, EnvironmentGeneration: profile.OwnershipGeneration,
+		CredentialRecorded: initialCredentialRecorded(negotiatedCapabilities(profile.Provider)),
 	}
 }
 
@@ -441,6 +470,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	}
 	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort, launch.snapshot), r.logger, launch.nonce)
 	if err != nil {
+		launch.inventory.HandshakeRejected = launch.inventory.HandshakeRejected || errors.Is(err, agentctl.ErrHandshakeRejected)
 		return fail("control_handshake", err)
 	}
 	launch.request.rollbackToken = token
@@ -450,6 +480,7 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 			control.Close()
 			return fail("token_persist", err)
 		}
+		launch.inventory.recordCredential()
 		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 			control.Close()
 			return fail("token_checkpoint", err)
