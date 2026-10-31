@@ -74,14 +74,14 @@ The check is a startup check. It does not defend against an operator, or a proce
 ## Allocation directory
 
 A node wrapper often needs state the agent cannot rewrite, such as bindings or fences. That state lives in a per-workload directory outside the workspace.
-Core does not discover it. The node operator, who knows which scheduler created it, passes it once with `--node-launch-wrapper-alloc-dir`.
-Core reads no environment variable for it, so no scheduler name is built in and a variable in the agent environment cannot stand in for it.
+Core does not discover it. The node's launcher, which starts agentctl and knows its own workload layout, creates a directory private to the agentctl user and passes it once with `--node-launch-wrapper-alloc-dir`. A per-workload directory that the launcher's runtime leaves writable by others is not suitable as is; the launcher passes a private subdirectory of it instead.
+Core reads no environment variable for it, so no launcher name is built in and a variable in the agent environment cannot stand in for it.
 
 `launchwrapper.ValidateTokens` accepts `{{kandev.alloc_dir}}` as a whole argument after the executable. `Spec.Validate`, the profile path, and the profile command prefix check reject it, so only a node wrapper can use it.
 The value lives in `launchwrapper.Node.AllocDir` with `json:"-"`. `Node` already travels to every launch seam, so none of them changed. `Context` has no field for it, so a caller cannot supply one.
 
 `Node.Prepare` resolves it only when the wrapper references it. It calls `ResolveAllocDir`, which requires an absolute path, resolves symlinks, and requires an existing directory owned by the agentctl effective user with no group or world write bit. It then refuses a result inside the launch work directory. Windows refuses.
-Ancestors are not walked: the directory is created by the scheduler client under its own tree, and the owner and mode check on the resolved directory is the guard.
+Ancestors are not walked: the owner and mode check on the resolved directory is the guard, which is why it must be private.
 The check repeats at every launch, so a directory replaced after startup is refused.
 
 At startup `applyNodeAllocDir` runs the same check when the loaded policy references the token, so a node with a missing or bad value refuses to start rather than failing each launch. A value without a node wrapper file is refused as a misconfiguration.

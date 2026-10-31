@@ -24,7 +24,7 @@ The design is in the [node launch wrapper system design](../system-design/node-l
 - **Node wrapper:** A wrapper that agentctl reads at startup from an operator-owned file. Its source value is `node`.
 - **Profile wrapper:** A wrapper from profile launch settings, as defined by the generic contract. Its source value is `profile`.
 - **Agent launch:** Any process agentctl starts to run an agent, or to run an agent for a probe or utility inference.
-- **Allocation directory:** A directory the node's scheduler client creates for one workload, held outside the agent's writable workspace. The node operator hands it to agentctl at startup. A node wrapper can reference it to keep its own state where the agent cannot rewrite it. Core gives it no scheduler meaning.
+- **Allocation directory:** A directory private to the agentctl process owner, held outside the agent's writable workspace and supplied by the node operator at startup. The node's launcher, which starts agentctl, is expected to provide it. A node wrapper can reference it to keep its own state where the agent cannot rewrite it. Core gives it no launcher meaning.
 - **Owner:** The user id that must own the wrapper file, the wrapper executable, and the directories above them. It defaults to the agentctl process owner. Root is also accepted as an owner of ancestor directories.
 
 ## Requirements
@@ -85,12 +85,12 @@ The design is in the [node launch wrapper system design](../system-design/node-l
 
 ### REQ-AGENTS-NODEWRAP-006: Allocation directory reference
 
-**Intent:** A node wrapper can name a per-workload directory outside the workspace, without core knowing which scheduler provides it.
+**Intent:** A node wrapper can name a per-workload directory outside the workspace, without core knowing which launcher provides it.
 
 #### Acceptance criteria
 
 - **AC-AGENTS-NODEWRAP-006.1:** A node wrapper argument that is exactly `{{kandev.alloc_dir}}` shall be accepted after the executable. It shall be refused as the executable and in any partial, embedded or malformed form. A profile wrapper shall not accept it, and `{{{kandev.alloc_dir}}}` shall stay the literal text, as in AC-AGENTS-WRAPPERS-002.3.
-- **AC-AGENTS-NODEWRAP-006.2:** The reference shall resolve to the value of `--node-launch-wrapper-alloc-dir` after symlinks are resolved. The value shall be an absolute path to an existing directory owned by the agentctl process owner and not writable by group or others, and it shall not be inside the workspace of the launch.
+- **AC-AGENTS-NODEWRAP-006.2:** The reference shall resolve to the value of `--node-launch-wrapper-alloc-dir` after symlinks are resolved. The value shall be an absolute path to an existing directory that is private to the agentctl process owner: owned by that user and not writable by group or others. It shall not be inside the workspace of the launch. A directory that is shared or writable by others, even if it is the launcher's own per-workload directory, shall be refused, and the launcher shall create a private one instead.
 - **AC-AGENTS-NODEWRAP-006.3:** agentctl shall resolve and check the value again at every launch that uses the reference. No process environment variable, API request, profile field, task input, or agent environment shall supply or replace it.
 - **AC-AGENTS-NODEWRAP-006.4:** A node wrapper that references the allocation directory shall refuse startup when the value is missing or fails the checks in AC-AGENTS-NODEWRAP-006.2. A launch that finds the value unusable shall be refused with no child process and no unwrapped retry. A node wrapper that does not reference it shall behave as before whether or not a value is supplied.
 - **AC-AGENTS-NODEWRAP-006.5:** The value shall be held only in agentctl's startup configuration, never serialized, snapshotted, or advertised. Failure messages shall name the failed check and shall not include the path.
