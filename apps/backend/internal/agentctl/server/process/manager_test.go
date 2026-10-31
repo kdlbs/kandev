@@ -175,11 +175,12 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	}
 	cmd.Stderr = stderrWriter
 	m := &Manager{
-		cmd:       cmd,
-		stderr:    stderr,
-		logger:    log,
-		doneCh:    make(chan struct{}),
-		updatesCh: make(chan adapter.AgentEvent, 1),
+		processManagerID: "manager-lifetime-1",
+		cmd:              cmd,
+		stderr:           stderr,
+		logger:           log,
+		doneCh:           make(chan struct{}),
+		updatesCh:        make(chan adapter.AgentEvent, 1),
 		stderrSanitizer: stderrLineSanitizerFunc(func(string) (string, bool) {
 			return "OpenCode provider failure", true
 		}),
@@ -214,6 +215,9 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	if got, _ := data["process_manager_id"].(string); got != "manager-lifetime-1" {
+		t.Fatalf("process manager ID = %q, want manager-lifetime-1", got)
 	}
 	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
 	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
