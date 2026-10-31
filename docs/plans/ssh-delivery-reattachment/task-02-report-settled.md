@@ -84,3 +84,5 @@ Completed on 2026-10-31. The real-SQL regression first returned blocked despite 
 The source and tested binary remain independent of the installed app. No existing-session control or database override was performed. Browser rendering was not separately tested.
 
 PR review found the direct runtime-settled branch still returned the pre-attempt revision. A real-SQL regression reproduced expected revision 2 versus returned revision 1. Canonical refresh now runs after settlement reconciliation for both runtime outcomes; the regression checks the saved revision and absence of prompt dispatch.
+
+Review follow-up reproduced a canonical read failing with `context deadline exceeded` after runtime recovery exhausted its 30-second budget. A virtual-time real-SQL regression exercises that deadline without a wall-clock delay. The canonical reread now has its own bounded five-second context, preserving caller-cancellation independence, exact identity checks and the original blocked outcome when no matching settlement exists.

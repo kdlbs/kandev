@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
@@ -247,4 +248,76 @@ func TestSSHLiveDeliveryRecoveryRejectsChangedRemoteOwner(t *testing.T) {
 	require.NotNil(t, retry)
 	t.Cleanup(retry.Abort)
 	require.NoError(t, retry.Commit(func() {}))
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+func TestSSHLiveDeliveryRecoveryCallbackDoesNotBlockExecutor(t *testing.T) {
+	rt, record, _ := sshDeliveryRecoveryFixture(t)
+	instances, _, err := rt.RecoverInstancesDetailed(context.Background(), []*models.ExecutorRunning{record})
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	original := instances[0]
+	rt.mu.Lock()
+	prior := rt.sessions[record.AgentExecutionID]
+	rt.mu.Unlock()
+	rt.transportTeardown(record.AgentExecutionID, prior, "test_disconnect", 0)
+	refresh, err := rt.ReconnectDeliveryInstance(context.Background(), original)
+	require.NoError(t, err)
+	require.NotNil(t, refresh)
+	t.Cleanup(refresh.Abort)
+	execution := &AgentExecution{ID: record.AgentExecutionID, SessionID: record.SessionID, agentctl: original.Client}
+	manager := newTestManager(t)
+	publishing := make(chan struct{})
+	commit := refresh.Commit
+	refresh.Commit = func(publish func()) error {
+		return commit(func() { close(publishing); publish() })
+	}
+	execution.agentctlSourceMu.RLock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := manager.commitTrackedRemoteRefresh(context.Background(), execution, refresh, "", func(context.Context) error { return nil })
+		done <- err
+	}()
+	select {
+	case <-publishing:
+	case <-time.After(100 * time.Millisecond):
+	}
+	available := rt.mu.TryLock()
+	if available {
+		rt.mu.Unlock()
+	}
+	execution.agentctlSourceMu.RUnlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh did not finish after callback release")
+	}
+	require.True(t, available, "a pinned workspace callback must not stall other SSH executor operations")
+	client, release := execution.AcquireAgentCtlClient()
+	release()
+	require.Same(t, refresh.Instance.Client, client)
+	rt.mu.Lock()
+	current := rt.sessions[record.AgentExecutionID]
+	rt.mu.Unlock()
+	require.NotSame(t, prior, current)
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+func TestSSHLiveDeliveryRecoveryFailedPublicationRestoresURL(t *testing.T) {
+	original := agentctl.NewClient("127.0.0.1", 12345, newTestLogger())
+	candidate := agentctl.NewClient("127.0.0.1", 12346, newTestLogger())
+	execution := &AgentExecution{ID: "original-execution", agentctl: original}
+	refresh := &RemoteInstanceRefresh{Instance: &ExecutorInstance{Client: candidate}, Commit: func(func()) error { return ErrDeliveryOwnerMismatch }}
+	manager := newTestManager(t)
+	committed, err := manager.commitTrackedRemoteRefresh(context.Background(), execution, refresh, "", func(context.Context) error { return nil })
+	require.ErrorIs(t, err, ErrDeliveryOwnerMismatch)
+	require.False(t, committed)
+	execution.agentctlSourceMu.Lock()
+	url := execution.AgentctlURL()
+	execution.agentctlSourceMu.Unlock()
+	require.Equal(t, original.BaseURL(), url, "a losing refresh must not persist the discarded candidate URL")
+	client, release := execution.AcquireAgentCtlClient()
+	release()
+	require.Same(t, original, client)
 }

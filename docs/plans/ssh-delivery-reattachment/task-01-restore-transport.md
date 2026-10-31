@@ -88,3 +88,5 @@ Completed on 2026-10-31. Production changes and six focused regressions were ver
 - Existing task/session identities, states and executor configuration matched the baseline. The original backend process stayed ready. Both test task controllers, the relay and the independent backend exited; test files remain.
 
 A response timing limitation remains: the first Retry returned blocked while terminal projection settled the same recovery; a subsequent state-only Retry returned settled. This did not resend work or prevent a new follow-up. Browser rendering acceptance was not run. The installed binary was not replaced. Task 02 addresses the first-response timing limitation.
+
+Review follow-up reproduced executor-wide lock contention while a workspace callback pinned the old client. The shared remote refresh publisher now obtains the source write lease before entering executor commit; the matching session and client still publish atomically. Losing commits restore the prior URL fallback. Focused SSH, Kubernetes refresh, callback fencing and URL regressions cover the shared helper.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
@@ -144,4 +145,43 @@ func TestRetrySessionDeliveryDirectSettlementReturnsCanonicalRevision(t *testing
 	require.True(t, ok)
 	require.Equal(t, recovery.Revision, response.RecoveryRevision)
 	require.Empty(t, manager.capturedPromptCalls)
+}
+
+type deadlinePromptRecoveryManager struct {
+	*mockAgentManager
+	settle func()
+}
+
+func (m *deadlinePromptRecoveryManager) RecoverAgentPromptStreamWithIdentity(ctx context.Context, _ lifecycle.AgentDeliveryRecoveryIdentity) lifecycle.DeliveryReconciliationResult {
+	<-ctx.Done()
+	m.settle()
+	return lifecycle.DeliveryReconciliationResult{Outcome: lifecycle.DeliveryReconciliationBlocked, Err: ctx.Err()}
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestRetrySessionDeliveryRereadsAfterRuntimeDeadline(t *testing.T) {
+	f := newRetryTerminalFixture(t)
+	manager := &deadlinePromptRecoveryManager{mockAgentManager: &mockAgentManager{}, settle: f.settle}
+	f.service.agentManager = manager
+	synctest.Test(t, func(t *testing.T) {
+		response, err := f.service.RetrySessionDelivery(context.Background(), f.session.TaskID, f.session.ID)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Equal(t, SessionDeliveryRecoverySettled, response.Outcome)
+		require.Empty(t, manager.capturedPromptCalls)
+	})
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
+func TestRetrySessionDeliveryPreservesBlockAfterRuntimeDeadline(t *testing.T) {
+	f := newRetryTerminalFixture(t)
+	manager := &deadlinePromptRecoveryManager{mockAgentManager: &mockAgentManager{}, settle: func() {}}
+	f.service.agentManager = manager
+	synctest.Test(t, func(t *testing.T) {
+		response, err := f.service.RetrySessionDelivery(context.Background(), f.session.TaskID, f.session.ID)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Equal(t, SessionDeliveryRecoveryBlocked, response.Outcome)
+		require.Empty(t, manager.capturedPromptCalls)
+	})
 }

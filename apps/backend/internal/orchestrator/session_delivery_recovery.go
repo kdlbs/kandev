@@ -280,7 +280,9 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 			response.Reason = "terminal_settlement_pending"
 		}
 	}
-	if settled, err := s.retryConcurrentlySettledDelivery(retryCtx, session, recovery); settled != nil || err != nil {
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelRead()
+	if settled, err := s.retryConcurrentlySettledDelivery(readCtx, session, recovery); settled != nil || err != nil {
 		return settled, err
 	}
 	return response, nil
