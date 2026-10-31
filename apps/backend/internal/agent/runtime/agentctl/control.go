@@ -673,6 +673,42 @@ func (c *ControlClient) ShutdownControlServer(ctx context.Context) error {
 	return nil
 }
 
+type RuntimeFootprint struct {
+	InstanceID      string    `json:"instance_id"`
+	SessionID       string    `json:"session_id,omitempty"`
+	TaskID          string    `json:"task_id,omitempty"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastActivity    time.Time `json:"last_activity"`
+	Processes       int       `json:"processes"`
+	CommittedBytes  uint64    `json:"committed_bytes"`
+	ResidentBytes   uint64    `json:"resident_bytes"`
+	UnreadableCount int       `json:"unreadable_processes"`
+}
+
+// ListRuntimeFootprints reads counts and bytes from the authenticated owner.
+func (c *ControlClient) ListRuntimeFootprints(ctx context.Context) ([]RuntimeFootprint, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/runtime-footprint", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("read runtime footprint: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("read runtime footprint: status %d", resp.StatusCode)
+	}
+	var result struct {
+		Footprints []RuntimeFootprint `json:"footprints"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode runtime footprint: %w", err)
+	}
+	return result.Footprints, nil
+}
+
 // ListInstances lists all running agent instances.
 func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances", nil)

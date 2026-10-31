@@ -39,8 +39,18 @@ func (h *WorkspaceHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces", h.httpCreateWorkspace)
 	api.POST("/workspaces/:id/clone", h.httpCloneWorkspace)
 	api.GET("/workspaces/:id", h.httpGetWorkspace)
+	api.GET("/workspaces/:id/runtime-footprint", h.httpGetRuntimeFootprint)
 	api.PATCH("/workspaces/:id", h.httpUpdateWorkspace)
 	api.DELETE("/workspaces/:id", h.httpDeleteWorkspace)
+}
+
+func (h *WorkspaceHandlers) httpGetRuntimeFootprint(c *gin.Context) {
+	view, err := h.service.WorkspaceRuntimeFootprint(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "runtime footprint not found")
+		return
+	}
+	c.JSON(http.StatusOK, view)
 }
 
 func (h *WorkspaceHandlers) registerWS(dispatcher *ws.Dispatcher) {

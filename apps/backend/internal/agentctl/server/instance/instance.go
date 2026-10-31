@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -27,6 +28,38 @@ type processManager interface {
 	// identity" reconstruction row). Empty before the agent's session/new or
 	// session/load completes.
 	GetSessionID() string
+}
+
+type footprintReader interface {
+	OwnedFootprint() process.ProcessFootprint
+}
+
+// RuntimeFootprint carries only the existing owner identities, counts and bytes.
+type RuntimeFootprint struct {
+	InstanceID   string    `json:"instance_id"`
+	SessionID    string    `json:"session_id,omitempty"`
+	TaskID       string    `json:"task_id,omitempty"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActivity time.Time `json:"last_activity"`
+	process.ProcessFootprint
+}
+
+// Footprint reads the process manager belonging to this exact instance.
+func (i *Instance) Footprint() RuntimeFootprint {
+	i.statusMu.RLock()
+	status, createdAt := i.Status, i.CreatedAt
+	i.statusMu.RUnlock()
+	row := RuntimeFootprint{
+		InstanceID: i.ID, SessionID: i.SessionID, TaskID: i.TaskID,
+		Status: status, CreatedAt: createdAt, LastActivity: i.LastActivity(),
+	}
+	if reader, ok := i.manager.(footprintReader); ok {
+		row.ProcessFootprint = reader.OwnedFootprint()
+	} else {
+		row.UnreadableProcesses = 1
+	}
+	return row
 }
 
 // Instance represents a single agent instance running as a subprocess.
