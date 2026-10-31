@@ -295,3 +295,40 @@ func TestEnvelopeFieldsRoundTripAndAreOmittedWhenUnset(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, absent.CredentialRecorded)
 }
+
+// A new environment records credential_recorded as an explicit false only under
+// drain_receipt version 2, in both places an envelope is first written.
+func TestNewEnvironmentsRecordAnExplicitNoCredentialOnlyUnderVersionTwo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		required []models.ExecutorProviderCapabilityRequirement
+		want     *bool
+	}{
+		"version 2":  {[]models.ExecutorProviderCapabilityRequirement{requireDrainV2, requireDurableCap}, boolRef(false)},
+		"version 1":  {[]models.ExecutorProviderCapabilityRequirement{requireDrainV1, requireDurableCap}, nil},
+		"no drain":   {[]models.ExecutorProviderCapabilityRequirement{requireDurableCap}, nil},
+		"no profile": {nil, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := pluginExecutorLaunchRequest(drainV2LaunchProvider(tc.required...))
+			fromLaunch := pluginExecutorLaunchInventory(request, request.PluginExecutor.Profile, "operation-1", "digest-1")
+			fromCallback := pluginExecutorInventoryForLaunch(request, &pluginsdk.ExecutorProviderRequestContext{})
+			require.Equal(t, tc.want, fromLaunch.CredentialRecorded)
+			require.Equal(t, tc.want, fromCallback.CredentialRecorded)
+		})
+	}
+}
+
+// A provider's late launch checkpoint rebuilds the envelope; it must never
+// clear what the host already recorded.
+func TestProviderCheckpointKeepsTheStickyCredentialFields(t *testing.T) {
+	h := newEarlyCheckpointHarness(t)
+	h.request.Metadata = metadataWith(t, map[string]interface{}{MetadataKeyPluginExecutor: pluginExecutorInventory{}}, func(inventory *pluginExecutorInventory) {
+		inventory.EnvironmentID, inventory.EnvironmentGeneration = h.request.TaskEnvironmentID, 4
+		inventory.CredentialRecorded, inventory.HandshakeRejected = boolRef(true), true
+	})
+	require.NoError(t, h.checkpoint(pluginExecutorPhaseBootstrapping, "", ""))
+	got := h.checkpoints[len(h.checkpoints)-1]
+	require.NotNil(t, got.CredentialRecorded)
+	require.True(t, *got.CredentialRecorded)
+	require.True(t, got.HandshakeRejected)
+}
