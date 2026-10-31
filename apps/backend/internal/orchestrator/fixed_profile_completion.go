@@ -8,10 +8,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// fixedProfileForCleanCompletion captures the fixed profile only while this
+// fixedResourceForCleanCompletion captures the execution's resource only while its
 // execution still owns the completing turn. The caller resets its count only
 // after checked turn settlement succeeds, under the same session guard.
-func (s *Service) fixedProfileForCleanCompletion(ctx context.Context, data watcher.AgentEventData) string {
+func (s *Service) fixedResourceForCleanCompletion(ctx context.Context, data watcher.AgentEventData) string {
 	if s.profileExecutionResolver == nil || s.repo == nil || s.turnService == nil || !cleanFixedCompletion(data) {
 		return ""
 	}
@@ -23,7 +23,7 @@ func (s *Service) fixedProfileForCleanCompletion(ctx context.Context, data watch
 	if err != nil || turn == nil || turn.ID != data.TurnID {
 		return ""
 	}
-	return fixedSessionProfileID(session)
+	return data.ResourceCircuitKey
 }
 
 func cleanFixedCompletion(data watcher.AgentEventData) bool {
@@ -47,7 +47,7 @@ func fixedCompletionMatchesSession(data watcher.AgentEventData, session *models.
 		(data.AgentProfileID == "" || data.AgentProfileID == session.AgentProfileID)
 }
 
-func (s *Service) fixedProfileForCleanStreamCompletion(
+func (s *Service) fixedResourceForCleanStreamCompletion(
 	ctx context.Context,
 	payload *agentruntime.AgentStreamEventPayload,
 	turnID string,
@@ -57,10 +57,11 @@ func (s *Service) fixedProfileForCleanStreamCompletion(
 		s.streamEventIsStalePrompt(payload) {
 		return ""
 	}
-	return s.fixedProfileForCleanCompletion(ctx, watcher.AgentEventData{
+	return s.fixedResourceForCleanCompletion(ctx, watcher.AgentEventData{
 		TaskID: payload.TaskID, SessionID: payload.SessionID, TurnID: turnID,
 		AgentExecutionID: payload.ExecutionID, AgentProfileID: payload.AgentProfileID,
 		ExecutionProfileID: payload.ExecutionProfileID, ProviderError: payload.Data.ProviderError,
-		ErrorMessage: payload.Data.Error,
+		ResourceCircuitKey: payload.ResourceCircuitKey,
+		ErrorMessage:       payload.Data.Error,
 	})
 }

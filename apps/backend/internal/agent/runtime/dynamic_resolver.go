@@ -964,6 +964,11 @@ func profileCredentialBindingDescriptor(profile *agentsettingsmodels.AgentProfil
 		sort.Strings(secretIDs)
 		descriptor.CredentialSourceKind = "profile_secret"
 		descriptor.CredentialLocator = strings.Join(secretIDs, ",")
+		// BillingType is a controller-only projection, absent on store reads.
+		// An explicit secret binding already supplies its authentication scope.
+		if descriptor.AuthenticationMethod == "" {
+			descriptor.AuthenticationMethod = "profile_secret"
+		}
 	} else if descriptor.AuthenticationMethod != "" {
 		descriptor.CredentialSourceKind = "agent_credentials"
 		descriptor.CredentialLocator = profile.AgentID + ":" + descriptor.AuthenticationMethod

@@ -38,6 +38,9 @@ export const CIRCUIT_CODE_KEYS: Record<string, string> = {
   auth_required: "sidebar:controlCircuits.code.authRequired",
   subscription_required: "sidebar:controlCircuits.code.subscriptionRequired",
   account_blocked: "sidebar:controlCircuits.code.accountBlocked",
+  missing_credentials: "sidebar:controlCircuits.code.missingCredentials",
+  provider_not_configured: "sidebar:controlCircuits.code.providerNotConfigured",
+  network_unavailable: "sidebar:controlCircuits.code.networkUnavailable",
 };
 
 function record(value: unknown): value is Record<string, unknown> {

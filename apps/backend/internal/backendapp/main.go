@@ -713,6 +713,9 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	if services.DynamicProfileResolver != nil {
+		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
+	}
 
 	// ============================================
 	// WORKTREE MANAGER

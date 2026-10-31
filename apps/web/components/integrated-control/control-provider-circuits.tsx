@@ -83,7 +83,10 @@ function CircuitReadState({ result }: { result: ReturnType<typeof useControlRout
 function CircuitRow({ circuit }: { circuit: RoutingCircuit }) {
   const { t } = useTranslation();
   const scope = CIRCUIT_SCOPE_KEYS[circuit.scope];
-  const code = circuit.code ? CIRCUIT_CODE_KEYS[circuit.code] : undefined;
+  const code =
+    circuit.code && Object.hasOwn(CIRCUIT_CODE_KEYS, circuit.code)
+      ? CIRCUIT_CODE_KEYS[circuit.code]
+      : "common:unknownError";
   const due = circuit.state === "half_open" ? circuit.probe_until : circuit.until;
   return (
     <li
@@ -99,7 +102,7 @@ function CircuitRow({ circuit }: { circuit: RoutingCircuit }) {
       <span className="font-mono text-xs text-muted-foreground">
         {shortCircuitId(circuit.scope_value)}
       </span>
-      {code && <span>{t(code)}</span>}
+      <span>{t(code)}</span>
       {due && (
         <span className="text-xs text-muted-foreground">
           {t("sidebar:controlCircuits.until", { time: formatDateTime(due) })}

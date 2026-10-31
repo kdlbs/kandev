@@ -222,13 +222,14 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION",
 			Kind:   KindFeature,
 			Label:  "Dynamic circuit backoff escalation",
-			Description: "Lengthens the dynamic routing backoff for a candidate that keeps failing, " +
-				"from one minute up to four hours, instead of re-probing it every minute.",
+			Description: "Lengthens shared resource circuit backoff for repeated provider failures " +
+				"from one minute up to four hours. Applies to dynamic candidates and fixed profiles.",
 			Stability: StabilityExperimental,
 			RiskLevel: RiskMedium,
-			RiskDescription: "A candidate that failed several times in a row can stay skipped for up to four hours, " +
-				"or until a later provider reset time, even after its provider recovers. Sessions then use the next " +
-				"configured candidate or wait. A turn that completes without a provider error clears the failure count. Requires Dynamic agent routing.",
+			RiskDescription: "Repeated failures can suspend the resource for up to four hours, or until a later provider reset time, " +
+				"even after recovery. This also affects fixed profiles when Dynamic agent routing is off: they wait without " +
+				"falling back to another candidate. Dynamic routes may use the next configured candidate or wait. " +
+				"A clean completed turn clears the failure count.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

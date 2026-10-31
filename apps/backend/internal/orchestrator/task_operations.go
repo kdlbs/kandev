@@ -1264,6 +1264,9 @@ func (s *Service) handleSessionLaunchFailure(
 	preloadedSession ...*models.TaskSession,
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
+	if isFixedProfileSuspendedError(launchErr) {
+		return launchErr
+	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
 			zap.String("task_id", taskID),
@@ -7037,7 +7040,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// provider request, even into an execution that is still alive. Dynamic
 	// sessions are gated by their own selection.
 	if !s.isDynamicPromptSession(session) {
-		if err := s.admitFixedProfileDispatch(ctx, sessionID, fixedSessionProfileID(session)); err != nil {
+		if err := s.admitFixedSessionPrompt(ctx, session); err != nil {
 			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 			return nil, err
 		}

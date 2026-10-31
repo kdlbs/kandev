@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // resourceCircuitCandidate builds the resource identity of one concrete
@@ -23,34 +24,41 @@ func (r *ProfileExecutionResolver) resourceCircuitCandidate(
 	if err != nil || profile == nil || profile.DeletedAt != nil {
 		return dynamic.Candidate{}, false
 	}
-	candidate := dynamic.Candidate{
-		ID: executionProfileID, Enabled: true,
-		BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, executionProfileID),
-	}
-	if r.bindingResolver != nil {
-		candidate.BindingKey = dynamic.ResourceKey(
-			dynamic.ScopeCredential,
-			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
-		)
-	}
-	return candidate, true
+	return dynamic.Candidate{ID: executionProfileID, Enabled: true, BindingKey: r.ResourceCircuitKeyForProfile(profile)}, true
 }
 
-// RecordFixedProfileFailure records a fixed profile's classified failure
-// against its resource circuit. A profile that cannot be resolved records
-// nothing.
+// ResourceCircuitKeyForProfile uses the supplied immutable launch profile,
+// never a later settings read, to name its shared resource.
+func (r *ProfileExecutionResolver) ResourceCircuitKeyForProfile(profile *settingsmodels.AgentProfile) string {
+	if r == nil || profile == nil || profile.ID == "" {
+		return ""
+	}
+	if r.bindingResolver != nil {
+		return dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), profile.ID),
+		)
+	}
+	return dynamic.ResourceKey(dynamic.ScopeProfile, profile.ID)
+}
+
+// RecordFixedProfileFailure charges the immutable resource captured by the
+// execution. An unknown resource cannot charge a currently configured secret.
 func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
-	ctx context.Context,
-	executionProfileID string,
+	_ context.Context,
+	executionProfileID, resourceKey string,
 	failure *routingerr.Error,
 ) {
 	if failure == nil {
 		return
 	}
-	candidate, ok := r.resourceCircuitCandidate(ctx, executionProfileID)
-	if !ok {
+	if r == nil || r.engine == nil || executionProfileID == "" {
 		return
 	}
+	if resourceKey == "" && !routingerr.HoldsUntilRelease(failure.Code) {
+		return
+	}
+	candidate := dynamic.Candidate{ID: executionProfileID, Enabled: true, BindingKey: resourceKey}
 	r.engine.RecordResourceFailure(
 		dynamic.Profile{ID: executionProfileID, Candidates: []dynamic.Candidate{candidate}},
 		candidate.ID, failure,
@@ -60,15 +68,14 @@ func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
 // ResetFixedProfileCircuitFailures clears only the consecutive count of a
 // concrete profile's shared resource after its owner confirms a clean turn.
 // It does not close a circuit, release a hold, or change a probe lease.
-func (r *ProfileExecutionResolver) ResetFixedProfileCircuitFailures(ctx context.Context, executionProfileID string) bool {
+func (r *ProfileExecutionResolver) ResetFixedProfileCircuitFailures(_ context.Context, resourceKey string) bool {
 	if r == nil || r.engine == nil || !r.engine.Circuits().EscalationEnabled() {
 		return false
 	}
-	candidate, ok := r.resourceCircuitCandidate(ctx, executionProfileID)
-	if !ok {
+	if resourceKey == "" {
 		return false
 	}
-	return r.engine.Circuits().ResetFailures(candidate.BindingKey)
+	return r.engine.Circuits().ResetFailures(resourceKey)
 }
 
 // FixedProfileSuspension reports the resource circuit refusing a new dispatch
@@ -89,4 +96,16 @@ func (r *ProfileExecutionResolver) FixedProfileSuspension(
 		return dynamic.Suspension{}, true
 	}
 	return suspension, true
+}
+
+// CapturedFixedProfileSuspension checks the resource of a retained execution.
+// Unknown legacy resource identity must not be replaced with today's secret.
+func (r *ProfileExecutionResolver) CapturedFixedProfileSuspension(executionProfileID, resourceKey string, now time.Time) (dynamic.Suspension, bool) {
+	if r == nil || r.engine == nil || executionProfileID == "" {
+		return dynamic.Suspension{}, false
+	}
+	suspension, blocked := r.engine.CandidateSuspension(dynamic.Candidate{
+		ID: executionProfileID, Enabled: true, BindingKey: resourceKey,
+	}, now)
+	return suspension, blocked || resourceKey != ""
 }

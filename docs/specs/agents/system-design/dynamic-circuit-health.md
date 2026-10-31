@@ -26,6 +26,21 @@ execution and route generation. Account holds require owner release; expired
 timed and restored half-open observations do not become permanent fixed-profile
 blocks. Recording an unrouted classified failure does not authorize a successor.
 
+The lifecycle resolver captures the same profile snapshot used for the execution
+environment. Its existing resource key is retained with the execution/profile
+pair and propagated by trusted runtime events. Failures and clean completions
+use that captured resource, not later profile settings. An unknown retained key
+cannot charge or reset today's credential; account holds keep their owner-release
+contract. Explicit profile secret references supply their binding scope even
+when the controller-only billing projection is absent from the store read.
+
+A pre-provider circuit refusal preserves queued prompt identity and recorded
+history. Unattempted sessions wait rather than fail. The existing admission sweep
+rechecks only recorded waits; ordinary queue auto-run and session-incarnation
+guards still apply. Automation continuations retain their existing run, prompt,
+and retry tuple and resume through the existing dispatcher after suspension
+expires or is released. No new attempt, run, worker, or retry budget is created.
+
 The original `features.dynamicCircuitBackoffEscalation` option is constructed at
 startup and remains OFF in every shipped profile. Enabled escalation retains its
 existing bounded ladder and reset semantics. The additive `failure_count` column

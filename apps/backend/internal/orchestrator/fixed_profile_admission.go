@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -22,6 +24,14 @@ type FixedProfileSuspendedError struct {
 
 func (e *FixedProfileSuspendedError) Error() string {
 	return fmt.Sprintf("fixed profile %s suspended: %s", e.ExecutionProfileID, fixedProfileSuspensionMessage(e.Suspension))
+}
+
+// DispatchDeferred keeps an admitted automation run open before provider I/O.
+func (e *FixedProfileSuspendedError) DispatchDeferred() string { return "fixed_profile_suspended" }
+
+func isFixedProfileSuspendedError(err error) bool {
+	var suspended *FixedProfileSuspendedError
+	return errors.As(err, &suspended)
 }
 
 // fixedProfileSuspensionMessage names the suspended scope, the reason code and
@@ -78,12 +88,37 @@ func (s *Service) admitFixedProfileDispatch(ctx context.Context, sessionID, exec
 		return nil
 	}
 	suspension, known := s.profileExecutionResolver.FixedProfileSuspension(ctx, executionProfileID, time.Now())
+	return s.refuseFixedProfileDispatch(ctx, sessionID, executionProfileID, suspension, known)
+}
+
+func (s *Service) refuseFixedProfileDispatch(ctx context.Context, sessionID, executionProfileID string, suspension dynamicruntime.Suspension, known bool) error {
 	if !known || !suspension.Blocked() {
 		return nil
 	}
 	refusal := &FixedProfileSuspendedError{ExecutionProfileID: executionProfileID, Suspension: suspension}
 	s.surfaceFixedProfileSuspension(ctx, sessionID, suspension)
 	return refusal
+}
+
+func (s *Service) fixedProfileSuspensionForSession(ctx context.Context, session *models.TaskSession) (dynamicruntime.Suspension, bool) {
+	if session == nil || s.profileExecutionResolver == nil || s.isDynamicPromptSession(session) {
+		return dynamicruntime.Suspension{}, false
+	}
+	profileID := fixedSessionProfileID(session)
+	if session.AgentExecutionID != "" {
+		running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+		if err != nil || running == nil || running.AgentExecutionID != session.AgentExecutionID {
+			return dynamicruntime.Suspension{}, false
+		}
+		key := agentruntime.CapturedResourceCircuitKey(running.Metadata, running.AgentExecutionID, profileID)
+		return s.profileExecutionResolver.CapturedFixedProfileSuspension(profileID, key, time.Now())
+	}
+	return s.profileExecutionResolver.FixedProfileSuspension(ctx, profileID, time.Now())
+}
+
+func (s *Service) admitFixedSessionPrompt(ctx context.Context, session *models.TaskSession) error {
+	suspension, known := s.fixedProfileSuspensionForSession(ctx, session)
+	return s.refuseFixedProfileDispatch(ctx, session.ID, fixedSessionProfileID(session), suspension, known)
 }
 
 // surfaceFixedProfileSuspension records the refusal on the session so the
@@ -117,6 +152,7 @@ func (s *Service) surfaceFixedProfileSuspension(
 	}
 	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, previous, session.State,
 		session.ErrorMessage, &session.UpdatedAt, session)
+	s.markFixedProfileWait(ctx, session)
 }
 
 // recordFixedProfileFailure records the resource circuit of a fixed profile
@@ -140,18 +176,27 @@ func (s *Service) recordFixedProfileFailure(
 	if err != nil || session == nil || s.isDynamicPromptSession(session) {
 		return
 	}
-	profileID := data.ExecutionProfileID
-	if profileID == "" && data.AgentExecutionID != "" && session.AgentExecutionID == data.AgentExecutionID {
-		profileID = fixedSessionProfileID(session)
-	}
+	profileID := fixedProfileFailureOwner(data, session)
 	if profileID == "" {
 		return
 	}
-	s.profileExecutionResolver.RecordFixedProfileFailure(ctx, profileID, classified)
+	s.profileExecutionResolver.RecordFixedProfileFailure(ctx, profileID, data.ResourceCircuitKey, classified)
 	s.logger.Info("recorded fixed profile resource failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("execution_profile_id", profileID),
 		zap.String("routing_code", string(classified.Code)))
+}
+
+func fixedProfileFailureOwner(data watcher.AgentEventData, session *models.TaskSession) string {
+	if data.AgentExecutionID == "" || session.AgentExecutionID != data.AgentExecutionID || session.TaskID != data.TaskID {
+		return ""
+	}
+	profileID := fixedSessionProfileID(session)
+	if profileID == "" || (data.ExecutionProfileID != "" && data.ExecutionProfileID != profileID) ||
+		(data.AgentProfileID != "" && data.AgentProfileID != session.AgentProfileID) {
+		return ""
+	}
+	return profileID
 }
