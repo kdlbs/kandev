@@ -8,6 +8,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -40,6 +41,13 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 		return deliveryRecoveryResult(identity, DeliveryReconciliationBlocked,
 			"recovery_identity_incomplete", ErrDeliveryRecoveryBlocked)
 	}
+
+	if _, exists := m.GetExecutionBySessionID(requested.SessionID); !exists {
+		remote, err := m.recoverSavedSSHDelivery(ctx, requested)
+		if remote && err != nil {
+			return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
+		}
+	}
 	if execution, exists := m.GetExecutionBySessionID(requested.SessionID); exists {
 		if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
 			if execution.ID != requested.ExecutionID && loadedRecoverySuccessorMatches(execution, requested) &&
@@ -58,6 +66,14 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 		if m.streamManager == nil {
 			return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable,
 				"delivery_recovery_unavailable", ErrDeliveryTransportUnavailable)
+		}
+		if execution.RuntimeName == agentruntime.RuntimeSSH {
+			if err := m.reconnectSSHDelivery(ctx, execution); err != nil {
+				return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
+			}
+			if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
+				return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch, "execution_identity_changed", ErrDeliveryOwnerMismatch)
+			}
 		}
 		return m.streamManager.ReconcileAgentDelivery(ctx, execution)
 	}
