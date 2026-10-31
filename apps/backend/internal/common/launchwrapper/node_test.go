@@ -219,3 +219,26 @@ func TestNodeRequiredWithoutSpecRefuses(t *testing.T) {
 	require.True(t, Node{Required: true}.Active())
 	require.True(t, Node{Spec: Spec{Version: Version, Source: SourceNode, Argv: []string{child}}}.Active())
 }
+
+// TestLoadNodeFileValidatesTheWrapperWithoutRunningIt pins that loading a node
+// wrapper only reads and stats it. The wrapper records every run in a sentinel
+// file, so any execution of it, directly or through a shell, leaves evidence.
+func TestLoadNodeFileValidatesTheWrapperWithoutRunningIt(t *testing.T) {
+	if runtime.GOOS == windowsOS {
+		t.Skip("POSIX ownership model")
+	}
+	dir := secureDir(t)
+	sentinel := filepath.Join(dir, "wrapper-ran")
+	wrapper := writeExecutable(t, dir, "wrap", "#!/bin/sh\necho ran >> '"+sentinel+"'\nexec \"$@\"\n")
+	path := writeNodeFile(t, dir, 0o600, wrapper, "--")
+
+	spec, err := LoadNodeFile(path, -1)
+	require.NoError(t, err)
+	require.Equal(t, []string{wrapper, "--"}, spec.Argv)
+	require.NoError(t, spec.ValidateNode())
+	require.NoError(t, ValidateTokens(spec.Argv))
+	_, err = DecodeNode(nodeJSON(t, wrapper, "--"))
+	require.NoError(t, err)
+
+	require.NoFileExists(t, sentinel, "loading or validating the node wrapper executed it")
+}
