@@ -37,6 +37,10 @@ const (
 	pluginExecutorPersistGrace = 30 * time.Second
 
 	pluginDrainReceiptDigestDomain = "kandev.plugin.drain-receipt.v1"
+
+	// pluginDrainReceiptNeverHeldCredential is the first drain_receipt version
+	// whose not_attempted means the host never held an agentctl credential.
+	pluginDrainReceiptNeverHeldCredential = 2
 )
 
 // pluginRuntimeDrainer asks the exact recorded agentctl to seal and drain
@@ -177,12 +181,17 @@ func storedPluginDrainDecision(inventory pluginExecutorInventory, claimOperation
 //
 //	credential known, drain answered     -> drained (with a receipt)
 //	credential known, drain not answered -> unreachable or uncertain
-//	no credential, a handshake happened  -> unreachable
-//	no credential, no handshake ever, launch_failed -> not_attempted
-//	no credential, no handshake ever, any other reason -> unreachable
+//	no credential, drain_receipt@1:
+//	  no handshake ever, launch_failed   -> not_attempted
+//	  otherwise                          -> unreachable
+//	no credential, drain_receipt@2:
+//	  the host never held a credential   -> not_attempted, whatever the reason
+//	  otherwise                          -> unreachable
 //
-// not_attempted is the provider's proof that no runtime ever existed, so it is
-// sent only when no agentctl handshake was ever started.
+// Under @1 not_attempted is the provider's proof that no runtime ever existed.
+// Under @2 it states only that the host never held an agentctl credential, so
+// no instance, agent or shell can exist through agentctl; the provider verifies
+// the rest. The version is the one stored with the record.
 func (r *PluginRemoteExecutor) drainPluginRuntime(
 	ctx context.Context,
 	token string,
@@ -194,10 +203,7 @@ func (r *PluginRemoteExecutor) drainPluginRuntime(
 	reason string,
 ) pluginDrainDecision {
 	if token == "" || r.drainRuntime == nil {
-		if reason == pluginExecutorCleanupReasonLaunch && !inventory.HandshakeStarted {
-			return pluginDrainDecision{outcome: pluginDrainOutcomeNotAttempted}
-		}
-		return pluginDrainDecision{outcome: pluginDrainOutcomeUnreachable}
+		return pluginDrainDecision{outcome: pluginNoCredentialDrainOutcome(inventory, token, reason)}
 	}
 	operationContext = proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	drainCtx, cancel := context.WithTimeout(ctx, pluginExecutorDrainDeadline)
@@ -214,6 +220,27 @@ func (r *PluginRemoteExecutor) drainPluginRuntime(
 		ReceiptId: pluginDrainReceiptID(inventory, claimOperationID), CleanupClaim: claimOperationID,
 		RuntimeIdentity: inventory.RuntimeIdentity, CompletedAt: receipt.CompletedAt.UTC().Format(time.RFC3339Nano),
 	}}
+}
+
+// pluginNoCredentialDrainOutcome is the outcome of a destroy for which no drain
+// could be attempted.
+func pluginNoCredentialDrainOutcome(inventory pluginExecutorInventory, token, reason string) string {
+	if token == "" && pluginDrainNeverHeldCredential(inventory) {
+		return pluginDrainOutcomeNotAttempted
+	}
+	if reason == pluginExecutorCleanupReasonLaunch && !inventory.HandshakeStarted {
+		return pluginDrainOutcomeNotAttempted
+	}
+	return pluginDrainOutcomeUnreachable
+}
+
+// pluginDrainNeverHeldCredential reports whether the record proves the host
+// never held an agentctl credential. It is true only under a recorded
+// drain_receipt version that defines not_attempted that way, and only when no
+// handshake was ever started.
+func pluginDrainNeverHeldCredential(inventory pluginExecutorInventory) bool {
+	return negotiatedVersion(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) >= pluginDrainReceiptNeverHeldCredential &&
+		!inventory.HandshakeStarted
 }
 
 // classifyPluginDrainFailure maps a failed drain to the outcome it proves. Only

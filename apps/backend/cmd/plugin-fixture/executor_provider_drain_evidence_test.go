@@ -72,3 +72,43 @@ func TestFixtureWithoutDeclaredCapabilitiesAcceptsABareDestroy(t *testing.T) {
 	require.Nil(t, response.GetError())
 	require.True(t, response.GetConfirmedAbsent())
 }
+
+// A provider declaring drain_receipt@2 accepts not_attempted under any cleanup
+// reason, but never with a receipt; the version 1 declaration keeps the narrow
+// rule exercised above.
+func TestFixtureDrainReceiptVersionTwoAcceptsNotAttemptedForAnyReason(t *testing.T) {
+	cases := []struct {
+		name         string
+		declaration  string
+		reason       string
+		withReceipt  bool
+		wantRefusal  bool
+		wantAbsences bool
+	}{
+		{"version 2, task cleanup", "destroy_checkpoints,drain_receipt@2", "task_cleanup", false, false, true},
+		{"version 2, environment reset", "destroy_checkpoints,drain_receipt@2", "task_environment_reset", false, false, true},
+		{"version 2, recovery cleanup", "destroy_checkpoints,drain_receipt@2", "recovery_cleanup", false, false, true},
+		{"version 2, launch failure", "destroy_checkpoints,drain_receipt@2", "launch_failed", false, false, true},
+		{"version 2 with a receipt", "destroy_checkpoints,drain_receipt@2", "task_cleanup", true, true, false},
+		{"explicit version 1, task cleanup", "destroy_checkpoints,drain_receipt@1", "task_cleanup", false, true, false},
+		{"unversioned means version 1", "destroy_checkpoints,drain_receipt", "task_cleanup", false, true, false},
+		{"explicit version 1, launch failure", "destroy_checkpoints,drain_receipt@1", "launch_failed", false, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(fixtureCapabilitiesEnv, tc.declaration)
+			response := destroyWithEvidence(t, func(r *pluginsdk.DestroyExecutorEnvironmentRequest) {
+				r.DrainOutcome, r.CleanupReason = "not_attempted", tc.reason
+				if tc.withReceipt {
+					r.DrainReceipt = &pluginsdk.ExecutorDrainReceipt{ReceiptId: "receipt-1", CleanupClaim: "claim-1", RuntimeIdentity: "runtime-1"}
+				}
+			})
+			if tc.wantRefusal {
+				require.Equal(t, "drain_evidence_refused", response.GetError().GetCode())
+				return
+			}
+			require.Nil(t, response.GetError())
+			require.Equal(t, tc.wantAbsences, response.GetConfirmedAbsent())
+		})
+	}
+}
