@@ -44,6 +44,7 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 
 - Policy absent, disabled, vetoed, or step unknown: no route call and unchanged completion.
 - Cancelled, errored, terminal-replay, stale, or output/effect turns: not counted.
+- Reasoning-only normal ends: count without clearing the prior empty-end streak; reasoning still vetoes replay for other failure origins. Answer text, plan content and tool effects remain protected.
 - Threshold N: N consecutive empty ends on one candidate advance once; below N, the route is `action_required`.
 - Other origins still require a complete diagnostic and provider ID.
 - Persisted state contains only the fingerprint and bounded identity fields.

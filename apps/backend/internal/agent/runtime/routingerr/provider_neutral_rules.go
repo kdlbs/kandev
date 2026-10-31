@@ -3,7 +3,7 @@ package routingerr
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
-var providerNeutralRules = []rule{
+var providerNeutralRules = append(providerCatalogRules, []rule{
 	// A gateway that restricted an account rejects every request with 403 and
 	// an account-restriction code or message. The envelope must open the line,
 	// optionally inside a labeled JSON message, so an agent quoting the error
@@ -29,6 +29,14 @@ var providerNeutralRules = []rule{
 		CodeNetworkUnavailable,
 		ConfHigh,
 	),
+	// Context rejection is a prompt result; startup and later phases retain
+	// their existing classification rather than gaining a new recovery route.
+	mustRule(
+		"provider.context_length_exceeded.v1",
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
+		ConfHigh,
+	),
 	// An AI-SDK error envelope carries the provider's own classification in a
 	// structured "error_type" field. The underscore-joined "provider_unavailable"
 	// never matches the space-separated prose in provider.unavailable.v1. The
@@ -49,13 +57,16 @@ var providerNeutralRules = []rule{
 		CodeProviderUnavailable,
 		ConfMedium,
 	),
-}
+}...)
 
-func matchProviderNeutralRules(text string) (*Error, bool) {
+func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
+		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
+			continue
+		}
 		if r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,

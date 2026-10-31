@@ -12,6 +12,10 @@ It is admitted only when the candidate policy is enabled and the workflow step a
 Otherwise the completion keeps its existing behavior.
 All other rules in this decision still apply, including the threshold, attempt deduplication, resets, and fenced successor launch.
 
+## Amendment (2026-10-26)
+
+A reasoning-only normal completion also qualifies when it has no answer text, plan content or tool activity/effects. Reasoning alone does not clear its streak. This changes only the empty normal completion boundary: reasoning remains observed output for other provider/runtime failures, and current-attempt, effect, policy and workflow fences remain required.
+
 ## Context
 
 [Issue #4015](https://github.com/kdlbs/kandev/issues/4015) proposes recovery from repeated unknown failures in task dynamic routing.
