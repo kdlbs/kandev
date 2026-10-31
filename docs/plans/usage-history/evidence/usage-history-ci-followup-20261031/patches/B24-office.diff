@@ -1,0 +1,16 @@
+diff --git a/apps/web/e2e/tests/office/session-lifecycle.spec.ts b/apps/web/e2e/tests/office/session-lifecycle.spec.ts
+index 14723b94b8e..568da1baed6 100644
+--- a/apps/web/e2e/tests/office/session-lifecycle.spec.ts
++++ b/apps/web/e2e/tests/office/session-lifecycle.spec.ts
+@@ -153,6 +153,11 @@ test.describe("Office task session lifecycle", () => {
+     officeApi,
+     officeSeed,
+   }) => {
++    // This API-only test does not request testPage, so its workspace reset
++    // fixture does not run. Clear worker-scoped tasks before pausing the CEO.
++    await apiClient.e2eReset(officeSeed.workspaceId, [officeSeed.workflowId]);
++    await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
++
+     const newAssignee = (await officeApi.createAgent(officeSeed.workspaceId, {
+       name: "Lifecycle Reassignee",
+       role: "worker",

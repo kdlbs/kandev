@@ -1,0 +1,98 @@
+{
+  "worker": "B24",
+  "status": "ready_for_parent_review",
+  "ci": {
+    "run_id": 41168999159,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "head_sha": "4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6",
+    "synthetic_merge_sha": "41a8a07b56085a93afb2df246495176bd5208890",
+    "test_id": "e1a7389f33bf22ce6a57-268d26ea489fb6446658",
+    "project": "chromium",
+    "title": "Office task session lifecycle \u203a reassignment: prev assignee's session moves to a terminal state",
+    "statuses": [
+      "failed",
+      "passed"
+    ],
+    "verdict": "FLAKY",
+    "failed_attempt_observation": "PATCH /api/v1/office/agents/<seeded-agent>/status returned 400: invalid status transition from stopped to paused at the test's pre-pause setup.",
+    "failed_attempt_trace": "not present; the available trace is from passing retry 1"
+  },
+  "source": {
+    "changed_paths": [
+      "apps/web/e2e/tests/office/session-lifecycle.spec.ts"
+    ],
+    "baseline_source_sha256": "00105b00f875584b3f05583ea7c8bf90d91cb2f2c470b39b248b9a2c0be7102b",
+    "baseline_source_matches_ci_merge_tree": true,
+    "current_source_sha256": "29d07faab1aee7f27ed4ee5fcec9277792d0ea797fd8a9a5521310b2923cda0b",
+    "change": "The API-only reassignment test now resets its worker-scoped Office workspace, then explicitly transitions the seeded CEO to idle before the existing pause setup. The terminal session-state poll and assertion remain unchanged.",
+    "diff": "Five added lines only; no shared helpers or production files changed."
+  },
+  "causality": {
+    "proven": [
+      "The failed API request observed the seeded agent in stopped state immediately before the test attempted paused.",
+      "Office status contract permits stopped to idle, and idle to paused; stopped to paused is rejected.",
+      "The test does not request testPage. The office-fixture testPage fixture performs the per-test workspace reset, while officeSeed is worker-scoped.",
+      "CI shard 11 metadata lists agent-skills-ui.spec.ts, agents.spec.ts, and routine-catch-up-policy-ui.spec.ts before session-lifecycle.spec.ts among its assigned Office files."
+    ],
+    "inference": "Stale worker-scoped Office tasks or their cleanup likely left the seeded agent stopped. The exact event that wrote stopped cannot be identified because attempt 0 has no trace. Resetting the workspace waits for its task cleanup, and the explicit stopped-to-idle recovery uses the valid API transition before pausing.",
+    "confidence_limit": "The isolated baseline title and the baseline lifecycle file both passed locally; this run did not reproduce the CI failure before the fix. Their passes are not treated as proof that the flake was absent."
+  },
+  "commands": {
+    "working_directory": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web",
+    "runner": "managed pnpm e2e:run --host --no-build --project chromium",
+    "environment": "GOMAXPROCS=1, E2E_PORT_OFFSET=27, CAPTURE_PR_ASSETS unset; Playwright config workers=1 and local retries=0",
+    "baseline_isolated": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium tests/office/session-lifecycle.spec.ts --grep \"reassignment: prev assignee's session moves to a terminal state\"",
+      "exit_code": 0,
+      "result": "1 passed",
+      "log": "/tmp/usage-history-luna-B24-baseline-isolated.log"
+    },
+    "baseline_ordered_file": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium tests/office/session-lifecycle.spec.ts",
+      "exit_code": 0,
+      "result": "4 passed",
+      "log": "/tmp/usage-history-luna-B24-baseline-file.log"
+    },
+    "post_fix_five_repeats": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium tests/office/session-lifecycle.spec.ts --grep \"reassignment: prev assignee's session moves to a terminal state\" --repeat-each=5",
+      "exit_code": 0,
+      "result": "5 passed; one worker; zero retries",
+      "log": "/tmp/usage-history-luna-B24-postfix-repeat5.log"
+    },
+    "post_fix_ci_predecessor_office_sequence": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium tests/office/agent-skills-ui.spec.ts tests/office/agents.spec.ts tests/office/routine-catch-up-policy-ui.spec.ts tests/office/session-lifecycle.spec.ts",
+      "exit_code": 0,
+      "result": "16 passed in one worker; zero retries",
+      "log": "/tmp/usage-history-luna-B24-postfix-office-sequence.log"
+    }
+  },
+  "checks": {
+    "prettier": {
+      "command": "pnpm exec prettier --check e2e/tests/office/session-lifecycle.spec.ts",
+      "exit_code": 0
+    },
+    "eslint": {
+      "command": "pnpm exec eslint e2e/tests/office/session-lifecycle.spec.ts",
+      "exit_code": 0
+    },
+    "git_diff_check": {
+      "command": "git diff --check -- apps/web/e2e/tests/office/session-lifecycle.spec.ts",
+      "exit_code": 0
+    }
+  },
+  "pr_assets": {
+    "capture_mode": "unset",
+    "snapshot": "/tmp/usage-history-luna-B24-pr-assets-before.tar",
+    "manifest_included": true,
+    "file_count_before_and_after": 9,
+    "byte_exact_after_runs": true,
+    "tree_sha256_before_and_after": "2fd0116e69b4399558a038cecda707b147855f336789470246858c32c5c5c2b1",
+    "restore": "Not needed; byte-for-byte comparison confirmed the original assets and manifest remained unchanged."
+  },
+  "limits": [
+    "No CI rerun or external mutation was performed.",
+    "No commits or pushes were made.",
+    "The failed CI attempt has no trace, so its exact preceding status writer remains unproven."
+  ]
+}

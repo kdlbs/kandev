@@ -457,4 +457,39 @@ This is a fixture measurement, not a general storage prediction.
 PostgreSQL was not run after this failure.
 Normal cleanup removed the temporary database; the logs, 27 scenario receipts, comparisons, and resource observations remain.
 Evidence is in `evidence/usage-history-luna-C8-full-normal-20261031T0122Z/`.
+
+### Focused query correction (2026-10-31)
+
+The isolated C9 patch passed parent review for eight Go files.
+It adds indexed reads by retained subject and reuses report aggregates for bounded task and session filters.
+It also uses daily summaries for safe monthly and provider reports.
+Ambiguous currency or coverage causes the affected month to use point facts.
+
+The focused suite passed the five previous timeout filters on SQLite and PostgreSQL 18.6.
+Nine monthly controls compare complete rows and totals with the reference path.
+They cover provider choices, deleted subjects, independent metrics, local midnight, UTC month edges, and source-calendar overlap.
+The monthly controls also passed the race detector.
+Lint and vet passed.
+
+The full normal SQLite and PostgreSQL gates remain pending after this correction.
+Each gate still requires one million native observations, 100,000 external observations, and ten samples.
+The fixture, oracle, and report deadline remain unchanged.
+Evidence is in [the focused query packet](evidence/usage-history-luna-C9-query-fix-20261031/README.md).
+
+### Current CI checkpoint (2026-10-31)
+
+Core commit `4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6` contains the reviewed browser fixture changes and their evidence.
+Its CI finished with 90 passed checks, five failed checks, and 11 skipped checks.
+Three leaf jobs failed: Quick Chat cancellation, the process package under the ambient environment, and a concurrent resolver test.
+The other two failed checks depend on those jobs.
+The complete audit found two additional flaky cases and confirmed that all nine earlier cases passed on their first attempt.
+
+The parent reviewed all five CI corrections and integrated them into the primary checkout.
+The browser corrections passed 40 local cases with retries disabled.
+The process package preserved 2,251 test and subtest outcomes and reduced its local race runtime from 445.135 to 328.130 seconds.
+The resolver correction also passed repeated normal and race checks.
+Evidence is in [the CI follow-up packet](evidence/usage-history-ci-followup-20261031/README.md).
+
+Both PRs remain conflict-free against the observed main commits.
+Final delivery still requires normal hooks, a current backend build, both full performance gates, green CI, and zero flaky verdicts.
 Both full normal database runs remain required after the query correction, with their original counts, samples, oracle, and deadlines.

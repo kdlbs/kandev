@@ -56,11 +56,10 @@ func (r *Repository) readRetainedUsageReport(ctx context.Context, filter models.
 	if err := r.readUsageReportRows(ctx, tx, scope, metadata.generation, metadata.providerOptionsReady, filter, report); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS usage_report_range`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP TABLE usage_report_calendar`); err != nil {
-		return nil, err
+	for _, table := range []string{"usage_report_range", "usage_report_utc_month_dimensions", "usage_report_utc_calendar", "usage_report_calendar"} {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
+			return nil, err
+		}
 	}
 	return report, tx.Commit()
 }
@@ -105,7 +104,8 @@ func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope
 	if err != nil {
 		return err
 	}
-	source := usageReportReadSource(scope, generation, filter, false, cached)
+	postgres := r.db.DriverName() == usageDriverPostgres
+	source := usageReportReadSourceForEngine(scope, generation, filter, false, cached, postgres)
 	grouped := usageReportGrouped(source, filter.GroupBy, report.ProjectionPending)
 	if err := tx.GetContext(ctx, &report.TotalRows, r.db.Rebind(`SELECT COUNT(*) FROM (`+grouped.sql+`) report_groups`), grouped.args...); err != nil {
 		return err
@@ -127,7 +127,7 @@ func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope
 		}
 		report.Rows = append(report.Rows, out)
 	}
-	totalsSource := usageReportReadSource(scope, generation, filter, true, cached)
+	totalsSource := usageReportReadSourceForEngine(scope, generation, filter, true, cached, postgres)
 	var total usageReportAggregate
 	if err := tx.GetContext(ctx, &total, r.db.Rebind(`WITH base AS (`+totalsSource.sql+`) SELECT `+usageReportTotalsSQL(report.ProjectionPending)+` FROM base HAVING COUNT(*)>0`), totalsSource.args...); err != nil && err != sql.ErrNoRows {
 		return err
@@ -142,7 +142,7 @@ func (r *Repository) readUsageReportRows(ctx context.Context, tx *sqlx.Tx, scope
 	}
 	providerFilter := filter
 	providerFilter.Provider = ""
-	providers := usageReportProviderOptionsSource(scope, generation, providerFilter, cached && filter.Provider == "")
+	providers := usageReportProviderOptionsSourceForEngine(scope, generation, providerFilter, cached && filter.Provider == "", postgres)
 	return tx.SelectContext(ctx, &report.Providers, r.db.Rebind(providers.sql), providers.args...)
 }
 

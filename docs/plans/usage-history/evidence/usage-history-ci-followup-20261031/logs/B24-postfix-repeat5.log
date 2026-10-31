@@ -1,0 +1,35 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium tests/office/session-lifecycle.spec.ts --grep "reassignment: prev assignee's session moves to a terminal state" --repeat-each\=5
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 5 tests using 1 worker
+
+(node:4156318) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-gK2n9U/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (181ms)
+(node:4156475) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-1-RLEky9/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  2 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (222ms)
+(node:4156688) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-2-JuNVsG/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  3 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (208ms)
+(node:4156873) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-3-4BQvcL/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  4 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (190ms)
+(node:4157021) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-4-kr3AH6/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  5 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (188ms)
+
+  5 passed (12.8s)

@@ -1,0 +1,97 @@
+{
+  "worker": "B23",
+  "status": "ready_for_parent_review",
+  "workspace": "/tmp/usage-history-B23-resolver-worktree",
+  "source_base": {
+    "commit": "4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6",
+    "tree": "45b065cad151bf69646e71f8e34bb736aa02074d",
+    "ci_merge_commit_checked": "41a8a07b56085a93afb2df246495176bd5208890",
+    "ci_merge_tree_checked": "a4944c408f8932084cce8a5ba43c096517d4c2cc",
+    "resolver_relevant_tree_comparison": "git diff --exit-code exact-base ci-merge for resolver/cache files returned 0",
+    "primary_checkout": "unchanged; HEAD remains exact source base; resolver production and test files compare clean to HEAD"
+  },
+  "change": {
+    "files": [
+      {
+        "path": "apps/backend/internal/agent/runtime/lifecycle/agentctl_resolver_test.go",
+        "base_git_blob": "08e39eda7b5a31b884edd1c7a3460b900ccfc746",
+        "worktree_git_blob": "b03021e9683ed18b0532c85c15c29c86c4e106dc",
+        "worktree_sha256": "4cc9f08258c5e2113479864d616ab203b9ffa2dcfa325b68be3707d446c3df58"
+      }
+    ],
+    "production_resolver_changed": false,
+    "description": "The concurrent-download test now uses uncanceled background contexts for successful callers. It drains both resolver results before returning. This avoids scheduling asynchronous cache-lease release while testing.T.TempDir is removing the same cache tree. The one-request assertion and cancellation-specific sibling test remain intact."
+  },
+  "root_cause_evidence": {
+    "proven": [
+      "CI run 41168999201 attempt 1, job 124442754704, failed TestAgentctlResolverSingleflightsConcurrentDownloads during TempDir RemoveAll with unlinkat .../002/cache/remote-helpers: directory not empty.",
+      "The test used a shared context.WithCancel and canceled it in deferred cleanup after successful resolver results.",
+      "Successful resolver resolution registers context.AfterFunc to release cache leases; lease Release takes the cache lock and removes a marker. Go context.AfterFunc runs its callback asynchronously and cancellation does not join that callback.",
+      "The CI test artifact contains no other lifecycle-package test failure. Artifact archive 13030880999 SHA256 bb72d513366256d467ee0823c85acaf721428982bcf4682bea861d8834e85bca."
+    ],
+    "inferred": "The TempDir cleanup failure is a race between asynchronous cache-lease release and removal of the temporary cache root. The artifact has no goroutine stack proving the exact interleaving; the path, cleanup timing, test cancellation, and resolver ownership path align with it.",
+    "baseline_local": "The unmodified focused test passed -count=100 locally; this did not reproduce the intermittent CI cleanup failure."
+  },
+  "validation": {
+    "go_version": "1.26.0",
+    "budgets": "GOMAXPROCS=2, GOMEMLIMIT=3GiB, GOFLAGS=-p=1, -trimpath; no repository test timeouts, sleeps, retry logic, or download budgets changed.",
+    "commands": [
+      {
+        "command": "go test -trimpath ./internal/agent/runtime/lifecycle -run '^TestAgentctlResolverSingleflightsConcurrentDownloads$' -count=100 -timeout=2m",
+        "phase": "pre-change baseline",
+        "exit": 0,
+        "log": "/tmp/usage-history-luna-B23-baseline.log",
+        "result": "package test time 2.143s"
+      },
+      {
+        "command": "go test -trimpath ./internal/agent/runtime/lifecycle -run '^TestAgentctlResolverSingleflightsConcurrentDownloads$' -count=100 -timeout=2m",
+        "phase": "final focused regression",
+        "exit": 0,
+        "log": "/tmp/usage-history-luna-B23-post-singleflight.log",
+        "result": "package test time 0.845s"
+      },
+      {
+        "command": "go test -trimpath ./internal/agent/runtime/lifecycle -run '^TestAgentctlResolver(SingleflightsConcurrentDownloads|SharedDownloadSurvivesFirstWaiterCancellation|ManifestDownloadsExactHelperAndReusesCache|RejectsBadDownloadWithoutPublishingCacheFile|LaunchDeadlineBoundsDownload|RechecksCacheAfterDelayedMiss|KeepsHelperSelectedByPendingOlderLaunch|CachePruneDoesNotDelayDeadlineBoundLaunch)$' -count=20 -timeout=5m",
+        "phase": "normal related regressions",
+        "exit": 0,
+        "log": "/tmp/usage-history-luna-B23-normal-related.log",
+        "result": "package test time 1.312s"
+      },
+      {
+        "command": "go test -race -trimpath ./internal/agent/runtime/lifecycle -run '^TestAgentctlResolver(SingleflightsConcurrentDownloads|SharedDownloadSurvivesFirstWaiterCancellation|ManifestDownloadsExactHelperAndReusesCache|RejectsBadDownloadWithoutPublishingCacheFile|LaunchDeadlineBoundsDownload|RechecksCacheAfterDelayedMiss|KeepsHelperSelectedByPendingOlderLaunch|CachePruneDoesNotDelayDeadlineBoundLaunch)$' -count=10 -timeout=8m",
+        "phase": "race related regressions",
+        "exit": 0,
+        "log": "/tmp/usage-history-luna-B23-race-related.log",
+        "result": "package test time 1.965s"
+      },
+      {
+        "command": "PATH=/tmp/usage-history-serial-lint-bin:$PATH bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/agentctl_resolver_test.go",
+        "phase": "official changed-file lint",
+        "exit": 0,
+        "result": "0 issues"
+      },
+      {
+        "command": "gofmt -d changed file; git diff --check",
+        "phase": "final formatting and whitespace checks",
+        "exit": 0
+      }
+    ],
+    "diagnostic_iteration": "A temporary callback-tracking test experiment was rejected after it failed to join context.AfterFunc's nested asynchronous callback. That instrumentation and its assertions were removed; the final fix does not depend on it."
+  },
+  "artifacts": {
+    "isolated_diff": "/tmp/usage-history-luna-B23-isolated.diff",
+    "isolated_diff_sha256": "31c8dbbbc066f284fb9fea48878a290d71a0284e8a0459641ccc6f5d0ebd42cf",
+    "ready_report": "/tmp/usage-history-luna-B23-ready.json",
+    "logs": [
+      "/tmp/usage-history-luna-B23-baseline.log",
+      "/tmp/usage-history-luna-B23-post-singleflight.log",
+      "/tmp/usage-history-luna-B23-normal-related.log",
+      "/tmp/usage-history-luna-B23-race-related.log"
+    ]
+  },
+  "retries_and_limits": {
+    "ci_reruns": 0,
+    "whole_backend_or_lifecycle_package": "not run",
+    "remaining": "Parent owns review, integration, and broad CI. Other reported CI failures were outside the resolver worker scope."
+  }
+}

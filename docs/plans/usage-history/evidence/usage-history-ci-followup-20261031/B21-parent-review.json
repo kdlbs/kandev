@@ -1,0 +1,44 @@
+{
+  "reviewed_at": "2026-10-31T05:12:18.192982+00:00",
+  "status": "approved_for_integration",
+  "receipt": "/tmp/usage-history-luna-B21-ready.json",
+  "source_sha256": "70467f4f7eb0859be418f9f8d3455e96bdc1e47d87bdc49b34efe5fa2f3d0bd1",
+  "diff_sha256": "9146387b2b720ec2a97338470331ecd551d2a4fbd9f31a6244e4c506d8f3511e",
+  "artifacts_independently_hashed": 3,
+  "actual_focused_post_passes": 5,
+  "actual_ordered_post_passes": 4,
+  "retries": 0,
+  "assets_independently_verified": 9,
+  "logs": {
+    "focused-repetitions-final": {
+      "path": "/tmp/usage-history-luna-B21-ci/focused-repetitions-final.log",
+      "sha256": "cd59fa8fda8cff2965e936f5f1dae2752b6deaaff64de2d061ff64e78e75bdf0"
+    },
+    "ordered-final": {
+      "path": "/tmp/usage-history-luna-B21-ci/ordered-final.log",
+      "sha256": "e88dc13f60563e768f5ff68114a098c9df3dde66e65db27b829198ebdebbef7d"
+    },
+    "baseline-run": {
+      "path": "/tmp/usage-history-luna-B21-ci/baseline-run.log",
+      "sha256": "8049a93ef2e2d167bb35efa08ecd94ec67b5abdc56bd98382465ce3b9c7cb3df"
+    },
+    "ordered-baseline": {
+      "path": "/tmp/usage-history-luna-B21-ci/ordered-baseline.log",
+      "sha256": "500d53ed2b65a779c5333022d51d2d01842d9fa1b1d0ac93ce93c0bbd5c72ea0"
+    },
+    "focused-repetitions": {
+      "path": "/tmp/usage-history-luna-B21-ci/focused-repetitions.log",
+      "sha256": "105efebec7cd269b55a0c4ae2af2c95cdf8ea7a58c17eef7b6e54266dd503237"
+    }
+  },
+  "semantic_review": [
+    "Cancel-hold uses8seconds while E2E cancellation join is3seconds; screenshot shows actual recovery card with no composer. Root is CI-evidence-backed inference because unmodified local baselines passed.",
+    "Interruptible /slow30s preserves real QuickChat cancellation and subsequent composer behavior without deliberate recovery.",
+    "Existing WebSocket observer forwards the actual pending=true event, buffers settlement replies until disabled-control assertion, then releases in finally. No state values or revisions are invented.",
+    "Underlying task cancellation control and follow-up two-message assertions remain. Shared helper and production files are unchanged."
+  ],
+  "limits": [
+    "Final exact-head CI/0FLAKY audit stillrequired",
+    "Original CI failure not reproduced locally; intermediate fixture-onlychange2failuresdemonstratedtransientpendingassertion racebeforeobserverfix"
+  ]
+}

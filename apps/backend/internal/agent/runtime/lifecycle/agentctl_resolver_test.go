@@ -201,15 +201,18 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 	})
 	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
 	results := make(chan error, 2)
-	ctx, cancel := context.WithCancel(context.Background())
-	joined := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	// Keep successful caller contexts uncanceled through TempDir cleanup because
+	// cancellation schedules cache-lease release asynchronously.
+	callers := []*observedDoneContext{
+		{Context: context.Background(), observed: make(chan struct{})},
+		{Context: context.Background(), observed: make(chan struct{})},
+	}
 	var releaseOnce sync.Once
 	releaseResponse := func() { releaseOnce.Do(func() { close(release) }) }
 	received := 0
 	defer func() {
-		cancel()
 		releaseResponse()
-		for received < len(joined) {
+		for received < len(callers) {
 			select {
 			case <-results:
 				received++
@@ -219,12 +222,11 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 			}
 		}
 	}()
-	for _, signal := range joined {
-		go func(observed chan struct{}) {
-			caller := &observedDoneContext{Context: ctx, observed: observed}
+	for _, caller := range callers {
+		go func(caller *observedDoneContext) {
 			_, err := resolver.ResolveRemoteBinaryContext(caller, platform, nil)
 			results <- err
-		}(signal)
+		}(caller)
 	}
 	waitFor := func(signal <-chan struct{}, label string) {
 		t.Helper()
@@ -235,8 +237,8 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 		}
 	}
 	waitFor(entered, "download request")
-	for _, signal := range joined {
-		waitFor(signal, "caller to join download")
+	for _, caller := range callers {
+		waitFor(caller.observed, "caller to join download")
 	}
 	releaseResponse()
 	for range 2 {

@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -80,6 +82,61 @@ func TestUsageHistorySummaryIndependentMetricActors(t *testing.T) {
 		} else {
 			require.Nil(t, summary.EffectiveCostPerMillion())
 		}
+	}
+}
+
+func TestUsageHistoryAllTimeProviderSummaryPreservesInt64(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		t.Run(fmt.Sprintf("postgres=%t", postgres), func(t *testing.T) {
+			repo := segmentContractFixture(t, postgres)
+			_, err := NewWithDB(repo.db, repo.ro)
+			require.NoError(t, err, "projection/report indexes must replay on the same database")
+			segmentBinding(t, repo, "precision-collector", "session-1")
+			var taskIncarnation, sessionIncarnation string
+			query := repo.db.Rebind(`SELECT task_incarnation_id,session_incarnation_id FROM usage_subjects WHERE task_id=? AND session_id=?`)
+			require.NoError(t, repo.db.QueryRowx(query, "task-1", "session-1").Scan(&taskIncarnation, &sessionIncarnation))
+			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			tx, err := repo.db.BeginTxx(t.Context(), nil)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback() }()
+			require.NoError(t, repo.AdmitBindingTx(t.Context(), tx, usagehistory.Binding{
+				ID: "precision-native-execution", Kind: usagehistory.BindingKindExecution, WorkspaceID: "ws-1", TaskID: "task-1",
+				TaskIncarnationID: taskIncarnation, SessionID: "session-1", SessionIncarnationID: sessionIncarnation,
+				ActorID: "precision-actor", ActorStatus: "attributed", ActorKind: "user", ActorSource: "execution", CapturedAt: at,
+			}))
+			for index, amount := range []int64{math.MaxInt64 - 1, 1} {
+				point := at.AddDate(0, 0, index+1).Add(12 * time.Hour)
+				native := usagehistory.NativeUsage{
+					BindingID: "precision-native-execution", UsageEventID: fmt.Sprintf("precision-native-%d", index),
+					TaskID: "task-1", SessionID: "session-1", Model: "model", Provider: "native-provider",
+					InputTokens: amount, OutputTokens: models.Int64(0), TotalTokens: amount, UsageCompleteness: "complete",
+					CostPresent: true, CostBasis: models.UsageCostBasisReported, CostSubcents: 1, OccurredAt: point, CollectedAt: point,
+				}
+				require.NoError(t, repo.RetainNativeUsageTx(t.Context(), tx, native))
+			}
+			require.NoError(t, tx.Commit())
+			finishFixtureRetention(t, repo)
+			completeFixtureProjection(t, repo)
+
+			filter := models.SessionUsageFilter{WorkspaceID: "ws-1", Timezone: "America/New_York", GroupBy: "model", Provider: "native-provider"}
+			var scope, generation string
+			require.NoError(t, repo.db.Get(&scope, repo.db.Rebind(`SELECT scope_id FROM usage_projection_scopes LIMIT 1`)))
+			require.NoError(t, repo.db.Get(&generation, repo.db.Rebind(`SELECT active_generation FROM usage_projection_scopes WHERE scope_id=?`), scope))
+			proof, err := repo.db.BeginTxx(t.Context(), nil)
+			require.NoError(t, err)
+			defer func() { _ = proof.Rollback() }()
+			safe, err := repo.usageReportAllTimeSummarySafe(t.Context(), proof, scope, generation, filter)
+			require.NoError(t, err)
+			require.True(t, safe, "this provider report must exercise the all-time native summary")
+			require.NoError(t, proof.Rollback())
+
+			report, err := repo.ListSessionUsage(t.Context(), filter)
+			require.NoError(t, err)
+			require.Len(t, report.Rows, 1)
+			require.Equal(t, "native-provider", report.Rows[0].Provider)
+			require.Equal(t, models.Int64(math.MaxInt64), report.Totals.TotalTokens)
+			require.Equal(t, models.Int64(2), report.Totals.CostSubcents)
+		})
 	}
 }
 

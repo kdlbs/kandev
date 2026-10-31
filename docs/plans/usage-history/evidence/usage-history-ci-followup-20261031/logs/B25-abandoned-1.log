@@ -1,0 +1,62 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium tests/task/plan-download.spec.ts -- --grep 'keeps every Plan action reachable at the narrow desktop panel width' --retries\=0
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 1 test using 1 worker
+
+(node:2898) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-XzUXY3/repos/e2e-remote.git
+ * [new branch]      main -> main
+[failed backend log: /tmp/kandev-e2e-0-XzUXY3]
+Backend logs: /tmp/kandev-e2e-0-XzUXY3/.kandev/logs/backend-logs.log
+2026-10-31T05:17:50.401Z	WARN	logger/logger.go:245	unable to discover host gh account	{"workspace_id": "0b0c5d2c-232f-4f85-9c89-196dbf14aa85", "error": "list gh accounts: gh auth failed: exit status 1"}
+2026-10-31T05:17:50.577Z	WARN	logger/logger.go:245	server is reachable on non-loopback interfaces WITHOUT authentication; enable the Authentication feature toggle (Settings > System > Feature Toggles) or set KANDEV_FEATURES_AUTH=true	{"binds": ["192.168.1.133"]}
+2026-10-31T05:17:50.765Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"could not discover submodules"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:50.765Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"could not discover submodules"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:50.765Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"no valid git repository found, file monitor not polling"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:50.765Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"no valid git repository found, file monitor not polling"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:50.766Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"no valid git repository found, git polling not started"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:50.766Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:50.765Z","caller":"logger/logger.go:245","msg":"no valid git repository found, git polling not started"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:51.042Z	WARN	logger/logger.go:245	jira: secret delete failed	{"error": "secret not found: jira:081837f3-fe43-4f12-b234-a00267db7ed0:token"}
+2026-10-31T05:17:51.042Z	WARN	logger/logger.go:245	jira: oauth access token delete failed	{"error": "secret not found: jira:081837f3-fe43-4f12-b234-a00267db7ed0:oauth_access_token"}
+2026-10-31T05:17:51.042Z	WARN	logger/logger.go:245	jira: oauth refresh token delete failed	{"error": "secret not found: jira:081837f3-fe43-4f12-b234-a00267db7ed0:oauth_refresh_token"}
+2026-10-31T05:17:51.045Z	WARN	logger/logger.go:245	linear: secret delete failed	{"error": "secret not found: linear:081837f3-fe43-4f12-b234-a00267db7ed0:token"}
+2026-10-31T05:17:51.058Z	WARN	logger/logger.go:245	jira: secret delete failed	{"error": "secret not found: jira:0b0c5d2c-232f-4f85-9c89-196dbf14aa85:token"}
+2026-10-31T05:17:51.059Z	WARN	logger/logger.go:245	jira: oauth access token delete failed	{"error": "secret not found: jira:0b0c5d2c-232f-4f85-9c89-196dbf14aa85:oauth_access_token"}
+2026-10-31T05:17:51.059Z	WARN	logger/logger.go:245	jira: oauth refresh token delete failed	{"error": "secret not found: jira:0b0c5d2c-232f-4f85-9c89-196dbf14aa85:oauth_refresh_token"}
+2026-10-31T05:17:51.063Z	WARN	logger/logger.go:245	linear: secret delete failed	{"error": "secret not found: linear:0b0c5d2c-232f-4f85-9c89-196dbf14aa85:token"}
+2026-10-31T05:17:51.073Z	WARN	logger/logger.go:245	http	{"server": "kandev", "method": "DELETE", "path": "/api/v1/gitlab/mock/reset", "status": 503, "duration_ms": 0, "bytes": 52}
+2026-10-31T05:17:52.342Z	WARN	logger/logger.go:245	{"level":"warn","timestamp":"2026-10-31T05:17:52.342Z","caller":"logger/logger.go:245","msg":"durable delivery pressure changed"}	{"component": "agentctl-launcher", "stream": "stdout"}
+2026-10-31T05:17:53.478Z	WARN	logger/logger.go:245	failed to resolve persisted terminal launch info	{"component": "terminal_handler", "session_id": "b2899683-8aa3-4a10-b1c4-bcca8347903f", "error": "terminal not found"}
+
+  ✘  1 [chromium] › e2e/tests/task/plan-download.spec.ts:31:5 › keeps every Plan action reachable at the narrow desktop panel width (4.3s)
+
+
+  1) [chromium] › e2e/tests/task/plan-download.spec.ts:31:5 › keeps every Plan action reachable at the narrow desktop panel width 
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      75 |       );
+      76 |     });
+    > 77 |     expect(isReachable).toBe(true);
+         |                         ^
+      78 |     if (control === menu) {
+      79 |       await testPage.keyboard.press("Enter");
+      80 |       const freshMenuItem = testPage.getByTestId("plan-toolbar-implement-fresh-menu-item");
+        at /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web/e2e/tests/task/plan-download.spec.ts:77:25
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    e2e/test-results/task-plan-download-keeps-e-5c54a--narrow-desktop-panel-width-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: e2e/test-results/task-plan-download-keeps-e-5c54a--narrow-desktop-panel-width-chromium/error-context.md
+
+  1 failed
+    [chromium] › e2e/tests/task/plan-download.spec.ts:31:5 › keeps every Plan action reachable at the narrow desktop panel width 
+ ELIFECYCLE  Command failed with exit code 1.

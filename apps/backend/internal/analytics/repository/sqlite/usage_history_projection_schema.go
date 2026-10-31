@@ -62,7 +62,9 @@ var usageReportingIndexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_provider_options_work ON usage_projection_provider_options(scope_id, generation, work_key, model, source, provider)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_provider_options_pending ON usage_projection_history(scope_id, generation, work_key) WHERE provider_options_ready=0 OR provider_options_version=0`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_provider_points ON usage_projection_contributions(scope_id, generation, provider, calendar, coverage_kind, coverage_start, coverage_end)`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_contribution_model_provider_points ON usage_projection_contributions(scope_id, generation, model, provider, calendar, coverage_kind, coverage_start) WHERE calendar='UTC' AND coverage_kind='point'`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_canonical_lifetime ON usage_canonical_facts(scope_id, generation, work_key, model, provider, subject_id, build_id) WHERE coverage_kind='lifetime'`,
+	`CREATE INDEX IF NOT EXISTS idx_usage_canonical_lifetime_work ON usage_canonical_facts(scope_id, generation, work_key, build_id) WHERE coverage_kind='lifetime'`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_projection_collected ON usage_projection_history(scope_id, generation, collected_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_usage_migration_gap_scope ON usage_history_migration_gaps(workspace_id, organization_id)`,
 }

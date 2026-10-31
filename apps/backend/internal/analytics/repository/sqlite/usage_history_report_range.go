@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -15,8 +16,18 @@ var usageReportRangeCounts = []string{"token_count", "cost_count", "partial_coun
 // Range/provider predicates and published build joins run before this grouping.
 // It stores no raw observations, source payloads or per-fact history copy.
 func (r *Repository) prepareUsageReportRange(ctx context.Context, tx *sqlx.Tx, scope, generation string, filter models.SessionUsageFilter) (bool, error) {
-	if filter.GroupBy == usageWorkFallback || filter.GroupBy == usageSubjectSession ||
-		filter.Start == nil && filter.End == nil && isDatedUsageGroup(filter.GroupBy) {
+	if usageReportUsesUTCMonthSummaries(filter) {
+		dimensionFilter := filter
+		dimensionFilter.Provider = ""
+		if err := r.prepareUsageReportUTCMonthDimensions(ctx, tx, scope, generation, dimensionFilter); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS usage_report_range`); err != nil {
+		return false, err
+	}
+	identityGroup := usageReportRangeIdentityForFilter(filter)
+	if usageReportRangeShouldBypass(filter, identityGroup) {
 		return false, nil
 	}
 	dimensions := usageReportRangeDimensions()
@@ -32,20 +43,51 @@ func (r *Repository) prepareUsageReportRange(ctx context.Context, tx *sqlx.Tx, s
 	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE usage_report_range (`+strings.Join(definitions, ",")+`)`); err != nil {
 		return false, err
 	}
-	source := usageReportSource(scope, generation, filter, false)
+	source := usageReportSourceForEngine(scope, generation, filter, false, r.db.DriverName() == usageDriverPostgres)
+	if usageAllTimeSummaryCandidate(filter) {
+		safe, err := r.usageReportAllTimeSummarySafe(ctx, tx, scope, generation, filter)
+		if err != nil {
+			return false, err
+		}
+		if safe {
+			source = reportAllTimeSummarySource(scope, generation, filter)
+		}
+	}
 	var values []string
-	for range usageReportRangeIdentity {
-		values = append(values, `''`)
+	for _, name := range usageReportRangeIdentity {
+		if slices.Contains(identityGroup, name) {
+			values = append(values, name)
+		} else {
+			values = append(values, `''`)
+		}
 	}
 	values = append(values, dimensions...)
 	for _, name := range numbers {
 		values = append(values, `CAST(SUM(`+name+`) AS BIGINT)`)
 	}
 	columns := append(append([]string{}, text...), numbers...)
+	groupBy := append(append([]string{}, identityGroup...), dimensions...)
 	query := `WITH report_range_source AS (` + source.sql + `) INSERT INTO usage_report_range (` + strings.Join(columns, ",") + `)
- SELECT ` + strings.Join(values, ",") + ` FROM report_range_source GROUP BY ` + strings.Join(dimensions, ",")
+	 SELECT ` + strings.Join(values, ",") + ` FROM report_range_source GROUP BY ` + strings.Join(groupBy, ",")
 	_, err := tx.ExecContext(ctx, r.db.Rebind(query), source.args...)
 	return err == nil, err
+}
+
+func usageReportRangeShouldBypass(filter models.SessionUsageFilter, identityGroup []string) bool {
+	needsSubjectRows := filter.GroupBy == usageWorkFallback || filter.GroupBy == usageSubjectSession ||
+		filter.Start == nil && filter.End == nil && isDatedUsageGroup(filter.GroupBy)
+	if !needsSubjectRows {
+		return false
+	}
+	return len(identityGroup) == 0 || len(filter.TaskIDs) == 0 && len(filter.SessionIDs) == 0
+}
+
+func usageReportRangeIdentityForFilter(filter models.SessionUsageFilter) []string {
+	if filter.GroupBy != usageWorkFallback && filter.GroupBy != usageSubjectSession ||
+		len(filter.TaskIDs) == 0 && len(filter.SessionIDs) == 0 {
+		return nil
+	}
+	return usageReportRangeIdentity[:5]
 }
 
 func usageReportRangeDimensions() []string {
@@ -64,19 +106,19 @@ func usageReportRangeNumbers() []string {
 	return append(columns, usageReportRangeCounts...)
 }
 
-func usageReportReadSource(scope, generation string, filter models.SessionUsageFilter, totals, cached bool) usageReportQuery {
+func usageReportReadSourceForEngine(scope, generation string, filter models.SessionUsageFilter, totals, cached, postgres bool) usageReportQuery {
 	if cached {
 		return usageReportQuery{sql: `SELECT * FROM usage_report_range`}
 	}
-	return usageReportSource(scope, generation, filter, totals)
+	return usageReportSourceForEngine(scope, generation, filter, totals, postgres)
 }
 
-func usageReportProviderOptionsSource(scope, generation string, filter models.SessionUsageFilter, cached bool) usageReportQuery {
+func usageReportProviderOptionsSourceForEngine(scope, generation string, filter models.SessionUsageFilter, cached, postgres bool) usageReportQuery {
 	if cached {
-		return usageReportProviderOptionsProjection(usageReportReadSource(scope, generation, filter, false, true))
+		return usageReportProviderOptionsProjection(usageReportReadSourceForEngine(scope, generation, filter, false, true, postgres))
 	}
 	if filter.Start != nil || filter.End != nil || len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0 {
-		return usageReportProviderOptionsProjection(usageReportReadSource(scope, generation, filter, false, false))
+		return usageReportProviderOptionsProjection(usageReportReadSourceForEngine(scope, generation, filter, false, false, postgres))
 	}
 	predicate := reportScopePredicate(scope, generation, filter)
 	if !isDatedUsageGroup(filter.GroupBy) {
