@@ -109,7 +109,7 @@ func (s *Service) fixedProfileSuspensionForSession(ctx context.Context, session 
 	if session.AgentExecutionID != "" {
 		running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 		if err != nil || running == nil || running.AgentExecutionID != session.AgentExecutionID {
-			return dynamicruntime.Suspension{}, false
+			return s.profileExecutionResolver.CapturedFixedProfileSuspension(profileID, "", time.Now())
 		}
 		key := agentruntime.CapturedResourceCircuitKey(running.Metadata, running.AgentExecutionID, profileID)
 		return s.profileExecutionResolver.CapturedFixedProfileSuspension(profileID, key, time.Now())
