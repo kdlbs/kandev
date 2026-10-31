@@ -4171,11 +4171,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		!data.ProviderError.Valid() {
 		return false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: data.AgentID,
-		Stderr:     data.ProviderError.Message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
 	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
 		return false
 	}
