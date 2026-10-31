@@ -162,11 +162,8 @@ Claim identity: every claim acquisition has a unique operation id (the operation
 
 Cleanup ownership: `StopInstance` for archive and delete reasons only stops agentctl; the task-environment cleanup
 job calls `DestroyTaskEnvironment`, the single authority that drains and destroys from the stored record, with the
-agentctl credential revealed from the runtime secret the record references. Only a failed-launch rollback cleans up
-inside `StopInstance`. `DestroyTaskEnvironment` returns a retryable error while the same process still has the
-record's launch in flight (an in-memory set keyed by execution ID), so it cannot settle "absent" before the provider
-publishes the resource. Recover `absent` means the provider proves the operation's resource is gone and its worker cleaned; the host then deletes the row, so a provider that cannot prove this answers `found` or `unknown`, and fences the operation id so that `absent` means the resource will never exist. Recover results for `found` resources must carry `state_version`, on the launch-recovery
-and the cleanup path. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
+agentctl credential revealed from the runtime secret the record references. Only a failed-launch rollback cleans up in `StopInstance`. After a restart, an archive or delete stop that cannot reach agentctl completes and leaves the record, so the destroy runs (`unreachable` if a credential was recorded). `DestroyTaskEnvironment` returns a retryable error while the same process still has the
+record's launch in flight (an in-memory set), so it cannot settle "absent" early. Recover `absent` means the provider proves the resource is gone and its worker cleaned; the host then deletes the row, so a provider that cannot answers `found` or `unknown`, and fences the operation id. Recover `found` results carry `state_version` on both recovery paths. When a failed launch can neither take the cleanup claim nor checkpoint the resource it
 provisioned, the launch records the resource durably in `unrecorded_plugin_executors` (keyed by execution ID, no foreign key,
 written through `RecordUnrecordedRuntimeInventory` without the environment claim), logs the launch cause and a
 `handed_off` outcome, and returns a "not recorded" error without calling the provider: a provider checkpoints
