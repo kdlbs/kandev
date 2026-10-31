@@ -28,6 +28,7 @@ import (
 const (
 	RunReasonTaskAssigned          = shared.RunReasonTaskAssigned
 	RunReasonTaskComment           = shared.RunReasonTaskComment
+	RunReasonHandoffCompleted      = shared.RunReasonHandoffCompleted
 	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
 	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
 	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved

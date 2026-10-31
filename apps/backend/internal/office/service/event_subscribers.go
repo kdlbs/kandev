@@ -321,6 +321,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.TaskCreated, s.handleTaskCreated},
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
+		{events.TaskStateChanged, s.handleHandoffTaskStateChanged},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
@@ -1593,7 +1594,10 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	}
 	// A session-bridged comment mirrors a turn that already ran; it must
 	// never itself queue a new run, whichever agent it's attributed to.
-	if data.Source == "session" {
+	// A handoff completion report carries its own handoff_completed wake,
+	// queued directly by handleHandoffTaskStateChanged, so the generic
+	// comment path must not wake the assignee a second time.
+	if data.Source == "session" || data.Source == handoffCompletionCommentSource {
 		return nil
 	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
