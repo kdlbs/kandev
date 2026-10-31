@@ -470,7 +470,8 @@
       "turn_change_contents",
       "turn_change_sets",
       "turn_file_changes",
-      "turn_repository_changes"
+      "turn_repository_changes",
+      "workspace_collaboration_grants"
     ]
   }
 }

@@ -133,14 +133,15 @@ func (p *GRPCPlugin) GRPCServer(broker *hcplugin.GRPCBroker, s *grpc.Server) err
 // to start serving it on hostBrokerID so the plugin subprocess can call
 // back. See the file header.
 func (p *GRPCPlugin) GRPCClient(_ context.Context, broker *hcplugin.GRPCBroker, conn *grpc.ClientConn) (interface{}, error) {
+	origins := newPluginCallOrigins(p.Host)
 	if p.Host != nil {
 		go broker.AcceptAndServe(hostBrokerID, func(opts []grpc.ServerOption) *grpc.Server {
-			s := grpc.NewServer(opts...)
+			s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(origins.intercept))...)
 			registerHostServer(s, p.Host)
 			return s
 		})
 	}
-	return &RemotePlugin{client: pluginv1.NewPluginClient(conn)}, nil
+	return &RemotePlugin{client: pluginv1.NewPluginClient(pluginCallClientConn{ClientConnInterface: conn, origins: origins}), origins: origins}, nil
 }
 
 // dialBrokerWithRetry retries broker.Dial(id) with backoff until it
@@ -169,7 +170,8 @@ func dialBrokerWithRetry(ctx context.Context, broker *hcplugin.GRPCBroker, id ui
 // RemotePlugin is the Go-native client kandev's runtime manager uses to
 // call a running plugin, returned by Dispense(pluginsdk.PluginMapKey).
 type RemotePlugin struct {
-	client pluginv1.PluginClient
+	client  pluginv1.PluginClient
+	origins *pluginCallOrigins
 }
 
 // DeliverEvent calls the plugin's DeliverEvent RPC. Timeout/retry policy
@@ -266,6 +268,7 @@ type grpcPluginServer struct {
 }
 
 func (s *grpcPluginServer) DeliverEvent(ctx context.Context, req *pluginv1.Event) (*pluginv1.EventAck, error) {
+	ctx = withPluginCallReference(ctx)
 	e, err := eventFromProto(req)
 	if err != nil {
 		return nil, err
@@ -277,6 +280,7 @@ func (s *grpcPluginServer) DeliverEvent(ctx context.Context, req *pluginv1.Event
 }
 
 func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.WebhookRequest) (*pluginv1.WebhookResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	resp, err := s.impl.HandleWebhook(ctx, webhookRequestFromProto(req))
 	if err != nil {
 		return nil, err
@@ -285,6 +289,7 @@ func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.Webh
 }
 
 func (s *grpcPluginServer) HandleAction(ctx context.Context, req *pluginv1.PluginActionRequest) (*pluginv1.PluginActionResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(ActionHandler)
 	if !ok {
 		return nil, unsupportedPluginExtension("action handler")
@@ -300,6 +305,7 @@ func (s *grpcPluginServer) HandleAction(ctx context.Context, req *pluginv1.Plugi
 }
 
 func (s *grpcPluginServer) SearchEntityReferences(ctx context.Context, req *pluginv1.SearchEntityReferencesRequest) (*pluginv1.SearchEntityReferencesResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(EntityReferenceSearcher)
 	if !ok {
 		return nil, unsupportedPluginExtension("entity reference searcher")
@@ -315,6 +321,7 @@ func (s *grpcPluginServer) SearchEntityReferences(ctx context.Context, req *plug
 }
 
 func (s *grpcPluginServer) AuthorizeEntityReference(ctx context.Context, req *pluginv1.AuthorizeEntityReferenceRequest) (*pluginv1.AuthorizeEntityReferenceResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(EntityReferenceAuthorizer)
 	if !ok {
 		return nil, unsupportedPluginExtension("entity reference authorizer")
@@ -334,6 +341,7 @@ func (s *grpcPluginServer) AuthorizeEntityReference(ctx context.Context, req *pl
 }
 
 func (s *grpcPluginServer) ResolveGitCredential(ctx context.Context, req *pluginv1.ResolveGitCredentialRequest) (*pluginv1.ResolveGitCredentialResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(GitCredentialResolver)
 	if !ok {
 		return nil, unsupportedPluginExtension("git credential resolver")
@@ -349,6 +357,7 @@ func (s *grpcPluginServer) ResolveGitCredential(ctx context.Context, req *plugin
 }
 
 func (s *grpcPluginServer) GetGitCredentialBinding(ctx context.Context, req *pluginv1.GitCredentialBindingRequest) (*pluginv1.GitCredentialBindingResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(GitCredentialBinder)
 	if !ok {
 		return nil, unsupportedPluginExtension("git credential binder")
@@ -364,6 +373,7 @@ func (s *grpcPluginServer) GetGitCredentialBinding(ctx context.Context, req *plu
 }
 
 func (s *grpcPluginServer) InvokeAgentTool(ctx context.Context, req *pluginv1.AgentToolRequest) (*pluginv1.AgentToolResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	handler, ok := s.impl.(AgentToolPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("agent tool invocation")

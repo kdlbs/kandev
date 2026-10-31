@@ -210,8 +210,8 @@ type StepDefinition struct {
 	WIPLimit                    int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
-	// default + coordination workflows can declare their UX role
-	// ("work", "review", "approval", "custom") in YAML.
+	// default + coordination workflows can declare their step nature
+	// ("work", "review", "approval", "custom", "hold") in YAML.
 	StageType StageType `json:"stage_type,omitempty"`
 	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
 	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
@@ -243,10 +243,11 @@ type WorkflowStep struct {
 	SessionTarget               *WorkflowSessionTarget                       `json:"session_target,omitempty"`
 	WIPLimit                    int                                          `json:"wip_limit,omitempty"`
 	PullFromStepID              string                                       `json:"pull_from_step_id,omitempty"`
-	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
-	// ("work", "review", "approval", "custom"). The engine does not branch
-	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
-	// "custom" so existing rows remain unchanged.
+	// StageType is a Phase 2 (ADR-0004) statement of the step's nature
+	// ("work", "review", "approval", "custom", "hold"). The execution engine
+	// does not branch on it; the frontend reads it to choose presentation.
+	// Stored as TEXT in workflow_steps.stage_type, defaulting to "custom" so
+	// existing rows remain unchanged.
 	StageType StageType `json:"stage_type,omitempty"`
 	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
 	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).

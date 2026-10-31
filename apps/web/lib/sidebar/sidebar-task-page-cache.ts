@@ -1,10 +1,15 @@
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import { isReadAbort, isTemporaryReadError } from "@/lib/api/temporary-read-error";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { reconcileSidebarPage, sidebarPageMembership } from "./sidebar-page-overviews";
 import { repositoryIdentityForSavedRepository } from "./repository-rule-identity";
+import {
+  startSidebarPageRecoveryCycle,
+  type SidebarPageRecoveryCycle,
+} from "./sidebar-task-page-recovery";
 
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -22,12 +27,33 @@ type SidebarRankingInputs = {
 let cachedRanking: { inputs: SidebarRankingInputs; key: string } | undefined;
 
 type PageSnapshot = { page: SidebarTaskPageResponse; owner: string; fetchedAt: number };
-type Request = {
-  promise: Promise<SidebarTaskPageResponse>;
+type ReadAttempt = {
   controller: AbortController;
-  consumers: number;
   owner: string;
   readId?: string;
+  released: boolean;
+  settled: boolean;
+};
+type RecoveryRecord = {
+  cacheKey: string;
+  consumers: number;
+  exhausted: boolean;
+  lastError?: unknown;
+  promise?: Promise<SidebarTaskPageResponse>;
+  cycle?: SidebarPageRecoveryCycle<SidebarTaskPageResponse>;
+  attempt?: ReadAttempt;
+  retainedOwner?: string;
+  lastForegroundEpisode?: object;
+};
+type SidebarPageRequestOptions = {
+  manualRetry?: boolean;
+  foregroundRecoveryEpisode?: object;
+};
+type SidebarPageRead = {
+  workspaceId: string;
+  query: SidebarTaskQuery;
+  requestKey: string;
+  identity: { key: string; epoch: number; scope: string };
 };
 type PageStore = {
   getState: () => AppState;
@@ -38,7 +64,7 @@ const byteSize = (value: unknown) => new TextEncoder().encode(JSON.stringify(val
 /** Bounded ID memberships and shared reads. All retained overview objects live in Zustand. */
 export class SidebarTaskPageCache {
   private pages = new Map<string, PageSnapshot>();
-  private requests = new Map<string, Request>();
+  private records = new Map<string, RecoveryRecord>();
   private scope = "";
   private rankingKey = "";
   private revision = 0;
@@ -169,15 +195,31 @@ export class SidebarTaskPageCache {
   }
 
   private cancelRequests() {
-    const requests = [...this.requests.values()];
-    this.requests.clear();
-    for (const request of requests) {
-      request.controller.abort();
-      this.releaseRead(request);
+    const records = [...this.records.entries()];
+    this.records.clear();
+    for (const [, record] of records) this.abortRecord(record);
+  }
+
+  private abortRecord(record: RecoveryRecord) {
+    record.cycle?.abort();
+    const attempt = record.attempt;
+    attempt?.controller.abort();
+    if (attempt && !attempt.settled) this.releaseRead(attempt);
+    if (record.retainedOwner) {
+      this.store.getState().releaseTaskOverviews?.(record.retainedOwner);
+      record.retainedOwner = undefined;
     }
   }
 
-  private releaseRead(request: Request) {
+  private createRecord(recordKey: string, cacheKey: string) {
+    const record: RecoveryRecord = { cacheKey, consumers: 0, exhausted: false };
+    this.records.set(recordKey, record);
+    return record;
+  }
+
+  private releaseRead(request: ReadAttempt) {
+    if (request.released) return;
+    request.released = true;
     const state = this.store.getState();
     if (request.readId) state.finishTaskOverviewRead?.(request.readId);
     state.releaseTaskOverviews?.(request.owner);
@@ -246,7 +288,7 @@ export class SidebarTaskPageCache {
   }
 
   private settle(
-    request: Request,
+    request: ReadAttempt,
     raw: SidebarTaskPageResponse,
     query: SidebarTaskQuery,
     identity: { key: string; epoch: number; scope: string },
@@ -274,7 +316,12 @@ export class SidebarTaskPageCache {
     return page;
   }
 
-  request(workspaceId: string, query: SidebarTaskQuery, cacheKey: string) {
+  request(
+    workspaceId: string,
+    query: SidebarTaskQuery,
+    cacheKey: string,
+    options: SidebarPageRequestOptions = {},
+  ) {
     const epoch = this.synchronize();
     const scope = this.scope;
     const requestKey = JSON.stringify([cacheKey, query]);
@@ -283,43 +330,125 @@ export class SidebarTaskPageCache {
       this.pages.delete(cacheKey);
       this.pages.set(cacheKey, snapshot);
     }
-    let request = this.requests.get(requestKey);
-    if (!request) {
-      const controller = new AbortController();
-      const created: Request = {
-        controller,
-        consumers: 0,
-        owner: `sidebar:read:${generateUUID()}`,
-        readId: this.store.getState().beginTaskOverviewRead?.(),
-        promise: querySidebarTasks(workspaceId, query, {
-          cache: "no-store",
-          init: { signal: controller.signal },
-        })
-          .then((page) => this.settle(created, page, query, { key: cacheKey, epoch, scope }))
-          .finally(() => {
-            if (created.readId) this.store.getState().finishTaskOverviewRead?.(created.readId);
-            if (this.requests.get(requestKey) === created) this.requests.delete(requestKey);
-          }),
-      };
-      request = created;
-      this.requests.set(requestKey, request);
-    }
-    request.consumers++;
+    const record = this.records.get(requestKey) ?? this.createRecord(requestKey, cacheKey);
+    record.consumers++;
+    const promise = this.admit(
+      record,
+      { workspaceId, query, requestKey, identity: { key: cacheKey, epoch, scope } },
+      options,
+    );
     let released = false;
     return {
-      promise: request.promise,
+      promise,
+      claimForegroundEpisode: (episode: object) => {
+        if (this.records.get(requestKey) === record) record.lastForegroundEpisode = episode;
+      },
       release: () => {
         if (released) return;
         released = true;
-        request.consumers--;
-        if (request.consumers !== 0) return;
-        if (this.requests.get(requestKey) === request) {
-          request.controller.abort();
-          this.requests.delete(requestKey);
-        }
-        this.releaseRead(request);
+        record.consumers--;
+        if (record.consumers > 0) return;
+        if (this.records.get(requestKey) === record) this.records.delete(requestKey);
+        this.abortRecord(record);
       },
     };
+  }
+
+  private admit(
+    record: RecoveryRecord,
+    read: SidebarPageRead,
+    options: SidebarPageRequestOptions,
+  ): Promise<SidebarTaskPageResponse> {
+    const episode = options.foregroundRecoveryEpisode;
+    if (record.promise) {
+      if (episode) record.lastForegroundEpisode = episode;
+      return record.promise;
+    }
+    const newEpisode = Boolean(episode && episode !== record.lastForegroundEpisode);
+    if (episode) record.lastForegroundEpisode = episode;
+    if (record.exhausted && !options.manualRetry && !newEpisode) {
+      return Promise.reject(record.lastError ?? new Error("Sidebar page recovery exhausted"));
+    }
+    return this.startCycle(record, read);
+  }
+
+  private startCycle(
+    record: RecoveryRecord,
+    read: SidebarPageRead,
+  ): Promise<SidebarTaskPageResponse> {
+    const cycle = startSidebarPageRecoveryCycle<SidebarTaskPageResponse>({
+      attempt: (signal) => this.runAttempt(read, signal),
+      onAttemptFailed: (error) => {
+        record.lastError = error;
+      },
+    });
+    record.cycle = cycle;
+    const promise = cycle.promise
+      .then(
+        (page) => {
+          record.exhausted = false;
+          record.lastError = undefined;
+          return page;
+        },
+        (error) => {
+          if (!isReadAbort(error)) {
+            record.exhausted = isTemporaryReadError(error);
+            record.lastError = error;
+          }
+          throw error;
+        },
+      )
+      .finally(() => {
+        if (record.promise !== promise) return;
+        record.promise = undefined;
+        record.cycle = undefined;
+      });
+    record.promise = promise;
+    return promise;
+  }
+
+  private runAttempt(read: SidebarPageRead, signal: AbortSignal): Promise<SidebarTaskPageResponse> {
+    const { workspaceId, query, requestKey, identity } = read;
+    const attempt: ReadAttempt = {
+      controller: new AbortController(),
+      owner: `sidebar:read:${generateUUID()}`,
+      readId: this.store.getState().beginTaskOverviewRead?.(),
+      released: false,
+      settled: false,
+    };
+    const record = this.records.get(requestKey);
+    if (record) record.attempt = attempt;
+    const abortAttempt = () => attempt.controller.abort();
+    if (signal.aborted) attempt.controller.abort();
+    else signal.addEventListener("abort", abortAttempt, { once: true });
+    const release = () => this.releaseRead(attempt);
+    attempt.controller.signal.addEventListener(
+      "abort",
+      () => {
+        if (!attempt.settled) release();
+      },
+      { once: true },
+    );
+    return querySidebarTasks(workspaceId, query, {
+      cache: "no-store",
+      init: { signal: attempt.controller.signal },
+    })
+      .then((page) => {
+        const settled = this.settle(attempt, page, query, identity);
+        attempt.settled = true;
+        if (record) {
+          if (record.retainedOwner && record.retainedOwner !== attempt.owner) {
+            this.store.getState().releaseTaskOverviews?.(record.retainedOwner);
+          }
+          record.retainedOwner = attempt.owner;
+        }
+        return settled;
+      })
+      .finally(() => {
+        signal.removeEventListener("abort", abortAttempt);
+        if (record?.attempt === attempt) record.attempt = undefined;
+        if (!attempt.settled) release();
+      });
   }
 }
 

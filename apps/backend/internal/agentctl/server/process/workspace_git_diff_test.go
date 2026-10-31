@@ -360,6 +360,20 @@ func TestBuildUntrackedDiff_CancellationDuringLineConstruction(t *testing.T) {
 	}
 }
 
+func TestBuildUntrackedDiffUsesCanonicalPatch(t *testing.T) {
+	const path = `new[one] file "a".txt`
+	diff, additions, truncated, err := buildUntrackedDiff(context.Background(), path, []byte("first\nsecond"))
+	if err != nil {
+		t.Fatalf("buildUntrackedDiff: %v", err)
+	}
+	want := "diff --git a/new[one] file \"a\".txt b/new[one] file \"a\".txt\n" +
+		"new file mode 100644\nindex 0000000..0000000\n--- /dev/null\n" +
+		"+++ b/new[one] file \"a\".txt\n@@ -0,0 +1,2 @@\n+first\n+second\n"
+	if diff != want || additions != 2 || truncated {
+		t.Fatalf("buildUntrackedDiff = (%q, %d, %v), want (%q, 2, false)", diff, additions, truncated, want)
+	}
+}
+
 func TestBranchDiffTotals_CancellationStopsNumstatLoop(t *testing.T) {
 	baseCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

@@ -23,7 +23,12 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 		return
 	}
 	data = s.withPromptAttemptEvidence(data)
-	if data.DynamicRouteAttempt {
+	if data.DynamicRouteAttempt ||
+		(s.activeContinuationFailureOwns(data.SessionID) && !retainedCapacityFailureOwns(data)) {
+		// Non-capacity continuation failures belong to the existing recovery
+		// owner, which preserves continuation evidence and manual replay
+		// policy. Capacity episodes keep retained-turn settlement so their
+		// retry budget and capacity projection stay intact.
 		s.handleAgentFailed(ctx, data)
 		return
 	}
@@ -70,6 +75,29 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 			zap.String("session_id", data.SessionID), zap.String("execution_id", data.AgentExecutionID),
 			zap.Uint64("prompt_generation", data.PromptGeneration))
 	}
+}
+
+func retainedCapacityFailureOwns(data watcher.AgentEventData) bool {
+	classified := classifyKanbanFailure(data)
+	return classified != nil && classified.Code == routingerr.CodeModelCapacity
+}
+
+func (s *Service) activeContinuationFailureOwns(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	value, ok := s.transientRetries.Load(sessionID)
+	if !ok {
+		return false
+	}
+	entry, ok := value.(*transientRetryEntry)
+	if !ok || entry == nil || entry.mode != recoveryModeContinue {
+		return false
+	}
+	// Only saved-history continuation acceptance failures used to settle
+	// through handleAgentFailed. Capacity and agent-managed live continuations
+	// keep their retained-turn settlement and refusal reasons.
+	return entry.continuationPolicy == continuationPolicySavedHistoryRestore
 }
 
 func validRetainedTurnFailureEvent(data watcher.AgentEventData) bool {
@@ -179,8 +207,15 @@ func (s *Service) settleRetainedTurnFailure(
 			zap.String("turn_id", failedTurnID), zap.Error(err))
 		return false
 	}
-	if err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID, recoveryReason); err != nil {
+	messageID, err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID, recoveryReason)
+	if err != nil {
 		s.logger.Warn("failed to persist retained provider turn failure",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", failedTurnID), zap.Error(err))
+		return false
+	}
+	if err := s.recordTaskTurnErrorAttention(ctx, data, failedTurnID, messageID); err != nil {
+		s.logger.Warn("failed to record task turn-error attention",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("turn_id", failedTurnID), zap.Error(err))
 		return false
@@ -286,9 +321,9 @@ func (s *Service) persistRetainedTurnFailureMessage(
 	data watcher.AgentEventData,
 	turnID string,
 	recoveryReason string,
-) error {
+) (string, error) {
 	if s.messageCreator == nil {
-		return fmt.Errorf("turn failure message creator is unavailable")
+		return "", fmt.Errorf("turn failure message creator is unavailable")
 	}
 	message := retainedTurnFailureMessage(data)
 	classified := routingerr.Classify(routingerr.Input{
@@ -325,10 +360,45 @@ func (s *Service) persistRetainedTurnFailureMessage(
 	messageID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf(
 		"session-turn-failure:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration,
 	))).String()
-	return s.messageCreator.CreateSessionMessageIdempotent(
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
 		ctx, messageID, data.TaskID, message, data.SessionID,
 		string(v1.MessageTypeStatus), turnID, metadata, false,
-	)
+	); err != nil {
+		return "", err
+	}
+	return messageID, nil
+}
+
+// TaskTurnErrorRecorder persists the bounded task-owned attention pointer for
+// the latest manual failed interactive turn.
+type TaskTurnErrorRecorder interface {
+	RecordTaskTurnErrorAttention(ctx context.Context, taskID string, value models.TaskTurnError) (bool, error)
+}
+
+func (s *Service) recordTaskTurnErrorAttention(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	turnID, messageID string,
+) error {
+	if s.turnErrorRecorder == nil {
+		return nil
+	}
+	occurredAt := time.Now().UTC()
+	if reader, ok := s.messageCreator.(SessionMessageTimestampReader); ok {
+		if persisted, found := reader.SessionMessageCreatedAt(ctx, messageID); found {
+			occurredAt = persisted
+		}
+	}
+	_, err := s.turnErrorRecorder.RecordTaskTurnErrorAttention(ctx, data.TaskID, models.TaskTurnError{
+		StampValue:  messageID,
+		SessionID:   data.SessionID,
+		ExecutionID: data.AgentExecutionID,
+		TurnID:      turnID,
+		MessageID:   messageID,
+		OccurredAt:  occurredAt,
+		Message:     retainedTurnFailureMessage(data),
+	})
+	return err
 }
 
 func retainedTurnFailureMessage(data watcher.AgentEventData) string {

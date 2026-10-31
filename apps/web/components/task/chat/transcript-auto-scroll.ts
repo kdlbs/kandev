@@ -138,23 +138,30 @@ export function resolveNativeInitialScrollTop(params: {
 export function createFrameCoalescer(run: () => void): {
   schedule: () => void;
   flush: () => void;
+  cancel: () => void;
 } {
   let frameId: number | null = null;
+  let generation = 0;
+  const cancel = () => {
+    generation++;
+    if (frameId !== null) cancelAnimationFrame(frameId);
+    frameId = null;
+  };
   return {
     schedule: () => {
       if (frameId !== null) return;
+      const scheduledGeneration = generation;
       frameId = requestAnimationFrame(() => {
+        if (scheduledGeneration !== generation) return;
         frameId = null;
         run();
       });
     },
     flush: () => {
-      if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-        frameId = null;
-      }
+      cancel();
       run();
     },
+    cancel,
   };
 }
 

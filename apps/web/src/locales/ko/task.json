@@ -3031,5 +3031,8 @@
   "storageRecoveryDiskTitle": "디스크 공간 부족으로 세션이 중단되었습니다",
   "storageAdvisoryPressureGuidanceOversized": "출력이 전달 크기 한도를 초과하여 새 출력이 차단되었습니다. 더 작은 출력으로 새 턴을 시작하세요.",
   "storageAdvisoryPressureGuidanceLimit": "구성된 전달 한도로 새 출력이 차단되었습니다. 재개하기 전에 보관된 출력과 전달 진행 상황을 확인하세요.",
-  "storageAdvisoryPressureGuidanceWriteFailed": "저장소 쓰기 실패로 새 출력이 차단되었습니다. 재개하기 전에 런타임 저장소를 확인하세요."
+  "storageAdvisoryPressureGuidanceWriteFailed": "저장소 쓰기 실패로 새 출력이 차단되었습니다. 재개하기 전에 런타임 저장소를 확인하세요.",
+  "dismissTurnError": "턴 오류 닫기",
+  "failedToDismissTurnError": "턴 오류를 닫지 못했습니다",
+  "turnErrorAcknowledgementFailed": "메시지는 수락되었지만 턴 오류 배지를 닫지 못했습니다. 직접 닫아 주세요."
 }

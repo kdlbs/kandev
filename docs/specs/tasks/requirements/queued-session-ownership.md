@@ -171,6 +171,42 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   explanation. Normal conversation controls shall remain available. Genuine queued
   destinations shall retain queue status without a duplicate Start or Resume action.
 
+### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004: Explicit discard of a pending deferred launch
+
+**Intent:** A user can cancel a queued launch they no longer want without
+depending on automatic replay cleanup, and the answer states what actually
+happened to the durable record.
+
+#### Acceptance criteria
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.1:** When the task holds no
+  ceiling-deferred launch, an explicit discard shall succeed as a no-op, write
+  nothing, and report a distinct already-clear outcome.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.2:** When the task holds an unclaimed
+  ceiling-deferred launch, an explicit discard shall settle the launch's
+  automation ownership and remove the ceiling half of the shared durable record.
+  It shall report a distinct discarded outcome and leave every non-ceiling key,
+  including a coexisting WIP or dependency intent, untouched.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.3:** When settlement or the durable
+  clear cannot be proven complete, the discard shall report a distinct retained
+  outcome naming the incomplete step. Before settlement, an ownership or
+  session-inventory read failure shall leave the run and record unchanged. If
+  the final clear fails after the user-requested settlement succeeds, the record
+  and ownership marker shall remain durable for cleanup retry; the run stays
+  terminal and a replay sweep shall finish the discard without replaying it.
+  `retained` reports that the record remains, not that its launch can still run.
+  A failed discard shall never be reported as a no-op or as a success.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.4:** An explicit discard shall not
+  clear a record that another dispatcher currently claims, and shall not clear a
+  successor record that replaced the one it observed. Both cases report the
+  retained outcome.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.5:** An explicit discard shall not
+  start, resume, or stop an agent session, and shall not perform a manual
+  launch.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.6:** The request shall use the existing
+  task-write and executor-mutation authorization of task mutation. An
+  unauthorized caller shall be denied and no durable record shall change.
+
 ## Compatibility and exclusions
 
 Actual manual starts and resumes retain the existing ceiling override. This

@@ -364,6 +364,64 @@ func TestSyncWorkspace_BrokenFileBecomesWarningAndNilExport(t *testing.T) {
 	require.Len(t, cfg.LastWarnings, 1)
 }
 
+func TestParseExportRejectsUnsupportedStageTypeInJSONAndYAML(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		data string
+	}{
+		{
+			name: "JSON",
+			path: "flows/broken.json",
+			data: `{"version":1,"type":"kandev_workflow","workflows":[{"name":"Dev Flow","steps":[{"name":"Review","position":0,"stage_type":"unknown"}]}]}`,
+		},
+		{
+			name: "YAML",
+			path: "flows/broken.yml",
+			data: `version: 1
+type: kandev_workflow
+workflows:
+  - name: Dev Flow
+    steps:
+      - name: Review
+        position: 0
+        stage_type: unknown
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseExport(tt.path, []byte(tt.data))
+			require.ErrorContains(t, err, "unsupported stage type")
+		})
+	}
+}
+
+func TestSyncWorkspace_InvalidStageTypeBecomesWarningAndNilExport(t *testing.T) {
+	invalidYAML := strings.Replace(
+		validExportYAML,
+		"      - name: Todo\n",
+		"      - name: Todo\n        stage_type: unknown\n",
+		1,
+	)
+	mock := github.NewMockClient()
+	mock.SeedRepoFile("acme", "flows", "main", DefaultPath+"/invalid.yml", []byte(invalidYAML))
+	svc, applier := setupTestService(t, mock)
+	configureWorkspace(t, svc, "ws-1")
+
+	result, err := svc.SyncWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	require.Len(t, result.Warnings, 1)
+	assert.Contains(t, result.Warnings[0], "unsupported stage type")
+
+	require.Len(t, applier.calls, 1)
+	byPath := map[string]workflowservice.SyncFileExport{}
+	for _, file := range applier.calls[0] {
+		byPath[file.Path] = file
+	}
+	assert.Nil(t, byPath[DefaultPath+"/invalid.yml"].Export)
+}
+
 func TestSyncWorkspace_IgnoresNonWorkflowFiles(t *testing.T) {
 	mock := seededMockClient()
 	mock.SeedRepoFile("acme", "flows", "main", DefaultPath+"/README.md", []byte("# docs"))

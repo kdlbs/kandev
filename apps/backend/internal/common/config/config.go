@@ -31,6 +31,7 @@ type Config struct {
 	// live under this root.
 	HomeDir                string                       `mapstructure:"homeDir"`
 	Server                 ServerConfig                 `mapstructure:"server"`
+	Notifications          NotificationsConfig          `mapstructure:"notifications"`
 	Tasks                  TasksConfig                  `mapstructure:"tasks"`
 	Credentials            CredentialsConfig            `mapstructure:"credentials"`
 	Limits                 LimitsConfig                 `mapstructure:"limits"`
@@ -55,6 +56,11 @@ type Config struct {
 	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
 	Executors              ExecutorsConfig              `mapstructure:"executors"`
 	Source                 ConfigSource                 `mapstructure:"-" json:"-"`
+}
+
+// NotificationsConfig contains process-wide notification delivery policy.
+type NotificationsConfig struct {
+	WebhookAllowPrivateNetworks bool `mapstructure:"webhookAllowPrivateNetworks"`
 }
 
 // TasksConfig contains task lifecycle startup limits.
@@ -398,6 +404,10 @@ type DatabaseConfig struct {
 	SSLMode  string `mapstructure:"sslMode"`
 	MaxConns int    `mapstructure:"maxConns"`
 	MinConns int    `mapstructure:"minConns"`
+	// SQLiteReaderConns is the SQLite read-only pool size. It is resolved
+	// once at startup and ignored for PostgreSQL. The raw YAML value is parsed
+	// after driver selection so a PostgreSQL selection cannot fail decoding.
+	SQLiteReaderConns int `mapstructure:"-"`
 }
 
 // NATSConfig holds NATS messaging configuration.
@@ -517,6 +527,9 @@ type FeaturesConfig struct {
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
+
+	// WorkspaceCollaboration narrows conversation callers with explicit grants.
+	WorkspaceCollaboration bool `mapstructure:"workspace_collaboration" json:"workspaceCollaboration"`
 
 	// Auth is the on/off switch for opt-in authentication and per-user
 	// workspaces. When on, every visitor must sign in (the first becomes the
@@ -721,6 +734,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
 	v.SetDefault("server.webTitlePrefix", "")
+	v.SetDefault("notifications.webhookAllowPrivateNetworks", false)
 
 	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
 	v.SetDefault("homeDir", "")
@@ -903,8 +917,10 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("select configuration file: %w", err)
 	}
+	var yamlConfig map[string]interface{}
 	if found {
-		if err := readSelectedConfig(v, selection); err != nil {
+		yamlConfig, err = readSelectedConfig(v, selection)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -919,6 +935,13 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	fromYAML, err := applySQLiteReaderConns(&cfg, yamlConfig, yamlKeys, envSnapshot, sources)
+	if err != nil {
+		if fromYAML && found {
+			return nil, fmt.Errorf("config validation failed for %q: %w", selection.path, err)
+		}
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

@@ -85,7 +85,7 @@ export type KanbanState = {
      * pick the right meta surface (review/approval shows multi-agent
      * decisions). Backend never branches on this field.
      */
-    stage_type?: "work" | "review" | "approval" | "custom";
+    stage_type?: "work" | "review" | "approval" | "custom" | "hold";
     /**
      * Last order-revision this step's task order was written at
      * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
@@ -444,6 +444,13 @@ export type KanbanSliceActions = {
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
   removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
+  /** Retains one live task summary for consumers whose task is not a board row
+   * (for example an ephemeral Quick Chat task). */
+  recordSidebarStatusSummary: (
+    workspaceId: string,
+    taskId: string,
+    summary: TaskStatusSummary,
+  ) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

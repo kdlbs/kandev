@@ -278,7 +278,7 @@ func TestPluginsWorkspaceAdminUsesValidatedVersionedDomainOperations(t *testing.
 
 func TestPluginsWorkspaceAdminCannotEditImproveKandevResources(t *testing.T) {
 	ctx := context.Background()
-	services, _, _ := provideTestServices(t, "workspace-admin-improve-guard")
+	services, _, repositories := provideTestServices(t, "workspace-admin-improve-guard")
 	workspace, err := services.Task.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: taskmodels.WorkspaceNameImproveKandev})
 	require.NoError(t, err)
 	workflow, err := services.Task.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
@@ -290,7 +290,9 @@ func TestPluginsWorkspaceAdminCannotEditImproveKandevResources(t *testing.T) {
 		{ID: "improve-step-b", WorkflowID: workflow.ID, Name: "Second", Position: 1, StageType: workflowmodels.StageTypeReview},
 	}
 	for _, step := range steps {
-		_, err := services.Workflow.CreateStepWithStartStepUpdates(ctx, step)
+		// Seed reserved workspace data directly. The workflow service correctly
+		// rejects user mutations in this workspace.
+		err := repositories.Workflow.CreateStep(ctx, step)
 		require.NoError(t, err)
 	}
 	repositoryPath := filepath.Join(t.TempDir(), "repository")

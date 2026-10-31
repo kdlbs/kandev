@@ -95,7 +95,7 @@ test.describe("Settings composition", () => {
     const notificationsContent = testPage.locator('[data-settings-page-content="true"]');
     await expect(notificationsContent).toBeVisible();
     await expect(notificationsContent.locator(':scope > [data-slot="card"]')).toHaveCount(0);
-    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(4);
+    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(5);
 
     await testPage.goto("/settings/preferences/terminal-editors");
     const editorContent = testPage.locator('[data-settings-page-content="true"]').last();

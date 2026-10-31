@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/jmoiron/sqlx"
 
@@ -84,54 +85,94 @@ func (r *Repository) GetTaskDeferredLaunch(
 func (r *Repository) SetTaskDeferredLaunchIfUnchanged(
 	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
 ) (stored bool, lostCompare bool, err error) {
+	stored, lostCompare, _, err = r.setTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, value, "")
+	return stored, lostCompare, err
+}
+
+// ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged is the same
+// compare-and-set plus one conditional removal, applied in the same task
+// transaction: the automation start ownership marker is removed only while it
+// still equals expectedOwner.
+//
+// The two effects share one transaction, so a failure in either write rolls
+// back both. That is what keeps an explicit discard honest: it can never leave
+// the durable launch record cleared while the marker of the run it was serving
+// is still held, nor release the marker while the record survives. A marker
+// that belongs to another run is left in place and reported through
+// ownershipReleased=false rather than failing the clear.
+func (r *Repository) ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged(
+	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+	expectedOwner string,
+) (stored bool, lostCompare bool, ownershipReleased bool, err error) {
+	if strings.TrimSpace(expectedOwner) == "" {
+		return false, false, false, fmt.Errorf("expected automation owner must not be empty for task %s", taskID)
+	}
+	return r.setTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, value, expectedOwner)
+}
+
+// setTaskDeferredLaunchIfUnchanged holds the compare-and-set body. A non-empty
+// expectedOwner adds the conditional ownership removal to the same transaction.
+func (r *Repository) setTaskDeferredLaunchIfUnchanged(
+	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+	expectedOwner string,
+) (stored bool, lostCompare bool, ownershipReleased bool, err error) {
 	if value == nil {
-		return false, false, fmt.Errorf("deferred launch value must not be nil for task %s", taskID)
+		return false, false, false, fmt.Errorf("deferred launch value must not be nil for task %s", taskID)
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
-		return false, false, fmt.Errorf("failed to serialize deferred launch record: %w", err)
+		return false, false, false, fmt.Errorf("failed to serialize deferred launch record: %w", err)
 	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	metadata, err := r.lockMetadataRow(ctx, tx, "tasks", "task", taskID)
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	_, found, err := decodeDeferredLaunch(metadata)
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	if found != prior {
 		// Commit rather than roll back: the read lock has nothing to undo, and
 		// committing releases it immediately so the winner is not held up.
 		if err := tx.Commit(); err != nil {
-			return false, false, err
+			return false, false, false, err
 		}
-		return false, true, nil
+		return false, true, false, nil
 	}
 
 	result, err := tx.ExecContext(ctx,
 		r.db.Rebind(metadataKeyUpdateQuery("tasks", r.db.DriverName())),
 		metadataKeyUpdateArgs(r.db.DriverName(), models.MetaKeyDeferredLaunch, string(payload), r.nowUTC(), taskID)...)
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
 	if rows == 0 {
-		return false, false, fmt.Errorf("task not found: %s", taskID)
+		return false, false, false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if expectedOwner != "" {
+		released, releaseErr := r.removeTaskMetadataKeyIfValueWithExecutor(
+			ctx, tx, taskID, models.MetaKeyAutomationStartOwned, expectedOwner,
+		)
+		if releaseErr != nil {
+			return false, false, false, releaseErr
+		}
+		ownershipReleased = released
 	}
 	if err := tx.Commit(); err != nil {
-		return false, false, err
+		return false, false, false, err
 	}
-	return true, false, nil
+	return true, false, ownershipReleased, nil
 }
 
 // decodeDeferredLaunch splits a task's whole metadata JSON into the decoded

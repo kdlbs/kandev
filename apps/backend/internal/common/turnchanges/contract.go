@@ -2,7 +2,11 @@
 // repository intervals captured around an admitted agent turn.
 package turnchanges
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Availability string
 
@@ -108,6 +112,7 @@ type Provenance struct {
 	Unborn              bool               `json:"unborn,omitempty"`
 	HeadCommitOID       string             `json:"head_commit_oid,omitempty"`
 	HeadRef             string             `json:"head_ref,omitempty"`
+	HeadBindingID       string             `json:"head_binding_id,omitempty"`
 	TargetConfigured    bool               `json:"target_configured"`
 	TargetIdentity      string             `json:"target_identity,omitempty"`
 	TargetRef           string             `json:"target_ref,omitempty"`
@@ -123,6 +128,17 @@ type Provenance struct {
 func (p *Provenance) Valid() bool {
 	return p != nil && p.Version == ProvenanceVersion2 && p.ChangeSetID != "" && p.CheckoutID != "" &&
 		(p.Boundary == CheckpointStart || p.Boundary == CheckpointEnd)
+}
+
+// SameBranchBinding reports whether both endpoints carry the same valid
+// generated-branch binding identity. A match can relax only the symbolic
+// ref-name check; every other history eligibility rule still applies.
+func SameBranchBinding(start, end *Provenance) bool {
+	if start == nil || end == nil || start.HeadBindingID == "" || start.HeadBindingID != end.HeadBindingID {
+		return false
+	}
+	parsed, err := uuid.Parse(start.HeadBindingID)
+	return err == nil && parsed.String() == start.HeadBindingID
 }
 
 type PolicyResolutionKind string

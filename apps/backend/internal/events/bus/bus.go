@@ -30,6 +30,16 @@ type Event struct {
 	Source    string      `json:"source"` // Service that produced the event
 	Timestamp time.Time   `json:"timestamp"`
 	Data      interface{} `json:"data"`
+	// PluginOrigin is host-installed envelope metadata, never plugin payload.
+	// Its presence prevents an expired or unknown invocation becoming native.
+	PluginOrigin *PluginEventOrigin `json:"plugin_origin,omitempty"`
+}
+
+// PluginEventOrigin names an opaque live Host invocation in its issuing plugin.
+// An empty reference still marks an unidentified plugin-origin notification.
+type PluginEventOrigin struct {
+	PluginID  string `json:"plugin_id"`
+	Reference string `json:"reference"`
 }
 
 // EffectiveSubject returns the concrete subject e was published on, falling

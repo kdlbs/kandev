@@ -74,7 +74,7 @@ function readSnapshot(
   phase: TaskNavigationReadSnapshot["phase"],
   temporary: boolean,
 ): TaskNavigationReadSnapshot {
-  return { phase, attempt: 1, temporary, revision: 3, cycle: 2 };
+  return { phase, attempt: 1, temporary, exhausted: false, revision: 3, cycle: 2 };
 }
 
 describe("deriveTaskDetailRouteView projection continuity", () => {

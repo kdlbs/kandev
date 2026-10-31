@@ -2,6 +2,7 @@
 status: active
 system: plugins
 created: 2026-07-18
+updated: 2026-10-30
 owners:
   - jcfs
 ---
@@ -35,11 +36,17 @@ marketplace — while keeping install-by-URL and sideloading as escape hatches.
 - **AC-PLUGINS-MARKETPLACE-001.1:** Users SHALL be able to browse a catalog of available plugins from inside kandev (Settings > Plugins > **Browse**) without knowing any URL in advance.
 - **AC-PLUGINS-MARKETPLACE-001.2:** The catalog SHALL be **searchable** (by name/description) and **filterable by category**, and SHALL be **sorted by GitHub stars descending by default**. Stars are a **sort hint, not a quality score** — no open-source first-party store actually ranks by stars (Obsidian ranks by downloads), so the catalog SHOULD also expose **"recently updated"** ordering (from each repo's last release / `pushed_at`) so new or actively-maintained plugins are not buried under older high-star incumbents.
 - **AC-PLUGINS-MARKETPLACE-001.3:** Each catalog entry shows: display name, description, author, categories, the source repository link, the latest published version, and its star count.
-- **AC-PLUGINS-MARKETPLACE-001.4:** Release authors and registry reviewers SHALL apply the attribution convention: first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`, community releases declare the contributor's stable identity, and a plugin is not labeled `kandev` only because a maintainer curated it into the official source. This is a release and curation check, not an index-builder ownership validation rule. The builder preserves a declared manifest author and falls back to the repository owner for legacy releases without one.
+- **AC-PLUGINS-MARKETPLACE-001.4:** Native-plugin listings in the official catalog shall attribute the plugin to the owner of its curated repository. A manifest author or metadata lookup failure shall not change this attribution. A community repository owned by `Fclem` shall show `by Fclem`. A first-party repository owned by `kdlbs` shall show `by kdlbs`.
 - **AC-PLUGINS-MARKETPLACE-001.5:** The catalog source repository link SHALL identify the repository named by the registry entry. The index builder derives this value from the registry pointer. A release manifest's `repo_url`, when present, SHOULD identify the same repository so installed and marketplace views do not disagree; release and registry review is responsible for flagging mismatches.
 - **AC-PLUGINS-MARKETPLACE-001.6:** Installing from the catalog SHALL be **one click**: it resolves to the plugin's latest release tarball URL and runs the existing verified install pipeline (`POST /api/plugins/install`). No new install mechanism is introduced.
 - **AC-PLUGINS-MARKETPLACE-001.7:** A catalog entry for a plugin that is already installed SHALL show an **Installed** state; when the catalog's latest version is newer than the installed version, it SHALL show an **Update available** affordance (which reinstalls the newer tarball).
 - **AC-PLUGINS-MARKETPLACE-001.8:** The catalog SHALL be assembled from **one or more marketplace sources**. kandev ships with the **official kandev source** enabled by default; operators MAY add **additional sources** (a team or corporate registry) and the catalog merges them.
+- **AC-PLUGINS-MARKETPLACE-001.9:** When the official catalog retains an earlier native-plugin listing after a release failure, attribution shall follow its current curated repository owner. The retained package version, URL, and digest shall remain unchanged. An all-failed rebuild shall preserve the published catalog.
+- **AC-PLUGINS-MARKETPLACE-001.10:** On desktop and phone, installed-plugin details shall identify the manifest author as `Declared author`. This value shall not imply verified publisher identity. Missing author data shall keep the existing unavailable marker.
+
+These attribution rules cover native plugins. Canvas attribution, publisher
+verification, and package provenance remain separate contracts. Custom source
+metadata remains subject to the operator's trust in that source.
 
 ### REQ-PLUGINS-MARKETPLACE-002: Prompt curated-release publication
 
@@ -113,4 +120,5 @@ excluded. Per-plugin writes, background eligibility and installation are unchang
 
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/marketplace.md).
+The technical sources are the [marketplace design](../system-design/marketplace.md)
+and [native-plugin attribution](../system-design/native-plugin-attribution.md).

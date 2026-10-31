@@ -17,6 +17,10 @@ legacy_specs: []
 
 # Fix plan: Turn change history integrity
 
+Follow-up: [generated-branch continuity](../turn-change-title-branch-continuity/plan.md)
+adds title-rename interaction coverage for issue #4961. This completed package's
+work-order statuses and recorded verification results remain its original delivery evidence.
+
 ## Overview
 
 Make turn comparisons account for upstream history changes while retaining the

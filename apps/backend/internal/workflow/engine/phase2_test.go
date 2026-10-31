@@ -118,7 +118,7 @@ func TestValidParticipantRole(t *testing.T) {
 }
 
 func TestValidStageType(t *testing.T) {
-	for _, v := range []string{"work", "review", "approval", "custom"} {
+	for _, v := range []string{"work", "review", "approval", "custom", "hold"} {
 		if !ValidStageType(v) {
 			t.Fatalf("expected stage_type %q to be valid", v)
 		}

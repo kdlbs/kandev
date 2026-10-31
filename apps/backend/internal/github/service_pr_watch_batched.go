@@ -37,7 +37,10 @@ const prSyncExplicitRefreshKeySuffix = "|explicit-refresh"
 // so a caller can resume exactly that phase without repeating finished work.
 type prWatchSyncPending struct {
 	Numbered bool
-	Watches  []*PRWatch
+	// WorkflowOnly marks Actions-attention work that resumes without repeating
+	// a completed status phase.
+	WorkflowOnly bool
+	Watches      []*PRWatch
 }
 
 // prWatchSyncOutcome is the internal result of one batched sync pass.
@@ -49,7 +52,11 @@ type prWatchSyncOutcome struct {
 	Results  []PRWatchSyncResult
 	Pending  []prWatchSyncPending
 	Deferred *AdmissionDeferredError
-	Err      error
+	// WorkflowDeferred owns the unfinished workflow phase's own retry boundary.
+	// It stays separate from a status deferral so a completed known-PR phase is
+	// not held for an unrelated branch-discovery boundary.
+	WorkflowDeferred *AdmissionDeferredError
+	Err              error
 }
 
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
@@ -86,6 +93,95 @@ func (s *Service) syncWorkspaceWatchesBatchedForPoller(
 	ctx context.Context, workspaceID string, watches []*PRWatch,
 ) prWatchSyncOutcome {
 	return s.syncWorkspaceWatchesBatched(ctx, workspaceID, watches, false, true)
+}
+
+// runWorkspaceWorkflowPhaseForPoller resumes only Actions-attention work. It
+// never re-fetches status, so a workflow-only wake cannot repeat a completed
+// known-PR or branch phase.
+func (s *Service) runWorkspaceWorkflowPhaseForPoller(
+	ctx context.Context, workspaceID string, watches []*PRWatch,
+) prWatchSyncOutcome {
+	if len(watches) == 0 {
+		return prWatchSyncOutcome{}
+	}
+	expected := watches
+	ctx, watches, resolved, err := s.prepareWorkflowPhase(ctx, workspaceID, watches)
+	if err != nil {
+		return prWatchSyncWorkflowFailedOutcome(expected, err)
+	}
+	if len(watches) == 0 {
+		return prWatchSyncOutcome{}
+	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
+	exec, execErr := graphQLExecutorFor(resolved.Client)
+	if execErr != nil {
+		exec = nil
+	}
+	result := s.runWorkflowPhase(ctx, resolved.Client, exec, resolved.CacheScope, watches, false)
+	outcome := prWatchSyncOutcome{
+		Deferred: result.Deferred, WorkflowDeferred: result.Deferred, Err: result.Err,
+	}
+	if len(result.Unfinished) > 0 {
+		outcome.Pending = appendPRWatchWorkflowPending(nil, result.Unfinished)
+	}
+	return outcome
+}
+
+// prepareWorkflowPhase applies the same workspace, host, credential, and
+// lifetime fences as the full batched sync without running a status phase.
+func (s *Service) prepareWorkflowPhase(
+	ctx context.Context, workspaceID string, watches []*PRWatch,
+) (context.Context, []*PRWatch, *resolvedServiceClient, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return ctx, watches, nil, ErrGitHubWorkspaceRequired
+	}
+	for _, watch := range watches {
+		if watch == nil || watch.WorkspaceID != workspaceID {
+			return ctx, watches, nil, ErrGitHubWorkspaceRequired
+		}
+	}
+	host, err := s.selectedGitHubHost(ctx, workspaceID)
+	if err != nil {
+		return ctx, watches, nil, err
+	}
+	currentWatches := make([]*PRWatch, 0, len(watches))
+	for _, watch := range watches {
+		if err := requireExpectedGitHubHost(withExpectedGitHubHost(ctx, defaultAuthFlowHost(watch.GitHubHost)), host); err != nil {
+			if errors.Is(err, ErrGitHubHostMismatch) {
+				continue
+			}
+			return ctx, watches, nil, err
+		}
+		if err := s.validatePRWatchHost(ctx, workspaceID, watch); err != nil {
+			return ctx, watches, nil, err
+		}
+		currentWatches = append(currentWatches, watch)
+	}
+	if len(currentWatches) == 0 {
+		return ctx, nil, nil, nil
+	}
+	ctx = withExpectedGitHubHost(ctx, host.String())
+	activeWatches, err := s.filterActivePRWatches(ctx, currentWatches)
+	if err != nil {
+		return ctx, currentWatches, nil, err
+	}
+	if len(activeWatches) == 0 {
+		return ctx, nil, nil, nil
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil {
+		return ctx, activeWatches, nil, err
+	}
+	return ctx, activeWatches, resolved, nil
+}
+
+// prWatchSyncWorkflowFailedOutcome reports work that never reached the
+// provider. Only the workflow phase is retried.
+func prWatchSyncWorkflowFailedOutcome(watches []*PRWatch, err error) prWatchSyncOutcome {
+	deferred := admissionDeferralOf(err)
+	outcome := prWatchSyncOutcome{Err: err, Deferred: deferred, WorkflowDeferred: deferred}
+	outcome.Pending = appendPRWatchWorkflowPending(nil, watches)
+	return outcome
 }
 
 func (s *Service) syncWorkspaceWatchesBatched(
@@ -171,10 +267,25 @@ func admissionDeferralOf(err error) *AdmissionDeferredError {
 	return nil
 }
 
-// prWatchPendingWatches flattens pending phases back into their watches.
-func prWatchPendingWatches(pending []prWatchSyncPending) []*PRWatch {
+// prWatchStatusPendingWatches flattens only unfinished status phases.
+func prWatchStatusPendingWatches(pending []prWatchSyncPending) []*PRWatch {
 	watches := make([]*PRWatch, 0, len(pending))
 	for _, entry := range pending {
+		if entry.WorkflowOnly {
+			continue
+		}
+		watches = append(watches, entry.Watches...)
+	}
+	return watches
+}
+
+// prWatchWorkflowPendingWatches flattens only unfinished workflow phases.
+func prWatchWorkflowPendingWatches(pending []prWatchSyncPending) []*PRWatch {
+	watches := make([]*PRWatch, 0, len(pending))
+	for _, entry := range pending {
+		if !entry.WorkflowOnly {
+			continue
+		}
 		watches = append(watches, entry.Watches...)
 	}
 	return watches
@@ -185,16 +296,32 @@ func prWatchPendingWatches(pending []prWatchSyncPending) []*PRWatch {
 func appendPRWatchSyncPending(
 	pending []prWatchSyncPending, numbered bool, watches []*PRWatch,
 ) []prWatchSyncPending {
+	return appendPRWatchSyncPendingForPhase(pending, numbered, false, watches)
+}
+
+// appendPRWatchWorkflowPending records unfinished Actions-attention work
+// without repeating a completed status phase.
+func appendPRWatchWorkflowPending(
+	pending []prWatchSyncPending, watches []*PRWatch,
+) []prWatchSyncPending {
+	return appendPRWatchSyncPendingForPhase(pending, true, true, watches)
+}
+
+func appendPRWatchSyncPendingForPhase(
+	pending []prWatchSyncPending, numbered, workflowOnly bool, watches []*PRWatch,
+) []prWatchSyncPending {
 	if len(watches) == 0 {
 		return pending
 	}
 	for i := range pending {
-		if pending[i].Numbered == numbered {
+		if pending[i].Numbered == numbered && pending[i].WorkflowOnly == workflowOnly {
 			pending[i].Watches = append(pending[i].Watches, watches...)
 			return pending
 		}
 	}
-	return append(pending, prWatchSyncPending{Numbered: numbered, Watches: watches})
+	return append(pending, prWatchSyncPending{
+		Numbered: numbered, WorkflowOnly: workflowOnly, Watches: watches,
+	})
 }
 
 func (s *Service) filterActivePRWatches(ctx context.Context, watches []*PRWatch) ([]*PRWatch, error) {
@@ -264,7 +391,59 @@ func (s *Service) syncWatchesBatchedWithClient(
 		}
 	}
 	outcome.Results = collectPRWatchSyncResults(watches, resultsByWatch)
+	s.runWorkflowPhaseAfterStatus(&outcome, req, resultsByWatch)
 	return outcome
+}
+
+// runWorkflowPhaseAfterStatus refreshes Actions attention for every status
+// that already applied, even when a sibling status phase deferred. A completed
+// known-PR phase must not wait for an unrelated branch-discovery boundary.
+func (s *Service) runWorkflowPhaseAfterStatus(
+	outcome *prWatchSyncOutcome, req batchedPRWatchSync,
+	resultsByWatch map[*PRWatch]PRWatchSyncResult,
+) {
+	if outcome == nil {
+		return
+	}
+	watches := appliedWorkflowPhaseWatches(resultsByWatch)
+	if len(watches) == 0 {
+		return
+	}
+	exec, err := graphQLExecutorFor(req.client)
+	if err != nil {
+		exec = nil
+	}
+	result := s.runWorkflowPhase(
+		req.ctx, req.client, exec, req.cacheScope, watches, req.explicitRefresh,
+	)
+	if len(result.Unfinished) > 0 {
+		outcome.Pending = appendPRWatchWorkflowPending(outcome.Pending, result.Unfinished)
+	}
+	if result.Deferred != nil {
+		outcome.WorkflowDeferred = result.Deferred
+		if outcome.Deferred == nil {
+			// Passive per-task sync returns the typed deferral instead of
+			// treating incomplete workflow evidence as a complete pass. A status
+			// deferral keeps its own boundary so the searching wake is not moved.
+			outcome.Deferred = result.Deferred
+			if outcome.Err == nil {
+				outcome.Err = result.Deferred
+			}
+		}
+	}
+}
+
+// appliedWorkflowPhaseWatches lists the watches whose status write completed.
+func appliedWorkflowPhaseWatches(resultsByWatch map[*PRWatch]PRWatchSyncResult) []*PRWatch {
+	watches := make([]*PRWatch, 0, len(resultsByWatch))
+	for watch, result := range resultsByWatch {
+		if watch == nil || !result.Applied || !result.Found || result.SyncFailed || result.Status == nil ||
+			result.Status.PR == nil || result.Status.PR.Number <= 0 || watch.PRNumber <= 0 {
+			continue
+		}
+		watches = append(watches, watch)
+	}
+	return watches
 }
 
 // batchedPRWatchSync bundles one batched pass's fixed inputs.
@@ -842,7 +1021,6 @@ func (s *Service) fetchBatchedNumberedPhase(
 			s.finishBatchedPRQueryProgress(progressKey, progress, keepBatchedPRProgress(fetchErr))
 			return nil, fetchErr
 		}
-		s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, statuses)
 		s.finishBatchedPRQueryProgress(progressKey, progress, false)
 		return statuses, nil
 	})
@@ -876,7 +1054,6 @@ func (s *Service) fetchBatchedSearchingPhase(
 			s.finishBatchedBranchQueryProgress(progressKey, progress, keepBatchedPRProgress(fetchErr))
 			return nil, fetchErr
 		}
-		s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, phase.byKey)
 		s.finishBatchedBranchQueryProgress(progressKey, progress, false)
 		return phase, nil
 	})

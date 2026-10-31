@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-03
-updated: 2026-10-28
+updated: 2026-10-29
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -16,6 +16,7 @@ owners:
 ## Purpose and boundaries
 
 Separate a provider turn error from terminal execution failure.
+The [prompt-error extension](acp-prompt-error-continuity.md) defines provider-neutral retention for proven ACP error responses.
 The shared runtime owns process and connection lifetime.
 Orchestration owns failed-turn settlement and existing retry admission.
 Provider dialects translate tested error shapes into bounded evidence.
@@ -66,14 +67,17 @@ Require the same initialized native session, nonzero prompt generation, ownershi
 Use the existing SDK `ClientSideConnection.Done()` to reject closed transport.
 Do not send a probe prompt or create another provider session to establish liveness.
 
-The common extractor requires a high-confidence transient classification from sanitized provider evidence.
-It accepts tested application-level `session/prompt` errors and dialect-specific terminal provider-stream diagnostics.
-Generic internal errors, Data-only signatures, auth, hard quota, invalid model, and uncertain transport errors receive no retention attestation.
+The [prompt-error extension](acp-prompt-error-continuity.md) replaces the application-error classification gate with typed response-origin evidence.
+A proven `session/prompt` error response can retain any current usable ACP conversation.
+Error class still governs automatic recovery. Data-only signatures never establish runtime authority.
+Local SDK errors and uncertain transport do not qualify through this generic path.
+Dialect-specific terminal provider-stream diagnostics retain their existing tested contracts.
 Provider classification alone never establishes ACP liveness.
 
 Initial fixtures cover Codex's ordered systemError/capacity notifications, classifying ACP overload and rate-limit replies, and Cursor's tested terminal stream diagnostic.
 Cursor's native restore error contract remains distinct: SDK peer-disconnect errors do not become retention evidence.
-Unsupported providers retain existing behavior until their shape has positive and negative fixtures.
+Provider-specific stream diagnostics require positive and negative fixtures.
+Ordinary prompt error responses use the shared origin and runtime contract.
 
 Propagate the disposition through process forwarding, `TurnOutcomeRecorder`, agentctl JSON, retained-outcome retrieval, lifecycle snapshots, and watcher conversion.
 Remote omission and invalid values fail closed.
@@ -230,9 +234,10 @@ Keep unknown support values ineligible.
 This value identifies a tested live-conversation contract, not a CLI release or provider assertion.
 Do not add OpenCode support to transport-loss restoration.
 
-Extend `Adapter.retainableACPApplicationError` for the tested OpenCode capacity application error.
-Keep its high-confidence semantic gate and the existing `promptFailureDisposition` liveness check.
-Generic internal errors, cancellation, auth, hard quota, Data-only signatures, and broken transport do not qualify.
+The generic prompt-error path preserves the tested OpenCode capacity diagnostic and its recovery evidence.
+Capacity recovery keeps its high-confidence semantic gate. Runtime retention uses the shared origin and liveness checks.
+Generic internal, auth, and hard-quota prompt errors can retain a usable runtime under requirement 004.
+They do not qualify for capacity recovery. Cancellation, Data-only signatures, and broken transport grant no capacity authority.
 Capture capacity evidence after the notification queue drains and before synthetic tool cleanup.
 Use the existing bounded ledger for authoritative completed outcomes.
 OpenCode child-session, background, and subagent work must block continuation unless the current evidence accounts for its completion.
@@ -408,7 +413,8 @@ Correct `action-message-recovery-history.tsx` for existing persisted records too
 An execution ID alone cannot choose the startup view model.
 Use explicit bootstrap phase or typed startup causes for startup presentation.
 For the reported legacy capacity record, retain its provider explanation instead of the startup fallback.
-Existing true bootstrap, quota, runtime failure, and workspace recovery controls remain intact.
+Existing bootstrap, runtime failure, and workspace recovery controls remain intact.
+A quota error on a proven usable ACP conversation follows the nonblocking prompt-error contract.
 
 ## Desktop and phone
 

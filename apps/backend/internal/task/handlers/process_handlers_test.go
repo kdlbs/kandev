@@ -371,6 +371,9 @@ func (m *mockRepository) RestoreActiveClarificationBundle(
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }
+func (m *mockRepository) UpdatePermissionPresentation(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) ClaimPermissionResolution(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
 	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
 }

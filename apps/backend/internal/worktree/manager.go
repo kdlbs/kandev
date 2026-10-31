@@ -117,7 +117,9 @@ type Store interface {
 	// non-deleted worktree row that has a non-empty path.
 	ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 	// CountActiveWorktreeReferences counts non-deleted session associations
-	// for a physical worktree, excluding associations owned by the caller.
+	// for a physical worktree, excluding associations owned by the caller. A
+	// session stops counting once its task is archived, its state is
+	// terminal, and no runtime row remains.
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 }
 
@@ -239,7 +241,8 @@ func (m *Manager) ListActiveWorktreePaths(ctx context.Context) ([]string, error)
 }
 
 // CountActiveWorktreeReferences returns the number of non-deleted session
-// associations for a physical worktree outside the supplied sessions.
+// associations for a physical worktree outside the supplied sessions. An
+// archived terminal session with no runtime row no longer holds the worktree.
 func (m *Manager) CountActiveWorktreeReferences(
 	ctx context.Context,
 	worktreeID string,

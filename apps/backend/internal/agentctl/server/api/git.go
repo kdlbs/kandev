@@ -127,6 +127,10 @@ type GitCommitRequest struct {
 type GitRenameBranchRequest struct {
 	NewName string `json:"new_name"`
 	Repo    string `json:"repo,omitempty"`
+	// ExpectedGeneratedBranch carries the verified old generated branch for
+	// Kandev's title-driven rename. Ordinary rename callers omit it and keep
+	// the existing payload and behavior.
+	ExpectedGeneratedBranch string `json:"expected_generated_branch,omitempty"`
 }
 
 // GitStageRequest for POST /api/v1/git/stage
@@ -520,7 +524,13 @@ func (s *Server) handleGitRenameBranch(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	var result *process.GitOperationResult
+	var err error
+	if req.ExpectedGeneratedBranch != "" {
+		result, err = gitOp.RenameGeneratedBranch(c.Request.Context(), req.ExpectedGeneratedBranch, req.NewName)
+	} else {
+		result, err = gitOp.RenameBranch(c.Request.Context(), req.NewName)
+	}
 	if err != nil {
 		s.handleGitError(c, "rename_branch", err)
 		return

@@ -59,38 +59,55 @@ func (a *Adapter) promptFailureConnectionUsable(conn *sdk.ClientSideConnection, 
 	}
 }
 
-func (a *Adapter) retainableACPApplicationError(err error) (*streams.ProviderError, bool) {
-	mockRetainedError := a.dialect.retainedApplicationErr != nil && a.dialect.retainedApplicationErr(err)
-	openCodeCapacity := a.agentID == openCodeAgentID
-	if a.agentID != claudeAgentID && a.agentID != codexAgentID && !openCodeCapacity && !mockRetainedError {
-		return nil, false
-	}
+// remotePromptRequestError reports the SDK request error when the peer itself
+// returned it. The origin marker is the evidence boundary: local send, decode,
+// deadline, and disconnect failures never satisfy it, whatever their message
+// or Data says.
+func remotePromptRequestError(err error) (*sdk.RequestError, bool) {
 	var requestErr *sdk.RequestError
-	if !errors.As(err, &requestErr) || requestErr == nil || requestErr.Message == "" {
+	if !errors.As(err, &requestErr) || !requestErr.IsRemoteResponse() {
 		return nil, false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: a.agentID,
-		Stderr:     requestErr.Message,
-	})
-	if classified.Confidence != routingerr.ConfHigh || classified.UserAction {
+	return requestErr, true
+}
+
+// retainedACPApplicationError projects a prompt error the peer itself returned.
+func (a *Adapter) retainedACPApplicationError(err error) (*streams.ProviderError, bool) {
+	if _, ok := remotePromptRequestError(err); !ok {
 		return nil, false
 	}
-	switch classified.Code {
-	case routingerr.CodeProviderOverloaded, routingerr.CodeModelCapacity, routingerr.CodeRateLimited:
-	default:
-		return nil, false
-	}
-	// OpenCode retention covers only the tested admission refusal. A broad
-	// capacity phrase or another high-confidence provider error keeps the
-	// existing recovery path.
-	if openCodeCapacity && classified.ClassifierRule != routingerr.RuleOpenCodeCapacityAdmission {
-		return nil, false
-	}
-	providerError := ProviderErrorFromError(err, a.agentID, "")
+	providerID, modelID := a.ProviderErrorContext()
+	providerError := ProviderErrorFromError(err, providerID, modelID)
 	if providerError == nil || !providerError.Valid() {
 		return nil, false
 	}
 	return providerError, true
+}
+
+// sendRetainedPromptError emits the retained-turn failure for a settled prompt
+// error while leaving the process, connection, and native session intact.
+func (a *Adapter) sendRetainedPromptError(
+	sessionID string,
+	promptGeneration uint64,
+	turn *promptTurnState,
+	notificationsDrained bool,
+	disposition streams.PromptFailureDisposition,
+	providerError *streams.ProviderError,
+) {
+	var capacityContinuation *streams.CapacityContinuationSnapshot
+	if classified := routingerr.Classify(routingerr.Input{
+		Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
+	}); classified.Code == routingerr.CodeModelCapacity {
+		capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
+	}
+	a.cancelAsyncTurnComplete(sessionID)
+	a.sendUpdate(AgentEvent{
+		Type:                     streams.EventTypeError,
+		SessionID:                sessionID,
+		PromptGeneration:         promptGeneration,
+		Error:                    providerError.Message,
+		ProviderError:            providerError,
+		CapacityContinuation:     capacityContinuation,
+		PromptFailureDisposition: disposition,
+	})
 }

@@ -133,6 +133,18 @@ func (c *Client) DeliveryRecoveryDescriptor() (*DeliveryStatus, bool) {
 	return &copy, true
 }
 
+// ProcessManagerID returns the producer lifetime reported by the most recent
+// authenticated delivery descriptor. It is distinct from process_generation,
+// which restarts when agentctl creates a new process manager.
+func (c *Client) ProcessManagerID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.deliveryStatus == nil {
+		return ""
+	}
+	return c.deliveryStatus.ProcessManagerID
+}
+
 func (c *Client) setLastDeliverySubmissionID(id string) {
 	c.mu.Lock()
 	c.lastDeliverySubmissionID = id

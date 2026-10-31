@@ -119,6 +119,14 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // MessageCreator is an interface for creating messages on tasks
+// SessionMessageTimestampReader returns the immutable creation time of a
+// persisted session message. A message creator that can resolve its own rows
+// implements it so durable attention ordering uses message time, not the time
+// settlement happened to record it.
+type SessionMessageTimestampReader interface {
+	SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool)
+}
+
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
@@ -139,8 +147,9 @@ type MessageCreator interface {
 	// already-completed lifecycle-only turn. The turn is never active, so a
 	// later prompt cannot adopt it.
 	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
@@ -796,6 +805,9 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+	// turnErrorRecorder persists durable task attention for a manual retained
+	// failure. Nil leaves the historical settlement behavior unchanged.
+	turnErrorRecorder TaskTurnErrorRecorder
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
@@ -2080,6 +2092,11 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTaskTurnErrorRecorder wires the task-owned failed-turn attention store.
+func (s *Service) SetTaskTurnErrorRecorder(recorder TaskTurnErrorRecorder) {
+	s.turnErrorRecorder = recorder
+}
+
 // SetTransientRetryMessageService wires the task service used to write and
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2111,6 +2128,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
 	}
 }
 

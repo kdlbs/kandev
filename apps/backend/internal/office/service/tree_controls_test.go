@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -32,7 +34,41 @@ func (w treeControlTaskStateWriter) UpdateTaskStateIfWorkflowStep(
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	var exists int
+	if err := w.repo.Writer().QueryRowxContext(ctx, `SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+func (w treeControlTaskStateWriter) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string, expectedState, state v1.TaskState,
+) (bool, error) {
+	result, err := w.repo.Writer().ExecContext(ctx, `
+		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ? AND state = ?
+	`, state, taskID, expectedStepID, expectedState)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows > 0 {
+		return rows > 0, err
+	}
+	var exists int
+	if err := w.repo.Writer().QueryRowxContext(ctx, `SELECT 1 FROM tasks WHERE id = ?`, taskID).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 type mockTaskCanceller struct {

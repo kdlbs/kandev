@@ -1,18 +1,34 @@
-import { act, renderHook, cleanup } from "@testing-library/react";
+import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/client";
 import { createAppStore } from "@/lib/state/store";
 import type { Workspace } from "@/lib/types/http";
 import { workspaceId } from "@/lib/types/ids";
 import { useWorkspaceClone, canCloneWorkspace } from "./use-workspace-clone";
+import { useWorkspaceCollaboration } from "./use-workspace-collaboration";
 
 const action = vi.fn();
 const push = vi.fn();
 const toast = vi.fn();
 let store = createAppStore();
+const { readCollaboration, putCollaboration } = vi.hoisted(() => ({
+  readCollaboration: vi.fn(),
+  putCollaboration: vi.fn(),
+}));
 vi.mock("@/app/actions/workspaces", () => ({
   cloneWorkspaceAction: (...args: unknown[]) => action(...args),
 }));
-vi.mock("@/components/state-provider", () => ({ useAppStoreApi: () => store }));
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => store,
+  useAppStore: (selector: (state: ReturnType<typeof store.getState>) => unknown) =>
+    selector(store.getState()),
+}));
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => true }));
+vi.mock("@/lib/api/domains/workspace-collaboration-api", () => ({
+  COLLABORATION_ACTIONS: ["read", "report", "prompt", "control"],
+  readWorkspaceCollaboration: readCollaboration,
+  putWorkspaceCollaboration: putCollaboration,
+}));
 vi.mock("@/lib/routing/client-router", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
 const source = {
@@ -102,5 +118,101 @@ describe("workspace clone flow", () => {
     act(() => result.current.close());
     expect(result.current.source).toBeNull();
     expect(result.current.name).toBe("");
+  });
+});
+
+const collaborationWorkspace = {
+  id: "ws-1",
+  name: "Source",
+  scopes: ["workspace.read", "workspace.manage"],
+};
+const collaborationResult = (targetName: string, targetId = "ws-2") => ({
+  workspaces: [
+    collaborationWorkspace,
+    { ...collaborationWorkspace, id: targetId, name: targetName, scopes: ["workspace.read"] },
+  ],
+  grants: [],
+});
+
+describe("workspace collaboration editor", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store = createAppStore();
+  });
+  afterEach(cleanup);
+
+  it("surfaces a rejected read as denied", async () => {
+    readCollaboration.mockRejectedValue(new ApiError("forbidden", 403, {}));
+    const { result } = renderHook(() => useWorkspaceCollaboration("task-1", "ws-1", true));
+    await waitFor(() => expect(result.current.status).toBe("denied"));
+    expect(result.current.rows).toEqual([]);
+  });
+
+  it("ignores a read that resolves after the task changes", async () => {
+    let resolveFirst!: (value: unknown) => void;
+    readCollaboration
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(collaborationResult("Second target"));
+    const { result, rerender } = renderHook(
+      ({ taskId }) => useWorkspaceCollaboration(taskId, "ws-1", true),
+      { initialProps: { taskId: "task-a" } },
+    );
+    await waitFor(() => expect(readCollaboration).toHaveBeenCalledTimes(1));
+    rerender({ taskId: "task-b" });
+    await waitFor(() => expect(readCollaboration).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      resolveFirst(collaborationResult("Stale target"));
+    });
+    expect(result.current.rows.map((row) => row.name)).toEqual(["Second target"]);
+  });
+
+  it("keeps the draft and marks a failed save", async () => {
+    readCollaboration.mockResolvedValue(collaborationResult("Target"));
+    putCollaboration.mockRejectedValue(new ApiError("forbidden", 403, {}));
+    const { result } = renderHook(() => useWorkspaceCollaboration("task-1", "ws-1", true));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.edit("ws-2", "read", true));
+    await act(async () => {
+      await result.current.save("ws-2");
+    });
+    const row = result.current.rows.find((item) => item.id === "ws-2");
+    expect(row?.draft.read).toBe(true);
+    expect(row?.saved.read).toBe(false);
+    expect(row?.error).toBe("denied");
+    expect(row?.saving).toBe(false);
+  });
+
+  it("keeps edits made while a save is in flight", async () => {
+    readCollaboration.mockResolvedValue(collaborationResult("Target"));
+    let resolveSave!: (value: unknown) => void;
+    putCollaboration.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useWorkspaceCollaboration("task-1", "ws-1", true));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.edit("ws-2", "read", true));
+    act(() => {
+      void result.current.save("ws-2");
+    });
+    await waitFor(() =>
+      expect(result.current.rows.find((item) => item.id === "ws-2")?.saving).toBe(true),
+    );
+    act(() => result.current.edit("ws-2", "prompt", true));
+    await act(async () => {
+      resolveSave({});
+    });
+    const row = result.current.rows.find((item) => item.id === "ws-2");
+    expect(row?.saved.read).toBe(true);
+    expect(row?.saved.prompt).toBe(false);
+    expect(row?.draft.read).toBe(true);
+    expect(row?.draft.prompt).toBe(true);
+    expect(row?.saving).toBe(false);
   });
 });

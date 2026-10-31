@@ -23,6 +23,7 @@ import {
   type WorkflowSessionFocusStart,
 } from "@/lib/state/workflow-session-focus";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { recordRetainedSidebarStatusSummary } from "./sidebar-status-summary";
 import {
   WORKSPACE_CONTEXT_COLLECTIONS,
   type WorkspaceContextCollection,
@@ -167,6 +168,7 @@ type TaskActions = Pick<
   | "setActiveSession"
   | "setActiveSessionAuto"
   | "clearActiveSession"
+  | "recordSidebarStatusSummary"
   | "beginWorkflowSessionFocus"
   | "bindWorkflowSessionFocus"
   | "reconcileWorkflowSessionFocus"
@@ -420,6 +422,10 @@ function createWorkflowSessionFocusActions(
 function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskActions {
   return {
     ...createWorkflowSessionFocusActions(set, get),
+    recordSidebarStatusSummary: (workspaceId, taskId, summary) =>
+      set((draft) => {
+        recordRetainedSidebarStatusSummary(draft, workspaceId, taskId, summary);
+      }),
     setActiveTask: (taskId) =>
       set((draft) => {
         draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);

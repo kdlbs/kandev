@@ -27,6 +27,11 @@ var (
 	ErrPermissionOptionNotOffered      = errors.New("permission_option_not_offered")
 	ErrPermissionAuditFailed           = errors.New("permission_audit_failed")
 	ErrPermissionDeliveryFailed        = errors.New("permission_delivery_failed")
+	// ErrPermissionFinalizationFailed is an internal post-delivery subtype of
+	// ErrPermissionAuditFailed. It keeps the established public audit-failure
+	// classification while letting automatic fallback distinguish uncertain
+	// delivery from a failure before dispatch.
+	ErrPermissionFinalizationFailed = fmt.Errorf("%w", ErrPermissionAuditFailed)
 )
 
 type ResolveAgentPermissionRequest struct {
@@ -36,6 +41,9 @@ type ResolveAgentPermissionRequest struct {
 	PendingID string
 	OptionID  string
 	Source    models.PermissionResolutionSource
+	// AutomaticOnly prevents an automatic resolver from claiming a request that
+	// was already promoted to a person's fallback.
+	AutomaticOnly bool
 	// ActorKind, when set, replaces the kind derived from the context.
 	ActorKind models.PermissionResolutionActorKind
 	// UnattendedTurnID is stored in the audit of an unattended-turn denial.
@@ -131,7 +139,7 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 		FinalizedAt: time.Now().UTC(),
 	})
 	if err != nil || finalized.Outcome != models.PermissionFinalized {
-		return nil, ErrPermissionAuditFailed
+		return nil, ErrPermissionFinalizationFailed
 	}
 	s.markSessionRunningAfterPermission(ctx, request.SessionID)
 	return &ResolveAgentPermissionResult{
@@ -158,8 +166,9 @@ func (s *Service) claimAgentPermission(ctx context.Context, request ResolveAgent
 	}
 	claimID := uuid.NewString()
 	claim, err := s.claimPermissionWithRetry(ctx, models.PermissionResolutionClaimRequest{
-		TaskID:    request.TaskID,
-		SessionID: request.SessionID,
+		TaskID:        request.TaskID,
+		SessionID:     request.SessionID,
+		AutomaticOnly: request.AutomaticOnly,
 		Audit: models.PermissionResolutionAudit{
 			ClaimID:     claimID,
 			ActorUserID: actorUserID,
@@ -350,7 +359,7 @@ func (s *Service) finalizePermissionDeliveryFailure(ctx context.Context, request
 		FinalizedAt: time.Now().UTC(),
 	})
 	if finalizeErr != nil || finalized.Outcome != models.PermissionFinalized {
-		return ErrPermissionAuditFailed
+		return ErrPermissionFinalizationFailed
 	}
 	return domainErr
 }

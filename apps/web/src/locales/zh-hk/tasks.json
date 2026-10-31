@@ -76,5 +76,20 @@
   "filtersButton_one": "篩選（{{count}}）",
   "filtersButton_other": "篩選（{{count}}）",
   "appliedWorkflow": "工作流程：{{name}}",
-  "appliedRepository": "儲存庫：{{name}}"
+  "appliedRepository": "儲存庫：{{name}}",
+  "ungrouped": "未分組",
+  "collaborationTitle": "工作區協作",
+  "collaborationDescription": "{{workspace}} 中的 {{task}}。管理此對話對其他工作區的存取範圍。",
+  "collaborationNativePermissions": "讀取、報告、提示和控制互相獨立。現有用戶權限仍然適用。取消全部四項即可撤銷存取。",
+  "collaborationRead": "讀取",
+  "collaborationReport": "報告",
+  "collaborationPrompt": "提示",
+  "collaborationControl": "控制",
+  "collaborationTargetUnavailable": "您目前沒有此目標的現有讀取權限。已儲存的授權僅供查看，無法編輯。",
+  "collaborationLoadDenied": "您無權管理此對話的工作區存取。",
+  "collaborationLoadFailed": "無法載入工作區存取。編輯內容已保留，請重新載入後再儲存。",
+  "collaborationSaveDenied": "權限被拒絕，無法儲存此行。編輯內容已保留。",
+  "collaborationSaveFailed": "無法儲存此行。編輯內容已保留。",
+  "collaborationNoTargets": "沒有其他可用的工作區。",
+  "collaborationRetry": "重新載入"
 }

@@ -214,6 +214,51 @@ func TestConfigPrecedenceEnvironmentOverYAML(t *testing.T) {
 	}
 }
 
+func TestWebhookPrivateNetworkSettingUsesYAMLAndEnvironmentPrecedence(t *testing.T) {
+	const envVar = "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS"
+	t.Setenv(envVar, "")
+
+	defaults, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath defaults: %v", err)
+	}
+	if defaults.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("webhook private networks must be disabled by default")
+	}
+	if got := defaults.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceDefault {
+		t.Fatalf("default source = %q, want %q", got, SourceDefault)
+	}
+
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte("notifications:\n  webhookAllowPrivateNetworks: true\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	configured, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath yaml: %v", err)
+	}
+	if !configured.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("YAML setting must allow private webhook destinations")
+	}
+	if got := configured.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceConfiguration {
+		t.Fatalf("YAML source = %q, want %q", got, SourceConfiguration)
+	}
+
+	t.Setenv(envVar, "false")
+	overridden, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath environment override: %v", err)
+	}
+	if overridden.Notifications.WebhookAllowPrivateNetworks {
+		t.Fatal("environment value must override YAML")
+	}
+	if got := overridden.SourceFor("notifications.webhookAllowPrivateNetworks"); got != SourceEnvironment {
+		t.Fatalf("environment source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
 func TestEmptyCredentialsEnvironmentClearsYAML(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("credentials:\n  file: /run/secrets/credentials\n"), 0o600); err != nil {
@@ -446,5 +491,165 @@ func TestHomeConfigDefaultDotDirectory(t *testing.T) {
 	}
 	if cfg.Server.Port != 40128 || cfg.Source.FilePath != configFile {
 		t.Fatalf("selected config = %q, port = %d; want %s and port 40128", cfg.Source.FilePath, cfg.Server.Port, configFile)
+	}
+}
+
+func unsetSQLiteReaderConnsEnv(t *testing.T) {
+	t.Helper()
+	const key = "KANDEV_SQLITE_READER_CONNS"
+	old, had := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(key, old)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
+
+func writeSQLiteReaderConnsConfig(t *testing.T, contents string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return dir
+}
+
+func TestSQLiteReaderConnsStartupResolution(t *testing.T) {
+	t.Setenv("KANDEV_DATABASE_DRIVER", "")
+	unsetSQLiteReaderConnsEnv(t)
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath default: %v", err)
+	}
+	if cfg.Database.SQLiteReaderConns != 4 {
+		t.Fatalf("default = %d, want 4", cfg.Database.SQLiteReaderConns)
+	}
+	if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceDefault {
+		t.Fatalf("default source = %q, want %q", got, SourceDefault)
+	}
+
+	cfg, err = LoadWithPath(writeSQLiteReaderConnsConfig(t, "database:\n  driver: sqlite\n  sqliteReaderConns: 6\n"))
+	if err != nil {
+		t.Fatalf("LoadWithPath YAML: %v", err)
+	}
+	if cfg.Database.SQLiteReaderConns != 6 {
+		t.Fatalf("YAML = %d, want 6", cfg.Database.SQLiteReaderConns)
+	}
+	if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceConfiguration {
+		t.Fatalf("YAML source = %q, want %q", got, SourceConfiguration)
+	}
+
+	t.Setenv("KANDEV_SQLITE_READER_CONNS", "7")
+	cfg, err = LoadWithPath(writeSQLiteReaderConnsConfig(t, "database:\n  driver: sqlite\n  sqliteReaderConns: many\n"))
+	if err != nil {
+		t.Fatalf("LoadWithPath env over invalid YAML: %v", err)
+	}
+	if cfg.Database.SQLiteReaderConns != 7 {
+		t.Fatalf("env over YAML = %d, want 7", cfg.Database.SQLiteReaderConns)
+	}
+	if got := cfg.SourceFor("database.sqliteReaderConns"); got != SourceEnvironment {
+		t.Fatalf("env source = %q, want %q", got, SourceEnvironment)
+	}
+}
+
+func TestSQLiteReaderConnsYAMLResolutionIgnoresAutomaticEnvironment(t *testing.T) {
+	t.Setenv("KANDEV_DATABASE_DRIVER", "")
+	unsetSQLiteReaderConnsEnv(t)
+
+	tests := []struct {
+		name         string
+		automaticEnv string
+		canonicalEnv string
+		wantValue    int
+		wantSource   SettingSource
+	}{
+		{
+			name:         "valid automatic alias does not override YAML",
+			automaticEnv: "7",
+			wantValue:    6,
+			wantSource:   SourceConfiguration,
+		},
+		{
+			name:         "invalid automatic alias does not invalidate YAML",
+			automaticEnv: "invalid",
+			wantValue:    6,
+			wantSource:   SourceConfiguration,
+		},
+		{
+			name:         "documented alias overrides YAML and automatic alias",
+			automaticEnv: "7",
+			canonicalEnv: "8",
+			wantValue:    8,
+			wantSource:   SourceEnvironment,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DATABASE_SQLITEREADERCONNS", tt.automaticEnv)
+			if tt.canonicalEnv != "" {
+				t.Setenv("KANDEV_SQLITE_READER_CONNS", tt.canonicalEnv)
+			}
+
+			cfg, err := LoadWithPath(writeSQLiteReaderConnsConfig(t, "database:\n  driver: sqlite\n  sqliteReaderConns: 6\n"))
+			if err != nil {
+				t.Fatalf("LoadWithPath: %v", err)
+			}
+			if cfg.Database.SQLiteReaderConns != tt.wantValue {
+				t.Fatalf("database.sqliteReaderConns = %d, want %d", cfg.Database.SQLiteReaderConns, tt.wantValue)
+			}
+			if got := cfg.SourceFor(sqliteReaderConnsKey); got != tt.wantSource {
+				t.Fatalf("database.sqliteReaderConns source = %q, want %q", got, tt.wantSource)
+			}
+		})
+	}
+}
+
+func TestSQLiteReaderConnsRejectsInvalidValues(t *testing.T) {
+	t.Setenv("KANDEV_DATABASE_DRIVER", "")
+	validYAML := "database:\n  driver: sqlite\n  sqliteReaderConns: 6\n"
+	for _, raw := range []string{"many", "", "   ", "0", "65"} {
+		t.Run("env_"+raw, func(t *testing.T) {
+			t.Setenv("KANDEV_SQLITE_READER_CONNS", raw)
+			_, err := LoadWithPath(writeSQLiteReaderConnsConfig(t, validYAML))
+			if err == nil || !strings.Contains(err.Error(), "database.sqliteReaderConns") {
+				t.Fatalf("Load error = %v, want environment rejection", err)
+			}
+			if strings.Contains(err.Error(), "config.yaml") {
+				t.Fatalf("environment error named config file: %v", err)
+			}
+		})
+	}
+
+	unsetSQLiteReaderConnsEnv(t)
+	for _, contents := range []string{
+		"database:\n  driver: sqlite\n  sqliteReaderConns: many\n",
+		"database:\n  driver: sqlite\n  sqliteReaderConns: 65\n",
+	} {
+		dir := writeSQLiteReaderConnsConfig(t, contents)
+		_, err := LoadWithPath(dir)
+		if err == nil || !strings.Contains(err.Error(), "config.yaml") || !strings.Contains(err.Error(), "database.sqliteReaderConns") {
+			t.Fatalf("Load error = %v, want selected file and key rejection", err)
+		}
+	}
+}
+
+func TestSQLiteReaderConnsPostgresIgnoresInvalidValues(t *testing.T) {
+	t.Setenv("KANDEV_SQLITE_READER_CONNS", "many")
+	cfg, err := LoadWithPath(writeSQLiteReaderConnsConfig(t, "database:\n  driver: postgres\n  port: 5432\n  user: u\n  dbName: db\n  sqliteReaderConns: many\n"))
+	if err != nil {
+		t.Fatalf("PostgreSQL startup rejected by SQLite-only value: %v", err)
+	}
+	if cfg.Database.Driver != "postgres" {
+		t.Fatalf("driver = %q, want postgres", cfg.Database.Driver)
+	}
+	if cfg.Database.SQLiteReaderConns != 4 {
+		t.Fatalf("PostgreSQL ignored value = %d, want default 4", cfg.Database.SQLiteReaderConns)
 	}
 }

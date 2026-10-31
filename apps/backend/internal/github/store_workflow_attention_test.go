@@ -79,6 +79,61 @@ func TestTaskPRWorkflowAttentionRoundTripAndHeadScopedRecovery(t *testing.T) {
 	}
 }
 
+func TestTaskPRWorkflowAttentionHeadGuardedWrite(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	tp := &TaskPR{
+		TaskID: "workflow-guard-task", WorkspaceID: "workflow-guard-workspace",
+		Owner: "acme", Repo: "widget", PRNumber: 7, HeadSHA: "head-a",
+		State: "open", CreatedAt: now,
+	}
+	if err := store.CreateTaskPR(ctx, tp); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	approval := &WorkflowAttention{
+		State: WorkflowAttentionApprovalRequired, HeadSHA: "head-a", ObservedAt: now,
+		Runs: []WorkflowAttentionRun{{RunID: 1, Name: "CI", Reason: workflowAttentionApprovalRequiredReason}},
+	}
+
+	if row, changed, err := store.UpdateTaskPRWorkflowAttention(
+		ctx, tp.TaskID, tp.RepositoryID, tp.PRNumber, "stale-head", approval,
+	); err != nil || row != nil || changed {
+		t.Fatalf("stale-head write = (%v, %v, %v), want a no-op", row, changed, err)
+	}
+
+	row, changed, err := store.UpdateTaskPRWorkflowAttention(
+		ctx, tp.TaskID, tp.RepositoryID, tp.PRNumber, "head-a", approval,
+	)
+	if err != nil || !changed || row == nil || row.WorkflowAttention == nil ||
+		row.WorkflowAttention.State != WorkflowAttentionApprovalRequired {
+		t.Fatalf("first head-guarded write = (%#v, %v, %v)", row, changed, err)
+	}
+
+	if row, changed, err := store.UpdateTaskPRWorkflowAttention(
+		ctx, tp.TaskID, tp.RepositoryID, tp.PRNumber, "head-a", approval,
+	); err != nil || row != nil || changed {
+		t.Fatalf("semantically equal write = (%v, %v, %v), want a no-op", row, changed, err)
+	}
+
+	cleared := workflowAttentionNone("head-a")
+	row, changed, err = store.UpdateTaskPRWorkflowAttention(
+		ctx, tp.TaskID, tp.RepositoryID, tp.PRNumber, "head-a", cleared,
+	)
+	if err != nil || !changed || row == nil || row.WorkflowAttention == nil ||
+		row.WorkflowAttention.State != WorkflowAttentionNone {
+		t.Fatalf("clearing write = (%#v, %v, %v), want none", row, changed, err)
+	}
+
+	stored, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if stored.WorkflowAttention == nil || stored.WorkflowAttention.State != WorkflowAttentionNone {
+		t.Fatalf("stored attention = %#v, want none", stored.WorkflowAttention)
+	}
+}
+
 func TestTaskPRWorkflowAttentionColumnIsMigratedAndProjected(t *testing.T) {
 	store := newTestStore(t)
 	columns, err := store.tableColumns("github_task_prs")
@@ -93,5 +148,34 @@ func TestTaskPRWorkflowAttentionColumnIsMigratedAndProjected(t *testing.T) {
 	}
 	if !strings.Contains(taskPRColumns, "workflow_attention") || !strings.Contains(taskPRColumnsQualified, "gtp.workflow_attention") {
 		t.Fatalf("workflow_attention is missing from task PR projections")
+	}
+}
+
+func TestTaskPRWorkflowAttentionRejectsEmptyExpectedHead(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	tp := &TaskPR{
+		TaskID: "workflow-empty-head-task", WorkspaceID: "workflow-empty-head-workspace",
+		Owner: "acme", Repo: "widget", PRNumber: 8, State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, tp); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	attention := &WorkflowAttention{
+		State: WorkflowAttentionUnknown, HeadSHA: "", ObservedAt: time.Now().UTC(),
+		Runs: []WorkflowAttentionRun{},
+	}
+	row, changed, err := store.UpdateTaskPRWorkflowAttention(
+		ctx, tp.TaskID, tp.RepositoryID, tp.PRNumber, "", attention,
+	)
+	if err != nil || row != nil || changed {
+		t.Fatalf("empty-head write = (%v, %v, %v), want no-op", row, changed, err)
+	}
+	stored, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if stored.WorkflowAttention != nil {
+		t.Fatalf("empty-head row attention = %#v, want nil", stored.WorkflowAttention)
 	}
 }

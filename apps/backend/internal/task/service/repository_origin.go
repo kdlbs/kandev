@@ -14,7 +14,10 @@ func (s *Service) SetGitLabRepositoryOriginVerifier(verifier GitLabRepositoryOri
 }
 
 func (s *Service) verifyRemoteRepositoryOrigin(ctx context.Context, workspaceID string, input *TaskRepositoryInput) error {
-	if input.TrustedProviderDescriptor {
+	// Saved repository IDs and local inputs carry no remote locator of their own;
+	// resolution re-checks workspace ownership for the ID and never re-parses the
+	// extra remote metadata a caller may include with it.
+	if input.RepositoryID != "" || input.TrustedProviderDescriptor || effectiveRemoteURL(*input) == "" {
 		return nil
 	}
 	provider, _, _, canonicalURL, err := parseRemoteRepositoryURL(effectiveRemoteURL(*input), effectiveRemoteProvider(*input))

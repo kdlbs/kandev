@@ -77,20 +77,22 @@ Keep the helper's exit code unchanged and report any separately verified base dr
 For related or stacked PRs, use the semantic-conflict procedure in the same
 reference. Reconcile changed contracts and stable IDs before delivery.
 
-Before waiting and after each push, check `approval_required_runs` for the
-current head. An explicit fixup request authorizes approval of those runs.
-Check the authenticated actor's base-repository access with
-`gh repo view <base-owner>/<base-repo> --json viewerPermission`.
-If the actor has write access, inspect the PR changes, including workflow
-changes, then approve each matching run with
-`gh api --method POST repos/<base-owner>/<base-repo>/actions/runs/<run-id>/approve`.
-Poll the run until the current-head workflow is queued, running, or finished
-with a conclusion other than `action_required`; then use `scripts/pr-await`.
-An approval response alone does not confirm that CI started.
-If the actor cannot approve, address review comments, run local checks, and
-push permitted fixes. Then end the turn reporting that CI awaits maintainer
-approval. If access is unknown or approval fails, report the blocker without
-calling CI clean. A read-only poller cannot approve workflows.
+After every push, immediately refresh `approval_required_runs` for the current
+head; refresh again before waiting. For external-contributor PRs, GitHub may
+hold Actions at `action_required`. A fixup request authorizes approval of listed
+current-head runs; do not call `scripts/pr-await` or end the turn while an
+approvable run remains unapproved.
+
+Check the active GitHub credentials' base-repository permission with
+`gh repo view <base-owner>/<base-repo> --json viewerPermission`. If they grant
+write access, inspect the PR changes, including workflows, then approve each
+listed run with `gh api --method POST repos/<base-owner>/<base-repo>/actions/runs/<run-id>/approve`.
+Poll each run until its current-head workflow is queued, running, or terminal
+without `action_required`, then use `scripts/pr-await`; an approval response
+alone does not confirm CI started. If the credentials cannot approve, address
+review comments, run local checks, and push permitted fixes, then report that
+CI awaits maintainer approval. If access is unknown or approval fails, report
+the blocker without calling CI clean. A read-only poller cannot approve runs.
 
 For pending checks, load [waiting.md](references/waiting.md).
 Use `scripts/pr-await` and its final exit code.
@@ -180,6 +182,12 @@ fetch the exact job log and inspect the workflow step before changing docs or
 the validator. Reproduce the evaluator against the exact PR file set, then
 retry only the failed publisher job once; a successful retry without source
 changes is transient evidence, not proof that the original run was healthy.
+
+When reproducing `validateCoverage` locally, include the content of every
+referenced plan, work order, requirements, and system-design document in
+`fileContents`, including unchanged documents. The evaluator resolves
+requirement IDs from that map, so changed-path-only input can create false
+missing-definition errors.
 If duplicate publisher statuses contain only GitHub API 404/429 or rate-limit
 transport errors, collapse them to the leaf job, keep product/docs unchanged,
 restart `scripts/pr-await`, and verify the rerun and aggregate at the same head.
@@ -198,11 +206,13 @@ retry time is exposed, follow the bounded recovery in
 '{run_attempt,status,conclusion,head_sha}'` and classify only the current
 attempt after its parent workflow is terminal.
 
-For unfamiliar, infrastructure, or E2E failures, load
-`references/ci-troubleshooting.md` and, for transport or queue evidence,
+For unfamiliar or infrastructure failures, load
+`references/ci-troubleshooting.md`. For E2E failures, also load
+`references/e2e-failure-triage.md`. For transport or queue evidence, load
 `references/transport-troubleshooting.md` before changing code.
-Also load it for unexpected zero-duration or no-op manual-review runs: event
-and workflow provenance can explain them without a product-code change.
+Load CI troubleshooting for unexpected zero-duration or no-op manual-review
+runs; event and workflow provenance can explain them without a product-code
+change.
 
 An explicit request to run `pr fixup` owns every failed required check on the
 current head. Never stop by calling a failure "unrelated" only because its

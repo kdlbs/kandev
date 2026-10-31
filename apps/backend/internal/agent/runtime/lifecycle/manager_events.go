@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -549,8 +548,7 @@ func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
 	return execution.isSessionInitialized() && client.HasAgentStream() &&
 		execution.TaskScope == TaskLaunchScopeTask &&
 		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
-		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
-		isRetainableACPAgent(execution.AgentID)
+		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution)
 }
 
 func retainedPromptFailureExecutionMatches(
@@ -579,15 +577,6 @@ func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
 	}
 	return (execution.Owner.TaskID == "" || execution.Owner.TaskID == execution.TaskID) &&
 		(execution.Owner.SessionID == "" || execution.Owner.SessionID == execution.SessionID)
-}
-
-func isRetainableACPAgent(agentID string) bool {
-	switch agentID {
-	case claudeACPAgentID, codexACPAgentID, openCodeACPAgentID, acpcompat.CursorAgentID, "mock-agent":
-		return true
-	default:
-		return false
-	}
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {

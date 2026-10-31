@@ -249,7 +249,7 @@ function useTaskPageRecoveryFeedback(
     hasTaskMoveError: taskMoveError !== null,
     hasEnsureSessionError: ensureSession.status === "error",
     hasBootstrapRecoveryError: bootstrapRecoveryError !== null,
-    hasTaskReadRecovery: Boolean(taskReadRecovery?.temporaryError),
+    hasTaskReadRecovery: Boolean(taskReadRecovery?.exhausted),
     effectiveSessionId,
     isSessionPassthrough: sessionPanel.isSessionPassthrough,
     hasComposerRecoveryOwner: automaticRecoveryOwnedByChat,

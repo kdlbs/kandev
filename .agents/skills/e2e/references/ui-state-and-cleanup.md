@@ -23,6 +23,13 @@ already-active session may emit no new subscribe frame; consume the original
 frame or trigger a distinct state transition. Verify ordering in the owning
 Playwright project with `--retries=0`.
 
+When `page.routeWebSocket` gates frames, use `socket.onMessage` for
+browser-to-backend requests and `server.onMessage` for backend-to-browser
+notifications. Forward frames in the other direction immediately. If a
+foreground history refresh can replace a held row, also hold the target
+session's latest `message.list` response and verify it is queued before
+releasing the held frames.
+
 Arm every WebSocket wait before the action that should produce it, including all
 waits when one action emits multiple notifications. Establish startup state with
 REST `expect.poll`, then correlate each post-action event by an active-to-settled

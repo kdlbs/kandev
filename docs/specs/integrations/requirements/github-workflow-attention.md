@@ -30,6 +30,8 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.6:** Missing checks or unstable mergeability alone shall not imply approval. Unavailable provider evidence shall remain distinct from an observed absence of approval gates.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.7:** When GitHub requires an action but the reason is ambiguous, Kandev shall show "Workflow needs attention" instead of an approval claim.
 - **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.8:** An approval reason shall replace unexplained "unstable" copy in the affected summary. Independent conflicts, reviews, queue state, and actual failures shall remain visible.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9:** Automatic monitoring shall refresh workflow attention for every open known PR on the same one-minute cadence as its check status, including when many monitored PRs share one GitHub principal. When local admission defers that refresh, the attempt shall resume at its retry boundary without waiting for the next minute. Until it completes, the stored observation shall remain unchanged and shall not be marked stale.
+- **AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.10:** When the job evidence that classifies an action-required workflow is unavailable, Kandev shall treat the observation as unavailable. It shall neither claim approval nor claim generic workflow attention from that missing evidence.
 
 ### REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002: Bounded Actions caching
 
@@ -70,3 +72,4 @@ The shared [task summary](../../ui/requirements/pr-task-status-summary.md) owns 
 - [Task approval badge](../../../plans/github-workflow-approval-badge/plan.md)
 
 - [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).
+- [Workflow approval freshness](../../../plans/github-workflow-approval-freshness/plan.md)

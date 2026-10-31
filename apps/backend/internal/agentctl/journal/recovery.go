@@ -38,6 +38,10 @@ type SubmissionSummary struct {
 // high-water mark only for the bounded replay it requested.
 type RecoveryDescriptor struct {
 	StorageCapability
+	// ProcessManagerID identifies the current producer lifetime. It is supplied
+	// by agentctl and is not journal state; retained events use it to distinguish
+	// events from a manager that has since been replaced.
+	ProcessManagerID     string              `json:"process_manager_id,omitempty"`
 	SessionID            string              `json:"session_id"`
 	IncarnationID        string              `json:"incarnation_id"`
 	HarnessGeneration    uint64              `json:"harness_generation"`

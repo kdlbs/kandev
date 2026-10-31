@@ -37,6 +37,7 @@
   "configurationChat": "Chat de configuração",
   "configurationChatDescription": "Deixe o agente atualizar as definições, fluxos de trabalho, perfis de agente e configuração MCP do Kandev.",
   "configurationChatTab": "Chat de configuração",
+  "continuationActivityResumed": "O agente retomou",
   "continuationHistoryPreserved": "A conversa anterior é preservada.",
   "continuationIn": "A continuar em {{countdown}}.",
   "continuationPhase_continuing": "A continuar o pedido anterior...",

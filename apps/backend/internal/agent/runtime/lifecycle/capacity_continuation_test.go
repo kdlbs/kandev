@@ -117,8 +117,3 @@ func TestCapacityContinuationRetainsOpenCodeRuntime(t *testing.T) {
 	require.True(t, turnFailed, "the OpenCode retained turn failure must publish agent.turn_failed")
 	require.False(t, failed, "an OpenCode retained turn failure must not publish a terminal execution failure")
 }
-
-func TestRetainableACPAgentCoversOpenCode(t *testing.T) {
-	require.True(t, isRetainableACPAgent(openCodeACPAgentID))
-	require.False(t, isRetainableACPAgent("unproven-acp"))
-}

@@ -34,6 +34,9 @@ func (r *recordingPriorityTaskRepository) UpdateTaskPreservingDeferredLaunch(ctx
 
 func TestUpdateTask_PriorityOnlyUsesFieldScopedRepositoryWrite(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
+	// The cleanup worker reads svc.tasks; stop it before swapping the
+	// repository so the test does not race a background pass.
+	svc.StopTaskResourceCleanupWorker()
 	ctx := context.Background()
 	setupTestTask(t, repo)
 

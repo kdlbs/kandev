@@ -122,6 +122,10 @@ already cached the task's workspace before deletion.
 - When no persisted summary row exists, the first source event rehydrates configured authoritative
   session, Git, and pull-request observations before deriving the new row. The event therefore updates
   one keyed observation without discarding unchanged siblings from other keys.
+- Optional `turn_error` carries nonblocking task attention for retained failed turns.
+  Its bounded shape, stamped acknowledgement, and projection rules belong to the
+  [prompt-error continuity design](acp-prompt-error-continuity.md#durable-task-attention).
+  It stays separate from `active_error`, pending input, and foreground activity.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant session error or task-owned pre-session launch error.
 - `active_error.session_id` is optional for a task-owned error.

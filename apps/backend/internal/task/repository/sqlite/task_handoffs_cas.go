@@ -104,22 +104,27 @@ func (r *Repository) lockTaskRowForHandoffs(ctx context.Context, tx *sqlx.Tx, ta
 	return raw.String, nil
 }
 
-// handoffProvenanceMetaKeys are the task-handoff provenance keys that must
-// never regress to a stale in-memory value: SetTaskHandoffsIfUnchanged's
-// key-scoped compare-and-set writes MetaKeyHandoffs directly against the DB
-// row, entirely outside of any *models.Task snapshot a concurrent full-row
-// writer might be holding.
-var handoffProvenanceMetaKeys = []string{models.MetaKeyHandoffs, models.MetaKeyHandoffSource}
+// protectedLiveMetadataKeys are task metadata keys with their own conditional
+// writers that must never regress to a stale in-memory value. Handoff
+// provenance is written by SetTaskHandoffsIfUnchanged outside any
+// *models.Task snapshot; turn-error attention is written by the stamped
+// record/acknowledge operations. A full-row writer holding a snapshot from
+// before either commit must not clear or overwrite them.
+var protectedLiveMetadataKeys = []string{
+	models.MetaKeyHandoffs,
+	models.MetaKeyHandoffSource,
+	models.MetaKeyLastTurnError,
+}
 
-// preserveLiveHandoffProvenance overwrites handoffProvenanceMetaKeys in
+// preserveProtectedLiveMetadata overwrites protectedLiveMetadataKeys in
 // outgoing (the metadata a full-row task write is about to persist) with
 // whatever is currently committed for the task, so that write can never
-// revert a provenance key to the value it held when the caller's in-memory
-// task snapshot was read. It must run inside the same transaction and after
-// the same row lock (readTaskStepInTx) as the write it protects, so on
-// Postgres it observes any handoffs CAS append that committed first; SQLite
-// gets the same ordering from single-writer transaction serialization.
-func (r *Repository) preserveLiveHandoffProvenance(ctx context.Context, tx *sql.Tx, taskID string, outgoing []byte) ([]byte, error) {
+// revert a newer value to the one held when the caller's snapshot was read.
+// It must run inside the same transaction and after the same row lock
+// (readTaskStepInTx) as the write it protects, so on Postgres it observes any
+// conditional write that committed first; SQLite gets the same ordering from
+// single-writer transaction serialization.
+func (r *Repository) preserveProtectedLiveMetadata(ctx context.Context, tx *sql.Tx, taskID string, outgoing []byte) ([]byte, error) {
 	var raw sql.NullString
 	err := tx.QueryRowContext(ctx, r.db.Rebind("SELECT metadata FROM tasks WHERE id = ?"), taskID).Scan(&raw)
 	if err == sql.ErrNoRows {
@@ -134,6 +139,11 @@ func (r *Repository) preserveLiveHandoffProvenance(ctx context.Context, tx *sql.
 		if err := json.Unmarshal(outgoing, &merged); err != nil {
 			return nil, fmt.Errorf("parse outgoing metadata for handoff provenance: %w", err)
 		}
+		if merged == nil {
+			// A JSON null payload decodes to a nil map; the live protected keys
+			// must still be spliced into an object.
+			merged = make(map[string]json.RawMessage)
+		}
 	}
 
 	var current map[string]json.RawMessage
@@ -143,7 +153,7 @@ func (r *Repository) preserveLiveHandoffProvenance(ctx context.Context, tx *sql.
 		}
 	}
 
-	for _, key := range handoffProvenanceMetaKeys {
+	for _, key := range protectedLiveMetadataKeys {
 		if value, ok := current[key]; ok {
 			merged[key] = value
 		} else {

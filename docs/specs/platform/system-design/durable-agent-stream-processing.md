@@ -51,6 +51,9 @@ The bounded intake budget is 4 MiB; storage work does not hold control-response 
 Every original event retains its sequence and effect identity.
 Tool, permission, terminal, turn, and owner changes flush the preceding batch.
 Canonical message changes and projected cursor advancement commit atomically.
+For a batched event, inbox receipt and received-cursor advancement join that
+same transaction; see [delivery write cost](durable-delivery-write-cost.md).
+Unbatched events keep a separate receipt transaction.
 Notification follows successful projection and does not depend on HTTP acknowledgment success.
 
 ### Canonical text segments
@@ -250,3 +253,38 @@ The predecessor's retained stream, submissions and recovery block stay as
 history; current-generation admission no longer consults them. Fresh start never
 receives, projects, or acknowledges the predecessor stream.
 Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).
+
+## Uncommitted first-generation relaunch
+
+A first launch can fail before any native conversation commits, for example
+when the provider rejects ACP `session/new`. Its child may still have appended
+setup events to stream `<incarnation>:g1`. Without a committed generation, an
+explicit relaunch (Resume or Start fresh) stays on generation one and reuses
+that stream. Such a relaunch is a generation-one bootstrap, not a restored
+session. Preflight permits replay from zero under the fresh-bootstrap rule when
+all of these hold:
+
+- The launch carries no native session ID and no required native conversation.
+- SQL has no harness generation for the session incarnation and no delivery cursor.
+- The authenticated stream retains the full prefix from sequence one.
+- The stream has zero acknowledgments, no unresolved submissions, and no
+  submission records.
+
+The launch's predecessor execution does not matter. Replay creates no
+checkpoint or receipt. The existing bootstrap processor waits for the
+replacement's generation-one commit before it receives, projects, or
+acknowledges any event. If any condition fails, the checkpoint stays missing.
+That covers committed native conversations, retained prompt work, pruned
+history, and an existing cursor. Those cases keep their dedicated recovery
+paths above.
+
+Managed process-exit errors carry both `process_generation` and an opaque
+`process_manager_id`. The authenticated delivery descriptor reports the
+current manager ID. Lifecycle compares manager IDs before it uses the local
+process generation, because each new process manager starts its counter at one.
+An error from a different manager is retired even when both managers report
+generation one. If an event has a manager ID but the current ID is unavailable,
+lifecycle also retires it. A managed exit without an ID is retired when the
+current descriptor has an ID, because the producer cannot be identified. Older
+descriptors keep the existing generation check for compatibility.
+Delivery: [Uncommitted bootstrap relaunch](../../../plans/uncommitted-bootstrap-relaunch/plan.md).

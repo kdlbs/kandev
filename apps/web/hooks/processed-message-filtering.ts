@@ -10,6 +10,10 @@ import {
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
+import {
+  isAutomaticPermissionPresentation,
+  permissionPresentationFromMetadata,
+} from "@/lib/permissions/presentation";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -33,7 +37,10 @@ function isVisibleMessageType(type: MessageType | undefined): boolean {
 }
 
 function isPermissionVisible(message: Message, toolCallIds: Set<string>): boolean {
-  const metadata = message.metadata as { tool_call_id?: string; status?: string } | undefined;
+  const metadata = message.metadata as
+    | { tool_call_id?: string; status?: string; permission_presentation?: unknown }
+    | undefined;
+  if (isAutomaticPermissionPresentation(permissionPresentationFromMetadata(metadata))) return false;
   const toolCallId = metadata?.tool_call_id;
   if (toolCallId && toolCallIds.has(toolCallId)) return false;
   const status = metadata?.status;

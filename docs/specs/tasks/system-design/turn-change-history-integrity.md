@@ -134,8 +134,66 @@ The selected target identity must remain the same across endpoints.
 
 A comparison has `comparison_version = 2` and one basis:
 `direct`, `upstream_adjusted`, `history_unavailable`, or `legacy_raw`.
-Changed real HEAD also requires a stable symbolic branch binding.
+Comparison requires a stable symbolic branch binding, including when real HEAD stays unchanged.
+A verified title rename can preserve that binding through the receipt extension below.
 A branch switch is changed context; detached history needs the same explicit base proof.
+
+### Generated-branch continuity
+
+The [binding decision](../../../decisions/2026-10-30-turn-checkpoint-branch-binding.md)
+defines the planned extension for AC-002.14 and AC-002.15.
+It adds optional `Provenance.HeadBindingID` (`head_binding_id`) to v2 receipts.
+The captured `HeadRef` remains the actual symbolic ref.
+
+Each cached `GitOperator` keeps one bounded branch binding: a UUID and its observed ref.
+Capture creates a fresh binding when no binding exists or the observed ref differs.
+Detached HEAD has no binding ID. Receipt retries read the original checkpoint body.
+They never restore live binding state from an old receipt.
+
+Only the title owner's verified generated-branch path can carry a binding across ref names.
+The orchestrator passes the recorded old branch through the
+`RenameGeneratedBranchForSession` method and an optional `expected_generated_branch`
+field on the existing agentctl rename request.
+Ordinary rename callers omit that field.
+Agentctl validates the expected branch against actual symbolic HEAD under the
+checkout capture lock before Git mutation.
+The rename uses explicit old and new branch operands.
+Post-operation checks require the expected new ref and unchanged real HEAD.
+An existing binding transfers only when its recorded ref matches the observed old ref.
+Otherwise, a fresh binding prevents continuity with an earlier checkout state.
+
+Capture and generated rename serialize through `acquireTurnCheckpointLock`.
+Binding reads and writes also obey the operator's memory synchronization.
+Capture verifies its binding ID with the other before/after provenance fields.
+Generic renames and external branch switches cannot transfer a binding.
+An ordinary rename clears the live binding, so a recreated branch name cannot
+reuse an earlier checkout identity.
+The next capture observes the different ref and creates a new ID.
+Failed, mismatched, or raced renames never transfer the previous binding.
+
+Comparison accepts different nonempty symbolic refs only when both immutable
+receipts contain the same valid, nonempty binding UUID.
+When the symbolic ref names match, two known binding UUIDs must still match:
+a branch switch can recreate the previous name at the same commit.
+A receipt without an ID keeps the legacy equal-ref fallback; differing names
+still require valid shared proof.
+The same binding predicate also applies where unborn-first-root eligibility
+requires branch continuity. Other history eligibility checks retain their meaning.
+An ID match never overrides target changes, unsafe operations, missing ancestry,
+normalization conflicts, or invalid object evidence.
+
+Once both receipts exist, comparison needs no live binding state.
+The existing provenance JSON and checkpoint commit bodies retain the IDs.
+No SQL migration, separate journal, new capability version, or public setting is needed.
+Agentctl replacement before the end receipt loses unrecorded binding continuity.
+A renamed interval then fails closed; recovery never infers proof from reflogs or current refs.
+Backend restart with retained agentctl preserves its live binding.
+Old receipts without IDs retain the strict ref check when names differ.
+Accepted historical comparisons are never recalculated to repair this defect.
+
+Desktop and phone use the existing projection: a ready zero-file result has no card.
+A renamed turn with edits uses the existing card and historical diff surface.
+Unproven history retains its unavailable state, including the zero-entry exception.
 
 ### Direct comparison
 
@@ -160,7 +218,7 @@ All eligibility conditions must hold:
 4. `B0` is a strict ancestor of `B1`, and both bases belong to their captured HEAD ancestry.
 5. Capture observed no active merge/rebase operation or provenance race.
 6. The executor supports the controlled tree-merge capability.
-7. The symbolic branch binding did not switch between captures.
+7. The symbolic branch binding stayed continuous under the receipt rules above.
 
 The target commit may already be ahead at turn start.
 Use the captured merge base, not the target's tip, as the starting branch baseline.
@@ -524,3 +582,4 @@ lost acknowledgements, stale claims, mixed active/completed turns, and cleanup r
 - [Decision](../../../decisions/2026-10-27-turn-change-history-integrity.md)
 - [Original delivery plan](../../../plans/turn-changed-files/plan.md)
 - [Fix plan](../../../plans/turn-change-history-integrity/plan.md)
+- [Generated-branch continuity fix plan](../../../plans/turn-change-title-branch-continuity/plan.md)

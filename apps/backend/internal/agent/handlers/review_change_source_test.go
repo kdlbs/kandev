@@ -35,6 +35,59 @@ func TestReviewChangeSourceExecutionFailures(t *testing.T) {
 	}
 }
 
+func TestReviewChangeSourceDoesNotFallbackWhenSessionExecIsDenied(t *testing.T) {
+	denied := errors.New("session execution denied")
+	lookup := &mockExecutionLookup{ensureErr: denied, execAccessErr: denied}
+	reader := &localReviewReaderStub{files: map[string]any{"secret.go": "local"}}
+	source := NewReviewChangeSource(lookup, reader)
+
+	files, err := source.UncommittedFiles(context.Background(), "s")
+
+	if !errors.Is(err, denied) {
+		t.Fatalf("UncommittedFiles error = %v, want session.exec denial", err)
+	}
+	if files != nil {
+		t.Fatalf("files = %#v, want no local files", files)
+	}
+	if reader.calls != 0 {
+		t.Fatalf("local reader calls = %d, want 0 after authorization denial", reader.calls)
+	}
+	if lookup.execAccessCalls != 1 {
+		t.Fatalf("session.exec checks = %d, want 1", lookup.execAccessCalls)
+	}
+}
+
+func TestReviewChangeSourceFallsBackForAuthorizedUnavailableRuntime(t *testing.T) {
+	lookup := &mockExecutionLookup{ensureErr: errors.New("runtime unavailable")}
+	reader := &localReviewReaderStub{files: map[string]any{"main.go": "local"}}
+	source := NewReviewChangeSource(lookup, reader)
+
+	files, err := source.UncommittedFiles(context.Background(), "s")
+
+	if err != nil {
+		t.Fatalf("UncommittedFiles: %v", err)
+	}
+	if files["main.go"] != "local" || reader.calls != 1 {
+		t.Fatalf("files = %#v, local reader calls = %d", files, reader.calls)
+	}
+	if lookup.execAccessCalls != 1 {
+		t.Fatalf("session.exec checks = %d, want 1", lookup.execAccessCalls)
+	}
+}
+
+type localReviewReaderStub struct {
+	calls int
+	files map[string]any
+	err   error
+}
+
+func (*localReviewReaderStub) GetSessionBaseCommit(context.Context, string) string { return "" }
+func (*localReviewReaderStub) GetSessionBaseBranch(context.Context, string) string { return "" }
+func (r *localReviewReaderStub) LocalReviewFiles(context.Context, string, bool) (map[string]any, error) {
+	r.calls++
+	return r.files, r.err
+}
+
 func TestReviewChangeSourceUncommittedFiles(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -141,6 +194,30 @@ func TestReviewChangeSourceCommittedFilesWrapsDiffFailure(t *testing.T) {
 	_, err := source.CommittedFiles(context.Background(), "s")
 	if err == nil || !strings.Contains(err.Error(), "cumulative diff for session s:") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReviewChangeSourceCommittedFilesFallsBackOnUnavailableComparisonResult(t *testing.T) {
+	server := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/git/status":
+			_, _ = w.Write([]byte(`{"success":true,"base_commit":"base"}`))
+		case "/api/v1/git/cumulative-diff":
+			_, _ = w.Write([]byte(`{"success":false,"files":{},"error":"comparison target unavailable","error_code":"comparison_target_ref_unavailable"}`))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	})
+	reader := &localReviewReaderStub{files: map[string]any{"committed.go": "local"}}
+	server.sessionReader = reader
+
+	files, err := server.CommittedFiles(context.Background(), "s")
+
+	if err != nil {
+		t.Fatalf("CommittedFiles: %v", err)
+	}
+	if files["committed.go"] != "local" || reader.calls != 1 {
+		t.Fatalf("files = %#v, local reader calls = %d", files, reader.calls)
 	}
 }
 
