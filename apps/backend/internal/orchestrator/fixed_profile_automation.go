@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/automation"
@@ -16,7 +17,7 @@ type fixedProfileWaitIdentityKey struct{}
 
 func (s *Service) retainFixedProfileAutomation(
 	ctx context.Context, task *models.Task, session *models.TaskSession, prompt string,
-	metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string,
+	metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string, initialStart ...bool,
 ) bool {
 	if runID == "" || s.messageQueue == nil {
 		return false
@@ -30,6 +31,9 @@ func (s *Service) retainFixedProfileAutomation(
 		"run_id": runID, "prompt": prompt, "metadata": metadata,
 		"action": string(action), "reason": reason,
 		"incarnation_id": identity.SessionIncarnationID, "since": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if len(initialStart) > 0 && initialStart[0] {
+		wait["initial_start"] = true
 	}
 	return s.repo.SetSessionMetadataKey(ctx, session.ID, fixedProfileAutomationWaitKey, wait) == nil
 }
@@ -93,6 +97,9 @@ func (s *Service) resumeFixedProfileContinuation(ctx context.Context, run *autom
 	if err != nil || a == nil || !a.Enabled {
 		return false
 	}
+	if initial, _ := wait["initial_start"].(bool); initial {
+		return s.resumeFixedProfileInitialStart(ctx, a, run, task, session, wait)
+	}
 	metadata, _ := wait["metadata"].(map[string]interface{})
 	bound := s.dispatchAutomationContinuation(ctx, a, task, session, models.StringFromAny(wait["prompt"]), metadata,
 		run.ID, automation.ThreadAction(models.StringFromAny(wait["action"])), models.StringFromAny(wait["reason"]))
@@ -136,4 +143,34 @@ func (s *Service) fixedProfileAutomationTask(ctx context.Context, session *model
 		return nil, false
 	}
 	return task, true
+}
+
+func (s *Service) retainFixedProfileAutomationStart(
+	ctx context.Context, a *automation.Automation, task *models.Task, runID string,
+	action automation.ThreadAction, reason string, err error,
+) bool {
+	var refusal *FixedProfileSuspendedError
+	if runID == "" || !errors.As(err, &refusal) || refusal.SessionID == "" {
+		return false
+	}
+	ctx = context.WithoutCancel(ctx)
+	session, readErr := s.repo.GetTaskSession(ctx, refusal.SessionID)
+	if readErr != nil || session == nil || session.TaskID != task.ID {
+		return false
+	}
+	metadata := map[string]interface{}{"automation_id": a.ID, "automation_run_id": runID}
+	return s.retainFixedProfileAutomation(ctx, task, session, task.Description, metadata, runID, action, reason, true)
+}
+
+// An unattempted start has no resumable executor. Re-enter the normal task
+// start and run binder; do not send its initial prompt as a continuation.
+func (s *Service) resumeFixedProfileInitialStart(ctx context.Context, a *automation.Automation, run *automation.AutomationRun, task *models.Task, session *models.TaskSession, wait map[string]interface{}) bool {
+	pendingTask := *task
+	pendingTask.Description = models.StringFromAny(wait["prompt"])
+	bound := s.autoStartAutomationTaskForRun(ctx, a, &pendingTask, task.WorkflowStepID, run.ID,
+		automation.ThreadAction(models.StringFromAny(wait["action"])), models.StringFromAny(wait["reason"]), true, nil)
+	if bound {
+		s.clearFixedProfileMetadataWait(ctx, session.ID, fixedProfileAutomationWaitKey, wait)
+	}
+	return bound
 }

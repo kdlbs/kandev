@@ -18,6 +18,7 @@ import (
 // execution profile whose own resource circuit is open. The profile keeps its
 // configured model: the refusal never selects or implies another one.
 type FixedProfileSuspendedError struct {
+	SessionID          string
 	ExecutionProfileID string
 	Suspension         dynamicruntime.Suspension
 }
@@ -95,7 +96,7 @@ func (s *Service) refuseFixedProfileDispatch(ctx context.Context, sessionID, exe
 	if !known || !suspension.Blocked() {
 		return nil
 	}
-	refusal := &FixedProfileSuspendedError{ExecutionProfileID: executionProfileID, Suspension: suspension}
+	refusal := &FixedProfileSuspendedError{SessionID: sessionID, ExecutionProfileID: executionProfileID, Suspension: suspension}
 	s.surfaceFixedProfileSuspension(ctx, sessionID, suspension)
 	return refusal
 }

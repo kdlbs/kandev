@@ -1684,6 +1684,9 @@ func (s *Service) autoStartAutomationTaskForRun(
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
 		dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 		if err != nil {
+			if s.retainFixedProfileAutomationStart(ctx, a, task, runID, action, reason, err) {
+				return automation.RunDispatch{}, errors.Join(err, automation.ErrRunDeferred)
+			}
 			return automation.RunDispatch{}, err
 		}
 		if operation != nil && operation.State == retryOperationCommittedState {
@@ -1698,6 +1701,7 @@ func (s *Service) autoStartAutomationTaskForRun(
 
 	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 	if err != nil {
+		s.retainFixedProfileAutomationStart(ctx, a, task, runID, action, reason, err)
 		if isSessionRecoveryRequiredError(err) || isFixedProfileSuspendedError(err) {
 			s.logger.Info("parked automation task before further dispatch",
 				zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.Error(err))

@@ -98,6 +98,9 @@ func (s *Service) resumeFixedProfileWaits(ctx context.Context) {
 	for _, session := range sessions {
 		wait, ok := session.Metadata[fixedProfileWaitMetadataKey].(map[string]interface{})
 		if !ok || wait["incarnation_id"] != session.QueueIncarnationID {
+			wait, ok = session.Metadata[fixedProfileAutomationWaitKey].(map[string]interface{})
+		}
+		if !ok || wait["incarnation_id"] != session.QueueIncarnationID {
 			continue
 		}
 		suspension, known := s.fixedProfileSuspensionForSession(ctx, session)
