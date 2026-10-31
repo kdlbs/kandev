@@ -307,12 +307,21 @@ test.describe("Subtask basics", () => {
       const dialog = testPage.getByTestId("new-subtask-dialog");
       await dialog.getByTestId("subtask-workspace-mode-new").click();
       await dialog.getByTestId("executor-profile-selector").click();
-      await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
+      const localProfileOption = testPage.getByRole("option", {
+        name: new RegExp(localProfile.name),
+      });
+      await localProfileOption.click();
       await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
         localProfile.name,
       );
-      await dialog.getByTestId("branch-chip-trigger").click();
-      await testPage.getByRole("option", { name: new RegExp(policy.name) }).click();
+      await expect(localProfileOption).toBeHidden();
+
+      const branchPicker = dialog.getByTestId("branch-chip-trigger");
+      await branchPicker.click();
+      await expect(branchPicker).toHaveAttribute("aria-expanded", "true");
+      const policyOption = testPage.getByRole("option", { name: new RegExp(policy.name) });
+      await expect(policyOption).toBeVisible();
+      await policyOption.click();
       await expect(dialog.getByTestId("branch-chip-trigger")).toContainText(policy.name);
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
         "aria-pressed",

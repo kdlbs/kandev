@@ -124,12 +124,31 @@ export async function reportFixtureUsage(
 }
 
 export async function readUsage(page: Page, workspace: string, query: Record<string, string> = {}) {
-  const params = new URLSearchParams({ range: "all", group: "task", timezone: "UTC", ...query });
-  const response = await page.request.get(
-    `/api/v1/workspaces/${workspace}/stats/token-usage?${params}`,
-  );
+  const response = await page.request.get(usageReadURL(workspace, query));
   expect(response.status(), await response.text()).toBe(200);
   return response.json() as Promise<TokenUsageResponse>;
+}
+
+function usageReadURL(workspace: string, query: Record<string, string>) {
+  const params = new URLSearchParams({ range: "all", group: "task", timezone: "UTC", ...query });
+  return `/api/v1/workspaces/${workspace}/stats/token-usage?${params}`;
+}
+
+function isTransientUsageReadFailure(status: number, responseBody: string) {
+  if (status !== 503) return false;
+
+  let body: unknown;
+  try {
+    body = JSON.parse(responseBody);
+  } catch {
+    return false;
+  }
+
+  if (typeof body !== "object" || body === null) return false;
+  const payload = body as { code?: unknown; error_code?: unknown };
+  return [payload.code, payload.error_code].some(
+    (code) => code === "analytics_busy" || code === "persistence_unavailable",
+  );
 }
 
 export async function waitForUsage(
@@ -139,25 +158,31 @@ export async function waitForUsage(
   query: Record<string, string> = {},
 ) {
   let report: TokenUsageResponse | undefined;
+  let terminalError: Error | undefined;
   await expect
     .poll(
       async () => {
-        report = await readUsage(page, workspace, query);
-        return {
-          status: report.projection_status,
-          pending: report.projection_pending,
-          published: Boolean(report.projection_generation),
-          tokens: report.totals.amounts_decimal?.total_tokens,
-        };
+        const response = await page.request.get(usageReadURL(workspace, query));
+        if (response.status() !== 200) {
+          const responseBody = await response.text();
+          if (isTransientUsageReadFailure(response.status(), responseBody)) return false;
+          terminalError = new Error(
+            `${responseBody}: expected HTTP 200, received ${response.status()}`,
+          );
+          return true;
+        }
+        report = (await response.json()) as TokenUsageResponse;
+        return (
+          report.projection_status === "ready" &&
+          !report.projection_pending &&
+          Boolean(report.projection_generation) &&
+          report.totals.amounts_decimal?.total_tokens === tokens
+        );
       },
       { timeout: 30_000, message: "Waiting for the real retained publication and exact totals" },
     )
-    .toEqual({
-      status: "ready",
-      pending: false,
-      published: true,
-      tokens,
-    });
+    .toBe(true);
+  if (terminalError) throw terminalError;
   if (!report) throw new Error("No retained report was read");
   return report;
 }

@@ -402,3 +402,22 @@ These focused passes do not close delivery. The current CI artifact audit found 
 The exact-head retry audit found three flaky tests despite successful E2E jobs. The Git fixture now pauses the active content source atomically and verifies HTTP 404 before restore and HTTP 200 after restore. The history deadline fixture waits for required persistence and publication to recover before UI Retry; it preserves both error cards and saved values until then. The mobile initial-load fixture waits for all three workload rows to persist before navigation. No product UI or timeout changed.
 
 Reviewed local checks use one worker and zero retries. The Git case passed six runs across fixture iterations. History coverage passed five focused repetitions, all five desktop cases, the affected phone case and a final focused assertion check. The mobile case passed six repetitions and its two-case predecessor sequence. Evidence is in `evidence/usage-history-ci-browser-fixup-20261031/`. The mobile failed attempt has no trace, so its exact event ordering remains unknown. The fix preserves initial snapshot coverage and does not claim to repair a production subscription gap. Fresh full CI and its no-flake audit remain required.
+
+### Browser follow-up verification
+
+CI on `863769e` passed 95 checks and skipped 12, but its retry audit found four flaky tests.
+The publication helper now retries only known HTTP 503 readiness errors within its existing deadline.
+Direct reads and unknown failures remain strict.
+The Office fixture clears claimed runs before each permission case.
+Eight preceding setup cases reproduced the original scheduler queue timeout before this correction.
+
+The subtask fixture waits for one popover to close before it opens the next.
+This race did not reproduce locally, so its cause remains an inference.
+The phone fixture waits for menu animations before it measures the unchanged touch-target threshold.
+The original phone test failed four of five local runs.
+
+Reviewed browser runs passed with zero retries, including the Office predecessor sequence and twelve phone cases.
+The helper unit tests passed all six cases.
+Evidence is in `evidence/usage-history-ci-browser-followup-20261031/`.
+These corrections change test fixtures only; production code and test deadlines remain unchanged.
+Fresh CI, a zero-flake artifact audit, and both full performance gates remain required.
