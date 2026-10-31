@@ -42,6 +42,9 @@ func (m *Manager) stopPendingRemoteRecovery(
 	if err != nil {
 		return false, fmt.Errorf("attach exact remote execution for stop: %w", err)
 	}
+	if ri == nil && pluginStopDefersToEnvironmentCleanup(entry.record.Runtime, reason) {
+		return true, nil
+	}
 	if ri == nil {
 		return m.stopAbsentRemoteOwner(ctx, backend, entry, reason, force, outcome)
 	}
