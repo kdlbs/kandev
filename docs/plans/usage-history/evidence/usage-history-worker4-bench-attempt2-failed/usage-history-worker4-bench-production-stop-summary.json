@@ -1,0 +1,85 @@
+{
+  "status": "STOPPED_FOR_PRODUCTION_FIX",
+  "source_set_sha256": "469f1b39d7633e2860e607b864e49b14aa1beb11b0501d692ec5415d32073141",
+  "source_hashes_unchanged": true,
+  "sqlite_full_command_passed": false,
+  "postgres_started": false,
+  "four_older_years_added": false,
+  "measured_fixture": {
+    "retained_native_observations": 200005,
+    "retained_external_observations": 20010,
+    "published_canonical_facts": 220012,
+    "daily_summary_rows": 4392,
+    "lifetime_summary_rows": 4,
+    "fixture_disk_bytes": 2182005176,
+    "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+  },
+  "completed_ten_sample_subbenchmarks": [
+    {
+      "scenario": "five_years/UTC",
+      "samples": 10,
+      "p50_ms": 3943.885711,
+      "p95_ms": 4009.241737,
+      "p99_ms": 4009.241737,
+      "sqlite_nvisit": 5348698,
+      "query_process_peak_rss_bytes": 46960640,
+      "sqlite_native_baseline_bytes": 2507768,
+      "sqlite_native_peak_bytes": 7340440,
+      "source_file": "usage-history-worker4-bench-sqlite-one_year-five_years-UTC.json"
+    },
+    {
+      "scenario": "recent/America/New_York",
+      "samples": 10,
+      "p50_ms": 1308.574916,
+      "p95_ms": 1518.906364,
+      "p99_ms": 1518.906364,
+      "sqlite_nvisit": 2532940,
+      "query_process_peak_rss_bytes": 55246848,
+      "sqlite_native_baseline_bytes": 2507768,
+      "sqlite_native_peak_bytes": 12085144,
+      "source_file": "usage-history-worker4-bench-sqlite-one_year-recent-America-New_York.json"
+    },
+    {
+      "scenario": "recent/Asia/Kathmandu",
+      "samples": 10,
+      "p50_ms": 1824.517712,
+      "p95_ms": 1847.031023,
+      "p99_ms": 1847.031023,
+      "sqlite_nvisit": 2538315,
+      "query_process_peak_rss_bytes": 51138560,
+      "sqlite_native_baseline_bytes": 2507768,
+      "sqlite_native_peak_bytes": 12085096,
+      "source_file": "usage-history-worker4-bench-sqlite-one_year-recent-Asia-Kathmandu.json"
+    },
+    {
+      "scenario": "recent/Europe/Lisbon",
+      "samples": 10,
+      "p50_ms": 1791.891225,
+      "p95_ms": 1900.565638,
+      "p99_ms": 1900.565638,
+      "sqlite_nvisit": 2538321,
+      "query_process_peak_rss_bytes": 55513088,
+      "sqlite_native_baseline_bytes": 2507768,
+      "sqlite_native_peak_bytes": 12075456,
+      "source_file": "usage-history-worker4-bench-sqlite-one_year-recent-Europe-Lisbon.json"
+    },
+    {
+      "scenario": "recent/UTC",
+      "samples": 10,
+      "p50_ms": 520.276279,
+      "p95_ms": 528.269354,
+      "p99_ms": 528.269354,
+      "sqlite_nvisit": 2070842,
+      "query_process_peak_rss_bytes": 43261952,
+      "sqlite_native_baseline_bytes": 2507768,
+      "sqlite_native_peak_bytes": 4086512,
+      "source_file": "usage-history-worker4-bench-sqlite-one_year-recent-UTC.json"
+    }
+  ],
+  "production_failures": [
+    "Five-year America/New_York report returned analytics busy: context deadline exceeded on the one-year fixture",
+    "Five-year Asia/Kathmandu report returned analytics busy: context deadline exceeded on the one-year fixture"
+  ],
+  "scan_finding": "Four recent UTC report statements each visit 440022 dated contribution entries through idx_usage_contribution_time using only scope, generation, and coverage_start upper bound",
+  "live_original_session_pids": []
+}

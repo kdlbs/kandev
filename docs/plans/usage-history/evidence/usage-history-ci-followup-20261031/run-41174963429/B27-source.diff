@@ -1,0 +1,27 @@
+diff --git a/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts b/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts
+index bbfe0c3aacd..aa547b4fb05 100644
+--- a/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts
++++ b/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts
+@@ -92,12 +92,18 @@ test("desktop preserves the episode when the OpenCode continuation fails without
+     expect(failure.metadata?.attempts_started).toBe(11);
+     await pollUntil(
+       async () => {
+-        const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+-        return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
++        const [{ sessions }, { messages }] = await Promise.all([
++          apiClient.listTaskSessions(fixture.taskId),
++          apiClient.listSessionMessages(fixture.sessionId),
++        ]);
++        return {
++          state: sessions.find((candidate) => candidate.id === fixture.sessionId)?.state,
++          hasRetryNotice: messages.some((message) => message.metadata?.retrying === true),
++        };
+       },
+-      (state) => state === "WAITING_FOR_INPUT",
++      ({ state, hasRetryNotice }) => state === "WAITING_FOR_INPUT" && !hasRetryNotice,
+       30_000,
+-      "waiting for the exhausted OpenCode continuation to settle",
++      "waiting for the exhausted OpenCode continuation and retry notice to settle",
+     );
+     await expect(session.transientRetryCard()).toHaveCount(0);
+     await expect(session.activeChat().getByTestId("retained-turn-recovery-feedback")).toContainText(

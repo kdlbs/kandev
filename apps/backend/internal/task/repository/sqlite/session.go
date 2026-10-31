@@ -49,7 +49,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
 	stampTurnDefaults(turn)
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, r.insertTurnWithSessionLock(ctx, turn)
 	}
@@ -123,9 +123,9 @@ func stampTurnDefaults(turn *models.Turn) {
 	turn.UpdatedAt = now
 }
 
-// insertTurnRow inserts turn's row via execer, which is either r.db (a plain,
-// non-transactional insert) or a *sql.Tx (participating in the caller's
-// transaction). A new turn is session activity, so the same statement batch
+// insertTurnRow inserts the turn in the caller's transaction. With retention
+// enabled, execer must be a *sqlx.Tx so the usage binding and turn commit or
+// roll back together. A new turn is session activity, so the same statement batch
 // also refreshes task_sessions.updated_at: the session reconciliation sweep
 // measures event silence from that row (and the newest message), and a turn
 // dispatched without a user message (auto-start, workflow on_enter) must
@@ -133,6 +133,15 @@ func stampTurnDefaults(turn *models.Turn) {
 func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
 	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
+	}
+	if r.usageHistoryRetainer != nil {
+		tx, ok := execer.(*sqlx.Tx)
+		if !ok {
+			return fmt.Errorf("retained turn binding requires the turn transaction")
+		}
+		if err := r.bindTurnUsageTx(ctx, tx, turn); err != nil {
+			return err
+		}
 	}
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
@@ -144,9 +153,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 	}
 
 	if _, err := execer.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
+		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id, started_at, completed_at, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.UsageBindingID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
 		return err
 	}
 	if err := r.clearManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
@@ -225,7 +234,7 @@ func scanTurn(scanner turnScanner) (*models.Turn, error) {
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.ExecutionProfileID, &turn.RouteGeneration, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.ExecutionProfileID, &turn.RouteGeneration, &turn.UsageBindingID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +256,7 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 // GetTurn retrieves a turn by ID
 func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns WHERE id = ?
 	`), id)
 	return scanTurnRow(row)
@@ -260,7 +269,7 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
 	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
@@ -469,7 +478,7 @@ func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
 // for the session, or nil when the session has no turns.
 func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND %s
 		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
@@ -487,7 +496,7 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
 	defer span.End()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, usage_binding_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND %s
 		ORDER BY turn_row.started_at ASC, turn_row.created_at ASC, turn_row.id ASC
@@ -1329,6 +1338,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
 
 	if err != nil {
+		return err
+	}
+	if err := r.captureUsageCollectionSessionTx(ctx, exec, session.TaskID, session.ID); err != nil {
 		return err
 	}
 	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
@@ -4018,6 +4030,77 @@ func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*mo
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListTaskSessionsForPlugin applies the cross-task session filters in SQL.
+// The plugin Host asks for one row past its page size; the extra row lets it
+// report HasMore without loading every task's sessions into memory.
+func (r *Repository) ListTaskSessionsForPlugin(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessionsForPlugin")
+	defer span.End()
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > sqliteMaxHostParams-8 {
+		limit = sqliteMaxHostParams - 8
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `SELECT ` + taskSessionSelectCols + ` ` + taskSessionFromClause + `
+		JOIN tasks t ON t.id = ts.task_id
+		WHERE 1 = 1`
+	args := make([]interface{}, 0, len(filter.WorkspaceIDs)+len(filter.TaskIDs)+len(filter.SessionIDs)+len(filter.States)+3)
+	appendIn := func(column string, values []string) {
+		placeholders, inArgs := buildInPlaceholders(values)
+		query += " AND " + column + " IN (" + placeholders + ")"
+		args = append(args, inArgs...)
+	}
+	if len(filter.WorkspaceIDs) > 0 {
+		appendIn("t.workspace_id", filter.WorkspaceIDs)
+	}
+	if len(filter.TaskIDs) > 0 {
+		appendIn("ts.task_id", filter.TaskIDs)
+	}
+	if len(filter.SessionIDs) > 0 {
+		appendIn("ts.id", filter.SessionIDs)
+	}
+	if len(filter.States) > 0 {
+		states := make([]string, len(filter.States))
+		for i, state := range filter.States {
+			states[i] = string(state)
+		}
+		appendIn("ts.state", states)
+	}
+	if filter.UpdatedSince != nil {
+		query += " AND ts.updated_at >= ?"
+		args = append(args, *filter.UpdatedSince)
+	}
+	if filter.ExcludeInternal {
+		query += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "t.metadata")
+		query += andNotAutomationOriginT
+	}
+	query += " ORDER BY ts.started_at DESC, ts.id ASC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	if len(args) > sqliteMaxHostParams {
+		return nil, fmt.Errorf("plugin session filter has too many values")
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	sessions, err := r.scanTaskSessions(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	return r.loadWorktreesBatch(ctx, sessions)
+}
+
 // ListTaskSessionsByTaskEnvironment returns every session bound to an
 // environment, including inherited sessions whose task differs from the
 // environment owner's task. The environment binding, rather than task row
@@ -4585,6 +4668,19 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if session == nil || session.ID == "" || session.TaskID == "" || session.QueueIncarnationID == "" {
 		return nil, errors.New("task session identity is required")
 	}
+	usagePreserved := false
+	usageDeleted := false
+	if r.usageHistoryLifecycle != nil {
+		if err := r.usageHistoryLifecycle.PreserveSessionUsage(ctx, session.TaskID, session.ID, session.QueueIncarnationID); err != nil {
+			return nil, fmt.Errorf("preserve task session usage before pruning: %w", err)
+		}
+		usagePreserved = true
+		defer func() {
+			if usagePreserved && !usageDeleted {
+				_ = r.usageHistoryLifecycle.ReleaseSessionUsage(context.Background(), session.TaskID, session.ID, session.QueueIncarnationID)
+			}
+		}()
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -4609,6 +4705,11 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := r.StageTurnHistoryCleanupForSession(ctx, tx, session.ID); err != nil {
 		return nil, err
 	}
+	if r.usageHistoryLifecycle != nil {
+		if err := r.usageHistoryLifecycle.CompleteSessionUsageTx(ctx, tx, session.TaskID, session.ID, session.QueueIncarnationID); err != nil {
+			return nil, fmt.Errorf("detach retained usage before session prune: %w", err)
+		}
+	}
 	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
 	if err != nil {
 		return nil, err
@@ -4625,6 +4726,7 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	usageDeleted = true
 	r.notifyTaskSessionQueuePurged(ctx, session.TaskID, session.ID)
 	return deletedAttachments, nil
 }

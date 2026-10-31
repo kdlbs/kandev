@@ -1,3 +1,6 @@
 scripts/release/update-homebrew-tap.sh linguist-language=Shell
 docs/specs/spec-lint-exceptions.tsv merge=union
 scripts/dev-isolated.ps1 text eol=crlf
+
+# Preserve generated benchmark CSV bytes and recognize CRLF record endings.
+docs/plans/usage-history/evidence/**/*.csv -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

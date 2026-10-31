@@ -33,7 +33,17 @@ func (r *Repository) AdmitExecutorUse(ctx context.Context, executorID, profileID
 		}
 	}
 	if sessionID != "" {
-		result, err := tx.ExecContext(ctx, tx.Rebind("UPDATE task_sessions SET executor_actor_user_id = ? WHERE id = ?"), actorID, sessionID)
+		bindingID, err := r.admitExecutionUsageTx(ctx, tx, sessionID, actorID)
+		if err != nil {
+			return err
+		}
+		query := "UPDATE task_sessions SET executor_actor_user_id = ? WHERE id = ?"
+		args := []any{actorID, sessionID}
+		if r.usageHistoryRetainer != nil {
+			query = "UPDATE task_sessions SET executor_actor_user_id = ?, usage_execution_binding_id = ? WHERE id = ?"
+			args = []any{actorID, bindingID, sessionID}
+		}
+		result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 		if err != nil {
 			return err
 		}

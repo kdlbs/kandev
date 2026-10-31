@@ -15,6 +15,8 @@ import { makeGitEnv } from "../helpers/git-helper";
 import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
+export { resetSeedRepositoryCheckout } from "../helpers/seed-repository-checkout";
+
 const DEFAULT_SIDEBAR_VIEW = {
   id: "view-all-tasks",
   name: "All tasks",
@@ -450,7 +452,9 @@ export const test = backendFixture.extend<
         // selection, and a stale selection can hide default-priority tasks in
         // unrelated tests that run later in the same worker.
         kanban_priority_filter_tokens: [],
+        // Restore column visibility so completed tasks remain visible in later tests.
         kanban_hidden_step_ids: {},
+        workflow_ids_with_auto_hide_empty_steps: [],
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -577,27 +581,6 @@ export const test = backendFixture.extend<
   ],
 });
 
-/** Restores the shared seed checkout to the immutable fixture baseline. */
-export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
-  const env = makeGitEnv(tmpDir);
-  execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
-    env,
-    stdio: "ignore",
-  });
-  execFileSync(
-    "git",
-    ["-C", seedData.repositoryPath, "reset", "--hard", seedData.repositoryBaselineOID],
-    {
-      env,
-      stdio: "ignore",
-    },
-  );
-  execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
-    env,
-    stdio: "ignore",
-  });
-}
-
 /** Points the seed repository at a non-empty remote whose HEAD cannot resolve. */
 export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
   const remoteDir = path.join(
@@ -660,6 +643,7 @@ export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: s
 // also calls saveUserSettings, so tests that do use testPage are unaffected.
 test.beforeEach(async ({ apiClient, backend, seedData }) => {
   await runWithBackendRecovery(backend, async () => {
+    const { settings } = await apiClient.getUserSettings();
     await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -675,6 +659,14 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         views: [DEFAULT_SIDEBAR_VIEW],
         active_view_id: DEFAULT_SIDEBAR_VIEW.id,
         draft: null,
+      },
+      // Sidebar customization persists across tests in this worker, including
+      // a zero-height navigation area that clips the next test's New Task action.
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision:
+          settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
+        layout: null,
       },
       thread_views: [DEFAULT_THREAD_VIEW],
       thread_active_view_id: DEFAULT_THREAD_VIEW.id,
@@ -699,7 +691,9 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       // selection, and a stale selection can hide default-priority tasks in
       // unrelated tests that run later in the same worker.
       kanban_priority_filter_tokens: [],
+      // Restore column visibility so completed tasks remain visible in later tests.
       kanban_hidden_step_ids: {},
+      workflow_ids_with_auto_hide_empty_steps: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

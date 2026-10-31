@@ -1,0 +1,81 @@
+{
+  "status": "focused_ready_for_parent_review",
+  "base_commit": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+  "worktree": "/tmp/usage-history-C9-performance-worktree",
+  "primary_workspace_modified": false,
+  "commit_created": false,
+  "diff_artifact": {
+    "path": "/tmp/usage-history-luna-C9-final.diff",
+    "sha256": "f70256b75cc3945fd5e41bdcfa24256bb04e2d1ffd6e408d67b73143032cc892"
+  },
+  "monthly_currency_safety": {
+    "result": "full-row parity passed on SQLite and real PostgreSQL",
+    "controls": [
+      "per-local-day currency normalization and provider options while row filters remain selected",
+      "same local day split across UTC dates, and local midnight within one UTC date",
+      "NY January 2026 USD full UTC day plus EUR UTC edge day: month falls back and preserves blank-currency tokens and both currency costs",
+      "NY interior USD point plus distinct-work EUR requested-calendar coarse row on the same local source day: affected month falls back with parity",
+      "independent token-only, cost-only, and paired metrics with balanced daily token/cost counts, unknown_costs=0, and rate_missing=1: complete grouped rows preserve blank-currency tokens=10 and USD tokens=10/cost=7; the rate-missing evidence marks the month unsafe",
+      "coarse and currency-unsafe contributions do not duplicate a UTC day probe",
+      "task/session filters, including deleted subjects"
+    ],
+    "guard": "currency and metric safety considers full UTC-day summaries plus selected UTC-edge contributions; requested-calendar coarse contributions conservatively reject the affected model/provider/month"
+  },
+  "focused_sql_and_bounded_work": {
+    "fixture": {
+      "published_facts": 2217,
+      "contributions": 4432,
+      "daily_summaries": 4418,
+      "note": "scaled diagnostic fixture, not the original 1,000,005-native/100,013-external full benchmark fixture"
+    },
+    "sqlite_point_index_visits": {
+      "five_years/America/New_York": 387,
+      "five_years/Asia/Kathmandu": 401,
+      "five_years/Europe/Lisbon": 401,
+      "native": 1,
+      "deleted_task": 0
+    },
+    "sqlite_daily_summary_visits": {
+      "five_years/America/New_York": 4414,
+      "five_years/Asia/Kathmandu": 4414,
+      "five_years/Europe/Lisbon": 4414,
+      "native": 8828,
+      "deleted_task": 0
+    },
+    "result": "all five formerly failing filters passed bounded-source checks on SQLite and PostgreSQL"
+  },
+  "verification": {
+    "focused_command": "CGO_CFLAGS='-O2 -g -DSQLITE_ENABLE_STMT_SCANSTATUS' go test -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite -run '^Test(UsageHistoryMonthlyReviewEdges|UsageHistoryDeadlineCasesUseBoundedReportSources|UsageHistoryDeadlineCasesPostgres)$' -count=1 -v",
+    "focused_log": "/tmp/usage-history-luna-C9-focused-final.log",
+    "focused_result": "passed; monthly parity matrix and five bounded-source cases on SQLite and real PostgreSQL",
+    "race_command": "go test -race -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite -run '^TestUsageHistoryMonthlyReviewEdges$' -count=1",
+    "race_log": "/tmp/usage-history-luna-C9-monthly-review-race-final.log",
+    "race_result": "passed",
+    "lint_command": "bash scripts/lint-go-changed <the eight changed Go files>",
+    "lint_log": "/tmp/usage-history-luna-C9-golangci-final.log",
+    "lint_result": "passed, 0 issues",
+    "vet_command": "go vet -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite",
+    "vet_log": "/tmp/usage-history-luna-C9-vet-final.log",
+    "vet_result": "passed"
+  },
+  "changed_files_sha256": {
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_schema.go": "5ba553c58cf85e054a0a9eedf786956d2741e28766c61cd2dd0794ab28e1ba78",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_summary_test.go": "573e71ddc3d65cd096d7aaa8fbee30b1c15bf64f01fc95adc3ae9857bfdfbf0c",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report.go": "b0e97a3ca1da4f76ffb50ef276b3788a5cbd8427b4c5f6061ad2fa13d3267f99",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report_range.go": "115c859671e07036f890d967869087b482daa3e6872fff2ed71f010438ea936c",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report_scan_test.go": "1ffc4c501ed14c92200bb3e880fc39bd31e1a3bfc0fb7aae5ede0108a0a7c407",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report_source.go": "9b6d4a28503e85d5eff19116a2fc6a20a9702af291109193f58e7c4cc2b2be53",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go": "ec6fb1b09f65ac240af78842a1ace22604725cf7fbafc13721a0652b0e63a3c9",
+    "apps/backend/internal/analytics/repository/sqlite/usage_history_report_monthly_review_scan_test.go": "036ca705944790c6fec7834cdf05a2a18f1cb2bd7f0a26a5f3afdbb09b4e217f"
+  },
+  "full_benchmark_gate": {
+    "status": "not_run_after_fix; parent review and source freeze pending",
+    "prior_actual_run": "C8 full SQLite normal harness at1,000,005 native observations,100,013 external observations and1,100,017 published canonical facts exited1 after3,618.666 seconds (60m18.666s). Five filters hit the existing10-second deadline; temporaryDB was removed. Full PostgreSQL normal harness was not started.",
+    "limitation": "focused scaled fixtures and plans are not a full normal benchmark pass; no full-size capacity claim is made"
+  },
+  "parent_receipt_correction": {
+    "original_receipt_sha256": "277f6dc691dac05b132301b57791199f9b4a0450bb7f769800267ef6d8bb193a",
+    "field": "full_benchmark_gate.prior_actual_run",
+    "reason": "Worker receipt said36m18s; original C8 log and parent-verified3618.666seconds equal60m18.666s. No source or test result changed."
+  }
+}

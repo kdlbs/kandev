@@ -1,0 +1,49 @@
+diff --git a/apps/web/e2e/tests/chat/quick-chat-cancel-palette.spec.ts b/apps/web/e2e/tests/chat/quick-chat-cancel-palette.spec.ts
+index 80315275205..a9da3db905e 100644
+--- a/apps/web/e2e/tests/chat/quick-chat-cancel-palette.spec.ts
++++ b/apps/web/e2e/tests/chat/quick-chat-cancel-palette.spec.ts
+@@ -135,6 +135,7 @@ test.describe("Quick Chat cancellation palette and composer", () => {
+     seedData,
+   }) => {
+     test.setTimeout(120_000);
++    const cancellation = await holdCancellationSettlement(testPage);
+     const { session } = await seedRunningGeneratingSession(
+       testPage,
+       apiClient,
+@@ -150,9 +151,15 @@ test.describe("Quick Chat cancellation palette and composer", () => {
+       apiClient,
+       false,
+     );
+-    const acceptanceMarker = "Quick Chat palette cancellation accepted";
+-    await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
+-    await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
++    // The cancel-hold fixture deliberately outlasts the E2E cancellation join
++    // window and can leave the session in recovery instead of accepting a follow-up.
++    await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
++    await waitForAgentMessage(
++      apiClient,
++      quickSessionId,
++      "Running slow response (30s total)",
++      30_000,
++    );
+     await expect(
+       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
+     ).toBeVisible({ timeout: 15_000 });
+@@ -164,9 +171,14 @@ test.describe("Quick Chat cancellation palette and composer", () => {
+     await palette.getByRole("combobox").fill("cancel");
+     const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
+     await expect(cancelOption).toHaveCount(1);
+-    await cancelOption.click();
+-
+-    await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
++    cancellation.arm(quickSessionId);
++    try {
++      await cancelOption.click();
++      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
++      await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
++    } finally {
++      cancellation.release();
++    }
+     await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
+     await waitForQuickChatDirectInput(quickChat);
+     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");

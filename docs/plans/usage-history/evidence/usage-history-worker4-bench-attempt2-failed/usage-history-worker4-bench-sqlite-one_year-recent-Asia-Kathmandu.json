@@ -1,0 +1,3393 @@
+{
+  "engine": "sqlite",
+  "phase": "one_year",
+  "scenario": {
+    "Name": "recent/Asia/Kathmandu",
+    "Filter": {
+      "WorkspaceID": "usage-bench-main",
+      "Source": "",
+      "SessionIDs": null,
+      "TaskIDs": null,
+      "Model": "",
+      "Provider": "",
+      "Start": "2025-12-02T00:00:00+05:45",
+      "End": "2026-01-01T00:00:00+05:45",
+      "Timezone": "Asia/Kathmandu",
+      "GroupBy": "day",
+      "SortBy": "",
+      "SortDirection": "",
+      "IncludeUndated": false,
+      "Limit": 200,
+      "Offset": 0,
+      "Canonical": false,
+      "ProjectionGeneration": ""
+    },
+    "Expected": {
+      "Tokens": 194330,
+      "Cost": 40967,
+      "NativeTokens": 164380,
+      "TokenRows": 18086,
+      "CostRows": 18086,
+      "TokenMissing": true,
+      "CostMissing": true,
+      "Currencies": {
+        "EUR": true,
+        "USD": true
+      },
+      "Providers": {
+        "__unknown_provider__": true,
+        "coarse-provider": true,
+        "correction-provider": true,
+        "external-provider": true,
+        "lifetime-provider": true,
+        "mixed-provider": true,
+        "native-provider": true
+      }
+    }
+  },
+  "fixture": {
+    "retained_native_observations": 200005,
+    "retained_external_observations": 20010,
+    "published_canonical_facts": 220012,
+    "daily_summary_rows": 4392,
+    "lifetime_summary_rows": 4,
+    "fixture_disk_bytes": 2182005176,
+    "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+  },
+  "cumulative_fixture_construction_ns": 96490440477,
+  "fixture_construction_method": "128-row bulk inserts of normalized retained observations and exact encoded canonical facts; production selection/contribution/summary builders; not measured production ingestion",
+  "hardware": {
+    "arch": "amd64",
+    "cgroup_cpu_max": "max 100000",
+    "cgroup_memory_max": "max",
+    "cpu": "AMD Ryzen 5 7640HS w/ Radeon 760M Graphics",
+    "go": "go1.26.0",
+    "gomaxprocs": 2,
+    "gomemlimit": "3GiB",
+    "kernel": "7.0.14-4-pve",
+    "logical_cpus": 11,
+    "os": "linux"
+  },
+  "latency_samples_ns": [
+    1830326738,
+    1771890412,
+    1776751857,
+    1780654200,
+    1800595411,
+    1830770292,
+    1829484422,
+    1824517712,
+    1847031023,
+    1824805296
+  ],
+  "latency_p50_ns": 1824517712,
+  "latency_p95_ns": 1847031023,
+  "latency_p99_ns": 1847031023,
+  "isolated_plain_query": {
+    "publication": "95c3d1c5-eae5-504d-9e4b-cee728514c12.c",
+    "sqlite_version": "3.51.1",
+    "query_latency_ns": 1319464505,
+    "query_go_allocated_bytes": 1272752,
+    "query_go_allocations": 16983,
+    "query_process_peak_rss_bytes": 51138560,
+    "sqlite_native_baseline_bytes": 2507768,
+    "sqlite_native_peak_bytes": 12085096,
+    "postgres_backend_process_peak_rss_bytes": null,
+    "scans": {
+      "sqlite_nvisit": 0,
+      "postgres_scan_rows_returned": 0,
+      "postgres_scan_rows_filtered_or_rechecked": 0,
+      "postgres_largest_plan_node_memory_bytes": 0,
+      "statement_count": 0,
+      "read_statement_count": 0
+    }
+  },
+  "isolated_instrumented_query": {
+    "publication": "95c3d1c5-eae5-504d-9e4b-cee728514c12.c",
+    "sqlite_version": "3.51.1",
+    "query_latency_ns": 1801543263,
+    "query_go_allocated_bytes": 1530000,
+    "query_go_allocations": 18360,
+    "query_process_peak_rss_bytes": 55361536,
+    "sqlite_native_baseline_bytes": 2507768,
+    "sqlite_native_peak_bytes": 12091256,
+    "postgres_backend_process_peak_rss_bytes": null,
+    "statements": [
+      {
+        "sql": "BEGIN IMMEDIATE"
+      },
+      {
+        "sql": "SELECT COALESCE(org_id, '') FROM workspaces WHERE id = ?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_workspaces_1",
+            "plan": "SEARCH workspaces USING INDEX sqlite_autoindex_workspaces_1 (id=?)",
+            "select_id": 3,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "INSERT INTO usage_scope_fences (fence_kind, fence_id, state, generation, updated_at)\n\t\tVALUES (?, ?, ?, 0, ?) ON CONFLICT(fence_kind, fence_id) DO NOTHING"
+      },
+      {
+        "sql": "SELECT state FROM usage_scope_fences WHERE fence_kind = ? AND fence_id = ?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_usage_scope_fences_1",
+            "plan": "SEARCH usage_scope_fences USING INDEX sqlite_autoindex_usage_scope_fences_1 (fence_kind=? AND fence_id=?)",
+            "select_id": 3,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "INSERT INTO usage_scope_fences (fence_kind, fence_id, state, generation, updated_at)\n\t\tVALUES (?, ?, ?, 0, ?) ON CONFLICT(fence_kind, fence_id) DO NOTHING"
+      },
+      {
+        "sql": "SELECT state FROM usage_scope_fences WHERE fence_kind = ? AND fence_id = ?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_usage_scope_fences_1",
+            "plan": "SEARCH usage_scope_fences USING INDEX sqlite_autoindex_usage_scope_fences_1 (fence_kind=? AND fence_id=?)",
+            "select_id": 3,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT s.active_generation, s.commit_sequence, s.revision, COALESCE(g.replay_sequence, 0),\n\t\tCOALESCE(g.fact_count, 0), COALESCE(g.dated_count, 0), COALESCE(g.lifetime_count, 0), COALESCE(g.interval_count, 0), COALESCE(g.native_count, 0),\n\t\tg.earliest, g.latest, g.collected_at FROM usage_projection_scopes s LEFT JOIN usage_projection_generations g\n\t\tON g.scope_id = s.scope_id AND g.generation = s.active_generation WHERE s.scope_id = ?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_usage_projection_scopes_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_usage_projection_scopes_1 (scope_id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_generations_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_projection_generations_1 (scope_id=? AND generation=?) LEFT-JOIN",
+            "select_id": 12,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT EXISTS(SELECT 1 FROM usage_projection_work WHERE scope_id = ? AND generation = ?)\n\t\tOR EXISTS(SELECT 1 FROM usage_projection_generations WHERE scope_id = ? AND state IN ('scan', 'replay'))",
+        "sqlite_scan_loops": [
+          {
+            "name": "idx_usage_projection_publication_group",
+            "plan": "SEARCH usage_projection_work USING COVERING INDEX idx_usage_projection_publication_group (scope_id=? AND generation=?)",
+            "select_id": 8,
+            "parent_id": 4,
+            "nloop": 1,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_generations_1",
+            "plan": "SEARCH usage_projection_generations USING INDEX sqlite_autoindex_usage_projection_generations_1 (scope_id=?)",
+            "select_id": 28,
+            "parent_id": 23,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT COUNT(*)=3 FROM usage_history_migration_state WHERE source_key IN ('native','measurements','buckets') AND complete=1",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_usage_history_migration_state_1",
+            "plan": "SEARCH usage_history_migration_state USING INDEX sqlite_autoindex_usage_history_migration_state_1 (source_key=?)",
+            "select_id": 4,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 3
+          }
+        ]
+      },
+      {
+        "sql": "SELECT EXISTS(SELECT 1 FROM usage_history_migration_gaps g JOIN workspaces w ON w.id=g.workspace_id AND COALESCE(w.org_id,'')=g.organization_id WHERE g.workspace_id=?)",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_workspaces_1",
+            "plan": "SEARCH w USING INDEX sqlite_autoindex_workspaces_1 (id=?)",
+            "select_id": 10,
+            "parent_id": 4,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "idx_usage_migration_gap_scope",
+            "plan": "SEARCH g USING COVERING INDEX idx_usage_migration_gap_scope (workspace_id=? AND organization_id=?)",
+            "select_id": 16,
+            "parent_id": 4,
+            "nloop": 1,
+            "nvisit": 0
+          }
+        ]
+      },
+      {
+        "sql": "CREATE TEMP TABLE usage_report_calendar (period TEXT PRIMARY KEY, start_at TIMESTAMP NOT NULL, end_at TIMESTAMP NOT NULL, full_day INTEGER NOT NULL, month_partial INTEGER NOT NULL)",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_master",
+            "plan": "SEARCH temp.sqlite_master USING INTEGER PRIMARY KEY (rowid=?)",
+            "select_id": 26,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "INSERT INTO usage_report_calendar VALUES (?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?),(?, ?, ?, ?, ?)"
+      },
+      {
+        "sql": "SELECT COUNT(*) FROM (WITH base AS (SELECT '' AS subject_id,'' AS task_id,'' AS task_incarnation_id,'' AS session_id,'' AS session_incarnation_id,'' AS work_key,'summary' AS coverage_kind,g.period,c.calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,c.input_missing,c.output_missing,c.cache_read_missing,c.cache_write_missing,c.reasoning_missing,c.total_missing,c.source_total_missing,c.turns_missing,c.cost_missing,c.rate_missing,c.token_count,c.cost_count,c.partial_count+CASE WHEN g.month_partial=1 THEN c.token_count+c.cost_count ELSE 0 END AS partial_count,c.estimated_count,c.stale_count,c.cost_basis FROM usage_daily_summaries c JOIN usage_report_calendar g ON g.period=c.usage_date AND g.full_day=1 WHERE  c.scope_id=? AND c.generation=? AND c.calendar=? UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,g.period,? AS calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (g.month_partial=1) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  JOIN usage_report_calendar g ON c.coverage_start\u003e=g.start_at AND c.coverage_start\u003cg.end_at WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind='point' AND c.calendar='UTC' AND (g.full_day=0 OR (?\u003c\u003e'UTC' AND f.calendar\u003c\u003e?)) UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,c.usage_date AS period,c.calendar,CASE WHEN c.calendar=? THEN 'requested' ELSE 'source' END AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (c.calendar\u003c\u003e? OR c.coverage_start\u003c? OR c.coverage_end\u003e?) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind NOT IN ('point','lifetime') AND 1=1 AND c.coverage_end\u003e? AND c.coverage_start\u003c? AND (c.calendar\u003c\u003e? OR NOT EXISTS (SELECT 1 FROM usage_report_calendar g WHERE g.period=c.usage_date AND g.full_day=1))), identified AS (SELECT *,period AS entity FROM base), currencies AS (\n SELECT entity,model,provider,period,calendar,COUNT(DISTINCT NULLIF(currency,'')) AS n,MIN(NULLIF(currency,'')) AS only_currency FROM identified GROUP BY entity,model,provider,period,calendar), normalized AS (\n SELECT b.*,CASE WHEN b.metric_kind='tokens' AND d.n=1 THEN d.only_currency ELSE b.currency END AS group_currency FROM identified b JOIN currencies d ON d.entity=b.entity AND d.model=b.model AND d.provider=b.provider AND d.period=b.period AND d.calendar=b.calendar)\n SELECT entity,MIN(subject_id) AS subject_id,MIN(task_id) AS task_id,MIN(task_incarnation_id) AS task_incarnation_id,MIN(session_id) AS session_id,MIN(session_incarnation_id) AS session_incarnation_id,MIN(period) AS period,CASE WHEN SUM(input_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(input_tokens) AS BIGINT) END AS input_tokens,CASE WHEN SUM(output_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(output_tokens) AS BIGINT) END AS output_tokens,CASE WHEN SUM(cache_read_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_read_tokens) AS BIGINT) END AS cache_read_tokens,CASE WHEN SUM(cache_write_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_write_tokens) AS BIGINT) END AS cache_write_tokens,CASE WHEN SUM(reasoning_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(reasoning_tokens) AS BIGINT) END AS reasoning_tokens,CASE WHEN SUM(total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(total_tokens) AS BIGINT) END AS total_tokens,CASE WHEN SUM(source_total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(source_total_tokens) AS BIGINT) END AS source_total_tokens,CASE WHEN SUM(turns_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(turns) AS BIGINT) END AS turns,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003c=1 THEN CASE WHEN SUM(cost_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(cost_subcents) AS BIGINT) END END AS cost_subcents,CASE WHEN SUM(rate_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(rate_tokens) AS BIGINT) END AS rate_tokens,SUM(input_missing) AS input_missing,SUM(output_missing) AS output_missing,SUM(cache_read_missing) AS cache_read_missing,SUM(cache_write_missing) AS cache_write_missing,SUM(reasoning_missing) AS reasoning_missing,SUM(total_missing) AS total_missing,SUM(source_total_missing) AS source_total_missing,SUM(turns_missing) AS turns_missing,SUM(cost_missing) AS cost_missing,SUM(rate_missing) AS rate_missing,SUM(token_count) AS token_count,SUM(cost_count) AS cost_count,SUM(partial_count) AS partial_count,SUM(estimated_count) AS estimated_count,SUM(stale_count) AS stale_count,CASE WHEN MIN(model)=MAX(model) THEN MIN(model) ELSE 'mixed' END AS model,CASE WHEN MIN(provider)=MAX(provider) THEN MIN(provider) ELSE 'mixed' END AS provider,CASE WHEN MIN(agent_client)=MAX(agent_client) THEN MIN(agent_client) ELSE 'mixed' END AS agent_client,CASE WHEN MIN(calendar)=MAX(calendar) THEN MIN(calendar) ELSE 'mixed' END AS calendar,CASE WHEN MIN(calendar_basis)=MAX(calendar_basis) THEN MIN(calendar_basis) ELSE 'mixed' END AS calendar_basis,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(NULLIF(currency,'')),'') END AS currency,CASE WHEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END)=MAX(CASE WHEN metric_kind='cost' THEN cost_basis END) THEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END) WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN cost_basis END)\u003e1 THEN 'mixed' ELSE 'unknown' END AS cost_basis,SUM(CASE WHEN metric_kind='tokens' THEN partial_count ELSE 0 END) AS token_partial,SUM(CASE WHEN metric_kind='cost' THEN partial_count ELSE 0 END) AS cost_partial,SUM(CASE WHEN coverage_kind='lifetime' THEN 1 ELSE 0 END) AS undated_count,SUM(CASE WHEN coverage_kind\u003c\u003e'lifetime' THEN 1 ELSE 0 END) AS dated_count,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_id END),'') ELSE '' END AS token_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_status END),'unknown') END AS token_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_kind END),'unknown') ELSE 'unknown' END AS token_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN source END),'') END AS token_source,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_id END),'') ELSE '' END AS cost_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_status END),'unknown') END AS cost_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_kind END),'unknown') ELSE 'unknown' END AS cost_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN source END),'') END AS cost_source FROM normalized GROUP BY entity,model,provider,calendar,calendar_basis,group_currency, period) report_groups",
+        "sqlite_scan_loops": [
+          {
+            "name": "idx_usage_daily_date",
+            "plan": "SEARCH c USING INDEX idx_usage_daily_date (scope_id=? AND generation=? AND calendar=?)",
+            "select_id": 13,
+            "parent_id": 8,
+            "nloop": 1,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 24,
+            "parent_id": 8,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "usage_report_calendar",
+            "plan": "SCAN g",
+            "select_id": 102,
+            "parent_id": 89,
+            "nloop": 1,
+            "nvisit": 30
+          },
+          {
+            "name": "idx_usage_contribution_points",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_points (scope_id=? AND generation=? AND calendar=? AND coverage_kind=? AND coverage_start\u003e? AND coverage_start\u003c?)",
+            "select_id": 104,
+            "parent_id": 89,
+            "nloop": 30,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 118,
+            "parent_id": 89,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 139,
+            "parent_id": 89,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 151,
+            "parent_id": 89,
+            "nloop": 36170,
+            "nvisit": 36170
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 326,
+            "parent_id": 321,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "idx_usage_contribution_time",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_time (scope_id=? AND generation=? AND coverage_start\u003c?)",
+            "select_id": 296,
+            "parent_id": 284,
+            "nloop": 1,
+            "nvisit": 440022
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 337,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 371,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 384,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "base",
+            "plan": "SCAN base",
+            "select_id": 535,
+            "parent_id": 527,
+            "nloop": 1,
+            "nvisit": 36172
+          },
+          {
+            "name": "currencies",
+            "plan": "SCAN d",
+            "select_id": 611,
+            "parent_id": 2,
+            "nloop": 1,
+            "nvisit": 65
+          },
+          {
+            "name": "auto-index",
+            "plan": "SEARCH base USING AUTOMATIC COVERING INDEX (calendar=? AND period=? AND provider=? AND model=?)",
+            "select_id": 670,
+            "parent_id": 2,
+            "nloop": 65,
+            "nvisit": 36172
+          }
+        ]
+      },
+      {
+        "sql": "SELECT * FROM (WITH base AS (SELECT '' AS subject_id,'' AS task_id,'' AS task_incarnation_id,'' AS session_id,'' AS session_incarnation_id,'' AS work_key,'summary' AS coverage_kind,g.period,c.calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,c.input_missing,c.output_missing,c.cache_read_missing,c.cache_write_missing,c.reasoning_missing,c.total_missing,c.source_total_missing,c.turns_missing,c.cost_missing,c.rate_missing,c.token_count,c.cost_count,c.partial_count+CASE WHEN g.month_partial=1 THEN c.token_count+c.cost_count ELSE 0 END AS partial_count,c.estimated_count,c.stale_count,c.cost_basis FROM usage_daily_summaries c JOIN usage_report_calendar g ON g.period=c.usage_date AND g.full_day=1 WHERE  c.scope_id=? AND c.generation=? AND c.calendar=? UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,g.period,? AS calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (g.month_partial=1) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  JOIN usage_report_calendar g ON c.coverage_start\u003e=g.start_at AND c.coverage_start\u003cg.end_at WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind='point' AND c.calendar='UTC' AND (g.full_day=0 OR (?\u003c\u003e'UTC' AND f.calendar\u003c\u003e?)) UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,c.usage_date AS period,c.calendar,CASE WHEN c.calendar=? THEN 'requested' ELSE 'source' END AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (c.calendar\u003c\u003e? OR c.coverage_start\u003c? OR c.coverage_end\u003e?) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind NOT IN ('point','lifetime') AND 1=1 AND c.coverage_end\u003e? AND c.coverage_start\u003c? AND (c.calendar\u003c\u003e? OR NOT EXISTS (SELECT 1 FROM usage_report_calendar g WHERE g.period=c.usage_date AND g.full_day=1))), identified AS (SELECT *,period AS entity FROM base), currencies AS (\n SELECT entity,model,provider,period,calendar,COUNT(DISTINCT NULLIF(currency,'')) AS n,MIN(NULLIF(currency,'')) AS only_currency FROM identified GROUP BY entity,model,provider,period,calendar), normalized AS (\n SELECT b.*,CASE WHEN b.metric_kind='tokens' AND d.n=1 THEN d.only_currency ELSE b.currency END AS group_currency FROM identified b JOIN currencies d ON d.entity=b.entity AND d.model=b.model AND d.provider=b.provider AND d.period=b.period AND d.calendar=b.calendar)\n SELECT entity,MIN(subject_id) AS subject_id,MIN(task_id) AS task_id,MIN(task_incarnation_id) AS task_incarnation_id,MIN(session_id) AS session_id,MIN(session_incarnation_id) AS session_incarnation_id,MIN(period) AS period,CASE WHEN SUM(input_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(input_tokens) AS BIGINT) END AS input_tokens,CASE WHEN SUM(output_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(output_tokens) AS BIGINT) END AS output_tokens,CASE WHEN SUM(cache_read_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_read_tokens) AS BIGINT) END AS cache_read_tokens,CASE WHEN SUM(cache_write_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_write_tokens) AS BIGINT) END AS cache_write_tokens,CASE WHEN SUM(reasoning_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(reasoning_tokens) AS BIGINT) END AS reasoning_tokens,CASE WHEN SUM(total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(total_tokens) AS BIGINT) END AS total_tokens,CASE WHEN SUM(source_total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(source_total_tokens) AS BIGINT) END AS source_total_tokens,CASE WHEN SUM(turns_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(turns) AS BIGINT) END AS turns,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003c=1 THEN CASE WHEN SUM(cost_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(cost_subcents) AS BIGINT) END END AS cost_subcents,CASE WHEN SUM(rate_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(rate_tokens) AS BIGINT) END AS rate_tokens,SUM(input_missing) AS input_missing,SUM(output_missing) AS output_missing,SUM(cache_read_missing) AS cache_read_missing,SUM(cache_write_missing) AS cache_write_missing,SUM(reasoning_missing) AS reasoning_missing,SUM(total_missing) AS total_missing,SUM(source_total_missing) AS source_total_missing,SUM(turns_missing) AS turns_missing,SUM(cost_missing) AS cost_missing,SUM(rate_missing) AS rate_missing,SUM(token_count) AS token_count,SUM(cost_count) AS cost_count,SUM(partial_count) AS partial_count,SUM(estimated_count) AS estimated_count,SUM(stale_count) AS stale_count,CASE WHEN MIN(model)=MAX(model) THEN MIN(model) ELSE 'mixed' END AS model,CASE WHEN MIN(provider)=MAX(provider) THEN MIN(provider) ELSE 'mixed' END AS provider,CASE WHEN MIN(agent_client)=MAX(agent_client) THEN MIN(agent_client) ELSE 'mixed' END AS agent_client,CASE WHEN MIN(calendar)=MAX(calendar) THEN MIN(calendar) ELSE 'mixed' END AS calendar,CASE WHEN MIN(calendar_basis)=MAX(calendar_basis) THEN MIN(calendar_basis) ELSE 'mixed' END AS calendar_basis,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(NULLIF(currency,'')),'') END AS currency,CASE WHEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END)=MAX(CASE WHEN metric_kind='cost' THEN cost_basis END) THEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END) WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN cost_basis END)\u003e1 THEN 'mixed' ELSE 'unknown' END AS cost_basis,SUM(CASE WHEN metric_kind='tokens' THEN partial_count ELSE 0 END) AS token_partial,SUM(CASE WHEN metric_kind='cost' THEN partial_count ELSE 0 END) AS cost_partial,SUM(CASE WHEN coverage_kind='lifetime' THEN 1 ELSE 0 END) AS undated_count,SUM(CASE WHEN coverage_kind\u003c\u003e'lifetime' THEN 1 ELSE 0 END) AS dated_count,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_id END),'') ELSE '' END AS token_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_status END),'unknown') END AS token_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_kind END),'unknown') ELSE 'unknown' END AS token_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN source END),'') END AS token_source,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_id END),'') ELSE '' END AS cost_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_status END),'unknown') END AS cost_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_kind END),'unknown') ELSE 'unknown' END AS cost_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN source END),'') END AS cost_source FROM normalized GROUP BY entity,model,provider,calendar,calendar_basis,group_currency, period) usage_report_page ORDER BY period IS NULL ASC,period ASC,entity,model,provider,calendar,currency,period LIMIT ? OFFSET ?",
+        "sqlite_scan_loops": [
+          {
+            "name": "idx_usage_daily_date",
+            "plan": "SEARCH c USING INDEX idx_usage_daily_date (scope_id=? AND generation=? AND calendar=?)",
+            "select_id": 13,
+            "parent_id": 8,
+            "nloop": 1,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 24,
+            "parent_id": 8,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "usage_report_calendar",
+            "plan": "SCAN g",
+            "select_id": 102,
+            "parent_id": 89,
+            "nloop": 1,
+            "nvisit": 30
+          },
+          {
+            "name": "idx_usage_contribution_points",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_points (scope_id=? AND generation=? AND calendar=? AND coverage_kind=? AND coverage_start\u003e? AND coverage_start\u003c?)",
+            "select_id": 104,
+            "parent_id": 89,
+            "nloop": 30,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 118,
+            "parent_id": 89,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 139,
+            "parent_id": 89,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 151,
+            "parent_id": 89,
+            "nloop": 36170,
+            "nvisit": 36170
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 326,
+            "parent_id": 321,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "idx_usage_contribution_time",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_time (scope_id=? AND generation=? AND coverage_start\u003c?)",
+            "select_id": 296,
+            "parent_id": 284,
+            "nloop": 1,
+            "nvisit": 440022
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 337,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 371,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 384,
+            "parent_id": 284,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "base",
+            "plan": "SCAN base",
+            "select_id": 535,
+            "parent_id": 527,
+            "nloop": 1,
+            "nvisit": 36172
+          },
+          {
+            "name": "currencies",
+            "plan": "SCAN d",
+            "select_id": 611,
+            "parent_id": 2,
+            "nloop": 1,
+            "nvisit": 65
+          },
+          {
+            "name": "auto-index",
+            "plan": "SEARCH base USING AUTOMATIC COVERING INDEX (calendar=? AND period=? AND provider=? AND model=?)",
+            "select_id": 670,
+            "parent_id": 2,
+            "nloop": 65,
+            "nvisit": 36172
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "SELECT t.created_at,t.archived_at,s.id,COALESCE(NULLIF(s.queue_incarnation_id,''),s.id) FROM tasks t LEFT JOIN task_sessions s ON s.task_id=t.id AND s.id=? WHERE t.id=? AND t.workspace_id=?",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_autoindex_tasks_1",
+            "plan": "SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)",
+            "select_id": 5,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_task_sessions_1",
+            "plan": "SEARCH s USING INDEX sqlite_autoindex_task_sessions_1 (id=?) LEFT-JOIN",
+            "select_id": 14,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 1
+          }
+        ]
+      },
+      {
+        "sql": "WITH base AS (SELECT '' AS subject_id,'' AS task_id,'' AS task_incarnation_id,'' AS session_id,'' AS session_incarnation_id,'' AS work_key,'summary' AS coverage_kind,g.period,c.calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,c.input_missing,c.output_missing,c.cache_read_missing,c.cache_write_missing,c.reasoning_missing,c.total_missing,c.source_total_missing,c.turns_missing,c.cost_missing,c.rate_missing,c.token_count,c.cost_count,c.partial_count+CASE WHEN g.month_partial=1 THEN c.token_count+c.cost_count ELSE 0 END AS partial_count,c.estimated_count,c.stale_count,c.cost_basis FROM usage_daily_summaries c JOIN usage_report_calendar g ON g.period=c.usage_date AND g.full_day=1 WHERE  c.scope_id=? AND c.generation=? AND c.calendar=? UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,g.period,? AS calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (g.month_partial=1) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  JOIN usage_report_calendar g ON c.coverage_start\u003e=g.start_at AND c.coverage_start\u003cg.end_at WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind='point' AND c.calendar='UTC' AND (g.full_day=0 OR (?\u003c\u003e'UTC' AND f.calendar\u003c\u003e?)) UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,c.usage_date AS period,c.calendar,CASE WHEN c.calendar=? THEN 'requested' ELSE 'source' END AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (c.calendar\u003c\u003e? OR c.coverage_start\u003c? OR c.coverage_end\u003e?) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind NOT IN ('point','lifetime') AND 1=1 AND c.coverage_end\u003e? AND c.coverage_start\u003c? AND (c.calendar\u003c\u003e? OR NOT EXISTS (SELECT 1 FROM usage_report_calendar g WHERE g.period=c.usage_date AND g.full_day=1))) SELECT CASE WHEN SUM(input_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(input_tokens) AS BIGINT) END AS input_tokens,CASE WHEN SUM(output_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(output_tokens) AS BIGINT) END AS output_tokens,CASE WHEN SUM(cache_read_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_read_tokens) AS BIGINT) END AS cache_read_tokens,CASE WHEN SUM(cache_write_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(cache_write_tokens) AS BIGINT) END AS cache_write_tokens,CASE WHEN SUM(reasoning_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(reasoning_tokens) AS BIGINT) END AS reasoning_tokens,CASE WHEN SUM(total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(total_tokens) AS BIGINT) END AS total_tokens,CASE WHEN SUM(source_total_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(source_total_tokens) AS BIGINT) END AS source_total_tokens,CASE WHEN SUM(turns_missing)=0 AND SUM(token_count)\u003e0 THEN CAST(SUM(turns) AS BIGINT) END AS turns,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003c=1 THEN CASE WHEN SUM(cost_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(CASE WHEN currency=(SELECT MIN(currency) FROM base WHERE metric_kind='cost' AND currency\u003c\u003e'') THEN cost_subcents END) AS BIGINT) END END AS cost_subcents,CASE WHEN SUM(rate_missing)=0 AND SUM(cost_count)\u003e0 THEN CAST(SUM(rate_tokens) AS BIGINT) END AS rate_tokens,SUM(input_missing) AS input_missing,SUM(output_missing) AS output_missing,SUM(cache_read_missing) AS cache_read_missing,SUM(cache_write_missing) AS cache_write_missing,SUM(reasoning_missing) AS reasoning_missing,SUM(total_missing) AS total_missing,SUM(source_total_missing) AS source_total_missing,SUM(turns_missing) AS turns_missing,SUM(cost_missing) AS cost_missing,SUM(rate_missing) AS rate_missing,SUM(token_count) AS token_count,SUM(cost_count) AS cost_count,SUM(partial_count) AS partial_count,SUM(estimated_count) AS estimated_count,SUM(stale_count) AS stale_count,CASE WHEN MIN(model)=MAX(model) THEN MIN(model) ELSE 'mixed' END AS model,CASE WHEN MIN(provider)=MAX(provider) THEN MIN(provider) ELSE 'mixed' END AS provider,CASE WHEN MIN(agent_client)=MAX(agent_client) THEN MIN(agent_client) ELSE 'mixed' END AS agent_client,CASE WHEN MIN(calendar)=MAX(calendar) THEN MIN(calendar) ELSE 'mixed' END AS calendar,CASE WHEN MIN(calendar_basis)=MAX(calendar_basis) THEN MIN(calendar_basis) ELSE 'mixed' END AS calendar_basis,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' AND currency\u003c\u003e'' THEN currency END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(NULLIF(currency,'')),'') END AS currency,CASE WHEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END)=MAX(CASE WHEN metric_kind='cost' THEN cost_basis END) THEN MIN(CASE WHEN metric_kind='cost' THEN cost_basis END) WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN cost_basis END)\u003e1 THEN 'mixed' ELSE 'unknown' END AS cost_basis,SUM(CASE WHEN metric_kind='tokens' THEN partial_count ELSE 0 END) AS token_partial,SUM(CASE WHEN metric_kind='cost' THEN partial_count ELSE 0 END) AS cost_partial,SUM(CASE WHEN coverage_kind='lifetime' THEN 1 ELSE 0 END) AS undated_count,SUM(CASE WHEN coverage_kind\u003c\u003e'lifetime' THEN 1 ELSE 0 END) AS dated_count,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_id END),'') ELSE '' END AS token_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_status END),'unknown') END AS token_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN actor_kind END),'unknown') ELSE 'unknown' END AS token_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='tokens' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='tokens' THEN source END),'') END AS token_source,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_id END),'') ELSE '' END AS cost_actor_id,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_status END),'unknown') END AS cost_actor_status,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN actor_id||':'||actor_status||':'||actor_kind END)=1 THEN COALESCE(MIN(CASE WHEN metric_kind='cost' THEN actor_kind END),'unknown') ELSE 'unknown' END AS cost_actor_kind,CASE WHEN COUNT(DISTINCT CASE WHEN metric_kind='cost' THEN source END)\u003e1 THEN 'mixed' ELSE COALESCE(MIN(CASE WHEN metric_kind='cost' THEN source END),'') END AS cost_source FROM base HAVING COUNT(*)\u003e0",
+        "sqlite_scan_loops": [
+          {
+            "name": "idx_usage_daily_date",
+            "plan": "SEARCH c USING INDEX idx_usage_daily_date (scope_id=? AND generation=? AND calendar=?)",
+            "select_id": 11,
+            "parent_id": 6,
+            "nloop": 1,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 22,
+            "parent_id": 6,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "usage_report_calendar",
+            "plan": "SCAN g",
+            "select_id": 100,
+            "parent_id": 87,
+            "nloop": 1,
+            "nvisit": 30
+          },
+          {
+            "name": "idx_usage_contribution_points",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_points (scope_id=? AND generation=? AND calendar=? AND coverage_kind=? AND coverage_start\u003e? AND coverage_start\u003c?)",
+            "select_id": 102,
+            "parent_id": 87,
+            "nloop": 30,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 116,
+            "parent_id": 87,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 137,
+            "parent_id": 87,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 149,
+            "parent_id": 87,
+            "nloop": 36170,
+            "nvisit": 36170
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 324,
+            "parent_id": 319,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "idx_usage_contribution_time",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_time (scope_id=? AND generation=? AND coverage_start\u003c?)",
+            "select_id": 294,
+            "parent_id": 282,
+            "nloop": 1,
+            "nvisit": 440022
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 335,
+            "parent_id": 282,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 369,
+            "parent_id": 282,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 382,
+            "parent_id": 282,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "base",
+            "plan": "SCAN base",
+            "select_id": 538,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 36172
+          },
+          {
+            "name": "auto-index",
+            "plan": "SEARCH base USING AUTOMATIC PARTIAL COVERING INDEX (metric_kind=?)",
+            "select_id": 613,
+            "parent_id": 593,
+            "nloop": 1,
+            "nvisit": 18086
+          }
+        ]
+      },
+      {
+        "sql": "SELECT DISTINCT CASE WHEN provider='' THEN '__unknown_provider__' ELSE provider END FROM (SELECT '' AS subject_id,'' AS task_id,'' AS task_incarnation_id,'' AS session_id,'' AS session_incarnation_id,'' AS work_key,'summary' AS coverage_kind,g.period,c.calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,c.input_missing,c.output_missing,c.cache_read_missing,c.cache_write_missing,c.reasoning_missing,c.total_missing,c.source_total_missing,c.turns_missing,c.cost_missing,c.rate_missing,c.token_count,c.cost_count,c.partial_count+CASE WHEN g.month_partial=1 THEN c.token_count+c.cost_count ELSE 0 END AS partial_count,c.estimated_count,c.stale_count,c.cost_basis FROM usage_daily_summaries c JOIN usage_report_calendar g ON g.period=c.usage_date AND g.full_day=1 WHERE  c.scope_id=? AND c.generation=? AND c.calendar=? UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,g.period,? AS calendar,'requested' AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (g.month_partial=1) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  JOIN usage_report_calendar g ON c.coverage_start\u003e=g.start_at AND c.coverage_start\u003cg.end_at WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind='point' AND c.calendar='UTC' AND (g.full_day=0 OR (?\u003c\u003e'UTC' AND f.calendar\u003c\u003e?)) UNION ALL SELECT u.subject_id,u.task_id,u.task_incarnation_id,u.session_id,u.session_incarnation_id,f.work_key,f.coverage_kind,c.usage_date AS period,c.calendar,CASE WHEN c.calendar=? THEN 'requested' ELSE 'source' END AS calendar_basis,c.metric_kind,c.actor_id,c.actor_status,c.actor_kind,c.source,c.model,c.provider,c.agent_client,c.semantics,c.currency,c.input_tokens,c.output_tokens,c.cache_read_tokens,c.cache_write_tokens,c.reasoning_tokens,c.total_tokens,c.source_total_tokens,c.turns,c.cost_subcents,c.rate_tokens,CASE WHEN c.metric_kind = 'tokens' AND c.input_tokens IS NULL THEN 1 ELSE 0 END AS input_missing,CASE WHEN c.metric_kind = 'tokens' AND c.output_tokens IS NULL THEN 1 ELSE 0 END AS output_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_read_tokens IS NULL THEN 1 ELSE 0 END AS cache_read_missing,CASE WHEN c.metric_kind = 'tokens' AND c.cache_write_tokens IS NULL THEN 1 ELSE 0 END AS cache_write_missing,CASE WHEN c.metric_kind = 'tokens' AND c.reasoning_tokens IS NULL THEN 1 ELSE 0 END AS reasoning_missing,CASE WHEN c.metric_kind = 'tokens' AND c.total_tokens IS NULL THEN 1 ELSE 0 END AS total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.source_total_tokens IS NULL THEN 1 ELSE 0 END AS source_total_missing,CASE WHEN c.metric_kind = 'tokens' AND c.turns IS NULL THEN 1 ELSE 0 END AS turns_missing,CASE WHEN c.metric_kind = 'cost' AND c.cost_subcents IS NULL THEN 1 ELSE 0 END AS cost_missing,CASE WHEN c.metric_kind = 'cost' AND c.rate_tokens IS NULL THEN 1 ELSE 0 END AS rate_missing,CASE WHEN c.metric_kind = 'tokens' THEN 1 ELSE 0 END AS token_count,CASE WHEN c.metric_kind = 'cost' THEN 1 ELSE 0 END AS cost_count,CASE WHEN c.partial \u003c\u003e 0 OR (c.calendar\u003c\u003e? OR c.coverage_start\u003c? OR c.coverage_end\u003e?) THEN 1 ELSE 0 END AS partial_count,c.estimated AS estimated_count,c.stale AS stale_count,c.cost_basis FROM usage_projection_contributions c JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id\n JOIN usage_canonical_facts f ON f.scope_id=c.scope_id AND f.generation=c.generation AND f.build_id=c.build_id AND f.fact_key=c.fact_key\n JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id  WHERE  c.scope_id=? AND c.generation=? AND c.coverage_kind NOT IN ('point','lifetime') AND 1=1 AND c.coverage_end\u003e? AND c.coverage_start\u003c? AND (c.calendar\u003c\u003e? OR NOT EXISTS (SELECT 1 FROM usage_report_calendar g WHERE g.period=c.usage_date AND g.full_day=1))) report_providers ORDER BY 1",
+        "sqlite_scan_loops": [
+          {
+            "name": "idx_usage_daily_date",
+            "plan": "SEARCH c USING INDEX idx_usage_daily_date (scope_id=? AND generation=? AND calendar=?)",
+            "select_id": 9,
+            "parent_id": 4,
+            "nloop": 1,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 20,
+            "parent_id": 4,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "usage_report_calendar",
+            "plan": "SCAN g",
+            "select_id": 88,
+            "parent_id": 75,
+            "nloop": 1,
+            "nvisit": 30
+          },
+          {
+            "name": "idx_usage_contribution_points",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_points (scope_id=? AND generation=? AND calendar=? AND coverage_kind=? AND coverage_start\u003e? AND coverage_start\u003c?)",
+            "select_id": 90,
+            "parent_id": 75,
+            "nloop": 30,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 104,
+            "parent_id": 75,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 125,
+            "parent_id": 75,
+            "nloop": 36172,
+            "nvisit": 36172
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 137,
+            "parent_id": 75,
+            "nloop": 36170,
+            "nvisit": 36170
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "select_id": 236,
+            "parent_id": 231,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "idx_usage_contribution_time",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_time (scope_id=? AND generation=? AND coverage_start\u003c?)",
+            "select_id": 206,
+            "parent_id": 194,
+            "nloop": 1,
+            "nvisit": 440022
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "select_id": 247,
+            "parent_id": 194,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_applied_1",
+            "plan": "SEARCH a USING INDEX sqlite_autoindex_usage_projection_applied_1 (scope_id=? AND generation=? AND work_key=?)",
+            "select_id": 281,
+            "parent_id": 194,
+            "nloop": 2,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_autoindex_usage_subjects_1",
+            "plan": "SEARCH u USING INDEX sqlite_autoindex_usage_subjects_1 (subject_id=?)",
+            "select_id": 294,
+            "parent_id": 194,
+            "nloop": 2,
+            "nvisit": 2
+          }
+        ]
+      },
+      {
+        "sql": "DROP TABLE usage_report_calendar",
+        "sqlite_scan_loops": [
+          {
+            "name": "sqlite_master",
+            "plan": "SCAN temp.sqlite_master",
+            "select_id": 3,
+            "parent_id": 0,
+            "nloop": 1,
+            "nvisit": 2
+          },
+          {
+            "name": "sqlite_master",
+            "plan": "SCAN temp.sqlite_master",
+            "select_id": 17,
+            "parent_id": 0,
+            "nloop": 0,
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_master",
+            "plan": "SCAN temp.sqlite_master",
+            "select_id": 41,
+            "parent_id": 0,
+            "nloop": 0,
+            "nvisit": 0
+          }
+        ]
+      },
+      {
+        "sql": "COMMIT"
+      }
+    ],
+    "scans": {
+      "sqlite_nvisit": 2538315,
+      "postgres_scan_rows_returned": 0,
+      "postgres_scan_rows_filtered_or_rechecked": 0,
+      "postgres_largest_plan_node_memory_bytes": 0,
+      "statement_count": 143,
+      "read_statement_count": 136
+    }
+  },
+  "latency_scope": "complete actual ListSessionUsage report including every page; validation and fixture construction excluded; no trace callbacks; SQLite collection disabled in a scanstatus-capable build",
+  "memory_scope": "isolated query process peak RSS includes initialization but excludes bulk seeding; SQLite allocator high-water resets before query; Go allocation counters are client-only; PostgreSQL plan-node memory is not whole-server peak"
+}

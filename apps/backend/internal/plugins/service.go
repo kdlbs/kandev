@@ -153,6 +153,7 @@ type Service struct {
 	workflowSteps          workflowStepLister
 	agentProfiles          agentProfileDataSource
 	sessionCodeStats       sessionCodeStatsSource
+	usage                  sessionUsageSource
 	messageData            messageDataSource
 	interactionData        interactionDataSource
 	pendingTaskTransitions pendingTaskTransitionSource
@@ -559,6 +560,21 @@ func (s *Service) SetSourceIssueController(controller SourceIssueController) {
 	s.sourceIssueController = controller
 }
 
+// SetUsageSource wires the source-aware token usage service separately from
+// the original Host data API dependencies, so existing callers and test
+// fixtures remain source compatible.
+func (s *Service) SetUsageSource(source sessionUsageSource) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage = source
+}
+
+func (s *Service) usageSourceDep() sessionUsageSource {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.usage
+}
+
 // SetInteractionResponder wires the interaction write path (ADR 0052): the
 // adapter that answers permissions through the orchestrator and clarification
 // bundles through the clarification handler. Wired LATE for the same reason as
@@ -899,6 +915,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		workflowSteps:              s.workflowSteps,
 		agentProfiles:              s.agentProfiles,
 		sessionCodeStats:           s.sessionCodeStats,
+		usageDep:                   s.usageSourceDep,
 		messageData:                s.messageData,
 		interactionData:            s.interactionData,
 		taskPRsDep:                 s.taskPRSourceDep,

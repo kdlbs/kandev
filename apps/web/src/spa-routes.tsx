@@ -12,7 +12,7 @@ import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-clie
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
 import { StatsPageClient } from "@/app/stats/stats-page-client";
-import { isRangeKey } from "@/app/stats/stats-utils";
+import { TokenUsagePageClient } from "@/app/stats/token-usage-page-client";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
 import { TasksWorkspaceError } from "@/app/tasks/tasks-workspace-error";
@@ -73,6 +73,7 @@ import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destinati
 import { generateUUID } from "@/lib/utils";
 import { canUseTasksListBootData, type TasksListMetadataReady } from "@/lib/tasks/tasks-list-query";
 import { isIntegratedControlPath } from "@/lib/navigation/integrated-control";
+import { resolveTopLevelRoute } from "./spa-top-level-routes";
 const IntegratedControlPage = lazy(() =>
   import("@/components/integrated-control/integrated-control-page").then((mod) => ({
     default: mod.IntegratedControlPage,
@@ -96,7 +97,7 @@ const EMPTY_REPOSITORIES: Repository[] = [];
 const EMPTY_TASKS_METADATA: TasksListMetadataReady = { workflows: false, repositories: false };
 const READY_TASKS_METADATA: TasksListMetadataReady = { workflows: true, repositories: true };
 
-type SpaRoute =
+export type SpaRoute =
   | {
       kind: "kanban";
       workspaceId?: string;
@@ -120,6 +121,7 @@ type SpaRoute =
   | { kind: "jira" }
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
+  | { kind: "tokenUsage"; range?: RangeKey }
   | { kind: "runs"; view?: string }
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "canvas"; canvasId: string }
@@ -310,37 +312,6 @@ function resolveTaskDetailRoute(
     simple: searchParams.get("simple") ?? undefined,
     mode: searchParams.get("mode") ?? undefined,
   };
-}
-
-function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams): SpaRoute | null {
-  switch (normalized) {
-    case "/tasks":
-      return { kind: "tasks" };
-    case "/threads":
-      return { kind: "threads" };
-    case "/github":
-      return { kind: "github" };
-    case "/gitlab":
-      return { kind: "gitlab" };
-    case "/azure-devops":
-      return { kind: "azure-devops" };
-    case "/jira":
-      return { kind: "jira" };
-    case "/linear":
-      return { kind: "linear" };
-    case "/login":
-      return { kind: "login" };
-    case "/setup":
-      return { kind: "setup" };
-    case "/invite":
-      return { kind: "invite", token: searchParams.get("token") ?? undefined };
-    case "/stats": {
-      const range = searchParams.get("range");
-      return { kind: "stats", range: range && isRangeKey(range) ? range : undefined };
-    }
-    default:
-      return null;
-  }
 }
 
 function resolveNestedRoute(normalized: string): SpaRoute | null {
@@ -655,6 +626,14 @@ function ExternalDataRoute({
     case "stats":
       return (
         <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
+      );
+    case "tokenUsage":
+      return (
+        <TokenUsagePageClient
+          workspaceId={workspaceId}
+          activeRange={route.range}
+          initialError={null}
+        />
       );
     case "runs":
       // The flat feed is demoted to a lens over the list, not deleted: with

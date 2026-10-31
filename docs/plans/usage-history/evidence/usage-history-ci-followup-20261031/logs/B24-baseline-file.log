@@ -1,0 +1,18 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium tests/office/session-lifecycle.spec.ts
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 4 tests using 1 worker
+
+(node:4130654) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-LIyGYr/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:16:7 › Office task session lifecycle › fire-and-forget: RUNNING lights the spinner, IDLE does not (2.1s)
+  ✓  2 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:82:7 › Office task session lifecycle › multi-agent: assignee + reviewer get separate timeline entries (1.6s)
+  ✓  3 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (152ms)
+  ✓  4 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:218:7 › Office task session lifecycle › reviewer removal terminates the reviewer's session (128ms)
+
+  4 passed (6.3s)

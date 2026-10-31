@@ -149,6 +149,52 @@ func TestRequiredPersistenceMiddlewareBlocksStatefulTrafficButAllowsDiagnostics(
 	}
 }
 
+func TestRequiredPersistenceMiddlewareAllowsUsageReaderCleanupWhileUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
+		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
+	}})
+	if err != nil {
+		t.Fatalf("NewTracker: %v", err)
+	}
+	if err := tracker.RecordSuccess("task"); err != nil {
+		t.Fatalf("RecordSuccess: %v", err)
+	}
+	if err := tracker.RecordProbe("task", errTestPersistence); err != nil {
+		t.Fatalf("RecordProbe: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(requiredPersistenceMiddleware(requiredstores.NewHealth(tracker, nil, nil)))
+	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/release-reader", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/pause", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/resume", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{e2eUsageHistoryControlPathPrefix + "workspace/release-reader", http.StatusOK},
+		{e2eUsageHistoryControlPathPrefix + "workspace/resume", http.StatusOK},
+		{e2eUsageHistoryControlPathPrefix + "workspace/pause", http.StatusServiceUnavailable},
+		{e2eUsageHistoryControlPathPrefix + "workspace/other/release-reader", http.StatusServiceUnavailable},
+		{e2eUsageHistoryControlPathPrefix + "workspace/other/resume", http.StatusServiceUnavailable},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.path, nil))
+		if rec.Code != tc.want {
+			t.Errorf("POST %s status = %d, want %d", tc.path, rec.Code, tc.want)
+		}
+	}
+}
+
 func TestRequiredPersistenceMiddlewareRunsBeforeAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{

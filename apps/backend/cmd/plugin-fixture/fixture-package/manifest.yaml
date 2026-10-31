@@ -24,9 +24,9 @@ runtime:
     windows-amd64: "server/plugin-windows-amd64.exe"
 
 capabilities:
-  api_read: ["messages", "managed_agent_conversations", "tasks", "sessions", "interactions", "automations"]
+  api_read: ["messages", "managed_agent_conversations", "tasks", "sessions", "interactions", "automations", "session_usage"]
   events: ["task.created"]
-  api_write: ["tasks", "managed_agent_conversations", "execution", "interactions", "automations"]
+  api_write: ["tasks", "managed_agent_conversations", "execution", "interactions", "automations", "session_usage"]
   agent_invoke: true
   state: true
   secrets: true
@@ -95,6 +95,9 @@ actions:
   - key: "connection-status"
     scope: "workspace"
     max_body_bytes: 4096
+  - key: "usage-history-fixture"
+    scope: "workspace"
+    max_body_bytes: 16384
   - key: "utility-default"
     scope: "workspace"
     max_body_bytes: 4096

@@ -1,0 +1,437 @@
+{
+  "captured_at_utc": "2026-10-30T12:11:00Z",
+  "repo_head": "0c40960504818901f3cabcd03597fdd699052cca",
+  "repo_tree": "a76f4d0101940fd0d1036ebd4a7b7f573b113aae",
+  "worktree_status": [
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_postgres_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_publish_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_bench_seed_test.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats.go",
+    " M apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats_sqlite.go",
+    "?? apps/backend/internal/analytics/repository/sqlite/usage_history_bench_scale_control_test.go",
+    "?? docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1032Z/"
+  ],
+  "go_version": "go version go1.26.0 linux/amd64",
+  "build_environment": {
+    "CGO_ENABLED": "1",
+    "CGO_CFLAGS": "-O2 -g -DSQLITE_ENABLE_STMT_SCANSTATUS",
+    "GOMAXPROCS": "2",
+    "GOMEMLIMIT": "3GiB",
+    "GOFLAGS": "-p=1",
+    "tags": [
+      "sqlite_trace",
+      "usage_history_scanstatus"
+    ]
+  },
+  "production_package_source_count": 81,
+  "production_package_source_manifest_sha256": "e9e9c95106216cd99e6148be6fd14f41c57c65f75f707d79977a14793146fdb8",
+  "production_package_sources": [
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/admission.go",
+      "sha256": "8009ff6b7cebc04bd7114ed50a881da0409c86061dc4ec657b28b55512c7eeb5"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/repository.go",
+      "sha256": "4b6b1df113fc7e876e782f133a0be3deca377bead7bd03d633df8537fa921d5a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/stats.go",
+      "sha256": "630f1381166dae9d9cf8d0966271c8f249e2eae0d1534323d6b5c532ae395ae6"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage.go",
+      "sha256": "6dd7530ea3a80683190b0ec63b571c90485de2d408e79582b18ad431e9de2fac"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history.go",
+      "sha256": "2a34e7fd0f68b20c97bf87be81a3a44be1e2cf3c789aa94ab6fb7eb929b5153a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_binding_admission.go",
+      "sha256": "c1e5bf8cb9aa9ce31b505a0bd124d4c0f3fd07c511409e01935945c835842042"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_canonical.go",
+      "sha256": "9e4670bb37023ba9c167e31d7ce03bf10562650722e1ac2bef664f0b96ef5c30"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_context_repair.go",
+      "sha256": "43aead5409bca1782deedbee7cdc1683e73d944bbfba8ba1f6a34d1f062dfaa7"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_contract.go",
+      "sha256": "d7592eec7eec1d41473c38dc68741e6bbf08c8dfc10a9956edfbb0daf351884e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_contract_admission.go",
+      "sha256": "4869e1b0a832e2f51e4692da5ea7c3370d9926db233db9aedd9c1013a33f291e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_contract_constants.go",
+      "sha256": "7555eaa7b9a457ea28dddeb470a121427b06b1a9e48b0d65516fadecc8dfc8f9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_contract_schema.go",
+      "sha256": "a5e1dffa4c989d6a7375bf4d30cdc8375bf0fca68bda729a9a687d686d4a7e30"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_current_source.go",
+      "sha256": "53725d1d2708ebd5500cc2a8c4dd8b468190903a9dad8da4ff0a45094494ea6c"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_current_target.go",
+      "sha256": "295bfe3499d7c43e66d0498be9fee38d0dff5e931a9366ec4fbf4a9f1e18b843"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_current_target_schema.go",
+      "sha256": "279b117dd5b6703d867bb4a26f56585de8b9e88e604326addade0fe3e9f2ee60"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_erasure.go",
+      "sha256": "2358f4d621998003536d0399f82cc659940066b49ccaf3786d7aee4d4880a51b"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_identity.go",
+      "sha256": "06b00ac37d1bbc225b7d4fb6a7136f6a5d873e7a8ba670b3551f34f0f31cbe8d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_index.go",
+      "sha256": "8e083c7a5d309f1446591c15ec108a27122fb4c498162aec5a27da5307df8a7f"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_legacy_preservation.go",
+      "sha256": "6f52e083fc352fcd89fb5df58cd8a9afa295bf56a5ed0c8d2a43fbae2d72b04a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_legacy_scope.go",
+      "sha256": "5abd8a71b96c7058f8e61c51424d1fd4d6f1c07a9260a802e138673f53df3a8d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_lifecycle.go",
+      "sha256": "66d07a1d69ccb10bc8d81489b1bc30926e33871279420771f61dd5de1c629c6a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_live_source.go",
+      "sha256": "d96396ccde54a01c7d3a8b3c4938d616a93a7d5ca7efe46e4be09342e3a4e599"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_migration.go",
+      "sha256": "9386ae82c97b2a425ff345783ac821883ffb344a7dc2c68692cd1118afac14b5"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_mutations.go",
+      "sha256": "49046fbd0e13d37ce9fad4b1101fb4bbb235a1cdc4199f2248583e2cbea4f29a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_native_accounting_state.go",
+      "sha256": "afa0067661ae2203f4a2375640f318dd3c6310c83501b97d17010afbd883c887"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_native_admission.go",
+      "sha256": "225eb82f6d9692c7b769d36bcd45ffe60c2a56c402da9a95a533aef741d74481"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_native_preservation.go",
+      "sha256": "0d926efa01dc21d77fda18aba94a1cd2913e8f8b6494a8ec90e5a80d4c7f0fcc"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_native_reasoning.go",
+      "sha256": "4e327f60624006cc33df46ec18b70e04756b48384d1861ebcb497a201ccf7d3d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_native_turns_repair.go",
+      "sha256": "d035f7cf8b8aff3f5c03e52c32618a73dbabde1cf027b6eccd6b6383b1126be5"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_overlap.go",
+      "sha256": "7fd39a847fb3be27a7818bed50c43a4661252b510cbc0d313a72d26cf9d6f3e9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_overlap_policy.go",
+      "sha256": "647bdbca97f456ba337a086e585895e9677aa6b9bca5db9d3b06edb5352b883d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_preservation.go",
+      "sha256": "22898ad1b93a8600cc0c1aa008f9bfbf735ec4deebde0bce79e660de44df25e4"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_contributions.go",
+      "sha256": "ecdde9879ca1db715ad9a878bd600b026293361105239bb0a95e171f5f832ab0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_erasure.go",
+      "sha256": "e38a7d496d2106de3116da304598d17a06fa42aabf539fcb9acb919877c0ec98"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_generation.go",
+      "sha256": "f411f76d3b77ade66251adf841b00944fdd8bf62e77a54fc5a680aeb1967cf19"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_log.go",
+      "sha256": "76d14451f061faae5766cdbbdd06fd51b68a4026b75a111d971f7411dd31c7dc"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_overlap.go",
+      "sha256": "52355bee11a3cbc56c96ba809caa2623dbe4d3420d01563625325dfec34be8c8"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_publication.go",
+      "sha256": "4232d551f751f4e2914214a971bf4b6b55876d9ed7cd67fb8c2f1c49b557415f"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_read.go",
+      "sha256": "da0ddab5695c61bb8f8e317d6b72f3dbbc78a8bb53731e6bd9f72b5009368514"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_reconcile.go",
+      "sha256": "d5a7ac0ac83cd7e7ccf79212946d08d96418cc09477eb19c1ef6f6d5f00e7c93"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_resolution.go",
+      "sha256": "93349c580db0e58b46712cbcebb42494dd640af8e2206396d1fd235edc3c7fd2"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_schema.go",
+      "sha256": "fb6169a5129ee07a7ed347861356fc219fba6b456b66b6c4261578cfecc4886e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_summary.go",
+      "sha256": "1061a9ff94829b49d59d60503f5151ff972fb6cd54c24c5e4bdec41cf84b73cf"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_work.go",
+      "sha256": "642abcb54bb1b052de7d3d5755b6a4d5726ed2a7ee76294815683f724b38dc9c"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_report.go",
+      "sha256": "012cb92a2607a649e914856652ee04a89616cd6f35175654544c14ab52740c81"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_aggregate.go",
+      "sha256": "82e34793fdc3eaaa2656a6090fe1ffff435d79fe3e3f98b582aeb5d5108629fc"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_errors.go",
+      "sha256": "c0890b9bc128f2e717e12b78cd04eddcba6a1dd34ab5445d3e01751d89e9c124"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_range.go",
+      "sha256": "cdaa2a2c1c46da1c3e04f3edbfdb76544a7eb4d373a89a8c41d32c2db51a221b"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_source.go",
+      "sha256": "28fafbf15c72ec893b18b473fe609cf3d76434c96470c82716c6d48d4a7ab79d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats.go",
+      "sha256": "922cec136da833997347aa98cdce92acf7e53c46102e745a475cc023379957e3"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats_sqlite.go",
+      "sha256": "cac086b9055da5219073a176898fd6f949ddfb8819c582bf0fc6f210af50269c"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_schema_migration.go",
+      "sha256": "1cd77674e6f8e68f8206bfb90b7a7f1b5b31961b9e7d8bc24917c08b3d9b1ce8"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments.go",
+      "sha256": "d6d67deb9b6d405ec317af23c0c24abebb1a90cf321a41822d3c9c09ec89b0c8"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_choice.go",
+      "sha256": "61eaa270bffa107b459c8c4309ccd8ff82971ba03b0fee1b6dcd27a0d7f58ed7"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_cost.go",
+      "sha256": "c72139aac8efd31dc00f95a34a202539381472fe41975d715e17d85506e8d3c3"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_index.go",
+      "sha256": "cc050408c604650c9e846502fc0f2b14b95c2d3ea84bf03b33a3a1d5ac3c4899"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_native.go",
+      "sha256": "3b4ce3f5d4b2c65ed8f4dd5cf14580cb33156e4077ee35cd0099013e9f69659c"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_quality.go",
+      "sha256": "b5ad46632bc2fa1a7d1ee7757ecf88830a94576ba44fdd1edf4fc5d9c0dba960"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_read.go",
+      "sha256": "336ac6c4a3bd5aa07aeded63fdd2696d579d62e2ff85b9d30c503c1837154ed8"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_reduction.go",
+      "sha256": "2eae7e7415531f39e95d917321d2256f81fe3e998e7c6ef99888fedfa3654b97"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_resolution.go",
+      "sha256": "588bf03622d401f72f8f5a6e09e6759e4389a15a79197ad1687eae0d77db6d82"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_scan.go",
+      "sha256": "20d38727d05e8bf38341ab3ea080be348ae9719ef88ea947b8cad598e95828d7"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_schema.go",
+      "sha256": "2ac372f5c65d27d7c6e7e325674439b3b2a4aa19d4094050e8318a99755fc0c0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_selection.go",
+      "sha256": "85a9794adee391359fd8d514c995feec83472c1fa86824e30822f0f590f9312e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_tokens.go",
+      "sha256": "e1fa24103cb7e5d867e6f4f3b6e432a844e5437b909ff5880101728cd1a42656"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_segments_window.go",
+      "sha256": "182edefff17d1f4cee4b8709c4c9b618986de8cd32b712f544f35ff4dcd03057"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_selection.go",
+      "sha256": "a68d833617fc418fa8198216d6aa927ec3ccca7641d8d1645d7831c7ea0d21d0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_source_context.go",
+      "sha256": "db5e9a69ac0c6e51ce4e820124d003e58f90595536a190fa04fd8f0d294b5740"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_source_erasure.go",
+      "sha256": "1870ade4d444ac104db6fbbccbd13bb6970b838a40ad6533da859887fd711c03"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_source_guards.go",
+      "sha256": "8e20bada75843ddbb8c1243f76ca3d32f45c8e485e89387a83f2c8ea88de1cfe"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_source_read.go",
+      "sha256": "4e8334d59d4518742e5908829dfd34cd9477a965486ae3951aa094a29f0a1237"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_source_reset.go",
+      "sha256": "be2b59f789b6450fc36052185b236e7413fbe04e8c0d95b614a6f94df5e3c510"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_targets.go",
+      "sha256": "271cd2583579bb8cfbc49636d275dbb7ec7f9d6de48f17ba745923866c1d6b97"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_validation.go",
+      "sha256": "2529a1f4f54a127662f4a269a3cdb60c7ff27dc18544dbf217a517b27cd1514e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_work.go",
+      "sha256": "1ad54f7f13864215a18c401e6d682cbdbf9bff7563af9028dab48c01d3cf27d6"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_work_repair.go",
+      "sha256": "8aa7c312e797a0cdaac7c4d0bb03d55df30f2d6bbd73cf7ccb29496bdbbf5b40"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_work_repair_schema.go",
+      "sha256": "45208012f813295466d2c53f055e0be9919b79bbe6588652da4c5b124d53abf2"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_work_repair_source.go",
+      "sha256": "b7ef0b858b6c2e45ec7c1bdcfa5ac8fad91c6adb7edecce68ec7143326e0c603"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_schema.go",
+      "sha256": "40381e835b135171fd08b5731f4d472ec7f657333284b3de545efcfb1c826b3a"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_schema_helpers.go",
+      "sha256": "a6cccabe450cbb25ed0415fc5f8398be5b8311348181c2d78ffe1c10f700ce0c"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_schema_migration.go",
+      "sha256": "7c11a82924e4e4c39b654bb749e8bc278ff82d4d1c66906a156e42bbe1341a7b"
+    }
+  ],
+  "tagged_harness_source_count": 18,
+  "tagged_harness_source_manifest_sha256": "2c5da2fe470948f642fe4855188644bbaf715aa40211f74976ade23fc17cc318",
+  "tagged_harness_sources": [
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_cases_test.go",
+      "sha256": "55b66752efafd38188fd67eff6bfc71534c00657cbba0694c7ee599f88773f6e"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_comparison_test.go",
+      "sha256": "501874347dc88a8520b10aba33dfe67437b43a6cd7c0bbe2be862a4b1c4c49e9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_evidence_test.go",
+      "sha256": "623ebce9f0000271fc671ca8418ba2c4b208f74d818972fb9f5f10ecd16bebda"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_check_test.go",
+      "sha256": "92c2a3dfc038390e2004a30798f2d5a88d44d2fdcd60d319c1f5dc4df9f25eff"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_test.go",
+      "sha256": "29a80f858e4de75abf1ebdebff9b781170af8f6a027bb349bfe8e93d25a51612"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_instrumentation_test.go",
+      "sha256": "d2244ace64f5f2b01cb983d66564f9ca629a2b3a1a81299c427f709b01dd14b0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_metrics_test.go",
+      "sha256": "461f0e29268dbc355d9cdd52537d42359d36c14cbf541d63de2c807b2d2d40f7"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_occurrence_test.go",
+      "sha256": "93a180a852494465569b40711d7e56a74d69848c2497978636fe3d87d9c64f9b"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_postgres_test.go",
+      "sha256": "6aa9ed6fa03d963d9edd65840e63f018f7b8e882f9d639fadc0cc8edd367e441"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_process_test.go",
+      "sha256": "dc84ba8f9c96a425b43fe94451ef8f7bc340fff68189f6787b9d9ca1f2622439"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_publish_test.go",
+      "sha256": "6832535e46590205ca7f5301aed59256dc1aca640dd2c55ba8be201413bcea1d"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go",
+      "sha256": "80a4843dee2a319186a3910a822c170785202fd6cfdaafa79bb0cb0e1d44b427"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_scale_control_test.go",
+      "sha256": "9b734a8dcd4e2909a9a205e02a73927da061588fe1cc9b1b844f89488fc382d6"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_seed_test.go",
+      "sha256": "67d10d5807eab8befd37dcff9a914559f961cf1acba143cce0dc3aad36439177"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_source_test.go",
+      "sha256": "995bf1f833ce0a007f3cc8254e025ea4e67b668a902de09c36af622eabf176d9"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_special_test.go",
+      "sha256": "a19379d08aaa5d8045eaf1c21b55e57813ea24d1d259a013a69c45c2bd2932a0"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats.go",
+      "sha256": "922cec136da833997347aa98cdce92acf7e53c46102e745a475cc023379957e3"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_scanstats_sqlite.go",
+      "sha256": "cac086b9055da5219073a176898fd6f949ddfb8819c582bf0fc6f210af50269c"
+    }
+  ],
+  "dependency_source_count": 3782,
+  "dependency_source_manifest_sha256": "b8e5e24aeae1b8a6be41da1eb4b3c5ad3383f18e6257f50aed254cef96087fcf",
+  "dependency_source_receipt": "../usage-history-luna-C2-20261030T1032Z/source-frame.json",
+  "measured_core_head": "0c40960504818901f3cabcd03597fdd699052cca",
+  "note": "Production files are from frozen core HEAD; only tagged benchmark harness files are uncommitted."
+}

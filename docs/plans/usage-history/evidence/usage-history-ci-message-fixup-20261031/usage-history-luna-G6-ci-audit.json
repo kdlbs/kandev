@@ -1,0 +1,1549 @@
+{
+  "aggregateReportCrossCheck": {
+    "jobConclusion": "success",
+    "jobId": 124423689029,
+    "jobName": "E2E Tests Passed",
+    "line": "E2E flake cross-check: match. retry-summary and the merged Playwright report both report 3 flaky.",
+    "result": "MATCH: merged Playwright report and retry-summary both report 3 flaky."
+  },
+  "artifacts": {
+    "allNormalAndContainerShardMetadataExitZero": true,
+    "allTargetArchivesMatchGitHubSha256Digest": true,
+    "allTargetArtifactsBoundToRunAndSourceHead": true,
+    "allTargetArtifactsUnexpired": true,
+    "apiArtifactTotalForRun": 72,
+    "artifactInventory": [
+      {
+        "apiDigest": "sha256:16305d3755c93a32bdb1f6c9f92757d2c43550a7fc3214e285af99133a0fe108",
+        "artifactId": 13027597467,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:16305d3755c93a32bdb1f6c9f92757d2c43550a7fc3214e285af99133a0fe108",
+        "expired": false,
+        "name": "blob-report-1",
+        "sizeBytes": 792531,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:bbffe0eff4743fc88b456fbe7e98b063e47f67326539f2380d29367828e912fc",
+        "artifactId": 13028081335,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:bbffe0eff4743fc88b456fbe7e98b063e47f67326539f2380d29367828e912fc",
+        "expired": false,
+        "name": "blob-report-10",
+        "sizeBytes": 425033,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:e99372c9394b8c01e3f33ceab000b970c6600994887302d00f96d96cc80f6a61",
+        "artifactId": 13027417696,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:e99372c9394b8c01e3f33ceab000b970c6600994887302d00f96d96cc80f6a61",
+        "expired": false,
+        "name": "blob-report-11",
+        "sizeBytes": 642500,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:cc11595f111cd7e95675bf35deb3cdeea9c607f0416231410682d2cda7fbbdad",
+        "artifactId": 13027956728,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:cc11595f111cd7e95675bf35deb3cdeea9c607f0416231410682d2cda7fbbdad",
+        "expired": false,
+        "name": "blob-report-12",
+        "sizeBytes": 912377,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:54b656b424f3e344d30efcb15f6a7874b69175496862781145a163165002abbc",
+        "artifactId": 13027731499,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:54b656b424f3e344d30efcb15f6a7874b69175496862781145a163165002abbc",
+        "expired": false,
+        "name": "blob-report-13",
+        "sizeBytes": 414609,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:929d118a757c17f3cbf9dcde55a41a3c42b1b5edd5710adb3ab2f8c64cf5515e",
+        "artifactId": 13028165612,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:929d118a757c17f3cbf9dcde55a41a3c42b1b5edd5710adb3ab2f8c64cf5515e",
+        "expired": false,
+        "name": "blob-report-14",
+        "sizeBytes": 1343025,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:4b4f2da04003e854db90131ea8f2ba9c967e1e98627a80dae107d41440998083",
+        "artifactId": 13028046492,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:4b4f2da04003e854db90131ea8f2ba9c967e1e98627a80dae107d41440998083",
+        "expired": false,
+        "name": "blob-report-15",
+        "sizeBytes": 465167,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:0c87dc1e5247524aa520dc4f711570f6256b5f146da941c5b643313fa5f4ad8a",
+        "artifactId": 13027742391,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:0c87dc1e5247524aa520dc4f711570f6256b5f146da941c5b643313fa5f4ad8a",
+        "expired": false,
+        "name": "blob-report-16",
+        "sizeBytes": 1290187,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:d9ffde20e306eb2f7dae06c297a928441f8e6edf0f5b24345f86175105cf74d1",
+        "artifactId": 13027322923,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:d9ffde20e306eb2f7dae06c297a928441f8e6edf0f5b24345f86175105cf74d1",
+        "expired": false,
+        "name": "blob-report-17",
+        "sizeBytes": 10390808,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:a12a1a64b0f3a257216dcd3c3201a1c11afd9c6d3b665ba91fa5897df2378cc5",
+        "artifactId": 13027332775,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:a12a1a64b0f3a257216dcd3c3201a1c11afd9c6d3b665ba91fa5897df2378cc5",
+        "expired": false,
+        "name": "blob-report-18",
+        "sizeBytes": 595755,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:07363422ee8423362868b33e5856f4454864744e52f970e40fd9634291ac7cb6",
+        "artifactId": 13028140585,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:07363422ee8423362868b33e5856f4454864744e52f970e40fd9634291ac7cb6",
+        "expired": false,
+        "name": "blob-report-19",
+        "sizeBytes": 875014,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:7516b1b1f65783851bb7758dfa3b8f03ef71cb063b9edb10c35450f4bfe610d8",
+        "artifactId": 13027657332,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:7516b1b1f65783851bb7758dfa3b8f03ef71cb063b9edb10c35450f4bfe610d8",
+        "expired": false,
+        "name": "blob-report-2",
+        "sizeBytes": 408415,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:ac3115cc559d14c37b1a6ec992277c9250c458c327f326e456957d0fbc5cb26a",
+        "artifactId": 13028165878,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:ac3115cc559d14c37b1a6ec992277c9250c458c327f326e456957d0fbc5cb26a",
+        "expired": false,
+        "name": "blob-report-20",
+        "sizeBytes": 424471,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:68561ab227311a0b511936e6b5500bf4e59e9dfb4f263c78c4e4f1964f999732",
+        "artifactId": 13027117943,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:68561ab227311a0b511936e6b5500bf4e59e9dfb4f263c78c4e4f1964f999732",
+        "expired": false,
+        "name": "blob-report-21",
+        "sizeBytes": 7939251,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:e878cdf8f1a00211d64dcc0c5231dd1fcc1ae1574364832af83c8b55ff84be22",
+        "artifactId": 13027383148,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:e878cdf8f1a00211d64dcc0c5231dd1fcc1ae1574364832af83c8b55ff84be22",
+        "expired": false,
+        "name": "blob-report-22",
+        "sizeBytes": 5443170,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:80235a73394a085f94263736d202ab764538a27b65e78d46d0174deceae633bb",
+        "artifactId": 13028066829,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:80235a73394a085f94263736d202ab764538a27b65e78d46d0174deceae633bb",
+        "expired": false,
+        "name": "blob-report-23",
+        "sizeBytes": 482024,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:20401da513f25d2769eac35268e4afe1b4739899dc0573698b2e6ad14eec4eb6",
+        "artifactId": 13027827020,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:20401da513f25d2769eac35268e4afe1b4739899dc0573698b2e6ad14eec4eb6",
+        "expired": false,
+        "name": "blob-report-24",
+        "sizeBytes": 1254377,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:e07baf48a6a9aedd94c8f2c923b2f887d0574244fe44649cd3bd8cd074388675",
+        "artifactId": 13027422510,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:e07baf48a6a9aedd94c8f2c923b2f887d0574244fe44649cd3bd8cd074388675",
+        "expired": false,
+        "name": "blob-report-25",
+        "sizeBytes": 455135,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:8948ddae32d033983a1c17390ee274eba83e2a1d551a3b4643601e95529644dd",
+        "artifactId": 13028145551,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:8948ddae32d033983a1c17390ee274eba83e2a1d551a3b4643601e95529644dd",
+        "expired": false,
+        "name": "blob-report-26",
+        "sizeBytes": 628692,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:bf245993c2454dbffa46e941c69d66b66d3b08af7b84ff472bf2b2cd6f147a59",
+        "artifactId": 13028210546,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:bf245993c2454dbffa46e941c69d66b66d3b08af7b84ff472bf2b2cd6f147a59",
+        "expired": false,
+        "name": "blob-report-27",
+        "sizeBytes": 660557,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:f346589a80855145953f0d0e87f97f598d74fa4e966f283a354e23509ab65151",
+        "artifactId": 13027692107,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:f346589a80855145953f0d0e87f97f598d74fa4e966f283a354e23509ab65151",
+        "expired": false,
+        "name": "blob-report-28",
+        "sizeBytes": 702810,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:11f0dc3634214b35488aca0e1b9889f6933fd56e0664fb8a12423ad7059ed254",
+        "artifactId": 13028130562,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:11f0dc3634214b35488aca0e1b9889f6933fd56e0664fb8a12423ad7059ed254",
+        "expired": false,
+        "name": "blob-report-3",
+        "sizeBytes": 1771494,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:c2e2c0ddaa45c1df7657e6badf012c5d39ed4b867534f00f5fd7e3832b4b0bd2",
+        "artifactId": 13028230678,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:c2e2c0ddaa45c1df7657e6badf012c5d39ed4b867534f00f5fd7e3832b4b0bd2",
+        "expired": false,
+        "name": "blob-report-4",
+        "sizeBytes": 988555,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:c1b0ee8ebaa4945b5b9c2e05710c14ff0a44ca78d5d3bc89ab3ac1111b9ead86",
+        "artifactId": 13028210113,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:c1b0ee8ebaa4945b5b9c2e05710c14ff0a44ca78d5d3bc89ab3ac1111b9ead86",
+        "expired": false,
+        "name": "blob-report-5",
+        "sizeBytes": 668197,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:c53bf7f24f27086149b0036e2e2e21afe9d2db2ac71cd8655d869ce0c2f41c10",
+        "artifactId": 13027467210,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:c53bf7f24f27086149b0036e2e2e21afe9d2db2ac71cd8655d869ce0c2f41c10",
+        "expired": false,
+        "name": "blob-report-6",
+        "sizeBytes": 520570,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:83a7545b9d7b6d246eb9e77a0e8ba26e789ad8a94d214ebc9471cf6ca287ea87",
+        "artifactId": 13027806944,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:83a7545b9d7b6d246eb9e77a0e8ba26e789ad8a94d214ebc9471cf6ca287ea87",
+        "expired": false,
+        "name": "blob-report-7",
+        "sizeBytes": 597679,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:bfc92ad1f2e688cc053e57ddb8366cc848b76c4f4ae58782a64d2b154f03d416",
+        "artifactId": 13027567427,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:bfc92ad1f2e688cc053e57ddb8366cc848b76c4f4ae58782a64d2b154f03d416",
+        "expired": false,
+        "name": "blob-report-8",
+        "sizeBytes": 642771,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:91d01708fafcb49a2500cce29142f3f68e7c03914783abbfd97fc38bc5c39659",
+        "artifactId": 13027158463,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:91d01708fafcb49a2500cce29142f3f68e7c03914783abbfd97fc38bc5c39659",
+        "expired": false,
+        "name": "blob-report-9",
+        "sizeBytes": 1191960,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:da7b1c996cda61022d3d94808ec84c049c27fd8ff178d02abb6e9cafa4af2d88",
+        "artifactId": 13027921568,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:da7b1c996cda61022d3d94808ec84c049c27fd8ff178d02abb6e9cafa4af2d88",
+        "expired": false,
+        "name": "blob-report-containers-1",
+        "sizeBytes": 73410,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:8bd17a67ba288c1510506a25f256f5d08f5279017f49ecd40d0a6cd0048c77c0",
+        "artifactId": 13028081100,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:8bd17a67ba288c1510506a25f256f5d08f5279017f49ecd40d0a6cd0048c77c0",
+        "expired": false,
+        "name": "blob-report-containers-2",
+        "sizeBytes": 95545,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:d1a5642246d23553e25f0681188e5ca59e2428f666b92a1475fd40406666ebad",
+        "artifactId": 13027297685,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:d1a5642246d23553e25f0681188e5ca59e2428f666b92a1475fd40406666ebad",
+        "expired": false,
+        "name": "blob-report-containers-3",
+        "sizeBytes": 240429,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:d8605123a36cbbcc7fa3563ca2f0f75d9e6872a2b349bf3b90515ab96a3525af",
+        "artifactId": 13027961395,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:d8605123a36cbbcc7fa3563ca2f0f75d9e6872a2b349bf3b90515ab96a3525af",
+        "expired": false,
+        "name": "blob-report-containers-4",
+        "sizeBytes": 114635,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:d245d9dbaeb1c8c41ad8f9bf4a5da16d87a9b8950a947001b42a812462c8c60b",
+        "artifactId": 13027487463,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:d245d9dbaeb1c8c41ad8f9bf4a5da16d87a9b8950a947001b42a812462c8c60b",
+        "expired": false,
+        "name": "blob-report-containers-5",
+        "sizeBytes": 121405,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:6c44d4d130429287ec43764475a801418c6759a7b3e74572ec6a8467c36e7685",
+        "artifactId": 13028115312,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:6c44d4d130429287ec43764475a801418c6759a7b3e74572ec6a8467c36e7685",
+        "expired": false,
+        "name": "blob-report-containers-6",
+        "sizeBytes": 63433,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:15db366596d3bacd8c0d5fd46e7fbfb4454f5f3e3b730addb0a0830884ece598",
+        "artifactId": 13027168573,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:15db366596d3bacd8c0d5fd46e7fbfb4454f5f3e3b730addb0a0830884ece598",
+        "expired": false,
+        "name": "e2e-retry-summary",
+        "sizeBytes": 5848411,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      },
+      {
+        "apiDigest": "sha256:55166afeef47687f499b78d5b941130de0324e26aaf94fcca750e2cfab346feb",
+        "artifactId": 13027088740,
+        "digestMatch": true,
+        "downloadedSha256": "sha256:55166afeef47687f499b78d5b941130de0324e26aaf94fcca750e2cfab346feb",
+        "expired": false,
+        "name": "e2e-timing-diagnostics",
+        "sizeBytes": 31714805,
+        "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+        "workflowRunId": 41161561000
+      }
+    ],
+    "diagnosticsArtifactCount": 1,
+    "innerReportArchiveCount": 118,
+    "retrySummaryArtifactCount": 1,
+    "shardMetadataCount": 34,
+    "shards": [
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-1/shard-normal-1-metadata.json",
+        "processCount": 4,
+        "shard": 1,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-10/shard-normal-10-metadata.json",
+        "processCount": 4,
+        "shard": 10,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-11/shard-normal-11-metadata.json",
+        "processCount": 4,
+        "shard": 11,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-12/shard-normal-12-metadata.json",
+        "processCount": 4,
+        "shard": 12,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-13/shard-normal-13-metadata.json",
+        "processCount": 4,
+        "shard": 13,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-14/shard-normal-14-metadata.json",
+        "processCount": 4,
+        "shard": 14,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-15/shard-normal-15-metadata.json",
+        "processCount": 4,
+        "shard": 15,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-16/shard-normal-16-metadata.json",
+        "processCount": 4,
+        "shard": 16,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-17/shard-normal-17-metadata.json",
+        "processCount": 4,
+        "shard": 17,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-18/shard-normal-18-metadata.json",
+        "processCount": 4,
+        "shard": 18,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-19/shard-normal-19-metadata.json",
+        "processCount": 4,
+        "shard": 19,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-2/shard-normal-2-metadata.json",
+        "processCount": 4,
+        "shard": 2,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-20/shard-normal-20-metadata.json",
+        "processCount": 4,
+        "shard": 20,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-21/shard-normal-21-metadata.json",
+        "processCount": 4,
+        "shard": 21,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-22/shard-normal-22-metadata.json",
+        "processCount": 4,
+        "shard": 22,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-23/shard-normal-23-metadata.json",
+        "processCount": 4,
+        "shard": 23,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-24/shard-normal-24-metadata.json",
+        "processCount": 4,
+        "shard": 24,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-25/shard-normal-25-metadata.json",
+        "processCount": 4,
+        "shard": 25,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-26/shard-normal-26-metadata.json",
+        "processCount": 4,
+        "shard": 26,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-27/shard-normal-27-metadata.json",
+        "processCount": 4,
+        "shard": 27,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-28/shard-normal-28-metadata.json",
+        "processCount": 4,
+        "shard": 28,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-3/shard-normal-3-metadata.json",
+        "processCount": 4,
+        "shard": 3,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-4/shard-normal-4-metadata.json",
+        "processCount": 4,
+        "shard": 4,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-5/shard-normal-5-metadata.json",
+        "processCount": 4,
+        "shard": 5,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-6/shard-normal-6-metadata.json",
+        "processCount": 4,
+        "shard": 6,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-7/shard-normal-7-metadata.json",
+        "processCount": 4,
+        "shard": 7,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-8/shard-normal-8-metadata.json",
+        "processCount": 4,
+        "shard": 8,
+        "shardCount": 28
+      },
+      {
+        "cohort": "normal",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-9/shard-normal-9-metadata.json",
+        "processCount": 4,
+        "shard": 9,
+        "shardCount": 28
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-1/shard-containers-1-metadata.json",
+        "processCount": 1,
+        "shard": 1,
+        "shardCount": 6
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-2/shard-containers-2-metadata.json",
+        "processCount": 1,
+        "shard": 2,
+        "shardCount": 6
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-3/shard-containers-3-metadata.json",
+        "processCount": 1,
+        "shard": 3,
+        "shardCount": 6
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-4/shard-containers-4-metadata.json",
+        "processCount": 1,
+        "shard": 4,
+        "shardCount": 6
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-5/shard-containers-5-metadata.json",
+        "processCount": 1,
+        "shard": 5,
+        "shardCount": 6
+      },
+      {
+        "cohort": "containers",
+        "exitCode": 0,
+        "metadataPath": "blob-reports/blob-report-containers-6/shard-containers-6-metadata.json",
+        "processCount": 1,
+        "shard": 6,
+        "shardCount": 6
+      }
+    ],
+    "targetArchiveCountWithDigestChecks": 36,
+    "targetBlobArtifacts": 34,
+    "targetContainerBlobArtifacts": 6,
+    "targetNormalBlobArtifacts": 28
+  },
+  "audit": "G6 exact-head core CI E2E zero-flake audit",
+  "blobReportAudit": {
+    "attemptCount": 4604,
+    "errorResultCount": 5,
+    "helperOutputPath": "/tmp/usage-history-luna-G6-blob-audit.json",
+    "method": "scripts/playwright-blob-audit over the 34 digest-verified outer blob artifacts, parsing their 118 inner report archives",
+    "parseErrorCount": 0,
+    "reportCount": 118,
+    "retryAttemptCount": 5,
+    "statusCounts": {
+      "failed": 5,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "unexpectedStatuses": {
+      "failed": 5
+    },
+    "violations": [
+      "retry_attempts=5",
+      "error_results=5",
+      "unexpected_statuses={'failed': 5}"
+    ]
+  },
+  "commandsAndEvidence": {
+    "artifactDownload": "GH_REPO=kdlbs/kandev gh api repos/kdlbs/kandev/actions/artifacts/{artifact_id}/zip",
+    "blobAudit": "python3 scripts/playwright-blob-audit /tmp/usage-history-luna-G6-artifacts/blob-reports",
+    "e2eWatch": "GH_REPO=kdlbs/kandev gh run watch 41161561000 --exit-status --interval 30",
+    "githubArtifactsApi": "/tmp/usage-history-luna-G6-artifacts-api.json",
+    "githubJobsApi": "/tmp/usage-history-luna-G6-jobs-api.json",
+    "githubRunApi": "/tmp/usage-history-luna-G6-run-api.json",
+    "normalShardCheckoutLog": "/tmp/usage-history-luna-G6-normal-shard-job.log",
+    "rawArtifactZips": "/tmp/usage-history-luna-G6-artifacts/raw-zips/",
+    "rawReportComparison": "/tmp/usage-history-luna-G6-raw-analysis.json",
+    "reportJobLog": "/tmp/usage-history-luna-G6-report-job.log",
+    "syntheticCommitApi": "/tmp/usage-history-luna-G6-synthetic-commit.json",
+    "triage": "/tmp/usage-history-luna-G6-triage.json"
+  },
+  "flakeTriage": {
+    "allReferencedAttachmentsPresent": true,
+    "attachmentCount": 13,
+    "attachmentInventory": [
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "1fce757ee183c96adc469c98ee45c7fa8fd8caa99911f74cab69cd543f596e21",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "351a62469c856dc61740c8c614232482a445638a28263e481e6601517b239011",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+        "present": true,
+        "retry": 1,
+        "sha256": "03bbbe1b0c33c289b51c213688957030a84a88d722ae8d7547022be7f919d06f",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+        "present": true,
+        "retry": 1,
+        "sha256": "e6b8261864aeae6056bd7870ff567ce5c5a0bfb17b2f5fcef92e347a6cd9e11c",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "b997c1f16cc1c564c4df8d7e33c0288e652bf88afceea82bce2f9a7b8661892b",
+        "status": "failed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "5c6aafe0709b30d3396edd74b6dad762224b4991838e6a1d452d995a9754220c",
+        "status": "failed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6",
+        "status": "passed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "3017147afcdc2609ff096fee1685ba88a98a1bf2ce5e65e8985f4a4f1ab8685a",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "cfcf672c1f93e3557461b6ab9d5dfb646ec0d57126a7eafddfa3c285bb9c56cb",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+        "present": true,
+        "retry": 1,
+        "sha256": "099932d848ed483087e8982da044e7561e0cf5cbd967b638d7a0c99ab8006af5",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+        "present": true,
+        "retry": 1,
+        "sha256": "f9164f5529952eca5e6589cec4e0a0cceca2723d0a8eefb99d6e3b30ec154dfe",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      }
+    ],
+    "attemptSpecificErrorContextAndTracePaths": [
+      {
+        "attempts": [
+          {
+            "errorContextPaths": [
+              "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown"
+            ],
+            "retry": 0,
+            "status": "failed",
+            "tracePaths": []
+          },
+          {
+            "errorContextPaths": [
+              "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown"
+            ],
+            "retry": 1,
+            "status": "failed",
+            "tracePaths": [
+              "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip"
+            ]
+          },
+          {
+            "errorContextPaths": [],
+            "retry": 2,
+            "status": "passed",
+            "tracePaths": []
+          }
+        ],
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "parentAssignment": {
+          "port": 26,
+          "worker": "B18 Bohr",
+          "workerId": "01a18ff3-f0df-72d2-9559-a5e8c2cd48cb"
+        }
+      },
+      {
+        "attempts": [
+          {
+            "errorContextPaths": [
+              "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown"
+            ],
+            "retry": 0,
+            "status": "failed",
+            "tracePaths": []
+          },
+          {
+            "errorContextPaths": [],
+            "retry": 1,
+            "status": "passed",
+            "tracePaths": [
+              "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip"
+            ]
+          }
+        ],
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+        "parentAssignment": {
+          "port": 27,
+          "worker": "B19 Boyle",
+          "workerId": "01a18ff3-f0a9-7522-a9e2-31f1a37c7648"
+        }
+      },
+      {
+        "attempts": [
+          {
+            "errorContextPaths": [
+              "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown"
+            ],
+            "retry": 0,
+            "status": "failed",
+            "tracePaths": []
+          },
+          {
+            "errorContextPaths": [
+              "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown"
+            ],
+            "retry": 1,
+            "status": "failed",
+            "tracePaths": [
+              "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip"
+            ]
+          },
+          {
+            "errorContextPaths": [],
+            "retry": 2,
+            "status": "passed",
+            "tracePaths": []
+          }
+        ],
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "parentAssignment": {
+          "port": 28,
+          "worker": "B20 Averroes",
+          "workerId": "01a18ff3-f072-76d2-913c-5ba28da56ca1"
+        }
+      }
+    ],
+    "file": "/tmp/usage-history-luna-G6-triage.json",
+    "initialFailedAttemptsHaveTraces": false,
+    "newComparedWithPriorSix": true,
+    "parentAssignments": [
+      {
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "port": 26,
+        "worker": "B18 Bohr",
+        "workerId": "01a18ff3-f0df-72d2-9559-a5e8c2cd48cb"
+      },
+      {
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+        "port": 27,
+        "worker": "B19 Boyle",
+        "workerId": "01a18ff3-f0a9-7522-a9e2-31f1a37c7648"
+      },
+      {
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "port": 28,
+        "worker": "B20 Averroes",
+        "workerId": "01a18ff3-f072-76d2-913c-5ba28da56ca1"
+      }
+    ],
+    "rawAttemptEvidence": [
+      {
+        "attachmentPaths": [
+          "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+          "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+          "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+          "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+          "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip"
+        ],
+        "attempts": 3,
+        "errorCategory": "timeout",
+        "file": "tests/chat/jump-to-latest.spec.ts",
+        "finalStatus": "passed",
+        "firstFailure": "Error: expect(locator).toBeVisible() failed Locator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first() Expected: visible Timeout: 5000ms Error: element(s) not found Call log: - Expect \"toBeVisible\" with timeout 5000ms - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().loca",
+        "firstFailureCount": 2,
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "parentAssignment": {
+          "port": 26,
+          "worker": "B18 Bohr",
+          "workerId": "01a18ff3-f0df-72d2-9559-a5e8c2cd48cb"
+        },
+        "project": "chromium",
+        "rawAttempts": [
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+                "name": "screenshot",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+                "sha256": "1fce757ee183c96adc469c98ee45c7fa8fd8caa99911f74cab69cd543f596e21"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+                "name": "error-context",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+                "sha256": "351a62469c856dc61740c8c614232482a445638a28263e481e6601517b239011"
+              }
+            ],
+            "errorContextPaths": [
+              "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown"
+            ],
+            "errorMessages": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\u001b[22m\n"
+            ],
+            "report": "blob-report-17/report-normal-17-3-0.zip",
+            "retry": 0,
+            "status": "failed",
+            "traceAttachedToThisAttempt": false,
+            "tracePaths": []
+          },
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+                "name": "screenshot",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+                "sha256": "03bbbe1b0c33c289b51c213688957030a84a88d722ae8d7547022be7f919d06f"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+                "name": "error-context",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+                "sha256": "e6b8261864aeae6056bd7870ff567ce5c5a0bfb17b2f5fcef92e347a6cd9e11c"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+                "name": "trace",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/267352b41d060782face61d2da23e24ca45400e6.zip",
+                "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe"
+              }
+            ],
+            "errorContextPaths": [
+              "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown"
+            ],
+            "errorMessages": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\u001b[22m\n"
+            ],
+            "report": "blob-report-17/report-normal-17-3-0.zip",
+            "retry": 1,
+            "status": "failed",
+            "traceAttachedToThisAttempt": true,
+            "tracePaths": [
+              "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip"
+            ]
+          },
+          {
+            "attachments": [],
+            "errorContextPaths": [],
+            "errorMessages": [],
+            "report": "blob-report-17/report-normal-17-3-0.zip",
+            "retry": 2,
+            "status": "passed",
+            "traceAttachedToThisAttempt": false,
+            "tracePaths": []
+          }
+        ],
+        "statuses": [
+          "failed",
+          "failed",
+          "passed"
+        ],
+        "testId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+        "title": "chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "attachmentPaths": [
+          "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+          "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+          "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip"
+        ],
+        "attempts": 2,
+        "errorCategory": "timeout",
+        "file": "tests/pr/pr-watcher-dockview-layout.spec.ts",
+        "finalStatus": "passed",
+        "firstFailure": "Error: the session layout did not reach an idle or recovery state the session layout did not reach an idle or recovery state expect(received).not.toBe(\u001b[32mexpected) // Object.is equality Expected: not \u001b[32m\"waiting\" Call Log: - Timeout 60000ms exceeded while waiting on the predicate",
+        "firstFailureCount": 1,
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+        "parentAssignment": {
+          "port": 27,
+          "worker": "B19 Boyle",
+          "workerId": "01a18ff3-f0a9-7522-a9e2-31f1a37c7648"
+        },
+        "project": "chromium",
+        "rawAttempts": [
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+                "name": "screenshot",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+                "sha256": "b997c1f16cc1c564c4df8d7e33c0288e652bf88afceea82bce2f9a7b8661892b"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+                "name": "error-context",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+                "sha256": "5c6aafe0709b30d3396edd74b6dad762224b4991838e6a1d452d995a9754220c"
+              }
+            ],
+            "errorContextPaths": [
+              "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown"
+            ],
+            "errorMessages": [
+              "Error: the session layout did not reach an idle or recovery state\n\nthe session layout did not reach an idle or recovery state\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"waiting\"\u001b[39m\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate"
+            ],
+            "report": "blob-report-21/report-normal-21-4-0.zip",
+            "retry": 0,
+            "status": "failed",
+            "traceAttachedToThisAttempt": false,
+            "tracePaths": []
+          },
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+                "name": "trace",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+                "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6"
+              }
+            ],
+            "errorContextPaths": [],
+            "errorMessages": [],
+            "report": "blob-report-21/report-normal-21-4-0.zip",
+            "retry": 1,
+            "status": "passed",
+            "traceAttachedToThisAttempt": true,
+            "tracePaths": [
+              "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip"
+            ]
+          }
+        ],
+        "statuses": [
+          "failed",
+          "passed"
+        ],
+        "testId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+        "title": "pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "attachmentPaths": [
+          "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+          "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+          "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+          "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+          "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip"
+        ],
+        "attempts": 3,
+        "errorCategory": "timeout",
+        "file": "tests/session/opencode-capacity-retry.spec.ts",
+        "finalStatus": "passed",
+        "firstFailure": "Error: expect(locator).toHaveCount(\u001b[32mexpected) failed Locator: locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card') Expected: \u001b[32m0 Received: 1 Timeout: 5000ms Call log: - Expect \"toHaveCount\" with timeout 5000ms - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card') 5 \u00d7 locator resolved to 1 element - unexpected value \"",
+        "firstFailureCount": 2,
+        "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "parentAssignment": {
+          "port": 28,
+          "worker": "B20 Averroes",
+          "workerId": "01a18ff3-f072-76d2-913c-5ba28da56ca1"
+        },
+        "project": "chromium",
+        "rawAttempts": [
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+                "name": "screenshot",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+                "sha256": "3017147afcdc2609ff096fee1685ba88a98a1bf2ce5e65e8985f4a4f1ab8685a"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+                "name": "error-context",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+                "sha256": "cfcf672c1f93e3557461b6ab9d5dfb646ec0d57126a7eafddfa3c285bb9c56cb"
+              }
+            ],
+            "errorContextPaths": [
+              "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown"
+            ],
+            "errorMessages": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: \u001b[32m0\u001b[39m\nReceived: \u001b[31m1\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\u001b[22m\n\u001b[2m    5 \u00d7 locator resolved to 1 element\u001b[22m\n\u001b[2m      - unexpected value \"1\"\u001b[22m\n"
+            ],
+            "report": "blob-report-22/report-normal-22-4-0.zip",
+            "retry": 0,
+            "status": "failed",
+            "traceAttachedToThisAttempt": false,
+            "tracePaths": []
+          },
+          {
+            "attachments": [
+              {
+                "diagnosticsPath": "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+                "name": "screenshot",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+                "sha256": "099932d848ed483087e8982da044e7561e0cf5cbd967b638d7a0c99ab8006af5"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+                "name": "error-context",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+                "sha256": "f9164f5529952eca5e6589cec4e0a0cceca2723d0a8eefb99d6e3b30ec154dfe"
+              },
+              {
+                "diagnosticsPath": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+                "name": "trace",
+                "presentInDiagnostics": true,
+                "reportPath": "resources/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+                "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2"
+              }
+            ],
+            "errorContextPaths": [
+              "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown"
+            ],
+            "errorMessages": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: \u001b[32m0\u001b[39m\nReceived: \u001b[31m1\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\u001b[22m\n\u001b[2m    5 \u00d7 locator resolved to 1 element\u001b[22m\n\u001b[2m      - unexpected value \"1\"\u001b[22m\n"
+            ],
+            "report": "blob-report-22/report-normal-22-4-0.zip",
+            "retry": 1,
+            "status": "failed",
+            "traceAttachedToThisAttempt": true,
+            "tracePaths": [
+              "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip"
+            ]
+          },
+          {
+            "attachments": [],
+            "errorContextPaths": [],
+            "errorMessages": [],
+            "report": "blob-report-22/report-normal-22-4-0.zip",
+            "retry": 2,
+            "status": "passed",
+            "traceAttachedToThisAttempt": false,
+            "tracePaths": []
+          }
+        ],
+        "statuses": [
+          "failed",
+          "failed",
+          "passed"
+        ],
+        "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+        "title": "session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      }
+    ],
+    "traceAttribution": [
+      {
+        "attemptStatus": "failed",
+        "diagnosticsPath": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe",
+        "testId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b"
+      },
+      {
+        "attemptStatus": "passed",
+        "diagnosticsPath": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6",
+        "testId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4"
+      },
+      {
+        "attemptStatus": "failed",
+        "diagnosticsPath": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2",
+        "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896"
+      }
+    ]
+  },
+  "limitations": [
+    "This audit is scoped to the public E2E run at source head c17567082b98545edcdd5b314792c466df635d79, attempt 1.",
+    "No later remote PR head was polled; the run result must not be treated as evidence for a different source head.",
+    "This is an E2E no-flake audit, not a full performance or PR-readiness audit.",
+    "The suite passed finally but failed five attempts across three test identities; zero-flake acceptance is not met.",
+    "Trace attachments are attributed only to the attempt that emitted them; no initial failed attempt had a trace."
+  ],
+  "observedAtUtc": "2026-10-31T03:16:12.759559+00:00",
+  "priorSixIdentityStatusOnCurrentHead": {
+    "allSixPassFirstAttempt": true,
+    "identities": [
+      {
+        "foundInCurrentSummary": true,
+        "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts \u203a scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-3/report-normal-3-1-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2"
+      },
+      {
+        "foundInCurrentSummary": true,
+        "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts \u203a keeps the download control touch-sized on a coarse-pointer workbench",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-26/report-normal-26-4-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "90005c1239f5286505ae-901084b3039cf4aa996a"
+      },
+      {
+        "foundInCurrentSummary": true,
+        "key": "chromium::tests/layout/stats-usage-history.spec.ts::layout/stats-usage-history.spec.ts \u203a real first publication and rebuild preserve saved values through a database deadline",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-28/report-normal-28-2-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588"
+      },
+      {
+        "foundInCurrentSummary": true,
+        "key": "chromium::tests/office/taskless-routine-permission.spec.ts::office/taskless-routine-permission.spec.ts \u203a Office taskless routine permissions \u203a rejects the request when the launched profile does not auto-approve",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-8/report-normal-8-1-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "67a94427bba3153eec97-c0ddb32b0b4334be6207"
+      },
+      {
+        "foundInCurrentSummary": true,
+        "key": "chromium::tests/task/subtask.spec.ts::task/subtask.spec.ts \u203a Subtask basics \u203a creates a policy branch for a local-executor subtask",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-10/report-normal-10-1-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "caa386653e4d5920f206-71c3917ef7bc3f13d554"
+      },
+      {
+        "foundInCurrentSummary": true,
+        "key": "mobile-chrome::tests/session/mobile-acp-prompt-error-continuity.spec.ts::session/mobile-acp-prompt-error-continuity.spec.ts \u203a phone: visible per-row task actions expose Dismiss turn error",
+        "passedFirstAttempt": true,
+        "rawAttempts": 1,
+        "rawStatuses": [
+          "passed"
+        ],
+        "report": "blob-report-14/report-normal-14-3-0.zip",
+        "summaryStatuses": [
+          "passed"
+        ],
+        "testId": "f2b1d27a56205d4f8e3d-c01edec105212a083315"
+      }
+    ],
+    "matchingIdentityCount": 6,
+    "priorSourceHeads": [
+      "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+      "863769e72e8cf25f0035afafaa75b5f1e66da4be"
+    ]
+  },
+  "retrySummary": {
+    "apiDigest": "sha256:15db366596d3bacd8c0d5fd46e7fbfb4454f5f3e3b730addb0a0830884ece598",
+    "artifactId": 13027168573,
+    "counts": {
+      "failed": 0,
+      "passedAfterRetry": 3,
+      "passedFirstAttempt": 4556,
+      "skipped": 40,
+      "timedOut": 0
+    },
+    "diagnosticsCopyMatchesRetrySummary": true,
+    "diagnosticsMemberCount": 109,
+    "executedNonSkipped": 4559,
+    "flakeRatePerThousand": 0.66,
+    "flakyVerdicts": 3,
+    "generatedAt": "2026-10-31T03:05:36.058Z",
+    "unexpectedVerdicts": 0,
+    "uniqueTestCount": 4599,
+    "zeroFlakesSatisfied": false
+  },
+  "scope": {
+    "pullRequest": 3660,
+    "repository": "kdlbs/kandev",
+    "requirement": "zero Playwright flaky verdicts",
+    "result": "FAIL: 3 flaky verdicts",
+    "sourceHead": "c17567082b98545edcdd5b314792c466df635d79"
+  },
+  "sourceVerification": {
+    "localHeadAtFinish": "c17567082b98545edcdd5b314792c466df635d79",
+    "localHeadAtStart": "c17567082b98545edcdd5b314792c466df635d79",
+    "localHeadUnchangedDuringAudit": true,
+    "noCommitPushOrPublicComment": true,
+    "noLocalTestsBrowsersBuildOrReruns": true,
+    "noSourceOrDocumentationEditsByAuditor": true,
+    "preexistingDirtyPaths": [
+      " M docs/plans/usage-history/plan.md"
+    ],
+    "remotePrStatePolled": false
+  },
+  "statusComparison": {
+    "attemptStatusMismatches": 0,
+    "duplicateRetryIndices": [],
+    "finalFailed": 0,
+    "finalTimedOut": 0,
+    "outcomeMismatches": 0,
+    "projectDescriptorCount": 4599,
+    "projectDescriptorMismatches": 0,
+    "publishedSummaryCounts": {
+      "failed": 0,
+      "passedAfterRetry": 3,
+      "passedFirstAttempt": 4556,
+      "skipped": 40,
+      "timedOut": 0
+    },
+    "rawAttemptStatusCounts": {
+      "failed": 5,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "rawProjectDescriptorKeysMatchRetrySummaryForAllTestIds": true,
+    "rawReportParseErrors": 0,
+    "rawRetryAttemptCount": 5,
+    "rawVsSummary": "Exact match for all 4,599 unique test IDs, all attempt status sequences, attempt counts, final statuses, and recomputed outcomes.",
+    "recomputedSummaryCounts": {
+      "failed": 0,
+      "passedAfterRetry": 3,
+      "passedFirstAttempt": 4556,
+      "skipped": 40,
+      "timedOut": 0
+    },
+    "skipped": 40,
+    "testIdSetMismatches": 0,
+    "unmatchedBeginEvents": 0,
+    "unmatchedEndEvents": 0
+  },
+  "syntheticMerge": {
+    "baseMainTarget": "997bc54fae4da15702c91da5c5d120bfe651edc1",
+    "checkoutLogEvidence": [
+      "/tmp/usage-history-luna-G6-normal-shard-job.log",
+      "/tmp/usage-history-luna-G6-report-job.log"
+    ],
+    "commitApiFile": "/tmp/usage-history-luna-G6-synthetic-commit.json",
+    "commitSha": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+    "githubCommitSignatureVerified": true,
+    "message": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+    "parentOrder": [
+      "base main target",
+      "pull request head"
+    ],
+    "parents": [
+      "997bc54fae4da15702c91da5c5d120bfe651edc1",
+      "c17567082b98545edcdd5b314792c466df635d79"
+    ],
+    "pullRequestHead": "c17567082b98545edcdd5b314792c466df635d79",
+    "reportMetadataProjectEventCount": 230,
+    "reportMetadataUniqueProjectRecords": [
+      {
+        "commitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitBody": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1\n",
+        "gitCommitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitSubject": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "prBaseHash": "aebac5d5395e9983124b398198bace146d38506b",
+        "project": "chromium"
+      },
+      {
+        "commitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitBody": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1\n",
+        "gitCommitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitSubject": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "prBaseHash": "aebac5d5395e9983124b398198bace146d38506b",
+        "project": "containers"
+      },
+      {
+        "commitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitBody": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1\n",
+        "gitCommitHash": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+        "gitCommitSubject": "Merge c17567082b98545edcdd5b314792c466df635d79 into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "prBaseHash": "aebac5d5395e9983124b398198bace146d38506b",
+        "project": "mobile-chrome"
+      }
+    ],
+    "treeSha": "4763f5f686c57fe5144775f2e183ef4f3eca7ae5"
+  },
+  "workflow": {
+    "conclusion": "success",
+    "createdAt": "2026-10-31T02:47:34Z",
+    "event": "pull_request",
+    "headBranch": "feature/investigate-token-co-9dc",
+    "headSha": "c17567082b98545edcdd5b314792c466df635d79",
+    "jobConclusions": {
+      "success": 42
+    },
+    "jobCount": 42,
+    "runAttempt": 1,
+    "runId": 41161561000,
+    "runNumber": 22958,
+    "status": "completed",
+    "updatedAt": "2026-10-31T03:06:08Z",
+    "url": "https://github.com/kdlbs/kandev/actions/runs/41161561000",
+    "workflowId": 239580910,
+    "workflowName": "E2E Tests"
+  }
+}

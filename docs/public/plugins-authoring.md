@@ -467,6 +467,31 @@ no transaction primitive, so design updates to be idempotent; host.storage
 (below) is per-user, per-scope frontend storage with an optional
 ifUnmodifiedSince compare-and-swap.
 
+For bounded backend cleanup, use the optional `pluginsdk.HostStateKeys(host)` reader.
+Its `ListKeys(ctx, pluginsdk.StateKeyQuery{Scope: scope, ScopeID: scopeID, Cursor: cursor, Limit: 200})`
+returns `StateKeyPage{Keys, NextCursor}` without JSON values or timestamps.
+The existing `state: true` capability applies.
+The Host derives plugin identity from the connection and selects exactly that scope and scope ID.
+There is no global or foreign-plugin query.
+
+The default limit is 200. Valid explicit limits are 1 through 200.
+An invalid limit, malformed cursor, or cursor from a different query returns `InvalidArgument`.
+The opaque cursor binds plugin identity, scope, scope ID, and normalized limit.
+Keys use stable database ordering with an exclusive continuation after the last returned key.
+Deleting processed keys does not skip later keys.
+Pages are not a snapshot. Concurrent inserts at or before the cursor require a fresh pass.
+
+Use point `GetState`, `SetState`, and `DeleteState` calls to process each key.
+Persist `NextCursor` in a separate checkpoint scope after the batch completes.
+An empty `NextCursor` marks completion.
+Keep batch operations idempotent because a crash before the checkpoint can repeat work.
+An older in-process Host returns `ok == false` from `HostStateKeys`.
+For an older remote Host, `ListKeys` returns gRPC `Unimplemented`.
+Treat either result as unsupported. Do not substitute the unbounded `ListState` call.
+If cleanup requires this reader, stop that cleanup until the Host supports it.
+Require a Host upgrade instead of an unbounded fallback.
+The existing `Host` interface and `ListState` contract remain unchanged.
+
 `host.storage` belongs to the native plugin frontend contract. An isolated web
 app does not receive that API. Use the canvas state protocol instead.
 
@@ -1024,7 +1049,7 @@ subscription vocabulary and wildcard rules are in the
 
 | Host surface               | Methods                                                                                                                          | Required manifest capability                                                                                                                      | Notes                                                                                                                                                                                                                                                                                     |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| State                      | GetState, SetState, DeleteState, ListState                                                                                       | state: true                                                                                                                                       | Plugin-scoped JSON objects keyed by scope/scopeID/key; no transactions                                                                                                                                                                                                                    |
+| State                      | GetState, SetState, DeleteState, ListState. Optional `HostStateKeys(host)`: `ListKeys`                                               | state: true                                                                                                                                       | Plugin-scoped JSON objects keyed by scope/scopeID/key. The optional reader provides bounded key-only enumeration. No transactions.                                                                                                                                                          |
 | Config                     | GetConfig                                                                                                                        | None                                                                                                                                              | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                                                                                                                         |
 | Secrets                    | RevealSecret, GetSecret, SetSecret, DeleteSecret                                                                                 | secrets: true                                                                                                                                     | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                                                                                                                       |
 | Tasks                      | Tasks().List, Tasks().Get                                                                                                        | api_read: tasks                                                                                                                                   | Typed DTOs and opaque pagination cursor                                                                                                                                                                                                                                                   |
@@ -1051,14 +1076,249 @@ subscription vocabulary and wildcard rules are in the
 | Exact interaction responses | `HostExactInteractionCommands(host)`: `RespondPermission`, `AnswerClarification`                                                | `api_write: interactions` plus `host.v2.write:interactions` and a Host-issued human response receipt                                              | The authenticated native UI issues a short-lived receipt for one interaction revision and exact response; legacy v1 response methods return `PermissionDenied`                                                                                                                             |
 | Exact observations         | `pluginsdk.HostExactQueries(host)`                                                                                               | Resource declaration plus matching `host.v2.read:<resource>` workspace grant                                                                      | Snapshot-bound workspace, task, session, interaction, message, inbox, relation, pending-transition, PR-evidence, and usage reads; use capability discovery for per-host support                                                                                                           |
 | Automation history         | `pluginsdk.HostAutomationHistory(host)`: `ListAutomations`, `ListRuns`, `GetRun`                                                   | `api_read: automations` plus `host.v2.read:automations`                                                                                           | Workspace-authorized definition and retained-run observations; list reads use the shared bounded snapshot, and `GetRun` refreshes one known run through current authority                                                                                                                 |
+| Retained usage             | `pluginsdk.HostUsageHistory(host)`: `ListTargets`, `Report`                                                                       | `api_read: session_usage` for discovery; `api_write: session_usage` for reports                                                                    | Current-target point lookup, immutable snapshot imports, source-scoped revisions, explicit segments in schema 2, and separate token/cost completeness                                                                                                                                      |
 | Linked issue writeback      | `pluginsdk.HostSourceIssueWriteback(host)`: `GetCapabilities`, `Comment`, `Transition`                                          | `api_read: source_issues` and `host.v2.read:source_issues` for reads; `api_write: source_issues` and `host.v2.write:source_issues` for writes          | Resolves the task's existing Jira/Linear link and uses workspace credentials; commands carry task/source versions and durable receipts, and ambiguous outcomes return `UNCERTAIN` without automatic resend                                                                                     |
 | Agent invocation           | InvokeUtilityAgent(ctx, prompt, options...)                                                                                      | agent_invoke: true                                                                                                                                | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
 | Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
 
-The Go signatures, filters, DTOs, and pagination types live in
-pluginsdk/host.go and data_types.go. api_write task/message
-methods are implemented in the current branch; do not repeat older docs that
-call them reserved.
+The Go API lives under `pluginsdk/`, beside each Host accessor and its DTOs.
+Task and message writes are implemented in the current branch. Older docs that
+call them reserved are out of date.
+
+### Retained usage collection
+
+The versioned retained-usage API supports independent collectors.
+It keeps collector provenance separate from the work identity that the Host
+can prove. It also keeps model, model provider, agent client, and serving
+platform as separate dimensions.
+
+#### Snapshot imports and current targets
+
+A snapshot import starts with `ListTargets`, a workspace ID, and no
+`CurrentTarget`, snapshot ID, or cursor. Discovery preparation is a separate
+bounded step. A page with `Preparing == true` has no targets, snapshot ID,
+or cursor. Its upper bound is zero and `HasMore` is false.
+This state is separate from projection status on canonical reads.
+
+If discovery reports `Preparing`, repeat the initial query in a later step to
+advance durable preparation.
+
+After preparation, the Host returns a frozen snapshot ID and upper sequence
+bound. The keyset cursor remains stable across additions, deletions, and later
+source updates. An issued binding retains correction authority after task deletion,
+subject to current authorization and source safety.
+
+Store the snapshot ID and cursor. Continue with both values, including after
+a restart.
+
+A snapshot target does not prove current source eligibility. For a current
+check, set `UsageCollectionTargetQueryV1.CurrentTarget` to a
+`UsageCollectionCurrentTargetQueryV1`. The outer query requires `WorkspaceID`.
+The point query requires at least one of `TaskID`, `SessionID`,
+`ExternalSessionID`, or `SubjectBinding`. Every nonempty field is an exact
+constraint. `SnapshotID` and `Cursor` are forbidden.
+
+The point result requires `CurrentTarget == true`, even with no target.
+It contains at most one target. Its snapshot ID and cursor are empty, and its
+upper bound is zero. `HasMore` and `Preparing` are false. An empty acknowledged
+result means no matching authorized target. It does not request an archive scan.
+
+The SDK returns `Unimplemented` if the Host omits the acknowledgement.
+It returns `FailedPrecondition` if the point response contains enumeration
+state or multiple targets. If the Host lacks point support, require a compatible
+Host for current collection. Do not fall back to archive enumeration or a
+cached snapshot as proof of current eligibility.
+
+Only an explicit `SourceScopeStatus == "eligible"` permits aggregate
+collection. `mixed`, `unknown`, an empty status, and a missing match do not.
+A binding alone does not authorize cumulative history from another ownership
+scope. Revalidate before a raw source read and before its report. Discovery
+actor status is a context hint. The Host derives aggregate actor attribution
+from core evidence for the reported coverage, not from a stale discovery hint.
+
+Targets can include nullable `SessionStartedAt`, `SessionEndedAt`,
+`CoverageStart`, and `CoverageEnd` values from retained core evidence.
+These values survive task deletion. An absent value remains unknown.
+Session bounds provide context. They do not prove consumption on every date.
+Collection time never becomes consumption time. The retained DTO supplies no
+turn count. A collector message count does not establish Kandev turns.
+
+#### Observation identity and segments
+
+Every observation carries its subject binding. The Host derives workspace
+scope, actor attribution, and collector namespace. The write DTO does not
+accept those claims. `ItemID` stays stable when a provider or model correction
+changes an observation. Each correction increases `Revision` and carries the
+new payload digest. The first revision is 1. Tombstones use a revision above
+the active item revision.
+`UsageObservationV1.ComputePayloadDigestV1` returns `sha256:<lowercase hex>`
+over deterministic protobuf bytes with the digest field cleared. Set
+`PayloadDigest` to this value before the report. Tombstones use the same
+method. `UsageCompleteSetRevisionV1.ComputePayloadDigestV1` hashes the binding,
+set ID, revision, and sorted item IDs.
+
+Schema 1 remains supported for observations without `Segment`.
+Different model or provider labels alone do not prove disjoint work.
+Schema 2 adds `UsageObservationV1.Segment`, a `UsageSegmentIdentityV1` with
+`DecompositionID` and `SegmentID`. Reports with a segment must use
+`UsageObservationSchemaVersionV2`. This report version is separate from the
+manifest API version and the v1 RPC names.
+
+An older Host rejects schema 2 with `unsupported_version`.
+Do not retry a segmented report as schema 1.
+
+A decomposition declares one alternative division of proven work into disjoint
+members. Distinct members within that decomposition can contribute together
+after work and coverage checks. Different collectors' decompositions remain
+alternatives, even with matching ID strings. The declaration does not grant
+native priority or prove provider identity. An unsegmented whole-work snapshot
+also remains an alternative to a decomposition.
+
+`DecompositionID` stays fixed across subject bindings and lifetime or dated
+coverage. `SegmentID` names an immutable producer record or a documented
+immutable group series. It stays fixed across supported corrections and
+lifetime or dated views. These declared IDs belong to the authenticated
+collector. Display labels, dates, and a refreshed binding do not establish
+new lineage. A provider label alone need not define another member.
+
+If a group label changes without record evidence, quarantine the ambiguous
+replacement membership. Do not invent a correction lineage or retire missing
+groups. Model and provider corrections with proven record identity keep the
+same item and segment IDs. Segment membership does not change the retirement
+rules for partial reports or complete sets.
+
+#### Amounts, revisions, and canonical reads
+
+Token categories use nullable `int64` values. A present zero means measured
+zero. An absent category means unknown. `UsageTokenSemanticsV1` records whether
+cache and reasoning values are included in input/output totals. Cost uses a
+nullable fixed-point amount, currency, and a `reported`, `estimated`, or
+`unknown` basis. USD uses 10,000 units per dollar. Token and cost completeness
+are independent. Protobuf JSON encodes `int64` values as decimal strings.
+The write result reports token and cost sources, and their actor attribution,
+independently.
+
+An absent `TokenSemantics` means unknown and is valid. The Host preserves an
+explicit source total without inventing category sums or subset relationships.
+Explicit semantics versions `1` and `v1` describe the supported subset flags.
+
+Partial reports do not retire omitted observations. A collector retires an
+item through a same-collector supersession, a tombstone, or a complete-set
+revision. A complete-set revision includes the full set in one bounded report.
+Every member carries the same source-set ID and revision. The set digest covers
+all member IDs. Set revisions start at 1 and increase. The Host accepts no
+more than 200 total observation and tombstone entries in a report. Larger sets
+use item-level supersessions or tombstones. One complete-set revision can
+retire at most 200 previous members.
+
+An identical revision and digest is an idempotent replay. A lower revision
+returns `stale`. A reused revision with another digest returns `conflict`. A
+higher revision can correct an amount up or down. Stale or conflicting results
+include the current accepted row when one exists. An unsupported explicit
+semantics version returns the per-item `unsupported_version` status. An unknown report schema
+returns batch-level `unsupported_version` and the supported schema version.
+Checkpoint an observation only after an `observation` receipt returns
+`accepted` or `unchanged` with its exact `CurrentRevision` and `CurrentDigest`.
+
+The report includes no prompt, response, source code, actor name, or credential
+field. Raw source labels contain no sensitive values. Unsupported work
+identity schemes stay unproven. Matching model names do not prove equivalent
+work. The result reports token and cost source selection independently.
+
+The `transcript_binding` identity matches the issued binding or its retained
+external session ID. Proven shared transcript work within one captured scope
+contributes once across subjects. Distinct proven transcript contexts within
+one subject remain distinct. Unproven or copied lineage does not establish
+disjoint work. Shared work does not invent a task, session, or actor allocation.
+The `provider_event` identity requires an exact event
+alias that core already retained for that subject. Unsupported aliases remain
+unproven. A plugin cannot claim native source priority.
+Equivalent coverage with conflicting dimensions remains an incomplete
+alternative. Explicit disjoint segment members use the decomposition rules.
+
+Retained writes feed `Usage.ListCanonical`. Its `PageInfo` adds
+`ProjectionStatus`, `ProjectionGeneration`, and `ProjectionPending`, including
+on empty pages. A generation identifies a committed projection when available.
+The projection and reporting services supply that generation. Collectors keep
+saved selections while a projection reports pending or preparing state.
+
+Canonical `SessionUsageMeasurement` rows include Host-derived
+`TokenMetricAbsent` and `CostMetricAbsent` flags. A true flag excludes only
+that metric when a consumer combines canonical facts. A false flag means
+the metric applies, and a nil applicable amount remains unknown.
+A measured zero remains a nonnil amount. Legacy defaults are false and
+preserve unknown amounts.
+
+A cost-only row must not make selected token totals unknown. A token donor
+without applicable cost must not make selected cost unknown. Consumers must
+retain genuine unknowns for applicable metrics. These flags are read-only
+applicability, not quality, identity, or ownership claims. The write path
+ignores them.
+
+This source contract does not establish a released SDK version or a minimum
+Kandev version. The current `sdk-release.json` keeps `host_release` and
+`min_kandev_version` null. Plugin maintainers pin an exact Kandev commit until
+a Stable SDK release and its verified Host mapping provide that evidence.
+
+```go
+history, ok := pluginsdk.HostUsageHistory(host)
+if !ok {
+    return errors.New("retained usage is unsupported")
+}
+
+page, err := history.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{
+    WorkspaceID: workspaceID,
+    CurrentTarget: &pluginsdk.UsageCollectionCurrentTargetQueryV1{
+        TaskID:            taskID,
+        SessionID:         sessionID,
+        ExternalSessionID: externalSessionID,
+        SubjectBinding:    issuedBinding,
+    },
+})
+if err != nil {
+    return err
+}
+if !page.CurrentTarget {
+    return errors.New("current target lookup is unsupported")
+}
+if len(page.Targets) == 0 {
+    return nil
+}
+target := page.Targets[0] // the SDK rejects multiple targets or enumeration state
+if target.SourceScopeStatus != "eligible" {
+    return errors.New("source consumption scope is not proven")
+}
+
+inputTokens := int64(120)
+occurredAt := sourceOccurrence // RFC3339 consumption time from source evidence
+observation := pluginsdk.UsageObservationV1{
+	SubjectBinding: target.SubjectBinding,
+	ItemID:         "collector-record-123",
+	SourceRecordID: "provider-record-123",
+	SourceVersion:  "collector-1.4.0",
+	Revision:       1,
+	WorkIdentity: &pluginsdk.UsageWorkIdentityV1{
+		Scheme: "transcript_binding", ID: target.SubjectBinding,
+	},
+	Tokens:   &pluginsdk.UsageTokenAmountsV1{InputTokens: &inputTokens},
+	Coverage: &pluginsdk.UsageCoverageV1{OccurrenceAt: &occurredAt},
+}
+digest, err := observation.ComputePayloadDigestV1()
+if err != nil {
+    return err
+}
+observation.PayloadDigest = digest
+
+batch := pluginsdk.UsageObservationBatchV1{
+	SchemaVersion: pluginsdk.UsageObservationSchemaVersionV1,
+	Observations:  []pluginsdk.UsageObservationV1{observation},
+}
+result, err := history.Report(ctx, batch)
+if err != nil {
+    return err
+}
+_ = result // inspect the batch and per-item status before checkpointing
+```
 
 ### Build an independent coordination policy
 

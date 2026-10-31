@@ -1,0 +1,2122 @@
+{
+  "audit": "G5 exact-head core CI E2E no-flake audit",
+  "observedAtUtc": "2026-10-31T01:51:05+00:00",
+  "scope": {
+    "repository": "kdlbs/kandev",
+    "pullRequest": 3660,
+    "sourceHead": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+    "requirement": "zero Playwright flaky verdicts",
+    "result": "FAIL: 2 flaky verdicts"
+  },
+  "sourceVerification": {
+    "localHead": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+    "worktreeCleanAtAuditStart": true,
+    "worktreeCleanAtAuditEnd": false,
+    "previousHeadEvidenceUsed": false,
+    "notes": "The audit is specifically for workflow run 41154924428 attempt 1 at source head 5b79da2f...; the starting worktree was clean. Two concurrent B15/B16 test-file edits were visible at finalization and were not part of this audit; no claim is made for any later public source head.",
+    "finalSharedWorktreeObservation": {
+      "observedAtUtc": "2026-10-31T01:51:05+00:00",
+      "head": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+      "modifiedPaths": [
+        {
+          "status": " M",
+          "path": "apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+          "observedMtimeUtc": "2026-10-31T01:50:32Z"
+        },
+        {
+          "status": " M",
+          "path": "apps/web/e2e/tests/task/threads-composer-disclosure.spec.ts",
+          "observedMtimeUtc": "2026-10-31T01:49:48Z"
+        }
+      ],
+      "note": "These two shared-worktree edits appeared after the audited CI run and correspond to the two newly flaky test files; this audit made no repository writes and left them untouched. The CI artifact evidence remains bound to commit 5b79da2f41f9a6e2c9bd9f421313276981e95c00."
+    }
+  },
+  "workflow": {
+    "runId": 41154924428,
+    "runNumber": 22956,
+    "workflowId": 239580910,
+    "workflowName": "E2E Tests",
+    "event": "pull_request",
+    "headSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+    "headBranch": "feature/investigate-token-co-9dc",
+    "runAttempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "createdAt": "2026-10-31T01:21:04Z",
+    "updatedAt": "2026-10-31T01:38:04Z",
+    "checkoutEvidence": {
+      "syntheticMergeSha": "df1170a32c991f05577b31a8686580f8226fa231",
+      "parents": [
+        "997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "5b79da2f41f9a6e2c9bd9f421313276981e95c00"
+      ],
+      "verifiedFromGitHubCommitApi": true,
+      "sourceParentMatches": true,
+      "baseParent": "997bc54fae4da15702c91da5c5d120bfe651edc1",
+      "checkoutLogs": [
+        "/tmp/usage-history-luna-G5-shard1.log",
+        "/tmp/usage-history-luna-G5-container-shard1.log",
+        "/tmp/usage-history-luna-G5-report-job.log"
+      ],
+      "checkoutJobIds": [
+        124400228155,
+        124400228001,
+        124403359673
+      ]
+    },
+    "shards": {
+      "expectedNormal": 28,
+      "actualNormal": 28,
+      "expectedContainers": 6,
+      "actualContainers": 6,
+      "allMatchingShardJobsCompletedSuccessAttempt1": true,
+      "aggregateJob": {
+        "id": 124403359673,
+        "name": "E2E Tests Passed",
+        "runAttempt": 1,
+        "status": "completed",
+        "conclusion": "success"
+      }
+    }
+  },
+  "artifacts": {
+    "apiArtifactTotalForRun": 72,
+    "targetBlobArtifacts": 34,
+    "targetNormalBlobArtifacts": 28,
+    "targetContainerBlobArtifacts": 6,
+    "retrySummaryArtifactCount": 1,
+    "diagnosticsArtifactCount": 1,
+    "targetArchiveCountWithDigestChecks": 36,
+    "allTargetArchivesMatchGitHubSha256Digest": true,
+    "allTargetArtifactsBoundToRunAndSourceHead": true,
+    "allTargetArtifactsExpired": false,
+    "artifacts": [
+      {
+        "name": "blob-report-1",
+        "id": 13023894371,
+        "sizeInBytes": 956891,
+        "apiDigest": "sha256:09b5c3cc255152a7e759670a700a6754ea907fe243d77dcfd0d4531735117de3",
+        "observedSha256": "sha256:09b5c3cc255152a7e759670a700a6754ea907fe243d77dcfd0d4531735117de3",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228155,
+        "producerJobName": "E2E Shard 1/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-10",
+        "id": 13024004240,
+        "sizeInBytes": 6807890,
+        "apiDigest": "sha256:b6b977429abeb9dc031902da9d5f952a12fdd23d40b46f392d3ea5e84516f889",
+        "observedSha256": "sha256:b6b977429abeb9dc031902da9d5f952a12fdd23d40b46f392d3ea5e84516f889",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228124,
+        "producerJobName": "E2E Shard 10/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-11",
+        "id": 13024579512,
+        "sizeInBytes": 1114917,
+        "apiDigest": "sha256:5e43f701e0d7f692f44274fac0a95afe778ed5aa5773053a5b128209a8670270",
+        "observedSha256": "sha256:5e43f701e0d7f692f44274fac0a95afe778ed5aa5773053a5b128209a8670270",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228152,
+        "producerJobName": "E2E Shard 11/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-12",
+        "id": 13023999329,
+        "sizeInBytes": 788477,
+        "apiDigest": "sha256:df6aea150b5f40ff007d8e1ae639479e0a8a678d476d525c520e5c2eac9d5b35",
+        "observedSha256": "sha256:df6aea150b5f40ff007d8e1ae639479e0a8a678d476d525c520e5c2eac9d5b35",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228106,
+        "producerJobName": "E2E Shard 12/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-13",
+        "id": 13024133842,
+        "sizeInBytes": 610277,
+        "apiDigest": "sha256:9de679e73b281eb39be7d5ec1532eea46bd7f7780d24f3585045727739afbc64",
+        "observedSha256": "sha256:9de679e73b281eb39be7d5ec1532eea46bd7f7780d24f3585045727739afbc64",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228180,
+        "producerJobName": "E2E Shard 13/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-14",
+        "id": 13025013208,
+        "sizeInBytes": 651974,
+        "apiDigest": "sha256:d1ed1a4c7653d5dd68857ba20674bc0150fdd07cbd0e698fa914066211afc500",
+        "observedSha256": "sha256:d1ed1a4c7653d5dd68857ba20674bc0150fdd07cbd0e698fa914066211afc500",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228135,
+        "producerJobName": "E2E Shard 14/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-15",
+        "id": 13025087730,
+        "sizeInBytes": 414390,
+        "apiDigest": "sha256:dbccbbff1f9332caa177c642fbd82295f72c1e62ef90d2e4e8000a9cff240690",
+        "observedSha256": "sha256:dbccbbff1f9332caa177c642fbd82295f72c1e62ef90d2e4e8000a9cff240690",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228133,
+        "producerJobName": "E2E Shard 15/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-16",
+        "id": 13024134020,
+        "sizeInBytes": 425978,
+        "apiDigest": "sha256:e60868dc44314b52cf5bb4814cfc772a29a9eb7dc063931105ac99cf1185672f",
+        "observedSha256": "sha256:e60868dc44314b52cf5bb4814cfc772a29a9eb7dc063931105ac99cf1185672f",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228266,
+        "producerJobName": "E2E Shard 16/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-17",
+        "id": 13025265206,
+        "sizeInBytes": 437753,
+        "apiDigest": "sha256:cd04967e217c5a5f921b3bec0e8f33d8137df606747a17f4ab469e6f25c75f66",
+        "observedSha256": "sha256:cd04967e217c5a5f921b3bec0e8f33d8137df606747a17f4ab469e6f25c75f66",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228105,
+        "producerJobName": "E2E Shard 17/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-18",
+        "id": 13025320194,
+        "sizeInBytes": 1442038,
+        "apiDigest": "sha256:c68b4a607ec2dd440d80c55f8880e1bdea4bff5aa86d2dc054f0fe697079d0eb",
+        "observedSha256": "sha256:c68b4a607ec2dd440d80c55f8880e1bdea4bff5aa86d2dc054f0fe697079d0eb",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228249,
+        "producerJobName": "E2E Shard 18/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-19",
+        "id": 13024503483,
+        "sizeInBytes": 883955,
+        "apiDigest": "sha256:a3e997b0f1e17f80cf38d4e84f5478f922c7d84c34ebf7a1dd66616f8ac68a28",
+        "observedSha256": "sha256:a3e997b0f1e17f80cf38d4e84f5478f922c7d84c34ebf7a1dd66616f8ac68a28",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228205,
+        "producerJobName": "E2E Shard 19/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-2",
+        "id": 13023954252,
+        "sizeInBytes": 823980,
+        "apiDigest": "sha256:010269ba67e8fb3714ba972932407a9923fcec6cfdea9ec243c9049334df5763",
+        "observedSha256": "sha256:010269ba67e8fb3714ba972932407a9923fcec6cfdea9ec243c9049334df5763",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228183,
+        "producerJobName": "E2E Shard 2/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-20",
+        "id": 13023929390,
+        "sizeInBytes": 445321,
+        "apiDigest": "sha256:26ba885cd76c402fffebac4ee791141fa92a9f9ccee129e55a23661c9db0b9ae",
+        "observedSha256": "sha256:26ba885cd76c402fffebac4ee791141fa92a9f9ccee129e55a23661c9db0b9ae",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228221,
+        "producerJobName": "E2E Shard 20/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-21",
+        "id": 13024084213,
+        "sizeInBytes": 620667,
+        "apiDigest": "sha256:0ffd461d99201896e852490b17cc3ad20f665b8d3faa7766150a0c945ad82c47",
+        "observedSha256": "sha256:0ffd461d99201896e852490b17cc3ad20f665b8d3faa7766150a0c945ad82c47",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228296,
+        "producerJobName": "E2E Shard 21/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-22",
+        "id": 13024799541,
+        "sizeInBytes": 940472,
+        "apiDigest": "sha256:90114b1fa743934775ba3dcf921c8cedd7fabc9ae5288ed66ea3b2e6ec0fd2af",
+        "observedSha256": "sha256:90114b1fa743934775ba3dcf921c8cedd7fabc9ae5288ed66ea3b2e6ec0fd2af",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228131,
+        "producerJobName": "E2E Shard 22/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-23",
+        "id": 13024759529,
+        "sizeInBytes": 619392,
+        "apiDigest": "sha256:25e8d9a6cf2cda103e19453b9f0438ae1ee6222b67cb0930f4c60d77e9508b26",
+        "observedSha256": "sha256:25e8d9a6cf2cda103e19453b9f0438ae1ee6222b67cb0930f4c60d77e9508b26",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228280,
+        "producerJobName": "E2E Shard 23/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-24",
+        "id": 13024029342,
+        "sizeInBytes": 1260632,
+        "apiDigest": "sha256:cb98ea0046604139189bac7e22271df326174c8dadb06e71dd2601a1e851e526",
+        "observedSha256": "sha256:cb98ea0046604139189bac7e22271df326174c8dadb06e71dd2601a1e851e526",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228323,
+        "producerJobName": "E2E Shard 24/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-25",
+        "id": 13024887947,
+        "sizeInBytes": 613204,
+        "apiDigest": "sha256:47877c6246bd0f7f910e815d15259897457c6bd61497c3344e1758c16eb839f0",
+        "observedSha256": "sha256:47877c6246bd0f7f910e815d15259897457c6bd61497c3344e1758c16eb839f0",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228290,
+        "producerJobName": "E2E Shard 25/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-26",
+        "id": 13024604902,
+        "sizeInBytes": 928133,
+        "apiDigest": "sha256:de6d8bfd214189362727d39c664c45778616c8d0b4d1be980c1b20cad9532e17",
+        "observedSha256": "sha256:de6d8bfd214189362727d39c664c45778616c8d0b4d1be980c1b20cad9532e17",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228206,
+        "producerJobName": "E2E Shard 26/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-27",
+        "id": 13025135599,
+        "sizeInBytes": 799381,
+        "apiDigest": "sha256:e0d6840270ee8aa5d79b5bd4a29f45545cc8a7c3cdd2cf9818a051239fcc40da",
+        "observedSha256": "sha256:e0d6840270ee8aa5d79b5bd4a29f45545cc8a7c3cdd2cf9818a051239fcc40da",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228316,
+        "producerJobName": "E2E Shard 27/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-28",
+        "id": 13024419026,
+        "sizeInBytes": 731769,
+        "apiDigest": "sha256:33c1874f308779853b33b6169a589d03f9fc4bf03d69ffddd2d57743052289a4",
+        "observedSha256": "sha256:33c1874f308779853b33b6169a589d03f9fc4bf03d69ffddd2d57743052289a4",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228294,
+        "producerJobName": "E2E Shard 28/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-3",
+        "id": 13025028349,
+        "sizeInBytes": 701923,
+        "apiDigest": "sha256:31dde84ba207c59f35c651a71b013583808e5eeec0a642411c65afe1c448f5ec",
+        "observedSha256": "sha256:31dde84ba207c59f35c651a71b013583808e5eeec0a642411c65afe1c448f5ec",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228108,
+        "producerJobName": "E2E Shard 3/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-4",
+        "id": 13024902653,
+        "sizeInBytes": 913498,
+        "apiDigest": "sha256:3b5c818f69794c9da5f114112cd0354a7b9037d16b1892b6a845c9e0424c4857",
+        "observedSha256": "sha256:3b5c818f69794c9da5f114112cd0354a7b9037d16b1892b6a845c9e0424c4857",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228207,
+        "producerJobName": "E2E Shard 4/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-5",
+        "id": 13024188949,
+        "sizeInBytes": 619620,
+        "apiDigest": "sha256:c3dcbdb3a176ab9eade0efbc33eecdc0f279eac0e377aae1535f26650259f7fd",
+        "observedSha256": "sha256:c3dcbdb3a176ab9eade0efbc33eecdc0f279eac0e377aae1535f26650259f7fd",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228086,
+        "producerJobName": "E2E Shard 5/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-6",
+        "id": 13024804392,
+        "sizeInBytes": 499173,
+        "apiDigest": "sha256:935bed1f380045ed69d70ba7e2fab555d40ae7916c257cceb95d9dc4bbba9e2a",
+        "observedSha256": "sha256:935bed1f380045ed69d70ba7e2fab555d40ae7916c257cceb95d9dc4bbba9e2a",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228110,
+        "producerJobName": "E2E Shard 6/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-7",
+        "id": 13024099252,
+        "sizeInBytes": 2859230,
+        "apiDigest": "sha256:c02562a7c5ab07821031b70c01e82f1456bfacc786111412f2b43d1348fe2080",
+        "observedSha256": "sha256:c02562a7c5ab07821031b70c01e82f1456bfacc786111412f2b43d1348fe2080",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228185,
+        "producerJobName": "E2E Shard 7/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-8",
+        "id": 13024129027,
+        "sizeInBytes": 706594,
+        "apiDigest": "sha256:65d5664519f582b298c39aac355c34660b28df0830d90251efa7cbe0aff8051c",
+        "observedSha256": "sha256:65d5664519f582b298c39aac355c34660b28df0830d90251efa7cbe0aff8051c",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228104,
+        "producerJobName": "E2E Shard 8/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-9",
+        "id": 13023899544,
+        "sizeInBytes": 419153,
+        "apiDigest": "sha256:7cf02fb178d2fe54a74c26b1aa64a32d1a0df24597b255bb62bd29c1e1f0301c",
+        "observedSha256": "sha256:7cf02fb178d2fe54a74c26b1aa64a32d1a0df24597b255bb62bd29c1e1f0301c",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228254,
+        "producerJobName": "E2E Shard 9/28",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-1",
+        "id": 13024814435,
+        "sizeInBytes": 73470,
+        "apiDigest": "sha256:0631979597b041cf415b5e209e5942deb307bf8b34f5b1a247089a60bb3fbd47",
+        "observedSha256": "sha256:0631979597b041cf415b5e209e5942deb307bf8b34f5b1a247089a60bb3fbd47",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228001,
+        "producerJobName": "E2E Containers Shard 1/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-2",
+        "id": 13024198868,
+        "sizeInBytes": 94697,
+        "apiDigest": "sha256:a0cfbf7962c86b1ec87cd4f2127250819b25f6569e5e43a42c9903fd46a20574",
+        "observedSha256": "sha256:a0cfbf7962c86b1ec87cd4f2127250819b25f6569e5e43a42c9903fd46a20574",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400227971,
+        "producerJobName": "E2E Containers Shard 2/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-3",
+        "id": 13024124017,
+        "sizeInBytes": 240176,
+        "apiDigest": "sha256:e198936c2801a9ba00f4d0b1898ff645ac9ad9bb3689245263c8c6b03e108392",
+        "observedSha256": "sha256:e198936c2801a9ba00f4d0b1898ff645ac9ad9bb3689245263c8c6b03e108392",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228098,
+        "producerJobName": "E2E Containers Shard 3/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-4",
+        "id": 13024554814,
+        "sizeInBytes": 114617,
+        "apiDigest": "sha256:3f245a5e62fc59bc059e420fd6f8af08730c85804c4a2ee0a7f652204446540b",
+        "observedSha256": "sha256:3f245a5e62fc59bc059e420fd6f8af08730c85804c4a2ee0a7f652204446540b",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228000,
+        "producerJobName": "E2E Containers Shard 4/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-5",
+        "id": 13024968457,
+        "sizeInBytes": 120286,
+        "apiDigest": "sha256:43d5eadf87bced139271dafd95542564752f175fb6b1e79758d765ed571da0f4",
+        "observedSha256": "sha256:43d5eadf87bced139271dafd95542564752f175fb6b1e79758d765ed571da0f4",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400227991,
+        "producerJobName": "E2E Containers Shard 5/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "blob-report-containers-6",
+        "id": 13024248612,
+        "sizeInBytes": 64562,
+        "apiDigest": "sha256:a65489c4f247c381dc677fd1e6b8085a5d81ee195d6b93d5bd3d96d70d9eadb8",
+        "observedSha256": "sha256:a65489c4f247c381dc677fd1e6b8085a5d81ee195d6b93d5bd3d96d70d9eadb8",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124400228034,
+        "producerJobName": "E2E Containers Shard 6/6",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "e2e-retry-summary",
+        "id": 13025365475,
+        "sizeInBytes": 5922367,
+        "apiDigest": "sha256:87cc36a5275f672ee6f65314d19f71fdc4b9ce15813ae096348133f047f5f02f",
+        "observedSha256": "sha256:87cc36a5275f672ee6f65314d19f71fdc4b9ce15813ae096348133f047f5f02f",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124403359673,
+        "producerJobName": "E2E Tests Passed",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      },
+      {
+        "name": "e2e-timing-diagnostics",
+        "id": 13024969067,
+        "sizeInBytes": 17826550,
+        "apiDigest": "sha256:1a20b7a8f47d3e4594612fa9e945ae6e907f6676d66ee898a7cd1cef315e006e",
+        "observedSha256": "sha256:1a20b7a8f47d3e4594612fa9e945ae6e907f6676d66ee898a7cd1cef315e006e",
+        "digestMatches": true,
+        "workflowRunId": 41154924428,
+        "workflowHeadSha": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+        "expired": false,
+        "producerJobId": 124403359673,
+        "producerJobName": "E2E Tests Passed",
+        "producerRunAttempt": 1,
+        "producerConclusion": "success"
+      }
+    ]
+  },
+  "blobReportAudit": {
+    "method": "Parsed onTestBegin/onTestEnd events directly from raw, digest-verified GitHub artifact zips; scripts/playwright-blob-audit independently agrees.",
+    "reportCount": 118,
+    "attemptCount": 4602,
+    "onTestEndEventCount": 4602,
+    "retryAttemptCount": 3,
+    "statusCounts": {
+      "failed": 3,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "errorResultCount": 3,
+    "parseErrorCount": 0,
+    "cohorts": {
+      "normal": {
+        "artifactCount": 28,
+        "attemptCount": 4437,
+        "endEventCount": 4437,
+        "retryAttemptCount": 3,
+        "statusCounts": {
+          "failed": 3,
+          "passed": 4401,
+          "skipped": 33
+        },
+        "errorResultCount": 3,
+        "parseErrorCount": 0,
+        "reportCount": 112,
+        "uniqueTestCount": 4434
+      },
+      "containers": {
+        "artifactCount": 6,
+        "attemptCount": 165,
+        "endEventCount": 165,
+        "retryAttemptCount": 0,
+        "statusCounts": {
+          "passed": 158,
+          "skipped": 7
+        },
+        "errorResultCount": 0,
+        "parseErrorCount": 0,
+        "reportCount": 6,
+        "uniqueTestCount": 165
+      }
+    },
+    "innerReportArchiveCount": 118,
+    "innerReportArchiveDigests": [
+      {
+        "artifactName": "blob-report-1",
+        "reportArchive": "report-normal-1-1-0.zip",
+        "sha256": "sha256:020b20fab89bcdacf923b694f58a6d081f1901aba4fea15250cdc0cdd9689c3d"
+      },
+      {
+        "artifactName": "blob-report-1",
+        "reportArchive": "report-normal-1-2-0.zip",
+        "sha256": "sha256:f438c82532b50830e6a54d528b6d4194be4fa29b8d6cce3559f19cfc8810f800"
+      },
+      {
+        "artifactName": "blob-report-1",
+        "reportArchive": "report-normal-1-3-0.zip",
+        "sha256": "sha256:42efe6ee9f1b625d29446df5ba97fca06c9b7457bc1c54b37dc8695298dae6fe"
+      },
+      {
+        "artifactName": "blob-report-1",
+        "reportArchive": "report-normal-1-4-0.zip",
+        "sha256": "sha256:aa26ae39893933c85ffd56ee24339bcee8ee2206a9b2b0a321fc7a951db7d270"
+      },
+      {
+        "artifactName": "blob-report-10",
+        "reportArchive": "report-normal-10-1-0.zip",
+        "sha256": "sha256:bb9889b89af2b233c818cac1e2137d78ff6e17c02d9e091440dafc1cf4a4784b"
+      },
+      {
+        "artifactName": "blob-report-10",
+        "reportArchive": "report-normal-10-2-0.zip",
+        "sha256": "sha256:2508377ec229162b8b0d376c7d5d8bb6e60366b2f0cdadd069bbfdd204b3651a"
+      },
+      {
+        "artifactName": "blob-report-10",
+        "reportArchive": "report-normal-10-3-0.zip",
+        "sha256": "sha256:17877c830635de3c426d4ad9093495271de1fe14f76e99f2137d9eac165e4881"
+      },
+      {
+        "artifactName": "blob-report-10",
+        "reportArchive": "report-normal-10-4-0.zip",
+        "sha256": "sha256:2a0df6abe525e5997ad0b9c62bdd62dfe773d5793bad6712156a845a6ecd10db"
+      },
+      {
+        "artifactName": "blob-report-11",
+        "reportArchive": "report-normal-11-1-0.zip",
+        "sha256": "sha256:69f9fc1e475d6f1a3d912058cd6fe068cce94d94c642d829df4397de25fbf5a4"
+      },
+      {
+        "artifactName": "blob-report-11",
+        "reportArchive": "report-normal-11-2-0.zip",
+        "sha256": "sha256:f4312e273c1faa057b6b918c0e051b374557454da7dd85f8878a6382e6c43781"
+      },
+      {
+        "artifactName": "blob-report-11",
+        "reportArchive": "report-normal-11-3-0.zip",
+        "sha256": "sha256:364318582bc8607edcda67caccee464141c6511f76ce8c6752defc9d234df21c"
+      },
+      {
+        "artifactName": "blob-report-11",
+        "reportArchive": "report-normal-11-4-0.zip",
+        "sha256": "sha256:4b08dd910371c8f44cc81405f28a1506a9a6a9c6b0521e7ee184b58d172546b5"
+      },
+      {
+        "artifactName": "blob-report-12",
+        "reportArchive": "report-normal-12-1-0.zip",
+        "sha256": "sha256:fed124a1364c046893995df8915badf3e65ce5bc1700f7e879028d580a124c8c"
+      },
+      {
+        "artifactName": "blob-report-12",
+        "reportArchive": "report-normal-12-2-0.zip",
+        "sha256": "sha256:e2f533e476c9b027691e366b191a16a0fb4f01079538cf55b405c627f4258d49"
+      },
+      {
+        "artifactName": "blob-report-12",
+        "reportArchive": "report-normal-12-3-0.zip",
+        "sha256": "sha256:b71120372a026bddf507ad6667cf23aea1c45e925d4d827788e295c78b87f586"
+      },
+      {
+        "artifactName": "blob-report-12",
+        "reportArchive": "report-normal-12-4-0.zip",
+        "sha256": "sha256:c59ee474abe7b2957f34819d93a387eb33f396a5afb171620bc07264c66abf75"
+      },
+      {
+        "artifactName": "blob-report-13",
+        "reportArchive": "report-normal-13-1-0.zip",
+        "sha256": "sha256:15f64758598badd9ddca2fa8eb5e6234aaad8909c2c7c82e801c1bbd3c110c6d"
+      },
+      {
+        "artifactName": "blob-report-13",
+        "reportArchive": "report-normal-13-2-0.zip",
+        "sha256": "sha256:b4941553de43307bbc8ecf07dcb1a454b1ef1dea6c3f8bf5e82e22f4df4e244a"
+      },
+      {
+        "artifactName": "blob-report-13",
+        "reportArchive": "report-normal-13-3-0.zip",
+        "sha256": "sha256:e57e752efe4d725de7ac066b124f88363a47e0f1c9a6195311c003b1caf6166a"
+      },
+      {
+        "artifactName": "blob-report-13",
+        "reportArchive": "report-normal-13-4-0.zip",
+        "sha256": "sha256:f1b1ad4619a9544ddca288821aa0347fb68321404fabf12db506f8e2febe6bf2"
+      },
+      {
+        "artifactName": "blob-report-14",
+        "reportArchive": "report-normal-14-1-0.zip",
+        "sha256": "sha256:b4d60d6893043892bd4fcec9dbbbd73c6795055ecd37c8f34287a30b382b5ca2"
+      },
+      {
+        "artifactName": "blob-report-14",
+        "reportArchive": "report-normal-14-2-0.zip",
+        "sha256": "sha256:2d8f31994ca016f35be1d01d1de55d18a8e3c2bdae7acf17a23f4abd194644d2"
+      },
+      {
+        "artifactName": "blob-report-14",
+        "reportArchive": "report-normal-14-3-0.zip",
+        "sha256": "sha256:efbf3a42534390f9c6d38314aba89225ee3012d936be1f6ccfb46496c365e98e"
+      },
+      {
+        "artifactName": "blob-report-14",
+        "reportArchive": "report-normal-14-4-0.zip",
+        "sha256": "sha256:b1a94c36a9198504b0bc3a559823299aaf7161f90ef6081ff5b46f8d70410650"
+      },
+      {
+        "artifactName": "blob-report-15",
+        "reportArchive": "report-normal-15-1-0.zip",
+        "sha256": "sha256:994bec2086eaaf60929a803ecfa33284b9d249d9014c91ad8206e2ea01ad14f8"
+      },
+      {
+        "artifactName": "blob-report-15",
+        "reportArchive": "report-normal-15-2-0.zip",
+        "sha256": "sha256:7fffda0fb8b48b1863e5854b4e582aebe84683ee08a94b84a222b66e2d8e6657"
+      },
+      {
+        "artifactName": "blob-report-15",
+        "reportArchive": "report-normal-15-3-0.zip",
+        "sha256": "sha256:0a25c7e970424900603bb0ef6677e8d06b95e187330908ac17122876b91101f7"
+      },
+      {
+        "artifactName": "blob-report-15",
+        "reportArchive": "report-normal-15-4-0.zip",
+        "sha256": "sha256:31b0985d466aa9502d0f4f14b444a854d0764e11c52949b618696ec49b6636b0"
+      },
+      {
+        "artifactName": "blob-report-16",
+        "reportArchive": "report-normal-16-1-0.zip",
+        "sha256": "sha256:17115ad280cd2fed6205dd3f767a311e4814d53c19ebe7ce189a0b592418608e"
+      },
+      {
+        "artifactName": "blob-report-16",
+        "reportArchive": "report-normal-16-2-0.zip",
+        "sha256": "sha256:56e191580063c69bd80428e22165e30213e4353d2594cd23132b95327933bacb"
+      },
+      {
+        "artifactName": "blob-report-16",
+        "reportArchive": "report-normal-16-3-0.zip",
+        "sha256": "sha256:4f35335cb57f107e8f16f25c4c29031c537bd1b551926102f6def597806696e5"
+      },
+      {
+        "artifactName": "blob-report-16",
+        "reportArchive": "report-normal-16-4-0.zip",
+        "sha256": "sha256:49bedd11670648912f44442496b16ab5419da29a77c162ee7f69d39484779b18"
+      },
+      {
+        "artifactName": "blob-report-17",
+        "reportArchive": "report-normal-17-1-0.zip",
+        "sha256": "sha256:c48725015433a8372aae9e4c040f856bc13e3860188b19202593d5788d07b573"
+      },
+      {
+        "artifactName": "blob-report-17",
+        "reportArchive": "report-normal-17-2-0.zip",
+        "sha256": "sha256:b8e30a8196c1d4759a5826fa91cd28bd263bc7d6b8d387549ca8f7e68b9107c9"
+      },
+      {
+        "artifactName": "blob-report-17",
+        "reportArchive": "report-normal-17-3-0.zip",
+        "sha256": "sha256:04e2b8ea44b3f791e65f6a979f6584030692e594009dd590bc4bdbabe5e4847f"
+      },
+      {
+        "artifactName": "blob-report-17",
+        "reportArchive": "report-normal-17-4-0.zip",
+        "sha256": "sha256:c0ca382a29a42b227c4a0cc2ba5569cce5415c370e37b03d8ba63f42e0fac6f5"
+      },
+      {
+        "artifactName": "blob-report-18",
+        "reportArchive": "report-normal-18-1-0.zip",
+        "sha256": "sha256:538844d29684821dc39bb2c22e4993076f98c67dd81831ca9af69984587db6b3"
+      },
+      {
+        "artifactName": "blob-report-18",
+        "reportArchive": "report-normal-18-2-0.zip",
+        "sha256": "sha256:b87ac9ce2b3afda14f5abcb47cce783a054dc53c1f1b0b85c2930c515e45b7a0"
+      },
+      {
+        "artifactName": "blob-report-18",
+        "reportArchive": "report-normal-18-3-0.zip",
+        "sha256": "sha256:feb67752f3efe96d64fe23636f49915db604995acda5e83c72ac4faa12f15ca3"
+      },
+      {
+        "artifactName": "blob-report-18",
+        "reportArchive": "report-normal-18-4-0.zip",
+        "sha256": "sha256:88367a63b6df2c2239a04de1747cdb89a5192df714e9d1ecb013dcc66e171ce6"
+      },
+      {
+        "artifactName": "blob-report-19",
+        "reportArchive": "report-normal-19-1-0.zip",
+        "sha256": "sha256:87ae5a198b93ebe128659964fe17ff609e9c168de79d99ba7f2ddbeca746c1ee"
+      },
+      {
+        "artifactName": "blob-report-19",
+        "reportArchive": "report-normal-19-2-0.zip",
+        "sha256": "sha256:941418388b5dd6d1b783fb29f588bfd3d990652584e34cf5b1789815a278316b"
+      },
+      {
+        "artifactName": "blob-report-19",
+        "reportArchive": "report-normal-19-3-0.zip",
+        "sha256": "sha256:f4b1315362eb179d4a29c2af33c836432325f9c373a4629b8af929af2c3b68cc"
+      },
+      {
+        "artifactName": "blob-report-19",
+        "reportArchive": "report-normal-19-4-0.zip",
+        "sha256": "sha256:6830423a3a5eaf87efade363c3fd745370508c3b5d4c74e49786363d6881d037"
+      },
+      {
+        "artifactName": "blob-report-2",
+        "reportArchive": "report-normal-2-1-0.zip",
+        "sha256": "sha256:fce8f6f334b4fe9cd03bb718f16c9af94d65b2eb30424dc306d5098e94bd27a7"
+      },
+      {
+        "artifactName": "blob-report-2",
+        "reportArchive": "report-normal-2-2-0.zip",
+        "sha256": "sha256:bac2358fcf7d08db9f69954ee21f8f4c4a9df37e7290ea083bf144791f6caeed"
+      },
+      {
+        "artifactName": "blob-report-2",
+        "reportArchive": "report-normal-2-3-0.zip",
+        "sha256": "sha256:d1c8d8486bf45b6f54d81ea88007f632553f3eddac5de3adb13eca89ae36c482"
+      },
+      {
+        "artifactName": "blob-report-2",
+        "reportArchive": "report-normal-2-4-0.zip",
+        "sha256": "sha256:08a6d66aff8e775f666e7bad069bafcb0a066fe919563355b16a1a871e2d34e5"
+      },
+      {
+        "artifactName": "blob-report-20",
+        "reportArchive": "report-normal-20-1-0.zip",
+        "sha256": "sha256:e1e16d44488fb059cfe3aa91265ac071e9677c9763254d50f1bb666d04499bb2"
+      },
+      {
+        "artifactName": "blob-report-20",
+        "reportArchive": "report-normal-20-2-0.zip",
+        "sha256": "sha256:c4d620c1731f4ef7838954930f78af438f9eeba6ec96e56ac9381c34ca79027e"
+      },
+      {
+        "artifactName": "blob-report-20",
+        "reportArchive": "report-normal-20-3-0.zip",
+        "sha256": "sha256:2a26c3312c3b15592fa293af253da0e047bc7de49ea8a87321bd9babbd60cbe8"
+      },
+      {
+        "artifactName": "blob-report-20",
+        "reportArchive": "report-normal-20-4-0.zip",
+        "sha256": "sha256:e4443774703a19e5e4cdf95832cad911827e538416494a6829feb5676301b0ca"
+      },
+      {
+        "artifactName": "blob-report-21",
+        "reportArchive": "report-normal-21-1-0.zip",
+        "sha256": "sha256:eb2c865b9ad9bf714045ab3b37f27a7c0086920584311e9268abc79d0e60be87"
+      },
+      {
+        "artifactName": "blob-report-21",
+        "reportArchive": "report-normal-21-2-0.zip",
+        "sha256": "sha256:ae4cf8cf70f267527f13c6bfd4b816acc21a7231f7ccefcc2814095488fdd0d1"
+      },
+      {
+        "artifactName": "blob-report-21",
+        "reportArchive": "report-normal-21-3-0.zip",
+        "sha256": "sha256:9641e230329b0aca4a653a4a47394fd2e7e1590388c0043c8730c39fa1d48ca6"
+      },
+      {
+        "artifactName": "blob-report-21",
+        "reportArchive": "report-normal-21-4-0.zip",
+        "sha256": "sha256:4bc145e93ca42dd6260fb1f76da5e4ccc0765ff7f956f2e7f98543ecca5cd641"
+      },
+      {
+        "artifactName": "blob-report-22",
+        "reportArchive": "report-normal-22-1-0.zip",
+        "sha256": "sha256:f1785199acdfd47a0f614e4214144fe6a7458ba7ad064c7dfb82a07875077f37"
+      },
+      {
+        "artifactName": "blob-report-22",
+        "reportArchive": "report-normal-22-2-0.zip",
+        "sha256": "sha256:22acbf4661d7296f4d2d43e42025b85fe0a55077459a6a1abd9b82621a283fed"
+      },
+      {
+        "artifactName": "blob-report-22",
+        "reportArchive": "report-normal-22-3-0.zip",
+        "sha256": "sha256:e655a06b29ebaf0d03617c56c560d141a3b0969f6a9058a9bcc0d7c9bfcd9e70"
+      },
+      {
+        "artifactName": "blob-report-22",
+        "reportArchive": "report-normal-22-4-0.zip",
+        "sha256": "sha256:8a7720dc88aced037080c489dcd346ae7b7e94c925df10f9656757796005d755"
+      },
+      {
+        "artifactName": "blob-report-23",
+        "reportArchive": "report-normal-23-1-0.zip",
+        "sha256": "sha256:af89afecf03c8e1ac748fc92b69f7c1a753cec3183191f2c2dcc90bb038111e9"
+      },
+      {
+        "artifactName": "blob-report-23",
+        "reportArchive": "report-normal-23-2-0.zip",
+        "sha256": "sha256:f564dde5db231479f1b45eeb8782f2e7d4f392a0d285e5154a9ef02f0684c845"
+      },
+      {
+        "artifactName": "blob-report-23",
+        "reportArchive": "report-normal-23-3-0.zip",
+        "sha256": "sha256:dc270c8eaa743e26579013f71a94ce9b04086a1df73e860bb628ed253b17a9c2"
+      },
+      {
+        "artifactName": "blob-report-23",
+        "reportArchive": "report-normal-23-4-0.zip",
+        "sha256": "sha256:9993d2dbe488b82b1f3972e97bccd1fe5d5aceff1cddc07e72c908e49853af11"
+      },
+      {
+        "artifactName": "blob-report-24",
+        "reportArchive": "report-normal-24-1-0.zip",
+        "sha256": "sha256:b8600b1f71a0658c4ca1bfa0cc98dc06705d833569208b59cb9a1a6b9f1eb610"
+      },
+      {
+        "artifactName": "blob-report-24",
+        "reportArchive": "report-normal-24-2-0.zip",
+        "sha256": "sha256:f110be2b19cd3603752d9742dfcf828138b6176e1de234c837fb41d4fc00ec09"
+      },
+      {
+        "artifactName": "blob-report-24",
+        "reportArchive": "report-normal-24-3-0.zip",
+        "sha256": "sha256:9ea746f8db07f5890e79370e86542eb66386fc6c2c57eebb78b6ddaf14892760"
+      },
+      {
+        "artifactName": "blob-report-24",
+        "reportArchive": "report-normal-24-4-0.zip",
+        "sha256": "sha256:e1ed71d5647e5af0d7eef354ac5920d99ebe90790da12b0d41d374c092b49654"
+      },
+      {
+        "artifactName": "blob-report-25",
+        "reportArchive": "report-normal-25-1-0.zip",
+        "sha256": "sha256:02b42574220e59db451d00e2b30ec6f0c25a544f9c41c11070eff8c970851016"
+      },
+      {
+        "artifactName": "blob-report-25",
+        "reportArchive": "report-normal-25-2-0.zip",
+        "sha256": "sha256:1b2991ef490252b17f378334c17cc3b77a320c057bf2ad0039caf035cbdc0416"
+      },
+      {
+        "artifactName": "blob-report-25",
+        "reportArchive": "report-normal-25-3-0.zip",
+        "sha256": "sha256:e874ca8d5d2267759269500272932872662175126a01e11cdd66d298206c352e"
+      },
+      {
+        "artifactName": "blob-report-25",
+        "reportArchive": "report-normal-25-4-0.zip",
+        "sha256": "sha256:72ed578e599f9849b9aa619ce83b077c4aedd3181aed26da17be52299cf58792"
+      },
+      {
+        "artifactName": "blob-report-26",
+        "reportArchive": "report-normal-26-1-0.zip",
+        "sha256": "sha256:d2a47e4054e018714a490d645d691955805c9b826c47a1c0728de1893d904394"
+      },
+      {
+        "artifactName": "blob-report-26",
+        "reportArchive": "report-normal-26-2-0.zip",
+        "sha256": "sha256:41c0b920fa21bf9b5548fdc2158e7051ade7173de49093a51ac544c76dba48d1"
+      },
+      {
+        "artifactName": "blob-report-26",
+        "reportArchive": "report-normal-26-3-0.zip",
+        "sha256": "sha256:bd1668a91346695c940111bbc91fc9293007bbc1f365e239bff2a5d29884b278"
+      },
+      {
+        "artifactName": "blob-report-26",
+        "reportArchive": "report-normal-26-4-0.zip",
+        "sha256": "sha256:4efa8d4e35c618d2cf78cee108307fba8c325cca8d93cb57d629654d7bba4b38"
+      },
+      {
+        "artifactName": "blob-report-27",
+        "reportArchive": "report-normal-27-1-0.zip",
+        "sha256": "sha256:0f23458da12ff2446dc770cab6c4df35ca93025df97a6e7fd1c95f36eba32134"
+      },
+      {
+        "artifactName": "blob-report-27",
+        "reportArchive": "report-normal-27-2-0.zip",
+        "sha256": "sha256:b732185be60f716ec362c7b3f6bf263ece426aedb475a336e9eef5c7d563f132"
+      },
+      {
+        "artifactName": "blob-report-27",
+        "reportArchive": "report-normal-27-3-0.zip",
+        "sha256": "sha256:010298cd737e0ad803b330aed4b7178d6b3abdae40e0690c9afd807570670ed5"
+      },
+      {
+        "artifactName": "blob-report-27",
+        "reportArchive": "report-normal-27-4-0.zip",
+        "sha256": "sha256:0a5f4a69b0eff9b0859912ef7faa094f751c3839ba8e343d76f050da29362054"
+      },
+      {
+        "artifactName": "blob-report-28",
+        "reportArchive": "report-normal-28-1-0.zip",
+        "sha256": "sha256:48a5203523ad878c47b121431bc6127fdeef9e09231410098d8dccaf5e81f093"
+      },
+      {
+        "artifactName": "blob-report-28",
+        "reportArchive": "report-normal-28-2-0.zip",
+        "sha256": "sha256:c855d83fba40220e0963dbf35af273f6f2cd2e8813d2c77cc586cc07460e8c2e"
+      },
+      {
+        "artifactName": "blob-report-28",
+        "reportArchive": "report-normal-28-3-0.zip",
+        "sha256": "sha256:598b1b9b393ed28974a5ab92d73a8d6f82199ff7b40892a75ad38b2f131162cc"
+      },
+      {
+        "artifactName": "blob-report-28",
+        "reportArchive": "report-normal-28-4-0.zip",
+        "sha256": "sha256:4ea083f4e5fa5702af1eadc785b1350579499a97b9daa6e8f7003d347cf8bc68"
+      },
+      {
+        "artifactName": "blob-report-3",
+        "reportArchive": "report-normal-3-1-0.zip",
+        "sha256": "sha256:3d30e74e607b915dc6197c439a11cd4d12f2801aa7a5ef18c738cbcec6e7cbc6"
+      },
+      {
+        "artifactName": "blob-report-3",
+        "reportArchive": "report-normal-3-2-0.zip",
+        "sha256": "sha256:5fd0994ab4871aa166dbe8950b4a231e4b4c207f43ad23b2342f9c4fb998c210"
+      },
+      {
+        "artifactName": "blob-report-3",
+        "reportArchive": "report-normal-3-3-0.zip",
+        "sha256": "sha256:e4d329134993fdb814a24ec459d51f868ff4f3442061267822b80e8c55a3b8dd"
+      },
+      {
+        "artifactName": "blob-report-3",
+        "reportArchive": "report-normal-3-4-0.zip",
+        "sha256": "sha256:f6defa9b13afffa938762713e8163a26154577dad6dd3efcec48ac3f7b9d95e4"
+      },
+      {
+        "artifactName": "blob-report-4",
+        "reportArchive": "report-normal-4-1-0.zip",
+        "sha256": "sha256:a2379f50860eb63a2a4b25cb881979d510e9f72c15351eeecdb5dd95d287e9d4"
+      },
+      {
+        "artifactName": "blob-report-4",
+        "reportArchive": "report-normal-4-2-0.zip",
+        "sha256": "sha256:a5700d8f540f2dcb8741b94657a8bd5bf7d9233b7bef7837a9231edf4edaec71"
+      },
+      {
+        "artifactName": "blob-report-4",
+        "reportArchive": "report-normal-4-3-0.zip",
+        "sha256": "sha256:0573d583abd9e7c473d9b1738d2ce0832dc01ed5a6e9442227b21af8d36166ba"
+      },
+      {
+        "artifactName": "blob-report-4",
+        "reportArchive": "report-normal-4-4-0.zip",
+        "sha256": "sha256:b9d3f3fb0f803a4ab39b35a5e44d08f9315e2d7c9f27cf54eab4651d1d36087c"
+      },
+      {
+        "artifactName": "blob-report-5",
+        "reportArchive": "report-normal-5-1-0.zip",
+        "sha256": "sha256:cf1d5874d8f5410b6677453059bfb19ec8c05c7317819425c7217b47c1932736"
+      },
+      {
+        "artifactName": "blob-report-5",
+        "reportArchive": "report-normal-5-2-0.zip",
+        "sha256": "sha256:bf7a4114060a9f9065dcb4057c6ab783e0878b7550108d4c37c923efed5538f3"
+      },
+      {
+        "artifactName": "blob-report-5",
+        "reportArchive": "report-normal-5-3-0.zip",
+        "sha256": "sha256:9edd04d068c8ee27d08f69356698b9e566b24df8777f83949a8c5c747ea9c49c"
+      },
+      {
+        "artifactName": "blob-report-5",
+        "reportArchive": "report-normal-5-4-0.zip",
+        "sha256": "sha256:58b8413f5e3027182d83a7e6a27127a8f4a2b89089ce5df173bae0814b960864"
+      },
+      {
+        "artifactName": "blob-report-6",
+        "reportArchive": "report-normal-6-1-0.zip",
+        "sha256": "sha256:682c877c1aee30d0ddba2d3019ceca691e746ed877991842e33c4dd00eee5d60"
+      },
+      {
+        "artifactName": "blob-report-6",
+        "reportArchive": "report-normal-6-2-0.zip",
+        "sha256": "sha256:2d5e422128f12a4b6f7b8ce15855ee5d9bd1b5756553447c79d36679dcedb04b"
+      },
+      {
+        "artifactName": "blob-report-6",
+        "reportArchive": "report-normal-6-3-0.zip",
+        "sha256": "sha256:5023a143442e241c7ae8e76ec092d1ef389e88ba35c13e3f22976fac7f90ddf1"
+      },
+      {
+        "artifactName": "blob-report-6",
+        "reportArchive": "report-normal-6-4-0.zip",
+        "sha256": "sha256:4d1a60b21368981812e148c7631490b4b6dccf98cf063dc09d1c311abfbf0abd"
+      },
+      {
+        "artifactName": "blob-report-7",
+        "reportArchive": "report-normal-7-1-0.zip",
+        "sha256": "sha256:d29c726c61f8da9c23a3b5b245a7bec9c098a8dfc0863265ee1f523f5d69d4da"
+      },
+      {
+        "artifactName": "blob-report-7",
+        "reportArchive": "report-normal-7-2-0.zip",
+        "sha256": "sha256:554ef03a62a99b188235b627041f2e4a10c11fa60f8029c1f53c92f901a75a6d"
+      },
+      {
+        "artifactName": "blob-report-7",
+        "reportArchive": "report-normal-7-3-0.zip",
+        "sha256": "sha256:70f79205dd8e91b46e2225d36a5de5e5524171af980cf44e853ffe1768068213"
+      },
+      {
+        "artifactName": "blob-report-7",
+        "reportArchive": "report-normal-7-4-0.zip",
+        "sha256": "sha256:8e52b5143081a42798d2226c19160b26d5d70d9506b06d39c7f511192338155a"
+      },
+      {
+        "artifactName": "blob-report-8",
+        "reportArchive": "report-normal-8-1-0.zip",
+        "sha256": "sha256:7239d1c715986912faea19c81febc370ed0723b2c68de500f8f54f2525176657"
+      },
+      {
+        "artifactName": "blob-report-8",
+        "reportArchive": "report-normal-8-2-0.zip",
+        "sha256": "sha256:b93463efaf85b3c8e9db602ddb47e6c57f443ac658be8374fabfded0cccec53d"
+      },
+      {
+        "artifactName": "blob-report-8",
+        "reportArchive": "report-normal-8-3-0.zip",
+        "sha256": "sha256:dc27ddadda5f7b9ea2156075767c37f362fff4149a6ea4bdf732158a282d1389"
+      },
+      {
+        "artifactName": "blob-report-8",
+        "reportArchive": "report-normal-8-4-0.zip",
+        "sha256": "sha256:2a19a81bc499792e5f9b09ccb0d621d44d97fd4cbaef52994e10a08f3cec69ad"
+      },
+      {
+        "artifactName": "blob-report-9",
+        "reportArchive": "report-normal-9-1-0.zip",
+        "sha256": "sha256:3f36ce6f507e9d7dda5c21f7af23f7cb7149ec6dcaab8794111a0c2fc01fc363"
+      },
+      {
+        "artifactName": "blob-report-9",
+        "reportArchive": "report-normal-9-2-0.zip",
+        "sha256": "sha256:6feebf166af52b75fb56fec0862db8cf2df4ddc92dc92ea7d017586d916c8304"
+      },
+      {
+        "artifactName": "blob-report-9",
+        "reportArchive": "report-normal-9-3-0.zip",
+        "sha256": "sha256:ce090ed7fb56b144c1367af8529dc11b2cd40393a706fdf3cd947927d458baeb"
+      },
+      {
+        "artifactName": "blob-report-9",
+        "reportArchive": "report-normal-9-4-0.zip",
+        "sha256": "sha256:31b71fa9fa6b45af1357685533f22ef96c518061655fb80b69f322a6acd05bd4"
+      },
+      {
+        "artifactName": "blob-report-containers-1",
+        "reportArchive": "report-containers-702b95a.zip",
+        "sha256": "sha256:fd88eca35450ca766b29b32b63f8abb5ffc23a14a13788355fc5b37b268ba13f"
+      },
+      {
+        "artifactName": "blob-report-containers-2",
+        "reportArchive": "report-containers-b3acef1.zip",
+        "sha256": "sha256:253459b16a12d25a7ce508ad413f5ca97dc1952fd5c1770bb181441f04d9d19f"
+      },
+      {
+        "artifactName": "blob-report-containers-3",
+        "reportArchive": "report-containers-a6327ab.zip",
+        "sha256": "sha256:630e64faadde7a5238252b96aeb15781913431a62c55eb092ae085507ba00445"
+      },
+      {
+        "artifactName": "blob-report-containers-4",
+        "reportArchive": "report-containers-f8195dd.zip",
+        "sha256": "sha256:38eb214674c138be13b8729ca0efc9a7f3631ad40d1b874b5e5c4bddb8999f01"
+      },
+      {
+        "artifactName": "blob-report-containers-5",
+        "reportArchive": "report-containers-fcd8dfc.zip",
+        "sha256": "sha256:27a27588a27aaeb2d339ed90fe84f9f2ebef6a9220266d418a1e19cd0af867ab"
+      },
+      {
+        "artifactName": "blob-report-containers-6",
+        "reportArchive": "report-containers-428988d.zip",
+        "sha256": "sha256:f36f7c3c69183b093d7d9a96faa5368b0f6acc87122906386caacfe8e89f5dd8"
+      }
+    ],
+    "shardMetadata": [
+      {
+        "artifactName": "blob-report-containers-1",
+        "cohort": "containers",
+        "shard": 1,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 6,
+        "startedAt": "2026-10-31T01:25:53.033Z",
+        "finishedAt": "2026-10-31T01:33:28.151Z",
+        "reportArchives": [
+          "report-containers-702b95a.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-containers-2",
+        "cohort": "containers",
+        "shard": 2,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 10,
+        "startedAt": "2026-10-31T01:26:13.284Z",
+        "finishedAt": "2026-10-31T01:33:36.162Z",
+        "reportArchives": [
+          "report-containers-b3acef1.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-containers-3",
+        "cohort": "containers",
+        "shard": 3,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 11,
+        "startedAt": "2026-10-31T01:25:07.792Z",
+        "finishedAt": "2026-10-31T01:32:27.974Z",
+        "reportArchives": [
+          "report-containers-a6327ab.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-containers-4",
+        "cohort": "containers",
+        "shard": 4,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 12,
+        "startedAt": "2026-10-31T01:25:14.733Z",
+        "finishedAt": "2026-10-31T01:32:29.202Z",
+        "reportArchives": [
+          "report-containers-f8195dd.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-containers-5",
+        "cohort": "containers",
+        "shard": 5,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 13,
+        "startedAt": "2026-10-31T01:25:39.731Z",
+        "finishedAt": "2026-10-31T01:33:23.605Z",
+        "reportArchives": [
+          "report-containers-fcd8dfc.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-containers-6",
+        "cohort": "containers",
+        "shard": 6,
+        "shardCount": 6,
+        "exitCode": 0,
+        "processCount": 1,
+        "unitCount": 1,
+        "startedAt": "2026-10-31T01:25:33.963Z",
+        "finishedAt": "2026-10-31T01:30:37.061Z",
+        "reportArchives": [
+          "report-containers-428988d.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-1",
+        "cohort": "normal",
+        "shard": 1,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 54,
+        "startedAt": "2026-10-31T01:25:10.550Z",
+        "finishedAt": "2026-10-31T01:33:39.765Z",
+        "reportArchives": [
+          "report-normal-1-1-0.zip",
+          "report-normal-1-2-0.zip",
+          "report-normal-1-3-0.zip",
+          "report-normal-1-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-2",
+        "cohort": "normal",
+        "shard": 2,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:01.896Z",
+        "finishedAt": "2026-10-31T01:33:24.889Z",
+        "reportArchives": [
+          "report-normal-2-1-0.zip",
+          "report-normal-2-2-0.zip",
+          "report-normal-2-3-0.zip",
+          "report-normal-2-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-3",
+        "cohort": "normal",
+        "shard": 3,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:01.465Z",
+        "finishedAt": "2026-10-31T01:33:16.663Z",
+        "reportArchives": [
+          "report-normal-3-1-0.zip",
+          "report-normal-3-2-0.zip",
+          "report-normal-3-3-0.zip",
+          "report-normal-3-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-4",
+        "cohort": "normal",
+        "shard": 4,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:02.712Z",
+        "finishedAt": "2026-10-31T01:34:08.160Z",
+        "reportArchives": [
+          "report-normal-4-1-0.zip",
+          "report-normal-4-2-0.zip",
+          "report-normal-4-3-0.zip",
+          "report-normal-4-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-5",
+        "cohort": "normal",
+        "shard": 5,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:03.433Z",
+        "finishedAt": "2026-10-31T01:34:02.690Z",
+        "reportArchives": [
+          "report-normal-5-1-0.zip",
+          "report-normal-5-2-0.zip",
+          "report-normal-5-3-0.zip",
+          "report-normal-5-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-6",
+        "cohort": "normal",
+        "shard": 6,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:01.459Z",
+        "finishedAt": "2026-10-31T01:33:40.280Z",
+        "reportArchives": [
+          "report-normal-6-1-0.zip",
+          "report-normal-6-2-0.zip",
+          "report-normal-6-3-0.zip",
+          "report-normal-6-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-7",
+        "cohort": "normal",
+        "shard": 7,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:00.329Z",
+        "finishedAt": "2026-10-31T01:34:17.906Z",
+        "reportArchives": [
+          "report-normal-7-1-0.zip",
+          "report-normal-7-2-0.zip",
+          "report-normal-7-3-0.zip",
+          "report-normal-7-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-8",
+        "cohort": "normal",
+        "shard": 8,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:21.452Z",
+        "finishedAt": "2026-10-31T01:34:24.018Z",
+        "reportArchives": [
+          "report-normal-8-1-0.zip",
+          "report-normal-8-2-0.zip",
+          "report-normal-8-3-0.zip",
+          "report-normal-8-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-9",
+        "cohort": "normal",
+        "shard": 9,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:26:52.784Z",
+        "finishedAt": "2026-10-31T01:33:27.025Z",
+        "reportArchives": [
+          "report-normal-9-1-0.zip",
+          "report-normal-9-2-0.zip",
+          "report-normal-9-3-0.zip",
+          "report-normal-9-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-10",
+        "cohort": "normal",
+        "shard": 10,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 55,
+        "startedAt": "2026-10-31T01:25:12.360Z",
+        "finishedAt": "2026-10-31T01:33:44.034Z",
+        "reportArchives": [
+          "report-normal-10-1-0.zip",
+          "report-normal-10-2-0.zip",
+          "report-normal-10-3-0.zip",
+          "report-normal-10-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-11",
+        "cohort": "normal",
+        "shard": 11,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:01.031Z",
+        "finishedAt": "2026-10-31T01:31:04.348Z",
+        "reportArchives": [
+          "report-normal-11-1-0.zip",
+          "report-normal-11-2-0.zip",
+          "report-normal-11-3-0.zip",
+          "report-normal-11-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-12",
+        "cohort": "normal",
+        "shard": 12,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:24:59.725Z",
+        "finishedAt": "2026-10-31T01:34:11.675Z",
+        "reportArchives": [
+          "report-normal-12-1-0.zip",
+          "report-normal-12-2-0.zip",
+          "report-normal-12-3-0.zip",
+          "report-normal-12-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-13",
+        "cohort": "normal",
+        "shard": 13,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:15.837Z",
+        "finishedAt": "2026-10-31T01:32:18.906Z",
+        "reportArchives": [
+          "report-normal-13-1-0.zip",
+          "report-normal-13-2-0.zip",
+          "report-normal-13-3-0.zip",
+          "report-normal-13-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-14",
+        "cohort": "normal",
+        "shard": 14,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:19.250Z",
+        "finishedAt": "2026-10-31T01:32:29.124Z",
+        "reportArchives": [
+          "report-normal-14-1-0.zip",
+          "report-normal-14-2-0.zip",
+          "report-normal-14-3-0.zip",
+          "report-normal-14-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-15",
+        "cohort": "normal",
+        "shard": 15,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:04.418Z",
+        "finishedAt": "2026-10-31T01:30:39.359Z",
+        "reportArchives": [
+          "report-normal-15-1-0.zip",
+          "report-normal-15-2-0.zip",
+          "report-normal-15-3-0.zip",
+          "report-normal-15-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-16",
+        "cohort": "normal",
+        "shard": 16,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:31.129Z",
+        "finishedAt": "2026-10-31T01:34:00.231Z",
+        "reportArchives": [
+          "report-normal-16-1-0.zip",
+          "report-normal-16-2-0.zip",
+          "report-normal-16-3-0.zip",
+          "report-normal-16-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-17",
+        "cohort": "normal",
+        "shard": 17,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:19.859Z",
+        "finishedAt": "2026-10-31T01:34:38.791Z",
+        "reportArchives": [
+          "report-normal-17-1-0.zip",
+          "report-normal-17-2-0.zip",
+          "report-normal-17-3-0.zip",
+          "report-normal-17-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-18",
+        "cohort": "normal",
+        "shard": 18,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:26:12.334Z",
+        "finishedAt": "2026-10-31T01:35:53.292Z",
+        "reportArchives": [
+          "report-normal-18-1-0.zip",
+          "report-normal-18-2-0.zip",
+          "report-normal-18-3-0.zip",
+          "report-normal-18-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-19",
+        "cohort": "normal",
+        "shard": 19,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:24:58.587Z",
+        "finishedAt": "2026-10-31T01:33:48.169Z",
+        "reportArchives": [
+          "report-normal-19-1-0.zip",
+          "report-normal-19-2-0.zip",
+          "report-normal-19-3-0.zip",
+          "report-normal-19-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-20",
+        "cohort": "normal",
+        "shard": 20,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:59.430Z",
+        "finishedAt": "2026-10-31T01:34:13.064Z",
+        "reportArchives": [
+          "report-normal-20-1-0.zip",
+          "report-normal-20-2-0.zip",
+          "report-normal-20-3-0.zip",
+          "report-normal-20-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-21",
+        "cohort": "normal",
+        "shard": 21,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:03.673Z",
+        "finishedAt": "2026-10-31T01:35:11.609Z",
+        "reportArchives": [
+          "report-normal-21-1-0.zip",
+          "report-normal-21-2-0.zip",
+          "report-normal-21-3-0.zip",
+          "report-normal-21-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-22",
+        "cohort": "normal",
+        "shard": 22,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:10.926Z",
+        "finishedAt": "2026-10-31T01:33:39.843Z",
+        "reportArchives": [
+          "report-normal-22-1-0.zip",
+          "report-normal-22-2-0.zip",
+          "report-normal-22-3-0.zip",
+          "report-normal-22-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-23",
+        "cohort": "normal",
+        "shard": 23,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:14.945Z",
+        "finishedAt": "2026-10-31T01:32:40.567Z",
+        "reportArchives": [
+          "report-normal-23-1-0.zip",
+          "report-normal-23-2-0.zip",
+          "report-normal-23-3-0.zip",
+          "report-normal-23-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-24",
+        "cohort": "normal",
+        "shard": 24,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:21.889Z",
+        "finishedAt": "2026-10-31T01:34:27.183Z",
+        "reportArchives": [
+          "report-normal-24-1-0.zip",
+          "report-normal-24-2-0.zip",
+          "report-normal-24-3-0.zip",
+          "report-normal-24-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-25",
+        "cohort": "normal",
+        "shard": 25,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:26:59.054Z",
+        "finishedAt": "2026-10-31T01:35:52.522Z",
+        "reportArchives": [
+          "report-normal-25-1-0.zip",
+          "report-normal-25-2-0.zip",
+          "report-normal-25-3-0.zip",
+          "report-normal-25-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-26",
+        "cohort": "normal",
+        "shard": 26,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:25:06.803Z",
+        "finishedAt": "2026-10-31T01:34:09.743Z",
+        "reportArchives": [
+          "report-normal-26-1-0.zip",
+          "report-normal-26-2-0.zip",
+          "report-normal-26-3-0.zip",
+          "report-normal-26-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-27",
+        "cohort": "normal",
+        "shard": 27,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 56,
+        "startedAt": "2026-10-31T01:27:33.440Z",
+        "finishedAt": "2026-10-31T01:34:13.335Z",
+        "reportArchives": [
+          "report-normal-27-1-0.zip",
+          "report-normal-27-2-0.zip",
+          "report-normal-27-3-0.zip",
+          "report-normal-27-4-0.zip"
+        ]
+      },
+      {
+        "artifactName": "blob-report-28",
+        "cohort": "normal",
+        "shard": 28,
+        "shardCount": 28,
+        "exitCode": 0,
+        "processCount": 4,
+        "unitCount": 57,
+        "startedAt": "2026-10-31T01:28:33.040Z",
+        "finishedAt": "2026-10-31T01:36:41.875Z",
+        "reportArchives": [
+          "report-normal-28-1-0.zip",
+          "report-normal-28-2-0.zip",
+          "report-normal-28-3-0.zip",
+          "report-normal-28-4-0.zip"
+        ]
+      }
+    ],
+    "failedAttemptAccounting": {
+      "failedAttemptEvents": 3,
+      "failedAttempts": [
+        {
+          "testId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+          "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+          "attempt": 0,
+          "reportArtifact": "blob-report-10",
+          "innerReport": "report-normal-10-1-0.zip",
+          "errors": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveAttribute\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('thread-column-a2db37ee-ff66-452d-b1bb-d109f3a10bdd').getByTestId('auto-scroll-toggle-button')\nExpected: \u001b[32m\"\u001b[7mfals\u001b[27me\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mtru\u001b[27me\"\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveAttribute\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('thread-column-a2db37ee-ff66-452d-b1bb-d109f3a10bdd').getByTestId('auto-scroll-toggle-button')\u001b[22m\n\u001b[2m    14 × locator resolved to <button type=\"button\" data-size=\"sm\" aria-pressed=\"true\" data-state=\"closed\" data-variant=\"ghost\" data-slot=\"tooltip-trigger\" data-testid=\"auto-scroll-toggle-button\" aria-label=\"Turn off transcript auto-scroll\" class=\"focus-visible:border-ring aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border border-transparent bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justify-center whitespace-nowrap transition-colors disabled:pointer-events-none dis…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"true\"\u001b[22m\n"
+          ]
+        },
+        {
+          "testId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+          "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+          "attempt": 0,
+          "reportArtifact": "blob-report-7",
+          "innerReport": "report-normal-7-4-0.zip",
+          "errors": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeFocused\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\u001b[22m\n\u001b[2m    13 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+          ]
+        },
+        {
+          "testId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+          "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+          "attempt": 1,
+          "reportArtifact": "blob-report-7",
+          "innerReport": "report-normal-7-4-0.zip",
+          "errors": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeFocused\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\u001b[22m\n\u001b[2m    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+          ]
+        }
+      ],
+      "allFailedEventsBelongToTheseTwoFlakyTests": true
+    }
+  },
+  "retrySummary": {
+    "artifactId": 13025365475,
+    "apiDigest": "sha256:87cc36a5275f672ee6f65314d19f71fdc4b9ce15813ae096348133f047f5f02f",
+    "generatedAt": "2026-10-31T01:37:40.953Z",
+    "uniqueTestCount": 4599,
+    "executedNonSkipped": 4559,
+    "counts": {
+      "passedFirstAttempt": 4557,
+      "passedAfterRetry": 2,
+      "failed": 0,
+      "timedOut": 0,
+      "skipped": 40
+    },
+    "flakyVerdicts": 2,
+    "unexpectedVerdicts": 0,
+    "flakeRatePerThousand": 0.44,
+    "zeroFlakesSatisfied": false,
+    "flakyTests": [
+      {
+        "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+        "testId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+        "project": "chromium",
+        "file": "tests/task/threads-composer-disclosure.spec.ts",
+        "title": "task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+        "summaryStatuses": [
+          "failed",
+          "passed"
+        ],
+        "summaryOutcome": "flaky",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "7e8e64cce582da21126f8e6d0f177dc6",
+            "status": "failed",
+            "durationMs": 25369,
+            "reportArtifact": "blob-report-10",
+            "innerReport": "report-normal-10-1-0.zip",
+            "errors": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveAttribute\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('thread-column-a2db37ee-ff66-452d-b1bb-d109f3a10bdd').getByTestId('auto-scroll-toggle-button')\nExpected: \u001b[32m\"\u001b[7mfals\u001b[27me\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mtru\u001b[27me\"\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveAttribute\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('thread-column-a2db37ee-ff66-452d-b1bb-d109f3a10bdd').getByTestId('auto-scroll-toggle-button')\u001b[22m\n\u001b[2m    14 × locator resolved to <button type=\"button\" data-size=\"sm\" aria-pressed=\"true\" data-state=\"closed\" data-variant=\"ghost\" data-slot=\"tooltip-trigger\" data-testid=\"auto-scroll-toggle-button\" aria-label=\"Turn off transcript auto-scroll\" class=\"focus-visible:border-ring aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border border-transparent bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justify-center whitespace-nowrap transition-colors disabled:pointer-events-none dis…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"true\"\u001b[22m\n"
+            ]
+          },
+          {
+            "attempt": 1,
+            "resultId": "452929350e6744d83d914edd6289f3a7",
+            "status": "passed",
+            "durationMs": 37697,
+            "reportArtifact": "blob-report-10",
+            "innerReport": "report-normal-10-1-0.zip",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+        "testId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+        "project": "mobile-chrome",
+        "file": "tests/task/mobile-plan-download.spec.ts",
+        "title": "task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+        "summaryStatuses": [
+          "failed",
+          "failed",
+          "passed"
+        ],
+        "summaryOutcome": "flaky",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "5d219e257360f1f115e56a662b5d3cb3",
+            "status": "failed",
+            "durationMs": 17859,
+            "reportArtifact": "blob-report-7",
+            "innerReport": "report-normal-7-4-0.zip",
+            "errors": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeFocused\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\u001b[22m\n\u001b[2m    13 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+            ]
+          },
+          {
+            "attempt": 1,
+            "resultId": "91e428ed717ccbc4e8161a3bb8c6f539",
+            "status": "failed",
+            "durationMs": 19106,
+            "reportArtifact": "blob-report-7",
+            "innerReport": "report-normal-7-4-0.zip",
+            "errors": [
+              "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeFocused\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\u001b[22m\n\u001b[2m    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+            ]
+          },
+          {
+            "attempt": 2,
+            "resultId": "23fd98378651bb31cc460d5f4297097f",
+            "status": "passed",
+            "durationMs": 11233,
+            "reportArtifact": "blob-report-7",
+            "innerReport": "report-normal-7-4-0.zip",
+            "errors": []
+          }
+        ]
+      }
+    ]
+  },
+  "statusComparison": {
+    "retrySummaryVsRawBlobReports": "Exact match across all 4,599 test IDs, every attempt status and attempt count, both flaky verdicts, and final status counts.",
+    "rawFlakyTestIdSetMatchesSummary": true,
+    "mergedPlaywrightCrossCheck": {
+      "reportJobId": 124403359673,
+      "runAttempt": 1,
+      "jobConclusion": "success",
+      "result": "MATCH",
+      "line": "E2E Tests Passed\tWrite E2E flake report\t2026-10-31T01:37:56.7595861Z E2E flake cross-check: match. retry-summary and the merged Playwright report both report 2 flaky."
+    },
+    "finalVerdictCounts": {
+      "passed": 4559,
+      "skipped": 40
+    },
+    "passedFirstAttempt": 4557,
+    "passedAfterRetry": 2,
+    "finalFailed": 0,
+    "finalTimedOut": 0,
+    "skipped": 40,
+    "unexpectedFinalVerdicts": 0
+  },
+  "priorB11B14IdentityStatusOnCurrentHead": {
+    "priorAudit": "/tmp/usage-history-luna-G3-ci-audit.json",
+    "priorSourceHead": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+    "matchingFlakyIdentities": 0,
+    "identities": [
+      {
+        "priorTestKey": "chromium::tests/layout/stats-usage-history.spec.ts::layout/stats-usage-history.spec.ts › real first publication and rebuild preserve saved values through a database deadline",
+        "project": "chromium",
+        "file": "tests/layout/stats-usage-history.spec.ts",
+        "title": "layout/stats-usage-history.spec.ts › real first publication and rebuild preserve saved values through a database deadline",
+        "currentTestId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588",
+        "currentAttempts": 1,
+        "currentStatuses": [
+          "passed"
+        ],
+        "currentFinalStatus": "passed",
+        "currentOutcome": "expected",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "efc2d427c844c3a7036d2f07799008fa",
+            "status": "passed",
+            "durationMs": 21382,
+            "reportArtifact": "blob-report-5",
+            "innerReport": "report-normal-5-4-0.zip",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "priorTestKey": "chromium::tests/office/taskless-routine-permission.spec.ts::office/taskless-routine-permission.spec.ts › Office taskless routine permissions › rejects the request when the launched profile does not auto-approve",
+        "project": "chromium",
+        "file": "tests/office/taskless-routine-permission.spec.ts",
+        "title": "office/taskless-routine-permission.spec.ts › Office taskless routine permissions › rejects the request when the launched profile does not auto-approve",
+        "currentTestId": "67a94427bba3153eec97-c0ddb32b0b4334be6207",
+        "currentAttempts": 1,
+        "currentStatuses": [
+          "passed"
+        ],
+        "currentFinalStatus": "passed",
+        "currentOutcome": "expected",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "c927fd83c3bb3dcf1ef79984ac2321c0",
+            "status": "passed",
+            "durationMs": 3445,
+            "reportArtifact": "blob-report-25",
+            "innerReport": "report-normal-25-3-0.zip",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "priorTestKey": "chromium::tests/task/subtask.spec.ts::task/subtask.spec.ts › Subtask basics › creates a policy branch for a local-executor subtask",
+        "project": "chromium",
+        "file": "tests/task/subtask.spec.ts",
+        "title": "task/subtask.spec.ts › Subtask basics › creates a policy branch for a local-executor subtask",
+        "currentTestId": "caa386653e4d5920f206-71c3917ef7bc3f13d554",
+        "currentAttempts": 1,
+        "currentStatuses": [
+          "passed"
+        ],
+        "currentFinalStatus": "passed",
+        "currentOutcome": "expected",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "86b18943650f30b11e1b27cc87d93b14",
+            "status": "passed",
+            "durationMs": 14507,
+            "reportArtifact": "blob-report-9",
+            "innerReport": "report-normal-9-1-0.zip",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "priorTestKey": "mobile-chrome::tests/session/mobile-acp-prompt-error-continuity.spec.ts::session/mobile-acp-prompt-error-continuity.spec.ts › phone: visible per-row task actions expose Dismiss turn error",
+        "project": "mobile-chrome",
+        "file": "tests/session/mobile-acp-prompt-error-continuity.spec.ts",
+        "title": "session/mobile-acp-prompt-error-continuity.spec.ts › phone: visible per-row task actions expose Dismiss turn error",
+        "currentTestId": "f2b1d27a56205d4f8e3d-c01edec105212a083315",
+        "currentAttempts": 1,
+        "currentStatuses": [
+          "passed"
+        ],
+        "currentFinalStatus": "passed",
+        "currentOutcome": "expected",
+        "rawAttemptEvidence": [
+          {
+            "attempt": 0,
+            "resultId": "0bef948ab4a81922ab4036048e8aad1a",
+            "status": "passed",
+            "durationMs": 12056,
+            "reportArtifact": "blob-report-26",
+            "innerReport": "report-normal-26-3-0.zip",
+            "errors": []
+          }
+        ]
+      }
+    ]
+  },
+  "flakeTriage": {
+    "file": "/tmp/usage-history-luna-G5-triage.json",
+    "newComparedWithPriorFour": "Both current flaky test identities are new; all four prior G3/B11-B14 identities pass on first attempt in this run.",
+    "traceHandling": "The Threads trace is from passing retry 1 and is excluded. The mobile trace is from failed retry 1 and only confirms that retry reproduced the focus assertion; it does not establish the cause of initial failed attempt 0. Neither initial failure has a trace attachment, and the final passing retry has no trace attachment."
+  },
+  "limitations": [
+    "E2E no-flake audit only; it does not make a final PR-readiness claim.",
+    "No local browser/build/test run, CI rerun, source change, commit, push, review, or public comment was performed.",
+    "Evidence applies to source head 5b79da2f41f9a6e2c9bd9f421313276981e95c00 and synthetic merge parent 997bc54fae4da15702c91da5c5d120bfe651edc1 only.",
+    "At finalization, the shared worktree contained two concurrent unstaged edits to the B15/B16 test files; they were left untouched and are outside the audited CI head."
+  ],
+  "evidenceFiles": {
+    "runApi": "/tmp/usage-history-luna-G5-run-api.json",
+    "jobsApi": "/tmp/usage-history-luna-G5-jobs-api.json",
+    "artifactsApi": "/tmp/usage-history-luna-G5-artifacts-api.json",
+    "rawArtifactZips": "/tmp/usage-history-luna-G5-artifacts/raw-zips/",
+    "downloadedArtifacts": "/tmp/usage-history-luna-G5-artifacts/",
+    "retrySummary": "/tmp/usage-history-luna-G5-artifacts/e2e-retry-summary/retry-summary.json",
+    "blobAuditHelperOutput": "/tmp/usage-history-luna-G5-blob-audit.json",
+    "aggregateReportJobLog": "/tmp/usage-history-luna-G5-report-job.log",
+    "normalShardCheckoutLog": "/tmp/usage-history-luna-G5-shard1.log",
+    "containerShardCheckoutLog": "/tmp/usage-history-luna-G5-container-shard1.log",
+    "syntheticMergeCommitApi": "/tmp/usage-history-luna-G5-synthetic-commit.json",
+    "triage": "/tmp/usage-history-luna-G5-triage.json"
+  }
+}

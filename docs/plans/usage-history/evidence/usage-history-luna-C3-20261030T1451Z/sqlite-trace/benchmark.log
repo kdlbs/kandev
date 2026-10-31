@@ -1,0 +1,53 @@
+goos: linux
+goarch: amd64
+pkg: github.com/kandev/kandev/internal/analytics/repository/sqlite
+cpu: AMD Ryzen 5 7640HS w/ Radeon 760M Graphics     
+BenchmarkUsageHistoryFiveYears/one_year/recent/UTC         	       1	  15302546 ns/op	      3796 nvisit/report	     15302 p95-us/report	  39546880 query-process-peak-rss-B	         1.000 samples	   3807360 sqlite-native-peak-B	  853344 B/op	    8982 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/recent/UTC
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-recent-UTC.json construction=1h1m21.313320929s samples=1 trace-query=14576345ns plain-query=10254229ns
+BenchmarkUsageHistoryFiveYears/one_year/five_years/UTC     	       1	 106826359 ns/op	     44024 nvisit/report	    106826 p95-us/report	  43601920 query-process-peak-rss-B	         1.000 samples	   6240312 sqlite-native-peak-B	 2470720 B/op	   21963 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/five_years/UTC
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-five_years-UTC.json construction=1h1m21.313320929s samples=1 trace-query=105862967ns plain-query=76058565ns
+BenchmarkUsageHistoryFiveYears/one_year/recent/America/New_York         	       1	 328583818 ns/op	    254895 nvisit/report	    328583 p95-us/report	  42016768 query-process-peak-rss-B	         1.000 samples	   5051816 sqlite-native-peak-B	  922408 B/op	    9185 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/recent/America/New_York
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-recent-America-New_York.json construction=1h1m21.313320929s samples=1 trace-query=319116304ns plain-query=233142441ns
+BenchmarkUsageHistoryFiveYears/one_year/five_years/America/New_York     	       1	4906387201 ns/op	   3121670 nvisit/report	   4906386 p95-us/report	  44826624 query-process-peak-rss-B	         1.000 samples	   6447736 sqlite-native-peak-B	 3066592 B/op	   23178 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/five_years/America/New_York
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-five_years-America-New_York.json construction=1h1m21.313320929s samples=1 trace-query=4743661564ns plain-query=3220537847ns
+BenchmarkUsageHistoryFiveYears/one_year/recent/Asia/Kathmandu           	       1	 324879691 ns/op	    256645 nvisit/report	    324879 p95-us/report	  41517056 query-process-peak-rss-B	         1.000 samples	   5051792 sqlite-native-peak-B	  905304 B/op	    9179 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/recent/Asia/Kathmandu
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-recent-Asia-Kathmandu.json construction=1h1m21.313320929s samples=1 trace-query=338007763ns plain-query=250937241ns
+BenchmarkUsageHistoryFiveYears/one_year/five_years/Asia/Kathmandu       	       1	4734283816 ns/op	   3119555 nvisit/report	   4734283 p95-us/report	  43958272 query-process-peak-rss-B	         1.000 samples	   6434512 sqlite-native-peak-B	 2554856 B/op	   22721 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/five_years/Asia/Kathmandu
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-five_years-Asia-Kathmandu.json construction=1h1m21.313320929s samples=1 trace-query=5552949567ns plain-query=4352676268ns
+BenchmarkUsageHistoryFiveYears/one_year/recent/Europe/Lisbon            	       1	 371218319 ns/op	    256645 nvisit/report	    371217 p95-us/report	  41291776 query-process-peak-rss-B	         1.000 samples	   5053152 sqlite-native-peak-B	  922072 B/op	    9202 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/recent/Europe/Lisbon
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-recent-Europe-Lisbon.json construction=1h1m21.313320929s samples=1 trace-query=365787701ns plain-query=271826776ns
+BenchmarkUsageHistoryFiveYears/one_year/five_years/Europe/Lisbon        	       1	4133015836 ns/op	   3121571 nvisit/report	   4133015 p95-us/report	  45051904 query-process-peak-rss-B	         1.000 samples	   6399544 sqlite-native-peak-B	 3037864 B/op	   23305 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/five_years/Europe/Lisbon
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-five_years-Europe-Lisbon.json construction=1h1m21.313320929s samples=1 trace-query=4174672449ns plain-query=3310986019ns
+BenchmarkUsageHistoryFiveYears/one_year/lifetime                        	       1	5897597468 ns/op	   3301041 nvisit/report	   5897597 p95-us/report	  41918464 query-process-peak-rss-B	         1.000 samples	   5017944 sqlite-native-peak-B	  768272 B/op	    5104 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/lifetime
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-lifetime.json construction=1h1m21.313320929s samples=1 trace-query=5187612263ns plain-query=4969050076ns
+--- FAIL: BenchmarkUsageHistoryFiveYears/one_year/native
+    usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded
+BenchmarkUsageHistoryFiveYears/one_year/mixed_actors                    	       1	1124350948 ns/op	   1100500 nvisit/report	   1124350 p95-us/report	  41005056 query-process-peak-rss-B	         1.000 samples	   3709816 sqlite-native-peak-B	  586072 B/op	    4618 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/mixed_actors
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-mixed_actors.json construction=1h1m21.313320929s samples=1 trace-query=1311996085ns plain-query=960577864ns
+BenchmarkUsageHistoryFiveYears/one_year/foreign_coarse                  	       1	4897417731 ns/op	   3301019 nvisit/report	   4897417 p95-us/report	  41967616 query-process-peak-rss-B	         1.000 samples	   5017944 sqlite-native-peak-B	  642600 B/op	    4788 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/foreign_coarse
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-foreign_coarse.json construction=1h1m21.313320929s samples=1 trace-query=7448385538ns plain-query=6173229779ns
+--- FAIL: BenchmarkUsageHistoryFiveYears/one_year/deleted_task
+    usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded
+BenchmarkUsageHistoryFiveYears/one_year/dst_new_york                    	       1	 457789494 ns/op	    264701 nvisit/report	    457788 p95-us/report	  41615360 query-process-peak-rss-B	         1.000 samples	   5051800 sqlite-native-peak-B	  839744 B/op	    8774 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/dst_new_york
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-dst_new_york.json construction=1h1m21.313320929s samples=1 trace-query=447728043ns plain-query=353354471ns
+BenchmarkUsageHistoryFiveYears/one_year/foreign_coarse_boundary         	       1	  12748225 ns/op	      7371 nvisit/report	     12747 p95-us/report	  41529344 query-process-peak-rss-B	         1.000 samples	   3710256 sqlite-native-peak-B	  270368 B/op	    1528 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/foreign_coarse_boundary
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-foreign_coarse_boundary.json construction=1h1m21.313320929s samples=1 trace-query=14779754ns plain-query=10081938ns
+BenchmarkUsageHistoryFiveYears/one_year/empty_range                     	       1	   2951899 ns/op	        22.00 nvisit/report	      2951 p95-us/report	  39890944 query-process-peak-rss-B	         1.000 samples	   3498144 sqlite-native-peak-B	  177592 B/op	    1226 allocs/op
+--- BENCH: BenchmarkUsageHistoryFiveYears/one_year/empty_range
+    usage_history_bench_run_test.go:114: evidence=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C3-20261030T1451Z/sqlite-trace/usage-history-worker4-bench-sqlite-one_year-empty_range.json construction=1h1m21.313320929s samples=1 trace-query=4555962ns plain-query=3981194ns
+signal: terminated
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	4238.997s
+FAIL

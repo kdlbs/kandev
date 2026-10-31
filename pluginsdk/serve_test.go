@@ -349,6 +349,10 @@ func (h *classifiedHost) HostCallContextEnabled() bool { return h.enabled }
 
 func (h *classifiedHost) ValidateHostCallContext(context.Context, bool) error { return nil }
 
+func (h *classifiedHost) UsageHistory() UsageHistoryReader {
+	return &recordingUsageHistoryReader{}
+}
+
 type hostCallProbe struct {
 	UnimplementedPlugin
 	mu      sync.Mutex
@@ -392,7 +396,7 @@ func (p *hostCallProbe) OnEvent(ctx context.Context, event *Event) error {
 	}
 	use := ctx
 	switch call {
-	case "background-preview", "background-task", "dropped-task":
+	case "background-preview", "background-task", "dropped-task", "background-usage":
 		use = context.Background()
 	}
 	var err error
@@ -402,6 +406,15 @@ func (p *hostCallProbe) OnEvent(ctx context.Context, event *Event) error {
 			return status.Error(codes.Unavailable, "plugin-owned task trees are unavailable")
 		}
 		_, err = manager.Preview(use, "root")
+	} else if call == "background-usage" {
+		history, ok := HostUsageHistory(host)
+		if !ok {
+			return status.Error(codes.Unavailable, "retained usage history is unavailable")
+		}
+		_, err = history.ListTargets(use, UsageCollectionTargetQueryV1{WorkspaceID: "workspace-1", Limit: 200})
+		if err == nil {
+			_, err = history.Report(use, UsageObservationBatchV1{SchemaVersion: UsageObservationSchemaVersionV1})
+		}
 	} else {
 		_, err = host.Tasks().Get(use, "task-1")
 	}
@@ -420,7 +433,9 @@ func TestHostCallContextClassificationCoversHostService(t *testing.T) {
 	for method := range methods {
 		_, required := hostCallCallerRequired[method]
 		_, exempt := hostCallCallerExempt[method]
-		require.NotEqual(t, required, exempt, "%s must be classified exactly once", method)
+		if required == exempt {
+			t.Errorf("%s must be classified exactly once", method)
+		}
 	}
 	for method := range hostCallCallerRequired {
 		require.Contains(t, methods, method, "required %s is not a Host method", method)
@@ -435,21 +450,33 @@ func TestHostCallContextClassifiesCapabilityVersusConversationCalls(t *testing.T
 		pluginv1.Host_PreviewPluginOwnedTaskTree_FullMethodName,
 		pluginv1.Host_ListManagedAgentConversationsExact_FullMethodName,
 		pluginv1.Host_GetState_FullMethodName,
+		pluginv1.Host_ListStateKeys_FullMethodName,
+		pluginv1.Host_UpsertSessionUsage_FullMethodName,
+		pluginv1.Host_ListSessionUsage_FullMethodName,
+		pluginv1.Host_ListUsageCollectionTargetsV1_FullMethodName,
+		pluginv1.Host_ReportUsageObservationsV1_FullMethodName,
 	} {
 		require.False(t, hostOperationNeedsCaller(method), "%s keeps native capability authority", method)
 	}
 	for _, method := range []string{
 		pluginv1.Host_ListTasksExact_FullMethodName,
+		pluginv1.Host_ListTaskUsageExact_FullMethodName,
 		pluginv1.Host_UpdateTaskExact_FullMethodName,
 		pluginv1.Host_SendMessage_FullMethodName,
 	} {
 		require.True(t, hostOperationNeedsCaller(method), "%s carries conversation domain authority", method)
 	}
+	require.True(t, hostOperationNeedsCaller("/kandev.plugin.v1.Host/UnknownFutureMethod"), "unknown Host methods fail closed")
 }
 
 func TestHostCallContextBackgroundKeepsCapabilityAuthority(t *testing.T) {
 	remote, plugin := newHostCallProbeHarness(t, true)
 	require.NoError(t, runHostCallProbe(t, remote, plugin, "background-preview"))
+}
+
+func TestHostCallContextBackgroundUsageCallsKeepCapabilityAuthority(t *testing.T) {
+	remote, plugin := newHostCallProbeHarness(t, true)
+	require.NoError(t, runHostCallProbe(t, remote, plugin, "background-usage"))
 }
 
 func TestHostCallContextBackgroundDomainCallsStayClosed(t *testing.T) {

@@ -9,6 +9,23 @@ test("task details omit native coordination controls for ordinary and configured
   seedData,
 }) => {
   const profile = await createStandardProfile(apiClient, "coordination-removal");
+  // Keep the completion transition isolated from other specs that mutate the
+  // worker-scoped seed workflow; a later step would make this target nonterminal.
+  const completionWorkflow = await apiClient.createWorkflow(
+    seedData.workspaceId,
+    `Completion gate isolation ${Date.now()}`,
+  );
+  const completingStepName = "Gate Done";
+  const startStep = await apiClient.createWorkflowStep(completionWorkflow.id, "Gate Start", 0, {
+    is_start_step: true,
+    complete_task_on_enter: false,
+  });
+  const completingStep = await apiClient.createWorkflowStep(
+    completionWorkflow.id,
+    completingStepName,
+    1,
+    { complete_task_on_enter: true },
+  );
   const ordinaryTask = await apiClient.createTask(seedData.workspaceId, "Ordinary task detail", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -18,8 +35,8 @@ test("task details omit native coordination controls for ordinary and configured
     seedData.workspaceId,
     "Configured task detail",
     {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: completionWorkflow.id,
+      workflow_step_id: startStep.id,
       agent_profile_id: profile.id,
     },
   );
@@ -100,18 +117,16 @@ test("task details omit native coordination controls for ordinary and configured
       );
     }
 
-    const completingStep = seedData.steps.find((step) => step.complete_task_on_enter);
-    if (!completingStep) throw new Error("seed workflow has no completing step");
     const [currentTask, persistedGateResponse] = await Promise.all([
       apiClient.getTask(configuredTask.id),
       apiClient.rawRequest("GET", `/api/v1/tasks/${configuredTask.id}/completion-gate`),
     ]);
-    expect(currentTask.workflow_step_id).toBe(seedData.startStepId);
+    expect(currentTask.workflow_step_id).toBe(startStep.id);
     expect(currentTask.state).not.toBe("COMPLETED");
     expect(persistedGateResponse.ok).toBe(true);
     const persistedGate = (await persistedGateResponse.json()) as { blocked: boolean };
     expect(persistedGate.blocked).toBe(true);
-    const stepButton = testPage.getByTestId(`workflow-step-${completingStep.name}`);
+    const stepButton = testPage.getByTestId(`workflow-step-${completingStepName}`);
     const moveResponse = testPage.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/tasks/${configuredTask.id}/move` &&
@@ -149,5 +164,6 @@ test("task details omit native coordination controls for ordinary and configured
     await apiClient.deleteTask(ordinaryTask.id).catch(() => undefined);
     await apiClient.deleteTask(configuredTask.id).catch(() => undefined);
     await apiClient.deleteAgentProfile(profile.id).catch(() => undefined);
+    await apiClient.deleteWorkflow(completionWorkflow.id).catch(() => undefined);
   }
 });

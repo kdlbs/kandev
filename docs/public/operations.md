@@ -650,6 +650,21 @@ Backups can still contain payload bytes removed from the live database.
 
 ## Database operation
 
+Task archive, task or session deletion, transcript pruning, and message compaction preserve accepted [usage accounting](usage-history.md).
+This includes native agent usage and accepted external collector observations.
+Stored daily summaries and indexed records support reports without conversation or collector-file scans.
+
+Retained accounting includes amounts and source, calendar, organization, and user evidence.
+Changes to current ownership or membership do not reassign that evidence.
+Unknown or mixed users remain explicit.
+
+Explicit workspace or organization deletion erases the affected retained accounting from the live database.
+Backups remain separate retained copies. Restoring an older backup can restore accounting erased after that backup.
+External provider records follow their own retention rules.
+
+Five-year benchmark evidence remains pending.
+Database and backup capacity planning requires measurements of the deployed workload.
+
 > **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.
 
 <details>

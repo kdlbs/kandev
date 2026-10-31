@@ -1,0 +1,142 @@
+=== RUN   TestUsageHistoryCurrentTargetExcludesHistoricalPages
+--- PASS: TestUsageHistoryCurrentTargetExcludesHistoricalPages (0.76s)
+=== RUN   TestUsageHistoryPostgresCurrentTargetExcludesHistoricalPages
+    usage_history_current_bounds_test.go:59: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresCurrentTargetExcludesHistoricalPages (0.00s)
+=== RUN   TestUsageHistoryCurrentTargetKeepsDeletedIncarnations
+=== RUN   TestUsageHistoryCurrentTargetKeepsDeletedIncarnations/task_delete
+=== RUN   TestUsageHistoryCurrentTargetKeepsDeletedIncarnations/session_prune
+--- PASS: TestUsageHistoryCurrentTargetKeepsDeletedIncarnations (0.44s)
+    --- PASS: TestUsageHistoryCurrentTargetKeepsDeletedIncarnations/task_delete (0.21s)
+    --- PASS: TestUsageHistoryCurrentTargetKeepsDeletedIncarnations/session_prune (0.23s)
+=== RUN   TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations
+=== RUN   TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations/task_delete
+    usage_history_current_retained_test.go:27: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations/session_prune
+    usage_history_current_retained_test.go:27: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations (0.00s)
+    --- SKIP: TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations/task_delete (0.00s)
+    --- SKIP: TestUsageHistoryPostgresCurrentTargetKeepsDeletedIncarnations/session_prune (0.00s)
+=== RUN   TestUsageHistoryCurrentTargetKeepsImportSnapshotFrozen
+--- PASS: TestUsageHistoryCurrentTargetKeepsImportSnapshotFrozen (0.22s)
+=== RUN   TestUsageHistoryPostgresCurrentTargetKeepsImportSnapshotFrozen
+    usage_history_current_snapshot_test.go:19: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresCurrentTargetKeepsImportSnapshotFrozen (0.00s)
+=== RUN   TestUsageHistoryCurrentTargetUsesExactLiveSession
+--- PASS: TestUsageHistoryCurrentTargetUsesExactLiveSession (0.05s)
+=== RUN   TestUsageHistoryCurrentTargetRevalidatesIssuedBinding
+--- PASS: TestUsageHistoryCurrentTargetRevalidatesIssuedBinding (0.05s)
+=== RUN   TestUsageHistoryCurrentTargetRejectsUnknownAndAmbiguousSources
+--- PASS: TestUsageHistoryCurrentTargetRejectsUnknownAndAmbiguousSources (0.06s)
+=== RUN   TestUsageHistoryCurrentTargetCannotReuseTransferredSnapshot
+--- PASS: TestUsageHistoryCurrentTargetCannotReuseTransferredSnapshot (0.05s)
+=== RUN   TestUsageHistoryCurrentTargetDistinguishesActorKinds
+--- PASS: TestUsageHistoryCurrentTargetDistinguishesActorKinds (0.05s)
+=== RUN   TestUsageHistoryCurrentTargetRejectsEnumerationState
+--- PASS: TestUsageHistoryCurrentTargetRejectsEnumerationState (0.06s)
+=== RUN   TestUsageHistoryCurrentTargetFindsUpdatedTranscriptDirectly
+--- PASS: TestUsageHistoryCurrentTargetFindsUpdatedTranscriptDirectly (0.20s)
+=== RUN   TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill
+=== RUN   TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill/postgres=false
+=== RUN   TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill/postgres=true
+    usage_history_runtime_accounting_test.go:16: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill (0.22s)
+    --- PASS: TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill/postgres=false (0.22s)
+    --- SKIP: TestUsageHistoryRuntimeAccountingNewScopeAfterBackfill/postgres=true (0.00s)
+=== RUN   TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier
+=== RUN   TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier/postgres=false
+=== RUN   TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier/postgres=true
+    usage_history_runtime_accounting_test.go:58: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier (0.24s)
+    --- PASS: TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier/postgres=false (0.24s)
+    --- SKIP: TestUsageHistoryRuntimeAccountingPartialRepairPublicationBarrier/postgres=true (0.00s)
+=== RUN   TestUsageHistorySessionCreationCannotReopenErasingScope
+--- PASS: TestUsageHistorySessionCreationCannotReopenErasingScope (0.21s)
+=== RUN   TestUsageHistoryPostgresSessionCreationCannotReopenErasingScope
+    usage_history_source_admission_test.go:19: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresSessionCreationCannotReopenErasingScope (0.00s)
+=== RUN   TestUsageHistorySourceGuardConcurrentFirstOwners
+--- PASS: TestUsageHistorySourceGuardConcurrentFirstOwners (0.21s)
+=== RUN   TestUsageHistoryPostgresSourceGuardConcurrentFirstOwners
+    usage_history_source_concurrency_test.go:20: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresSourceGuardConcurrentFirstOwners (0.00s)
+=== RUN   TestUsageHistorySourceGuardErasureResumesBoundedPages
+--- PASS: TestUsageHistorySourceGuardErasureResumesBoundedPages (0.73s)
+=== RUN   TestUsageHistoryPostgresSourceGuardErasureResumesBoundedPages
+    usage_history_source_erasure_test.go:18: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresSourceGuardErasureResumesBoundedPages (0.00s)
+=== RUN   TestUsageHistoryErasureIncludesWithheldNativeSource
+=== RUN   TestUsageHistoryErasureIncludesWithheldNativeSource/admission_gap
+=== RUN   TestUsageHistoryErasureIncludesWithheldNativeSource/backfill_gap
+--- PASS: TestUsageHistoryErasureIncludesWithheldNativeSource (0.45s)
+    --- PASS: TestUsageHistoryErasureIncludesWithheldNativeSource/admission_gap (0.22s)
+    --- PASS: TestUsageHistoryErasureIncludesWithheldNativeSource/backfill_gap (0.22s)
+=== RUN   TestUsageHistoryPostgresErasureIncludesWithheldNativeSource
+=== RUN   TestUsageHistoryPostgresErasureIncludesWithheldNativeSource/admission_gap
+    usage_history_source_gap_erasure_test.go:26: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresErasureIncludesWithheldNativeSource/backfill_gap
+    usage_history_source_gap_erasure_test.go:26: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryPostgresErasureIncludesWithheldNativeSource (0.00s)
+    --- SKIP: TestUsageHistoryPostgresErasureIncludesWithheldNativeSource/admission_gap (0.00s)
+    --- SKIP: TestUsageHistoryPostgresErasureIncludesWithheldNativeSource/backfill_gap (0.00s)
+=== RUN   TestUsageHistoryFreshSessionCannotReuseErasedTranscript
+=== RUN   TestUsageHistoryFreshSessionCannotReuseErasedTranscript/captured_guard
+=== RUN   TestUsageHistoryFreshSessionCannotReuseErasedTranscript/pre_guard_bindings
+--- PASS: TestUsageHistoryFreshSessionCannotReuseErasedTranscript (0.46s)
+    --- PASS: TestUsageHistoryFreshSessionCannotReuseErasedTranscript/captured_guard (0.23s)
+    --- PASS: TestUsageHistoryFreshSessionCannotReuseErasedTranscript/pre_guard_bindings (0.23s)
+=== RUN   TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript
+=== RUN   TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript/captured_guard
+    usage_history_source_reuse_test.go:31: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript/pre_guard_bindings
+    usage_history_source_reuse_test.go:31: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript (0.00s)
+    --- SKIP: TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript/captured_guard (0.00s)
+    --- SKIP: TestUsageHistoryPostgresFreshSessionCannotReuseErasedTranscript/pre_guard_bindings (0.00s)
+=== RUN   TestUsageHistoryCurrentTargetE2EResetReusesFixtureTranscript
+--- PASS: TestUsageHistoryCurrentTargetE2EResetReusesFixtureTranscript (0.22s)
+=== RUN   TestUsageHistoryPostgresCurrentTargetE2EResetReusesFixtureTranscript
+    usage_history_source_reuse_test.go:85: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresCurrentTargetE2EResetReusesFixtureTranscript (0.00s)
+=== RUN   TestUsageHistoryProductionWorkspaceEraseKeepsSourceGuards
+--- PASS: TestUsageHistoryProductionWorkspaceEraseKeepsSourceGuards (0.24s)
+=== RUN   TestUsageHistoryPostgresProductionWorkspaceEraseKeepsSourceGuards
+    usage_history_source_reuse_test.go:112: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- SKIP: TestUsageHistoryPostgresProductionWorkspaceEraseKeepsSourceGuards (0.00s)
+PASS
+ok  	github.com/kandev/kandev/internal/analytics/repository/sqlite	4.928s
+=== RUN   TestUsageHistoryTaskDeletePreservationPages
+=== RUN   TestUsageHistoryTaskDeletePreservationPages/all_pages
+=== RUN   TestUsageHistoryTaskDeletePreservationPages/native_rollback_resume
+--- PASS: TestUsageHistoryTaskDeletePreservationPages (4.25s)
+    --- PASS: TestUsageHistoryTaskDeletePreservationPages/all_pages (2.10s)
+    --- PASS: TestUsageHistoryTaskDeletePreservationPages/native_rollback_resume (2.14s)
+=== RUN   TestUsageHistorySessionPrunePreservationPages
+=== RUN   TestUsageHistorySessionPrunePreservationPages/all_pages
+=== RUN   TestUsageHistorySessionPrunePreservationPages/measurements_rollback_resume
+=== RUN   TestUsageHistorySessionPrunePreservationPages/buckets_rollback_resume
+--- PASS: TestUsageHistorySessionPrunePreservationPages (6.90s)
+    --- PASS: TestUsageHistorySessionPrunePreservationPages/all_pages (2.35s)
+    --- PASS: TestUsageHistorySessionPrunePreservationPages/measurements_rollback_resume (2.40s)
+    --- PASS: TestUsageHistorySessionPrunePreservationPages/buckets_rollback_resume (2.14s)
+=== RUN   TestUsageHistoryPostgresTaskDeletePreservationPages
+=== RUN   TestUsageHistoryPostgresTaskDeletePreservationPages/all_pages
+    usage_history_preservation_pages_test.go:74: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresTaskDeletePreservationPages/native_rollback_resume
+    usage_history_preservation_pages_test.go:74: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryPostgresTaskDeletePreservationPages (0.00s)
+    --- SKIP: TestUsageHistoryPostgresTaskDeletePreservationPages/all_pages (0.00s)
+    --- SKIP: TestUsageHistoryPostgresTaskDeletePreservationPages/native_rollback_resume (0.00s)
+=== RUN   TestUsageHistoryPostgresSessionPrunePreservationPages
+=== RUN   TestUsageHistoryPostgresSessionPrunePreservationPages/all_pages
+    usage_history_preservation_pages_test.go:74: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresSessionPrunePreservationPages/measurements_rollback_resume
+    usage_history_preservation_pages_test.go:74: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+=== RUN   TestUsageHistoryPostgresSessionPrunePreservationPages/buckets_rollback_resume
+    usage_history_preservation_pages_test.go:74: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryPostgresSessionPrunePreservationPages (0.00s)
+    --- SKIP: TestUsageHistoryPostgresSessionPrunePreservationPages/all_pages (0.00s)
+    --- SKIP: TestUsageHistoryPostgresSessionPrunePreservationPages/measurements_rollback_resume (0.00s)
+    --- SKIP: TestUsageHistoryPostgresSessionPrunePreservationPages/buckets_rollback_resume (0.00s)
+PASS
+ok  	github.com/kandev/kandev/internal/task/repository/sqlite	11.166s

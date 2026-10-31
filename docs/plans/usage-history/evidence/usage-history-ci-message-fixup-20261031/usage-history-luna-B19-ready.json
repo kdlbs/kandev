@@ -1,0 +1,156 @@
+{
+  "worker": "B19",
+  "created_at_utc": "2026-10-31",
+  "repository": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "branch": "feature/investigate-token-co-9dc",
+  "head": "c17567082b98545edcdd5b314792c466df635d79",
+  "owned_path": "apps/web/e2e/tests/pr/pr-watcher-dockview-layout.spec.ts",
+  "owned_source_git_blob_after": "c5f3ef500be2f4559247b53adbffa4bf5f815d88",
+  "owned_source_git_blob_before": "b90d68f70fd75088428e037a6d5494d5d6e2f58d",
+  "implementation": {
+    "summary": "Removed three simultaneous auto-start launches from this dockview-only fixture. The PR watcher still creates the same three tasks and provider refs. The spec now ensures each real primary session sequentially, waits for its workspace to be ready and session to remain CREATED, refreshes the kanban snapshot, starts task 1 with the visible Start Agent control, then runs the existing plan-mode and dockview task-switch assertions.",
+    "fixture_proofs": [
+      "Each watcher-created task is matched by title and Review workflow step.",
+      "Each ensure call returns a CREATED primary session before the next task is prepared.",
+      "The task primary_session_id matches the ensured session id.",
+      "Each task environment reaches ready with a non-empty workspace path before the next is prepared.",
+      "Task 1 starts through task-description-start-button and must reach the existing idle or recovery condition before plan mode is toggled.",
+      "All existing task-switch, no-layout-gap, no-plan-leak, Changes/Chat visibility, and three-distinct-workspaces assertions remain."
+    ],
+    "production_files_changed": [],
+    "builds_performed": false
+  },
+  "ci_failure_evidence": {
+    "workflow_run_id": 41161561000,
+    "run_attempt": 1,
+    "source_head": "c17567082b98545edcdd5b314792c466df635d79",
+    "source_test_blob_in_synthetic_tree": "b90d68f70fd75088428e037a6d5494d5d6e2f58d",
+    "synthetic_merge_commit": {
+      "sha": "c1c298c0ead4e41c16463d513313b5fa5d43ced0",
+      "verified": true,
+      "parents": [
+        "997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "c17567082b98545edcdd5b314792c466df635d79"
+      ],
+      "receipt": "/tmp/usage-history-luna-G6-synthetic-commit.json",
+      "note": "The run API later reported PR base aebac5d5395e9983124b398198bace146d38506b; the signed synthetic merge commit records the actual run merge parent as 997bc54fae4da15702c91da5c5d120bfe651edc1."
+    },
+    "identity": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::PR watcher dockview layout stability > layout remains correct when switching between PR watcher tasks with plan mode",
+    "attempt_statuses": [
+      "failed",
+      "passed"
+    ],
+    "initial_failed_attempt": {
+      "retry_index": 0,
+      "error": "the session layout did not reach an idle or recovery state; Playwright poll timed out after 60000ms",
+      "dom_evidence": "The page showed the task launch-error banner: 'The workspace could not be prepared for this launch. Launch needs attention.' The terminal was still connecting.",
+      "screenshot_path_in_raw_artifact": "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+      "screenshot_sha256": "b997c1f16cc1c564c4df8d7e33c0288e652bf88afceea82bce2f9a7b8661892b",
+      "error_context_path_in_raw_artifact": "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+      "error_context_sha256": "5c6aafe0709b30d3396edd74b6dad762224b4991838e6a1d452d995a9754220c",
+      "initial_attempt_trace": "not attached"
+    },
+    "passing_retry_trace": {
+      "retry_index": 1,
+      "status": "passed",
+      "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6",
+      "attribution": "passing retry context only; excluded as evidence for the initial failure"
+    },
+    "raw_artifact_archive": "/tmp/usage-history-luna-G6-artifacts/raw-zips/e2e-timing-diagnostics-13027088740.zip",
+    "local_failed_attempt_screenshot_extracted_to": "/tmp/luna-prwatcher-failed-attempt.png",
+    "underlying_launch_error_details": "Unavailable: initial attempt had no trace and the captured page left Show details collapsed."
+  },
+  "local_verification": {
+    "pre_change_baseline": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium -- e2e/tests/pr/pr-watcher-dockview-layout.spec.ts --grep 'layout remains correct when switching between PR watcher tasks with plan mode' --retries=0 --output=/tmp/usage-history-luna-prwatcher-baseline-01",
+      "cwd": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web",
+      "exit_code": 0,
+      "discovered": 1,
+      "result": "1 passed in 9.4s (test body 7.2s)",
+      "last_run": "/tmp/usage-history-luna-prwatcher-baseline-01/.last-run.json",
+      "log": "Captured in the tool output; no standalone log file was written for this baseline."
+    },
+    "post_change_repeated_run": {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=27 pnpm e2e:run --host --no-build --project chromium -- e2e/tests/pr/pr-watcher-dockview-layout.spec.ts --grep 'layout remains correct when switching between PR watcher tasks with plan mode' --retries=0 --repeat-each=5 --output=/tmp/usage-history-luna-prwatcher-after-01",
+      "cwd": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web",
+      "exit_code": 0,
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "retries": 0,
+      "duration": "56.1s",
+      "log": "/tmp/usage-history-luna-prwatcher-after-01.log",
+      "exit_file": "/tmp/usage-history-luna-prwatcher-after-01.exit",
+      "last_run": "/tmp/usage-history-luna-prwatcher-after-01/.last-run.json",
+      "normal_freshness_check": "Passed via managed global setup; KANDEV_E2E_SKIP_FRESHNESS and KANDEV_E2E_BIN were unset. No freshness bypass was used.",
+      "pr_asset_capture": "CAPTURE_PR_ASSETS was unset; existing assets were not reset or captured.",
+      "worker_and_port": "one Playwright worker, GOMAXPROCS=1, E2E_PORT_OFFSET=27",
+      "predecessor_replay": "Not run; evidence points to the target fixture's workspace startup, with no state-contamination signal.",
+      "tested_source_git_blob": "d9fe21c71f91887a05e93e4dbfa6b4ce762391ce"
+    },
+    "static_checks": {
+      "command": "pnpm exec eslint e2e/tests/pr/pr-watcher-dockview-layout.spec.ts --max-warnings=0",
+      "exit_code": 0,
+      "git_diff_check": "passed",
+      "prettier": "Passed with pnpm exec from apps/web."
+    }
+  },
+  "reused_artifacts": {
+    "build_receipt": "/tmp/usage-history-core-coordinated-host-ready.json",
+    "source_revision": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+    "freshness_required": true,
+    "freshness_bypass": false,
+    "artifacts": [
+      {
+        "path": "apps/backend/bin/kandev",
+        "sha256": "0151cadcc416aba226c320641955eda7ae61093bdee3c02cb88d098e8f647caa",
+        "bytes": 216151912
+      },
+      {
+        "path": "apps/backend/bin/agentctl",
+        "sha256": "bae6f0327d2b841fcf62b4139444d530b46792d4d71b1215628d6a28e951bc48",
+        "bytes": 49374056
+      },
+      {
+        "path": "apps/backend/bin/e2e-delivery-fixture",
+        "sha256": "d47a5b2c22b0f20aed1185fd93a07753e87abadbd11ce919edc97026020f8ce2",
+        "bytes": 168928896
+      },
+      {
+        "path": "apps/web/dist/index.html",
+        "sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+        "bytes": 8105
+      }
+    ]
+  },
+  "causality_and_limits": {
+    "baseline_passed_before_change": true,
+    "causality_proven": false,
+    "basis": "CI's failed screenshot proves a task workspace launch-error state. It does not expose the underlying error details. The unchanged fixture launched all three agent/worktree setups together; the revised fixture serializes environment preparation and passed five local repetitions. The data supports a contention hypothesis but does not prove the initial checkout failure was caused by that concurrency.",
+    "production_defect_demonstrated": false,
+    "ci_after_change": "Not run; parent review and current-head CI audit remain required."
+  },
+  "working_tree_observation": {
+    "owned_path_changed": true,
+    "other_concurrent_modified_paths_observed_and_untouched": [
+      "apps/web/e2e/tests/chat/jump-to-latest.spec.ts",
+      "apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts",
+      "docs/plans/usage-history/plan.md"
+    ],
+    "commit_or_push": false,
+    "merge_or_release": false
+  },
+  "next": "Parent review the owned spec and fixture proof, then evaluate exact-head/current-head CI.",
+  "formatting_followup": {
+    "initial_check_command": "pnpm exec prettier --check e2e/tests/pr/pr-watcher-dockview-layout.spec.ts",
+    "initial_check_exit_code": 1,
+    "format_command": "pnpm exec prettier --write e2e/tests/pr/pr-watcher-dockview-layout.spec.ts",
+    "final_check_command": "pnpm exec prettier --check e2e/tests/pr/pr-watcher-dockview-layout.spec.ts",
+    "final_check_exit_code": 0,
+    "working_directory": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web",
+    "final_source_git_blob": "c5f3ef500be2f4559247b53adbffa4bf5f815d88",
+    "diff_summary": "Prettier changed one multiline helper invocation to one line and removed its optional trailing comma; no executable logic changed.",
+    "focused_e2e_rerun": false,
+    "focused_e2e_rerun_reason": "The five retries-disabled E2E passes cover the same executable logic; the only later change was this formatting-only invocation reflow."
+  }
+}

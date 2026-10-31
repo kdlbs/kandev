@@ -1,0 +1,86 @@
+{
+  "reviewed_at": "2026-10-31T07:13:06.842444+00:00",
+  "worker_ready": "/tmp/usage-history-luna-C10-full-normal-ready.json",
+  "worker_ready_sha256": "ba479ac3af025ccee8df0d579d3450adea309b17be3ec05199d672ed6087bad7",
+  "source": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+  "runner_exit": 1,
+  "Go_package_elapsed_seconds": 3486.075,
+  "runner_elapsed_seconds": 3490.834,
+  "receipts_hashed": 30,
+  "ten_sample_receipts": {
+    "five_years": 13,
+    "one_year": 16
+  },
+  "facts": {
+    "five_years": {
+      "retained_native_observations": 1000005,
+      "retained_external_observations": 100013,
+      "published_metric_contributions": 2200032,
+      "published_canonical_facts": 1100017,
+      "daily_summary_rows": 18276,
+      "lifetime_summary_rows": 8,
+      "provider_option_dimension_rows": 17,
+      "fixture_disk_bytes": 24598847488,
+      "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+    },
+    "one_year": {
+      "retained_native_observations": 200005,
+      "retained_external_observations": 20013,
+      "published_metric_contributions": 440032,
+      "published_canonical_facts": 220017,
+      "daily_summary_rows": 3666,
+      "lifetime_summary_rows": 8,
+      "provider_option_dimension_rows": 17,
+      "fixture_disk_bytes": 3796709376,
+      "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+    }
+  },
+  "actual_failures": [
+    "BenchmarkUsageHistoryFiveYears/five_years/five_years/America/New_York",
+    "BenchmarkUsageHistoryFiveYears/five_years/five_years/Asia/Kathmandu",
+    "BenchmarkUsageHistoryFiveYears/five_years/five_years/Europe/Lisbon"
+  ],
+  "native_and_deleted_task_full_scale": {
+    "deleted_task": {
+      "samples": 10,
+      "p95_ns": 7650671897
+    },
+    "native": {
+      "samples": 10,
+      "p95_ns": 456652186
+    }
+  },
+  "recent_controls": {
+    "recent/America/New_York": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "nvisit_before": 650081,
+      "nvisit_after": 650082
+    },
+    "recent/Asia/Kathmandu": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "nvisit_before": 654581,
+      "nvisit_after": 654582
+    },
+    "recent/Europe/Lisbon": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "nvisit_before": 654559,
+      "nvisit_after": 654560
+    },
+    "recent/UTC": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "nvisit_before": 3818,
+      "nvisit_after": 3819
+    }
+  },
+  "oracle": "Original producer-recipe oracle remains in unchanged harness; emitted warm/timed receipts pass it. Failedmonthlycasesarenotpasses.",
+  "PostgreSQL": "NOTRUN afterSQLitefailure",
+  "full_normal_gate_passed": false,
+  "private_log_hashes_verified": 2,
+  "no_source_or_harness_mutation": true,
+  "temporary_database": "Normalb.TempDircleanupremovedfixture; no recoveryorcloneused",
+  "next": "C11targetedqueryfix; bothfreshnormalenginegatesstillrequired"
+}

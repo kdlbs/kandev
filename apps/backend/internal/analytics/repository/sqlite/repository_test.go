@@ -52,6 +52,7 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 	CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		org_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -110,6 +111,8 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
+        metadata TEXT NOT NULL DEFAULT '{}',
 		agent_profile_id TEXT NOT NULL,
 		agent_profile_snapshot TEXT DEFAULT '{}',
 		repository_id TEXT DEFAULT '',

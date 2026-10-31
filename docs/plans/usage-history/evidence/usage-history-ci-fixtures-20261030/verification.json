@@ -1,0 +1,67 @@
+{
+  "source_parent": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+  "failed_run": 41141620049,
+  "run_attempt": 1,
+  "failed_job_ids": [
+    124357134309,
+    124357134194,
+    124357134197,
+    124357134128
+  ],
+  "fix": "Use established optional-DSN helper in SQLite-only cohorts; keep real PostgreSQL gates active and accept the functional supported PostgreSQL16 baseline. PostgreSQL18 benchmark requirement unchanged.",
+  "postgres_actual_version": "16.14",
+  "postgres_image_digest": "sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54",
+  "go": "1.26.0",
+  "parallelism": "GOMAXPROCS=1 GOFLAGS=-p=1",
+  "after_postgres_race": true,
+  "retry_or_count_repetition": 1,
+  "artifacts": [
+    {
+      "file": "usage-history-ci-fixtures-before.log",
+      "sha256": "62aba743272d33e4d2c9eba141c4681a672792031ca9b2701b96614aefd5f45c",
+      "exit_code": 1,
+      "passed_test_events": 0,
+      "skipped_test_events": 0,
+      "failed_test_events": 4
+    },
+    {
+      "file": "usage-history-ci-pg16-before.log",
+      "sha256": "fed11707f3d4ee4e11a1bd229015742275feed4fc80de42a7247cf5d8e4d820a",
+      "exit_code": 1,
+      "passed_test_events": 0,
+      "skipped_test_events": 0,
+      "failed_test_events": 1
+    },
+    {
+      "file": "usage-history-ci-fixtures-no-dsn-after.log",
+      "sha256": "aec004a9420424d0372b7ec1c2c7aaa16ad2f72a701e35b5afc49f4d79c87014",
+      "exit_code": 0,
+      "passed_test_events": 39,
+      "skipped_test_events": 20,
+      "failed_test_events": 0
+    },
+    {
+      "file": "usage-history-ci-fixtures-pg16-race-after.log",
+      "sha256": "f6c229865d26ede51fa0663dd7605baeb663f7a645cc46a265a3cda10ba00411",
+      "exit_code": 0,
+      "passed_test_events": 43,
+      "skipped_test_events": 0,
+      "failed_test_events": 0
+    }
+  ],
+  "source_files": [
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_current_fixture_test.go",
+      "sha256": "a81c478bf505f74fd0cce06c3184c5b07856005af122badb5a75e12bf162b590"
+    },
+    {
+      "path": "apps/backend/internal/analytics/repository/sqlite/usage_history_projection_database_test.go",
+      "sha256": "d1443ba46013923f65c8885fb2002c974c0e32012238247c1afe2e15e4218063"
+    },
+    {
+      "path": "apps/backend/internal/task/repository/sqlite/usage_history_preservation_pages_test.go",
+      "sha256": "67a98861a982a5e17b30290496ef3ab9a72a2bbda9c527dce559e3d293777efc"
+    }
+  ],
+  "limits": "Only focused fixture remediation. Full million-event performance gates and current-head remote CI remain open."
+}

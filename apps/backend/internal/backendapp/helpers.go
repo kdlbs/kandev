@@ -1117,6 +1117,7 @@ type routeParams struct {
 	taskRepo                      *sqliterepo.Repository
 	officeRepo                    *officesqlite.Repository
 	analyticsRepo                 analyticsrepository.Repository
+	usageHistoryControl           *usageHistoryProjectionControl
 	orchestratorSvc               *orchestrator.Service
 	lifecycleMgr                  *lifecycle.Manager
 	loginMgr                      *loginpty.Manager
@@ -2148,6 +2149,7 @@ func registerSecondaryRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2EUsageHistoryRoutes(p.router, p.taskSvc, p.analyticsRepo, p.dbPool, p.usageHistoryControl)
 	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {

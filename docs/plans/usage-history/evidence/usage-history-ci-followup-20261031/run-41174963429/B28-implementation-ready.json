@@ -1,0 +1,149 @@
+{
+  "worker": "B28",
+  "status": "implementation_ready_tests_pending_parent_fresh_worker",
+  "source_revision": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+  "worktree": "/tmp/usage-history-B28-provider-keyboard-worktree",
+  "detached": true,
+  "primary_write_scope": "apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts",
+  "changed_paths": [
+    "apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts"
+  ],
+  "change": {
+    "summary": "Start at the visible Add button, then use real Tab key presses through a bounded number of rendered provider-profile tab stops until the created profile\u2019s scoped open button is focused. Enter/Space and the existing no-delete and persisted-profile assertions remain.",
+    "bound": "Two tab stops per rendered provider profile row, based on the source UI: the profile-open button and the separate delete button.",
+    "no_direct_focus_on_target": true,
+    "no_sleep_timeout_or_retry_changes": true,
+    "production_code_changed": false
+  },
+  "ci_evidence": {
+    "run_id": 41174963429,
+    "attempt": 1,
+    "source_revision": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "test_id": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+    "test": "chromium::tests/settings/executor-profile-card-keyboard.spec.ts::opens an existing provider profile with Tab and Enter",
+    "failed_result_id": "35006d23a59671aeae17c9e85800a331",
+    "retry_result_id": "d55927d1b30991b836afbc0579c358f4",
+    "failure": "At test line 49, after one Tab, row.contains(document.activeElement) was false. Diagnostic: active element tag BUTTON, text E2E remote sandbox profile, aria-label null.",
+    "failed_screenshot": {
+      "path": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/6a62dd7aa3649ae0e294d00b3219c92e8dbc05c5.png",
+      "sha256": "db27d92f6964a71a2a4376a94b053e00fcd7a1612d9ce476b08468978f6c31d7",
+      "observation": "Shows the Executors settings hub and the fixture provider profile row. It does not expose the focused node\u2019s profile ID."
+    },
+    "failed_error_context": {
+      "archive": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-10-13032677185/report-normal-10-4-0.zip",
+      "resource": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+      "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+      "size_bytes": 7454,
+      "note": "The extracted diagnostics markdown repeats this same resource twice; the inner archive resource is the single failed error context."
+    },
+    "passing_retry_trace": {
+      "path": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/40034e4e9d0c6ccc0b96c7fd3556ac9215374ab7.zip",
+      "sha256": "23017dbe3461213d3057a9acb6ca8328b0aea290820356182a9575811a1cf4cc",
+      "used_as_failure_evidence": false,
+      "status": "retry 1 PASSING trace; not inspected as the failed-attempt trace"
+    }
+  },
+  "diagnosis": {
+    "actual_ui_source": "apps/web/components/settings/executor-profiles-card.tsx",
+    "observed_ui_contract": "Each provider profile row is a div with executor-profile-card-{id}; it contains a primary native button named by the profile and a separate delete button. The chevron is decorative. The test helper uses the fixed visible profile name E2E remote sandbox profile and does not assert that this name is unique.",
+    "inference": "The failure proves the active button had the expected visible name but not that it was the button in the row selected by profile ID. The original one-Tab assumption and text-only diagnostic could not distinguish a same-named row or a transient focus/DOM mismatch. The revised traversal targets the exact scoped button by locator identity.",
+    "uncertainty": "The failed snapshot does not include the active button\u2019s profile ID or a failed-attempt trace. The screenshot\u2019s visible row does not resolve that identity. The specific runtime cause is therefore inferred, not proven; the CI retry passed and no local baseline has been run.",
+    "production_bug_indicated": false
+  },
+  "source_hashes": {
+    "base_commit": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "unmodified_spec_git_blob_oid": "f1c018a006904a8fe3ca5ecc5e15325fa153d2bd",
+    "modified_spec_git_blob_oid": "84088ba2e753e7086e14bf6ab157ca3c49cf767c",
+    "modified_spec_sha256": "3ab140fec6aca80160c0bc2b4358883e65786a367ab312d2f6e24e8b80d11853",
+    "final_diff": "/tmp/usage-history-luna-B28-final.diff",
+    "final_diff_sha256": "23002237f4727f33f3e7498130e78ca3ee93e4cf7d8b10156ec4398b068f7c77"
+  },
+  "validation": {
+    "tests_run": false,
+    "reason": "The B28 control currently has allow_tests=false (reason: C10 immutable full normal benchmark; no heavy jobs during timing). Parent requested completion and handoff without waiting; a fresh Luna6max verification worker will test after benchmarks quiesce.",
+    "control_file": "/tmp/usage-history-B28-control.json",
+    "diff_check": "git diff --check passed",
+    "main_workspace_modified": false,
+    "branches_or_commits_created": false,
+    "worktree_changed_files": [
+      "apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts"
+    ]
+  },
+  "asset_preservation": {
+    "provided_backend_sha256": "58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8",
+    "observed_backend_sha256": "58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8",
+    "provided_web_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+    "observed_web_dist_index_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+    "artifact_source_workspace": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+    "backend_artifact_hashes_for_normal_identity": {
+      "bin/kandev": "58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8",
+      "bin/mock-agent": "e136093f4cf47622d5ddbad0e9f5c6d2680c3e6946bd2e2958a6cd260d714659",
+      "bin/e2e-delivery-fixture": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+      ".build/kandev-plugin-e2e-1.0.0.tar.gz": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b"
+    },
+    "required_web_index_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+    "pr_assets_baseline_root": "/tmp/usage-history-luna-B21-ci/assets-before",
+    "pr_assets_count": 9,
+    "pr_assets_hashes_match_baseline": true,
+    "pr_assets_restored": false,
+    "pr_assets_note": "All nine manifest/image files still match their B21 hashes. No PR assets were written or restored.",
+    "worktree_has_prebuilt_artifacts_or_node_modules": false,
+    "handoff_guard": "Use the existing artifacts and dependencies as read-only inputs in the verification worktree; do not run builds or package installation. Keep KANDEV_E2E_SKIP_FRESHNESS unset. The worktree checkout timestamps are newer than the provided binary, so pass KANDEV_E2E_BUILD_IDENTITY=/tmp/usage-history-luna-B28-build-identity.json and KANDEV_E2E_EXPECTED_SOURCE_REVISION=1ce8d0bfdab088f899cf0ede7a5a911d097e0cee. The normal globalSetup identity validator must check the listed artifact checksums and source revision. Verify the web dist index hash before the run."
+  },
+  "test_handoff": {
+    "project": "chromium",
+    "managed_runner": "pnpm e2e:run",
+    "mode": "host",
+    "build": "no-build; use already built artifacts",
+    "retry_policy": "--retries=0",
+    "worker_policy": "--workers=1 (managed runner also enforces one worker)",
+    "freshness": "Normal global-setup build-identity validation; never set KANDEV_E2E_SKIP_FRESHNESS=1.",
+    "baseline_restore_scope": "Save only the modified owned spec to /tmp, replace only that spec with git show HEAD:<owned-path> for the unmodified baseline, and use an EXIT/HUP/INT/TERM trap that copies only the saved spec back. Do not checkout/reset the worktree or restore assets.",
+    "pipe_policy": "Run under set -o pipefail and tee each complete command output to the exact log path below; record actual exit status, discovered/executed/passed/failed/skipped counts, and every intermediate failure.",
+    "runs": [
+      {
+        "name": "unmodified baseline (exact CI failing Enter case)",
+        "expected_test_count": 1,
+        "log": "/tmp/usage-history-luna-B28-baseline-enter.log",
+        "command": "cd /tmp/usage-history-B28-provider-keyboard-worktree/apps/web && KANDEV_E2E_BUILD_IDENTITY=/tmp/usage-history-luna-B28-build-identity.json KANDEV_E2E_EXPECTED_SOURCE_REVISION=1ce8d0bfdab088f899cf0ede7a5a911d097e0cee pnpm e2e:run --host --no-build --project chromium tests/settings/executor-profile-card-keyboard.spec.ts -- --grep \"opens an existing provider profile with Tab and Enter\" --retries=0 --workers=1 2>&1 | tee /tmp/usage-history-luna-B28-baseline-enter.log"
+      },
+      {
+        "name": "changed focused keyboard cases, repeat 1 in a fresh managed run",
+        "expected_test_count": 2,
+        "log": "/tmp/usage-history-luna-B28-post-focused-1.log",
+        "command": "cd /tmp/usage-history-B28-provider-keyboard-worktree/apps/web && KANDEV_E2E_BUILD_IDENTITY=/tmp/usage-history-luna-B28-build-identity.json KANDEV_E2E_EXPECTED_SOURCE_REVISION=1ce8d0bfdab088f899cf0ede7a5a911d097e0cee pnpm e2e:run --host --no-build --project chromium tests/settings/executor-profile-card-keyboard.spec.ts -- --grep \"opens an existing provider profile with Tab and\" --retries=0 --workers=1 2>&1 | tee /tmp/usage-history-luna-B28-post-focused-1.log"
+      },
+      {
+        "name": "changed focused keyboard cases, repeat 2 in a fresh managed run",
+        "expected_test_count": 2,
+        "log": "/tmp/usage-history-luna-B28-post-focused-2.log",
+        "command": "cd /tmp/usage-history-B28-provider-keyboard-worktree/apps/web && KANDEV_E2E_BUILD_IDENTITY=/tmp/usage-history-luna-B28-build-identity.json KANDEV_E2E_EXPECTED_SOURCE_REVISION=1ce8d0bfdab088f899cf0ede7a5a911d097e0cee pnpm e2e:run --host --no-build --project chromium tests/settings/executor-profile-card-keyboard.spec.ts -- --grep \"opens an existing provider profile with Tab and\" --retries=0 --workers=1 2>&1 | tee /tmp/usage-history-luna-B28-post-focused-2.log"
+      },
+      {
+        "name": "changed entire owned spec in declaration order",
+        "expected_test_count": 4,
+        "log": "/tmp/usage-history-luna-B28-post-ordered-spec.log",
+        "command": "cd /tmp/usage-history-B28-provider-keyboard-worktree/apps/web && KANDEV_E2E_BUILD_IDENTITY=/tmp/usage-history-luna-B28-build-identity.json KANDEV_E2E_EXPECTED_SOURCE_REVISION=1ce8d0bfdab088f899cf0ede7a5a911d097e0cee pnpm e2e:run --host --no-build --project chromium tests/settings/executor-profile-card-keyboard.spec.ts -- --retries=0 --workers=1 2>&1 | tee /tmp/usage-history-luna-B28-post-ordered-spec.log"
+      }
+    ],
+    "evidence_guards": [
+      "Immediately before testing, read /tmp/usage-history-B28-control.json; require allow_tests=true. If false or absent, do not run.",
+      "Baseline trap restores only apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts; it must restore even when the baseline run fails.",
+      "Check all nine files in /tmp/usage-history-luna-B21-ci/assets-before against their recorded hashes before and after. No asset capture env var. Do not restore assets unless an actual test mutation is proven to be owned by this worker.",
+      "Check backend binary SHA 58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8 and web dist/index.html SHA 2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357 before and after.",
+      "After baseline trap runs, assert modified spec SHA256 is 3ab140fec6aca80160c0bc2b4358883e65786a367ab312d2f6e24e8b80d11853 and git diff contains only the owned spec."
+    ],
+    "identity_json": {
+      "schema_version": 1,
+      "source_revision": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+      "artifacts": {
+        "bin/kandev": "58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8",
+        "bin/mock-agent": "e136093f4cf47622d5ddbad0e9f5c6d2680c3e6946bd2e2958a6cd260d714659",
+        "bin/e2e-delivery-fixture": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+        ".build/kandev-plugin-e2e-1.0.0.tar.gz": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b"
+      }
+    },
+    "read_only_artifact_setup": "WT=/tmp/usage-history-B28-provider-keyboard-worktree\nBASE=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev\nfor dest in \"$WT/apps/node_modules\" \"$WT/apps/web/node_modules\" \"$WT/apps/backend/bin\" \"$WT/apps/backend/.build\" \"$WT/apps/web/dist\"; do test ! -e \"$dest\" && test ! -L \"$dest\" || { echo \"refusing to replace existing path: $dest\" >&2; exit 1; }; done\nmkdir -p \"$WT/apps/backend\"\nln -s \"$BASE/apps/node_modules\" \"$WT/apps/node_modules\"\nln -s \"$BASE/apps/web/node_modules\" \"$WT/apps/web/node_modules\"\nln -s \"$BASE/apps/backend/bin\" \"$WT/apps/backend/bin\"\nln -s \"$BASE/apps/backend/.build\" \"$WT/apps/backend/.build\"\nln -s \"$BASE/apps/web/dist\" \"$WT/apps/web/dist\"\n# Links are worktree-local; run no-build only. Verify the five recorded hashes and all nine B21 assets before/after.",
+    "baseline_owned_file_restore_trap": "set -euo pipefail\nWT=/tmp/usage-history-B28-provider-keyboard-worktree\nOWNED=apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts\nCHANGED=/tmp/usage-history-luna-B28-changed.spec.ts\ncp \"$WT/$OWNED\" \"$CHANGED\"\nrestore_owned() { cp \"$CHANGED\" \"$WT/$OWNED\"; }\ntrap restore_owned EXIT HUP INT TERM\ngit -C \"$WT\" show \"1ce8d0bfdab088f899cf0ede7a5a911d097e0cee:$OWNED\" > \"$WT/$OWNED\"\n# Run and tee only the baseline command. The trap restores only this owned file, even on failure.\n# After the baseline run: cp \"$CHANGED\" \"$WT/$OWNED\"; trap - EXIT HUP INT TERM"
+  }
+}

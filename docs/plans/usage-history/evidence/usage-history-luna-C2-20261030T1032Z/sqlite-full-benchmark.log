@@ -1,0 +1,30 @@
+--- FAIL: BenchmarkUsageHistoryFiveYears
+    usage_history_bench_run_test.go:76: usage fixture recent phase start native=200000 external=20000
+    usage_history_bench_run_test.go:76: usage fixture source insert start range=recent source=native records=200000
+    usage_history_bench_run_test.go:76: usage fixture source insert complete range=recent source=native records=200000
+    usage_history_bench_run_test.go:76: usage fixture source insert start range=recent source=plugin:bench records=20000
+    usage_history_bench_run_test.go:76: usage fixture source insert complete range=recent source=plugin:bench records=20000
+    usage_history_bench_run_test.go:76: usage fixture recent range inserts complete
+    usage_history_bench_run_test.go:76: usage fixture special records complete
+    usage_history_bench_run_test.go:76: usage fixture source insert start range=other source=native records=8
+    usage_history_bench_run_test.go:76: usage fixture source insert complete range=other source=native records=8
+    usage_history_bench_run_test.go:76: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_bench_run_test.go:76: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_bench_run_test.go:76: usage fixture second scope inserts complete
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=100
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=200
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=300
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=400
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=500
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=600
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=700
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=800
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=900
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=1000
+    usage_history_bench_run_test.go:76: usage fixture retention backfill pages=1100
+    usage_history_bench_run_test.go:76: usage fixture retention backfill complete pages=1103
+    usage_history_bench_run_test.go:76: usage projection advance scope_index=0 page=1 generation=ea3235ac-51e4-4175-9acb-7a2f14f96a1a: analytics busy: context deadline exceeded
+FAIL
+exit status 1
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	203.384s
+FAIL

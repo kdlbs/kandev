@@ -60,6 +60,41 @@ test.describe("OpenCode background inspection on a phone", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    let sessionId = task.session_id ?? "";
+    if (!sessionId) {
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(task.id);
+            sessionId = sessions[0]?.id ?? "";
+            return sessionId;
+          },
+          { message: "session row should be created", timeout: 30_000 },
+        )
+        .not.toBe("");
+    }
+
+    // Phone coverage exercises the page's initial workload snapshot. Wait for
+    // the three unknown observations to be durable before navigation so the
+    // one-time list fetch cannot race their commit.
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.rawRequest(
+            "GET",
+            `/api/v1/task-sessions/${sessionId}/background-work`,
+          );
+          if (!response.ok) return [];
+          const { workloads } = (await response.json()) as {
+            workloads: Array<{ work_id: string; state: string }>;
+          };
+          return SHELL_IDS.map(
+            (workId) => workloads.find((workload) => workload.work_id === workId)?.state ?? "",
+          );
+        },
+        { message: "OpenCode should persist all three unknown jobs", timeout: 30_000 },
+      )
+      .toEqual(SHELL_IDS.map(() => "unknown"));
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -93,19 +128,6 @@ test.describe("OpenCode background inspection on a phone", () => {
     // Resolve one job as failed with a real exit code and retained output. The
     // legacy OpenCode producer never delivers this, and the phone detail must
     // show the same retained outcome as desktop.
-    let sessionId = task.session_id ?? "";
-    if (!sessionId) {
-      await expect
-        .poll(
-          async () => {
-            const { sessions } = await apiClient.listTaskSessions(task.id);
-            sessionId = sessions[0]?.id ?? "";
-            return sessionId;
-          },
-          { message: "session row should be created", timeout: 30_000 },
-        )
-        .not.toBe("");
-    }
     await apiClient.recordBackgroundWorkload(sessionId, {
       work_id: SHELL_IDS[2],
       run_id: SHELL_IDS[2],

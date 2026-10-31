@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionDone } from "../../helpers/session";
@@ -68,10 +69,21 @@ test.describe("task-specific workflow agent overrides", () => {
       },
     });
 
+    // A persisted collapsed navigation layout must not hide the creation path.
+    const { settings } = await apiClient.getUserSettings();
+    const layout = settings.sidebar_layouts_by_workspace![seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: layout.revision,
+        layout: { ...layout, navigation_height: 0, navigation_expanded: false },
+      },
+    });
+
     try {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
-      await kanban.createTaskButton.first().click();
+      await openCreateTaskDialog(testPage);
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
@@ -145,7 +157,7 @@ test.describe("task-specific workflow agent overrides", () => {
       );
 
       await kanban.goto();
-      await kanban.createTaskButton.first().click();
+      await openCreateTaskDialog(testPage);
       const freshDialog = testPage.getByTestId("create-task-dialog");
       await expect(freshDialog).toBeVisible();
       await freshDialog.getByTestId("task-create-advanced-settings-trigger").click();

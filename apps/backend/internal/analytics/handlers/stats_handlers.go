@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/analytics"
 	"github.com/kandev/kandev/internal/analytics/dto"
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
@@ -68,6 +72,7 @@ func (h *StatsHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/stats/daily-activity", h.httpGetDailyActivity)
 	api.GET("/workspaces/:id/stats/completed-activity", h.httpGetCompletedActivity)
 	api.GET("/workspaces/:id/stats/model-usage", h.httpGetModelUsage)
+	api.GET("/workspaces/:id/stats/token-usage", h.httpGetTokenUsage)
 	api.GET("/workspaces/:id/stats/repositories", h.httpGetRepositoryStats)
 	api.GET("/workspaces/:id/stats/git", h.httpGetGitStats)
 }
@@ -167,6 +172,112 @@ func (h *StatsHandlers) httpGetModelUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, modelUsageToDTOs(usage))
 }
 
+func (h *StatsHandlers) httpGetTokenUsage(c *gin.Context) {
+	workspaceID, start, _, ok := h.parseRequest(c)
+	if !ok {
+		return
+	}
+	usageRepo, ok := h.repo.(repository.UsageRepository)
+	if !ok {
+		// Older repository implementations can still serve the established
+		// stats routes. An empty report keeps this additive route compatible
+		// during staged upgrades and gives the page a normal empty state.
+		if _, err := h.repo.GetGlobalStats(c.Request.Context(), workspaceID, nil); err != nil {
+			h.fail(c, workspaceID, "token usage", err)
+			return
+		}
+		c.JSON(http.StatusOK, &models.TokenUsageReport{Rows: []models.TokenUsageRow{}})
+		return
+	}
+	var end *time.Time
+	if c.Query("range") != "all" {
+		now := time.Now().UTC()
+		end = &now
+	}
+	if value := strings.TrimSpace(c.Query("start")); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "start must use RFC3339"})
+			return
+		}
+		start = &parsed
+	}
+	if value := strings.TrimSpace(c.Query("end")); value != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "end must use RFC3339"})
+			return
+		}
+		end = &parsed
+	}
+	if start != nil && end != nil && !start.Before(*end) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "start must be before end"})
+		return
+	}
+	limit, offset, valid := parseUsagePage(c)
+	if !valid {
+		return
+	}
+	filter := models.SessionUsageFilter{
+		WorkspaceID:          workspaceID,
+		ProjectionGeneration: c.Query("projection_generation"),
+		Start:                start,
+		End:                  end,
+		TaskIDs:              queryValues(c.Query("task_id")),
+		SessionIDs:           queryValues(c.Query("session_id")),
+		Model:                c.Query("model"),
+		Timezone:             c.Query("timezone"),
+		GroupBy:              c.Query("group"),
+		SortBy:               c.Query("sort"),
+		SortDirection:        c.Query("direction"),
+		Provider:             c.Query("provider"),
+		IncludeUndated:       c.Query("include_undated") == "true",
+		Limit:                limit,
+		Offset:               offset,
+	}
+	report, err := usageRepo.ListSessionUsage(c.Request.Context(), filter)
+	if err != nil {
+		h.fail(c, workspaceID, "token usage", err)
+		return
+	}
+	c.JSON(http.StatusOK, report)
+}
+
+func parseUsagePage(c *gin.Context) (limit, offset int, ok bool) {
+	limit = 200
+	if value := strings.TrimSpace(c.Query("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 1000 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be between 1 and 1000"})
+			return 0, 0, false
+		}
+		limit = parsed
+	}
+	if value := strings.TrimSpace(c.Query("offset")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "offset must be a non-negative integer"})
+			return 0, 0, false
+		}
+		offset = parsed
+	}
+	return limit, offset, true
+}
+
+func queryValues(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
 func (h *StatsHandlers) httpGetRepositoryStats(c *gin.Context) {
 	workspaceID, start, _, ok := h.parseRequest(c)
 	if !ok {
@@ -252,6 +363,18 @@ func (h *StatsHandlers) authorize(c *gin.Context, workspaceID string) bool {
 }
 
 func (h *StatsHandlers) fail(c *gin.Context, workspaceID, section string, err error) {
+	if errors.Is(err, analytics.ErrUsageAmountOverflow) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error_code": "usage_amount_overflow", "error": "usage totals exceed the supported integer range"})
+		return
+	}
+	if errors.Is(err, repository.ErrUsageProjectionChanged) {
+		c.JSON(http.StatusConflict, gin.H{"error_code": "usage_projection_changed", "error": "usage history changed; retry the report"})
+		return
+	}
+	if errors.Is(err, repository.ErrUsageNotVisible) {
+		c.JSON(http.StatusNotFound, gin.H{"error": workspaceNotFoundMessage})
+		return
+	}
 	if repository.IsAnalyticsBusy(err) {
 		h.logger.Warn("analytics stats request exceeded its bounded read budget",
 			zap.String("workspace_id", workspaceID),

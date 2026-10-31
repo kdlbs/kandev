@@ -1,0 +1,18 @@
+{
+  "kind": "diagnostic-interrupted",
+  "reason": "trace observer retained all bulk seed SQL and parameters; test process RSS reached approximately 1.7 GiB during 10-percent fixture",
+  "go_test_pid": 911420,
+  "runtime_test_binary_pid": 911740,
+  "runtime_test_binary_sha256": "995c404fbbdb12555bbf6b78ced55cd36268b1346321521dd6f9855bdfe48dbf",
+  "elapsed_seconds": 118,
+  "advance200_calls_logged": 700,
+  "fixture_source_records": {
+    "native": 20000,
+    "external": 2000
+  },
+  "retention_backfill_pages": 113,
+  "log": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1032Z/control-postgres-diagnostic.log",
+  "log_sha256_at_interruption": "51c87bb3a52d64a430aac6cf71df14264a520be0fd4e056d67c32375a88e7a57",
+  "completed_at_utc": "2026-10-30T11:30:58.362519+00:00",
+  "pass_claimed": false
+}

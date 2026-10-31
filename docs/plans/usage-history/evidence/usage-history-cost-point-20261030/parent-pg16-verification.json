@@ -1,0 +1,8 @@
+{
+  "command": "GOMAXPROCS=1 GOFLAGS=-p=1 go test -race -trimpath -count=1 -v ./internal/analytics/repository/sqlite -run '^(TestUsageHistoryMetricApplicabilityForNativeAndReportedCost|TestUsageHistoryNativePointBoundaryDoesNotOverlapEndingInterval)$'",
+  "configured_database": "PostgreSQL16.14, isolated schemas",
+  "passed_results": 8,
+  "skipped_results": 0,
+  "failed_results": 0,
+  "exit_code": 0
+}

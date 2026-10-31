@@ -1,0 +1,13 @@
+028ac5053907f378c48ea173e3bb0d566ffdcc39abf60cdf69de9b8aff9f1241  apps/backend/internal/analytics/repository/sqlite/usage_history_contract_schema.go
+e47cc6e2aef8de288fbf43556f9044691ae9717ddb118b05f5f910968b8e9dbb  apps/backend/internal/analytics/repository/sqlite/usage_history_native_turns_repair.go
+4978c561fa3a2522b632aefdbe75adc5a280f1815a138c64ac1a34d377f69828  apps/backend/internal/analytics/repository/sqlite/usage_history_selection.go
+ec26eaa51e122f5d748b2298ecba4a5c314978e83c924d7fe60c279c0fcdd2cc  apps/backend/internal/analytics/repository/sqlite/usage_history_overlap_lookup_scan_test.go
+7eab775fcfe11e146f96aad08028ed6fbdd3173ba83510cfe7e0d16665bfba72  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/README.md
+38e8757c823d326300eb0706bc1a175e10ef9a0e7bcef39cbce1ca3f4bbf0c0a  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/focused-normal-proof.log
+d7709cca79c4eb25320e7a31e514cccc104ccad625b6211280b912373f219ab2  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/focused-race-proof.log
+5c02991d0a6837f18243baf9b220f8938db78ff5664979732fb7e5c96cec25a4  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/postgres-initial-20k-failure.log
+dd3babade2b31730541444d50564c4024407c61584921ae4899bcdf59f61acf1  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/postgres-ordered-pending-prototype.log
+e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/scoped-lint.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/scoped-vet.log
+8b4fc9129b937a54cba29659dddf77bcf1bc2e379a8bda59179fe8205e9f5747  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/sqlite-postgres-final-scan-proof.log
+312a6d93889f020dfc86f55a5ad9aa6a732c37e179a6b4e35e08bd742b9bd5c2  docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/sqlite-race-scan-proof.log

@@ -10,6 +10,7 @@ import {
   readOpenCodeCapacityTrace,
 } from "../../helpers/opencode-capacity-retry";
 import { advanceCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
+import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
 
 test.setTimeout(480_000);
@@ -89,6 +90,21 @@ test("desktop preserves the episode when the OpenCode continuation fails without
     await driveOpenCodeCapacityRetries(backend, apiClient, fixture.sessionId, 1, 11);
     const failure = await expectOpenCodeRetainedRefusal(apiClient, fixture.sessionId, "exhausted");
     expect(failure.metadata?.attempts_started).toBe(11);
+    await pollUntil(
+      async () => {
+        const [{ sessions }, { messages }] = await Promise.all([
+          apiClient.listTaskSessions(fixture.taskId),
+          apiClient.listSessionMessages(fixture.sessionId),
+        ]);
+        return {
+          state: sessions.find((candidate) => candidate.id === fixture.sessionId)?.state,
+          hasRetryNotice: messages.some((message) => message.metadata?.retrying === true),
+        };
+      },
+      ({ state, hasRetryNotice }) => state === "WAITING_FOR_INPUT" && !hasRetryNotice,
+      30_000,
+      "waiting for the exhausted OpenCode continuation and retry notice to settle",
+    );
     await expect(session.transientRetryCard()).toHaveCount(0);
     await expect(session.activeChat().getByTestId("retained-turn-recovery-feedback")).toContainText(
       "11",

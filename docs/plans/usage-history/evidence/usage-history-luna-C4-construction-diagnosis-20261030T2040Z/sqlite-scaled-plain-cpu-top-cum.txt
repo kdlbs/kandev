@@ -1,0 +1,49 @@
+File: sqlite.test
+Build ID: 6538e8b0418a47dbe5202e73214218198d03de3a
+Type: cpu
+Time: 2026-10-30 20:40:23 WET
+Duration: 48.92s, Total samples = 45.77s (93.56%)
+Showing nodes accounting for 35.70s, 78.00% of 45.77s total
+Dropped 788 nodes (cum <= 0.23s)
+Showing top 40 nodes out of 202
+      flat  flat%   sum%        cum   cum%
+    35.53s 77.63% 77.63%        36s 78.65%  runtime.cgocall
+         0     0% 77.63%     24.61s 53.77%  testing.tRunner
+         0     0% 77.63%     24.60s 53.75%  github.com/kandev/kandev/internal/analytics/repository/sqlite.TestUsageHistoryBenchmarkConstructionScaleSQLite
+         0     0% 77.63%     24.60s 53.75%  github.com/kandev/kandev/internal/analytics/repository/sqlite.checkUsageHistoryConstructionScale
+         0     0% 77.63%     24.30s 53.09%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedRecent
+     0.02s 0.044% 77.67%     18.94s 41.38%  database/sql.withLock
+         0     0% 77.67%     17.05s 37.25%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).publish
+     0.02s 0.044% 77.71%     15.85s 34.63%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked
+         0     0% 77.71%     15.68s 34.26%  github.com/mattn/go-sqlite3.(*SQLiteRows).Next.func1
+         0     0% 77.71%     15.40s 33.65%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).AdvanceUsageHistoryProjection
+         0     0% 77.71%     15.38s 33.60%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjection
+     0.01s 0.022% 77.74%     14.77s 32.27%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func1 (inline)
+         0     0% 77.74%     14.76s 32.25%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_internal
+         0     0% 77.74%     12.07s 26.37%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync
+         0     0% 77.74%     11.23s 24.54%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync.func3 (inline)
+         0     0% 77.74%     11.23s 24.54%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_row_internal
+     0.02s 0.044% 77.78%      9.83s 21.48%  github.com/mattn/go-sqlite3.(*SQLiteConn).exec
+         0     0% 77.78%      8.43s 18.42%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare
+         0     0% 77.78%      8.30s 18.13%  github.com/mattn/go-sqlite3.(*SQLiteStmt).exec
+         0     0% 77.78%      8.19s 17.89%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare.func2 (inline)
+         0     0% 77.78%      8.18s 17.87%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_prepare_v2_internal
+     0.02s 0.044% 77.82%      8.01s 17.50%  database/sql.(*DB).queryDC
+         0     0% 77.82%         8s 17.48%  database/sql.(*Tx).QueryContext
+     0.02s 0.044% 77.87%      7.62s 16.65%  database/sql.(*DB).queryDC.func1
+     0.02s 0.044% 77.91%      7.53s 16.45%  database/sql.ctxDriverQuery
+         0     0% 77.91%      7.53s 16.45%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionWorkOrCutoverTx
+         0     0% 77.91%      7.52s 16.43%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionWorkTx
+         0     0% 77.91%      7.51s 16.41%  github.com/mattn/go-sqlite3.(*SQLiteConn).QueryContext
+     0.01s 0.022% 77.93%      7.51s 16.41%  github.com/mattn/go-sqlite3.(*SQLiteConn).query
+         0     0% 77.93%      6.65s 14.53%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedRange
+         0     0% 77.93%      6.46s 14.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).insertBatch
+         0     0% 77.93%      6.46s 14.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).insertSnapshotBatch
+         0     0% 77.93%      5.05s 11.03%  database/sql.(*Tx).Commit
+         0     0% 77.93%      5.05s 11.03%  database/sql.(*Tx).Commit.func1
+         0     0% 77.93%      5.05s 11.03%  github.com/mattn/go-sqlite3.(*SQLiteTx).Commit
+         0     0% 77.93%      4.97s 10.86%  database/sql.(*DB).execDC
+     0.01s 0.022% 77.95%      4.94s 10.79%  database/sql.(*DB).execDC.func2
+     0.02s 0.044% 78.00%      4.79s 10.47%  database/sql.ctxDriverExec
+         0     0% 78.00%      4.77s 10.42%  github.com/mattn/go-sqlite3.(*SQLiteConn).ExecContext
+         0     0% 78.00%      4.68s 10.23%  database/sql.(*Tx).ExecContext

@@ -1,0 +1,23 @@
+--- /tmp/usage-history-C8-original-run-full-normal-gates.sh
++++ /tmp/usage-history-C8-run-full-normal-gates.sh
+@@ -2,15 +2,15 @@
+ set -euo pipefail
+ 
+ # Execute only after parent-owned CI/browser/build jobs quiesce and the source is frozen.
+-readonly REPO=/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev
+-readonly EXPECTED_HEAD=863769e72e8cf25f0035afafaa75b5f1e66da4be
++readonly REPO=/tmp/usage-history-C8-benchmark-worktree
++readonly EXPECTED_HEAD=5b79da2f41f9a6e2c9bd9f421313276981e95c00
+ readonly BACKEND="$REPO/apps/backend"
+ readonly GO_BIN=/root/.local/share/mise/installs/go/1.26.0/bin/go
+-readonly EVIDENCE_ROOT="$REPO/docs/plans/usage-history/evidence/usage-history-luna-C7-full-normal-20261031T0028Z"
+-readonly LOG_ROOT=/tmp/usage-history-luna-C7-full-normal
++readonly EVIDENCE_ROOT="$REPO/docs/plans/usage-history/evidence/usage-history-luna-C8-full-normal-20261031T0122Z"
++readonly LOG_ROOT=/tmp/usage-history-luna-C8-full-normal
+ readonly PG_ENV_FILE=/tmp/usage-history-pr3660-postgres.env
+ 
+-readonly EVIDENCE_REL=docs/plans/usage-history/evidence/usage-history-luna-C7-full-normal-20261031T0028Z
++readonly EVIDENCE_REL=docs/plans/usage-history/evidence/usage-history-luna-C8-full-normal-20261031T0122Z
+ 
+ assert_source_frame() {
+   local head status_line

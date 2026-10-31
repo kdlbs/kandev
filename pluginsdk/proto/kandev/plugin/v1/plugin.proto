@@ -145,6 +145,8 @@ service Host {
   rpc SetState(SetStateRequest) returns (SetStateResponse);
   rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
   rpc ListState(ListStateRequest) returns (ListStateResponse);
+  // Optional, capability `state`: bounded keys for the connected plugin only.
+  rpc ListStateKeys(ListStateKeysRequest) returns (ListStateKeysResponse);
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
@@ -189,6 +191,17 @@ service Host {
   // not the raw commit/snapshot rows, whose JSON schema churns.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
+
+  // Source-aware token usage — api_read:session_usage and
+  // api_write:session_usage. The source namespace is assigned by Kandev from
+  // the connected plugin identity; plugins cannot impersonate another source.
+  rpc UpsertSessionUsage(UpsertSessionUsageRequest) returns (UpsertSessionUsageResponse);
+  rpc ListSessionUsage(ListSessionUsageRequest) returns (ListSessionUsageResponse);
+  // Versioned retained-history contract. Subject bindings and collection
+  // snapshots are issued by the Host; callers cannot choose tenant, actor, or
+  // collector namespace values.
+  rpc ListUsageCollectionTargetsV1(ListUsageCollectionTargetsV1Request) returns (ListUsageCollectionTargetsV1Response);
+  rpc ReportUsageObservationsV1(ReportUsageObservationsV1Request) returns (ReportUsageObservationsV1Response);
 
   // Conversation content — capability api_read:messages. Historical
   // user/agent message content for a session or task, filterable by a time
@@ -1488,6 +1501,16 @@ message ListStateRequest {
 message ListStateResponse {
   repeated StateEntry entries = 1;
 }
+message ListStateKeysRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string cursor = 3;
+  int32 limit = 4;
+}
+message ListStateKeysResponse {
+  repeated string keys = 1;
+  string next_cursor = 2;
+}
 message StateEntry {
   string key = 1;
   google.protobuf.Struct value = 2;
@@ -1539,6 +1562,9 @@ message Page {
 message PageInfo {
   string next_cursor = 1;
   bool has_more = 2;
+  string projection_status = 3;
+  string projection_generation = 4;
+  bool projection_pending = 5;
 }
 
 // Timestamps are RFC3339 strings (matches the JSON API + the Event envelope
@@ -2061,11 +2087,14 @@ message Session {
   string started_at = 8;
   optional string ended_at = 9;
   string agent_profile_name = 10; // profile name from the snapshot at run time
+  string updated_at = 11;          // canonical session change timestamp
 }
 message SessionFilter {
   repeated string task_ids = 1;
   repeated string workspace_ids = 2;
   repeated string states = 3;
+  repeated string session_ids = 4;
+  optional string updated_since = 5;
 }
 message ListSessionsRequest {
   SessionFilter filter = 1;
@@ -2104,6 +2133,259 @@ message ListSessionCodeStatsRequest {
 message ListSessionCodeStatsResponse {
   repeated SessionCodeStats stats = 1;
   PageInfo page_info = 2;
+}
+
+// SessionUsageMeasurement is a source-owned cumulative observation or a
+// dated bucket. Optional numeric values preserve the difference between an
+// unreported category and a reported zero.
+message SessionUsageMeasurement {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string transcript_id = 5;
+  string source_record_id = 6;
+  string usage_identity = 7;
+  string model = 8;
+  string provider = 9;
+  string source_version = 10;
+  int64 revision = 11;
+  string payload_digest = 12;
+  string observed_at = 13;
+  string collected_at = 14;
+  optional int64 input_tokens = 15;
+  optional int64 output_tokens = 16;
+  optional int64 cache_read_tokens = 17;
+  optional int64 cache_write_tokens = 18;
+  optional int64 reasoning_tokens = 19;
+  optional int64 total_tokens = 20;
+  optional int64 cost_subcents = 21;
+  string currency = 22;
+  string cost_basis = 23;
+  string coverage = 24;
+  string source_timezone = 25;
+  string attribution_status = 26;
+  optional string coverage_start = 27;
+  optional string coverage_end = 28;
+  string source_date = 29;
+  string coverage_key = 30;
+	bool estimated = 31;
+	bool stale = 32;
+	optional int64 turns = 33;
+	string cost_coverage = 34;
+  // Host-derived canonical read applicability. Collector writes ignore these.
+  // False preserves older-row semantics: nullable amounts remain unknown.
+  bool token_metric_absent = 35;
+  bool cost_metric_absent = 36;
+}
+message UpsertSessionUsageRequest {
+  string workspace_id = 1;
+  repeated SessionUsageMeasurement measurements = 2;
+}
+message SessionUsageWriteResult {
+  string source_record_id = 1;
+  string usage_identity = 2;
+  string model = 3;
+  string provider = 4;
+  string status = 5;
+  SessionUsageMeasurement measurement = 6;
+  string error = 7;
+}
+message UpsertSessionUsageResponse {
+  repeated SessionUsageWriteResult results = 1;
+}
+message SessionUsageFilter {
+  string workspace_id = 1;
+  repeated string session_ids = 2;
+  repeated string task_ids = 3;
+  string model = 4;
+  string provider = 5;
+  optional string start = 6;
+  optional string end = 7;
+  string timezone = 8;
+  string group_by = 9;
+  string sort_by = 10;
+	string sort_direction = 11;
+	bool include_undated = 12;
+	// Authorized read of canonical native/collector values. Write ownership
+	// remains derived from the connected plugin identity.
+	bool canonical = 13;
+}
+message ListSessionUsageRequest {
+  SessionUsageFilter filter = 1;
+  Page page = 2;
+}
+message ListSessionUsageResponse {
+  repeated SessionUsageMeasurement measurements = 1;
+  PageInfo page_info = 2;
+}
+
+// The v1 retained-usage contract separates the authenticated collector from
+// the work identity and mutable model/provider dimensions. Bindings are
+// opaque, Host-issued values. No workspace, organization, actor, or collector
+// namespace is accepted on an observation write.
+message UsageWorkIdentityV1 {
+  string scheme = 1; // provider_account_thread | provider_event | transcript_binding | another documented scheme
+  optional string authority = 2; // non-secret provider/account namespace, scoped again by the Host
+  string id = 3; // opaque identifier in the declared scheme
+}
+
+message UsageTokenAmountsV1 {
+  optional int64 input_tokens = 1;
+  optional int64 output_tokens = 2;
+  optional int64 cache_read_tokens = 3;
+  optional int64 cache_write_tokens = 4;
+  optional int64 reasoning_tokens = 5;
+  optional int64 total_tokens = 6;
+}
+
+message UsageTokenSemanticsV1 {
+  string version = 1;
+  optional bool cache_read_included_in_input = 2;
+  optional bool cache_write_included_in_input = 3;
+  optional bool reasoning_included_in_output = 4;
+}
+
+message UsageCostV1 {
+  optional int64 amount = 1; // fixed-point units; 10,000 units per USD
+  optional string currency = 2;
+  string basis = 3; // reported | estimated | unknown
+  optional string pricing_provenance = 4;
+}
+
+message UsageCoverageV1 {
+  optional string occurrence_at = 1; // RFC3339 source occurrence time
+  optional string coverage_start = 2; // RFC3339 inclusive start
+  optional string coverage_end = 3; // RFC3339 exclusive end
+  optional string source_date = 4;
+  optional string source_timezone = 5;
+}
+
+message UsageObservationQualityV1 {
+  bool token_coverage_complete = 1;
+  bool cost_coverage_complete = 2;
+  bool stale = 3;
+}
+
+message UsageObservationV1 {
+  string subject_binding = 1; // opaque binding issued by Kandev for a retained subject
+  string item_id = 2; // immutable within this authenticated collector namespace
+  string source_record_id = 3; // source-local record reference; not a work identity
+  string source_version = 4;
+  int64 revision = 5; // starts at 1; increases for each changed payload
+  string payload_digest = 6; // sha256:<lowercase hex> of deterministic protobuf bytes with this field cleared; Host verifies
+  optional string supersedes_item_id = 7; // same-collector supersession only
+  optional string source_set_id = 8;
+  optional int64 source_set_revision = 9;
+  UsageWorkIdentityV1 work_identity = 10;
+  optional string model_id = 11;
+  optional string model_provider = 12;
+  optional string agent_client = 13;
+  optional string serving_platform = 14;
+  map<string, string> raw_source_labels = 15; // non-sensitive labels only
+  UsageTokenAmountsV1 tokens = 16;
+  UsageTokenSemanticsV1 token_semantics = 17;
+  UsageCostV1 cost = 18;
+  UsageCoverageV1 coverage = 19;
+  UsageObservationQualityV1 quality = 20;
+  UsageSegmentIdentityV1 segment = 21; // schema 2 required; explicit disjoint source partition
+}
+
+message UsageSegmentIdentityV1 {
+  string decomposition_id = 1; // source-local alternative partitioning; independent of binding and coverage
+  string segment_id = 2; // immutable member lineage; independent of model/provider labels
+}
+
+message UsageObservationTombstoneV1 {
+  string subject_binding = 1;
+  string item_id = 2;
+  int64 revision = 3; // must be newer than the active item revision
+  string payload_digest = 4; // sha256:<lowercase hex> of deterministic protobuf bytes with this field cleared; Host verifies
+}
+
+message UsageCompleteSetRevisionV1 {
+  string subject_binding = 1;
+  string set_id = 2;
+  int64 revision = 3; // starts at 1; increases for each changed set
+  string payload_digest = 4; // sha256:<lowercase hex> of binding, set ID, revision, and sorted item IDs
+}
+
+message ReportUsageObservationsV1Request {
+  uint32 schema_version = 1;
+  repeated UsageObservationV1 observations = 2;
+  repeated UsageObservationTombstoneV1 tombstones = 3;
+  UsageCompleteSetRevisionV1 complete_set_revision = 4;
+}
+
+message UsageObservationSourceV1 {
+  string collector_namespace = 1; // Host-assigned provenance
+  string item_id = 2;
+  string actor_attribution_status = 3; // Host-derived status for this metric source
+}
+
+message UsageSelectionProvenanceV1 {
+  UsageObservationSourceV1 token_source = 1;
+  UsageObservationSourceV1 cost_source = 2;
+}
+
+message UsageObservationWriteResultV1 {
+  string operation = 1; // observation | tombstone | complete_set
+  string item_id = 2;
+  string status = 3; // accepted | unchanged | stale | conflict | rejected | unsupported_version
+  string error = 4;
+  int64 current_revision = 5;
+  string current_digest = 6;
+  UsageObservationV1 current_observation = 7;
+  string accepted_at = 8; // Host-assigned RFC3339 collection time
+  string actor_attribution_status = 9; // Host-derived; never accepted from the collector
+  string work_identity_status = 10; // proven | unproven | ambiguous
+  UsageSelectionProvenanceV1 selection = 11;
+}
+
+message ReportUsageObservationsV1Response {
+  string status = 1; // accepted | partial | unsupported_version
+  uint32 supported_schema_version = 2;
+  string collector_namespace = 3; // Host-assigned, never supplied by the caller
+  repeated UsageObservationWriteResultV1 results = 4;
+}
+
+message UsageCollectionTargetV1 {
+  string subject_binding = 1; // durable, opaque correction/admission authority
+  string task_id = 2;
+  optional string session_id = 3;
+  optional string external_session_id = 4; // supported execution/source context only
+  string subject_kind = 5; // task | session
+  string actor_attribution_status = 6; // Host-derived; actor identities are not exposed here
+  optional string session_started_at = 7;
+  optional string session_ended_at = 8;
+  optional string coverage_start = 9;
+  optional string coverage_end = 10;
+  string source_scope_status = 11; // eligible | mixed | unknown; only eligible permits aggregate collection
+}
+
+message ListUsageCollectionTargetsV1Request {
+  string workspace_id = 1;
+  int32 limit = 2;
+  string snapshot_id = 3;
+  string cursor = 4;
+  UsageCollectionCurrentTargetQueryV1 current_target = 5;
+}
+
+message UsageCollectionCurrentTargetQueryV1 {
+  string task_id = 1;
+  string session_id = 2;
+  string external_session_id = 3;
+  string subject_binding = 4;
+}
+
+message ListUsageCollectionTargetsV1Response {
+  repeated UsageCollectionTargetV1 items = 1;
+  string snapshot_id = 2;
+  int64 snapshot_upper_bound = 3;
+  string next_cursor = 4;
+  bool has_more = 5;
+  bool preparing = 6; // bounded durable preparation; no snapshot/items/cursor until false
+  bool current_target = 7; // acknowledgement required even for an empty point result
 }
 
 // ── Messages (conversation content) ──────────────────────────────────────────

@@ -1,0 +1,119 @@
+{
+  "worker": "B26",
+  "status": "implementation_ready",
+  "source": {
+    "repo": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+    "worktree": "/tmp/usage-history-B26-new-session-worktree",
+    "head": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "detached": true,
+    "branch_or_commit_created": false
+  },
+  "scope": {
+    "owned_paths": [
+      "apps/web/e2e/tests/session/new-session-advanced-settings.spec.ts"
+    ],
+    "modified_paths": [
+      "apps/web/e2e/tests/session/new-session-advanced-settings.spec.ts"
+    ],
+    "main_workspace_edited": false,
+    "shared_helpers_or_other_specs_edited": false,
+    "assets_or_package_pins_edited": false
+  },
+  "change": {
+    "summary": "Attach a WebSocket watcher before the seed helper navigates, arm a task-scoped session.launch response wait before submit, and await that response before asserting the dialog closed.",
+    "before_sha256": "d0a2c82dfaca79b37ade88dc10d95abb3d1d8aca447a46b06184ff3282696cd5",
+    "after_sha256": "cc767c4490d619f98f666523c6c77b597e5cbf82ce1fa1986ea7622310377638",
+    "diff": "/tmp/usage-history-luna-B26-final.diff"
+  },
+  "diagnosis": {
+    "classification": "inferred_from_failed_attempt_evidence_and_source",
+    "ci": {
+      "run_id": 41174963429,
+      "attempt": 1,
+      "source_head": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+      "test_id": "f290cfd874dff78cf43c-80e66543e94ce7150385",
+      "failed_result_id": "557bf3631b1a4c0f117fca78e938a7fc",
+      "retry_zero_duration_ms": 26578,
+      "assertion": "The New agent/Hand off dialog was still visible at the post-submit close assertion."
+    },
+    "failed_error_context": {
+      "path": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/54ff8e420a273c83bfd81185f6ea9b530128e0d6.markdown",
+      "sha256": "f2745d9885d0b49c04c662eaf63acd43cb0bbe82eb04a1f88cf4fd10e016be95",
+      "observed_state": [
+        "Dialog title: New agent in New Agent settings.",
+        "Prompt remains /e2e:simple-message and is disabled while submitting.",
+        "session-note.txt and Remove session-note.txt remain present.",
+        "Advanced settings is expanded; MCP servers shows 1 selected.",
+        "Cancel and Creating... are disabled; no visible validation error is recorded."
+      ]
+    },
+    "failed_screenshot": {
+      "path": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/1e52917db69cc956365c21f76c8a77e9abc61c55.png",
+      "sha256": "8f175e5aece2cb6bb86d8531adcf5d0194d8635ae58d08b3f7622e04803f7fea",
+      "observation": "The screenshot attached to the failed result shows the task chat with the submitted prompt and attachment; it appears later than the accessibility snapshot, which still shows Creating... ."
+    },
+    "source_contract": "useSessionLaunchSubmit sets creating before launchSession; it activates the returned session and calls onClose only after the session.launch WebSocket request resolves. The spec's expectCreatedSelection helper polls persisted session, MCP selection, and user-message state, which can become observable before that RPC reply reaches the UI.",
+    "uncertainty": "The failed result contains screenshot and error-context attachments but no failed trace or recorded WS request/reply event. The evidence supports a pending-launch-response race rather than rejected form validation, but does not prove exact event ordering. The retry-1 trace is passing and was not used as a failed trace."
+  },
+  "verification": {
+    "browser_or_playwright_tests": "not_run",
+    "go_or_build_commands": "not_run",
+    "reason": "The parent control file exists and currently sets allow_tests=false for the immutable full normal C10 benchmark.",
+    "static_diff_check": "git diff --check passed",
+    "full_fix_status": "not_claimed; awaiting fresh Luna6max verification after benchmarks quiesce",
+    "control_file": {
+      "path": "/tmp/usage-history-B26-control.json",
+      "exists": true,
+      "allow_tests": false,
+      "reason": "C10immutablefullnormalbenchmark; noheavyjobsduringtiming",
+      "updated_at": "2026-10-31T06:33:16.601477+00:00"
+    }
+  },
+  "assets_and_freshness": {
+    "source_workspace_backend_binary_sha256": "58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8",
+    "source_workspace_web_dist_index_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+    "built_assets_source_revision_requested": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "pr_asset_comparison": {
+      "baseline": "/tmp/usage-history-luna-B21-ci/assets-before",
+      "compared_against": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web/.pr-assets",
+      "file_count": 9,
+      "all_byte_identical": true,
+      "restored_or_modified": false
+    },
+    "fresh_worktree_preflight": {
+      "backend_binary_present": false,
+      "web_dist_index_present": false,
+      "e2e_build_identity_present_in_source_workspace": false,
+      "default_mtime_freshness_if_assets_are_reused": "would fail without a verified E2E build identity: new worktree newest backend source mtime was 2026-10-31T06:32:55Z, existing binary mtime was 2026-10-31T05:56:56Z",
+      "freshness_bypass_used": false,
+      "handoff": "Verification must provision the exact existing artifact set plus a valid source-revision/checksum identity, or receive separate authorization to build. Do not set KANDEV_E2E_SKIP_FRESHNESS, fabricate an identity, touch mtimes, or restore PR assets."
+    }
+  },
+  "test_handoff": {
+    "project": "chromium",
+    "managed_runner": "pnpm e2e:run --host --no-build --project chromium --shards 1",
+    "normal_freshness": "Keep global setup freshness enabled. --no-build does not skip global setup checks. Do not start until required artifacts are provisioned and the normal freshness check passes.",
+    "baseline": {
+      "scope": "Run the complete owned spec unmodified, retries disabled, one managed worker.",
+      "command_from_apps_web": "pnpm e2e:run --host --no-build --project chromium --shards 1 tests/session/new-session-advanced-settings.spec.ts -- --retries=0 --reporter=list",
+      "log": "/tmp/usage-history-luna-B26-baseline.log",
+      "restore_guard": "Save the changed owned spec to a temporary file; install only git show HEAD:apps/web/e2e/tests/session/new-session-advanced-settings.spec.ts for the baseline; restore the saved owned spec in an EXIT/INT/TERM trap. Do not restore or rewrite any other path."
+    },
+    "changed_focused_repeat": {
+      "scope": "Repeat only the reported test three times, retries disabled.",
+      "command_from_apps_web": "pnpm e2e:run --host --no-build --project chromium --shards 1 tests/session/new-session-advanced-settings.spec.ts -- --grep \"preserves the draft and submits only explicit additions through a bounded keyboard picker\" --repeat-each=3 --retries=0 --reporter=list",
+      "log": "/tmp/usage-history-luna-B26-focused.log"
+    },
+    "changed_ordered_spec": {
+      "scope": "Run the complete changed spec once after focused repeats, retries disabled.",
+      "command_from_apps_web": "pnpm e2e:run --host --no-build --project chromium --shards 1 tests/session/new-session-advanced-settings.spec.ts -- --retries=0 --reporter=list",
+      "log": "/tmp/usage-history-luna-B26-ordered.log"
+    },
+    "evidence_rules": [
+      "Use tee to preserve unfiltered runner output and capture each command's exit status.",
+      "Record discovered, passed, failed, skipped, and repeated-attempt counts exactly; retain failed intermediate logs and artifacts.",
+      "Verify all nine PR asset files against assets-before before and after; do not restore assets unless an actual run changed one and ownership is proven.",
+      "Do not use retries, sleeps, assertion relaxation, deadline bypasses, or KANDEV_E2E_SKIP_FRESHNESS."
+    ]
+  }
+}

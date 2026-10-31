@@ -1,0 +1,997 @@
+File: sqlite.test
+Build ID: 6538e8b0418a47dbe5202e73214218198d03de3a
+Type: cpu
+Time: 2026-10-30 20:40:23 WET
+Duration: 48.92s, Total samples = 45.77s (93.56%)
+Showing nodes accounting for 45.75s, 100% of 45.77s total
+      flat  flat%   sum%        cum   cum%
+    35.53s 77.63% 77.63%        36s 78.65%  runtime.cgocall
+         0     0% 77.63%     24.61s 53.77%  testing.tRunner
+         0     0% 77.63%     24.60s 53.75%  github.com/kandev/kandev/internal/analytics/repository/sqlite.TestUsageHistoryBenchmarkConstructionScaleSQLite
+         0     0% 77.63%     24.60s 53.75%  github.com/kandev/kandev/internal/analytics/repository/sqlite.checkUsageHistoryConstructionScale
+         0     0% 77.63%     24.30s 53.09%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedRecent
+     0.02s 0.044% 77.67%     18.94s 41.38%  database/sql.withLock
+         0     0% 77.67%     17.05s 37.25%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).publish
+     0.02s 0.044% 77.71%     15.85s 34.63%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked
+         0     0% 77.71%     15.68s 34.26%  github.com/mattn/go-sqlite3.(*SQLiteRows).Next.func1
+         0     0% 77.71%     15.40s 33.65%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).AdvanceUsageHistoryProjection
+         0     0% 77.71%     15.38s 33.60%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjection
+     0.01s 0.022% 77.74%     14.77s 32.27%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func1 (inline)
+         0     0% 77.74%     14.76s 32.25%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_internal
+         0     0% 77.74%     12.07s 26.37%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync
+         0     0% 77.74%     11.23s 24.54%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync.func3 (inline)
+         0     0% 77.74%     11.23s 24.54%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_row_internal
+     0.02s 0.044% 77.78%      9.83s 21.48%  github.com/mattn/go-sqlite3.(*SQLiteConn).exec
+         0     0% 77.78%      8.43s 18.42%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare
+         0     0% 77.78%      8.30s 18.13%  github.com/mattn/go-sqlite3.(*SQLiteStmt).exec
+         0     0% 77.78%      8.19s 17.89%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare.func2 (inline)
+         0     0% 77.78%      8.18s 17.87%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_prepare_v2_internal
+     0.02s 0.044% 77.82%      8.01s 17.50%  database/sql.(*DB).queryDC
+         0     0% 77.82%         8s 17.48%  database/sql.(*Tx).QueryContext
+     0.02s 0.044% 77.87%      7.62s 16.65%  database/sql.(*DB).queryDC.func1
+     0.02s 0.044% 77.91%      7.53s 16.45%  database/sql.ctxDriverQuery
+         0     0% 77.91%      7.53s 16.45%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionWorkOrCutoverTx
+         0     0% 77.91%      7.52s 16.43%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionWorkTx
+         0     0% 77.91%      7.51s 16.41%  github.com/mattn/go-sqlite3.(*SQLiteConn).QueryContext
+     0.01s 0.022% 77.93%      7.51s 16.41%  github.com/mattn/go-sqlite3.(*SQLiteConn).query
+         0     0% 77.93%      6.65s 14.53%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedRange
+         0     0% 77.93%      6.46s 14.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).insertBatch
+         0     0% 77.93%      6.46s 14.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).insertSnapshotBatch
+         0     0% 77.93%      5.05s 11.03%  database/sql.(*Tx).Commit
+         0     0% 77.93%      5.05s 11.03%  database/sql.(*Tx).Commit.func1
+         0     0% 77.93%      5.05s 11.03%  github.com/mattn/go-sqlite3.(*SQLiteTx).Commit
+         0     0% 77.93%      4.97s 10.86%  database/sql.(*DB).execDC
+     0.01s 0.022% 77.95%      4.94s 10.79%  database/sql.(*DB).execDC.func2
+     0.02s 0.044% 78.00%      4.79s 10.47%  database/sql.ctxDriverExec
+         0     0% 78.00%      4.77s 10.42%  github.com/mattn/go-sqlite3.(*SQLiteConn).ExecContext
+         0     0% 78.00%      4.68s 10.23%  database/sql.(*Tx).ExecContext
+         0     0% 78.00%      4.47s  9.77%  github.com/jmoiron/sqlx.(*Tx).SelectContext (inline)
+         0     0% 78.00%      4.47s  9.77%  github.com/jmoiron/sqlx.SelectContext
+         0     0% 78.00%      4.13s  9.02%  github.com/jmoiron/sqlx.(*Tx).QueryxContext
+     0.01s 0.022% 78.02%      3.88s  8.48%  github.com/jmoiron/sqlx.(*Tx).QueryRowxContext
+         0     0% 78.02%      3.85s  8.41%  github.com/mattn/go-sqlite3.(*SQLiteStmt).exec.func1
+         0     0% 78.02%      3.80s  8.30%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectUsageWorkTx
+         0     0% 78.02%      3.73s  8.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectUsageReferenceGroupsTx
+         0     0% 78.02%      3.72s  8.13%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectUsageReferenceGroupTx
+         0     0% 78.02%      3.12s  6.82%  github.com/kandev/kandev/internal/analytics/repository/sqlite.bulkUsageBenchRows
+         0     0% 78.02%      3.07s  6.71%  database/sql.(*Tx).Exec (inline)
+         0     0% 78.02%      2.67s  5.83%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectUsageOverlapTx
+     0.01s 0.022% 78.04%      2.66s  5.81%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).loadIndexedObservationTx
+     0.01s 0.022% 78.06%      2.59s  5.66%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectionReferencesTx
+     0.20s  0.44% 78.50%      2.51s  5.48%  runtime.mallocgc
+         0     0% 78.50%      2.31s  5.05%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).resolveUsageProjectionPageTx
+         0     0% 78.50%      2.18s  4.76%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).replayUsageProjectionPageTx
+     0.05s  0.11% 78.61%      2.17s  4.74%  runtime.systemstack
+         0     0% 78.61%      2.08s  4.54%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).resolveUsageSegmentPageTx
+         0     0% 78.61%      1.92s  4.19%  github.com/jmoiron/sqlx.(*Tx).GetContext (inline)
+     0.01s 0.022% 78.63%      1.92s  4.19%  github.com/jmoiron/sqlx.GetContext
+         0     0% 78.63%      1.80s  3.93%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).repairUsageProjectionSourcesTx
+         0     0% 78.63%      1.78s  3.89%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).retainCapturedLegacyExternalUsageTx
+         0     0% 78.63%      1.78s  3.89%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).retainLegacyExternalUsageTx
+         0     0% 78.63%      1.70s  3.71%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).repairUsageScopePageTx
+         0     0% 78.63%      1.63s  3.56%  github.com/kandev/kandev/internal/analytics/repository/sqlite.encodeUsageProjection
+         0     0% 78.63%      1.60s  3.50%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageInitialRepairReferencesTx
+     0.01s 0.022% 78.65%      1.48s  3.23%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).stageUsageProjectionFactsTx
+         0     0% 78.65%      1.47s  3.21%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).BackfillUsageHistory
+         0     0% 78.65%      1.47s  3.21%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).finishRetention
+         0     0% 78.65%      1.46s  3.19%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).backfillUsageHistorySourcePage
+     0.01s 0.022% 78.68%      1.45s  3.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).backfillExternalUsagePageTx
+         0     0% 78.68%      1.45s  3.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).backfillUsageSourcePageTx
+         0     0% 78.68%      1.44s  3.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).backfillExternalUsageRowTx
+     0.01s 0.022% 78.70%      1.37s  2.99%  encoding/gob.(*Encoder).Encode
+         0     0% 78.70%      1.37s  2.99%  encoding/gob.(*Encoder).EncodeValue
+     0.02s 0.044% 78.74%      1.27s  2.77%  github.com/jmoiron/sqlx.(*Row).Scan
+         0     0% 78.74%      1.27s  2.77%  github.com/kandev/kandev/internal/analytics/repository/sqlite.decodeUsageProjection
+         0     0% 78.74%      1.19s  2.60%  encoding/gob.(*Decoder).Decode
+         0     0% 78.74%      1.19s  2.60%  encoding/gob.(*Decoder).DecodeValue
+     0.10s  0.22% 78.96%      1.18s  2.58%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind
+         0     0% 78.96%      1.17s  2.56%  encoding/gob.(*Decoder).decodeValue
+         0     0% 78.96%      1.07s  2.34%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).scanUsageProjectionPageTx
+         0     0% 78.96%      1.06s  2.32%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).copyUsageProjectionSourcePageTx
+         0     0% 78.96%      1.05s  2.29%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).indexRetainedSourceRowTx
+     0.14s  0.31% 79.27%      1.03s  2.25%  runtime.mallocgcSmallScanNoHeader
+         0     0% 79.27%      0.99s  2.16%  database/sql.(*Rows).Next
+     0.09s   0.2% 79.46%      0.98s  2.14%  encoding/gob.(*Encoder).sendActualType
+     0.03s 0.066% 79.53%      0.98s  2.14%  encoding/gob.(*Encoder).sendType
+         0     0% 79.53%      0.98s  2.14%  encoding/gob.(*Encoder).sendTypeDescriptor
+         0     0% 79.53%      0.94s  2.05%  encoding/gob.(*Encoder).encode
+     0.06s  0.13% 79.66%      0.94s  2.05%  encoding/gob.(*Encoder).encodeStruct
+         0     0% 79.66%      0.92s  2.01%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).appendUsageProjectionIndexBatchTx
+     0.06s  0.13% 79.79%      0.92s  2.01%  runtime.newobject
+         0     0% 79.79%      0.91s  1.99%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).beginUsageSegmentGroupTx
+         0     0% 79.79%      0.91s  1.99%  runtime.gcBgMarkWorker
+         0     0% 79.79%      0.87s  1.90%  encoding/gob.(*Decoder).getDecEnginePtr
+     0.01s 0.022% 79.81%      0.86s  1.88%  database/sql.(*Rows).Next.func1
+     0.01s 0.022% 79.83%      0.86s  1.88%  github.com/kandev/kandev/internal/analytics/repository/sqlite.buildUsageProjectionIndexBatch
+     0.02s 0.044% 79.88%      0.85s  1.86%  database/sql.(*Rows).nextLocked
+     0.10s  0.22% 80.10%      0.83s  1.81%  encoding/gob.(*Decoder).compileDec
+         0     0% 80.10%      0.81s  1.77%  runtime.gcBgMarkWorker.func2
+     0.01s 0.022% 80.12%      0.81s  1.77%  runtime.gcDrain
+     0.01s 0.022% 80.14%      0.80s  1.75%  encoding/gob.(*Decoder).decOpFor.func4
+     0.01s 0.022% 80.16%      0.80s  1.75%  encoding/gob.(*Decoder).decodeStruct
+         0     0% 80.16%      0.78s  1.70%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageInitialRepairPendingTx
+         0     0% 80.16%      0.78s  1.70%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageProjectionCanonicalFactRow
+         0     0% 80.16%      0.74s  1.62%  encoding/gob.encOpFor.func4
+         0     0% 80.16%      0.69s  1.51%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).reduceUsageSegmentGroupTx
+         0     0% 80.16%      0.69s  1.51%  runtime.gcDrainMarkWorkerFractional (inline)
+     0.03s 0.066% 80.23%      0.68s  1.49%  encoding/gob.(*Decoder).decOpFor
+         0     0% 80.23%      0.68s  1.49%  encoding/gob.(*Decoder).decodeGobDecoder
+         0     0% 80.23%      0.68s  1.49%  encoding/gob.(*Decoder).gobDecodeOpFor.func1
+         0     0% 80.23%      0.68s  1.49%  encoding/gob.(*Encoder).encodeGobEncoder
+         0     0% 80.23%      0.68s  1.49%  encoding/gob.gobEncodeOpFor.func1
+         0     0% 80.23%      0.66s  1.44%  github.com/kandev/kandev/internal/analytics/models.(*SessionUsageMeasurement).GobDecode
+     0.02s 0.044% 80.27%      0.64s  1.40%  database/sql.(*Rows).close
+     0.01s 0.022% 80.29%      0.64s  1.40%  github.com/kandev/kandev/internal/analytics/models.SessionUsageMeasurement.GobEncode
+         0     0% 80.29%      0.63s  1.38%  database/sql.(*Rows).Close
+     0.01s 0.022% 80.31%      0.61s  1.33%  github.com/kandev/kandev/internal/analytics/repository/sqlite.scanUsageRow
+         0     0% 80.31%      0.59s  1.29%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).applyUsageProjectionReplayTx
+         0     0% 80.31%      0.59s  1.29%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageScopeWritableTx
+         0     0% 80.31%      0.58s  1.27%  github.com/jmoiron/sqlx.(*Row).scanAny
+     0.22s  0.48% 80.80%      0.56s  1.22%  runtime.scanObject
+     0.01s 0.022% 80.82%      0.55s  1.20%  github.com/mattn/go-sqlite3.(*SQLiteRows).Next
+         0     0% 80.82%      0.53s  1.16%  encoding/gob.(*Decoder).decodeTypeSequence
+         0     0% 80.82%      0.53s  1.16%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).insertUsageProjectionRowsTx
+         0     0% 80.82%      0.53s  1.16%  github.com/mattn/go-sqlite3.(*SQLiteStmt).Close
+     0.05s  0.11% 80.93%      0.53s  1.16%  runtime.mallocgcSmallNoscan
+     0.01s 0.022% 80.95%      0.52s  1.14%  runtime.(*mcache).nextFree
+         0     0% 80.95%      0.51s  1.11%  encoding/gob.(*Decoder).recvType
+         0     0% 80.95%      0.51s  1.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).linkUsageProjectionPublicationTx
+         0     0% 80.95%      0.49s  1.07%  github.com/mattn/go-sqlite3.(*SQLiteStmt).Close.func1 (inline)
+         0     0% 80.95%      0.49s  1.07%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_finalize
+         0     0% 80.95%      0.48s  1.05%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).prepareUsageObservationTargetTx
+     0.02s 0.044% 80.99%      0.48s  1.05%  runtime.(*mcache).refill
+     0.26s  0.57% 81.56%      0.43s  0.94%  runtime.tryDeferToSpanScan
+         0     0% 81.56%      0.42s  0.92%  database/sql.(*Rows).close.func1
+         0     0% 81.56%      0.42s  0.92%  github.com/mattn/go-sqlite3.(*SQLiteRows).Close
+     0.01s 0.022% 81.58%      0.42s  0.92%  runtime.deductAssistCredit
+     0.04s 0.087% 81.67%      0.42s  0.92%  runtime.makeslice
+         0     0% 81.67%      0.41s   0.9%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).enqueueUsageProjectionWorkTx
+     0.03s 0.066% 81.73%      0.41s   0.9%  runtime.(*mcentral).cacheSpan
+         0     0% 81.73%      0.41s   0.9%  runtime.gcAssistAlloc
+         0     0% 81.73%      0.40s  0.87%  runtime.gcAssistAlloc.func2
+         0     0% 81.73%      0.40s  0.87%  runtime.gcAssistAlloc1
+         0     0% 81.73%      0.40s  0.87%  runtime.gcDrainN
+         0     0% 81.73%      0.38s  0.83%  github.com/mattn/go-sqlite3.(*SQLiteStmt).query
+     0.02s 0.044% 81.78%      0.38s  0.83%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_bind_text
+     0.02s 0.044% 81.82%      0.38s  0.83%  runtime.scanSpan
+         0     0% 81.82%      0.37s  0.81%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).DeleteTask
+         0     0% 81.82%      0.37s  0.81%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).DeleteTaskWithVacatedStep (inline)
+         0     0% 81.82%      0.37s  0.81%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).deleteTaskWithVacatedStep
+     0.02s 0.044% 81.87%      0.37s  0.81%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind.func6 (inline)
+     0.02s 0.044% 81.91%      0.37s  0.81%  runtime.growslice
+     0.02s 0.044% 81.95%      0.37s  0.81%  runtime.mcall
+         0     0% 81.95%      0.36s  0.79%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).PreserveTaskUsage
+         0     0% 81.95%      0.36s  0.79%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).preserveUsageSourcePage
+         0     0% 81.95%      0.36s  0.79%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).runUsagePreservation
+     0.36s  0.79% 82.74%      0.36s  0.79%  runtime.nextFreeFast (inline)
+     0.35s  0.76% 83.50%      0.35s  0.76%  runtime.memmove
+         0     0% 83.50%      0.34s  0.74%  database/sql.(*DB).retry
+         0     0% 83.50%      0.34s  0.74%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).preserveExternalUsagePageTx
+         0     0% 83.50%      0.34s  0.74%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).preserveUsageSourceBatchTx
+     0.02s 0.044% 83.55%      0.33s  0.72%  github.com/jmoiron/sqlx.scanAll
+         0     0% 83.55%      0.33s  0.72%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).lockUsageScopeFenceTx
+     0.02s 0.044% 83.59%      0.33s  0.72%  github.com/mattn/go-sqlite3.(*SQLiteRows).declTypes
+     0.01s 0.022% 83.61%      0.32s   0.7%  github.com/mattn/go-sqlite3.(*SQLiteRows).Columns
+         0     0% 83.61%      0.31s  0.68%  database/sql.(*DB).ExecContext
+         0     0% 83.61%      0.31s  0.68%  database/sql.(*DB).ExecContext.func1
+         0     0% 83.61%      0.31s  0.68%  database/sql.(*DB).exec
+     0.02s 0.044% 83.66%      0.30s  0.66%  encoding/gob.(*Encoder).encodeArray
+         0     0% 83.66%      0.30s  0.66%  encoding/gob.encOpFor.func1
+         0     0% 83.66%      0.30s  0.66%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).lockUsageProjectionScopeTx
+         0     0% 83.66%      0.30s  0.66%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentReferencesTx
+         0     0% 83.66%      0.28s  0.61%  database/sql.(*Rows).initContextClose
+     0.20s  0.44% 84.09%      0.28s  0.61%  reflect.(*rtype).Field
+         0     0% 84.09%      0.28s  0.61%  runtime.entersyscall
+     0.28s  0.61% 84.71%      0.28s  0.61%  runtime.memclrNoHeapPointers
+         0     0% 84.71%      0.27s  0.59%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).assessUsageSegmentPageTx
+         0     0% 84.71%      0.27s  0.59%  runtime.newproc
+     0.01s 0.022% 84.73%      0.27s  0.59%  runtime.newproc.func1
+         0     0% 84.73%      0.26s  0.57%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentGroupStateTx
+     0.01s 0.022% 84.75%      0.26s  0.57%  github.com/kandev/kandev/internal/analytics/repository/sqlite.sqlRow.stored
+     0.05s  0.11% 84.86%      0.26s  0.57%  runtime.convTstring
+     0.01s 0.022% 84.88%      0.26s  0.57%  runtime.stringtoslicebyte
+         0     0% 84.88%      0.26s  0.57%  time.Time.Format
+         0     0% 84.88%      0.25s  0.55%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentChoiceTx
+     0.02s 0.044% 84.92%      0.25s  0.55%  github.com/kandev/kandev/internal/analytics/repository/sqlite.selectEquivalentObservations
+     0.01s 0.022% 84.95%      0.25s  0.55%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageProjectionFactContributionRows
+         0     0% 84.95%      0.25s  0.55%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageSegmentProbe
+     0.03s 0.066% 85.01%      0.25s  0.55%  runtime.sweepone
+         0     0% 85.01%      0.24s  0.52%  github.com/kandev/kandev/internal/analytics/repository/sqlite.indexedObservation.semantics
+     0.11s  0.24% 85.25%      0.24s  0.52%  runtime.reentersyscall
+     0.02s 0.044% 85.30%      0.24s  0.52%  time.Time.AppendFormat
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentScanRangeTx
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).admitSeedBatch
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).reportSpecial
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedSpecial
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.newUsageBenchFixture
+         0     0% 85.30%      0.23s   0.5%  github.com/kandev/kandev/internal/analytics/repository/sqlite.parseTimeString
+         0     0% 85.30%      0.23s   0.5%  runtime.goexit0
+         0     0% 85.30%      0.23s   0.5%  time.Parse
+         0     0% 85.30%      0.22s  0.48%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).saveUsageSegmentResolutionTx
+     0.01s 0.022% 85.32%      0.22s  0.48%  github.com/mattn/go-sqlite3.(*SQLiteRows).Columns.func1 (inline)
+     0.05s  0.11% 85.43%      0.22s  0.48%  runtime.markroot
+     0.03s 0.066% 85.49%      0.22s  0.48%  runtime.newproc1
+     0.09s   0.2% 85.69%      0.21s  0.46%  database/sql.driverArgsConnLocked
+         0     0% 85.69%      0.21s  0.46%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).loadUsageSegmentResolutionTx
+         0     0% 85.69%      0.21s  0.46%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).refreshUsageSourceContextTx
+         0     0% 85.69%      0.21s  0.46%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).stageUsageProjectionFactTx (inline)
+     0.02s 0.044% 85.73%      0.21s  0.46%  reflect.(*rtype).FieldByName
+     0.04s 0.087% 85.82%      0.21s  0.46%  runtime.(*sweepLocked).sweep
+         0     0% 85.82%      0.21s  0.46%  runtime.rawstring (inline)
+     0.04s 0.087% 85.91%      0.21s  0.46%  time.Time.appendFormat
+     0.03s 0.066% 85.97%      0.21s  0.46%  time.parse
+         0     0% 85.97%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).RetainNativeUsageTx
+         0     0% 85.97%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).admitUsageSourceContextTx
+         0     0% 85.97%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).persistScopedNativeUsageTx
+         0     0% 85.97%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentTokenAlternativeTx
+         0     0% 85.97%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentTokenAlternativesTx
+     0.01s 0.022% 86.00%      0.20s  0.44%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageProjectionContribution
+     0.04s 0.087% 86.08%      0.20s  0.44%  runtime.concatstrings
+     0.03s 0.066% 86.15%      0.20s  0.44%  runtime.schedule
+         0     0% 86.15%      0.19s  0.42%  encoding/base64.(*Encoding).EncodeToString
+         0     0% 86.15%      0.19s  0.42%  encoding/gob.encString
+         0     0% 86.15%      0.19s  0.42%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).admitRetainedCorrectionTx
+         0     0% 86.15%      0.19s  0.42%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).insertRetainedNativeUsageTx
+         0     0% 86.15%      0.19s  0.42%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_name
+     0.07s  0.15% 86.30%      0.19s  0.42%  reflect.(*structType).FieldByName
+     0.07s  0.15% 86.45%      0.19s  0.42%  runtime.exitsyscall
+     0.02s 0.044% 86.50%      0.19s  0.42%  runtime.gcmarknewobject
+     0.01s 0.022% 86.52%      0.18s  0.39%  bytes.(*Buffer).Write
+         0     0% 86.52%      0.18s  0.39%  database/sql.(*DB).Exec (inline)
+         0     0% 86.52%      0.18s  0.39%  encoding/json.Unmarshal
+     0.03s 0.066% 86.59%      0.18s  0.39%  gcWriteBarrier
+         0     0% 86.59%      0.18s  0.39%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureLegacyUsageLiveLinkTx
+         0     0% 86.59%      0.18s  0.39%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).markUsageProjectionItemTx
+     0.07s  0.15% 86.74%      0.18s  0.39%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load
+         0     0% 86.74%      0.18s  0.39%  runtime.mallocgcSmallScanHeader
+     0.01s 0.022% 86.76%      0.18s  0.39%  runtime.rawbyteslice
+         0     0% 86.76%      0.18s  0.39%  runtime.wbBufFlush
+         0     0% 86.76%      0.18s  0.39%  runtime.wbBufFlush.func1
+     0.02s 0.044% 86.80%      0.18s  0.39%  runtime.wbBufFlush1
+         0     0% 86.80%      0.18s  0.39%  sync.(*Map).Load (inline)
+         0     0% 86.80%      0.17s  0.37%  encoding/gob.(*Encoder).writeMessage
+         0     0% 86.80%      0.17s  0.37%  encoding/gob.(*encBuffer).WriteString (inline)
+         0     0% 86.80%      0.17s  0.37%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func9 (inline)
+     0.01s 0.022% 86.83%      0.17s  0.37%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_bytes
+         0     0% 86.83%      0.17s  0.37%  runtime.newstack
+         0     0% 86.83%      0.16s  0.35%  bytes.(*Buffer).grow
+     0.01s 0.022% 86.85%      0.16s  0.35%  bytes.growSlice
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).AdmitUsageWriteTx
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).appendUsageProjectionMutationTx
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).nativeUsageAccountingRepairPendingTx
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).recordNativeUsageAccountingStateTx
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).recordUsageMutationTx
+         0     0% 86.85%      0.16s  0.35%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSourceScopeUnsafeTx
+     0.01s 0.022% 86.87%      0.16s  0.35%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func3 (inline)
+         0     0% 86.87%      0.16s  0.35%  runtime.concatstring3
+         0     0% 86.87%      0.16s  0.35%  runtime.slicebytetostring
+         0     0% 86.87%      0.15s  0.33%  context.WithCancel
+         0     0% 86.87%      0.15s  0.33%  encoding/gob.overflow (inline)
+         0     0% 86.87%      0.15s  0.33%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageSegmentReduction.fact
+         0     0% 86.87%      0.15s  0.33%  internal/runtime/gc/scan.ScanSpanPacked (inline)
+     0.01s 0.022% 86.89%      0.15s  0.33%  internal/runtime/gc/scan.ScanSpanPackedAVX512
+     0.01s 0.022% 86.91%      0.15s  0.33%  runtime.copystack
+         0     0% 86.91%      0.15s  0.33%  runtime.findRunnable
+         0     0% 86.91%      0.14s  0.31%  github.com/kandev/kandev/internal/analytics/repository/sqlite.selectEquivalentCost
+     0.01s 0.022% 86.93%      0.14s  0.31%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func10 (inline)
+         0     0% 86.93%      0.14s  0.31%  runtime.(*mcentral).grow
+         0     0% 86.93%      0.14s  0.31%  runtime.deductSweepCredit
+     0.10s  0.22% 87.15%      0.14s  0.31%  runtime.typePointers.next
+     0.01s 0.022% 87.18%      0.13s  0.28%  context.withCancel (inline)
+         0     0% 87.18%      0.13s  0.28%  encoding/gob.(*Decoder).decOpFor.func3
+         0     0% 87.18%      0.13s  0.28%  encoding/gob.(*Decoder).decodeSlice
+     0.01s 0.022% 87.20%      0.13s  0.28%  encoding/gob.userType
+         0     0% 87.20%      0.13s  0.28%  encoding/json.(*decodeState).object
+         0     0% 87.20%      0.13s  0.28%  encoding/json.(*decodeState).unmarshal
+         0     0% 87.20%      0.13s  0.28%  encoding/json.(*decodeState).value
+         0     0% 87.20%      0.13s  0.28%  github.com/mattn/go-sqlite3.(*SQLiteRows).declTypes.func1 (inline)
+     0.01s 0.022% 87.22%      0.13s  0.28%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_decltype
+         0     0% 87.22%      0.13s  0.28%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_text
+         0     0% 87.22%      0.13s  0.28%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_type
+     0.11s  0.24% 87.46%      0.13s  0.28%  internal/runtime/gc/scan.scanSpanPackedAVX512
+     0.02s 0.044% 87.50%      0.13s  0.28%  runtime.mapassign
+         0     0% 87.50%      0.12s  0.26%  encoding/gob.validUserType
+         0     0% 87.50%      0.12s  0.26%  github.com/mattn/go-sqlite3._Cfunc_GoString (inline)
+     0.03s 0.066% 87.57%      0.12s  0.26%  reflect.Value.FieldByIndex
+     0.12s  0.26% 87.83%      0.12s  0.26%  runtime.(*mspan).base (inline)
+     0.06s  0.13% 87.96%      0.12s  0.26%  runtime.(*unwinder).resolveInternal
+         0     0% 87.96%      0.12s  0.26%  runtime.gcDrainMarkWorkerIdle (inline)
+     0.02s 0.044% 88.01%      0.12s  0.26%  runtime.gostring
+     0.01s 0.022% 88.03%      0.12s  0.26%  runtime.heapSetTypeNoHeader (inline)
+     0.03s 0.066% 88.09%      0.12s  0.26%  runtime.isSystemGoroutine
+     0.07s  0.15% 88.25%      0.12s  0.26%  runtime.pcvalue
+     0.01s 0.022% 88.27%      0.12s  0.26%  runtime.rawstringtmp
+     0.06s  0.13% 88.40%      0.12s  0.26%  runtime.selectgo
+         0     0% 88.40%      0.11s  0.24%  encoding/gob.(*Decoder).decodeArrayHelper
+         0     0% 88.40%      0.11s  0.24%  github.com/kandev/kandev/internal/analytics/repository/sqlite.indexedObservation.partition
+     0.10s  0.22% 88.62%      0.11s  0.24%  runtime.(*mspan).writeHeapBitsSmall
+         0     0% 88.62%      0.11s  0.24%  runtime.bgsweep
+     0.05s  0.11% 88.73%      0.11s  0.24%  runtime.cgoCheckPointer
+         0     0% 88.73%      0.11s  0.24%  runtime.gcMarkDone
+         0     0% 88.73%      0.11s  0.24%  runtime.gcMarkTermination
+     0.03s 0.066% 88.79%      0.11s  0.24%  runtime.gfget
+     0.04s 0.087% 88.88%      0.11s  0.24%  runtime.mallocgcTiny
+         0     0% 88.88%      0.11s  0.24%  runtime.markrootBlock
+     0.06s  0.13% 89.01%      0.11s  0.24%  runtime.scanblock
+     0.10s  0.22% 89.23%      0.10s  0.22%  encoding/base64.(*Encoding).Encode
+         0     0% 89.23%      0.10s  0.22%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).deriveExternalUsageAttributionTx
+         0     0% 89.23%      0.10s  0.22%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).repairUsageContextPageTx
+     0.01s 0.022% 89.25%      0.10s  0.22%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedRecord
+         0     0% 89.25%      0.10s  0.22%  github.com/kandev/kandev/internal/analytics/repository/sqlite.legacyEquivalentFact
+     0.04s 0.087% 89.34%      0.10s  0.22%  reflect.(*structType).Field
+     0.07s  0.15% 89.49%      0.10s  0.22%  reflect.Value.Field
+         0     0% 89.49%      0.10s  0.22%  runtime.(*unwinder).next
+     0.01s 0.022% 89.51%      0.10s  0.22%  runtime.convT
+     0.07s  0.15% 89.67%      0.10s  0.22%  runtime.findObject
+     0.01s 0.022% 89.69%      0.10s  0.22%  runtime.gdestroy
+         0     0% 89.69%      0.10s  0.22%  runtime.mProf_Flush
+     0.02s 0.044% 89.73%      0.10s  0.22%  runtime.mProf_FlushLocked
+     0.10s  0.22% 89.95%      0.10s  0.22%  runtime.nanotime (inline)
+         0     0% 89.95%      0.10s  0.22%  runtime.newarray
+         0     0% 89.95%      0.10s  0.22%  runtime.park_m
+     0.01s 0.022% 89.97%      0.09s   0.2%  context.(*cancelCtx).cancel
+         0     0% 89.97%      0.09s   0.2%  context.WithCancel.func1
+     0.01s 0.022% 89.99%      0.09s   0.2%  database/sql.(*Rows).awaitDone
+         0     0% 89.99%      0.09s   0.2%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).pruneUsageProjectionLogTx
+         0     0% 89.99%      0.09s   0.2%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).resolveCollectionBindingTx
+         0     0% 89.99%      0.09s   0.2%  github.com/kandev/kandev/internal/analytics/repository/sqlite.nullableTime
+     0.09s   0.2% 90.19%      0.09s   0.2%  internal/runtime/atomic.(*Uint32).CompareAndSwap (inline)
+         0     0% 90.19%      0.09s   0.2%  internal/runtime/maps.(*table).grow
+         0     0% 90.19%      0.09s   0.2%  internal/runtime/maps.(*table).rehash
+         0     0% 90.19%      0.09s   0.2%  internal/runtime/maps.newGroups (inline)
+         0     0% 90.19%      0.09s   0.2%  internal/runtime/maps.newTable
+         0     0% 90.19%      0.09s   0.2%  internal/runtime/maps.newarray
+         0     0% 90.19%      0.09s   0.2%  runtime.(*mheap).alloc
+     0.01s 0.022% 90.21%      0.09s   0.2%  runtime.(*mheap).alloc.func1
+     0.09s   0.2% 90.41%      0.09s   0.2%  runtime.(*mspan).moveInlineMarks
+     0.01s 0.022% 90.43%      0.09s   0.2%  runtime.(*stkframe).getStackMap
+         0     0% 90.43%      0.09s   0.2%  runtime.adjustframe
+     0.02s 0.044% 90.47%      0.09s   0.2%  runtime.findnull
+     0.09s   0.2% 90.67%      0.09s   0.2%  runtime.futex
+         0     0% 90.67%      0.09s   0.2%  runtime.mapassign_faststr
+     0.09s   0.2% 90.87%      0.09s   0.2%  runtime.spanClass.sizeclass (inline)
+     0.01s 0.022% 90.89%      0.08s  0.17%  context.(*cancelCtx).propagateCancel
+     0.01s 0.022% 90.91%      0.08s  0.17%  encoding/gob.(*Decoder).compatibleType
+     0.01s 0.022% 90.93%      0.08s  0.17%  encoding/gob.(*Encoder).freeEncoderState (partial-inline)
+         0     0% 90.93%      0.08s  0.17%  encoding/gob.NewEncoder (inline)
+     0.01s 0.022% 90.95%      0.08s  0.17%  encoding/json.Marshal
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageSchema
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).loadUsageProjectionSourcePageTx
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageLiveSourceCrossesScopeTx
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentWindowBoundsTx
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/analytics/repository/sqlite.NewWithDB
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initSchemaContext
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/task/repository/sqlite.NewWithDB
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/task/repository/sqlite.NewWithDBContext (inline)
+         0     0% 90.95%      0.08s  0.17%  github.com/kandev/kandev/internal/task/repository/sqlite.newRepositoryContext
+         0     0% 90.95%      0.08s  0.17%  github.com/mattn/go-sqlite3._Cfunc_GoStringN (inline)
+         0     0% 90.95%      0.08s  0.17%  internal/runtime/maps.(*table).reset
+         0     0% 90.95%      0.08s  0.17%  runtime.(*mheap).allocSpan
+         0     0% 90.95%      0.08s  0.17%  runtime.(*mheap).nextSpanForSweep
+     0.01s 0.022% 90.98%      0.08s  0.17%  runtime.(*timers).check
+     0.01s 0.022% 91.00%      0.08s  0.17%  runtime.SetFinalizer
+         0     0% 91.00%      0.08s  0.17%  runtime.callers
+         0     0% 91.00%      0.08s  0.17%  runtime.callers.func1
+         0     0% 91.00%      0.08s  0.17%  runtime.gostringn
+         0     0% 91.00%      0.08s  0.17%  runtime.unlock (partial-inline)
+     0.07s  0.15% 91.15%      0.08s  0.17%  runtime.unlock2
+         0     0% 91.15%      0.08s  0.17%  runtime.unlockWithRank (inline)
+         0     0% 91.15%      0.08s  0.17%  time.newParseError (inline)
+         0     0% 91.15%      0.07s  0.15%  encoding/base64.(*Encoding).DecodeString
+     0.01s 0.022% 91.17%      0.07s  0.15%  encoding/gob.(*Encoder).newEncoderState (inline)
+         0     0% 91.17%      0.07s  0.15%  github.com/jmoiron/sqlx.(*DB).Get (inline)
+         0     0% 91.17%      0.07s  0.15%  github.com/jmoiron/sqlx.Get
+         0     0% 91.17%      0.07s  0.15%  github.com/jmoiron/sqlx/reflectx.(*Mapper).TraversalsByName
+         0     0% 91.17%      0.07s  0.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).readTaskUsageTargetTx
+         0     0% 91.17%      0.07s  0.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedSubjects
+         0     0% 91.17%      0.07s  0.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).validateStorage
+         0     0% 91.17%      0.07s  0.15%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageInitialRepairQuery
+         0     0% 91.17%      0.07s  0.15%  github.com/mattn/go-sqlite3._Cfunc_CString
+         0     0% 91.17%      0.07s  0.15%  github.com/mattn/go-sqlite3._cgo_cmalloc
+     0.07s  0.15% 91.33%      0.07s  0.15%  indexbytebody
+     0.07s  0.15% 91.48%      0.07s  0.15%  runtime.(*bucket).mp
+         0     0% 91.48%      0.07s  0.15%  runtime.(*pageAlloc).scavenge
+         0     0% 91.48%      0.07s  0.15%  runtime.(*pageAlloc).scavenge.func1
+         0     0% 91.48%      0.07s  0.15%  runtime.(*pageAlloc).scavengeOne
+         0     0% 91.48%      0.07s  0.15%  runtime.(*scavengerState).init.func2
+         0     0% 91.48%      0.07s  0.15%  runtime.(*scavengerState).run
+     0.02s 0.044% 91.52%      0.07s  0.15%  runtime.(*spanSet).pop
+         0     0% 91.52%      0.07s  0.15%  runtime.bgscavenge
+     0.01s 0.022% 91.54%      0.07s  0.15%  runtime.bulkBarrierPreWrite
+     0.03s 0.066% 91.61%      0.07s  0.15%  runtime.chansend
+         0     0% 91.61%      0.07s  0.15%  runtime.chansend1
+     0.07s  0.15% 91.76%      0.07s  0.15%  runtime.findfunc
+         0     0% 91.76%      0.07s  0.15%  runtime.mProf_Malloc
+     0.07s  0.15% 91.92%      0.07s  0.15%  runtime.madvise
+     0.01s 0.022% 91.94%      0.07s  0.15%  runtime.makemap_small
+     0.02s 0.044% 91.98%      0.07s  0.15%  runtime.nilinterhash
+         0     0% 91.98%      0.07s  0.15%  runtime.profilealloc
+     0.07s  0.15% 92.13%      0.07s  0.15%  runtime.save
+         0     0% 92.13%      0.07s  0.15%  runtime.sysUnused (inline)
+         0     0% 92.13%      0.07s  0.15%  runtime.sysUnusedOS
+         0     0% 92.13%      0.07s  0.15%  runtime.tracebackPCs
+     0.02s 0.044% 92.18%      0.07s  0.15%  runtime.typedmemmove
+     0.03s 0.066% 92.24%      0.07s  0.15%  strings.ToLower
+         0     0% 92.24%      0.06s  0.13%  context.removeChild
+         0     0% 92.24%      0.06s  0.13%  database/sql.(*Rows).Columns
+     0.02s 0.044% 92.29%      0.06s  0.13%  encoding/gob.encInt
+     0.01s 0.022% 92.31%      0.06s  0.13%  encoding/json.(*decodeState).literalStore
+         0     0% 92.31%      0.06s  0.13%  encoding/json.(*encodeState).marshal
+         0     0% 92.31%      0.06s  0.13%  encoding/json.(*encodeState).reflectValue
+     0.01s 0.022% 92.33%      0.06s  0.13%  encoding/json.sliceEncoder.encode
+         0     0% 92.33%      0.06s  0.13%  errors.New (inline)
+         0     0% 92.33%      0.06s  0.13%  fmt.Sprintf
+         0     0% 92.33%      0.06s  0.13%  github.com/google/uuid.NewSHA1
+     0.01s 0.022% 92.35%      0.06s  0.13%  github.com/jmoiron/sqlx/reflectx.(*Mapper).TraversalsByNameFunc
+         0     0% 92.35%      0.06s  0.13%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).persistUsageProjectionIndexBatchTx
+         0     0% 92.35%      0.06s  0.13%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentCostAlternativesTx
+         0     0% 92.35%      0.06s  0.13%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageWorkVersionTx
+         0     0% 92.35%      0.06s  0.13%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageMutationFromRows
+     0.01s 0.022% 92.37%      0.06s  0.13%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func4 (inline)
+         0     0% 92.37%      0.06s  0.13%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind.func1 (inline)
+     0.02s 0.044% 92.42%      0.06s  0.13%  internal/abi.Name.Name
+     0.06s  0.13% 92.55%      0.06s  0.13%  internal/abi.Name.ReadVarint (inline)
+         0     0% 92.55%      0.06s  0.13%  internal/runtime/maps.NewEmptyMap (inline)
+         0     0% 92.55%      0.06s  0.13%  internal/runtime/maps.typedmemmove
+         0     0% 92.55%      0.06s  0.13%  runtime.exitsyscall.func3
+         0     0% 92.55%      0.06s  0.13%  runtime.exitsyscallTryGetP
+         0     0% 92.55%      0.06s  0.13%  runtime.funcspdelta (inline)
+     0.06s  0.13% 92.68%      0.06s  0.13%  runtime.heapArenaOf (inline)
+     0.01s 0.022% 92.70%      0.06s  0.13%  runtime.makechan
+     0.01s 0.022% 92.72%      0.06s  0.13%  runtime.pcdatavalue
+     0.02s 0.044% 92.77%      0.06s  0.13%  runtime.scanObjectsSmall
+     0.06s  0.13% 92.90%      0.06s  0.13%  runtime.typePointers.nextFast (inline)
+     0.01s 0.022% 92.92%      0.06s  0.13%  strings.Join
+     0.06s  0.13% 93.05%      0.06s  0.13%  time.appendInt
+     0.04s 0.087% 93.14%      0.05s  0.11%  context.(*cancelCtx).Done
+         0     0% 93.14%      0.05s  0.11%  database/sql.defaultCheckNamedValue
+     0.02s 0.044% 93.18%      0.05s  0.11%  database/sql/driver.defaultConverter.ConvertValue
+     0.02s 0.044% 93.23%      0.05s  0.11%  encoding/gob.decString
+         0     0% 93.23%      0.05s  0.11%  encoding/json.arrayEncoder.encode
+     0.01s 0.022% 93.25%      0.05s  0.11%  github.com/google/uuid.NewHash
+         0     0% 93.25%      0.05s  0.11%  github.com/jmoiron/sqlx.(*Row).Columns (inline)
+         0     0% 93.25%      0.05s  0.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageContractSchema
+         0     0% 93.25%      0.05s  0.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).guardUsageSourceTx
+         0     0% 93.25%      0.05s  0.11%  github.com/kandev/kandev/internal/analytics/repository/sqlite.placeholders (inline)
+         0     0% 93.25%      0.05s  0.11%  github.com/kandev/kandev/internal/db.(*MigrateLogger).Apply (inline)
+         0     0% 93.25%      0.05s  0.11%  github.com/kandev/kandev/internal/db.(*MigrateLogger).ApplyContext
+         0     0% 93.25%      0.05s  0.11%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare.(*SQLiteConn).prepare.func1.func3
+         0     0% 93.25%      0.05s  0.11%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_column_int64
+     0.03s 0.066% 93.31%      0.05s  0.11%  internal/abi.Name.Tag
+         0     0% 93.31%      0.05s  0.11%  runtime.(*mcentral).uncacheSpan
+     0.01s 0.022% 93.34%      0.05s  0.11%  runtime.(*mheap).freeSpan (inline)
+     0.01s 0.022% 93.36%      0.05s  0.11%  runtime.(*mheap).initSpan
+         0     0% 93.36%      0.05s  0.11%  runtime.(*mspan).initHeapBits
+     0.01s 0.022% 93.38%      0.05s  0.11%  runtime.(*unwinder).initAt
+     0.05s  0.11% 93.49%      0.05s  0.11%  runtime.acquirem (inline)
+     0.04s 0.087% 93.58%      0.05s  0.11%  runtime.cgoCheckArg
+         0     0% 93.58%      0.05s  0.11%  runtime.futexsleep
+     0.05s  0.11% 93.69%      0.05s  0.11%  runtime.getMCache (inline)
+         0     0% 93.69%      0.05s  0.11%  runtime.mPark (inline)
+         0     0% 93.69%      0.05s  0.11%  runtime.markroot.func1
+         0     0% 93.69%      0.05s  0.11%  runtime.notesleep
+     0.04s 0.087% 93.77%      0.05s  0.11%  runtime.spanOf (inline)
+         0     0% 93.77%      0.05s  0.11%  runtime.stopm
+         0     0% 93.77%      0.04s 0.087%  database/sql.(*Rows).Scan
+         0     0% 93.77%      0.04s 0.087%  database/sql.(*Rows).scanLocked
+     0.02s 0.044% 93.82%      0.04s 0.087%  database/sql.convertAssignRows
+     0.01s 0.022% 93.84%      0.04s 0.087%  encoding/base64.(*Encoding).Decode
+         0     0% 93.84%      0.04s 0.087%  encoding/gob.(*encBuffer).Write (inline)
+         0     0% 93.84%      0.04s 0.087%  encoding/gob.(*encoderState).encodeInt
+         0     0% 93.84%      0.04s 0.087%  encoding/gob.(*encoderState).encodeUint (inline)
+     0.04s 0.087% 93.93%      0.04s 0.087%  encoding/json.checkValid
+         0     0% 93.93%      0.04s 0.087%  github.com/jmoiron/sqlx.(*DB).Rebind
+         0     0% 93.93%      0.04s 0.087%  github.com/jmoiron/sqlx.BindType
+         0     0% 93.93%      0.04s 0.087%  github.com/jmoiron/sqlx.fieldsByTraversal
+         0     0% 93.93%      0.04s 0.087%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).authorizedUsageScopeTx
+         0     0% 93.93%      0.04s 0.087%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).prepareUsageProjectionWorkTx
+         0     0% 93.93%      0.04s 0.087%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).stageUsageProjectionSourceItemsTx
+     0.02s 0.044% 93.97%      0.04s 0.087%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).recordOracle
+         0     0% 93.97%      0.04s 0.087%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).validateReadiness
+         0     0% 93.97%      0.04s 0.087%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initSchemaContext.func1
+         0     0% 93.97%      0.04s 0.087%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).runMigrations
+         0     0% 93.97%      0.04s 0.087%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_reset
+         0     0% 93.97%      0.04s 0.087%  internal/bytealg.MakeNoZero
+     0.02s 0.044% 94.01%      0.04s 0.087%  internal/runtime/maps.(*Map).Delete
+     0.01s 0.022% 94.04%      0.04s 0.087%  internal/runtime/maps.(*Map).growToSmall
+         0     0% 94.04%      0.04s 0.087%  internal/runtime/maps.(*Map).putSlotSmall
+     0.02s 0.044% 94.08%      0.04s 0.087%  internal/stringslite.Clone (inline)
+     0.04s 0.087% 94.17%      0.04s 0.087%  internal/sync.(*Mutex).Lock (inline)
+     0.04s 0.087% 94.25%      0.04s 0.087%  internal/sync.(*Mutex).Unlock (inline)
+     0.04s 0.087% 94.34%      0.04s 0.087%  memeqbody
+         0     0% 94.34%      0.04s 0.087%  reflect.unsafe_New
+     0.04s 0.087% 94.43%      0.04s 0.087%  runtime.(*gList).pop (inline)
+         0     0% 94.43%      0.04s 0.087%  runtime.(*moduledata).funcName
+         0     0% 94.43%      0.04s 0.087%  runtime.(*mspan).initInlineMarkBits (inline)
+     0.04s 0.087% 94.52%      0.04s 0.087%  runtime.(*spanInlineMarkBits).init
+         0     0% 94.52%      0.04s 0.087%  runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func2
+         0     0% 94.52%      0.04s 0.087%  runtime.(*unwinder).init (inline)
+     0.01s 0.022% 94.54%      0.04s 0.087%  runtime.casgstatus
+     0.01s 0.022% 94.56%      0.04s 0.087%  runtime.closechan
+         0     0% 94.56%      0.04s 0.087%  runtime.funcname (inline)
+         0     0% 94.56%      0.04s 0.087%  runtime.futexwakeup
+         0     0% 94.56%      0.04s 0.087%  runtime.gcStart
+     0.04s 0.087% 94.65%      0.04s 0.087%  runtime.getcallerfp
+         0     0% 94.65%      0.04s 0.087%  runtime.gfget.func2
+         0     0% 94.65%      0.04s 0.087%  runtime.gostringnocopy (inline)
+     0.04s 0.087% 94.73%      0.04s 0.087%  runtime.interhash
+         0     0% 94.73%      0.04s 0.087%  runtime.mallocgcLarge
+         0     0% 94.73%      0.04s 0.087%  runtime.mapassign_fast32
+         0     0% 94.73%      0.04s 0.087%  runtime.mapdelete
+         0     0% 94.73%      0.04s 0.087%  runtime.memclrNoHeapPointersChunked
+         0     0% 94.73%      0.04s 0.087%  runtime.notewakeup
+     0.03s 0.066% 94.80%      0.04s 0.087%  runtime.pageIndexOf (inline)
+     0.04s 0.087% 94.89%      0.04s 0.087%  runtime.releasem (inline)
+     0.01s 0.022% 94.91%      0.04s 0.087%  runtime.stackalloc
+     0.03s 0.066% 94.97%      0.04s 0.087%  runtime.step
+     0.01s 0.022% 95.00%      0.04s 0.087%  runtime.typedslicecopy
+     0.01s 0.022% 95.02%      0.04s 0.087%  runtime.typehash
+     0.02s 0.044% 95.06%      0.04s 0.087%  runtime.wakep
+         0     0% 95.06%      0.04s 0.087%  strings.(*Builder).Grow
+         0     0% 95.06%      0.04s 0.087%  strings.(*Builder).grow
+         0     0% 95.06%      0.04s 0.087%  sync.(*Mutex).Lock (inline)
+         0     0% 95.06%      0.04s 0.087%  sync.(*Mutex).Unlock (partial-inline)
+         0     0% 95.06%      0.04s 0.087%  testing.(*common).Helper
+         0     0% 95.06%      0.04s 0.087%  time.appendNano
+     0.04s 0.087% 95.15%      0.04s 0.087%  time.nextStdChunk
+     0.03s 0.066% 95.22%      0.03s 0.066%  aeshashbody
+     0.02s 0.044% 95.26%      0.03s 0.066%  context.parentCancelCtx
+         0     0% 95.26%      0.03s 0.066%  crypto/sha1.(*digest).Sum
+     0.02s 0.044% 95.30%      0.03s 0.066%  crypto/sha1.(*digest).checkSum
+     0.03s 0.066% 95.37%      0.03s 0.066%  encoding/gob.(*decoderState).decodeUint
+         0     0% 95.37%      0.03s 0.066%  encoding/gob.(*encBuffer).writeByte (inline)
+         0     0% 95.37%      0.03s 0.066%  encoding/gob.decInt32
+     0.02s 0.044% 95.41%      0.03s 0.066%  encoding/json.unquoteBytes
+     0.01s 0.022% 95.43%      0.03s 0.066%  fmt.(*pp).doPrintf
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).checkTaskPreservationFenceTx
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageSegmentSchema
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).insertUsageTx
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).selectUsageSegmentedWorkTx
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageSegmentScanTx (inline)
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedMixed
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageArgs
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageBenchMust
+         0     0% 95.43%      0.03s 0.066%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).CreateTaskSession
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3.(*SQLiteStmt).NumInput
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3.(*SQLiteStmt).NumInput.func1 (inline)
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind.func13 (inline)
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind.func7 (inline)
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3._Cfunc_free
+         0     0% 95.43%      0.03s 0.066%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_bind_parameter_count
+     0.01s 0.022% 95.46%      0.03s 0.066%  internal/runtime/maps.(*Map).getWithoutKeySmallFastStr
+     0.03s 0.066% 95.52%      0.03s 0.066%  reflect.(*rtype).Kind
+         0     0% 95.52%      0.03s 0.066%  reflect.New
+     0.02s 0.044% 95.56%      0.03s 0.066%  reflect.Value.SetInt
+     0.02s 0.044% 95.61%      0.03s 0.066%  reflect.packEfaceData
+     0.01s 0.022% 95.63%      0.03s 0.066%  runtime.(*mheap).allocMSpanLocked
+         0     0% 95.63%      0.03s 0.066%  runtime.(*mheap).freeSpanLocked
+     0.03s 0.066% 95.70%      0.03s 0.066%  runtime.(*mspan).init
+     0.03s 0.066% 95.76%      0.03s 0.066%  runtime.(*mspan).refillAllocCache
+         0     0% 95.76%      0.03s 0.066%  runtime.(*pageAlloc).free
+     0.02s 0.044% 95.81%      0.03s 0.066%  runtime.(*spanSet).push
+         0     0% 95.81%      0.03s 0.066%  runtime.(*wbBuf).get2 (inline)
+         0     0% 95.81%      0.03s 0.066%  runtime.Callers (inline)
+         0     0% 95.81%      0.03s 0.066%  runtime.SetFinalizer.func1
+     0.01s 0.022% 95.83%      0.03s 0.066%  runtime.bulkBarrierPreWriteSrcOnly
+     0.01s 0.022% 95.85%      0.03s 0.066%  runtime.forEachG
+         0     0% 95.85%      0.03s 0.066%  runtime.gcResetMarkState
+     0.03s 0.066% 95.91%      0.03s 0.066%  runtime.getGCMask (inline)
+     0.02s 0.044% 95.96%      0.03s 0.066%  runtime.heapSetTypeSmallHeader (inline)
+         0     0% 95.96%      0.03s 0.066%  runtime.lock (inline)
+     0.03s 0.066% 96.02%      0.03s 0.066%  runtime.lock2
+         0     0% 96.02%      0.03s 0.066%  runtime.lockWithRank (inline)
+     0.01s 0.022% 96.05%      0.03s 0.066%  runtime.makeSpanClass (inline)
+         0     0% 96.05%      0.03s 0.066%  runtime.mapaccess2_faststr
+         0     0% 96.05%      0.03s 0.066%  runtime.removefinalizer
+         0     0% 96.05%      0.03s 0.066%  runtime.scanstack
+     0.01s 0.022% 96.07%      0.03s 0.066%  runtime.selparkcommit
+     0.02s 0.044% 96.11%      0.03s 0.066%  runtime.selunlock
+     0.01s 0.022% 96.13%      0.03s 0.066%  runtime.send
+     0.01s 0.022% 96.15%      0.03s 0.066%  runtime.stackcacherefill
+     0.03s 0.066% 96.22%      0.03s 0.066%  runtime.traceAcquire (inline)
+         0     0% 96.22%      0.03s 0.066%  runtime.wbMove
+     0.01s 0.022% 96.24%      0.03s 0.066%  strings.(*Builder).WriteString (inline)
+         0     0% 96.24%      0.03s 0.066%  sync.(*RWMutex).Lock
+     0.02s 0.044% 96.29%      0.02s 0.044%  bytes.growSlice.func1
+         0     0% 96.29%      0.02s 0.044%  context.WithDeadline (inline)
+         0     0% 96.29%      0.02s 0.044%  context.WithDeadlineCause
+         0     0% 96.29%      0.02s 0.044%  context.WithTimeout
+         0     0% 96.29%      0.02s 0.044%  database/sql.(*DB).BeginTx
+         0     0% 96.29%      0.02s 0.044%  database/sql.(*DB).BeginTx.func1
+         0     0% 96.29%      0.02s 0.044%  database/sql.(*DB).begin
+         0     0% 96.29%      0.02s 0.044%  database/sql.(*Tx).QueryRowContext
+     0.01s 0.022% 96.31%      0.02s 0.044%  database/sql.(*Tx).grabConn
+     0.02s 0.044% 96.35%      0.02s 0.044%  encoding/base64.assemble64 (inline)
+         0     0% 96.35%      0.02s 0.044%  encoding/gob.(*Decoder).recvMessage
+         0     0% 96.35%      0.02s 0.044%  encoding/gob.NewDecoder
+     0.01s 0.022% 96.37%      0.02s 0.044%  encoding/gob.getEncEngine
+         0     0% 96.37%      0.02s 0.044%  encoding/gob.getTypeInfo
+         0     0% 96.37%      0.02s 0.044%  encoding/gob.lookupTypeInfo (inline)
+     0.01s 0.022% 96.40%      0.02s 0.044%  encoding/json.(*decodeState).rescanLiteral
+         0     0% 96.40%      0.02s 0.044%  encoding/json.cachedTypeFields
+         0     0% 96.40%      0.02s 0.044%  encoding/json.indirect
+     0.01s 0.022% 96.42%      0.02s 0.044%  encoding/json.interfaceEncoder
+     0.01s 0.022% 96.44%      0.02s 0.044%  encoding/json.stateEndValue
+         0     0% 96.44%      0.02s 0.044%  github.com/jmoiron/sqlx.(*DB).BeginTxx
+         0     0% 96.44%      0.02s 0.044%  github.com/jmoiron/sqlx.In
+         0     0% 96.44%      0.02s 0.044%  github.com/jmoiron/sqlx.isScannable
+     0.01s 0.022% 96.46%      0.02s 0.044%  github.com/jmoiron/sqlx/reflectx.FieldByIndexes
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).CaptureUsageCollectionSessionTx
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).beginAnalyticsOperation
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).bindExternalUsageScopeTx
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).checkSessionPreservationFenceTx
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).enqueueUsageProjectionWorkBatchTx
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageContractSourceSchema
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageProjectionSchema
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).usageRunningSourceCrossesScopeTx
+         0     0% 96.46%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedLifetime
+     0.01s 0.022% 96.48%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.cloneInt64 (inline)
+         0     0% 96.48%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.setUsageObservationSegment
+         0     0% 96.48%      0.02s 0.044%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageBenchSeal
+         0     0% 96.48%      0.02s 0.044%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).captureUsageCollectionSessionTx
+         0     0% 96.48%      0.02s 0.044%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).createTaskSession
+         0     0% 96.48%      0.02s 0.044%  github.com/mattn/go-sqlite3.(*SQLiteStmt).bind.func4 (inline)
+         0     0% 96.48%      0.02s 0.044%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_bind_null
+     0.02s 0.044% 96.53%      0.02s 0.044%  internal/abi.(*Type).IsDirectIface (inline)
+     0.02s 0.044% 96.57%      0.02s 0.044%  internal/abi.Name.IsExported (inline)
+         0     0% 96.57%      0.02s 0.044%  internal/chacha8rand.(*State).Refill
+     0.02s 0.044% 96.61%      0.02s 0.044%  internal/chacha8rand.block
+     0.02s 0.044% 96.66%      0.02s 0.044%  internal/runtime/atomic.(*Int32).CompareAndSwap (inline)
+         0     0% 96.66%      0.02s 0.044%  internal/runtime/maps.(*Map).deleteSmall
+     0.01s 0.022% 96.68%      0.02s 0.044%  internal/runtime/maps.(*Map).growToTable
+     0.01s 0.022% 96.70%      0.02s 0.044%  internal/runtime/maps.(*Map).putSlotSmallFast32
+     0.02s 0.044% 96.74%      0.02s 0.044%  internal/runtime/maps.(*ctrlGroup).setEmpty (inline)
+         0     0% 96.74%      0.02s 0.044%  internal/runtime/maps.NewMap
+     0.02s 0.044% 96.79%      0.02s 0.044%  internal/runtime/maps.h2 (inline)
+     0.01s 0.022% 96.81%      0.02s 0.044%  internal/sync.(*entry[go.shape.interface {},go.shape.interface {}]).lookup (inline)
+         0     0% 96.81%      0.02s 0.044%  reflect.MakeSlice
+         0     0% 96.81%      0.02s 0.044%  reflect.TypeAssert[go.shape.interface { GobDecode error }]
+     0.01s 0.022% 96.83%      0.02s 0.044%  reflect.Value.Addr
+         0     0% 96.83%      0.02s 0.044%  reflect.Value.FieldByName
+         0     0% 96.83%      0.02s 0.044%  reflect.Value.Index
+         0     0% 96.83%      0.02s 0.044%  reflect.Value.Interface (inline)
+     0.02s 0.044% 96.88%      0.02s 0.044%  reflect.Value.String (inline)
+         0     0% 96.88%      0.02s 0.044%  reflect.packEface (inline)
+         0     0% 96.88%      0.02s 0.044%  reflect.valueInterface
+     0.02s 0.044% 96.92%      0.02s 0.044%  runtime.(*fixalloc).alloc
+         0     0% 96.92%      0.02s 0.044%  runtime.(*gcWork).tryGetSpan
+     0.02s 0.044% 96.96%      0.02s 0.044%  runtime.(*hchan).raceaddr (inline)
+         0     0% 96.96%      0.02s 0.044%  runtime.(*mspan).nextFreeIndex
+         0     0% 96.96%      0.02s 0.044%  runtime.(*scavengeIndex).free
+     0.02s 0.044% 97.01%      0.02s 0.044%  runtime.(*spanInlineMarkBits).tryAcquire
+     0.01s 0.022% 97.03%      0.02s 0.044%  runtime.(*spanQueue).steal
+     0.02s 0.044% 97.07%      0.02s 0.044%  runtime.(*sweepLocker).tryAcquire
+         0     0% 97.07%      0.02s 0.044%  runtime.SetFinalizer.func2
+         0     0% 97.07%      0.02s 0.044%  runtime.addfinalizer
+     0.02s 0.044% 97.12%      0.02s 0.044%  runtime.arenaIndex (inline)
+     0.02s 0.044% 97.16%      0.02s 0.044%  runtime.bool2int (inline)
+         0     0% 97.16%      0.02s 0.044%  runtime.chanrecv
+         0     0% 97.16%      0.02s 0.044%  runtime.concatstring2
+     0.02s 0.044% 97.20%      0.02s 0.044%  runtime.empty
+     0.02s 0.044% 97.25%      0.02s 0.044%  runtime.extractHeapBitsSmall
+     0.02s 0.044% 97.29%      0.02s 0.044%  runtime.gcResetMarkState.func1
+     0.02s 0.044% 97.33%      0.02s 0.044%  runtime.gcWriteBarrier2
+         0     0% 97.33%      0.02s 0.044%  runtime.goready (inline)
+         0     0% 97.33%      0.02s 0.044%  runtime.greyobject
+         0     0% 97.33%      0.02s 0.044%  runtime.makemap
+     0.01s 0.022% 97.36%      0.02s 0.044%  runtime.mapaccess1
+         0     0% 97.36%      0.02s 0.044%  runtime.mapaccess1_faststr
+     0.01s 0.022% 97.38%      0.02s 0.044%  runtime.mapaccess2
+     0.02s 0.044% 97.42%      0.02s 0.044%  runtime.memhash64
+     0.02s 0.044% 97.47%      0.02s 0.044%  runtime.offAddr.lessThan (inline)
+         0     0% 97.47%      0.02s 0.044%  runtime.pollFractionalWorkerExit
+         0     0% 97.47%      0.02s 0.044%  runtime.rand
+         0     0% 97.47%      0.02s 0.044%  runtime.ready
+         0     0% 97.47%      0.02s 0.044%  runtime.removespecial
+     0.02s 0.044% 97.51%      0.02s 0.044%  runtime.scanObjectSmall
+         0     0% 97.51%      0.02s 0.044%  runtime.selectnbrecv
+         0     0% 97.51%      0.02s 0.044%  runtime.send.goready.func1
+     0.01s 0.022% 97.53%      0.02s 0.044%  runtime.stackpoolalloc
+     0.02s 0.044% 97.57%      0.02s 0.044%  runtime.suspendG
+     0.01s 0.022% 97.60%      0.02s 0.044%  strings.(*Builder).WriteByte (inline)
+     0.01s 0.022% 97.62%      0.02s 0.044%  sync.(*RWMutex).Unlock
+     0.02s 0.044% 97.66%      0.02s 0.044%  sync/atomic.(*Int32).Add (inline)
+     0.02s 0.044% 97.71%      0.02s 0.044%  sync/atomic.(*Pointer[go.shape.struct { internal/sync.isEntry bool }]).Load (inline)
+     0.02s 0.044% 97.75%      0.02s 0.044%  sync/atomic.(*Value).Load (inline)
+         0     0% 97.75%      0.02s 0.044%  time.AfterFunc
+         0     0% 97.75%      0.02s 0.044%  time.absDays.date
+     0.02s 0.044% 97.79%      0.02s 0.044%  time.absDays.split (inline)
+         0     0% 97.79%      0.02s 0.044%  time.newTimer
+         0     0% 97.79%      0.02s 0.044%  time.parseRFC3339[go.shape.string]
+     0.02s 0.044% 97.84%      0.02s 0.044%  time.parseRFC3339[go.shape.string].func1 (inline)
+     0.01s 0.022% 97.86%      0.01s 0.022%  bytes.(*Buffer).Bytes (inline)
+     0.01s 0.022% 97.88%      0.01s 0.022%  bytes.(*Reader).Read
+         0     0% 97.88%      0.01s 0.022%  context.(*cancelCtx).Err
+     0.01s 0.022% 97.90%      0.01s 0.022%  crypto/sha1.(*digest).Reset (inline)
+         0     0% 97.90%      0.01s 0.022%  crypto/sha1.(*digest).Write
+         0     0% 97.90%      0.01s 0.022%  crypto/sha1.New (inline)
+         0     0% 97.90%      0.01s 0.022%  crypto/sha1.block
+     0.01s 0.022% 97.92%      0.01s 0.022%  crypto/sha1.blockSHANI
+         0     0% 97.92%      0.01s 0.022%  database/sql.(*DB).QueryContext
+         0     0% 97.92%      0.01s 0.022%  database/sql.(*DB).QueryContext.func1
+         0     0% 97.92%      0.01s 0.022%  database/sql.(*DB).beginDC
+         0     0% 97.92%      0.01s 0.022%  database/sql.(*DB).beginDC.func1
+     0.01s 0.022% 97.95%      0.01s 0.022%  database/sql.(*DB).conn
+         0     0% 97.95%      0.01s 0.022%  database/sql.(*DB).query
+         0     0% 97.95%      0.01s 0.022%  database/sql.(*NullInt64).Scan
+         0     0% 97.95%      0.01s 0.022%  database/sql.convertAssign (inline)
+         0     0% 97.95%      0.01s 0.022%  database/sql.ctxDriverBegin
+     0.01s 0.022% 97.97%      0.01s 0.022%  database/sql.init.func1
+     0.01s 0.022% 97.99%      0.01s 0.022%  database/sql/driver.IsValue (inline)
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.(*Decoder).freeDecoderState
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.(*Decoder).gobDecodeOpFor
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.(*Decoder).newDecoderState (inline)
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.(*Decoder).readMessage
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.(*decoderState).decodeInt (inline)
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.catchError
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.decAlloc
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.decInt64
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.decStringSlice
+         0     0% 97.99%      0.01s 0.022%  encoding/gob.decodeUintReader
+     0.01s 0.022% 98.01%      0.01s 0.022%  encoding/gob.encStructTerminator
+     0.01s 0.022% 98.03%      0.01s 0.022%  encoding/gob.isExported
+         0     0% 98.03%      0.01s 0.022%  encoding/json.(*decodeState).scanNext
+         0     0% 98.03%      0.01s 0.022%  encoding/json.(*scanner).popParseState (inline)
+         0     0% 98.03%      0.01s 0.022%  encoding/json.intEncoder
+         0     0% 98.03%      0.01s 0.022%  encoding/json.stringEncoder
+     0.01s 0.022% 98.06%      0.01s 0.022%  expandAVX512_30
+     0.01s 0.022% 98.08%      0.01s 0.022%  expandAVX512_60
+     0.01s 0.022% 98.10%      0.01s 0.022%  fmt.(*pp).argNumber
+     0.01s 0.022% 98.12%      0.01s 0.022%  fmt.(*pp).printArg
+         0     0% 98.12%      0.01s 0.022%  fmt.newPrinter
+         0     0% 98.12%      0.01s 0.022%  github.com/google/uuid.UUID.String (inline)
+         0     0% 98.12%      0.01s 0.022%  github.com/jmoiron/sqlx.appendReflectSlice
+         0     0% 98.12%      0.01s 0.022%  github.com/jmoiron/sqlx/reflectx.(*Mapper).TraversalsByName.func1
+         0     0% 98.12%      0.01s 0.022%  github.com/jmoiron/sqlx/reflectx.(*Mapper).TypeMap
+     0.01s 0.022% 98.14%      0.01s 0.022%  github.com/jmoiron/sqlx/reflectx.mustBe
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/config/workflows.LoadTemplates
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/config/workflows.loadTemplate
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).BackfillUsageSelection
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ListUsageCollectionTargets
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).MutateUsageObservationsTx
+         0     0% 98.14%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).acceptObservationTx
+     0.01s 0.022% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjection.func1
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionProviderOptionsBuildTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).advanceUsageProjectionProviderOptionsTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).applyUsageBatchTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).captureCollectionTargetTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).checkManagedDeleteFenceTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).currentUsageTargetTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).enqueueUsageSubjectRepairTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageMigrationCursorTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).ensureUsageSubjectTaskIncarnationKey
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).finishUsageSegmentResolutionTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).indexLegacyUsageTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).insertUsageProjectionProviderOptionsPageTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).listCurrentUsageTargetTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).nextUsageRepairScopeTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).persistUsageSegmentTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).publishUsageProjectionGroupTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).publishUsageProjectionWorkTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).readUsagePreservationCursorTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).registerNativeWorkIdentitiesTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).repairUsageWorkBatch
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).resolveNativeBindingScopeTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).saveContractObservationTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*Repository).upsertObservationTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).collectionTarget
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageBenchFixture).seedCorrection
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageSegmentAssessment).add
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.(*usageSegmentReduction).add
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.cloneUsageMeasurement
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.ensureUsageScopeTx
+         0     0% 98.16%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.indexedObservation.observation
+     0.01s 0.022% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.nativeValuesNonNegative (inline)
+         0     0% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.normalizeRetainedNativeUsage
+         0     0% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.nullableIntPtr (inline)
+         0     0% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.setUsageSegmentLineage
+         0     0% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.storedUsage.measurement
+         0     0% 98.19%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.upgradeUsageSubjectIncarnationTx
+     0.01s 0.022% 98.21%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageBenchFactMatches
+     0.01s 0.022% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageBenchMeasurement
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageProjectionFactBounds
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageProjectionPeriods
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageSegmentHash
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageSegmentTimeKey
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/analytics/repository/sqlite.usageSourceBundle
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/db.ColumnExistsContext
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/db.TableExistsContext
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/db.TableExistsContext.func1
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/db.scanTableExists
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).CreateTask
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).GetTaskSession
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).ListTaskSessionWorktrees
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).createTask
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).ensureRunnerProjectionTables
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).healBuiltinWorkflowStepOnAgentError
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initAgentDeliveryRetentionSchema
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initAgentDeliverySchema
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initDocumentsSchema
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).initTurnChangesSchema
+         0     0% 98.23%      0.01s 0.022%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).scanTaskSession
+         0     0% 98.23%      0.01s 0.022%  github.com/kdlbs/kandev/pluginsdk.UsageObservationV1.ComputePayloadDigestV1
+         0     0% 98.23%      0.01s 0.022%  github.com/mattn/go-sqlite3.(*SQLiteConn).BeginTx
+         0     0% 98.23%      0.01s 0.022%  github.com/mattn/go-sqlite3.(*SQLiteConn).begin
+         0     0% 98.23%      0.01s 0.022%  github.com/mattn/go-sqlite3._Cfunc_sqlite3_bind_int64
+     0.01s 0.022% 98.25%      0.01s 0.022%  gogo
+         0     0% 98.25%      0.01s 0.022%  google.golang.org/protobuf/internal/impl.(*MessageInfo).marshal
+         0     0% 98.25%      0.01s 0.022%  google.golang.org/protobuf/internal/impl.(*MessageInfo).marshalAppendPointer
+         0     0% 98.25%      0.01s 0.022%  google.golang.org/protobuf/internal/impl.appendMessageInfo
+     0.01s 0.022% 98.27%      0.01s 0.022%  google.golang.org/protobuf/internal/impl.appendStringPtrValidateUTF8
+         0     0% 98.27%      0.01s 0.022%  google.golang.org/protobuf/proto.MarshalOptions.Marshal
+         0     0% 98.27%      0.01s 0.022%  google.golang.org/protobuf/proto.MarshalOptions.marshal
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*Decoder).Decode
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).document (inline)
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).mapping
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).mappingStruct
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).prepare
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).sequence
+         0     0% 98.27%      0.01s 0.022%  gopkg.in/yaml%2ev3.(*decoder).unmarshal
+         0     0% 98.27%      0.01s 0.022%  internal/abi.(*StructField).Embedded (inline)
+     0.01s 0.022% 98.30%      0.01s 0.022%  internal/abi.Name.IsEmbedded (inline)
+     0.01s 0.022% 98.32%      0.01s 0.022%  internal/bytealg.IndexByteString
+     0.01s 0.022% 98.34%      0.01s 0.022%  internal/byteorder.BEPutUint64 (inline)
+     0.01s 0.022% 98.36%      0.01s 0.022%  internal/runtime/atomic.(*Uint32).Add (inline)
+     0.01s 0.022% 98.38%      0.01s 0.022%  internal/runtime/atomic.(*Uint64).Add (inline)
+     0.01s 0.022% 98.41%      0.01s 0.022%  internal/runtime/atomic.(*UnsafePointer).Load (inline)
+     0.01s 0.022% 98.43%      0.01s 0.022%  internal/runtime/gc/scan.FilterNilAVX512
+     0.01s 0.022% 98.45%      0.01s 0.022%  internal/runtime/maps.(*Map).putSlotSmallFastStr
+     0.01s 0.022% 98.47%      0.01s 0.022%  internal/runtime/maps.(*groupReference).elem (inline)
+         0     0% 98.47%      0.01s 0.022%  internal/runtime/maps.(*table).uncheckedPutSlot
+     0.01s 0.022% 98.49%      0.01s 0.022%  internal/runtime/maps.ctrlGroup.matchH2 (inline)
+         0     0% 98.49%      0.01s 0.022%  internal/runtime/maps.typedmemclr
+     0.01s 0.022% 98.51%      0.01s 0.022%  internal/runtime/syscall/linux.Syscall6
+         0     0% 98.51%      0.01s 0.022%  internal/saferio.ReadData
+         0     0% 98.51%      0.01s 0.022%  internal/strconv.AppendInt
+         0     0% 98.51%      0.01s 0.022%  internal/strconv.AppendUint
+         0     0% 98.51%      0.01s 0.022%  internal/stringslite.IndexByte (inline)
+         0     0% 98.51%      0.01s 0.022%  internal/syscall/unix.Unlinkat
+         0     0% 98.51%      0.01s 0.022%  io.ReadAtLeast
+         0     0% 98.51%      0.01s 0.022%  io.ReadFull (inline)
+         0     0% 98.51%      0.01s 0.022%  os.RemoveAll (inline)
+         0     0% 98.51%      0.01s 0.022%  os.ignoringEINTR (inline)
+         0     0% 98.51%      0.01s 0.022%  os.removeAll
+         0     0% 98.51%      0.01s 0.022%  os.removeAllFrom
+         0     0% 98.51%      0.01s 0.022%  os.removeAllFrom.removefileat.func1 (inline)
+         0     0% 98.51%      0.01s 0.022%  os.removefileat (inline)
+         0     0% 98.51%      0.01s 0.022%  reflect.(*rtype).NumMethod
+     0.01s 0.022% 98.54%      0.01s 0.022%  reflect.(*rtype).exportedMethods
+         0     0% 98.54%      0.01s 0.022%  reflect.(*rtype).ptrTo
+         0     0% 98.54%      0.01s 0.022%  reflect.(*rtype).typeOff (inline)
+     0.01s 0.022% 98.56%      0.01s 0.022%  reflect.Value.Elem
+         0     0% 98.56%      0.01s 0.022%  reflect.Value.Set
+     0.01s 0.022% 98.58%      0.01s 0.022%  reflect.Value.SetLen
+         0     0% 98.58%      0.01s 0.022%  reflect.ValueOf (inline)
+     0.01s 0.022% 98.60%      0.01s 0.022%  reflect.add (inline)
+     0.01s 0.022% 98.62%      0.01s 0.022%  reflect.arrayAt (inline)
+     0.01s 0.022% 98.65%      0.01s 0.022%  reflect.flag.kind (inline)
+     0.01s 0.022% 98.67%      0.01s 0.022%  reflect.flag.mustBeExported (inline)
+     0.01s 0.022% 98.69%      0.01s 0.022%  reflect.flag.ro (inline)
+         0     0% 98.69%      0.01s 0.022%  reflect.ptrTo (inline)
+         0     0% 98.69%      0.01s 0.022%  reflect.resolveTypeOff
+     0.01s 0.022% 98.71%      0.01s 0.022%  reflect.unpackEface (inline)
+         0     0% 98.71%      0.01s 0.022%  reflect.unsafe_NewArray
+         0     0% 98.71%      0.01s 0.022%  runtime.(*atomicMSpanPointer).Load (inline)
+     0.01s 0.022% 98.73%      0.01s 0.022%  runtime.(*fixalloc).free (inline)
+     0.01s 0.022% 98.75%      0.01s 0.022%  runtime.(*gQueue).pop (inline)
+     0.01s 0.022% 98.78%      0.01s 0.022%  runtime.(*gcBitsArena).tryAlloc (inline)
+     0.01s 0.022% 98.80%      0.01s 0.022%  runtime.(*gcControllerState).addScannableStack (inline)
+     0.01s 0.022% 98.82%      0.01s 0.022%  runtime.(*gcControllerState).assignWaitingGCWorker
+         0     0% 98.82%      0.01s 0.022%  runtime.(*gcControllerState).findRunnableGCWorker
+         0     0% 98.82%      0.01s 0.022%  runtime.(*gcControllerState).update
+     0.01s 0.022% 98.84%      0.01s 0.022%  runtime.(*gcWork).putObjFast (inline)
+     0.01s 0.022% 98.86%      0.01s 0.022%  runtime.(*guintptr).cas (inline)
+         0     0% 98.86%      0.01s 0.022%  runtime.(*inlineUnwinder).resolveInternal (inline)
+     0.01s 0.022% 98.89%      0.01s 0.022%  runtime.(*itabTableType).find
+     0.01s 0.022% 98.91%      0.01s 0.022%  runtime.(*limiterEvent).stop
+     0.01s 0.022% 98.93%      0.01s 0.022%  runtime.(*m).clearAllpSnapshot
+     0.01s 0.022% 98.95%      0.01s 0.022%  runtime.(*mLockProfile).store (inline)
+     0.01s 0.022% 98.97%      0.01s 0.022%  runtime.(*maybeTraceableChan).get (inline)
+         0     0% 98.97%      0.01s 0.022%  runtime.(*mcache).prepareForSweep
+         0     0% 98.97%      0.01s 0.022%  runtime.(*mcache).releaseAll
+     0.01s 0.022% 98.99%      0.01s 0.022%  runtime.(*mcentral).fullSwept (inline)
+     0.01s 0.022% 99.02%      0.01s 0.022%  runtime.(*memRecordCycle).add (inline)
+         0     0% 99.02%      0.01s 0.022%  runtime.(*mheap).allocManual
+         0     0% 99.02%      0.01s 0.022%  runtime.(*mheap).reclaim
+         0     0% 99.02%      0.01s 0.022%  runtime.(*mheap).reclaimChunk
+     0.01s 0.022% 99.04%      0.01s 0.022%  runtime.(*mspan).divideByElemSize (inline)
+     0.01s 0.022% 99.06%      0.01s 0.022%  runtime.(*mspan).inlineMarkBits (inline)
+         0     0% 99.06%      0.01s 0.022%  runtime.(*mspan).markBitsForIndex (inline)
+         0     0% 99.06%      0.01s 0.022%  runtime.(*mspan).objIndex (inline)
+     0.01s 0.022% 99.08%      0.01s 0.022%  runtime.(*mspan).typePointersOfType
+         0     0% 99.08%      0.01s 0.022%  runtime.(*mspan).typePointersOfUnchecked
+     0.01s 0.022% 99.10%      0.01s 0.022%  runtime.(*muintptr).set (inline)
+     0.01s 0.022% 99.13%      0.01s 0.022%  runtime.(*pageAlloc).update
+     0.01s 0.022% 99.15%      0.01s 0.022%  runtime.(*spanQueue).refill
+     0.01s 0.022% 99.17%      0.01s 0.022%  runtime.(*spanSet).reset
+     0.01s 0.022% 99.19%      0.01s 0.022%  runtime.(*sweepClass).update (inline)
+     0.01s 0.022% 99.21%      0.01s 0.022%  runtime.(*timeHistogram).record
+         0     0% 99.21%      0.01s 0.022%  runtime.(*timer).maybeAdd
+         0     0% 99.21%      0.01s 0.022%  runtime.(*timer).modify
+         0     0% 99.21%      0.01s 0.022%  runtime.(*timer).updateHeap
+         0     0% 99.21%      0.01s 0.022%  runtime.(*timers).cleanHead
+     0.01s 0.022% 99.24%      0.01s 0.022%  runtime.(*timers).deleteMin
+     0.01s 0.022% 99.26%      0.01s 0.022%  runtime.addb (inline)
+         0     0% 99.26%      0.01s 0.022%  runtime.addspecial
+         0     0% 99.26%      0.01s 0.022%  runtime.assertE2I2
+     0.01s 0.022% 99.28%      0.01s 0.022%  runtime.cgoInRange (inline)
+         0     0% 99.28%      0.01s 0.022%  runtime.cgoIsGoPointer
+         0     0% 99.28%      0.01s 0.022%  runtime.concatstring4
+         0     0% 99.28%      0.01s 0.022%  runtime.concatstring5
+         0     0% 99.28%      0.01s 0.022%  runtime.convT64
+         0     0% 99.28%      0.01s 0.022%  runtime.convTslice
+     0.01s 0.022% 99.30%      0.01s 0.022%  runtime.divRoundUp (inline)
+         0     0% 99.30%      0.01s 0.022%  runtime.dropg (inline)
+     0.01s 0.022% 99.32%      0.01s 0.022%  runtime.efaceeq
+         0     0% 99.32%      0.01s 0.022%  runtime.execute
+         0     0% 99.32%      0.01s 0.022%  runtime.exitsyscallNoP
+         0     0% 99.32%      0.01s 0.022%  runtime.finishsweep_m
+     0.01s 0.022% 99.34%      0.01s 0.022%  runtime.funcMaxSPDelta
+     0.01s 0.022% 99.37%      0.01s 0.022%  runtime.funcdata (inline)
+         0     0% 99.37%      0.01s 0.022%  runtime.gcMarkTermination.func3
+         0     0% 99.37%      0.01s 0.022%  runtime.gcStart.func3
+     0.01s 0.022% 99.39%      0.01s 0.022%  runtime.getStaticuint64s
+         0     0% 99.39%      0.01s 0.022%  runtime.getitab
+         0     0% 99.39%      0.01s 0.022%  runtime.gfput
+         0     0% 99.39%      0.01s 0.022%  runtime.globrunqgetbatch
+     0.01s 0.022% 99.41%      0.01s 0.022%  runtime.gopark
+     0.01s 0.022% 99.43%      0.01s 0.022%  runtime.gorecover
+         0     0% 99.43%      0.01s 0.022%  runtime.goschedImpl
+         0     0% 99.43%      0.01s 0.022%  runtime.gosched_m
+     0.01s 0.022% 99.45%      0.01s 0.022%  runtime.gostartcall (inline)
+         0     0% 99.45%      0.01s 0.022%  runtime.gostartcallfn
+         0     0% 99.45%      0.01s 0.022%  runtime.inUserArenaChunk (inline)
+         0     0% 99.45%      0.01s 0.022%  runtime.mProf_Malloc.func1
+     0.01s 0.022% 99.48%      0.01s 0.022%  runtime.mapaccess1_fast32
+     0.01s 0.022% 99.50%      0.01s 0.022%  runtime.markrootSpans
+     0.01s 0.022% 99.52%      0.01s 0.022%  runtime.memequal
+         0     0% 99.52%      0.01s 0.022%  runtime.newInlineUnwinder
+         0     0% 99.52%      0.01s 0.022%  runtime.newMarkBits
+         0     0% 99.52%      0.01s 0.022%  runtime.pcdatavalue1
+         0     0% 99.52%      0.01s 0.022%  runtime.pidleget
+     0.01s 0.022% 99.54%      0.01s 0.022%  runtime.procPin (inline)
+         0     0% 99.54%      0.01s 0.022%  runtime.procresize
+     0.01s 0.022% 99.56%      0.01s 0.022%  runtime.readgstatus (inline)
+     0.01s 0.022% 99.58%      0.01s 0.022%  runtime.readvarint (inline)
+     0.01s 0.022% 99.61%      0.01s 0.022%  runtime.releaseSudog
+         0     0% 99.61%      0.01s 0.022%  runtime.resolveTypeOff
+         0     0% 99.61%      0.01s 0.022%  runtime.roundupsize (inline)
+         0     0% 99.61%      0.01s 0.022%  runtime.rtype.typeOff (inline)
+         0     0% 99.61%      0.01s 0.022%  runtime.runqget (inline)
+         0     0% 99.61%      0.01s 0.022%  runtime.runqput
+     0.01s 0.022% 99.63%      0.01s 0.022%  runtime.runqputslow
+     0.01s 0.022% 99.65%      0.01s 0.022%  runtime.sellock
+         0     0% 99.65%      0.01s 0.022%  runtime.setMNoWB (inline)
+         0     0% 99.65%      0.01s 0.022%  runtime.setprofilebucket
+     0.01s 0.022% 99.67%      0.01s 0.022%  runtime.spanHasNoSpecials (inline)
+     0.01s 0.022% 99.69%      0.01s 0.022%  runtime.spanSetScans
+         0     0% 99.69%      0.01s 0.022%  runtime.stackmapdata (inline)
+         0     0% 99.69%      0.01s 0.022%  runtime.startTheWorldWithSema
+     0.01s 0.022% 99.72%      0.01s 0.022%  runtime.stkbucket
+     0.01s 0.022% 99.74%      0.01s 0.022%  runtime.traceLocker.ok (inline)
+         0     0% 99.74%      0.01s 0.022%  runtime.typedmemclr
+         0     0% 99.74%      0.01s 0.022%  strconv.AppendInt (inline)
+     0.01s 0.022% 99.76%      0.01s 0.022%  strings.(*Builder).copyCheck (inline)
+         0     0% 99.76%      0.01s 0.022%  strings.IndexByte (inline)
+         0     0% 99.76%      0.01s 0.022%  sync.(*Pool).Get
+         0     0% 99.76%      0.01s 0.022%  sync.(*Pool).pin
+         0     0% 99.76%      0.01s 0.022%  sync.runtime_procPin
+         0     0% 99.76%      0.01s 0.022%  sync/atomic.(*Value).Store
+     0.01s 0.022% 99.78%      0.01s 0.022%  sync/atomic.StorePointer
+         0     0% 99.78%      0.01s 0.022%  syscall.RawSyscall6
+         0     0% 99.78%      0.01s 0.022%  syscall.Syscall
+         0     0% 99.78%      0.01s 0.022%  testing.(*common).Cleanup.func1
+         0     0% 99.78%      0.01s 0.022%  testing.(*common).makeTempDir.func1
+         0     0% 99.78%      0.01s 0.022%  testing.(*common).runCleanup
+         0     0% 99.78%      0.01s 0.022%  testing.removeAll
+         0     0% 99.78%      0.01s 0.022%  testing.tRunner.func2
+     0.01s 0.022% 99.80%      0.01s 0.022%  time.(*Location).lookup
+         0     0% 99.80%      0.01s 0.022%  time.(*Time).GobDecode
+     0.01s 0.022% 99.83%      0.01s 0.022%  time.(*Time).UnmarshalBinary
+     0.01s 0.022% 99.85%      0.01s 0.022%  time.(*Time).addSec
+         0     0% 99.85%      0.01s 0.022%  time.Date
+     0.01s 0.022% 99.87%      0.01s 0.022%  time.FixedZone
+     0.01s 0.022% 99.89%      0.01s 0.022%  time.dateToAbsDays
+     0.01s 0.022% 99.91%      0.01s 0.022%  time.isDigit[go.shape.string] (inline)
+     0.01s 0.022% 99.93%      0.01s 0.022%  time.parseNanoseconds[go.shape.string]
+     0.01s 0.022%   100%      0.01s 0.022%  unicode/utf8.DecodeRune (inline)

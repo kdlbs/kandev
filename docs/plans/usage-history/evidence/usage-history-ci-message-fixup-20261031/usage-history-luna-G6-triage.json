@@ -1,0 +1,585 @@
+{
+  "audit": "G6 exact-head flaky-test triage (preliminary, raw event cross-check pending)",
+  "createdAtUtc": "2026-10-31T03:11:01.486889+00:00",
+  "diagnosticsEvidence": {
+    "allReferencedAttachmentsPresent": true,
+    "artifact": "e2e-timing-diagnostics",
+    "attachmentCount": 13,
+    "attachmentInventory": [
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "1fce757ee183c96adc469c98ee45c7fa8fd8caa99911f74cab69cd543f596e21",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "351a62469c856dc61740c8c614232482a445638a28263e481e6601517b239011",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+        "present": true,
+        "retry": 1,
+        "sha256": "03bbbe1b0c33c289b51c213688957030a84a88d722ae8d7547022be7f919d06f",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+        "present": true,
+        "retry": 1,
+        "sha256": "e6b8261864aeae6056bd7870ff567ce5c5a0bfb17b2f5fcef92e347a6cd9e11c",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe",
+        "status": "failed",
+        "testKey": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "b997c1f16cc1c564c4df8d7e33c0288e652bf88afceea82bce2f9a7b8661892b",
+        "status": "failed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "5c6aafe0709b30d3396edd74b6dad762224b4991838e6a1d452d995a9754220c",
+        "status": "failed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6",
+        "status": "passed",
+        "testKey": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+        "present": true,
+        "retry": 0,
+        "sha256": "3017147afcdc2609ff096fee1685ba88a98a1bf2ce5e65e8985f4a4f1ab8685a",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+        "present": true,
+        "retry": 0,
+        "sha256": "cfcf672c1f93e3557461b6ab9d5dfb646ec0d57126a7eafddfa3c285bb9c56cb",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "screenshot",
+        "path": "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+        "present": true,
+        "retry": 1,
+        "sha256": "099932d848ed483087e8982da044e7561e0cf5cbd967b638d7a0c99ab8006af5",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "error-context",
+        "path": "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+        "present": true,
+        "retry": 1,
+        "sha256": "f9164f5529952eca5e6589cec4e0a0cceca2723d0a8eefb99d6e3b30ec154dfe",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      },
+      {
+        "name": "trace",
+        "path": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+        "present": true,
+        "retry": 1,
+        "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2",
+        "status": "failed",
+        "testKey": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+      }
+    ],
+    "diagnosticsRetrySummarySha256": "8d6697907c8c57d6e4a1d967b1d1dac51551421c2a2aae87e1ccb68d329984b0",
+    "initialFailedAttemptsHaveTraces": false,
+    "retrySummaryCopyMatchesSeparateArtifact": true,
+    "retrySummaryDuplicateMatchesSeparateArtifact": true,
+    "sourceArtifactSha256": "55166afeef47687f499b78d5b941130de0324e26aaf94fcca750e2cfab346feb",
+    "traceAttachments": [
+      {
+        "attemptStatus": "failed",
+        "diagnosticsPath": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe",
+        "testId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b"
+      },
+      {
+        "attemptStatus": "passed",
+        "diagnosticsPath": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6",
+        "testId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4"
+      },
+      {
+        "attemptStatus": "failed",
+        "diagnosticsPath": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "presentInDiagnostics": true,
+        "retry": 1,
+        "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2",
+        "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896"
+      }
+    ]
+  },
+  "flake": {
+    "executed": 4559,
+    "flaky": 3,
+    "flakyTests": [
+      "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+      "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+      "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+    ],
+    "ratePerThousand": 0.66,
+    "unexpected": 0
+  },
+  "flakyVerdicts": [
+    {
+      "attachmentPaths": [
+        "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+        "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+        "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+        "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+        "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip"
+      ],
+      "attempts": 3,
+      "errorCategory": "timeout",
+      "file": "tests/chat/jump-to-latest.spec.ts",
+      "finalStatus": "passed",
+      "firstFailure": "Error: expect(locator).toBeVisible() failed Locator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first() Expected: visible Timeout: 5000ms Error: element(s) not found Call log: - Expect \"toBeVisible\" with timeout 5000ms - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().loca",
+      "firstFailureCount": 2,
+      "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+      "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+      "parentAssignment": {
+        "port": 26,
+        "worker": "B18 Bohr",
+        "workerId": "01a18ff3-f0df-72d2-9559-a5e8c2cd48cb"
+      },
+      "project": "chromium",
+      "rawAttempts": [
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+              "name": "screenshot",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/7950613250dfe9acd8995c9c32d0c30f85b04bd9.png",
+              "sha256": "1fce757ee183c96adc469c98ee45c7fa8fd8caa99911f74cab69cd543f596e21"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+              "name": "error-context",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/21039951195a42d628787fbb751d4e99ce8b9def.markdown",
+              "sha256": "351a62469c856dc61740c8c614232482a445638a28263e481e6601517b239011"
+            }
+          ],
+          "errorContextPaths": [
+            "retry-artifacts/21039951195a42d628787fbb751d4e99ce8b9def.markdown"
+          ],
+          "errorMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\u001b[22m\n"
+          ],
+          "report": "blob-report-17/report-normal-17-3-0.zip",
+          "retry": 0,
+          "status": "failed",
+          "traceAttachedToThisAttempt": false,
+          "tracePaths": []
+        },
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+              "name": "screenshot",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/8ea73bc6540e7521c2521e1144ca2ca540b6a3dc.png",
+              "sha256": "03bbbe1b0c33c289b51c213688957030a84a88d722ae8d7547022be7f919d06f"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+              "name": "error-context",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/2e5e8653ce777c8e8e909372b07be47feb958141.markdown",
+              "sha256": "e6b8261864aeae6056bd7870ff567ce5c5a0bfb17b2f5fcef92e347a6cd9e11c"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip",
+              "name": "trace",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/267352b41d060782face61d2da23e24ca45400e6.zip",
+              "sha256": "3ef9c8502e02aa29b3bc1e61738b3ad53f985b6c44ed67b138f11d32a6b978fe"
+            }
+          ],
+          "errorContextPaths": [
+            "retry-artifacts/2e5e8653ce777c8e8e909372b07be47feb958141.markdown"
+          ],
+          "errorMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().locator('[data-agent-message-body][data-message-id]').filter({ hasText: 'JUMP_TO_LATEST_STREAM_START_6M2J' }).first()\u001b[22m\n"
+          ],
+          "report": "blob-report-17/report-normal-17-3-0.zip",
+          "retry": 1,
+          "status": "failed",
+          "traceAttachedToThisAttempt": true,
+          "tracePaths": [
+            "retry-artifacts/267352b41d060782face61d2da23e24ca45400e6.zip"
+          ]
+        },
+        {
+          "attachments": [],
+          "errorContextPaths": [],
+          "errorMessages": [],
+          "report": "blob-report-17/report-normal-17-3-0.zip",
+          "retry": 2,
+          "status": "passed",
+          "traceAttachedToThisAttempt": false,
+          "tracePaths": []
+        }
+      ],
+      "statuses": [
+        "failed",
+        "failed",
+        "passed"
+      ],
+      "testId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+      "title": "chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+    },
+    {
+      "attachmentPaths": [
+        "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+        "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+        "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip"
+      ],
+      "attempts": 2,
+      "errorCategory": "timeout",
+      "file": "tests/pr/pr-watcher-dockview-layout.spec.ts",
+      "finalStatus": "passed",
+      "firstFailure": "Error: the session layout did not reach an idle or recovery state the session layout did not reach an idle or recovery state expect(received).not.toBe(\u001b[32mexpected) // Object.is equality Expected: not \u001b[32m\"waiting\" Call Log: - Timeout 60000ms exceeded while waiting on the predicate",
+      "firstFailureCount": 1,
+      "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+      "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+      "parentAssignment": {
+        "port": 27,
+        "worker": "B19 Boyle",
+        "workerId": "01a18ff3-f0a9-7522-a9e2-31f1a37c7648"
+      },
+      "project": "chromium",
+      "rawAttempts": [
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+              "name": "screenshot",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/352dab72aa2a3593b4aa3fe75865a569801865eb.png",
+              "sha256": "b997c1f16cc1c564c4df8d7e33c0288e652bf88afceea82bce2f9a7b8661892b"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+              "name": "error-context",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown",
+              "sha256": "5c6aafe0709b30d3396edd74b6dad762224b4991838e6a1d452d995a9754220c"
+            }
+          ],
+          "errorContextPaths": [
+            "retry-artifacts/0c7e1ad49408355202c65e6e591fede46a2b3cae.markdown"
+          ],
+          "errorMessages": [
+            "Error: the session layout did not reach an idle or recovery state\n\nthe session layout did not reach an idle or recovery state\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"waiting\"\u001b[39m\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate"
+          ],
+          "report": "blob-report-21/report-normal-21-4-0.zip",
+          "retry": 0,
+          "status": "failed",
+          "traceAttachedToThisAttempt": false,
+          "tracePaths": []
+        },
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+              "name": "trace",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip",
+              "sha256": "53585a7f4e35d4dfcacc539008a21589c343d09f89e8eb6e1829b3707ce836a6"
+            }
+          ],
+          "errorContextPaths": [],
+          "errorMessages": [],
+          "report": "blob-report-21/report-normal-21-4-0.zip",
+          "retry": 1,
+          "status": "passed",
+          "traceAttachedToThisAttempt": true,
+          "tracePaths": [
+            "retry-artifacts/ffc2d9fdf1daf1d509282458a3174c437e80c7bc.zip"
+          ]
+        }
+      ],
+      "statuses": [
+        "failed",
+        "passed"
+      ],
+      "testId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+      "title": "pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode"
+    },
+    {
+      "attachmentPaths": [
+        "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+        "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+        "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+        "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+        "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip"
+      ],
+      "attempts": 3,
+      "errorCategory": "timeout",
+      "file": "tests/session/opencode-capacity-retry.spec.ts",
+      "finalStatus": "passed",
+      "firstFailure": "Error: expect(locator).toHaveCount(\u001b[32mexpected) failed Locator: locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card') Expected: \u001b[32m0 Received: 1 Timeout: 5000ms Call log: - Expect \"toHaveCount\" with timeout 5000ms - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card') 5 \u00d7 locator resolved to 1 element - unexpected value \"",
+      "firstFailureCount": 2,
+      "initialFailedAttemptTraceAttribution": "no trace attached to initial failed attempt",
+      "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "parentAssignment": {
+        "port": 28,
+        "worker": "B20 Averroes",
+        "workerId": "01a18ff3-f072-76d2-913c-5ba28da56ca1"
+      },
+      "project": "chromium",
+      "rawAttempts": [
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+              "name": "screenshot",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/a57f8b4deb911c77d5ae1e77c1437c90026957a6.png",
+              "sha256": "3017147afcdc2609ff096fee1685ba88a98a1bf2ce5e65e8985f4a4f1ab8685a"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+              "name": "error-context",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown",
+              "sha256": "cfcf672c1f93e3557461b6ab9d5dfb646ec0d57126a7eafddfa3c285bb9c56cb"
+            }
+          ],
+          "errorContextPaths": [
+            "retry-artifacts/9a6e5c1fbef5f6c64e2bfeae43745cea18a956dc.markdown"
+          ],
+          "errorMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: \u001b[32m0\u001b[39m\nReceived: \u001b[31m1\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\u001b[22m\n\u001b[2m    5 \u00d7 locator resolved to 1 element\u001b[22m\n\u001b[2m      - unexpected value \"1\"\u001b[22m\n"
+          ],
+          "report": "blob-report-22/report-normal-22-4-0.zip",
+          "retry": 0,
+          "status": "failed",
+          "traceAttachedToThisAttempt": false,
+          "tracePaths": []
+        },
+        {
+          "attachments": [
+            {
+              "diagnosticsPath": "retry-artifacts/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+              "name": "screenshot",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/3dadd201ca19fb804196318651c5c1cbde92f4c1.png",
+              "sha256": "099932d848ed483087e8982da044e7561e0cf5cbd967b638d7a0c99ab8006af5"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+              "name": "error-context",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown",
+              "sha256": "f9164f5529952eca5e6589cec4e0a0cceca2723d0a8eefb99d6e3b30ec154dfe"
+            },
+            {
+              "diagnosticsPath": "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+              "name": "trace",
+              "presentInDiagnostics": true,
+              "reportPath": "resources/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip",
+              "sha256": "655ba30e5149b6f0878d7fe31df64581dc661656df680ef14deb1bb29d739ce2"
+            }
+          ],
+          "errorContextPaths": [
+            "retry-artifacts/8ed7eaad3f62c9789961da55a5cc9d762a027641.markdown"
+          ],
+          "errorMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: \u001b[32m0\u001b[39m\nReceived: \u001b[31m1\u001b[39m\nTimeout:  5000ms\n\nCall log:\n\u001b[2m  - Expect \"toHaveCount\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\u001b[22m\n\u001b[2m    5 \u00d7 locator resolved to 1 element\u001b[22m\n\u001b[2m      - unexpected value \"1\"\u001b[22m\n"
+          ],
+          "report": "blob-report-22/report-normal-22-4-0.zip",
+          "retry": 1,
+          "status": "failed",
+          "traceAttachedToThisAttempt": true,
+          "tracePaths": [
+            "retry-artifacts/c74806cc6316d99507a7988a30f96c8a8b957ca8.zip"
+          ]
+        },
+        {
+          "attachments": [],
+          "errorContextPaths": [],
+          "errorMessages": [],
+          "report": "blob-report-22/report-normal-22-4-0.zip",
+          "retry": 2,
+          "status": "passed",
+          "traceAttachedToThisAttempt": false,
+          "tracePaths": []
+        }
+      ],
+      "statuses": [
+        "failed",
+        "failed",
+        "passed"
+      ],
+      "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "title": "session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools"
+    }
+  ],
+  "limitations": [
+    "Retry summary and all raw report streams are compared; traces are attributed only to the attempt that emitted each attachment. A trace on a passing retry does not explain the first failed attempt. No tests were rerun."
+  ],
+  "parentFollowupAssignments": [
+    {
+      "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts \u203a Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+      "port": 26,
+      "worker": "B18 Bohr",
+      "workerId": "01a18ff3-f0df-72d2-9559-a5e8c2cd48cb"
+    },
+    {
+      "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts \u203a PR watcher dockview layout stability \u203a layout remains correct when switching between PR watcher tasks with plan mode",
+      "port": 27,
+      "worker": "B19 Boyle",
+      "workerId": "01a18ff3-f0a9-7522-a9e2-31f1a37c7648"
+    },
+    {
+      "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts \u203a desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "port": 28,
+      "worker": "B20 Averroes",
+      "workerId": "01a18ff3-f072-76d2-913c-5ba28da56ca1"
+    }
+  ],
+  "priorSixIdentityComparison": {
+    "matchedCurrentIdentities": [
+      {
+        "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts \u203a scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2"
+      },
+      {
+        "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts \u203a keeps the download control touch-sized on a coarse-pointer workbench",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "90005c1239f5286505ae-901084b3039cf4aa996a"
+      },
+      {
+        "key": "chromium::tests/layout/stats-usage-history.spec.ts::layout/stats-usage-history.spec.ts \u203a real first publication and rebuild preserve saved values through a database deadline",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588"
+      },
+      {
+        "key": "chromium::tests/office/taskless-routine-permission.spec.ts::office/taskless-routine-permission.spec.ts \u203a Office taskless routine permissions \u203a rejects the request when the launched profile does not auto-approve",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "67a94427bba3153eec97-c0ddb32b0b4334be6207"
+      },
+      {
+        "key": "chromium::tests/task/subtask.spec.ts::task/subtask.spec.ts \u203a Subtask basics \u203a creates a policy branch for a local-executor subtask",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "caa386653e4d5920f206-71c3917ef7bc3f13d554"
+      },
+      {
+        "key": "mobile-chrome::tests/session/mobile-acp-prompt-error-continuity.spec.ts::session/mobile-acp-prompt-error-continuity.spec.ts \u203a phone: visible per-row task actions expose Dismiss turn error",
+        "outcome": "expected",
+        "statuses": [
+          "passed"
+        ],
+        "testId": "f2b1d27a56205d4f8e3d-c01edec105212a083315"
+      }
+    ],
+    "noneOfTheThreeCurrentFlakesAreInPriorSix": true,
+    "priorIdentityCount": 6
+  },
+  "pullRequest": 3660,
+  "rawReportCrossCheck": {
+    "evidenceFile": "/tmp/usage-history-luna-G6-raw-analysis.json",
+    "innerReportArchiveCount": 118,
+    "outcomeMismatches": 0,
+    "rawAndSummaryUniqueTestIds": 4599,
+    "rawAttemptStatusCounts": {
+      "failed": 5,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "rawProjectDescriptorCount": 4599,
+    "rawProjectDescriptorKeysMatchRetrySummaryForAllTestIds": true,
+    "rawProjectDescriptorMismatches": 0,
+    "rawRetryAttemptCount": 5,
+    "result": "EXACT_MATCH",
+    "statusMismatches": 0,
+    "unmatchedBeginCount": 0,
+    "unmatchedEndCount": 0
+  },
+  "repository": "kdlbs/kandev",
+  "result": "FAIL: three Playwright flaky verdicts on exact source head c17567082b98545edcdd5b314792c466df635d79; zero-flake requirement not met.",
+  "retrySummaryArtifactId": 13027168573,
+  "retrySummaryDigest": "sha256:15db366596d3bacd8c0d5fd46e7fbfb4454f5f3e3b730addb0a0830884ece598",
+  "runAttempt": 1,
+  "runConclusion": "success",
+  "runStatus": "completed",
+  "sourceHead": "c17567082b98545edcdd5b314792c466df635d79",
+  "sourceRunAttempt": 1,
+  "summaryCounts": {
+    "failed": 0,
+    "passedAfterRetry": 3,
+    "passedFirstAttempt": 4556,
+    "skipped": 40,
+    "timedOut": 0
+  },
+  "workflowRunId": 41161561000
+}

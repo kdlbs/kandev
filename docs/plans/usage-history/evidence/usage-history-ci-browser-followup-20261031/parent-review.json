@@ -1,0 +1,131 @@
+{
+  "reviewed_at": "2026-10-31T01:19:39.745669+00:00",
+  "source_head": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+  "status": "approved_for_normal_commit_and_current_head_ci",
+  "ci_evidence": {
+    "run": 41149626029,
+    "attempt": 1,
+    "source_head": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+    "flaky_verdicts": 4,
+    "checks_successful_but_not_flake_free": true
+  },
+  "reviewed_paths": [
+    {
+      "worker": "B11",
+      "path": "apps/web/e2e/helpers/usage-history.ts",
+      "sha256": "ca622780f4b5601b919de0bef45f14056abd2d2f4456acfc74fe267a0baf38aa",
+      "matches": true
+    },
+    {
+      "worker": "B11",
+      "path": "apps/web/e2e/helpers/usage-history.test.ts",
+      "sha256": "872240c5163366cb30d9b66bc2f798ce16e9800f5d19501b94478acaa4466049",
+      "matches": true
+    },
+    {
+      "worker": "B12",
+      "path": "apps/web/e2e/tests/office/taskless-routine-permission.spec.ts",
+      "sha256": "293e729579274d15c4ccb902970bb8793731f729be40378de608d47c43e3269b",
+      "matches": true
+    },
+    {
+      "worker": "B13",
+      "path": "apps/web/e2e/tests/task/subtask.spec.ts",
+      "sha256": "e548b0721cede9e1b2fa74faa6217e25e90e9fd26582cf46bdbb56f34e8921d8",
+      "matches": true
+    },
+    {
+      "worker": "B14",
+      "path": "apps/web/e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts",
+      "sha256": "344f6ed66c8b35938a8227c1971ea8af3f9b8b09cba71bdbff9be2d9070fd793",
+      "matches": true
+    }
+  ],
+  "conclusions": [
+    "Known HTTP 503 readiness errors continue the existing 30-second publication poll; unknown statuses still fail. Direct reads remain strict.",
+    "Office fixture cleanup removes claimed runs before both permission branches; the eight-predecessor queued timeout was reproduced before the fix.",
+    "The subtask fixture waits for the first popover to close and for the second to open. Root cause remains inferred; no failed-attempt trace or local red reproduction exists.",
+    "The phone fixture waits for finite menu animations before the unchanged target-size assertion and real tap. Untouched baseline failed four of five runs.",
+    "No production code, test deadline, retry count, force-click behavior or assertion threshold changed."
+  ],
+  "validation": {
+    "parent_helper_tests": {
+      "exit_code": 0,
+      "tests_passed": 6,
+      "log": "helper-tests.log"
+    },
+    "worker_commands_and_counts": "See individual reviewed worker receipts.",
+    "independent_output_status_checks": [
+      {
+        "output": "/tmp/usage-history-B11-desktop5",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-B11-ci-preceding-sequence",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-B11-mobile",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-B12-green-eight-predecessors",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-B12-repeat-predecessors",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-luna-B13-fixed-focus-output",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-luna-B13-fixed-stress-output",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      },
+      {
+        "output": "/tmp/usage-history-luna-B14-fixed-results",
+        "status": {
+          "status": "passed",
+          "failedTests": []
+        },
+        "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+      }
+    ]
+  },
+  "limits": [
+    "Browser logs were not persisted by these workers. Parent verified successful Playwright .last-run.json outputs; detailed counts come from worker command receipts.",
+    "Local results do not prove a new CI run or zero flaky verdicts.",
+    "Both full normal performance gates remain pending."
+  ],
+  "production_artifacts": "Unchanged from coordinated source build 68244c2fbd9df85917749eb3d7218ebcde3e93d1."
+}

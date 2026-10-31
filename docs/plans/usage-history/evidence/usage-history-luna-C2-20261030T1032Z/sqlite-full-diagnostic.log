@@ -1,0 +1,74 @@
+--- FAIL: BenchmarkUsageHistoryFiveYears
+    usage_history_bench_run_test.go:79: usage fixture recent phase start native=200000 external=20000
+    usage_history_bench_run_test.go:79: usage fixture source insert start range=recent source=native records=200000
+    usage_history_bench_run_test.go:79: usage fixture source insert complete range=recent source=native records=200000
+    usage_history_bench_run_test.go:79: usage fixture source insert start range=recent source=plugin:bench records=20000
+    usage_history_bench_run_test.go:79: usage fixture source insert complete range=recent source=plugin:bench records=20000
+    usage_history_bench_run_test.go:79: usage fixture recent range inserts complete
+    usage_history_bench_run_test.go:79: usage fixture special records complete
+    usage_history_bench_run_test.go:79: usage fixture source insert start range=other source=native records=8
+    usage_history_bench_run_test.go:79: usage fixture source insert complete range=other source=native records=8
+    usage_history_bench_run_test.go:79: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_bench_run_test.go:79: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_bench_run_test.go:79: usage fixture second scope inserts complete
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=100
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=200
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=300
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=400
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=500
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=600
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=700
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=800
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=900
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=1000
+    usage_history_bench_run_test.go:79: usage fixture retention backfill pages=1100
+    usage_history_bench_run_test.go:79: usage fixture retention backfill complete pages=1103
+    usage_history_bench_publish_test.go:69: sqlite construction trace page=1 statements=64
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=45 duration_ns=0 error="": INSERT INTO usage_projection_source_versions (scope_id, source_table, source_id, commit_sequence, tombstone) VALUES (?, ?, ?, ?, ?)
+        			ON CONFLICT(scope_id, source_table, source_id) DO UPDATE SET commit_sequence = excluded.commit_sequence, tombstone = excluded.tombstone
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=46 duration_ns=0 error="": SELECT commit_sequence FROM usage_projection_source_versions WHERE scope_id = ? AND source_table = ? AND source_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=47 duration_ns=0 error="": INSERT INTO usage_projection_items (scope_id, generation, source_table, source_id, commit_sequence, tombstone)
+        		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(scope_id, generation, source_table, source_id) DO UPDATE
+        		SET commit_sequence = excluded.commit_sequence, tombstone = excluded.tombstone WHERE usage_projection_items.commit_sequence < excluded.commit_sequence
+        		OR (usage_projection_items.commit_sequence = excluded.commit_sequence AND excluded.tombstone = 0)
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=48 duration_ns=0 error="": SELECT commit_sequence FROM usage_projection_applied WHERE scope_id = ? AND generation = ? AND work_key = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=49 duration_ns=0 error="": INSERT INTO usage_projection_work (scope_id, generation, work_key, subject_id, requested_sequence, publish_group) VALUES (?, ?, ?, ?, ?, ?)
+        		ON CONFLICT(scope_id, generation, work_key) DO UPDATE SET requested_sequence = CASE WHEN excluded.requested_sequence > usage_projection_work.requested_sequence THEN excluded.requested_sequence ELSE usage_projection_work.requested_sequence END,
+        		state = CASE WHEN excluded.requested_sequence > usage_projection_work.selection_sequence THEN 'pending' ELSE usage_projection_work.state END
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=50 duration_ns=0 error="": SELECT 
+        	id, workspace_id, task_id, COALESCE(session_id, ''), scope_id, subject_id,
+        	usage_binding_id, actor_id, actor_status, actor_kind, transcript_id,
+        	source, source_record_id, usage_identity, model, provider, agent_client, source_version,
+        	revision, payload_digest, CAST(observed_at AS TEXT), CAST(collected_at AS TEXT),
+        	input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+        	reasoning_tokens, reasoning_output_tokens, total_tokens, source_total_tokens, reported_cache_write_tokens, token_semantics_version,
+        	reasoning_inside_output, cache_read_inside_input, native_scope, measurement_source,
+        	usage_completeness, usage_schema_version, pricing_catalog_version, turns, cost_subcents, currency, cost_basis,
+        	cost_coverage, coverage, source_timezone, attribution_status,
+        	CAST(coverage_start AS TEXT), CAST(coverage_end AS TEXT), source_date,
+        	coverage_key, estimated, stale FROM session_usage_buckets WHERE id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=51 duration_ns=0 error="": SELECT item_id, selection_partition, selection_coverage, work_status, observation_metadata, retired, work_event_id,
+        		selection_bundle,selection_segment,selection_group,selection_layout,selection_token_bundle,selection_cost_bundle,selection_scan_key FROM session_usage_buckets WHERE id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=52 duration_ns=0 error="": SELECT commit_sequence FROM usage_projection_source_versions WHERE scope_id = ? AND source_table = ? AND source_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=53 duration_ns=0 error="": INSERT INTO usage_dirty_partitions (scope_id, subject_id, partition_key, updated_at) VALUES (?, ?, ?, ?)
+        			ON CONFLICT(scope_id, subject_id, partition_key) DO UPDATE SET updated_at = excluded.updated_at
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=54 duration_ns=0 error="": SELECT workspace_id, organization_id FROM usage_scopes WHERE scope_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=55 duration_ns=0 error="": INSERT INTO usage_scope_fences (fence_kind, fence_id, state, generation, updated_at)
+        		VALUES (?, ?, ?, 0, ?) ON CONFLICT(fence_kind, fence_id) DO NOTHING
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=56 duration_ns=0 error="": SELECT state FROM usage_scope_fences WHERE fence_kind = ? AND fence_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=57 duration_ns=0 error="": INSERT INTO usage_scope_fences (fence_kind, fence_id, state, generation, updated_at)
+        		VALUES (?, ?, ?, 0, ?) ON CONFLICT(fence_kind, fence_id) DO NOTHING
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=58 duration_ns=0 error="": SELECT state FROM usage_scope_fences WHERE fence_kind = ? AND fence_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=59 duration_ns=0 error="": INSERT INTO usage_projection_scopes (scope_id, updated_at) VALUES (?, ?) ON CONFLICT(scope_id) DO NOTHING
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=60 duration_ns=0 error="": UPDATE usage_scopes SET projection_registered = 1 WHERE scope_id = ? AND projection_registered = 0
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=61 duration_ns=0 error="": SELECT commit_sequence, active_generation FROM usage_projection_scopes WHERE scope_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=62 duration_ns=0 error="": INSERT INTO usage_projection_log (scope_id, commit_sequence, payload, publication_group, created_at) VALUES (?, ?, ?, ?, ?)
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=63 duration_ns=0 error="": UPDATE usage_projection_scopes SET commit_sequence = ?, updated_at = ? WHERE scope_id = ?
+    usage_history_bench_publish_test.go:71: sqlite construction SQL index=64 duration_ns=31000000 error="": SELECT EXISTS(SELECT 1 FROM session_usage_measurements WHERE scope_id=? AND source='native' AND (turns IS NOT NULL OR native_accounting_version < 1)) OR EXISTS(SELECT 1 FROM session_usage_buckets WHERE scope_id=? AND source='native' AND (turns IS NOT NULL OR native_accounting_version < 1))
+    usage_history_bench_publish_test.go:98: sqlite construction state=scan replay=19 items=0 work=0 builds=0 resolutions=0 applied=0 facts=0 contributions=0
+    usage_history_bench_publish_test.go:110: SQLite construction checkpoints: [{Source:session_usage_buckets KeySize:0 Complete:0} {Source:session_usage_measurements KeySize:0 Complete:0}]
+    usage_history_bench_run_test.go:79: usage projection advance scope_index=0 page=1 generation=abe299a8-c827-4e4c-a9a0-2beae827ecdb: analytics busy: context deadline exceeded
+FAIL
+exit status 1
+FAIL	github.com/kandev/kandev/internal/analytics/repository/sqlite	203.729s
+FAIL

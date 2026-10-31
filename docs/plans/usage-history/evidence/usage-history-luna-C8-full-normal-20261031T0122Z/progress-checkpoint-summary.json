@@ -1,0 +1,44 @@
+{
+  "observation": "read-only SQLite metadata and bounded right-edge rowid/cursor reads; no full-row scan or COUNT query",
+  "samples_utc": [
+    "2026-10-31T02:17:47Z",
+    "2026-10-31T02:17:57Z"
+  ],
+  "older_source_insert_order": [
+    "native",
+    "plugin:bench"
+  ],
+  "older_fixture_rows_from_frozen_recipe": {
+    "native": 800000,
+    "external": 80000
+  },
+  "source_high_water_after": {
+    "table": "session_usage_buckets",
+    "rowid": 1100030,
+    "source": "plugin:bench",
+    "source_record_id": "older-plugin:bench-00079999"
+  },
+  "stage": "ordinary usage projection rebuild/replay after native and external source insertion",
+  "generation": {
+    "id": "39045801-4c7d-4958-8eb0-33e4a81834fb",
+    "state": "replay",
+    "fact_count": 1050016,
+    "dated_count": 1050012,
+    "native_count": 1000005
+  },
+  "work_cursor": {
+    "state": "resolve",
+    "requested_sequence": 1099938,
+    "selection_sequence": 1099938,
+    "decoded_after_key_before": "2025-02-08T12:10:48Z",
+    "decoded_after_key_after": "2025-03-06T11:53:31.2Z",
+    "cursor_advanced": true
+  },
+  "database_main_file_bytes": {
+    "before": 23998402560,
+    "after": 24004620288,
+    "delta": 6217728
+  },
+  "raw_observations": "progress-observation-2.txt and progress-observation-3.txt",
+  "assessment": "bounded checkpoint cursor advanced while source high-water remained stable, confirming active replay/resolution work rather than repeated source insertion"
+}

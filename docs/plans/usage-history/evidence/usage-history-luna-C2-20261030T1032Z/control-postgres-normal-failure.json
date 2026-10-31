@@ -1,0 +1,26 @@
+{
+  "kind": "first-failure",
+  "test_pattern": "^TestUsageHistoryBenchmark(PostgresFixture|ConstructionScalePostgres)$",
+  "runtime_test_binary_sha256": "80f90c5ebca76a006a7df0e210d0486446fca7d67297c934e8daa352758eebb6",
+  "exit_code": 1,
+  "duration_seconds": 150.061,
+  "failed_test": "TestUsageHistoryBenchmarkConstructionScalePostgres",
+  "failure_stage": "AdvanceUsageHistoryProjection",
+  "scope_index": 0,
+  "advance_page": 299,
+  "error": "analytics busy: timeout: context deadline exceeded",
+  "fixture_recipe": {
+    "recent_native_source_records": 20000,
+    "recent_external_source_records": 2000,
+    "other_scope_native_records": 8,
+    "other_scope_external_records": 8,
+    "retention_backfill_pages": 113,
+    "expected_retained_native": 20005,
+    "expected_retained_external": 2013
+  },
+  "log": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1032Z/control-postgres-normal.log",
+  "log_sha256": "ca726657c0f65b74eca514f2be47aa7f0d8233180e58efc1771e50c46fbe0136",
+  "completed_at_utc": "2026-10-30T11:24:51Z",
+  "small_postgres_fixture_passed": true,
+  "production_files_changed": 0
+}

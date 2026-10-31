@@ -1,0 +1,18 @@
+=== RUN   TestUsageHistoryNativeAccountingRepairFindsAlreadyClearedTurns
+--- PASS: TestUsageHistoryNativeAccountingRepairFindsAlreadyClearedTurns (0.26s)
+=== RUN   TestUsageHistoryNativeAccountingRepairSQLite
+--- PASS: TestUsageHistoryNativeAccountingRepairSQLite (1.64s)
+=== RUN   TestUsageHistoryNativeAccountingRepairPostgres
+--- PASS: TestUsageHistoryNativeAccountingRepairPostgres (5.94s)
+=== RUN   TestUsageHistoryProjectionOversizedGroupResumes
+--- PASS: TestUsageHistoryProjectionOversizedGroupResumes (0.53s)
+=== RUN   TestUsageHistorySelectionParityNativeCoverageAfterRestart
+=== RUN   TestUsageHistorySelectionParityNativeCoverageAfterRestart/equivalent_native
+=== RUN   TestUsageHistorySelectionParityNativeCoverageAfterRestart/fuller_external
+=== RUN   TestUsageHistorySelectionParityNativeCoverageAfterRestart/partial_native_overlap
+--- PASS: TestUsageHistorySelectionParityNativeCoverageAfterRestart (1.99s)
+    --- PASS: TestUsageHistorySelectionParityNativeCoverageAfterRestart/equivalent_native (0.67s)
+    --- PASS: TestUsageHistorySelectionParityNativeCoverageAfterRestart/fuller_external (0.68s)
+    --- PASS: TestUsageHistorySelectionParityNativeCoverageAfterRestart/partial_native_overlap (0.64s)
+PASS
+ok  	github.com/kandev/kandev/internal/analytics/repository/sqlite	10.389s

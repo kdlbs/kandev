@@ -1,0 +1,141 @@
+{
+  "handoff": "B12",
+  "status": "ready_for_parent_review",
+  "repository": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "branch": "feature/investigate-token-co-9dc",
+  "head": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+  "change": {
+    "path": "apps/web/e2e/tests/office/taskless-routine-permission.spec.ts",
+    "sha256": "293e729579274d15c4ccb902970bb8793731f729be40378de608d47c43e3269b",
+    "lines": "82-87",
+    "summary": "Before each permission scenario, reset the worker Office workspace while preserving its required workflows. This clears claimed runs left by earlier Office runtime-token E2E setup."
+  },
+  "actual_root_evidence": {
+    "ci": {
+      "run_id": 41149626029,
+      "attempt": 1,
+      "head_sha": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+      "synthetic_merge_sha": "bb28d054a13383296a281527ff050fdcc0f9b5ec",
+      "shard_job_id": 124384013825,
+      "worker_index": 0,
+      "test": "Office taskless routine permissions › rejects the request when the launched profile does not auto-approve",
+      "first_attempt": "failed after 180000 ms; Expected finished, Received queued",
+      "retry": "passed; retry summary classifies this test flaky (attempt statuses failed, passed)"
+    },
+    "worker_order": "On CI worker 0, agentctl-cli tests ran first. At least the first eight seed claimed runs for runtime-token setup, then the permission test ran on that same worker/backend. The suite has no e2eReset in those API-only tests.",
+    "mechanism": "MaxConcurrentInstance defaults to 8. evalInstanceCeilingGate counts every runs row with status='claimed' (WHERE 1=1). The office test harness seeds claimed rows, and their direct run rows have no workspace_id. Eight such rows fill the instance claim pool, so the taskless routine run remains queued and never reaches the permission handler. The CI failure is test-fixture state contamination, not a permission delivery failure.",
+    "local_red": "With the first eight claim-seeding agentctl-cli tests followed by the failing permission case, local retries=0 reproduced the exact 180-second failure and queued status. Four predecessors passed because they did not fill the eight-run ceiling.",
+    "ci_artifacts": "The failed error-context records queued. The trace bundled beside it is from the successful retry and was not used as failed-attempt proof. The exact shard log has no Office permission/scheduler lifecycle events; its backend dump contains unrelated integration-cleanup and generic filesystem warnings."
+  },
+  "verification": [
+    {
+      "label": "Isolated exact failing title before fix",
+      "exit_code": 0,
+      "retries": 0,
+      "result": "1 passed"
+    },
+    {
+      "label": "Four seed predecessors plus failing title before fix",
+      "exit_code": 0,
+      "retries": 0,
+      "result": "5 passed; below the instance claim ceiling"
+    },
+    {
+      "label": "Eight seed predecessors plus failing title before fix (red reproduction)",
+      "exit_code": 1,
+      "retries": 0,
+      "result": "8 setup tests passed; permission test reproduced CI signature after 180 seconds (Expected finished, Received queued)"
+    },
+    {
+      "label": "Eight seed predecessors plus both permission branches after fix",
+      "exit_code": 0,
+      "retries": 0,
+      "result": "10 passed"
+    },
+    {
+      "label": "Same minimum sequence repeated twice after fix",
+      "exit_code": 0,
+      "retries": 0,
+      "result": "20 passed"
+    },
+    {
+      "label": "Prettier from apps/web",
+      "exit_code": 0,
+      "result": "All matched files use Prettier code style"
+    },
+    {
+      "label": "git diff --check for owned file",
+      "exit_code": 0,
+      "result": "clean"
+    }
+  ],
+  "commands": [
+    {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=25 pnpm e2e:run --host --no-build -- tests/office/agentctl-cli.spec.ts tests/office/taskless-routine-permission.spec.ts --grep '<first 4 seed titles>|rejects the request when the launched profile does not auto-approve' --workers=1 --retries=0 --output=/tmp/usage-history-B12-red-predecessors",
+      "exit_code": 0,
+      "note": "4 predecessor tests plus target; control passed"
+    },
+    {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=25 pnpm e2e:run --host --no-build -- tests/office/agentctl-cli.spec.ts tests/office/taskless-routine-permission.spec.ts --grep '<first 8 seed titles>|rejects the request when the launched profile does not auto-approve' --workers=1 --retries=0 --output=/tmp/usage-history-B12-red-eight-predecessors",
+      "exit_code": 1,
+      "note": "8 predecessors passed; target reproduced queued timeout after 180 seconds"
+    },
+    {
+      "command": "env -u CAPTURE_PR_ASSETS GOMAXPROCS=1 E2E_PORT_OFFSET=25 pnpm e2e:run --host --no-build -- tests/office/agentctl-cli.spec.ts tests/office/taskless-routine-permission.spec.ts --grep '<first 8 seed titles>|rejects the request when the launched profile does not auto-approve|approves the request when the launched profile auto-approves' --workers=1 --retries=0 --output=/tmp/usage-history-B12-green-eight-predecessors",
+      "exit_code": 0,
+      "note": "10 passed after fix"
+    },
+    {
+      "command": "Same managed command and grep as the preceding green run, with --repeat-each=2 and --output=/tmp/usage-history-B12-repeat-predecessors",
+      "exit_code": 0,
+      "note": "20 passed; retries=0"
+    },
+    {
+      "command": "pnpm exec prettier --check e2e/tests/office/taskless-routine-permission.spec.ts",
+      "cwd": "apps/web",
+      "exit_code": 0
+    }
+  ],
+  "source_build": {
+    "receipt": "/tmp/usage-history-core-coordinated-host-ready.json",
+    "receipt_status": "passed",
+    "receipt_source_commit": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+    "receipt_version": "v0.98.0-264-g68244c2fbd9",
+    "receipt_command": "make -C apps/backend build e2e-plugin-package build-e2e-delivery-fixture",
+    "receipt_exit_code": 0,
+    "freshness_required": true,
+    "no_freshness_bypass": true,
+    "web_rebuilt": false,
+    "web_unchanged_from_B7_validated_build": true,
+    "verified_current_artifact_hashes_match_receipt": true,
+    "artifacts": {
+      "apps/backend/bin/kandev": "0151cadcc416aba226c320641955eda7ae61093bdee3c02cb88d098e8f647caa",
+      "apps/backend/bin/agentctl": "bae6f0327d2b841fcf62b4139444d530b46792d4d71b1215628d6a28e951bc48",
+      "apps/web/dist/index.html": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357",
+      "apps/backend/bin/e2e-delivery-fixture": "d47a5b2c22b0f20aed1185fd93a07753e87abadbd11ce919edc97026020f8ce2"
+    }
+  },
+  "final_source_proof": {
+    "local_head_unchanged": "863769e72e8cf25f0035afafaa75b5f1e66da4be",
+    "own_changed_path": "apps/web/e2e/tests/office/taskless-routine-permission.spec.ts",
+    "no_backend_or_production_source_changes": true,
+    "no_commit_or_push": true,
+    "no_e2e_clean": true,
+    "pr_assets_capture_unset": true,
+    "outputs_used": [
+      "/tmp/usage-history-B12-focused-results",
+      "/tmp/usage-history-B12-permissions-results",
+      "/tmp/usage-history-B12-red-predecessors",
+      "/tmp/usage-history-B12-red-eight-predecessors",
+      "/tmp/usage-history-B12-green-eight-predecessors",
+      "/tmp/usage-history-B12-repeat-predecessors"
+    ],
+    "concurrent_unowned_modified_paths_preserved": [
+      "apps/web/e2e/helpers/usage-history.test.ts",
+      "apps/web/e2e/helpers/usage-history.ts",
+      "apps/web/e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts",
+      "apps/web/e2e/tests/task/subtask.spec.ts"
+    ],
+    "known_limit": "The fix is uncommitted and has no new CI result; parent review and any publication remain outstanding."
+  }
+}

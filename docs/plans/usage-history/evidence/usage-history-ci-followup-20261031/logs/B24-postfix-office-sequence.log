@@ -1,0 +1,30 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium tests/office/agent-skills-ui.spec.ts tests/office/agents.spec.ts tests/office/routine-catch-up-policy-ui.spec.ts tests/office/session-lifecycle.spec.ts
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 16 tests using 1 worker
+
+(node:4157494) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-pzhiHa/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓   1 [chromium] › e2e/tests/office/agent-skills-ui.spec.ts:16:7 › Agent skills tab UI › direct navigation hydrates the skill list (no prior visit to Skills page) (1.2s)
+  ✓   2 [chromium] › e2e/tests/office/agent-skills-ui.spec.ts:41:7 › Agent skills tab UI › system skills carry the System badge alongside the slug (1.1s)
+  ✓   3 [chromium] › e2e/tests/office/agent-skills-ui.spec.ts:53:7 › Agent skills tab UI › toggling a system skill persists across reload (1.9s)
+  ✓   4 [chromium] › e2e/tests/office/agents.spec.ts:5:7 › Agents › onboarded CEO is listed, opens its dashboard and can be renamed (1.4s)
+  ✓   5 [chromium] › e2e/tests/office/agents.spec.ts:38:7 › Agents › worker creation, status transitions and deletion persist (1.0s)
+  ✓   6 [chromium] › e2e/tests/office/agents.spec.ts:95:7 › Agents › paused agent remains reachable from the agents list (1.4s)
+  ✓   7 [chromium] › e2e/tests/office/agents.spec.ts:112:7 › Agents › recovery control returns a paused agent to idle and then disappears (1.1s)
+  ✓   8 [chromium] › e2e/tests/office/agents.spec.ts:139:7 › Agents › recovery control is absent for an idle agent and appears again after a manual stop (1.6s)
+  ✓   9 [chromium] › e2e/tests/office/routine-catch-up-policy-ui.spec.ts:53:7 › Routine catch-up policy UI › create dialog: catch-up policy control visibility toggles live (2.0s)
+  ✓  10 [chromium] › e2e/tests/office/routine-catch-up-policy-ui.spec.ts:89:7 › Routine catch-up policy UI › detail view: catch-up policy control visibility toggles live (1.4s)
+  ✓  11 [chromium] › e2e/tests/office/routine-catch-up-policy-ui.spec.ts:114:7 › Routine catch-up policy UI › API: the deprecated catch-up policy alias is accepted and normalized on read (1.0s)
+  ✓  12 [chromium] › e2e/tests/office/routine-catch-up-policy-ui.spec.ts:138:7 › Routine catch-up policy UI › detail view: seeded non-default catch-up policy renders and Save persists a change (1.9s)
+  ✓  13 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:16:7 › Office task session lifecycle › fire-and-forget: RUNNING lights the spinner, IDLE does not (2.0s)
+  ✓  14 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:82:7 › Office task session lifecycle › multi-agent: assignee + reviewer get separate timeline entries (1.5s)
+  ✓  15 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:151:7 › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state (166ms)
+  ✓  16 [chromium] › e2e/tests/office/session-lifecycle.spec.ts:223:7 › Office task session lifecycle › reviewer removal terminates the reviewer's session (128ms)
+
+  16 passed (23.3s)

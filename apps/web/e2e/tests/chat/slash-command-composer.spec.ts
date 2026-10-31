@@ -5,6 +5,7 @@ import {
   seedAvailableCommands,
   seedConfirmedConfigOptions,
 } from "../../helpers/session-store";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import {
   attachAvailableCommandsCapture,
   attachMessageAddCapture,
@@ -74,6 +75,51 @@ async function createReadyTask(
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+}
+
+async function waitForAgentExecutionId(page: Page, sessionId: string): Promise<string> {
+  let executionId: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        executionId = await getSessionAgentExecutionId(page, sessionId);
+        return executionId;
+      },
+      { message: "Wait for the live agent execution snapshot", timeout: 15_000 },
+    )
+    .not.toBeNull();
+  if (!executionId) throw new Error("The live session has no agent execution ID");
+  return executionId;
+}
+
+async function waitForSessionSubscription(
+  traffic: ReturnType<typeof attachGatewayTrafficCapture>,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        traffic.frames.some(
+          (frame) =>
+            frame.direction === "sent" &&
+            frame.action === "session.subscribe" &&
+            frame.sessionId === sessionId,
+        ),
+      { timeout: 10_000, message: "The task page must subscribe before the agent starts" },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      () =>
+        traffic.frames.some(
+          (frame) =>
+            frame.direction === "received" &&
+            frame.action === "session.subscribe" &&
+            frame.sessionId === sessionId,
+        ),
+      { timeout: 30_000, message: "The task session subscription was not acknowledged" },
+    )
+    .toBe(true);
 }
 
 async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
@@ -181,7 +227,11 @@ test.describe("Slash command composer", () => {
     seedData,
   }) => {
     const availableCommands = attachAvailableCommandsCapture(testPage);
-    const notifications = await routeGatewayNotifications(testPage);
+    // This scenario scripts the provider catalog and configuration itself.
+    const notifications = await routeGatewayNotifications(testPage, [
+      "session.available_commands",
+      "session.models_updated",
+    ]);
     const task = await createReadyTask(apiClient, seedData, "Live Plan Mode Updates");
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
@@ -194,8 +244,7 @@ test.describe("Slash command composer", () => {
       )
       .toBe(true);
     await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
-    const executionId = await getSessionAgentExecutionId(testPage, task.session_id);
-    if (!executionId) throw new Error("The live session has no agent execution ID");
+    const executionId = await waitForAgentExecutionId(testPage, task.session_id);
     const sendModels = (
       value: string,
       executionId: string,
@@ -269,24 +318,48 @@ test.describe("Slash command composer", () => {
     seedData,
   }) => {
     const availableCommands = attachAvailableCommandsCapture(testPage);
-    const notifications = await routeGatewayNotifications(testPage);
-    const task = await createReadyTask(apiClient, seedData, "Startup Plan Mode Snapshot");
-    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
+    // This scenario owns the provider catalog and snapshots. Late mock-agent
+    // notifications must not replace its plan command or confirmed mode.
+    const notifications = await routeGatewayNotifications(testPage, [
+      "session.available_commands",
+      "session.models_updated",
+    ]);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Startup Plan Mode Snapshot",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        start_agent: false,
+      },
+    );
+    const prepared = await apiClient.launchSession({
+      task_id: task.id,
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+      workflow_step_id: seedData.startStepId,
+      prompt: "",
+      intent: "prepare",
+      launch_workspace: true,
+    });
+    const sessionId = prepared.session_id;
+    const traffic = attachGatewayTrafficCapture(testPage);
     const session = await openTaskChat(testPage, task.id);
+    await waitForSessionSubscription(traffic, sessionId);
+    await session.sendMessageViaButton("/e2e:simple-message");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    const previousExecutionId = await waitForAgentExecutionId(testPage, sessionId);
     await expect
       .poll(() =>
-        availableCommands.frames.some(
-          (frame) => frame.sessionId === task.session_id && frame.count > 0,
-        ),
+        availableCommands.frames.some((frame) => frame.sessionId === sessionId && frame.count > 0),
       )
       .toBe(true);
-    await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
-    const previousExecutionId = await getSessionAgentExecutionId(testPage, task.session_id);
-    if (!previousExecutionId) throw new Error("The live session has no agent execution ID");
+    await seedAvailableCommands(testPage, sessionId, [PLAN_COMMAND]);
     const planSnapshot = (executionId: string) => ({
       task_id: task.id,
-      session_id: task.session_id,
+      session_id: sessionId,
       agent_id: seedData.agentProfileId,
       agent_execution_id: executionId,
       current_model_id: "gpt-5.6-sol",
@@ -306,7 +379,7 @@ test.describe("Slash command composer", () => {
 
     notifications.send("session.state_changed", {
       task_id: task.id,
-      session_id: task.session_id,
+      session_id: sessionId,
       old_state: "WAITING_FOR_INPUT",
       new_state: "STARTING",
       updated_at: new Date(Date.now() + 60_000).toISOString(),
@@ -316,7 +389,7 @@ test.describe("Slash command composer", () => {
 
     notifications.send("session.agentctl_starting", {
       task_id: task.id,
-      session_id: task.session_id,
+      session_id: sessionId,
       agent_execution_id: "execution-new",
     });
     await expect(plan).not.toContainText("Active");

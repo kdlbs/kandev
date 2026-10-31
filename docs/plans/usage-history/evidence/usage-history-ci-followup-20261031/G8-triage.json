@@ -1,0 +1,632 @@
+{
+  "audit": "G8 exact-run E2E zero-flake triage",
+  "observedAtUtc": "2026-10-31T05:11:31.987037+00:00",
+  "runId": 41168999159,
+  "attempt": 1,
+  "pullRequest": 3660,
+  "sourceHead": "4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6",
+  "syntheticMerge": "41a8a07b56085a93afb2df246495176bd5208890",
+  "zeroFlakeGate": {
+    "requiredFlakyVerdicts": 0,
+    "observedFlakyVerdicts": 2,
+    "observedUnexpectedVerdicts": 1,
+    "satisfied": false
+  },
+  "retrySummary": {
+    "uniqueTests": 4599,
+    "executed": 4559,
+    "passedFirstAttempt": 4556,
+    "passedAfterRetry": 2,
+    "finalFailed": 1,
+    "timedOut": 0,
+    "skipped": 40,
+    "flaky": 2,
+    "unexpected": 1,
+    "flakeRatePerThousand": 0.44
+  },
+  "rawBlobReportAgreement": {
+    "rawOnlyIds": 0,
+    "summaryOnlyIds": 0,
+    "attemptStatusMismatches": 0,
+    "outcomeMismatches": 0,
+    "descriptorMismatches": 0,
+    "extraRawDescriptors": 0,
+    "rawProjectDescriptorTestIds": 4599,
+    "summaryTestIds": 4599,
+    "rawAttemptsMatchAllSummaryIds": true,
+    "allAttemptStatusesMatch": true,
+    "allOutcomesMatch": true,
+    "allDescriptorsMatch": true,
+    "duplicateProjectDescriptorEmissions": 0,
+    "duplicateProjectDescriptorTestIds": []
+  },
+  "rawAttempts": 4601,
+  "innerReportArchives": 118,
+  "rawAttemptStatusCounts": {
+    "failed": 3,
+    "passed": 4558,
+    "skipped": 40
+  },
+  "priorNineAllPassedAttempt0": true,
+  "priorNine": [
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+      "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+      "foundCurrent": true,
+      "currentTestId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+      "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+      "foundCurrent": true,
+      "currentTestId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588",
+      "key": "chromium::tests/layout/stats-usage-history.spec.ts::layout/stats-usage-history.spec.ts › real first publication and rebuild preserve saved values through a database deadline",
+      "foundCurrent": true,
+      "currentTestId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "67a94427bba3153eec97-c0ddb32b0b4334be6207",
+      "key": "chromium::tests/office/taskless-routine-permission.spec.ts::office/taskless-routine-permission.spec.ts › Office taskless routine permissions › rejects the request when the launched profile does not auto-approve",
+      "foundCurrent": true,
+      "currentTestId": "67a94427bba3153eec97-c0ddb32b0b4334be6207",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "caa386653e4d5920f206-71c3917ef7bc3f13d554",
+      "key": "chromium::tests/task/subtask.spec.ts::task/subtask.spec.ts › Subtask basics › creates a policy branch for a local-executor subtask",
+      "foundCurrent": true,
+      "currentTestId": "caa386653e4d5920f206-71c3917ef7bc3f13d554",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "prior-six",
+      "sourceTestId": "f2b1d27a56205d4f8e3d-c01edec105212a083315",
+      "key": "mobile-chrome::tests/session/mobile-acp-prompt-error-continuity.spec.ts::session/mobile-acp-prompt-error-continuity.spec.ts › phone: visible per-row task actions expose Dismiss turn error",
+      "foundCurrent": true,
+      "currentTestId": "f2b1d27a56205d4f8e3d-c01edec105212a083315",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "G6-flaky-three",
+      "sourceTestId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+      "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts › Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+      "foundCurrent": true,
+      "currentTestId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "G6-flaky-three",
+      "sourceTestId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+      "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode",
+      "foundCurrent": true,
+      "currentTestId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    },
+    {
+      "sourceGroup": "G6-flaky-three",
+      "sourceTestId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "foundCurrent": true,
+      "currentTestId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "testIdUnchanged": true,
+      "rawStatuses": [
+        "passed"
+      ],
+      "rawAttemptCount": 1,
+      "passFirstAttempt": true
+    }
+  ],
+  "cases": [
+    {
+      "testId": "30beb86f460dff9e004a-dfdc4d7a1e26a99989e9",
+      "key": "chromium::tests/chat/quick-chat-cancel-palette.spec.ts::chat/quick-chat-cancel-palette.spec.ts › Quick Chat cancellation palette and composer › cancels Quick Chat and leaves the underlying task turn running",
+      "project": "chromium",
+      "file": "tests/chat/quick-chat-cancel-palette.spec.ts",
+      "title": "chat/quick-chat-cancel-palette.spec.ts › Quick Chat cancellation palette and composer › cancels Quick Chat and leaves the underlying task turn running",
+      "summaryOutcome": "unexpected",
+      "summaryFinalStatus": "failed",
+      "summaryStatuses": [
+        "failed"
+      ],
+      "summaryAttempts": 1,
+      "errorCategory": "timeout",
+      "attempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "48ab667d59907486c014eafcfc3c6f89",
+          "durationMs": 35811,
+          "innerReport": "blob-report-23-13030292559/report-normal-23-1-0.zip",
+          "innerReportSha256": "ac818e9e365dc0fd84bede6042b5b425efa6a97a21b50d91c79e4fd9679160e5",
+          "errors": [
+            "Error: expect(locator).toBeEnabled() failed\n\nLocator: getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\nExpected: enabled\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeEnabled\" with timeout 15000ms\n  - waiting for getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\n"
+          ],
+          "errorDetails": [
+            {
+              "message": "Error: expect(locator).toBeEnabled() failed\n\nLocator: getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\nExpected: enabled\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeEnabled\" with timeout 15000ms\n  - waiting for getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\n",
+              "stack": "Error: expect(locator).toBeEnabled() failed\n\nLocator: getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\nExpected: enabled\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeEnabled\" with timeout 15000ms\n  - waiting for getByRole('dialog', { name: 'Quick Chat' }).getByTestId('submit-message-button')\n\n    at waitForQuickChatDirectInput (/__w/kandev/kandev/apps/web/e2e/tests/chat/quick-chat-helpers.ts:183:61)\n    at /__w/kandev/kandev/apps/web/e2e/tests/chat/quick-chat-cancel-palette.spec.ts:171:5"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "contentType": "image/png",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "48ab667d59907486c014eafcfc3c6f89",
+              "innerReport": "blob-report-23-13030292559/report-normal-23-1-0.zip",
+              "innerReportPath": "resources/c9ef6616f2d18c695ccbeb83ea8d01fe36e761c4.png",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "8b496d703b213d8adea9600247748fd4668cb0404629f0f40ea5edd0bfe8d3ad",
+                  "size": 86020
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/c9ef6616f2d18c695ccbeb83ea8d01fe36e761c4.png",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "8b496d703b213d8adea9600247748fd4668cb0404629f0f40ea5edd0bfe8d3ad",
+              "diagnosticsSize": 86020,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            },
+            {
+              "name": "quick-chat-cancellation-backend.log",
+              "contentType": "text/plain",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "48ab667d59907486c014eafcfc3c6f89",
+              "innerReport": "blob-report-23-13030292559/report-normal-23-1-0.zip",
+              "innerReportPath": "resources/aacb494d6208d62ca259394990e5665fb43aec16.txt",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "0c47fc33cdece083e651714c199d323f2ede6141d74bdbd27ec92c30ac683ec6",
+                  "size": 243098
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/aacb494d6208d62ca259394990e5665fb43aec16.txt",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "0c47fc33cdece083e651714c199d323f2ede6141d74bdbd27ec92c30ac683ec6",
+              "diagnosticsSize": 243098,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            },
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "48ab667d59907486c014eafcfc3c6f89",
+              "innerReport": "blob-report-23-13030292559/report-normal-23-1-0.zip",
+              "innerReportPath": "resources/673397837cc329d149575c9aadf849aab714d48a.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 2,
+              "innerReportCopies": [
+                {
+                  "sha256": "6fceaa795bcdb60f992cf368865204f9fa9f839fd211a988ec4dea577ea1d0fa",
+                  "size": 14032
+                },
+                {
+                  "sha256": "6fceaa795bcdb60f992cf368865204f9fa9f839fd211a988ec4dea577ea1d0fa",
+                  "size": 14032
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/673397837cc329d149575c9aadf849aab714d48a.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "5125c862642e292dbec72496d57f6b819cd106e4e29f2caa464a0bddb52499a3",
+              "diagnosticsSize": 28064,
+              "diagnosticsMatchesOneReportCopy": false,
+              "diagnosticsMatchesRepeatedReportCopies": true
+            },
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "48ab667d59907486c014eafcfc3c6f89",
+              "innerReport": "blob-report-23-13030292559/report-normal-23-1-0.zip",
+              "innerReportPath": "resources/673397837cc329d149575c9aadf849aab714d48a.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 2,
+              "innerReportCopies": [
+                {
+                  "sha256": "6fceaa795bcdb60f992cf368865204f9fa9f839fd211a988ec4dea577ea1d0fa",
+                  "size": 14032
+                },
+                {
+                  "sha256": "6fceaa795bcdb60f992cf368865204f9fa9f839fd211a988ec4dea577ea1d0fa",
+                  "size": 14032
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/673397837cc329d149575c9aadf849aab714d48a.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "5125c862642e292dbec72496d57f6b819cd106e4e29f2caa464a0bddb52499a3",
+              "diagnosticsSize": 28064,
+              "diagnosticsMatchesOneReportCopy": false,
+              "diagnosticsMatchesRepeatedReportCopies": true
+            }
+          ]
+        }
+      ],
+      "summaryAttachments": [
+        {
+          "name": "screenshot",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/c9ef6616f2d18c695ccbeb83ea8d01fe36e761c4.png",
+          "present": true,
+          "sha256": "8b496d703b213d8adea9600247748fd4668cb0404629f0f40ea5edd0bfe8d3ad"
+        },
+        {
+          "name": "quick-chat-cancellation-backend.log",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/aacb494d6208d62ca259394990e5665fb43aec16.txt",
+          "present": true,
+          "sha256": "0c47fc33cdece083e651714c199d323f2ede6141d74bdbd27ec92c30ac683ec6"
+        },
+        {
+          "name": "error-context",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/673397837cc329d149575c9aadf849aab714d48a.markdown",
+          "present": true,
+          "sha256": "5125c862642e292dbec72496d57f6b819cd106e4e29f2caa464a0bddb52499a3"
+        },
+        {
+          "name": "error-context",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/673397837cc329d149575c9aadf849aab714d48a.markdown",
+          "present": true,
+          "sha256": "5125c862642e292dbec72496d57f6b819cd106e4e29f2caa464a0bddb52499a3"
+        }
+      ]
+    },
+    {
+      "testId": "e1a7389f33bf22ce6a57-268d26ea489fb6446658",
+      "key": "chromium::tests/office/session-lifecycle.spec.ts::office/session-lifecycle.spec.ts › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state",
+      "project": "chromium",
+      "file": "tests/office/session-lifecycle.spec.ts",
+      "title": "office/session-lifecycle.spec.ts › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state",
+      "summaryOutcome": "flaky",
+      "summaryFinalStatus": "passed",
+      "summaryStatuses": [
+        "failed",
+        "passed"
+      ],
+      "summaryAttempts": 2,
+      "errorCategory": "none",
+      "attempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "f772db77cf82aef8077f526cc452e581",
+          "durationMs": 194,
+          "innerReport": "blob-report-11-13030402465/report-normal-11-4-0.zip",
+          "innerReportSha256": "6ffe378f0cd3caa5205c0f9c62622b7288a0faf14ba2a3b0d32cf4dc6869c3a0",
+          "errors": [
+            "Error: Office API PATCH /api/v1/office/agents/67ea50f2-7c55-4afb-b9d4-a47096631b67/status failed (400): {\"error\":\"invalid status transition: cannot transition from \\\"stopped\\\" to \\\"paused\\\"\"}"
+          ],
+          "errorDetails": [
+            {
+              "message": "Error: Office API PATCH /api/v1/office/agents/67ea50f2-7c55-4afb-b9d4-a47096631b67/status failed (400): {\"error\":\"invalid status transition: cannot transition from \\\"stopped\\\" to \\\"paused\\\"\"}",
+              "stack": "Error: Office API PATCH /api/v1/office/agents/67ea50f2-7c55-4afb-b9d4-a47096631b67/status failed (400): {\"error\":\"invalid status transition: cannot transition from \\\"stopped\\\" to \\\"paused\\\"\"}\n    at OfficeApiClient.request (/__w/kandev/kandev/apps/web/e2e/helpers/office-api-client.ts:21:13)\n    at OfficeApiClient.updateAgentStatus (/__w/kandev/kandev/apps/web/e2e/helpers/office-api-client.ts:119:17)\n    at /__w/kandev/kandev/apps/web/e2e/tests/office/session-lifecycle.spec.ts:165:5"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "f772db77cf82aef8077f526cc452e581",
+              "innerReport": "blob-report-11-13030402465/report-normal-11-4-0.zip",
+              "innerReportPath": "resources/c864249fb07c9b5f6127264d3994eb09e20abe1e.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "ead9297ed8dae29d10254342725f9ecb80a3e5081e253dedeb64940841a1adf5",
+                  "size": 5916
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/c864249fb07c9b5f6127264d3994eb09e20abe1e.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "ead9297ed8dae29d10254342725f9ecb80a3e5081e253dedeb64940841a1adf5",
+              "diagnosticsSize": 5916,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ]
+        },
+        {
+          "retry": 1,
+          "status": "passed",
+          "resultId": "8b9c1471e35b2b7bb8496b5f80eddd55",
+          "durationMs": 246,
+          "innerReport": "blob-report-11-13030402465/report-normal-11-4-0.zip",
+          "innerReportSha256": "6ffe378f0cd3caa5205c0f9c62622b7288a0faf14ba2a3b0d32cf4dc6869c3a0",
+          "errors": [],
+          "errorDetails": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "contentType": "application/zip",
+              "attemptStatus": "passed",
+              "retry": 1,
+              "resultId": "8b9c1471e35b2b7bb8496b5f80eddd55",
+              "innerReport": "blob-report-11-13030402465/report-normal-11-4-0.zip",
+              "innerReportPath": "resources/dd28c8e7f0ead0f52c752fc7172ad0269e36bebd.zip",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "b2d94e1f4976d2ec465d5e269837fcde7d0897f7b1f5b5fa53ed64aa843b1dab",
+                  "size": 24355
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/dd28c8e7f0ead0f52c752fc7172ad0269e36bebd.zip",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "b2d94e1f4976d2ec465d5e269837fcde7d0897f7b1f5b5fa53ed64aa843b1dab",
+              "diagnosticsSize": 24355,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ]
+        }
+      ],
+      "summaryAttachments": [
+        {
+          "name": "error-context",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/c864249fb07c9b5f6127264d3994eb09e20abe1e.markdown",
+          "present": true,
+          "sha256": "ead9297ed8dae29d10254342725f9ecb80a3e5081e253dedeb64940841a1adf5"
+        },
+        {
+          "name": "trace",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/dd28c8e7f0ead0f52c752fc7172ad0269e36bebd.zip",
+          "present": true,
+          "sha256": "b2d94e1f4976d2ec465d5e269837fcde7d0897f7b1f5b5fa53ed64aa843b1dab"
+        }
+      ]
+    },
+    {
+      "testId": "292602c485b575a74cfc-4c2129fef5badf2ab8cc",
+      "key": "chromium::tests/task/plan-download.spec.ts::task/plan-download.spec.ts › keeps every Plan action reachable at the narrow desktop panel width",
+      "project": "chromium",
+      "file": "tests/task/plan-download.spec.ts",
+      "title": "task/plan-download.spec.ts › keeps every Plan action reachable at the narrow desktop panel width",
+      "summaryOutcome": "flaky",
+      "summaryFinalStatus": "passed",
+      "summaryStatuses": [
+        "failed",
+        "passed"
+      ],
+      "summaryAttempts": 2,
+      "errorCategory": "timeout",
+      "attempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "2d0e3c90b31d01731678c3016d98b2ff",
+          "durationMs": 14689,
+          "innerReport": "blob-report-28-13029999542/report-normal-28-1-0.zip",
+          "innerReportSha256": "50a1a1b523622376a9945cd91496841df9fb1eb559cccb06126c574f8c9d8ddf",
+          "errors": [
+            "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6l_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n"
+          ],
+          "errorDetails": [
+            {
+              "message": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6l_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n",
+              "stack": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6l_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/task/plan-download.spec.ts:80:26"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "contentType": "image/png",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "2d0e3c90b31d01731678c3016d98b2ff",
+              "innerReport": "blob-report-28-13029999542/report-normal-28-1-0.zip",
+              "innerReportPath": "resources/c8f3b8ac332ade8e186dd159fd3f04af7d0092d2.png",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "349a029f502a96b5b150793d072c91190f2dfc81392c4d90f656eb4ba9394260",
+                  "size": 84311
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/c8f3b8ac332ade8e186dd159fd3f04af7d0092d2.png",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "349a029f502a96b5b150793d072c91190f2dfc81392c4d90f656eb4ba9394260",
+              "diagnosticsSize": 84311,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            },
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "2d0e3c90b31d01731678c3016d98b2ff",
+              "innerReport": "blob-report-28-13029999542/report-normal-28-1-0.zip",
+              "innerReportPath": "resources/bacc2e2dacd2850c828dc0b032bcb85531dc10fb.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "8d20b3abdb4205e01c4315271948768c7353f641d9f5be8348a4aa418b2a75da",
+                  "size": 5977
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/bacc2e2dacd2850c828dc0b032bcb85531dc10fb.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "8d20b3abdb4205e01c4315271948768c7353f641d9f5be8348a4aa418b2a75da",
+              "diagnosticsSize": 5977,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ]
+        },
+        {
+          "retry": 1,
+          "status": "passed",
+          "resultId": "a3eb6338ea581926c48ec00888d5897b",
+          "durationMs": 9349,
+          "innerReport": "blob-report-28-13029999542/report-normal-28-1-0.zip",
+          "innerReportSha256": "50a1a1b523622376a9945cd91496841df9fb1eb559cccb06126c574f8c9d8ddf",
+          "errors": [],
+          "errorDetails": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "contentType": "application/zip",
+              "attemptStatus": "passed",
+              "retry": 1,
+              "resultId": "a3eb6338ea581926c48ec00888d5897b",
+              "innerReport": "blob-report-28-13029999542/report-normal-28-1-0.zip",
+              "innerReportPath": "resources/558e7c3f27f258ac18006e15a467356b6539eba4.zip",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "01c8dd078b719136ff35c485f7360a155e94ad661e8697250378f2d1a42e87bc",
+                  "size": 4160784
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/558e7c3f27f258ac18006e15a467356b6539eba4.zip",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "01c8dd078b719136ff35c485f7360a155e94ad661e8697250378f2d1a42e87bc",
+              "diagnosticsSize": 4160784,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ]
+        }
+      ],
+      "summaryAttachments": [
+        {
+          "name": "screenshot",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/c8f3b8ac332ade8e186dd159fd3f04af7d0092d2.png",
+          "present": true,
+          "sha256": "349a029f502a96b5b150793d072c91190f2dfc81392c4d90f656eb4ba9394260"
+        },
+        {
+          "name": "error-context",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/bacc2e2dacd2850c828dc0b032bcb85531dc10fb.markdown",
+          "present": true,
+          "sha256": "8d20b3abdb4205e01c4315271948768c7353f641d9f5be8348a4aa418b2a75da"
+        },
+        {
+          "name": "trace",
+          "artifactName": "e2e-timing-diagnostics",
+          "path": "retry-artifacts/558e7c3f27f258ac18006e15a467356b6539eba4.zip",
+          "present": true,
+          "sha256": "01c8dd078b719136ff35c485f7360a155e94ad661e8697250378f2d1a42e87bc"
+        }
+      ]
+    }
+  ],
+  "quickChatTestResults23Attachments": [
+    {
+      "path": "normal-23-1/chat-quick-chat-cancel-pal-cc9a2-nderlying-task-turn-running-chromium/attachments/quick-chat-cancellation-backend-log-5e210fbabb1e53e695190937ebea492b32103cc4.log",
+      "sha256": "0c47fc33cdece083e651714c199d323f2ede6141d74bdbd27ec92c30ac683ec6",
+      "size": 243098,
+      "matchesInnerReportAttachment": true
+    },
+    {
+      "path": "normal-23-1/chat-quick-chat-cancel-pal-cc9a2-nderlying-task-turn-running-chromium/error-context.md",
+      "sha256": "6fceaa795bcdb60f992cf368865204f9fa9f839fd211a988ec4dea577ea1d0fa",
+      "size": 14032,
+      "matchesInnerReportAttachment": true
+    },
+    {
+      "path": "normal-23-1/chat-quick-chat-cancel-pal-cc9a2-nderlying-task-turn-running-chromium/test-failed-1.png",
+      "sha256": "8b496d703b213d8adea9600247748fd4668cb0404629f0f40ea5edd0bfe8d3ad",
+      "size": 86020,
+      "matchesInnerReportAttachment": true
+    }
+  ],
+  "initialFailedAttemptsHaveTraces": false,
+  "allCaseAttachmentsPresentAndMapped": true,
+  "currentPrChecks": {
+    "passed": 90,
+    "failed": 5,
+    "pending": 0,
+    "rawSkippedRows": 20,
+    "deduplicatedSkippedOnlyNames": 11,
+    "failedNames": [
+      "E2E Tests Passed",
+      "Run Backend Tests",
+      "E2E Shard 23/28",
+      "Backend Tests (2/4)",
+      "Backend (ambient integration env)"
+    ]
+  },
+  "actionableFailure": "QuickChat single-attempt failure: waitForQuickChatDirectInput at quick-chat-helpers.ts:183:61 waited 15s for dialog submit-message-button to be enabled; no element found. The raw test stack points to quick-chat-cancel-palette.spec.ts:171:5. B21 owns the fix.",
+  "limits": [
+    "This packet covers public E2E workflow run 41168999159 attempt 1 at exact PR head 4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6. It is not a full PR-readiness or performance audit.",
+    "The complete PR check response has 5 failed checks, including the QuickChat E2E aggregate/shard and 3 backend checks. The backend failures are outside this audit scope.",
+    "No initial failed attempt has a trace. The Office and plan-download traces belong to passing retries and do not establish the failed-attempt state.",
+    "Screenshots and error-context artifacts were hashed and mapped, not used alone to infer root cause. Error-context may reflect teardown. The attached QuickChat backend log was hash-mapped but its contents were not interpreted.",
+    "The QuickChat error-context attachment is duplicated twice in the inner report and the diagnostics path contains the exact two copies concatenated; the single-copy test-results-23 version matches both raw copies. This is a duplicate representation, not a missing or digest-invalid artifact.",
+    "No source fix or root-cause claim is made. B21 owns the QuickChat fix; C9 and other workers were not touched."
+  ]
+}

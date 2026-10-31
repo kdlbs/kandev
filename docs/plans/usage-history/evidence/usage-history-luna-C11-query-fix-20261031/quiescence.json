@@ -1,0 +1,13 @@
+{
+  "worker": "C11",
+  "status": "quiescent",
+  "checked_utc": "2026-10-31T07:24:51.902577+00:00",
+  "worktree": "/tmp/usage-history-C11-performance-worktree",
+  "negative_focused_race_lint_vet_complete": true,
+  "scoped_heavy_processes": [],
+  "local_heavy_window_released": true,
+  "control_path": "/tmp/usage-history-C11-control.json",
+  "control_reason": "C11 negative control, focused SQLite/PostgreSQL 18.6, race, lint, and vet complete; parent owns fresh C12 normal full gates after integration",
+  "B29_quiescence_receipt": "/tmp/usage-history-luna-B29-quiescence.json",
+  "C12_full_normal_gates": "Parent-owned after integration; not run by C11."
+}

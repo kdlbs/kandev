@@ -2368,9 +2368,10 @@ func copyMetadata(m map[string]any) map[string]any {
 // A turn starts when a user sends a prompt and ends when the agent completes,
 // cancels, or errors.
 type Turn struct {
-	ID            string `json:"id"`
-	TaskSessionID string `json:"session_id"`
-	TaskID        string `json:"task_id"`
+	ID             string `json:"id"`
+	TaskSessionID  string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	UsageBindingID string `json:"-"`
 	// ExecutionProfileID and RouteGeneration are immutable attribution for the
 	// concrete route that started this turn. They are kept alongside the
 	// existing metadata during the compatibility migration so old rows remain
@@ -2591,6 +2592,24 @@ type ActiveSessionRecoveryCandidate struct {
 	ExpectedExecutorID               string
 	ExpectedExecutorAgentExecutionID string
 	ExpectedExecutorUpdatedAt        time.Time
+}
+
+// PluginSessionFilter describes the bounded, cross-task session read used by
+// the plugin Host data API. Implementations should apply the workspace/task,
+// state, identity, and updated-since predicates before pagination so a plugin
+// reconciliation pass does not enumerate every task and session in memory.
+type PluginSessionFilter struct {
+	WorkspaceIDs []string
+	TaskIDs      []string
+	SessionIDs   []string
+	States       []TaskSessionState
+	UpdatedSince *time.Time
+	// ExcludeInternal applies the same config-task and automation-origin
+	// visibility rules as workspace task lists. Explicit task-id reads keep
+	// the legacy Host contract and leave this false.
+	ExcludeInternal bool
+	Limit           int
+	Offset          int
 }
 
 // ToAPI converts internal TaskSession to API type

@@ -655,7 +655,7 @@ func startAgentInfrastructure(
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
 ) bool {
-	restoreCleanups := make([]func() error, 0)
+	restoreCleanups := []func() error{repos.UsageHistoryStop}
 	var databaseQuiesce func() error
 	addRuntimeCleanup := func(fn func() error) func() error {
 		if fn == nil {
@@ -3160,6 +3160,7 @@ func buildHTTPServer(
 		taskRepo:                      repos.Task,
 		officeRepo:                    repos.Office,
 		analyticsRepo:                 repos.Analytics,
+		usageHistoryControl:           repos.usageHistoryControl,
 		orchestratorSvc:               orchestratorSvc,
 		lifecycleMgr:                  lifecycleMgr,
 		loginMgr:                      loginMgr,
