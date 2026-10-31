@@ -1,0 +1,639 @@
+{
+  "ready": true,
+  "status": "completed_for_parent_review",
+  "summary": "All authorized managed E2E flows completed with retries disabled and exact-head evidence preserved.",
+  "progress_json": "/tmp/usage-history-luna-B41-progress.json",
+  "task_id": "task30250a53",
+  "worker": "B41",
+  "repo": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "completed_at_utc": "2026-10-31T11:12:40Z",
+  "authorization_control": "/tmp/usage-history-B38-control.json",
+  "authorized_actions": [
+    "opencode-e2e",
+    "mobile-plan-e2e",
+    "containers-e2e"
+  ],
+  "c12_control_state": {
+    "status": "terminal",
+    "quiescent": true,
+    "runner_pid": 279535,
+    "runner_pgid": 279535
+  },
+  "port_correction": {
+    "offset": 22,
+    "correction_contract": "/tmp/usage-history-B40-parent-port-correction.json",
+    "status": "used without alteration"
+  },
+  "source_artifact_asset_hashes": {
+    "sources": {
+      "before_sha256": {
+        "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+        "apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+        "apps/web/e2e/tests/git/turn-changed-files-helpers.ts": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+        "apps/web/e2e/tests/task/mobile-plan-download.spec.ts": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+        "apps/web/lib/state/slices/session/session-slice.ts": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+        "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5"
+      },
+      "after_sha256": {
+        "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+        "apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+        "apps/web/e2e/tests/git/turn-changed-files-helpers.ts": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+        "apps/web/e2e/tests/task/mobile-plan-download.spec.ts": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+        "apps/web/lib/state/slices/session/session-slice.ts": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+        "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5"
+      },
+      "unchanged": true
+    },
+    "pinned_backend_artifacts": {
+      "before_manifest_sha256": {
+        "apps/backend/bin/kandev": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+        "apps/backend/bin/mock-agent": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+        "apps/backend/bin/e2e-delivery-fixture": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+        "apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+        "apps/backend/.build/e2e-plugin-identity.json": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d"
+      },
+      "after_sha256": {
+        "apps/backend/bin/kandev": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+        "apps/backend/bin/mock-agent": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+        "apps/backend/bin/e2e-delivery-fixture": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+        "apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+        "apps/backend/.build/e2e-plugin-identity.json": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d"
+      },
+      "unchanged": true
+    },
+    "web_dist_index": {
+      "path": "apps/web/dist/index.html",
+      "sha256_before_e2e": "8c3d95c23893c5e51851e15cd94fef1884c2575eba1e53347d63e5141b36836e",
+      "sha256_after_e2e": "8c3d95c23893c5e51851e15cd94fef1884c2575eba1e53347d63e5141b36836e",
+      "unchanged_during_e2e": true,
+      "pre_B31_stale_sha256": "2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357"
+    },
+    "container_helper_build_outputs_after": {
+      "apps/backend/bin/agentctl-linux-amd64": "ccbdfe1e49922a3b9dc2e4908aeec0a411335641ce0ed99058ec0592d854cd64",
+      "apps/backend/bin/mock-agent-linux-amd64": "d6287e8700d507029f1d39218260b61ae2786ad11bc20d39d1f5b745ccf89745"
+    },
+    "pr_assets": {
+      "before": {
+        "root": "/tmp/usage-history-luna-B21-ci/assets-before",
+        "count": 9,
+        "tree_sha256_path_nul_digest_newline": "0e4e531f5398e2532f220b641c5150af3d3677debb936beea7f82aa792b10b06",
+        "files": [
+          {
+            "path": "manifest.json",
+            "sha256": "0e493d8e8e72549afd4eb390bee8ada314d08fe721532067529a0c3a33b383ce"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-collector--real-collector-archived-details.png",
+            "sha256": "69969087ef726650929564b18bd6dff87aef56a70d96d30b56372e55486fa157"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-collector--real-collector-deleted-details.png",
+            "sha256": "3f6d968dc6f4c71e7d020f3aadae14198126bf727bfb96aaf14056d134a7884a"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-native--real-native-retained-unavailable-session-details.png",
+            "sha256": "a61835e2adc19c17fd14e494639d9db2f8f3513c13393508f21b14524018a7a6"
+          },
+          {
+            "path": "plugin-session-cost-action-desktop.png",
+            "sha256": "3df1a4c8623b5e4e3f4a8459d8862588deb7347acb1bb2de9067e9f06c55289b"
+          },
+          {
+            "path": "plugin-session-cost-action-phone.png",
+            "sha256": "e97be4ebf5d96aafa349b460a2079f39948a4beeb66311b81dce220984e601c7"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-collector--real-collector-archived-details.png",
+            "sha256": "e7fc3cc2b3554272dafd37bb74db0ce3a8ea4b0cd19ba1488c3c3b758ff39efa"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-collector--real-collector-deleted-details.png",
+            "sha256": "6cb6610374ff49fd0f43f5e4834b17b659cce94b9818c45e9f9a1008d3f85800"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-native--real-native-retained-unavailable-session-details.png",
+            "sha256": "714080fa44b00462f5d14543768acf2d77c2da7c5f2adeacb1ed63b6b176f290"
+          }
+        ]
+      },
+      "after": {
+        "root": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web/.pr-assets",
+        "count": 9,
+        "tree_sha256_path_nul_digest_newline": "0e4e531f5398e2532f220b641c5150af3d3677debb936beea7f82aa792b10b06",
+        "files": [
+          {
+            "path": "manifest.json",
+            "sha256": "0e493d8e8e72549afd4eb390bee8ada314d08fe721532067529a0c3a33b383ce"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-collector--real-collector-archived-details.png",
+            "sha256": "69969087ef726650929564b18bd6dff87aef56a70d96d30b56372e55486fa157"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-collector--real-collector-deleted-details.png",
+            "sha256": "3f6d968dc6f4c71e7d020f3aadae14198126bf727bfb96aaf14056d134a7884a"
+          },
+          {
+            "path": "mobile-stats-usage-history-phone-real-native--real-native-retained-unavailable-session-details.png",
+            "sha256": "a61835e2adc19c17fd14e494639d9db2f8f3513c13393508f21b14524018a7a6"
+          },
+          {
+            "path": "plugin-session-cost-action-desktop.png",
+            "sha256": "3df1a4c8623b5e4e3f4a8459d8862588deb7347acb1bb2de9067e9f06c55289b"
+          },
+          {
+            "path": "plugin-session-cost-action-phone.png",
+            "sha256": "e97be4ebf5d96aafa349b460a2079f39948a4beeb66311b81dce220984e601c7"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-collector--real-collector-archived-details.png",
+            "sha256": "e7fc3cc2b3554272dafd37bb74db0ce3a8ea4b0cd19ba1488c3c3b758ff39efa"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-collector--real-collector-deleted-details.png",
+            "sha256": "6cb6610374ff49fd0f43f5e4834b17b659cce94b9818c45e9f9a1008d3f85800"
+          },
+          {
+            "path": "stats-usage-history-desktop-real-native--real-native-retained-unavailable-session-details.png",
+            "sha256": "714080fa44b00462f5d14543768acf2d77c2da7c5f2adeacb1ed63b6b176f290"
+          }
+        ]
+      },
+      "unchanged": true
+    }
+  },
+  "flows": [
+    {
+      "action": "opencode-e2e",
+      "script": "/tmp/usage-history-luna-B38-prepared/run-opencode-e2e.sh",
+      "script_sha256": "7de598e9f75fc24fe967477eef738cf5ad3bc7a40f25b4e8481163ac01777d2f",
+      "script_exit_code": 0,
+      "runner": {
+        "mode": "host",
+        "project": "chromium",
+        "shards": 1,
+        "workers": 1,
+        "strict_freshness": true,
+        "build": false,
+        "port_offset": 22,
+        "retries": 0
+      },
+      "commands": [
+        {
+          "sequence": 1,
+          "specs": [
+            "tests/session/opencode-capacity-retry.spec.ts"
+          ],
+          "grep_title": "desktop preserves the episode when the OpenCode continuation fails without new tools",
+          "repeat_each": 10,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 10,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-repeat10.log",
+            "bytes": 4904,
+            "sha256": "d2a23cdbdc83dca96ae021d3ff90af6e88f2a59f11c6a2fbd9aa98f46a4178f4",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 10 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "10 passed (1.7m)"
+            ],
+            "expected_passed": 10
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-repeat10-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:71:5",
+              "title": "desktop preserves the episode when the OpenCode continuation fails without new tools",
+              "executions": 10
+            }
+          ],
+          "observed_case_execution_count": 10,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-repeat10.log"
+        },
+        {
+          "sequence": 2,
+          "specs": [
+            "tests/session/opencode-capacity-retry.spec.ts"
+          ],
+          "repeat_each": 1,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 5,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-fullfile.log",
+            "bytes": 1573,
+            "sha256": "d8190b02c9f4e0b678fabf98f1f56358d700404852f5ec1f9b004911fc61dad1",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 5 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "5 passed (33.9s)"
+            ],
+            "expected_passed": 5
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-fullfile-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:124:5",
+              "title": "desktop cancels OpenCode capacity recovery and prevents the old timer from dispatching",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:161:5",
+              "title": "desktop keeps mixed completed and pending OpenCode work manual",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:187:5",
+              "title": "desktop expires OpenCode capacity recovery without another dispatch",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:22:5",
+              "title": "desktop continues after the fifth OpenCode admission refusal on the same runtime",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:71:5",
+              "title": "desktop preserves the episode when the OpenCode continuation fails without new tools",
+              "executions": 1
+            }
+          ],
+          "observed_case_execution_count": 5,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-fullfile.log"
+        },
+        {
+          "sequence": 3,
+          "specs": [
+            "tests/session/new-session-advanced-settings.spec.ts",
+            "tests/session/opencode-capacity-retry.spec.ts",
+            "tests/settings/executor-profile-card-keyboard.spec.ts"
+          ],
+          "repeat_each": 1,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 14,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-ordered-three.log",
+            "bytes": 3322,
+            "sha256": "7f401260ffa95b766114c77723e6e147e107cc6aa3ad0e7dfef253b84d114793",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 14 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "14 passed (1.5m)"
+            ],
+            "expected_passed": 14
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-ordered-three-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/session/new-session-advanced-settings.spec.ts:125:7 \u203a New session Advanced settings",
+              "title": "cancel and reopen resets choices and disclosure; loading and empty stay in the picker",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/new-session-advanced-settings.spec.ts:168:7 \u203a New session Advanced settings",
+              "title": "uses phone sizing and a sheet at a narrow fine-pointer width",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/new-session-advanced-settings.spec.ts:17:7 \u203a New session Advanced settings",
+              "title": "preserves the handoff profile and explicit blank context",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/new-session-advanced-settings.spec.ts:187:9 \u203a New session Advanced settings \u203a coarse tablet",
+              "title": "keeps selections in a touch sheet",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/new-session-advanced-settings.spec.ts:28:7 \u203a New session Advanced settings",
+              "title": "preserves the draft and submits only explicit additions through a bounded keyboard picker",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:124:5",
+              "title": "desktop cancels OpenCode capacity recovery and prevents the old timer from dispatching",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:161:5",
+              "title": "desktop keeps mixed completed and pending OpenCode work manual",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:187:5",
+              "title": "desktop expires OpenCode capacity recovery without another dispatch",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:22:5",
+              "title": "desktop continues after the fifth OpenCode admission refusal on the same runtime",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/session/opencode-capacity-retry.spec.ts:71:5",
+              "title": "desktop preserves the episode when the OpenCode continuation fails without new tools",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/settings/executor-profile-card-keyboard.spec.ts:141:5",
+              "title": "old chevron and row padding open without deleting a profile",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/settings/executor-profile-card-keyboard.spec.ts:14:7",
+              "title": "opens an existing provider profile with Tab and Enter",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/settings/executor-profile-card-keyboard.spec.ts:14:7",
+              "title": "opens an existing provider profile with Tab and Space",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/settings/executor-profile-card-keyboard.spec.ts:82:5",
+              "title": "pointer opens the selected profile and delete stays on the hub",
+              "executions": 1
+            }
+          ],
+          "observed_case_execution_count": 14,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-ordered-three.log"
+        }
+      ]
+    },
+    {
+      "action": "mobile-plan-e2e",
+      "script": "/tmp/usage-history-luna-B38-prepared/run-mobile-plan-e2e.sh",
+      "script_sha256": "2b1f5a70fe8cdf333f16667f605516d8556cb164f2beca882b57d73bfdb7f7f4",
+      "script_exit_code": 0,
+      "runner": {
+        "mode": "host",
+        "project": "mobile-chrome",
+        "shards": 1,
+        "workers": 1,
+        "strict_freshness": true,
+        "build": false,
+        "port_offset": 22,
+        "retries": 0
+      },
+      "commands": [
+        {
+          "sequence": 1,
+          "specs": [
+            "tests/task/mobile-plan-download.spec.ts"
+          ],
+          "grep_title": "keeps the download control touch-sized on a coarse-pointer workbench",
+          "repeat_each": 10,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 10,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-repeat10.log",
+            "bytes": 4728,
+            "sha256": "60e9a486c99d399e7442fb6fa0ab0bcc871a72320941325410bca5826ac6b880",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 10 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "10 passed (1.2m)"
+            ],
+            "expected_passed": 10
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-repeat10-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/task/mobile-plan-download.spec.ts:21:5",
+              "title": "keeps the download control touch-sized on a coarse-pointer workbench",
+              "executions": 10
+            }
+          ],
+          "observed_case_execution_count": 10,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-repeat10.log"
+        },
+        {
+          "sequence": 2,
+          "specs": [
+            "tests/task/mobile-plan-download.spec.ts"
+          ],
+          "repeat_each": 1,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 2,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-fullfile.log",
+            "bytes": 1036,
+            "sha256": "5be11dc5f06bd3cefcacafe46bc431442d8c3aafe028a9268daa49da9189ad4c",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 2 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "2 passed (10.2s)"
+            ],
+            "expected_passed": 2
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-fullfile-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/task/mobile-plan-download.spec.ts:21:5",
+              "title": "keeps the download control touch-sized on a coarse-pointer workbench",
+              "executions": 1
+            },
+            {
+              "location": "e2e/tests/task/mobile-plan-download.spec.ts:6:5",
+              "title": "downloads the current Plan draft on a phone",
+              "executions": 1
+            }
+          ],
+          "observed_case_execution_count": 2,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/mobile-plan-e2e-20261031T110416Z-614059/mobile-plan-fullfile.log"
+        }
+      ]
+    },
+    {
+      "action": "containers-e2e",
+      "script": "/tmp/usage-history-luna-B38-prepared/run-containers-e2e.sh",
+      "script_sha256": "0b875ea49e804d784099406ca9aa261031339c404df45a31919b52b4f37a7720",
+      "script_exit_code": 0,
+      "runner": {
+        "mode": "host",
+        "project": "containers",
+        "shards": 1,
+        "workers": 1,
+        "strict_freshness": true,
+        "build": false,
+        "port_offset": 22,
+        "retries": 0
+      },
+      "helper_build": {
+        "command": "make -C apps/backend GO=/root/.local/share/mise/installs/go/1.26.0/bin/go build-agentctl-linux build-mock-agent-linux",
+        "exit_code": 0,
+        "evidence": {
+          "path": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/container-helper-build.log",
+          "bytes": 1017,
+          "sha256": "d0eec80e958e4b3607e6d9d525a3f762dad863f8134e45b437d000871ade42ba",
+          "complete_tee_capture": true,
+          "running_summaries": [],
+          "pass_summaries": [],
+          "expected_passed": null,
+          "success_markers": [
+            "Building agentctl for linux/amd64",
+            "Building mock-agent for linux/amd64"
+          ],
+          "exit_code": 0
+        },
+        "outputs": {
+          "apps/backend/bin/agentctl-linux-amd64": "ccbdfe1e49922a3b9dc2e4908aeec0a411335641ce0ed99058ec0592d854cd64",
+          "apps/backend/bin/mock-agent-linux-amd64": "d6287e8700d507029f1d39218260b61ae2786ad11bc20d39d1f5b745ccf89745"
+        }
+      },
+      "commands": [
+        {
+          "sequence": 1,
+          "specs": [
+            "tests/git/turn-changed-files-executors.spec.ts"
+          ],
+          "grep_title": "keeps exported turn content after container removal and backend restart",
+          "repeat_each": 10,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 10,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-repeat10.log",
+            "bytes": 5890,
+            "sha256": "baf457083df5afd0151111963a1de29bc7d831f27195d11e8f992880baf786d9",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 10 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "10 passed (3.8m)"
+            ],
+            "expected_passed": 10
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-repeat10-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 \u203a Docker executor turn change retention",
+              "title": "keeps exported turn content after container removal and backend restart",
+              "executions": 10
+            }
+          ],
+          "observed_case_execution_count": 10,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-repeat10.log"
+        },
+        {
+          "sequence": 2,
+          "specs": [
+            "tests/git/turn-changed-files-executors.spec.ts"
+          ],
+          "repeat_each": 1,
+          "retries": 0,
+          "exit_code": 0,
+          "passed": 1,
+          "evidence": {
+            "path": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-fullfile.log",
+            "bytes": 1018,
+            "sha256": "b8baac82ca4717b82eac993fab33e8e19f19a7265001cae8d06580d7cda5aaf2",
+            "complete_tee_capture": true,
+            "running_summaries": [
+              "Running 1 test(s) using 1 worker(s)"
+            ],
+            "pass_summaries": [
+              "1 passed (39.7s)"
+            ],
+            "expected_passed": 1
+          },
+          "playwright_output_dir": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-fullfile-results",
+          "playwright_output_dir_exists": true,
+          "observed_cases": [
+            {
+              "location": "e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 \u203a Docker executor turn change retention",
+              "title": "keeps exported turn content after container removal and backend restart",
+              "executions": 1
+            }
+          ],
+          "observed_case_execution_count": 1,
+          "case_catalog_source": "/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-fullfile.log"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "e2e_invocations": 7,
+    "container_helper_build_invocations": 1,
+    "passed_test_executions": 52,
+    "failed": 0,
+    "skipped": 0,
+    "retries": 0,
+    "flow_script_exits": {
+      "opencode-e2e": 0,
+      "mobile-plan-e2e": 0,
+      "containers-e2e": 0
+    }
+  },
+  "worktree": {
+    "tracked_diff_paths": [
+      "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go",
+      "apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+      "apps/web/e2e/tests/git/turn-changed-files-helpers.ts",
+      "apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+      "apps/web/lib/state/slices/session/session-slice.ts",
+      "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts"
+    ],
+    "matches_reviewed_six_path_frame": true,
+    "staged_paths": [],
+    "pluginsdk_unchanged": true,
+    "git_status_short_after": [
+      " M apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go",
+      " M apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+      " M apps/web/e2e/tests/git/turn-changed-files-helpers.ts",
+      " M apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+      " M apps/web/lib/state/slices/session/session-slice.ts",
+      " M apps/web/lib/state/slices/session/session-slice.update-messages.test.ts",
+      "?? docs/plans/usage-history/evidence/usage-history-ci-followup-20261031/run-41181339261/",
+      "?? docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/"
+    ]
+  },
+  "post_run_runtime": {
+    "e2e_processes_remaining": [],
+    "docker_running_containers_after": [
+      {
+        "id": "23f7d786955d",
+        "name": "usage-history-ci3660-pg16",
+        "status": "Up 11 hours (healthy)",
+        "image": "ghcr.io/kdlbs/kandev-ci:postgres-16"
+      },
+      {
+        "id": "e236744c57fa",
+        "name": "usage-history-pr3660-postgres",
+        "status": "Up 21 hours",
+        "image": "postgres:18"
+      }
+    ],
+    "same_two_preexisting_running_containers": true,
+    "shared_containers_touched": false
+  },
+  "runtime_notes": {
+    "environment_status_connector_available": false,
+    "network_policy_snapshots_present": false,
+    "docker_local_socket_healthy": true,
+    "no_external_network_policy_change": true
+  },
+  "exact_cases_verified_from_raw_logs": true
+}

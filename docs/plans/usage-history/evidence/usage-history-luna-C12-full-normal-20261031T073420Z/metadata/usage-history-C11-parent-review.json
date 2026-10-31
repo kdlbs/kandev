@@ -1,0 +1,50 @@
+{
+  "reviewed_at": "2026-10-31T07:26:31.910903+00:00",
+  "worker_receipt": "/tmp/usage-history-luna-C11-focused-ready.json",
+  "worker_receipt_sha256": "9c5ee214372447824d9955295c2f84ea1b98508facec1a8bbc21455e99a7645d",
+  "patch": {
+    "path": "/tmp/usage-history-luna-C11-final.diff",
+    "sha256": "6424822d7b55e23b9cf7d2f1c87c72a37af57155c61d4fa33730dd31539b59fa",
+    "bytes": 7912
+  },
+  "two_owned_source_hashes_match": true,
+  "protected_benchmark_files_unchanged": 17,
+  "negative_control": "OldproductionSQLfailsnewguardwith4419unboundedpointvisits;newSQLpassesonunchangedfixture",
+  "source_review": "Calendarstart/endclippingandhalfopenboundsmatchremovedGoedgecalculation. Materializededge-daysdrivetime-boundedpointindexprobes. Noidentity/provider/currency/coveragechanges.",
+  "logs_independently_hashed_and_checked": {
+    "negative_control": {
+      "path": "/tmp/usage-history-luna-C11-negative-control.log",
+      "sha256": "44a33a34f85ce0e0078cc4838ebcfb2ce8950c2dbef12248e4326128bf8fbe10",
+      "bytes": 3715,
+      "passed_test_and_subtest_count": 0
+    },
+    "focused": {
+      "path": "/tmp/usage-history-luna-C11-focused.log",
+      "sha256": "57178c8ae183e7abde26e6ca39fe8b38c8f80508bbe1f3673152251755c1f8e2",
+      "bytes": 28362,
+      "passed_test_and_subtest_count": 48
+    },
+    "race": {
+      "path": "/tmp/usage-history-luna-C11-race.log",
+      "sha256": "33e0799bc12537f0de52889bdc2b8edbfcedd71289280dfd16e6fb0034cf385d",
+      "bytes": 6767,
+      "passed_test_and_subtest_count": 29
+    },
+    "lint": {
+      "path": "/tmp/usage-history-luna-C11-lint.log",
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "bytes": 10,
+      "passed_test_and_subtest_count": 0
+    },
+    "vet": {
+      "path": "/tmp/usage-history-luna-C11-vet-confirmed.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "passed_test_and_subtest_count": 0
+    }
+  },
+  "actual_PostgreSQL": "18.6; focusedandracefunctionsranwithoutskips",
+  "vet": "workerconfirmedexplicitexit0; emptyloghashmatches",
+  "full_normal_gate": "Notpassed;bothfreshunchangedenginegatesstillrequired",
+  "integration": "Appliedto primary afterB29complete; sourceexactlymatchesfocusedworktree"
+}

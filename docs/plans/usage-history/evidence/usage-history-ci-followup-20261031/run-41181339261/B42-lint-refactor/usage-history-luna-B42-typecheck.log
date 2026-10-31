@@ -1,0 +1,37 @@
+
+> @kandev/web@0.1.0 pretypecheck /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs
+
+[release-notes] extracted notes for v0.98.0
+[changelog] parsed 118 version entries
+
+> @kandev/web@0.1.0 typecheck /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> pnpm run rich-output:check && tsc --noEmit
+
+
+> @kandev/web@0.1.0 rich-output:check /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> tsx scripts/generate-rich-output-catalog.ts --check
+
+
+<--- Last few GCs --->
+
+[720778:0x41a2d000]    11398 ms: Mark-Compact 2032.2 (2052.8) -> 2030.7 (2056.3) MB, pooled: 0 MB, 437.41 / 0.00 ms  (average mu = 0.320, current mu = 0.144) allocation failure; scavenge might not succeed
+[720778:0x41a2d000]    12322 ms: Mark-Compact 2034.6 (2056.3) -> 2032.5 (2065.3) MB, pooled: 0 MB, 727.92 / 0.00 ms  (average mu = 0.255, current mu = 0.213) background allocation failure; GC in old space requested
+
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x744ae8 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 2: 0xc1a4b0  [node]
+ 3: 0xc1a59f  [node]
+ 4: 0xebdda5  [node]
+ 5: 0xecf70c  [node]
+ 6: 0xea4ea4  [node]
+ 7: 0xe79d14  [node]
+ 8: 0xe610e5  [node]
+ 9: 0x121038e  [node]
+10: 0x12128d2  [node]
+11: 0x13667f5  [node]
+12: 0x7941c3df69b6 
+Aborted
+ ELIFECYCLE  Command failed with exit code 134.

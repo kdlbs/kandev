@@ -1,0 +1,196 @@
+{
+  "worker": "C12",
+  "prepared_at_utc": "2026-10-31T07:34:57.158656+00:00",
+  "repo": "/tmp/usage-history-C12-benchmark-worktree",
+  "expected_head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "worktree_clean_before_run": true,
+  "benchmark_files_unchanged_from_1ce8d0b": true,
+  "runner": "/tmp/usage-history-C12-run-full-normal-gates.sh",
+  "runner_sha256": "cfbf2f38a6ebc2ffd22848354b03e8929f019000f18cadc59b2a4ba0eb8de1ad",
+  "runner_bytes": 6131,
+  "runner_diff": "/tmp/usage-history-C12-runner.diff",
+  "runner_diff_sha256": "bb74f49ad3960bb8e66d8a91f57ecd8cee8f58d5abdde4896b300c9dccae0e5b",
+  "runner_diff_bytes": 1306,
+  "runner_body_identical_to_C10_outside_five_header_values": true,
+  "runner_syntax_check": "passed with bash -n",
+  "gate_started": true,
+  "release_control_allow_run": false,
+  "release_control_updated_at": "2026-10-31T07:33:57.849268+00:00",
+  "release_control_reason": "Parentcoordinatedbuild76405stillactive; needbuildsuccessandpushpublicsourceee5",
+  "status": "terminal_postgres_gate_failed",
+  "execution_session_id": 48490,
+  "started_at_utc": "2026-10-31T07:38:41Z",
+  "runner_invoked": "bash /tmp/usage-history-C12-run-full-normal-gates.sh",
+  "sqlite_command": "go test -p 1 -trimpath -tags sqlite_trace usage_history_scanstatus ./internal/analytics/repository/sqlite -run ^$ -bench ^BenchmarkUsageHistoryFiveYears$ -benchtime=10x -benchmem -count=1 -timeout=0",
+  "postgres_command": "go test -p 1 -trimpath -tags sqlite_trace usage_history_scanstatus ./internal/analytics/repository/sqlite -run ^$ -bench ^BenchmarkUsageHistoryPostgresFiveYears$ -benchtime=10x -benchmem -count=1 -timeout=0",
+  "sqlite_gate": "passed",
+  "postgres_gate": "failed; partial full-scale benchmark results captured",
+  "secrets_printed": false,
+  "live_control_snapshot": {
+    "allow_run": true,
+    "updated_at": "2026-10-31T07:38:41.462719+00:00",
+    "reason": "Normalhooks/build/pushpassed; freshPRheadmatches; noapprovalgate; nootherlocalheavyjobs"
+  },
+  "prepared_control_snapshot": {
+    "allow_run": false,
+    "reason": "Parentcoordinatedbuild76405stillactive; needbuildsuccessandpushpublicsourceee5",
+    "updated_at": "2026-10-31T07:33:57.849268+00:00"
+  },
+  "progress_checked_at_utc": "2026-10-31T10:41:48.060612+00:00",
+  "sqlite_log_exists": true,
+  "sqlite_log_bytes": 28919,
+  "current_engine": "postgres",
+  "elapsed_seconds": 10987,
+  "sqlite_benchmark_subtest_lines_seen": 8,
+  "sqlite_scenario_json_files_written_so_far": 29,
+  "sqlite_one_year_phase_lines_seen": 15,
+  "sqlite_full_five_year_phase_lines_seen": 4,
+  "sqlite_last_benchmark_line": "BenchmarkUsageHistoryFiveYears/five_years/foreign_coarse-2                \t      10\t   6522786 ns/op\t      1978 nvisit/report\t      7352 p95-us/report\t  43900928 query-process-peak-rss-B\t        10.00 samples\t   3911656 sqlite-native-peak-B\t 2103052 B/op\t   18577 allocs/op",
+  "sqlite_benchmark_subtests_completed": 19,
+  "sqlite_one_year_fixture_subtests_completed": 16,
+  "sqlite_five_years_fixture_subtests_completed": 3,
+  "sqlite_benchmark_subtest_summary_lines_seen": 28,
+  "sqlite_one_year_fixture_subtests_seen": 16,
+  "sqlite_five_years_fixture_subtests_seen": 12,
+  "sqlite_current_subtest_line": "BenchmarkUsageHistoryFiveYears/five_years/deleted_task-2                  \t",
+  "sqlite_exit_observed": true,
+  "sqlite_validation": "32 ten-sample scenario receipts plus 1 recent-before-after comparison verified by reviewed runner",
+  "postgres_log_exists": true,
+  "postgres_log_bytes": 465659,
+  "postgres_started_after_sqlite_validation": true,
+  "postgres_scenario_json_files_written_so_far": 28,
+  "postgres_summary_lines_seen": 28,
+  "postgres_five_year_fixture_summary_lines_seen": 16,
+  "postgres_active_subtest_token": null,
+  "postgres_full_five_year_timed_query_started": true,
+  "postgres_phase_assessment": "timed phase completed 12/16 full five-year scenario summaries; four five-year subtests failed with analytics busy: timeout: context deadline exceeded; runner terminal exit 1",
+  "live_control_allow_light_node": false,
+  "parent_light_node_window": "closed",
+  "parent_reported_light_node_runtime_seconds": 4,
+  "parent_reported_expected_old_store_regression_failed_and_was_skipped": "1 fail / 9 skips in 2.124s",
+  "parent_reported_patched_fullfile": "10/10 pass in 1.839s",
+  "c12_started_light_node_work": false,
+  "c12_runner_untouched": true,
+  "b35_started_by_c12": false,
+  "b35_result": "4 files, 90 tests passed, 0 skipped/failed, 3.6s; parent reported quiescent",
+  "b36_preflight": "released bounded window; PG timed query not started; tracked source clean; only expected evidence is untracked; target TestUsageHistoryBenchmarkFixture identified",
+  "b36_go_started": false,
+  "b36_normal_command": "running",
+  "b36_normal_session_id": 34230,
+  "b36_normal_deadline_seconds": 30,
+  "b36_test": "TestUsageHistoryBenchmarkFixture",
+  "b36_normal_count": 25,
+  "b36_normal_command_cap": "timeout 30s",
+  "b36_race_command": "pending",
+  "c12_benchmark_session_id": 48490,
+  "b36_window": "closed",
+  "c12_b36_normal_attempt": "one local attempt exited 1 from internal 25s test timeout; not an official B36 result",
+  "c12_b36_race_attempt": "not launched",
+  "b36_official_result": "parent reports exact case 25/25 passed in 12.1s; race hit 30s cap and was aborted, outcome not claimed",
+  "no_further_go_work": true,
+  "last_update_utc": "2026-10-31T10:46:54.168957+00:00",
+  "bounded_pg_diagnostic": {
+    "started_at_utc": "2026-10-31T10:11:53Z",
+    "pg_stat_activity_attempt": "not_run",
+    "psql_exit_code": 127,
+    "stderr": "withheld; no DSN or credentials printed",
+    "query_text_or_credentials_selected": false,
+    "process_sample_window_seconds": 5,
+    "gate_processes": [
+      {
+        "comm": "go",
+        "pid": 387232,
+        "state_before": "Sl",
+        "state_after": "Sl",
+        "cpu_before_seconds": 0.0,
+        "cpu_after_seconds": 0.0,
+        "cpu_delta_seconds": 0.0
+      },
+      {
+        "comm": "sqlite.test",
+        "pid": 387342,
+        "state_before": "Sl",
+        "state_after": "Sl",
+        "cpu_before_seconds": 1764.0,
+        "cpu_after_seconds": 1765.0,
+        "cpu_delta_seconds": 1.0
+      }
+    ],
+    "interpretation": "gate test process remained alive and consumed CPU during the sample; this does not prove database row-growth progress",
+    "observers_remaining": 0
+  },
+  "runner_exit_code": 1,
+  "quiescent": true,
+  "quiescent_at_utc": "2026-10-31T10:41:48.060612+00:00",
+  "postgres_test_duration_seconds": 6860.831,
+  "postgres_log": "/tmp/usage-history-luna-C12-full-normal-20261031T073420Z/postgres.log",
+  "postgres_terminal_summary": "FAIL; exit status 1; package test duration 6860.831s",
+  "latest_parent_liveness_diagnostic": {
+    "receipt": "/tmp/usage-history-C12-parent-PG-liveness.json",
+    "observed_at_utc": "2026-10-31T10:13:36Z",
+    "method": "one read-only pg_stat_activity query in existing usage-history-pr3660-postgres container",
+    "row_count": 1,
+    "state": "idle in transaction",
+    "wait_event_type": null,
+    "query_start": "2026-10-31T10:13:36.448161+00:00",
+    "xact_start": "2026-10-31T10:13:36.432165+00:00",
+    "elapsed_seconds": 0.068,
+    "query_text_or_credentials_selected": false,
+    "interpretation": "fresh timestamps support activity but do not prove row growth"
+  },
+  "postgres_failed_subtests": [
+    {
+      "subtest": "BenchmarkUsageHistoryPostgresFiveYears/five_years/five_years/America/New_York",
+      "error": "analytics busy: timeout: context deadline exceeded"
+    },
+    {
+      "subtest": "BenchmarkUsageHistoryPostgresFiveYears/five_years/five_years/Asia/Kathmandu",
+      "error": "analytics busy: timeout: context deadline exceeded"
+    },
+    {
+      "subtest": "BenchmarkUsageHistoryPostgresFiveYears/five_years/five_years/Europe/Lisbon",
+      "error": "analytics busy: timeout: context deadline exceeded"
+    },
+    {
+      "subtest": "BenchmarkUsageHistoryPostgresFiveYears/five_years/deleted_task",
+      "error": "analytics busy: timeout: context deadline exceeded"
+    }
+  ],
+  "postgres_fixture_construction_durations_observed": [
+    "17m17.58845293s one_year",
+    "1h45m46.465533768s full five_years"
+  ],
+  "latest_parent_liveness_interpretation": "fresh idle-in-transaction query_start and xact_start at 10:13:36Z supported database activity but did not prove row-growth; no repeat observer was run",
+  "final_receipt_path": "/tmp/usage-history-luna-C12-full-normal-ready.json",
+  "terminal_evidence_root_json_counts": {
+    "sqlite": 33,
+    "postgres": 29
+  },
+  "terminal_postgres_scenario_counts": {
+    "one_year": 16,
+    "five_years": 12,
+    "scenario_total": 28,
+    "comparison_files": 1
+  },
+  "terminal_postgres_missing_scenarios": [
+    "five_years/five_years-America-New_York",
+    "five_years/five_years-Asia-Kathmandu",
+    "five_years/five_years-Europe-Lisbon",
+    "five_years/deleted_task"
+  ],
+  "terminal_postgres_failure": "four subtests reported analytics busy: timeout: context deadline exceeded; runner exit 1",
+  "post_terminal_target_metadata_check": {
+    "receipt": "/tmp/usage-history-C12-target-metadata.json",
+    "checked_at_utc": "2026-10-31T10:46:29.485671+00:00",
+    "process_387342_status": "not_live",
+    "live_process_environment_read": false,
+    "current_envfile_host_port_dbname": {
+      "host": "127.0.0.1",
+      "port": "55366",
+      "dbname": "usage_history"
+    },
+    "container_publish_and_dbname_match": true,
+    "sql_or_database_connection_issued": false,
+    "dsn_or_credentials_printed": false
+  }
+}

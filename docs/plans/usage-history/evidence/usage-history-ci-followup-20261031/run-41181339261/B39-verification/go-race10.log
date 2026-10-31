@@ -1,0 +1,22 @@
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+=== RUN   TestWorkspaceTrackerExpiredCallerStillPublishes
+--- PASS: TestWorkspaceTrackerExpiredCallerStillPublishes (0.06s)
+PASS
+ok  	github.com/kandev/kandev/internal/agentctl/server/process	1.656s

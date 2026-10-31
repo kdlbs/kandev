@@ -1,0 +1,26 @@
+{
+  "reviewed_at": "2026-10-31T09:52:06.615286+00:00",
+  "worker": "B36Luna6Max",
+  "normal": {
+    "actual_runs": 25,
+    "passed": 25,
+    "failures": 0,
+    "elapsed_seconds": 12.086,
+    "exit": 0
+  },
+  "race": {
+    "result": "RESOURCEABORTbeforetestevents",
+    "timed_test_cases": 0,
+    "elapsed_seconds": 28.508,
+    "returncode": -15,
+    "verification": "PENDINGafterC12quiescence"
+  },
+  "source_hash_verified": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+  "source_changes": false,
+  "resource_scope": "GOMAX1,nice19,512MiB,readonlyofflinecache,owncommandcap30s;C12confirmedPGfixtureconstruction;noC12interruption",
+  "logs": {
+    "normal_sha256": "429d9d41c8bb73a88d203a2a8e3e6c473a1928636d3842d376958717548177c2",
+    "race_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "next": "Actualraceverificationstillrequired; donotrelabelresourceabortascodefailureorpass"
+}

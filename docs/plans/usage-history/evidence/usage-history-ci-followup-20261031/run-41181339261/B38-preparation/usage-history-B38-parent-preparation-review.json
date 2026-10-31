@@ -1,0 +1,12 @@
+{
+  "reviewed_at": "2026-10-31T10:27:28.403719+00:00",
+  "worker": "B38",
+  "actual_model": "gpt-6-luna",
+  "effort": "max",
+  "handoff_sha256": "459b08d4fd965f0d655ca61979f4245e6f736cd272944722977dcf66f637e367",
+  "all_script_and_manifest_hashes_verified": true,
+  "bash_n_all_six_shell_scripts": "passed",
+  "authorization": "deny; C12 still active",
+  "runtime_tests_started": false,
+  "review": "Corrected old Vite hash; explicit Go1.26 path avoids host Go1.24; source/artifact/asset constraints checked. Commands preserve managed freshness and retries0. Prepared, not executed."
+}

@@ -1,0 +1,40 @@
+{
+  "worker": "B34 / freshnativegpt-6-luna/max",
+  "status": "completed_quiescent",
+  "repo": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "control": {
+    "allow_light_node": false,
+    "allow_heavy": false,
+    "reason": "Prepareonly;awaitC12actualPGfixturephaseconfirmation",
+    "updated_at": "2026-10-31T09:23:38.069914+00:00"
+  },
+  "expected_sha256": {
+    "store": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+    "test": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+    "base_store": "92f3436f7f34a1d306a801f6583442bc10b77a7361e087470b708c26e38740a8"
+  },
+  "scope": "Run only the exact regression as a negative control with the production store temporarily at its base revision under Python try/finally, atexit and SIGINT/SIGTERM restoration, then run the full existing focused unit file. Retain no source changes.",
+  "commands_run": [],
+  "next": "Wait for allow_light_node=true. Re-read control before each Vitest command. Use existing pnpm/Vitest only, one worker, 512 MiB Node heap, OS timeout 30s.",
+  "release_control": {
+    "allow_light_node": true,
+    "allow_heavy": false,
+    "reason": "C12confirmedPG5yrfixtureconstruction; no timed5yrquerysubtestactive",
+    "scope": "ONLY1Vitestfile,negativecontrolthenpositive,nice19,1worker,heap512MB,eachcommandmax30s",
+    "updated_at": "2026-10-31T09:25:44.601287+00:00"
+  },
+  "result_files": [
+    "/tmp/usage-history-B34-negative.log",
+    "/tmp/usage-history-B34-negative-status.json",
+    "/tmp/usage-history-B34-positive.log",
+    "/tmp/usage-history-B34-positive-status.json"
+  ],
+  "final_source_hashes": {
+    "apps/web/lib/state/slices/session/session-slice.ts": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+    "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5"
+  },
+  "negative_control": "expected regression failure reproduced against base store; patched source restored and verified",
+  "positive": "full one-file suite passed 10/10",
+  "quiescent": true
+}

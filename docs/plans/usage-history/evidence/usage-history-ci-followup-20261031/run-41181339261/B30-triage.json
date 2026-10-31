@@ -1,0 +1,40 @@
+{
+  "worker": "B30",
+  "status": "implementation_ready_unverified",
+  "source_sha": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "ci": {
+    "run_id": 41181339248,
+    "run_attempt": 1,
+    "job_id": 124479264610,
+    "job": "Backend Tests (2/4)",
+    "job_conclusion": "failure",
+    "artifact_id": 13035775696,
+    "artifact_name": "backend-test-results-2",
+    "artifact_digest": "sha256:5513d54c5cca8c5ba1e86b255f06c0adf770e7500d00b863966ae581a1fa0ea4",
+    "downloaded_zip_sha256": "5513d54c5cca8c5ba1e86b255f06c0adf770e7500d00b863966ae581a1fa0ea4",
+    "structured_results": "test-results-2.json"
+  },
+  "failure": {
+    "test": "TestWorkspaceTrackerExpiredCallerStillPublishes",
+    "panic": "close of closed channel",
+    "location": "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go:292",
+    "stack": "WorkspaceTrackerExpiredCallerStillPublishes.func2 -> parseGitStatusOutputWithSnapshot -> captureBasicGitStatusSeed -> computeGitStatusObservation"
+  },
+  "cause": "The test hook closes its started notification channel on every between-query callback. Basic Git status capture may retry once after errGitStatusEvidenceChanged, and observations in separate admission classes can also overlap. The hook is therefore allowed to run more than once; closing the same channel again panics. Existing TestWorkspaceTrackerGitStatusCaptureRecoveryRetriesOneEvidenceChange asserts two callback invocations on the valid retry path.",
+  "planned_fix": "Change only this test fixture: use a capacity-one started signal and a nonblocking send, while keeping each hook invocation blocked on the existing release channel. Preserve cancellation, publication, cached-status, and file assertions.",
+  "scope": "test fixture only; no production, CI, timeout, retry, skip, or assertion changes",
+  "heavy_gate": {
+    "allow_heavy": false,
+    "reason": "C12normalfullbenchSOLElocalheavywindow",
+    "local_go_tests_run": false
+  },
+  "patch": {
+    "path": "/tmp/usage-history-luna-B30-final.diff",
+    "sha256": "cdf61b43a0aa50406dfd76009eb19bc8fd7b3f509421dd2a447fb7c29f202ebb",
+    "changed_source_sha256": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d"
+  },
+  "verification": {
+    "git_diff_check": "passed",
+    "local_go_tests": "not_run_heavy_gate_false"
+  }
+}

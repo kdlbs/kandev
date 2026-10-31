@@ -55,6 +55,8 @@ test("keeps the download control touch-sized on a coarse-pointer workbench", asy
   const menuContent = testPage.getByRole("menu").filter({ has: freshMenuItem });
   await expect(freshMenuItem).toBeVisible();
   await waitForFiniteAnimations(menuContent);
+  await freshMenuItem.focus();
+  await expect(freshMenuItem).toBeFocused();
   await testPage.keyboard.press("Escape");
   await expect(menuContent).toBeHidden();
   await expect(menu).toBeFocused();

@@ -1,0 +1,94 @@
+diff --git a/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts b/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts
+index cb683ba6e74..468514a6c97 100644
+--- a/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts
++++ b/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts
+@@ -4,7 +4,7 @@ import { waitForLatestSessionDone } from "../../helpers/session";
+ import {
+   enableTurnChangedFiles,
+   waitForTurnChangeCount,
+-  waitForTurnChangeFileContent,
++  waitForTurnChangeRepositoryContentComplete,
+ } from "./turn-changed-files-helpers";
+ 
+ test.describe("Docker executor turn change retention", () => {
+@@ -61,11 +61,14 @@ test.describe("Docker executor turn change retention", () => {
+       };
+       const file = filePage.files.find((entry) => entry.path === "untracked_test.txt");
+       expect(file?.id).toBeTruthy();
+-      // The card is published before content preservation settles. Wait for the
+-      // durable export before destroying the executor source it reads from.
+-      expect(
+-        await waitForTurnChangeFileContent(apiClient, sessionId, changeSet!.id, file!.id),
+-      ).toContain("INITIAL_CONTENT");
++      // The summary/card may be published before content preservation settles.
++      // Wait on the repository completion contract before destroying its source.
++      await waitForTurnChangeRepositoryContentComplete(
++        apiClient,
++        sessionId,
++        changeSet!.id,
++        repository!.id,
++      );
+ 
+       dockerRemove(containerId);
+       expect(dockerInspectExists(containerId)).toBe(false);
+@@ -76,8 +79,12 @@ test.describe("Docker executor turn change retention", () => {
+         "GET",
+         `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSet!.id}/files/${file!.id}/content?variant=canonical_patch`,
+       );
+-      expect(contentResponse.ok).toBe(true);
+-      const content = (await contentResponse.json()) as { content: string };
++      const contentResponseBody = await contentResponse.text();
++      expect(
++        contentResponse.ok,
++        `Post-restart turn content request failed with HTTP ${contentResponse.status}: ${contentResponseBody.slice(0, 1000)}`,
++      ).toBe(true);
++      const content = JSON.parse(contentResponseBody) as { content: string };
+       expect(Buffer.from(content.content, "base64").toString("utf8")).toContain("INITIAL_CONTENT");
+     } finally {
+       await restorePreference();
+diff --git a/apps/web/e2e/tests/git/turn-changed-files-helpers.ts b/apps/web/e2e/tests/git/turn-changed-files-helpers.ts
+index 943cfdfe089..bd682e6b968 100644
+--- a/apps/web/e2e/tests/git/turn-changed-files-helpers.ts
++++ b/apps/web/e2e/tests/git/turn-changed-files-helpers.ts
+@@ -130,6 +130,41 @@ export async function waitForTurnChangeFileContent(
+   return content;
+ }
+ 
++export async function waitForTurnChangeRepositoryContentComplete(
++  apiClient: ApiClient,
++  sessionId: string,
++  changeSetId: string,
++  repositoryChangeId: string,
++): Promise<void> {
++  await expect
++    .poll(
++      async () => {
++        const response = await apiClient.rawRequest(
++          "GET",
++          `/api/v1/task-sessions/${sessionId}/turn-changes?offset=0&limit=50`,
++        );
++        if (!response.ok) {
++          return { status: response.status, availability: "", contentComplete: false };
++        }
++        const history = (await response.json()) as TurnChangeHistoryResponse;
++        const repository = history.change_sets
++          ?.find((changeSet) => changeSet.id === changeSetId)
++          ?.repositories?.find((entry) => entry.id === repositoryChangeId);
++        return {
++          status: response.status,
++          availability: repository?.availability ?? "",
++          contentComplete: repository?.content_complete ?? false,
++        };
++      },
++      {
++        message:
++          "Turn change repository content should finish preservation before its source is removed",
++        timeout: 60_000,
++      },
++    )
++    .toMatchObject({ status: 200, availability: "ready", contentComplete: true });
++}
++
+ export async function readTurnChangeHistory(apiClient: ApiClient, sessionId: string) {
+   const response = await apiClient.rawRequest(
+     "GET",

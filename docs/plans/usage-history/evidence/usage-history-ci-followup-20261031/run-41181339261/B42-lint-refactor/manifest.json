@@ -1,0 +1,50 @@
+{
+  "files": [
+    {
+      "path": "usage-history-B42-parent-review.json",
+      "sha256": "31d7ce64da8b52605cad396b161bc01083d08c38e925ca120374b4e428cdef8d",
+      "bytes": 1476
+    },
+    {
+      "path": "usage-history-B42-parent-typecheck.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "bytes": 2
+    },
+    {
+      "path": "usage-history-B42-parent-typecheck.log",
+      "sha256": "c72f409617a569b4ea141bfcb88c914731aa45c4138efe42a30d912130acc122",
+      "bytes": 568
+    },
+    {
+      "path": "usage-history-luna-B42-final.diff",
+      "sha256": "fc825f81166bcbeec65846ac43004ab0c688089ea8df386f5808a1070b6ed0d4",
+      "bytes": 6896
+    },
+    {
+      "path": "usage-history-luna-B42-lint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "usage-history-luna-B42-prettier.log",
+      "sha256": "590750d54056c5075fd3b335577d0183738a4db864b4facb33c4c74115a532ae",
+      "bytes": 128
+    },
+    {
+      "path": "usage-history-luna-B42-ready.json",
+      "sha256": "f73ca9dd4a383ce3e0a178adb6bda9e1b78d913a735fb17423b501aa2a6b4248",
+      "bytes": 3153
+    },
+    {
+      "path": "usage-history-luna-B42-typecheck.log",
+      "sha256": "a8fdc0004c66050fdcea92a59f4a170399ace9f4fd85773ef4fb6f8598928bd8",
+      "bytes": 1499
+    },
+    {
+      "path": "usage-history-luna-B42-units.log",
+      "sha256": "82ee4c3e503ae85f0e995205b77a18e693a3cc9dfbf481512e91875fc47b8cd3",
+      "bytes": 255
+    }
+  ],
+  "excludes": "This manifest itself"
+}

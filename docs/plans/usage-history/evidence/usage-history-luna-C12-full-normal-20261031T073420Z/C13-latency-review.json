@@ -1,0 +1,104 @@
+{
+  "receipt": "usage-history-luna-C13-latency-review",
+  "review_mode": "bounded read-only source and receipt review",
+  "source_commit": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "sqlite_parent_receipt": "/tmp/usage-history-C12-SQLite-parent-review.json",
+  "scenario_receipt": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-five_years-America-New_York.json",
+  "scenario_receipt_sha256": "768b42cbc662f24dfaccde23ba035071cfd8e6dfaaceda503b414b2e5e5484e5",
+  "decision": {
+    "sqlite_normal_gate": "PASSED: parent receipt records all 32 scenarios at ten samples each and four recent-history controls; do not reclassify this gate as failed.",
+    "postgresql_gate": "RUNNING and not yet passed in the parent receipt; no two-engine completion claim.",
+    "latency_interpretation": "The 9.96–9.98 second figure is the complete two-page ListSessionUsage report measured by the benchmark, not one API request. The receipt trace has two report transactions, each containing 90 SQL statements. Each API call carries its own 10-second queue-plus-query operation deadline.",
+    "deadline_finding": "No isolated deadline failure is evidenced: both page calls completed successfully under their per-call operation contexts. The plain stopwatch is for both calls together. Per-page plain latency was not separately recorded, so do not treat the aggregate's distance from 10 seconds as per-call headroom.",
+    "plan_requirement_finding": "Slow full-range non-UTC monthly reporting is observed, but no accepted efficiency or correctness criterion is shown to fail. The query applies indexed interval/point reads, uses daily summaries where safe, and the five-year request covers the historical span being read. The agreed plan explicitly treats latency as measured evidence rather than a capacity promise. No new SLO or implementation is proposed.",
+    "minimal_candidate_improvement": null
+  },
+  "benchmark": {
+    "engine": "SQLite 3.51.1",
+    "scenario": "five_years/America/New_York",
+    "group_by": "month",
+    "requested_range": ["2021-01-01T00:00:00-05:00", "2026-01-01T00:00:00-05:00"],
+    "page_limit": 200,
+    "samples": 10,
+    "latency_scope": "Complete actual ListSessionUsage report including every page; validation and fixture construction excluded.",
+    "observed_pages": 2,
+    "p50_ns_complete_report": 9877733454,
+    "p95_ns_complete_report": 9960131073,
+    "p99_ns_complete_report": 9960131073,
+    "plain_isolated_query_ns_complete_report": 9979440130,
+    "instrumented_isolated_query_ns_complete_report": 13499199457,
+    "instrumented_statement_duration_sum_per_page_ns": [6734000000, 6742000000],
+    "instrumented_sqlite_visits_complete_report": 30121020,
+    "instrumented_sql_statements_complete_report": 180,
+    "fixture": {
+      "retained_native_observations": 1000005,
+      "retained_external_observations": 100013,
+      "published_canonical_facts": 1100017,
+      "published_metric_contributions": 2200032,
+      "daily_summary_rows": 18276
+    },
+    "measurement_caveat": "Instrumented latency includes scan-status/statement collection overhead and is not the normal latency gate. Plain latency is reported only for both pages together."
+  },
+  "dominant_observed_sql": [
+    {
+      "source": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go:42-98",
+      "operation": "Currency-safety classification for UTC monthly summary dimensions, including edge-day contributions.",
+      "instrumented_duration_ns_per_execution": [3345000000, 3353000000],
+      "execution_count_in_two_page_report": 2,
+      "observed_plan": "Uses idx_usage_contribution_points for coverage_start interval probes. The plan records 2,199,765 visits at each of two point-index scan nodes, plus applied-pointer and calendar-index lookups. It does not use a full raw-observation table scan."
+    },
+    {
+      "source": "apps/backend/internal/analytics/repository/sqlite/usage_history_report_range.go:46-72 and apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go:191-209",
+      "operation": "Build and aggregate the temporary report range from safe daily summaries, indexed canonical point contributions for edge/unsafe months, and coarse-coverage sources.",
+      "instrumented_duration_ns_per_execution": [3141000000, 3151000000],
+      "execution_count_in_two_page_report": 2,
+      "observed_plan": "The report_range_source statement uses indexed contribution/calendar joins; recorded nodes include 193,421 visits through idx_usage_contribution_model_provider_points and 2,321,052 applied-pointer visits."
+    }
+  ],
+  "bounded_recent_history_evidence": {
+    "source": "/tmp/usage-history-C12-SQLite-parent-review.json",
+    "recent_new_york_selection_equal_before_after_older_history": true,
+    "recent_new_york_sqlite_visits_before": 650081,
+    "recent_new_york_sqlite_visits_after": 650082,
+    "recent_new_york_p95_ns": 328804419,
+    "interpretation": "Adding four older years added one recorded visit to the recent New York control; this supports the accepted bounded-recent-read criterion."
+  },
+  "accepted_criteria_reviewed": [
+    {
+      "reference": "docs/specs/costs/requirements/usage-history.md:83-94",
+      "criteria": "AC-COSTS-USAGE-HISTORY-005.1-.6: consumption-date filtering, bounded-range reads, consistent totals/pagination, preserved coarse calendars, five-year evidence, and no silent truncation."
+    },
+    {
+      "reference": "docs/specs/costs/system-design/usage-history.md:324-347",
+      "criteria": "Use daily summaries for supported calendars; for other IANA calendars use bounded UTC day intervals and indexed canonical-fact SQL; preserve coarse days; apply SQL pagination; retain the existing queue-plus-query deadline; measure five-year plans/visits/latency without asserting a capacity promise."
+    },
+    {
+      "reference": "docs/plans/usage-history/task-05-retained-reporting.md:48-68",
+      "criteria": "SQL date filtering, indexed daily summaries, SQL grouping/pagination/full totals, and five-year plan/visit/latency/memory evidence."
+    }
+  ],
+  "source_boundary_evidence": [
+    {
+      "reference": "apps/backend/internal/analytics/handlers/stats_handlers.go:217-243,246-264",
+      "finding": "One HTTP handler invocation parses one limit/offset page (default limit 200), calls ListSessionUsage once, and returns that page."
+    },
+    {
+      "reference": "apps/backend/internal/analytics/repository/sqlite/usage_history_report.go:15-27,29-64,102-146",
+      "finding": "Each ListSessionUsage operation acquires its own bounded operation context and transaction, builds report data, applies SQL LIMIT/OFFSET, and returns HasMore."
+    },
+    {
+      "reference": "apps/backend/internal/analytics/repository/sqlite/admission.go:12-50",
+      "finding": "The existing budget is 10 seconds per operation, including admission queue time and query time."
+    },
+    {
+      "reference": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go:20-44,88-115; usage_history_bench_evidence_test.go:60-68",
+      "finding": "Benchmark timing wraps fetchUsageBenchReport, which follows HasMore and increments Offset until all pages are read. The evidence labels its latency scope as the complete report including every page. The SQL trace contains two transactions, confirming two page calls for this scenario."
+    }
+  ],
+  "uncertainty_and_limits": [
+    "The receipt does not give separate plain elapsed times for each page; the exact per-page instrumented transaction durations are available, while the uninstrumented p95 is only for the full two-page sequence.",
+    "The normal SQLite benchmark is an isolated run and does not establish concurrent-load capacity or queue behavior under contention.",
+    "PostgreSQL 18.6 was still running in the parent receipt at this review point."
+  ],
+  "work_performed": "Read-only inspection of immutable source, plan/spec text, and existing receipts; no source edits, tests, builds, database queries, or runtime work."
+}

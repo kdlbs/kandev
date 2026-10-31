@@ -171,9 +171,10 @@ func reportFactJoinForFilter(filter models.SessionUsageFilter, postgres bool) st
 		return reportFactJoin()
 	}
 	if postgres {
-		return ` FROM usage_subjects u
- CROSS JOIN LATERAL (SELECT f.* FROM usage_canonical_facts f WHERE f.scope_id=u.scope_id AND f.subject_id=u.subject_id OFFSET 0) f
- CROSS JOIN LATERAL (SELECT a.* FROM usage_projection_applied a WHERE a.scope_id=f.scope_id AND a.generation=f.generation AND a.work_key=f.work_key AND a.build_id=f.build_id OFFSET 0) a
+		return ` FROM usage_report_subjects u
+	 CROSS JOIN LATERAL (SELECT f.* FROM usage_canonical_facts f WHERE f.scope_id=u.scope_id AND f.subject_id=u.subject_id OFFSET 0) f
+ JOIN usage_report_applied a
+ ON a.scope_id=f.scope_id AND a.generation=f.generation AND a.work_key=f.work_key AND a.build_id=f.build_id
  CROSS JOIN LATERAL (SELECT c.* FROM usage_projection_contributions c WHERE c.scope_id=f.scope_id AND c.generation=f.generation AND c.build_id=f.build_id AND c.fact_key=f.fact_key OFFSET 0) c `
 	}
 	// SQLite's CROSS JOIN keeps the selective subject -> fact -> published
@@ -191,6 +192,14 @@ func reportFactScopePredicate(scope, generation string, filter models.SessionUsa
 		pred.args = append(pred.args, scope)
 	}
 	return pred
+}
+
+func reportFactScopePredicateForEngine(scope, generation string, filter models.SessionUsageFilter, postgres bool) usageReportQuery {
+	if postgres && (len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0) {
+		// The materialized subject set applies these filters before report joins.
+		filter.TaskIDs, filter.SessionIDs = nil, nil
+	}
+	return reportFactScopePredicate(scope, generation, filter)
 }
 
 func reportSubjectColumns() string {
@@ -239,7 +248,7 @@ func reportFactSource(scope, generation string, filter models.SessionUsageFilter
 }
 
 func reportFactSourceForEngine(scope, generation string, filter models.SessionUsageFilter, lifetime, postgres bool) usageReportQuery {
-	pred := reportFactScopePredicate(scope, generation, filter)
+	pred := reportFactScopePredicateForEngine(scope, generation, filter, postgres)
 	selectSQL := `SELECT ` + reportSubjectColumns() + `,g.period,? AS calendar,'requested' AS calendar_basis,` + usageReportDimensions("c") + `,` + usageReportAmountsSQL("c", false, "g.month_partial=1") + reportFactJoinForFilter(filter, postgres)
 	// Grid intervals are disjoint. The indexed predecessor is the only possible
 	// match; the end predicate preserves exclusive bounds and empty ranges.
@@ -248,9 +257,9 @@ func reportFactSourceForEngine(scope, generation string, filter models.SessionUs
 	coarse := reportCoarseSourceForEngine(scope, generation, filter, postgres)
 	q := usageReportQuery{sql: point.sql + ` UNION ALL ` + coarse.sql, args: append(point.args, coarse.args...)}
 	if lifetime {
-		return reportLifetimeAlternativesForEngine(q, pred, filter, postgres)
+		q = reportLifetimeAlternativesForEngine(q, pred, filter, postgres)
 	}
-	return q
+	return reportUsageAppliedCTEPrefix(q, filter, postgres, scope, generation)
 }
 
 func reportCoarseSource(scope, generation string, filter models.SessionUsageFilter) usageReportQuery {
@@ -258,7 +267,7 @@ func reportCoarseSource(scope, generation string, filter models.SessionUsageFilt
 }
 
 func reportCoarseSourceForEngine(scope, generation string, filter models.SessionUsageFilter, postgres bool) usageReportQuery {
-	pred, overlap := reportFactScopePredicate(scope, generation, filter), reportOverlap(filter)
+	pred, overlap := reportFactScopePredicateForEngine(scope, generation, filter, postgres), reportOverlap(filter)
 	partial := `c.calendar<>?`
 	if filter.GroupBy == usageGroupMonth || filter.GroupBy == usageGroupMonthly {
 		partial += ` OR EXISTS(SELECT 1 FROM usage_report_calendar g WHERE g.period=c.usage_date AND g.month_partial=1)`
@@ -340,10 +349,10 @@ func usageReportNeedsPointFallback(filter models.SessionUsageFilter) bool {
 func usageReportSourceForEngine(scope, generation string, filter models.SessionUsageFilter, totals, postgres bool) usageReportQuery {
 	allTime := filter.Start == nil && filter.End == nil
 	var source usageReportQuery
-	if len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0 || filter.GroupBy == usageWorkFallback || filter.GroupBy == usageSubjectSession || (allTime && (totals || !isDatedUsageGroup(filter.GroupBy))) {
+	if usageReportNeedsFactSource(filter, totals, allTime) {
 		source = reportFactSourceForEngine(scope, generation, filter, allTime && (totals || !isDatedUsageGroup(filter.GroupBy)), postgres)
 	} else {
-		source = reportSummarySource(scope, generation, filter)
+		source = usageReportSummarySourceForEngine(scope, generation, filter, postgres)
 	}
 	if !allTime && filter.IncludeUndated && !isDatedUsageGroup(filter.GroupBy) {
 		undated := reportUndatedRangeSourceForEngine(scope, generation, filter, postgres)
@@ -353,15 +362,72 @@ func usageReportSourceForEngine(scope, generation string, filter models.SessionU
 	return source
 }
 
+func usageReportNeedsFactSource(filter models.SessionUsageFilter, totals, allTime bool) bool {
+	return len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0 || filter.GroupBy == usageWorkFallback ||
+		filter.GroupBy == usageSubjectSession || allTime && (totals || !isDatedUsageGroup(filter.GroupBy))
+}
+
+func usageReportSummarySourceForEngine(scope, generation string, filter models.SessionUsageFilter, postgres bool) usageReportQuery {
+	if postgres && usageReportUsesUTCMonthSummaries(filter) {
+		return reportUTCMonthSummarySourceForEngine(scope, generation, filter, true)
+	}
+	return reportSummarySource(scope, generation, filter)
+}
+
 // An undated source with dated coverage is an alternative, not another amount
 // to add to a selected range. Independent lifetime-only work can be disclosed
 // explicitly, without assigning its collection time to the chart.
 func reportUndatedRangeSourceForEngine(scope, generation string, filter models.SessionUsageFilter, postgres bool) usageReportQuery {
-	pred := reportFactScopePredicate(scope, generation, filter)
+	pred := reportFactScopePredicateForEngine(scope, generation, filter, postgres)
 	query := `SELECT ` + reportSubjectColumns() + `,'' AS period,'' AS calendar,'unknown' AS calendar_basis,` + usageReportDimensions("c") + `,` + usageReportAmountsSQL("c", false, "1=1") + reportFactJoinForFilter(filter, postgres) + ` WHERE ` + pred.sql + ` AND c.coverage_kind='lifetime' AND NOT EXISTS (
  SELECT 1 FROM usage_canonical_facts d JOIN usage_projection_applied da ON da.scope_id=d.scope_id AND da.generation=d.generation AND da.work_key=d.work_key AND da.build_id=d.build_id
  WHERE d.scope_id=f.scope_id AND d.generation=f.generation AND d.work_key=f.work_key AND (d.bundle_key<>f.bundle_key OR d.segment_key=f.segment_key) AND d.coverage_kind<>'lifetime' AND ((c.metric_kind='tokens' AND d.token_source<>'') OR (c.metric_kind='cost' AND d.cost_source<>'')))`
 	return usageReportQuery{sql: query, args: pred.args}
+}
+
+func reportUsageAppliedCTEPrefix(query usageReportQuery, filter models.SessionUsageFilter, postgres bool, scope, generation string) usageReportQuery {
+	if postgres && (len(filter.TaskIDs) > 0 || len(filter.SessionIDs) > 0) {
+		// Resolve only requested subjects and their distinct work before looking
+		// up published builds by primary key. Reuse the subject set in the report
+		// joins so unrelated workspace history is neither materialized nor reread.
+		subjects := `SELECT scope_id,subject_id,task_id,task_incarnation_id,session_id,session_incarnation_id
+			FROM usage_subjects WHERE scope_id=?`
+		args := []any{scope}
+		for _, dimension := range []struct {
+			name   string
+			values []string
+		}{{"task_id", filter.TaskIDs}, {"session_id", filter.SessionIDs}} {
+			if len(dimension.values) > 0 {
+				subjects += ` AND ` + dimension.name + ` IN (` + placeholders(len(dimension.values)) + `)`
+				args = append(args, stringArgs(dimension.values)...)
+			}
+		}
+		query.sql = `WITH usage_report_subjects AS MATERIALIZED (` + subjects + `),
+		usage_report_work AS MATERIALIZED (
+			SELECT DISTINCT f.scope_id,f.generation,f.work_key,f.build_id
+			FROM usage_report_subjects u
+			CROSS JOIN LATERAL (
+				SELECT f.scope_id,f.generation,f.work_key,f.build_id
+				FROM usage_canonical_facts f
+				WHERE f.scope_id=u.scope_id AND f.generation=? AND f.subject_id=u.subject_id
+				OFFSET 0
+			) f
+		),
+		usage_report_applied AS MATERIALIZED (
+			SELECT a.scope_id,a.generation,a.work_key,a.build_id
+			FROM usage_report_work w
+			CROSS JOIN LATERAL (
+				SELECT a.scope_id,a.generation,a.work_key,a.build_id
+				FROM usage_projection_applied a
+				WHERE a.scope_id=w.scope_id AND a.generation=w.generation
+					AND a.work_key=w.work_key AND a.build_id=w.build_id
+				OFFSET 0
+			) a
+		) ` + query.sql
+		args = append(args, generation)
+		query.args = append(args, query.args...)
+	}
+	return query
 }
 
 func normalizeUsageReportFilter(filter models.SessionUsageFilter) (models.SessionUsageFilter, error) {

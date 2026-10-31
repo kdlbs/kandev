@@ -1,0 +1,51 @@
+{
+  "source": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "fd107a554904b80dbb1f11531573b6cafbfe2fe6b7da67f3e4abe467b0b19014",
+      "bytes": 601
+    },
+    {
+      "path": "usage-history-C14-focused-pg-parity.log",
+      "sha256": "faec194e030077bf3f1858962643bd7f371af90d04e2a04a482cbfcd9af3c133",
+      "bytes": 21084
+    },
+    {
+      "path": "usage-history-C14-focused-pg.log",
+      "sha256": "c5481381e087e46652549990ce81510a7745b98aab63a7c0cc22dcc1f45d0724",
+      "bytes": 12885
+    },
+    {
+      "path": "usage-history-C14-focused-race.log",
+      "sha256": "fe882f723edd16d2a8b9b0a7e4e5875e0199b877a30e9eb53a14f1ca7c2cad47",
+      "bytes": 19720
+    },
+    {
+      "path": "usage-history-C14-focused-sqlite.log",
+      "sha256": "a3132a006a9a5c5ebe04f63401d24f2619bfcd37f8d1a88ed6d3ece7062b2bda",
+      "bytes": 11368
+    },
+    {
+      "path": "usage-history-C14-parent-review.json",
+      "sha256": "5654ffe0a19eed4a9f8943594b893b21314ba70da3ce146b72f90f81e4042613",
+      "bytes": 3454
+    },
+    {
+      "path": "usage-history-luna-C14-final.diff",
+      "sha256": "36240889bb6480d69eadb12cfce60f76ec3c1f96731a3e97e735219a8eed84e4",
+      "bytes": 25449
+    },
+    {
+      "path": "usage-history-luna-C14-focused-ready.json",
+      "sha256": "919169d8333e3b7b56515a2f62572597e320ca899e746b0034856301d28941e3",
+      "bytes": 8538
+    },
+    {
+      "path": "usage-history-luna-C14-progress.json",
+      "sha256": "c2d9853670fe49486f3486c65827d3d04a34c3afc52eb4d0756eb76d9ff142b0",
+      "bytes": 1431
+    }
+  ],
+  "excludes": "This manifest itself"
+}

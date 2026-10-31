@@ -1,0 +1,66 @@
+{
+  "worker": "B42 / GPT6Luna Max",
+  "repo": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "scope": "Only the two authorized session slice files were edited in the worktree. No staging, commit, or push was performed.",
+  "source_file_hashes": {
+    "apps/web/lib/state/slices/session/session-slice.ts": {
+      "before_sha256": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+      "after_sha256": "18cb5bcbb90f1277960772a22a18fb16ed700647fcbc5aa3bba22e84aded5f24"
+    },
+    "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts": {
+      "before_sha256": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+      "after_sha256": "c954dab45b2dc0ee8f28d15135cc9696ab3ecd4827f37de3aa516187247cbcfe"
+    }
+  },
+  "unstaged_delta": {
+    "paths": [
+      "apps/web/lib/state/slices/session/session-slice.ts",
+      "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts"
+    ],
+    "diff_path": "/tmp/usage-history-luna-B42-final.diff",
+    "diff_sha256": "fc825f81166bcbeec65846ac43004ab0c688089ea8df386f5808a1070b6ed0d4",
+    "diff_bytes": 6896,
+    "git_diff_check_exit": 0
+  },
+  "index": {
+    "staged_path_count": 156,
+    "tracked_entries": 31169,
+    "entries_before_sha256": "521dc98b18d2f6a672cd6c5f9144011f803a3c47555cc1289629979e583fb7b0",
+    "entries_after_sha256": "521dc98b18d2f6a672cd6c5f9144011f803a3c47555cc1289629979e583fb7b0",
+    "unchanged": true
+  },
+  "unexpected_untracked_paths": [],
+  "checks": {
+    "prettier": {
+      "command": "pnpm exec prettier --write lib/state/slices/session/session-slice.ts lib/state/slices/session/session-slice.update-messages.test.ts",
+      "exit": 0,
+      "log": "/tmp/usage-history-luna-B42-prettier.log"
+    },
+    "changed_file_eslint": {
+      "command": "pnpm exec eslint --max-warnings 0 lib/state/slices/session/session-slice.ts lib/state/slices/session/session-slice.update-messages.test.ts",
+      "exit": 0,
+      "warnings": 0,
+      "errors": 0,
+      "log": "/tmp/usage-history-luna-B42-lint.log"
+    },
+    "focused_session_slice_unit_tests": {
+      "command": "timeout --signal=TERM 30s nice -n19 env NODE_OPTIONS=--max-old-space-size=2048 pnpm exec vitest run lib/state/slices/session/session-slice.update-messages.test.ts lib/state/slices/session/session-slice.prompts.test.ts lib/state/slices/session/session-slice.merge-messages.test.ts lib/state/slices/session/session-slice.upsert.test.ts --project browser --maxWorkers=1 --no-file-parallelism",
+      "exit": 0,
+      "files_passed": 4,
+      "files_total": 4,
+      "tests_passed": 90,
+      "tests_total": 90,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/tmp/usage-history-luna-B42-units.log"
+    },
+    "normal_web_typecheck": {
+      "command": "NODE_OPTIONS=--max-old-space-size=2048 pnpm run typecheck",
+      "exit": 134,
+      "status": "failed_resource_limit",
+      "phase": "pretypecheck generation succeeded; rich-output:check exhausted the 2 GiB Node heap before tsc --noEmit started",
+      "log": "/tmp/usage-history-luna-B42-typecheck.log"
+    }
+  }
+}

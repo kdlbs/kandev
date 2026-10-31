@@ -1,0 +1,45 @@
+{
+  "worker": "B34",
+  "phase": "positive_full_file",
+  "started_at": "2026-10-31T09:28:18.949710+00:00",
+  "control": {
+    "allow_light_node": true,
+    "allow_heavy": false,
+    "reason": "C12confirmedPG5yrfixtureconstruction; no timed5yrquerysubtestactive",
+    "scope": "ONLY1Vitestfile,negativecontrolthenpositive,nice19,1worker,heap512MB,eachcommandmax30s",
+    "updated_at": "2026-10-31T09:25:44.601287+00:00"
+  },
+  "source_hashes_before": {
+    "store": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+    "test": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5"
+  },
+  "command": [
+    "timeout",
+    "--signal=TERM",
+    "30s",
+    "nice",
+    "-n",
+    "19",
+    "env",
+    "NODE_OPTIONS=--max-old-space-size=512",
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "lib/state/slices/session/session-slice.update-messages.test.ts",
+    "--project",
+    "browser",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "log_path": "/tmp/usage-history-B34-positive.log",
+  "vitest_exit_code": 0,
+  "elapsed_seconds": 1.839,
+  "finished_at": "2026-10-31T09:28:20.789357+00:00",
+  "source_hashes_after": {
+    "store": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+    "test": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5"
+  },
+  "sources_unchanged": true,
+  "timed_out_or_signaled": false
+}

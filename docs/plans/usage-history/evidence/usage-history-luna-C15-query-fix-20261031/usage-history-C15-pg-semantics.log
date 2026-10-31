@@ -1,0 +1,202 @@
+=== RUN   TestUsageHistoryMonthlyReviewEdges
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite
+    usage_history_report_monthly_review_scan_test.go:23: usage fixture retention backfill complete pages=3
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/daily_currency_normalization
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/provider_options_ignore_selected_provider_while_rows_stay_filtered
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/shared_local_day_across_UTC_dates
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/local_midnight_within_one_UTC_date
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/balanced_independent_metrics_preserve_local-day_currency
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/UTC_edge_day_mixed_currency_falls_back_as_a_month
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/requested-calendar_coarse_currency_shares_local-day_fallback
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/coarse_and_currency-unsafe_month_falls_back_once
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres
+    usage_history_report_monthly_review_scan_test.go:23: usage fixture retention backfill complete pages=3
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/daily_currency_normalization
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/provider_options_ignore_selected_provider_while_rows_stay_filtered
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/shared_local_day_across_UTC_dates
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/local_midnight_within_one_UTC_date
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/balanced_independent_metrics_preserve_local-day_currency
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/UTC_edge_day_mixed_currency_falls_back_as_a_month
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/requested-calendar_coarse_currency_shares_local-day_fallback
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/coarse_and_currency-unsafe_month_falls_back_once
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2
+=== RUN   TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2
+--- PASS: TestUsageHistoryMonthlyReviewEdges (2.76s)
+    --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite (0.49s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/daily_currency_normalization (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/provider_options_ignore_selected_provider_while_rows_stay_filtered (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/shared_local_day_across_UTC_dates (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/local_midnight_within_one_UTC_date (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/balanced_independent_metrics_preserve_local-day_currency (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/UTC_edge_day_mixed_currency_falls_back_as_a_month (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/requested-calendar_coarse_currency_shares_local-day_fallback (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/coarse_and_currency-unsafe_month_falls_back_once (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects (0.01s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2 (0.00s)
+    --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres (2.27s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/daily_currency_normalization (0.06s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/provider_options_ignore_selected_provider_while_rows_stay_filtered (0.05s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/shared_local_day_across_UTC_dates (0.05s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/local_midnight_within_one_UTC_date (0.05s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/balanced_independent_metrics_preserve_local-day_currency (0.06s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/UTC_edge_day_mixed_currency_falls_back_as_a_month (0.05s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/requested-calendar_coarse_currency_shares_local-day_fallback (0.06s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/coarse_and_currency-unsafe_month_falls_back_once (0.06s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects (0.06s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0 (0.01s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0 (0.01s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2 (0.01s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/postgres/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2 (0.01s)
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources
+    usage_history_report_scan_test.go:69: usage fixture recent phase start native=400 external=40
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=recent source=native records=400
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=recent source=native records=400
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:69: usage fixture recent range inserts complete
+    usage_history_report_scan_test.go:69: usage fixture special records complete
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=other source=native records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=other source=native records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:69: usage fixture second scope inserts complete
+    usage_history_report_scan_test.go:69: usage fixture retention backfill complete pages=5
+    usage_history_report_scan_test.go:69: usage fixture recent publication complete pages=68
+    usage_history_report_scan_test.go:69: usage fixture deleted-task preservation complete
+    usage_history_report_scan_test.go:69: usage fixture archived-task preservation complete
+    usage_history_report_scan_test.go:70: usage fixture source insert start range=older source=native records=1600
+    usage_history_report_scan_test.go:70: usage fixture source insert complete range=older source=native records=1600
+    usage_history_report_scan_test.go:70: usage fixture source insert start range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:70: usage fixture source insert complete range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:70: usage fixture retention backfill complete pages=6
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/America/New_York
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=533; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=146 idx_usage_contribution_model_provider_points=387 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Asia/Kathmandu
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=533; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=132 idx_usage_contribution_model_provider_points=401 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Europe/Lisbon
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=477; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=76 idx_usage_contribution_model_provider_points=401 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/native
+    usage_history_report_scan_test.go:87: native point-period plan: SEARCH p USING INDEX idx_usage_contribution_model_provider_points (scope_id=? AND generation=? AND model=? AND provider=? AND calendar=? AND coverage_kind=? AND coverage_start>? AND coverage_start<?); NLOOP=1 NVISIT=1 SELECT=96 PARENT=85
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=1; unbounded point-index visits=0; daily-summary visits=8828; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_model_provider_points=1 idx_usage_daily_date=4414]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/deleted_task
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=0; unbounded point-index visits=0; daily-summary visits=0; canonical-work visits=0; lifetime-index visits=0; subject-first=true; indexed loops=[idx_usage_canonical_subject=500 idx_usage_canonical_subject=500 idx_usage_canonical_subject=500]
+--- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources (3.99s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/America/New_York (0.36s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Asia/Kathmandu (0.34s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Europe/Lisbon (0.34s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/native (0.25s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/deleted_task (0.04s)
+=== RUN   TestUsageHistoryDeadlineCasesPostgres
+    usage_history_report_scan_test.go:202: usage fixture recent phase start native=400 external=40
+    usage_history_report_scan_test.go:202: usage fixture source insert start range=recent source=native records=400
+    usage_history_report_scan_test.go:202: usage fixture source insert complete range=recent source=native records=400
+    usage_history_report_scan_test.go:202: usage fixture source insert start range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:202: usage fixture source insert complete range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:202: usage fixture recent range inserts complete
+    usage_history_report_scan_test.go:202: usage fixture special records complete
+    usage_history_report_scan_test.go:202: usage fixture source insert start range=other source=native records=8
+    usage_history_report_scan_test.go:202: usage fixture source insert complete range=other source=native records=8
+    usage_history_report_scan_test.go:202: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:202: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:202: usage fixture second scope inserts complete
+    usage_history_report_scan_test.go:202: usage fixture retention backfill complete pages=5
+    usage_history_report_scan_test.go:202: usage fixture recent publication complete pages=68
+    usage_history_report_scan_test.go:202: usage fixture deleted-task preservation complete
+    usage_history_report_scan_test.go:202: usage fixture archived-task preservation complete
+    usage_history_report_scan_test.go:204: usage fixture source insert start range=older source=native records=1600
+    usage_history_report_scan_test.go:204: usage fixture source insert complete range=older source=native records=1600
+    usage_history_report_scan_test.go:204: usage fixture source insert start range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:204: usage fixture source insert complete range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:204: usage fixture retention backfill complete pages=6
+=== RUN   TestUsageHistoryDeadlineCasesPostgres/five_years/America/New_York
+    usage_history_report_scan_test.go:236: PostgreSQL report plans: statements=88 reads=16 scan rows=185769.4 rejected=148334
+    usage_history_report_scan_test.go:239: PostgreSQL currency-safety bounded point-index visits=145.79000000000002 of 4432 published contributions
+    usage_history_report_scan_test.go:240: PostgreSQL monthly report bounded point-index plan contribution visits=534.25 of 4432 published contributions
+    usage_history_report_scan_test.go:245: PostgreSQL exact-source plan: scenario=five_years/America/New_York scan rows=17554.41 rejected=5134
+    usage_history_report_scan_test.go:245: PostgreSQL month-edge negative control: old contribution visits=4800.29, indexed range visits=534.25
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Subquery Scan relation= index= rows=4414 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Seq Scan relation=usage_report_utc_calendar index= rows=1766 rejected=61 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Index Scan relation=usage_daily_summaries index=idx_usage_daily_date rows=3885.1600000000003 rejected=0 loops=1886
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Seq Scan relation=usage_report_utc_calendar index= rows=61 rejected=1766 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=CTE Scan relation= index= rows=1826 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Seq Scan relation=usage_report_utc_calendar index= rows=1766 rejected=61 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/America/New_York type=Index Scan relation=usage_projection_applied index=usage_projection_applied_pkey rows=387 rejected=3096 loops=387
+    usage_history_report_scan_test.go:245: PostgreSQL local-month UTC calendar maximum scan loops=1
+=== RUN   TestUsageHistoryDeadlineCasesPostgres/five_years/Asia/Kathmandu
+    usage_history_report_scan_test.go:236: PostgreSQL report plans: statements=88 reads=16 scan rows=179578.6 rejected=142552
+    usage_history_report_scan_test.go:239: PostgreSQL currency-safety bounded point-index visits=131.76000000000002 of 4432 published contributions
+    usage_history_report_scan_test.go:240: PostgreSQL monthly report bounded point-index plan contribution visits=538.48 of 4432 published contributions
+    usage_history_report_scan_test.go:245: PostgreSQL exact-source plan: scenario=five_years/Asia/Kathmandu scan rows=17576.64 rejected=5647
+    usage_history_report_scan_test.go:245: PostgreSQL month-edge negative control: old contribution visits=4818.55, indexed range visits=538.48
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Subquery Scan relation= index= rows=4418 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Seq Scan relation=usage_report_utc_calendar index= rows=1766 rejected=61 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Index Scan relation=usage_daily_summaries index=idx_usage_daily_date rows=3885.1600000000003 rejected=0 loops=1886
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Seq Scan relation=usage_report_utc_calendar index= rows=61 rejected=1766 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=CTE Scan relation= index= rows=1826 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Seq Scan relation=usage_report_utc_calendar index= rows=1766 rejected=61 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Asia/Kathmandu type=Index Scan relation=usage_projection_applied index=usage_projection_applied_pkey rows=401 rejected=3609 loops=401
+    usage_history_report_scan_test.go:245: PostgreSQL local-month UTC calendar maximum scan loops=1
+=== RUN   TestUsageHistoryDeadlineCasesPostgres/five_years/Europe/Lisbon
+    usage_history_report_scan_test.go:236: PostgreSQL report plans: statements=88 reads=16 scan rows=123234.54 rejected=87018
+    usage_history_report_scan_test.go:239: PostgreSQL currency-safety bounded point-index visits=75.95 of 4432 published contributions
+    usage_history_report_scan_test.go:240: PostgreSQL monthly report bounded point-index plan contribution visits=488.61 of 4432 published contributions
+    usage_history_report_scan_test.go:245: PostgreSQL exact-source plan: scenario=five_years/Europe/Lisbon scan rows=17331.510000000002 rejected=5624
+    usage_history_report_scan_test.go:245: PostgreSQL month-edge negative control: old contribution visits=4824.49, indexed range visits=488.61
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Subquery Scan relation= index= rows=4418 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Seq Scan relation=usage_report_utc_calendar index= rows=1791 rejected=35 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Index Scan relation=usage_daily_summaries index=idx_usage_daily_date rows=3944.9 rejected=0 loops=1915
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Seq Scan relation=usage_report_utc_calendar index= rows=35 rejected=1791 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=CTE Scan relation= index= rows=1853 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Seq Scan relation=usage_report_utc_calendar index= rows=1791 rejected=35 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=five_years/Europe/Lisbon type=Index Scan relation=usage_projection_applied index=usage_projection_applied_pkey rows=401 rejected=3609 loops=401
+    usage_history_report_scan_test.go:245: PostgreSQL local-month UTC calendar maximum scan loops=1
+=== RUN   TestUsageHistoryDeadlineCasesPostgres/native
+    usage_history_report_scan_test.go:236: PostgreSQL report plans: statements=56 reads=15 scan rows=21944 rejected=9708
+    usage_history_report_scan_test.go:245: PostgreSQL exact-source plan: scenario=native scan rows=13842 rejected=2790
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=native type=Subquery Scan relation= index= rows=4002 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=native type=Seq Scan relation=usage_daily_summaries index= rows=4002 rejected=1378 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=native type=Seq Scan relation=usage_daily_summaries index= rows=4002 rejected=1378 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=native type=Seq Scan relation=usage_report_calendar index= rows=1826 rejected=0 loops=1
+=== RUN   TestUsageHistoryDeadlineCasesPostgres/deleted_task
+    usage_history_report_scan_test.go:236: PostgreSQL report plans: statements=55 reads=14 scan rows=24154 rejected=2935
+    usage_history_report_scan_test.go:243: PostgreSQL deleted-task applied visits=36; selected-work=1 selected-facts=500
+    usage_history_report_scan_test.go:243: PostgreSQL actual deleted-task contributions=3000/4432; applied visits=36 selected-work=1 selected-facts=500
+    usage_history_report_scan_test.go:245: PostgreSQL exact-source plan: scenario=deleted_task scan rows=12637 rejected=2358
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Subquery Scan relation= index= rows=1000 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Seq Scan relation=usage_report_calendar index= rows=1826 rejected=0 loops=1
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Subquery Scan relation= index= rows=1000 rejected=0 loops=500
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Index Scan relation=usage_projection_contributions index=usage_projection_contributions_pkey rows=1000 rejected=0 loops=500
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Index Scan relation=usage_report_calendar index=usage_report_calendar_start_at_key rows=1000 rejected=0 loops=1000
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Index Only Scan relation=usage_report_calendar index=usage_report_calendar_start_at_key rows=1000 rejected=0 loops=1000
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Subquery Scan relation= index= rows=0 rejected=1000 loops=500
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Index Scan relation=usage_projection_contributions index=usage_projection_contributions_pkey rows=1000 rejected=0 loops=500
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Subquery Scan relation= index= rows=0 rejected=1000 loops=500
+    usage_history_report_scan_test.go:308: PostgreSQL source scan: scenario=deleted_task type=Index Scan relation=usage_projection_contributions index=usage_projection_contributions_pkey rows=1000 rejected=0 loops=500
+    usage_history_report_scan_test.go:245: PostgreSQL deleted-task source contribution visits=3000 of 4432 published contributions
+--- PASS: TestUsageHistoryDeadlineCasesPostgres (9.37s)
+    --- PASS: TestUsageHistoryDeadlineCasesPostgres/five_years/America/New_York (0.71s)
+    --- PASS: TestUsageHistoryDeadlineCasesPostgres/five_years/Asia/Kathmandu (0.68s)
+    --- PASS: TestUsageHistoryDeadlineCasesPostgres/five_years/Europe/Lisbon (0.67s)
+    --- PASS: TestUsageHistoryDeadlineCasesPostgres/native (0.26s)
+    --- PASS: TestUsageHistoryDeadlineCasesPostgres/deleted_task (0.27s)
+=== RUN   TestUsageHistoryPostgresReportingAmountBoundaries
+=== RUN   TestUsageHistoryPostgresReportingAmountBoundaries/explicit-int64-overflow
+=== RUN   TestUsageHistoryPostgresReportingAmountBoundaries/distinct-currencies-have-no-monetary-sum
+--- PASS: TestUsageHistoryPostgresReportingAmountBoundaries (2.31s)
+    --- PASS: TestUsageHistoryPostgresReportingAmountBoundaries/explicit-int64-overflow (1.16s)
+    --- PASS: TestUsageHistoryPostgresReportingAmountBoundaries/distinct-currencies-have-no-monetary-sum (1.15s)
+=== RUN   TestUsageHistoryPostgresReportingSourceOwnershipAndUndated
+--- PASS: TestUsageHistoryPostgresReportingSourceOwnershipAndUndated (1.14s)
+PASS
+ok  	github.com/kandev/kandev/internal/analytics/repository/sqlite	19.594s

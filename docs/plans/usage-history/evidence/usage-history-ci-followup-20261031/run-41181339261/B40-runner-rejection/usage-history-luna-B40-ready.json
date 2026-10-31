@@ -1,0 +1,253 @@
+{
+  "worker": "B40",
+  "task_id": "task30250a53",
+  "status": "failed",
+  "ready_for_parent_review": true,
+  "outcome": "stopped_on_first_managed_failure",
+  "repo": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev",
+  "head_before": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "head_after": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "control": {
+    "path": "/tmp/usage-history-B38-control.json",
+    "sha256": "4d37d87d821878ed936c0a4ad939c29e20324dfd5f878d029961b0bfcd75ba53",
+    "allow_run": true,
+    "authorized_actions": [
+      "opencode-e2e",
+      "mobile-plan-e2e",
+      "containers-e2e"
+    ],
+    "c12": {
+      "status": "terminal",
+      "quiescent": true,
+      "runner_pid": 279535,
+      "runner_pgid": 279535
+    },
+    "live_runner_pid": false,
+    "live_runner_process_group": false,
+    "named_runner_processes": false
+  },
+  "commands": {
+    "opencode-e2e": {
+      "script": "/tmp/usage-history-luna-B38-prepared/run-opencode-e2e.sh",
+      "script_sha256": "e30f5441c9b34b94dec6ba69964be6938fbc758580608ed5dc83d145a8598872",
+      "script_exit": 1,
+      "first_managed_command_exit": 1,
+      "phase": "Playwright test module import and collection",
+      "selected_case": "tests/session/opencode-capacity-retry.spec.ts :: desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "case_ids": [],
+      "case_statuses": [],
+      "repeat_each_requested": 10,
+      "instances_started": 0,
+      "retries_configured": 0,
+      "retries_observed": 0,
+      "raw_log": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T105611Z-584748/opencode-repeat10.log",
+      "raw_log_sha256": "9e82c4f8d4ec6d8ddd0a9f94540373b1c43f9ec217d47364046fc69d16ff2d90",
+      "last_run_report": "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T105611Z-584748/opencode-repeat10-results/.last-run.json",
+      "last_run_report_sha256": "e22df5d0991eb28c09093b1e678b3fa8cd1fab48185d38e67cf79fb6e63ad5ea",
+      "diagnostic": "E2E_PORT_OFFSET=38 rejected; fixture permits integer offsets 0-29; Playwright then reported No tests found."
+    },
+    "mobile-plan-e2e": {
+      "status": "not_run_stop_on_first_failure"
+    },
+    "containers-e2e": {
+      "status": "not_run_stop_on_first_failure"
+    }
+  },
+  "source_hashes_before": [
+    {
+      "path": "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go",
+      "expected_sha256": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+      "observed_sha256": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+      "expected_sha256": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+      "observed_sha256": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/git/turn-changed-files-helpers.ts",
+      "expected_sha256": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+      "observed_sha256": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+      "expected_sha256": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+      "observed_sha256": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+      "matches": true
+    },
+    {
+      "path": "apps/web/lib/state/slices/session/session-slice.ts",
+      "expected_sha256": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+      "observed_sha256": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+      "matches": true
+    },
+    {
+      "path": "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts",
+      "expected_sha256": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+      "observed_sha256": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+      "matches": true
+    }
+  ],
+  "source_hashes_after": [
+    {
+      "path": "apps/backend/internal/agentctl/server/process/workspace_git_status_ordering_test.go",
+      "expected_sha256": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+      "observed_sha256": "3ad89ed81e1fd463da2a8e9d74b7b3c0911ea9d7735a5abab470f607ee84a54d",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+      "expected_sha256": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+      "observed_sha256": "afb74473afb12871defb0388e0318eca726f52b634479ea29ce4f5529984df77",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/git/turn-changed-files-helpers.ts",
+      "expected_sha256": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+      "observed_sha256": "202ed083b2a3f229086eb1bee5319eae23cc6cd1408c46f1f681136e6204a4b6",
+      "matches": true
+    },
+    {
+      "path": "apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+      "expected_sha256": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+      "observed_sha256": "dc527c108c9d53e2a6a185be29c8c9fc0f6733e59a851ce9b86439404808cd5b",
+      "matches": true
+    },
+    {
+      "path": "apps/web/lib/state/slices/session/session-slice.ts",
+      "expected_sha256": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+      "observed_sha256": "689a9f4ce123dbcf12fb9709ed12941db5dbb2d1b8b4e0598c267ddef39a0618",
+      "matches": true
+    },
+    {
+      "path": "apps/web/lib/state/slices/session/session-slice.update-messages.test.ts",
+      "expected_sha256": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+      "observed_sha256": "0c02b77c6a911a0d9fa8c27747c3c95dce990e399b1fddc37f7dbf6630a8a8a5",
+      "matches": true
+    }
+  ],
+  "backend_artifact_hashes_before": [
+    {
+      "path": "apps/backend/bin/kandev",
+      "expected_sha256": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+      "observed_sha256": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/bin/mock-agent",
+      "expected_sha256": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+      "observed_sha256": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/bin/e2e-delivery-fixture",
+      "expected_sha256": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+      "observed_sha256": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
+      "expected_sha256": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+      "observed_sha256": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/.build/e2e-plugin-identity.json",
+      "expected_sha256": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d",
+      "observed_sha256": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d",
+      "matches": true
+    }
+  ],
+  "backend_artifact_hashes_after": [
+    {
+      "path": "apps/backend/bin/kandev",
+      "expected_sha256": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+      "observed_sha256": "4d26fdfedae3b82399c195d039183733c9ac57f8b3c88676820dc3bf191f04d7",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/bin/mock-agent",
+      "expected_sha256": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+      "observed_sha256": "e7455330ddfcc360bb1d0c2d8c94bfcb98c1034b7b05a078003afd30086c9bd9",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/bin/e2e-delivery-fixture",
+      "expected_sha256": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+      "observed_sha256": "9bfd5e409051d634e69222c438714ca87722d8f3fe2f2d074fa2326f2105e30a",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
+      "expected_sha256": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+      "observed_sha256": "47f1c4ce138b700160cb5520d01b34a392da9c1f730b213dfc79e3ca9afce09b",
+      "matches": true
+    },
+    {
+      "path": "apps/backend/.build/e2e-plugin-identity.json",
+      "expected_sha256": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d",
+      "observed_sha256": "27149d3e9fb8ba23dade3c5547332c947601174764ae50b4cd800a6c0d2e1c7d",
+      "matches": true
+    }
+  ],
+  "asset_hashes_before": {
+    "manifest.json": "0e493d8e8e72549afd4eb390bee8ada314d08fe721532067529a0c3a33b383ce",
+    "mobile-stats-usage-history-phone-real-collector--real-collector-archived-details.png": "69969087ef726650929564b18bd6dff87aef56a70d96d30b56372e55486fa157",
+    "mobile-stats-usage-history-phone-real-collector--real-collector-deleted-details.png": "3f6d968dc6f4c71e7d020f3aadae14198126bf727bfb96aaf14056d134a7884a",
+    "mobile-stats-usage-history-phone-real-native--real-native-retained-unavailable-session-details.png": "a61835e2adc19c17fd14e494639d9db2f8f3513c13393508f21b14524018a7a6",
+    "plugin-session-cost-action-desktop.png": "3df1a4c8623b5e4e3f4a8459d8862588deb7347acb1bb2de9067e9f06c55289b",
+    "plugin-session-cost-action-phone.png": "e97be4ebf5d96aafa349b460a2079f39948a4beeb66311b81dce220984e601c7",
+    "stats-usage-history-desktop-real-collector--real-collector-archived-details.png": "e7fc3cc2b3554272dafd37bb74db0ce3a8ea4b0cd19ba1488c3c3b758ff39efa",
+    "stats-usage-history-desktop-real-collector--real-collector-deleted-details.png": "6cb6610374ff49fd0f43f5e4834b17b659cce94b9818c45e9f9a1008d3f85800",
+    "stats-usage-history-desktop-real-native--real-native-retained-unavailable-session-details.png": "714080fa44b00462f5d14543768acf2d77c2da7c5f2adeacb1ed63b6b176f290"
+  },
+  "asset_hashes_after": {
+    "manifest.json": "0e493d8e8e72549afd4eb390bee8ada314d08fe721532067529a0c3a33b383ce",
+    "mobile-stats-usage-history-phone-real-collector--real-collector-archived-details.png": "69969087ef726650929564b18bd6dff87aef56a70d96d30b56372e55486fa157",
+    "mobile-stats-usage-history-phone-real-collector--real-collector-deleted-details.png": "3f6d968dc6f4c71e7d020f3aadae14198126bf727bfb96aaf14056d134a7884a",
+    "mobile-stats-usage-history-phone-real-native--real-native-retained-unavailable-session-details.png": "a61835e2adc19c17fd14e494639d9db2f8f3513c13393508f21b14524018a7a6",
+    "plugin-session-cost-action-desktop.png": "3df1a4c8623b5e4e3f4a8459d8862588deb7347acb1bb2de9067e9f06c55289b",
+    "plugin-session-cost-action-phone.png": "e97be4ebf5d96aafa349b460a2079f39948a4beeb66311b81dce220984e601c7",
+    "stats-usage-history-desktop-real-collector--real-collector-archived-details.png": "e7fc3cc2b3554272dafd37bb74db0ce3a8ea4b0cd19ba1488c3c3b758ff39efa",
+    "stats-usage-history-desktop-real-collector--real-collector-deleted-details.png": "6cb6610374ff49fd0f43f5e4834b17b659cce94b9818c45e9f9a1008d3f85800",
+    "stats-usage-history-desktop-real-native--real-native-retained-unavailable-session-details.png": "714080fa44b00462f5d14543768acf2d77c2da7c5f2adeacb1ed63b6b176f290"
+  },
+  "assets_match_original_snapshot_before": true,
+  "assets_match_original_snapshot_after": true,
+  "web_index_before": {
+    "path": "apps/web/dist/index.html",
+    "sha256": "8c3d95c23893c5e51851e15cd94fef1884c2575eba1e53347d63e5141b36836e"
+  },
+  "web_index_after": {
+    "path": "apps/web/dist/index.html",
+    "sha256": "8c3d95c23893c5e51851e15cd94fef1884c2575eba1e53347d63e5141b36836e"
+  },
+  "prepared_script_hashes": {
+    "opencode-e2e": "e30f5441c9b34b94dec6ba69964be6938fbc758580608ed5dc83d145a8598872",
+    "mobile-plan-e2e": "bcda9de539365d3f60c1ad59d9f23713b7275a34434a7e79b654e22e608607a4",
+    "containers-e2e": "f80ae1b03daabc26613418b552e503a8d1006e2c66dea2a2ca5031fcff7d7bdf"
+  },
+  "evidence_logs": [
+    "/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T105611Z-584748/opencode-repeat10.log"
+  ],
+  "trace_files": [],
+  "backend_process_logs": [],
+  "notes": [
+    "No tracked sources were edited by B40.",
+    "No mobile or containers managed command was started after the first command failed.",
+    "The E2E-specific skill/reference files and cloud_environment.environment_status tool were unavailable in this session; /etc/codex/network-policy.json was absent.",
+    "Managed Docker local-socket health check passed before execution; Docker-specific work was not reached."
+  ],
+  "updated_at_utc": "2026-10-31T10:57:32.876809+00:00",
+  "quiescence_after_failure": {
+    "runner_pid_from_log_dir": 584748,
+    "runner_pid_live": false,
+    "runner_process_group_live": false,
+    "managed_runner_process_live": false,
+    "selected_spec_process_live": false,
+    "observed_after_command_exit": true
+  }
+}

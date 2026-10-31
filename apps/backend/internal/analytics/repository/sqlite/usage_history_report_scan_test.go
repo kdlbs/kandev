@@ -215,7 +215,7 @@ func TestUsageHistoryDeadlineCasesPostgres(t *testing.T) {
 			case "five_years/America/New_York", "five_years/Asia/Kathmandu", "five_years/Europe/Lisbon":
 				requireUsageReportSourcesEqual(t, fixture, scenario.Filter,
 					reportSummarySourceFallback(scope, generation, scenario.Filter),
-					reportUTCMonthSummarySource(scope, generation, scenario.Filter))
+					reportUTCMonthSummarySourceForEngine(scope, generation, scenario.Filter, true))
 			case "native":
 				requireUsageReportSourcesEqual(t, fixture, scenario.Filter,
 					reportFactSource(scope, generation, scenario.Filter, true),
@@ -235,8 +235,12 @@ func TestUsageHistoryDeadlineCasesPostgres(t *testing.T) {
 			require.NoError(t, err)
 			t.Logf("PostgreSQL report plans: statements=%d reads=%d scan rows=%g rejected=%g",
 				totals.Statements, totals.ReadStatements, totals.PostgresRows, totals.PostgresRejected)
+			if strings.HasPrefix(scenario.Name, "five_years/") && scenario.Name != "five_years/UTC" {
+				assertPostgresCurrencySafetyPlan(t, fixture, statements)
+				assertPostgresMonthlyEdgeIndexPlan(t, fixture, usageHistoryDeadlineReportSource(t, statements, scenario.Name))
+			}
 			if scenario.Name == "deleted_task" {
-				assertPostgresDeletedTaskReportBound(t, fixture, statements)
+				assertPostgresDeletedTaskReportBound(t, fixture, scenario.Filter, statements)
 			}
 			usageBenchExplainDeadlineSource(t, fixture, scenario)
 		})
@@ -253,10 +257,12 @@ func usageBenchExplainDeadlineSource(t *testing.T, fixture *usageBenchFixture, s
 	require.NoError(t, err)
 	require.NoError(t, fixture.repo.usageReportGrid(t.Context(), tx, scenario.Filter, metadata))
 	var source usageReportQuery
+	var legacySource usageReportQuery
 	switch scenario.Name {
 	case "five_years/America/New_York", "five_years/Asia/Kathmandu", "five_years/Europe/Lisbon":
 		require.NoError(t, fixture.repo.prepareUsageReportUTCMonthDimensions(t.Context(), tx, scope, generation, scenario.Filter))
-		source = reportUTCMonthSummarySource(scope, generation, scenario.Filter)
+		legacySource = reportUTCMonthSummarySource(scope, generation, scenario.Filter)
+		source = reportUTCMonthSummarySourceForEngine(scope, generation, scenario.Filter, true)
 	case "native":
 		safe, err := fixture.repo.usageReportAllTimeSummarySafe(t.Context(), tx, scope, generation, scenario.Filter)
 		require.NoError(t, err)
@@ -278,6 +284,22 @@ func usageBenchExplainDeadlineSource(t *testing.T, fixture *usageBenchFixture, s
 		Plan usageBenchPostgresNode `json:"Plan"`
 	}
 	require.NoError(t, json.Unmarshal(encoded, &roots))
+	if legacySource.sql != "" {
+		legacyQuery := `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT COUNT(*) FROM (` + legacySource.sql + `) usage_deadline_source`
+		var legacyEncoded []byte
+		require.NoError(t, tx.GetContext(t.Context(), &legacyEncoded, fixture.database.Rebind(legacyQuery), legacySource.args...))
+		var legacyRoots []struct {
+			Plan usageBenchPostgresNode `json:"Plan"`
+		}
+		require.NoError(t, json.Unmarshal(legacyEncoded, &legacyRoots))
+		require.Len(t, roots, 1)
+		require.Len(t, legacyRoots, 1)
+		legacyVisits := usageBenchPostgresRelationVisits(legacyRoots[0].Plan, "usage_projection_contributions")
+		optimizedVisits := usageBenchPostgresRelationVisits(roots[0].Plan, "usage_projection_contributions")
+		t.Logf("PostgreSQL month-edge negative control: old contribution visits=%g, indexed range visits=%g", legacyVisits, optimizedVisits)
+		require.Greater(t, legacyVisits, optimizedVisits,
+			"the old source must expose the scope-wide point scan removed by the PostgreSQL range probes")
+	}
 	var logScans func(usageBenchPostgresNode)
 	logScans = func(node usageBenchPostgresNode) {
 		if strings.Contains(node.Type, "Scan") {
@@ -307,8 +329,9 @@ func usageBenchExplainDeadlineSource(t *testing.T, fixture *usageBenchFixture, s
 	}
 }
 
-func assertPostgresDeletedTaskReportBound(t *testing.T, fixture *usageBenchFixture, statements []usageBenchStatement) {
+func assertPostgresDeletedTaskReportBound(t *testing.T, fixture *usageBenchFixture, filter models.SessionUsageFilter, statements []usageBenchStatement) {
 	t.Helper()
+	selectedWorks, selectedFacts := usageBenchAppliedFilterCardinality(t, fixture, filter)
 	var found bool
 	for _, statement := range statements {
 		if !strings.Contains(statement.SQL, "INSERT INTO usage_report_range") {
@@ -324,10 +347,108 @@ func assertPostgresDeletedTaskReportBound(t *testing.T, fixture *usageBenchFixtu
 			"the actual report materialization must retain the subject-first contribution bound")
 		require.False(t, usageBenchPostgresHasIndex(roots[0].Plan, "usage_projection_contributions", "idx_usage_contribution_points"),
 			"the actual report must not start from the scope-wide point index")
-		t.Logf("PostgreSQL actual deleted-task report contribution visits=%g of %d published contributions", visits, fixture.storage.PublishedContributions)
+		appliedVisits := usageBenchPostgresRelationVisits(roots[0].Plan, "usage_projection_applied")
+		t.Logf("PostgreSQL deleted-task applied visits=%g; selected-work=%d selected-facts=%d", appliedVisits, selectedWorks, selectedFacts)
+		require.LessOrEqual(t, appliedVisits, float64(selectedFacts+selectedWorks*2),
+			"published-build visits must be bounded by selected facts and distinct work")
+		t.Logf("PostgreSQL actual deleted-task contributions=%g/%d; applied visits=%g selected-work=%d selected-facts=%d", visits, fixture.storage.PublishedContributions, appliedVisits, selectedWorks, selectedFacts)
 		found = true
 	}
 	require.True(t, found, "the actual report range materialization plan must be captured")
+}
+
+func usageBenchAppliedFilterCardinality(t *testing.T, fixture *usageBenchFixture, filter models.SessionUsageFilter) (int64, int64) {
+	t.Helper()
+	scope, generation := fixture.subjects[0].scope, fixture.subjects[0].generation
+	var selected, selectedFacts int64
+	from := ` FROM usage_projection_applied a
+		JOIN usage_canonical_facts f ON f.scope_id=a.scope_id AND f.generation=a.generation AND f.work_key=a.work_key AND f.build_id=a.build_id
+		JOIN usage_subjects u ON u.scope_id=f.scope_id AND u.subject_id=f.subject_id
+		WHERE a.scope_id=? AND a.generation=?`
+	args := []any{scope, generation}
+	for _, dimension := range []struct {
+		name   string
+		values []string
+	}{{"task_id", filter.TaskIDs}, {"session_id", filter.SessionIDs}} {
+		if len(dimension.values) > 0 {
+			from += ` AND u.` + dimension.name + ` IN (` + placeholders(len(dimension.values)) + `)`
+			args = append(args, stringArgs(dimension.values)...)
+		}
+	}
+	require.NoError(t, fixture.database.Get(&selected, fixture.database.Rebind(`SELECT COUNT(DISTINCT a.work_key)`+from), args...))
+	require.NoError(t, fixture.database.Get(&selectedFacts, fixture.database.Rebind(`SELECT COUNT(*)`+from), args...))
+	return selected, selectedFacts
+}
+
+func assertPostgresMonthlyEdgeIndexPlan(t *testing.T, fixture *usageBenchFixture, statement *usageBenchStatement) {
+	t.Helper()
+	var roots []struct {
+		Plan usageHistoryPostgresRangePlanNode `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal(statement.PostgresPlan, &roots))
+	require.Len(t, roots, 1)
+	require.True(t, usageHistoryPostgresHasBoundedPointIndex(roots[0].Plan),
+		"monthly edge points must use the coverage-start range index")
+	visits := usageBenchPostgresRelationVisits(asUsageBenchPostgresNode(roots[0].Plan), "usage_projection_contributions")
+	t.Logf("PostgreSQL monthly report bounded point-index plan contribution visits=%g of %d published contributions", visits, fixture.storage.PublishedContributions)
+	require.Less(t, visits, float64(fixture.storage.PublishedContributions)/4,
+		"month-edge reports must not visit a scope-wide share of point contributions")
+}
+
+func assertPostgresCurrencySafetyPlan(t *testing.T, fixture *usageBenchFixture, statements []usageBenchStatement) {
+	t.Helper()
+	var target *usageBenchStatement
+	for i := range statements {
+		query := strings.ToUpper(statements[i].SQL)
+		if strings.Contains(query, "EDGE_MATCHED AS") && strings.Contains(query, "UPDATE USAGE_REPORT_UTC_MONTH_DIMENSIONS") {
+			target = &statements[i]
+			break
+		}
+	}
+	require.NotNil(t, target, "the currency-safety query plan must be captured")
+	var roots []struct {
+		Plan usageHistoryPostgresRangePlanNode `json:"Plan"`
+	}
+	require.NoError(t, json.Unmarshal(target.PostgresPlan, &roots))
+	require.Len(t, roots, 1)
+	require.True(t, usageHistoryPostgresHasBoundedPointIndex(roots[0].Plan),
+		"currency-safety edge rows must use the coverage-start range index")
+	visits := usageBenchPostgresRelationVisits(asUsageBenchPostgresNode(roots[0].Plan), "usage_projection_contributions")
+	t.Logf("PostgreSQL currency-safety bounded point-index visits=%g of %d published contributions", visits, fixture.storage.PublishedContributions)
+	require.Less(t, visits, float64(fixture.storage.PublishedContributions)/4,
+		"currency-safety analysis must not visit a scope-wide share of point contributions")
+}
+
+type usageHistoryPostgresRangePlanNode struct {
+	Type      string                              `json:"Node Type"`
+	Relation  string                              `json:"Relation Name"`
+	Index     string                              `json:"Index Name"`
+	IndexCond string                              `json:"Index Cond"`
+	Rows      float64                             `json:"Actual Rows"`
+	Loops     float64                             `json:"Actual Loops"`
+	Filtered  float64                             `json:"Rows Removed by Filter"`
+	Rechecked float64                             `json:"Rows Removed by Index Recheck"`
+	Plans     []usageHistoryPostgresRangePlanNode `json:"Plans"`
+}
+
+func usageHistoryPostgresHasBoundedPointIndex(node usageHistoryPostgresRangePlanNode) bool {
+	if node.Relation == "usage_projection_contributions" && node.Index == "idx_usage_contribution_points" && strings.Contains(node.IndexCond, "coverage_start") {
+		return true
+	}
+	for _, child := range node.Plans {
+		if usageHistoryPostgresHasBoundedPointIndex(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func asUsageBenchPostgresNode(node usageHistoryPostgresRangePlanNode) usageBenchPostgresNode {
+	converted := usageBenchPostgresNode{Type: node.Type, Relation: node.Relation, Index: node.Index, Rows: node.Rows, Loops: node.Loops, Filtered: node.Filtered, Rechecked: node.Rechecked}
+	for _, child := range node.Plans {
+		converted.Plans = append(converted.Plans, asUsageBenchPostgresNode(child))
+	}
+	return converted
 }
 
 func usageBenchPostgresRelationVisits(node usageBenchPostgresNode, relation string) float64 {

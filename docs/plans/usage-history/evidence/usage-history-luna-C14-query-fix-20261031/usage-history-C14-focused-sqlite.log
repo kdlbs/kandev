@@ -1,0 +1,97 @@
+=== RUN   TestUsageHistoryAllTimeProviderSummaryPreservesInt64
+=== RUN   TestUsageHistoryAllTimeProviderSummaryPreservesInt64/postgres=false
+=== RUN   TestUsageHistoryAllTimeProviderSummaryPreservesInt64/postgres=true
+    usage_history_projection_summary_test.go:91: set KANDEV_TEST_POSTGRES_DSN to run Postgres tests
+--- PASS: TestUsageHistoryAllTimeProviderSummaryPreservesInt64 (0.24s)
+    --- PASS: TestUsageHistoryAllTimeProviderSummaryPreservesInt64/postgres=false (0.24s)
+    --- SKIP: TestUsageHistoryAllTimeProviderSummaryPreservesInt64/postgres=true (0.00s)
+=== RUN   TestUsageHistoryMonthlyReviewEdges
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite
+    usage_history_report_monthly_review_scan_test.go:23: usage fixture retention backfill complete pages=3
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/daily_currency_normalization
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/provider_options_ignore_selected_provider_while_rows_stay_filtered
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/shared_local_day_across_UTC_dates
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/local_midnight_within_one_UTC_date
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/balanced_independent_metrics_preserve_local-day_currency
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/UTC_edge_day_mixed_currency_falls_back_as_a_month
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/requested-calendar_coarse_currency_shares_local-day_fallback
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/coarse_and_currency-unsafe_month_falls_back_once
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2
+=== RUN   TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2
+--- PASS: TestUsageHistoryMonthlyReviewEdges (0.61s)
+    --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite (0.61s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/daily_currency_normalization (0.03s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/provider_options_ignore_selected_provider_while_rows_stay_filtered (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/shared_local_day_across_UTC_dates (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/local_midnight_within_one_UTC_date (0.03s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/balanced_independent_metrics_preserve_local-day_currency (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/UTC_edge_day_mixed_currency_falls_back_as_a_month (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/requested-calendar_coarse_currency_shares_local-day_fallback (0.03s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/coarse_and_currency-unsafe_month_falls_back_once (0.02s)
+        --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects (0.02s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-0 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-0 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/task/usage-bench-main-2 (0.00s)
+            --- PASS: TestUsageHistoryMonthlyReviewEdges/sqlite/task_and_session_filters_include_deleted_subjects/session/usage-bench-main-2 (0.00s)
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources
+    usage_history_report_scan_test.go:69: usage fixture recent phase start native=400 external=40
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=recent source=native records=400
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=recent source=native records=400
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:69: usage fixture recent range inserts complete
+    usage_history_report_scan_test.go:69: usage fixture special records complete
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=other source=native records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=other source=native records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:69: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:69: usage fixture second scope inserts complete
+    usage_history_report_scan_test.go:69: usage fixture retention backfill complete pages=5
+    usage_history_report_scan_test.go:69: usage fixture recent publication complete pages=68
+    usage_history_report_scan_test.go:69: usage fixture deleted-task preservation complete
+    usage_history_report_scan_test.go:69: usage fixture archived-task preservation complete
+    usage_history_report_scan_test.go:70: usage fixture source insert start range=older source=native records=1600
+    usage_history_report_scan_test.go:70: usage fixture source insert complete range=older source=native records=1600
+    usage_history_report_scan_test.go:70: usage fixture source insert start range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:70: usage fixture source insert complete range=older source=plugin:bench records=160
+    usage_history_report_scan_test.go:70: usage fixture retention backfill complete pages=6
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/America/New_York
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=533; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=146 idx_usage_contribution_model_provider_points=387 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Asia/Kathmandu
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=533; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=132 idx_usage_contribution_model_provider_points=401 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Europe/Lisbon
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=477; unbounded point-index visits=0; daily-summary visits=4414; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_points=76 idx_usage_contribution_model_provider_points=401 idx_usage_contribution_overlap=5]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/native
+    usage_history_report_scan_test.go:87: native point-period plan: SEARCH p USING INDEX idx_usage_contribution_model_provider_points (scope_id=? AND generation=? AND model=? AND provider=? AND calendar=? AND coverage_kind=? AND coverage_start>? AND coverage_start<?); NLOOP=1 NVISIT=1 SELECT=96 PARENT=85
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=1; unbounded point-index visits=0; daily-summary visits=8828; canonical-work visits=0; lifetime-index visits=0; subject-first=false; indexed loops=[idx_usage_daily_date=4414 idx_usage_contribution_model_provider_points=1 idx_usage_daily_date=4414]
+=== RUN   TestUsageHistoryDeadlineCasesUseBoundedReportSources/deleted_task
+    usage_history_report_scan_test.go:87: published facts=2217 contributions=4432 daily summaries=4418; point-index visits=0; unbounded point-index visits=0; daily-summary visits=0; canonical-work visits=0; lifetime-index visits=0; subject-first=true; indexed loops=[idx_usage_canonical_subject=500 idx_usage_canonical_subject=500 idx_usage_canonical_subject=500]
+--- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources (4.71s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/America/New_York (0.38s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Asia/Kathmandu (0.37s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/five_years/Europe/Lisbon (0.38s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/native (0.26s)
+    --- PASS: TestUsageHistoryDeadlineCasesUseBoundedReportSources/deleted_task (0.04s)
+=== RUN   TestUsageHistoryReportExactUtcSummarySkipsPointFallback
+    usage_history_report_scan_test.go:575: usage fixture recent phase start native=400 external=40
+    usage_history_report_scan_test.go:575: usage fixture source insert start range=recent source=native records=400
+    usage_history_report_scan_test.go:575: usage fixture source insert complete range=recent source=native records=400
+    usage_history_report_scan_test.go:575: usage fixture source insert start range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:575: usage fixture source insert complete range=recent source=plugin:bench records=40
+    usage_history_report_scan_test.go:575: usage fixture recent range inserts complete
+    usage_history_report_scan_test.go:575: usage fixture special records complete
+    usage_history_report_scan_test.go:575: usage fixture source insert start range=other source=native records=8
+    usage_history_report_scan_test.go:575: usage fixture source insert complete range=other source=native records=8
+    usage_history_report_scan_test.go:575: usage fixture source insert start range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:575: usage fixture source insert complete range=other source=plugin:bench records=8
+    usage_history_report_scan_test.go:575: usage fixture second scope inserts complete
+    usage_history_report_scan_test.go:575: usage fixture retention backfill complete pages=5
+    usage_history_report_scan_test.go:575: usage fixture recent publication complete pages=68
+    usage_history_report_scan_test.go:575: usage fixture deleted-task preservation complete
+    usage_history_report_scan_test.go:575: usage fixture archived-task preservation complete
+--- PASS: TestUsageHistoryReportExactUtcSummarySkipsPointFallback (0.99s)
+PASS
+ok  	github.com/kandev/kandev/internal/analytics/repository/sqlite	6.552s

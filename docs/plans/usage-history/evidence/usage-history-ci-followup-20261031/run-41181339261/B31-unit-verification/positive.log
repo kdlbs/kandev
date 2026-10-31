@@ -1,0 +1,12 @@
+B34 POSITIVE FULL FILE
+STARTED_AT 2026-10-31T09:28:18.949710+00:00
+COMMAND ["timeout", "--signal=TERM", "30s", "nice", "-n", "19", "env", "NODE_OPTIONS=--max-old-space-size=512", "pnpm", "exec", "vitest", "run", "lib/state/slices/session/session-slice.update-messages.test.ts", "--project", "browser", "--maxWorkers=1", "--no-file-parallelism"]
+
+ RUN  v4.1.11 /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  09:28:20
+   Duration  671ms (transform 299ms, setup 163ms, import 233ms, tests 14ms, environment 170ms)
+

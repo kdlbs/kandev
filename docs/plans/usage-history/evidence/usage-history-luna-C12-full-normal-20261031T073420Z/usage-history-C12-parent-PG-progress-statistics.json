@@ -1,0 +1,7 @@
+{
+  "checked_at": "2026-10-31T10:43:17.612148+00:00",
+  "gate_database_matches_container_default": true,
+  "query": "Metadata counters only: pg_stat_user_tables, three known usage tables; no raw table scan/COUNT/EXPLAIN/query text",
+  "exit_code": 0,
+  "rows": "kandev_test_01fedac0eea845169c30808c4cb12055|session_usage_buckets|22031|22030\nkandev_test_01fedac0eea845169c30808c4cb12055|task_usage_events|0|0\nkandev_test_01fedac0eea845169c30808c4cb12055|usage_canonical_facts|22033|21906\nkandev_test_8d76c39373824689b6ad181d2d5c1188|session_usage_buckets|22031|22030\nkandev_test_8d76c39373824689b6ad181d2d5c1188|task_usage_events|0|0\nkandev_test_8d76c39373824689b6ad181d2d5c1188|usage_canonical_facts|22033|22033\n"
+}

@@ -1,0 +1,17 @@
+{
+  "reviewed_at": "2026-10-31T08:59:33.883203+00:00",
+  "worker_receipt": "/tmp/usage-history-luna-C13-latency-review.json",
+  "worker_sha256": "7aa937cd280243ba1d4e8fbd7db62d747eea5eb24540044e2229fc0904c0cad3",
+  "scenario_hash_matches": true,
+  "instrumented_statements": 180,
+  "report_transactions": 2,
+  "source_reviewed": [
+    "usage_history_bench_run_test.go:20(pagination)",
+    "usage_history_report.go:15(per-callcontext)",
+    "admission.go:12(10secondoperationbudget)"
+  ],
+  "conclusion": "Accepted: roughly10secondcompletedurationisTWOAPIpages; no evidenceofonecallnearingits10seconddeadline; no newSLOorrequiredcodechange",
+  "important_limit": "No concurrent-load capacity promise; per-pagePLAINlatencywasnotrecorded",
+  "normal_SQLite_gate": "PASSED",
+  "normal_PostgreSQL_gate": "RUNNING; nooverallcompletion"
+}

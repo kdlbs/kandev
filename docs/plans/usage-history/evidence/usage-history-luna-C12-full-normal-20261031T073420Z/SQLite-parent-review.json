@@ -1,0 +1,435 @@
+{
+  "reviewed_at": "2026-10-31T08:47:28.347716+00:00",
+  "source": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "engine": "SQLite",
+  "normal_gate": "PASSED",
+  "scenario_receipts": 32,
+  "ten_samples_per_scenario": true,
+  "comparison_receipts": 1,
+  "phase_counts": {
+    "one_year": 16,
+    "five_years": 16
+  },
+  "receipt_manifest": [
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-recent-Asia-Kathmandu.json",
+      "bytes": 50530,
+      "sha256": "cc53465fbd51213bc63f234dbcfcc66e3b426aa2f8314088fe01c15cf3fd8a5c"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-foreign_coarse.json",
+      "bytes": 87808,
+      "sha256": "dbba4b89b81a49714418143273d52a78979aa0e24509649b157e7d2fdb0b672c"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-recent-UTC.json",
+      "bytes": 45041,
+      "sha256": "e99cb20c4240ccbc39d64b3dd3df8eb52b74c0bc5b40905c5f2f00021061a346"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-empty_range.json",
+      "bytes": 44534,
+      "sha256": "6d731a0ed557ea28defe66b781009bb02de9921d8293d01aeea2298c24998099"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-five_years-Asia-Kathmandu.json",
+      "bytes": 139297,
+      "sha256": "3e1de52bdc87014ee2b6266154ef48c8fe8a3b9078a476dfa1e334e9efe84796"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-five_years-America-New_York.json",
+      "bytes": 274236,
+      "sha256": "768b42cbc662f24dfaccde23ba035071cfd8e6dfaaceda503b414b2e5e5484e5"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-recent-before-after.json",
+      "bytes": 4270,
+      "sha256": "384d09fb862d9e47d158ab48c162dac0b5e834a219a82012ac20b58892533d09"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-recent-Asia-Kathmandu.json",
+      "bytes": 50508,
+      "sha256": "de44cdd238d0ed1d3992ae052063d8a681c07bf1d4c83b297223913185cb3413"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-dst_new_york.json",
+      "bytes": 50309,
+      "sha256": "e89a2494fb95accdd29f72a796150bdaa41f762624b80a7a4cf902d2c2f8dea3"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-foreign_coarse_boundary.json",
+      "bytes": 61840,
+      "sha256": "9a7ab0493f58b1685e7fffda63d3c1f93e8314b637994d32a770f92d31e7fc7f"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-mixed_actors.json",
+      "bytes": 59732,
+      "sha256": "bc1305953a47958012dd386eb27744cdafbee6b05fb6078e425a5847bbdfb588"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-mixed_actors.json",
+      "bytes": 84859,
+      "sha256": "456a0d2e411bc0121cb392972e40933b1d713a261d78af1f2fafd5ff932fcc37"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-recent-America-New_York.json",
+      "bytes": 50512,
+      "sha256": "153b30e83895022849ac797e0efab18984956753f228ffa6818f2be46e4f5c0b"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-five_years-Europe-Lisbon.json",
+      "bytes": 139157,
+      "sha256": "acb78dd4724c67c3c9a64097fdf68ada1167fa9f9ef8c3d2cef8f575ebf0cc01"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-recent-UTC.json",
+      "bytes": 45036,
+      "sha256": "f111ac0722003ad2c9c99ecc488987b980261c3cd303c794922fe1ff273ac331"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-five_years-America-New_York.json",
+      "bytes": 139234,
+      "sha256": "7b5833f231956139a3632b850742de63b7166b0a3ac53bd3f02ec045f9980367"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-recent-Europe-Lisbon.json",
+      "bytes": 50518,
+      "sha256": "39d0b933909749a27556630ba478f91b0402a23094c8887ba0e33d5112d68b68"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-five_years-UTC.json",
+      "bytes": 76509,
+      "sha256": "730d86590647b3634e6bad63118870bab1eb7cc57a67c4470d76f140691d8259"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-five_years-Asia-Kathmandu.json",
+      "bytes": 274136,
+      "sha256": "62dc7f315739ca78f758fde608234fc543a41f006c5fd9abfe11a0ef55489082"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-native.json",
+      "bytes": 55017,
+      "sha256": "7f3d5d792880c300b2107b1b33e9a1a5be2fc77016ea5c8cd8f5b3bc81705b12"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-five_years-UTC.json",
+      "bytes": 148599,
+      "sha256": "29ea261daeae5ee8bc9b72d59eebde939de9e291694deda5427daa2ed766999d"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-deleted_task.json",
+      "bytes": 60894,
+      "sha256": "d12274c739dc381b041fd39ad32a296891c38d5eb3244962d8f39b60ff2cf1be"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-recent-America-New_York.json",
+      "bytes": 50470,
+      "sha256": "93c6eaddb11ed14390043cd3975ab242cb806185da5962e4ad0e8306ff4cc750"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-five_years-Europe-Lisbon.json",
+      "bytes": 274183,
+      "sha256": "e485b09edb37522178c22137491e0bf3213419874952c8bf796c8ea02ba01e2b"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-native.json",
+      "bytes": 80277,
+      "sha256": "61ff1d5e7191fe7bac387469414e69fc61775aa815020d46ea2c57b43b7d5b2b"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-recent-Europe-Lisbon.json",
+      "bytes": 50496,
+      "sha256": "03f5112a93cce945abe5cb5ac52ace12f10474fd1f26567fa90bc6d424cf4d72"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-foreign_coarse_boundary.json",
+      "bytes": 61730,
+      "sha256": "6929c4e0d9351ed55b156450ea2b494815a9e39940c013ed5644f15b11162f01"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-deleted_task.json",
+      "bytes": 86166,
+      "sha256": "a1e188a02d1822df2e91f01e7a1f056e27a7d61660afe44c523f3d8deb7bae58"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-empty_range.json",
+      "bytes": 44608,
+      "sha256": "53680d4c8e00c506e4fca86890edc0bd82a57145918b66201f9b35e03f163366"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-foreign_coarse.json",
+      "bytes": 62635,
+      "sha256": "cb5bf6747df4157f7b981a2ce8a7e4572e4061ec5e4f5c49eead6cfdb87b6b7f"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-lifetime.json",
+      "bytes": 62609,
+      "sha256": "7f3343074edbe0ceba2052910f22648393faaf91dc685955fb2cf006bdf504a9"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-one_year-dst_new_york.json",
+      "bytes": 50299,
+      "sha256": "fe9c43b7fb5eb8216319fc19aae1a55480f5f18530ccf837b5a0012f6808bcc7"
+    },
+    {
+      "path": "/tmp/usage-history-C12-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/sqlite/usage-history-worker4-bench-sqlite-five_years-lifetime.json",
+      "bytes": 87806,
+      "sha256": "503fab967cc27bd37a1442102fb01ede7b2bf391ffae04f3a9da28c878057d60"
+    }
+  ],
+  "scenario_statistics": [
+    {
+      "phase": "one_year",
+      "scenario": "recent/Asia/Kathmandu",
+      "p95_ns": 285131768,
+      "plain_query_ns": 281986936,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "foreign_coarse",
+      "p95_ns": 7352100,
+      "plain_query_ns": 7942318,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "recent/UTC",
+      "p95_ns": 9966451,
+      "plain_query_ns": 10988822,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "empty_range",
+      "p95_ns": 3428029,
+      "plain_query_ns": 3269474,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "five_years/Asia/Kathmandu",
+      "p95_ns": 1020408749,
+      "plain_query_ns": 924254536,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "five_years/America/New_York",
+      "p95_ns": 9960131073,
+      "plain_query_ns": 9979440130,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "recent/Asia/Kathmandu",
+      "p95_ns": 325294312,
+      "plain_query_ns": 307183657,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "dst_new_york",
+      "p95_ns": 322195805,
+      "plain_query_ns": 321658857,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "foreign_coarse_boundary",
+      "p95_ns": 10915095,
+      "plain_query_ns": 11061747,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "mixed_actors",
+      "p95_ns": 152342232,
+      "plain_query_ns": 147371437,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "mixed_actors",
+      "p95_ns": 778879299,
+      "plain_query_ns": 749631417,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "recent/America/New_York",
+      "p95_ns": 328804419,
+      "plain_query_ns": 319494739,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "five_years/Europe/Lisbon",
+      "p95_ns": 896023737,
+      "plain_query_ns": 880306407,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "recent/UTC",
+      "p95_ns": 10678138,
+      "plain_query_ns": 11496349,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "five_years/America/New_York",
+      "p95_ns": 999457675,
+      "plain_query_ns": 952232486,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "recent/Europe/Lisbon",
+      "p95_ns": 290896208,
+      "plain_query_ns": 283989306,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "five_years/UTC",
+      "p95_ns": 57558687,
+      "plain_query_ns": 59657075,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "five_years/Asia/Kathmandu",
+      "p95_ns": 9952159864,
+      "plain_query_ns": 9976200424,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "native",
+      "p95_ns": 144504110,
+      "plain_query_ns": 137888669,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "five_years/UTC",
+      "p95_ns": 565232323,
+      "plain_query_ns": 558693625,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "deleted_task",
+      "p95_ns": 1015017893,
+      "plain_query_ns": 995461160,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "recent/America/New_York",
+      "p95_ns": 278369094,
+      "plain_query_ns": 278621944,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "five_years/Europe/Lisbon",
+      "p95_ns": 9351656457,
+      "plain_query_ns": 9168520293,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "native",
+      "p95_ns": 326879734,
+      "plain_query_ns": 331974687,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "recent/Europe/Lisbon",
+      "p95_ns": 323815837,
+      "plain_query_ns": 309714998,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "foreign_coarse_boundary",
+      "p95_ns": 10234815,
+      "plain_query_ns": 9679583,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "deleted_task",
+      "p95_ns": 5904765429,
+      "plain_query_ns": 5719478746,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "empty_range",
+      "p95_ns": 2837045,
+      "plain_query_ns": 3249782,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "foreign_coarse",
+      "p95_ns": 148387445,
+      "plain_query_ns": 143230785,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "lifetime",
+      "p95_ns": 61503706,
+      "plain_query_ns": 58913794,
+      "samples": 10
+    },
+    {
+      "phase": "one_year",
+      "scenario": "dst_new_york",
+      "p95_ns": 300558469,
+      "plain_query_ns": 291820065,
+      "samples": 10
+    },
+    {
+      "phase": "five_years",
+      "scenario": "lifetime",
+      "p95_ns": 9019841,
+      "plain_query_ns": 8381685,
+      "samples": 10
+    }
+  ],
+  "recent_controls": {
+    "recent/America/New_York": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "sqlite_visits_before": 650081,
+      "sqlite_visits_after": 650082
+    },
+    "recent/Asia/Kathmandu": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "sqlite_visits_before": 654581,
+      "sqlite_visits_after": 654582
+    },
+    "recent/Europe/Lisbon": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "sqlite_visits_before": 654559,
+      "sqlite_visits_after": 654560
+    },
+    "recent/UTC": {
+      "selection_equal": true,
+      "publication_changed": true,
+      "sqlite_visits_before": 3818,
+      "sqlite_visits_after": 3819
+    }
+  },
+  "PostgreSQL": "RUNNING; notyetpassed",
+  "overall_both_engine_gate": "NOTCOMPLETE",
+  "original_runner_body_unchanged": true
+}

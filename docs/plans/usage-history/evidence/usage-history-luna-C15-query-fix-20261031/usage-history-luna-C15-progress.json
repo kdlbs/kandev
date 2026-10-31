@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "worker": "C15",
+  "status": "focused_ready_for_parent_review",
+  "updated_at_utc": "2026-10-31T11:41:42Z",
+  "objective": "Replace workspace-wide PostgreSQL applied-build materialization with matching selected task/session work while preserving C14 fixes and semantics.",
+  "completed": [
+    "Created detached worktree at the requested base and applied the verified C14 diff.",
+    "Materialized filtered usage subjects and distinct work/build keys before matching applied rows by key.",
+    "Added PostgreSQL regression with 128 unrelated sessions, 2,048 unrelated published work items, two selected facts, an old-CTE negative control, parity, dated/undated/lifetime and deleted-task assertions.",
+    "Adjusted C14's applied scan assertion to permit legitimate indexed lookup loops and bound visits by selected facts/work; the 2,050-row C15 regression independently detects global materialization.",
+    "Focused PostgreSQL 18.6 and SQLite semantics, race, lint, vet, formatting and diff checks passed."
+  ],
+  "observed_plan": {
+    "published_applied_items": 2050,
+    "selected_fact_count": 2,
+    "selected_work_count": 2,
+    "new_selected_applied_visits": [2, 2, 2, 3],
+    "old_global_cte_visits": 2050,
+    "unrelated_session_subjects": 128,
+    "usage_subjects_relation_visits": 152,
+    "canonical_fact_relation_visits": [9, 10]
+  },
+  "current_state": {
+    "repository": "/tmp/usage-history-C15-query-worktree",
+    "base_head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+    "head": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+    "detached": true,
+    "index_clean": true,
+    "commit_created": false,
+    "pushed": false,
+    "main_workspace_edited_by_C15": false,
+    "final_diff": "/tmp/usage-history-luna-C15-final.diff",
+    "final_diff_sha256": "c028f91a13b23ba796674a109436176638eb247ee950b75a95fb209bc16c201a"
+  },
+  "parent_followup": "Parent-owned full PostgreSQL 18.6 gate and benchmark after integration. C12 timeout evidence remains preserved at /tmp/usage-history-luna-C12-full-normal-ready.json and its referenced postgres.log."
+}

@@ -1,0 +1,80 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --shards 1 --project containers tests/git/turn-changed-files-executors.spec.ts -- --grep 'keeps exported turn content after container removal and backend restart' --repeat-each\=10 --retries\=0 --reporter\=list --output\=/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-repeat10-results
+
+[36m[e2e][0m mode=host  shards=1  project=containers  strict=1  workers=1
+
+Running 10 tests using 1 worker
+
+(node:622653) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-0-8jUJ5y/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-0-8jUJ5y/repos/e2e-docker-repo'...
+done.
+  ✓   1 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.5s)
+(node:626613) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-1-7jsQVt/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-1-7jsQVt/repos/e2e-docker-repo'...
+done.
+  ✓   2 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.1s)
+(node:630569) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-2-1k6n7e/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-2-1k6n7e/repos/e2e-docker-repo'...
+done.
+  ✓   3 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.3s)
+(node:634660) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-3-4viRyF/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-3-4viRyF/repos/e2e-docker-repo'...
+done.
+  ✓   4 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.4s)
+(node:638970) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-4-3IGvwC/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-4-3IGvwC/repos/e2e-docker-repo'...
+done.
+  ✓   5 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.3s)
+(node:643384) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-5-6VcO8D/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-5-6VcO8D/repos/e2e-docker-repo'...
+done.
+  ✓   6 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.6s)
+(node:647635) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-6-oJ8G0c/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-6-oJ8G0c/repos/e2e-docker-repo'...
+done.
+  ✓   7 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.7s)
+(node:651643) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-7-Iko2zJ/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-7-Iko2zJ/repos/e2e-docker-repo'...
+done.
+  ✓   8 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.5s)
+(node:655588) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-8-oDNIPT/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-8-oDNIPT/repos/e2e-docker-repo'...
+done.
+  ✓   9 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.3s)
+(node:659383) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-9-ez0La3/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-9-ez0La3/repos/e2e-docker-repo'...
+done.
+  ✓  10 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.3s)
+
+  10 passed (3.8m)

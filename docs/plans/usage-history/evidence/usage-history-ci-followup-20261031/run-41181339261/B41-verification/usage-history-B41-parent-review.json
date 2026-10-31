@@ -1,0 +1,35 @@
+{
+  "reviewed_at": "2026-10-31T11:16:04.566632+00:00",
+  "worker": "B41",
+  "actual_model": "gpt-6-luna",
+  "effort": "max",
+  "source": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "raw_handoff_sha256": "646c136de6666af548d2457ba14882aeb830021d02714a3dd1290b0fa3ceb6ba",
+  "executions_verified": 52,
+  "flow_pass_counts": {
+    "opencode-e2e": [
+      10,
+      5,
+      14
+    ],
+    "mobile-plan-e2e": [
+      10,
+      2
+    ],
+    "containers-e2e": [
+      10,
+      1
+    ]
+  },
+  "failed": 0,
+  "skipped": 0,
+  "retries": 0,
+  "log_hashes_verified": 8,
+  "source_hashes_verified": 6,
+  "backend_artifacts_verified": 5,
+  "linux_helpers_verified": 2,
+  "unchanged_PR_assets_verified": 9,
+  "Vite_index_sha256": "8c3d95c23893c5e51851e15cd94fef1884c2575eba1e53347d63e5141b36836e",
+  "quiescent": true,
+  "public_curation": "Remove unrelated Docker inventory from JSON; preserve originals privately and all relevant result/source/artifact/asset evidence."
+}

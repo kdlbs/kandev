@@ -1,0 +1,8 @@
+{
+  "allow_run": true,
+  "source": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "reason": "Normalhooks/build/pushpassed; freshPRheadmatches; noapprovalgate; nootherlocalheavyjobs",
+  "runner_review": "/tmp/usage-history-C12-parent-runner-review.json",
+  "build_receipt": "/tmp/usage-history-core-ee5b9aa-build-ready.json",
+  "updated_at": "2026-10-31T07:38:41.462719+00:00"
+}

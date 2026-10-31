@@ -1,0 +1,97 @@
+{
+  "source_base": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "diff_sha256": "c028f91a13b23ba796674a109436176638eb247ee950b75a95fb209bc16c201a",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 961,
+      "sha256": "81faf01801a347b18fe110e2d28d507be3cfc896cb6c2b8fdba55e716219fa66"
+    },
+    {
+      "path": "sqlite-source-equivalence.md",
+      "bytes": 1052,
+      "sha256": "0453567a763c95372a740ad8475917dd86e6ad02cde208d564843ba979f3306d"
+    },
+    {
+      "path": "usage-history-C15-diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "usage-history-C15-format.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "usage-history-C15-lint.log",
+      "bytes": 10,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47"
+    },
+    {
+      "path": "usage-history-C15-parent-filtered-race.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "usage-history-C15-parent-filtered-race.log",
+      "bytes": 5088,
+      "sha256": "84d6617447dfcc152cc61a88e1ab491bbff0bdd043362ff16deee391db8fc233"
+    },
+    {
+      "path": "usage-history-C15-parent-review.json",
+      "bytes": 3360,
+      "sha256": "83f1fc364a1921136f8c7f5ffaea50c1fff831eacc2145bb93638d7ebe891f74"
+    },
+    {
+      "path": "usage-history-C15-pg-deleted.log",
+      "bytes": 5086,
+      "sha256": "e16d0a46c71f1a3e818fd45f020717ac3d42ac91ff96c54bd65431b9d4704664"
+    },
+    {
+      "path": "usage-history-C15-pg-scaling-final.log",
+      "bytes": 9648,
+      "sha256": "476c05b8c90b9e84bdefccc945dff5fec2fc8e3257c6319ff2ce00aa321abf79"
+    },
+    {
+      "path": "usage-history-C15-pg-semantics.log",
+      "bytes": 25909,
+      "sha256": "de21a337d354a4085089ccd5753a6c0dd86d4b91d6eaf3d9775d0b0115433769"
+    },
+    {
+      "path": "usage-history-C15-race.log",
+      "bytes": 75,
+      "sha256": "9a3d2ce7000e3a51239838ea66b127db7bf936358f90ba9fa8fbd2a49c7a8716"
+    },
+    {
+      "path": "usage-history-C15-receipt-correction.json",
+      "bytes": 606,
+      "sha256": "469a36b6ffe4d8ecb7f7cae0b30680d9d5569130698e8970b09d9541dee7dfd9"
+    },
+    {
+      "path": "usage-history-C15-vet.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "usage-history-luna-C15-final.diff",
+      "bytes": 45318,
+      "sha256": "c028f91a13b23ba796674a109436176638eb247ee950b75a95fb209bc16c201a"
+    },
+    {
+      "path": "usage-history-luna-C15-focused-ready.json",
+      "bytes": 11629,
+      "sha256": "7368751220eea05c56eea8c3e2ae639e1d550ebc1588e5e7f96e36074110b043"
+    },
+    {
+      "path": "usage-history-luna-C15-focused-ready.original.json",
+      "bytes": 10915,
+      "sha256": "565c3fdb84eda780219860dc8ea72b3954122cec78f7c06faae0d29e666e8a6b"
+    },
+    {
+      "path": "usage-history-luna-C15-progress.json",
+      "bytes": 2092,
+      "sha256": "0fc640222c2151f467be4a637d7453d12b5069c2e84da3f951ece6f757a4796f"
+    }
+  ],
+  "excludes": "This manifest itself"
+}

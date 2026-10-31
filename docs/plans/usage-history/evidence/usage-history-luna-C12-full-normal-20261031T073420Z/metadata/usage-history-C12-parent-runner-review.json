@@ -1,0 +1,10 @@
+{
+  "reviewed_at": "2026-10-31T07:38:16.486010+00:00",
+  "normal_runner": "/tmp/usage-history-C12-run-full-normal-gates.sh",
+  "normal_runner_sha256": "cfbf2f38a6ebc2ffd22848354b03e8929f019000f18cadc59b2a4ba0eb8de1ad",
+  "original_body_unchanged": true,
+  "only5headersadapted": true,
+  "source": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "tracked_source_clean": true,
+  "release": "AwaitparentfreshPRstateconfirmation"
+}

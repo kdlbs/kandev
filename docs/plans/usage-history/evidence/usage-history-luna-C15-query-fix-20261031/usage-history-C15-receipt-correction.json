@@ -1,0 +1,9 @@
+{
+  "corrected_at": "2026-10-31T11:46:39.515691+00:00",
+  "original_handoff_sha256": "565c3fdb84eda780219860dc8ea72b3954122cec78f7c06faae0d29e666e8a6b",
+  "original_preserved": "/tmp/usage-history-luna-C15-focused-ready.original.json",
+  "path": "/tmp/usage-history-C15-pg-scaling-final.log",
+  "claimed": "476c05b8c90b9e84bdefccc945dff5fec2fc8e3257c6311ff2ce00aa321abf79",
+  "actual": "476c05b8c90b9e84bdefccc945dff5fec2fc8e3257c6319ff2ce00aa321abf79",
+  "reason": "Single-character transcription error in the handoff, corrected from actual unchanged log bytes. Source, diff and test output unchanged."
+}

@@ -1,0 +1,9 @@
+make[2]: Entering directory '/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/backend'
+Building agentctl for linux/amd64...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 /root/.local/share/mise/installs/go/1.26.0/bin/go build -trimpath -v -ldflags "-s -w -X main.Version=v0.98.0-270-gee5b9aac819-dirty -X main.Commit=ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2 -X main.BuildTime=2026-10-31T11:06:05Z" -o bin/agentctl-linux-amd64 ./cmd/agentctl
+Building mock-agent for linux/amd64...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 /root/.local/share/mise/installs/go/1.26.0/bin/go build -trimpath -v -ldflags "-s -w -X main.Version=v0.98.0-270-gee5b9aac819-dirty -X main.Commit=ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2 -X main.BuildTime=2026-10-31T11:06:05Z" -o bin/mock-agent-linux-amd64 ./cmd/mock-agent
+github.com/mark3labs/mcp-go/client/transport
+github.com/mark3labs/mcp-go/client
+github.com/kandev/kandev/cmd/mock-agent
+make[2]: Leaving directory '/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/backend'

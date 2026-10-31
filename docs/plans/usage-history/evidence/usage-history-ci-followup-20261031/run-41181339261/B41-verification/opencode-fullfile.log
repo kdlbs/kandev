@@ -1,0 +1,19 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --shards 1 --project chromium tests/session/opencode-capacity-retry.spec.ts -- --retries\=0 --reporter\=list --output\=/tmp/usage-history-luna-B38-runs/opencode-e2e-20261031T110006Z-591931/opencode-fullfile-results
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 5 tests using 1 worker
+
+(node:602976) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-rbrGMB/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:22:5 › desktop continues after the fifth OpenCode admission refusal on the same runtime (9.1s)
+  ✓  2 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:71:5 › desktop preserves the episode when the OpenCode continuation fails without new tools (8.5s)
+  ✓  3 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:124:5 › desktop cancels OpenCode capacity recovery and prevents the old timer from dispatching (6.1s)
+  ✓  4 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:161:5 › desktop keeps mixed completed and pending OpenCode work manual (3.9s)
+  ✓  5 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:187:5 › desktop expires OpenCode capacity recovery without another dispatch (3.9s)
+
+  5 passed (33.9s)

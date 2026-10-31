@@ -204,7 +204,7 @@ Task 04 preparation identified selector and replay dependencies; its current imp
 
 ## Verification results
 
-### Current validation status (2026-10-30, NOT FINAL)
+### Historical validation status (2026-10-30, NOT FINAL)
 
 The validated core source revision is `6a4b002a22ba959dbd636f2fb42eefc31c7dafd2` on exact main `aebac5d5395e9983124b398198bace146d38506b`.
 The SDK tree is `a9a0a09dc8b30ac02876ccc7e46eb18102079600`.
@@ -522,3 +522,13 @@ See [the C11 correction and review](evidence/usage-history-luna-C11-query-fix-20
 Both normal full-scale database gates remain required from the next immutable source.
 Keep their original fixtures, independent oracle, ten samples, complete scenarios and report deadline.
 No full performance pass is claimed.
+
+### Current delivery checkpoint (2026-10-31, not final)
+
+C12 passed the unchanged full SQLite gate: 32 scenarios, ten samples each, plus the recent-history comparison. PostgreSQL18.6 passed 28 scenarios and failed the three non-UTC five-year views and deleted-task report. Its [full evidence packet](evidence/usage-history-luna-C12-full-normal-20261031T073420Z/README.md) preserves all four failures.
+
+C14 and C15 add PostgreSQL-only indexed month-edge probes and selected-subject/work matching. Focused oracle, plan, boundary, amount, ownership, undated, race, lint and vet checks passed. A 128-session regression reads 2-3 selected applied rows instead of all 2,050. [C15 evidence](evidence/usage-history-luna-C15-query-fix-20261031/README.md) also records the unchanged SQLite source path. The full PostgreSQL gate remains pending.
+
+The backend fixture correction passed 25 normal and ten race executions. The stale-message deletion correction passed its old-source negative control and 90 existing unit tests. Typecheck and the patched Vite build passed. All 52 managed OpenCode, mobile and Docker executions passed with zero retries, failures or skips. The [B41 packet](evidence/usage-history-ci-followup-20261031/run-41181339261/B41-verification/manifest.json) records the exact cases and unchanged artifacts/screenshots.
+
+Normal commit hooks, the coordinated backend build, public pushes, current-head green CI and a complete zero-FLAKY audit remain required. No deadline, fixture, oracle or gate waiver is used.

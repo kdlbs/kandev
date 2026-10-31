@@ -1,0 +1,606 @@
+{
+  "audit": "G10 immediate new-flake triage",
+  "createdAtEpoch": 1793433598.4383843,
+  "repository": "kdlbs/kandev",
+  "pullRequest": 3660,
+  "runId": 41181339261,
+  "runAttempt": 1,
+  "sourceHead": "ee5b9aac81959fa7ee669007cb05f9f6c3a71ae2",
+  "runUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261",
+  "runConclusion": "success",
+  "requiredFlakyVerdicts": 0,
+  "observedFlakyVerdicts": 3,
+  "observedUnexpectedVerdicts": 0,
+  "zeroFlakeGateSatisfied": false,
+  "knownIdentityTargetCountWithDeduplication": 14,
+  "rawKnownIdentityRows": 15,
+  "newFlakyOrUnexpectedCount": 1,
+  "cases": [
+    {
+      "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "project": "chromium",
+      "file": "tests/session/opencode-capacity-retry.spec.ts",
+      "title": "session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "summaryOutcome": "flaky",
+      "summaryFinalStatus": "passed",
+      "summaryStatuses": [
+        "failed",
+        "passed"
+      ],
+      "summaryAttempts": 2,
+      "errorCategory": "timeout",
+      "newRelativeToKnown14": false,
+      "matchingKnownTargetGroups": [
+        "previous-nine",
+        "G9-current"
+      ],
+      "attempts": [
+        {
+          "retry": 0,
+          "resultId": "fc0264b46cd809108dd9a4f39db908c0",
+          "status": "failed",
+          "durationMs": 24290,
+          "outerArtifact": "blob-report-7-13034594210",
+          "innerReport": "report-normal-7-2-0.zip",
+          "errors": [
+            {
+              "message": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n",
+              "stack": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts:108:48",
+              "location": {
+                "file": "/__w/kandev/kandev/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts",
+                "column": 48,
+                "line": 108
+              },
+              "snippet": "  106 |       \"waiting for the exhausted OpenCode continuation and retry notice to settle\",\n  107 |     );\n> 108 |     await expect(session.transientRetryCard()).toHaveCount(0);\n      |                                                ^\n  109 |     await expect(session.activeChat().getByTestId(\"retained-turn-recovery-feedback\")).toContainText(\n  110 |       \"11\",\n  111 |     );"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "path": "resources/4e9677be1483deacbea83f8d0bcca38354426a5f.png",
+              "contentType": "image/png"
+            },
+            {
+              "name": "error-context",
+              "path": "resources/64579481b776ee767291ec27816fe8bd9af69cba.markdown",
+              "contentType": "text/markdown"
+            }
+          ]
+        },
+        {
+          "retry": 1,
+          "resultId": "d47bd20df9e28ed5f0a0671b0ebc6682",
+          "status": "passed",
+          "durationMs": 33616,
+          "outerArtifact": "blob-report-7-13034594210",
+          "innerReport": "report-normal-7-2-0.zip",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "path": "resources/10d889242e04fe8471e448345271667d8e052d4f.zip",
+              "contentType": "application/zip"
+            }
+          ]
+        }
+      ],
+      "retry0OuterArtifact": {
+        "name": "blob-report-7",
+        "id": 13034594210,
+        "sha256": "sha256:b5db7dbdacd2e1790df8896b061586443bb269c4368358886853d97053ff9614",
+        "innerReport": "report-normal-7-2-0.zip",
+        "jobId": 124479809405,
+        "jobName": "E2E Shard 7/28",
+        "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809405"
+      },
+      "passingRetryTraceIsNotFailedAttemptTrace": true,
+      "rawReconciledAttempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "fc0264b46cd809108dd9a4f39db908c0",
+          "durationMs": 24290,
+          "outerArtifact": "blob-report-7",
+          "outerArtifactId": 13034594210,
+          "outerArtifactSha256": "sha256:b5db7dbdacd2e1790df8896b061586443bb269c4368358886853d97053ff9614",
+          "innerReport": "blob-report-7-13034594210/report-normal-7-2-0.zip",
+          "innerReportSha256": "ce5405dc0fbe95f6eac1327cd2b5058530644a57829eab536bc91e4283dfb878",
+          "errors": [
+            {
+              "message": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n",
+              "stack": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts:108:48",
+              "location": {
+                "file": "/__w/kandev/kandev/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts",
+                "column": 48,
+                "line": 108
+              },
+              "snippet": "  106 |       \"waiting for the exhausted OpenCode continuation and retry notice to settle\",\n  107 |     );\n> 108 |     await expect(session.transientRetryCard()).toHaveCount(0);\n      |                                                ^\n  109 |     await expect(session.activeChat().getByTestId(\"retained-turn-recovery-feedback\")).toContainText(\n  110 |       \"11\",\n  111 |     );"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "contentType": "image/png",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "fc0264b46cd809108dd9a4f39db908c0",
+              "innerReport": "blob-report-7-13034594210/report-normal-7-2-0.zip",
+              "innerReportPath": "resources/4e9677be1483deacbea83f8d0bcca38354426a5f.png",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "66c03206cf867c7231671ae28bfe9ad126c79227398a6a72a373f77d4186409d",
+                  "size": 48206
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/4e9677be1483deacbea83f8d0bcca38354426a5f.png",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "66c03206cf867c7231671ae28bfe9ad126c79227398a6a72a373f77d4186409d",
+              "diagnosticsSize": 48206,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            },
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "fc0264b46cd809108dd9a4f39db908c0",
+              "innerReport": "blob-report-7-13034594210/report-normal-7-2-0.zip",
+              "innerReportPath": "resources/64579481b776ee767291ec27816fe8bd9af69cba.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "928b238efd73bbbc5218c6d83f99e9b0f3bf3805b757156510afea7d4390a8cf",
+                  "size": 14896
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/64579481b776ee767291ec27816fe8bd9af69cba.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "928b238efd73bbbc5218c6d83f99e9b0f3bf3805b757156510afea7d4390a8cf",
+              "diagnosticsSize": 14896,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809405,
+          "jobName": "E2E Shard 7/28",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809405"
+        },
+        {
+          "retry": 1,
+          "status": "passed",
+          "resultId": "d47bd20df9e28ed5f0a0671b0ebc6682",
+          "durationMs": 33616,
+          "outerArtifact": "blob-report-7",
+          "outerArtifactId": 13034594210,
+          "outerArtifactSha256": "sha256:b5db7dbdacd2e1790df8896b061586443bb269c4368358886853d97053ff9614",
+          "innerReport": "blob-report-7-13034594210/report-normal-7-2-0.zip",
+          "innerReportSha256": "ce5405dc0fbe95f6eac1327cd2b5058530644a57829eab536bc91e4283dfb878",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "contentType": "application/zip",
+              "attemptStatus": "passed",
+              "retry": 1,
+              "resultId": "d47bd20df9e28ed5f0a0671b0ebc6682",
+              "innerReport": "blob-report-7-13034594210/report-normal-7-2-0.zip",
+              "innerReportPath": "resources/10d889242e04fe8471e448345271667d8e052d4f.zip",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "6b0e8708c78ae265f758a182e9ef0c51ff2c694bd76d1e3fee7e514ccda80330",
+                  "size": 5980664
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/10d889242e04fe8471e448345271667d8e052d4f.zip",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "6b0e8708c78ae265f758a182e9ef0c51ff2c694bd76d1e3fee7e514ccda80330",
+              "diagnosticsSize": 5980664,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809405,
+          "jobName": "E2E Shard 7/28",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809405"
+        }
+      ],
+      "failedRetryHasTraceAttachment": false,
+      "passingRetryTraceAttachmentCount": 1
+    },
+    {
+      "testId": "49dafd893b68f682a717-fc2b2d434586d19e6825",
+      "key": "containers::tests/git/turn-changed-files-executors.spec.ts::git/turn-changed-files-executors.spec.ts › Docker executor turn change retention › keeps exported turn content after container removal and backend restart",
+      "project": "containers",
+      "file": "tests/git/turn-changed-files-executors.spec.ts",
+      "title": "git/turn-changed-files-executors.spec.ts › Docker executor turn change retention › keeps exported turn content after container removal and backend restart",
+      "summaryOutcome": "flaky",
+      "summaryFinalStatus": "passed",
+      "summaryStatuses": [
+        "failed",
+        "passed"
+      ],
+      "summaryAttempts": 2,
+      "errorCategory": "none",
+      "newRelativeToKnown14": true,
+      "matchingKnownTargetGroups": [],
+      "attempts": [
+        {
+          "retry": 0,
+          "resultId": "7a3c96941bbb715914ba365a7b3d5cd7",
+          "status": "failed",
+          "durationMs": 13772,
+          "outerArtifact": "blob-report-containers-4-13034728653",
+          "innerReport": "report-containers-f8195dd.zip",
+          "errors": [
+            {
+              "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false",
+              "stack": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n    at /home/runner/work/kandev/kandev/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts:79:34",
+              "location": {
+                "file": "/home/runner/work/kandev/kandev/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+                "column": 34,
+                "line": 79
+              },
+              "snippet": "  77 |         `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSet!.id}/files/${file!.id}/content?variant=canonical_patch`,\n  78 |       );\n> 79 |       expect(contentResponse.ok).toBe(true);\n     |                                  ^\n  80 |       const content = (await contentResponse.json()) as { content: string };\n  81 |       expect(Buffer.from(content.content, \"base64\").toString(\"utf8\")).toContain(\"INITIAL_CONTENT\");\n  82 |     } finally {"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "error-context",
+              "path": "resources/e860fa27bc26851ccd55cae99bd43bb7bac1723a.markdown",
+              "contentType": "text/markdown"
+            }
+          ]
+        },
+        {
+          "retry": 1,
+          "resultId": "30c7f0ebb2f869d17802e7c144fe7f51",
+          "status": "passed",
+          "durationMs": 13809,
+          "outerArtifact": "blob-report-containers-4-13034728653",
+          "innerReport": "report-containers-f8195dd.zip",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "path": "resources/108f1e7a815cb99e1af6288f5ff92cce0f08857e.zip",
+              "contentType": "application/zip"
+            }
+          ]
+        }
+      ],
+      "retry0OuterArtifact": {
+        "name": "blob-report-containers-4",
+        "id": 13034728653,
+        "sha256": "sha256:adad37308301d991f517f06eec935d5a9eb66a98d5f97f4831c24592c9876585",
+        "innerReport": "report-containers-f8195dd.zip",
+        "jobId": 124479809141,
+        "jobName": "E2E Containers Shard 4/6",
+        "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809141"
+      },
+      "passingRetryTraceIsNotFailedAttemptTrace": true,
+      "rawReconciledAttempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "7a3c96941bbb715914ba365a7b3d5cd7",
+          "durationMs": 13772,
+          "outerArtifact": "blob-report-containers-4",
+          "outerArtifactId": 13034728653,
+          "outerArtifactSha256": "sha256:adad37308301d991f517f06eec935d5a9eb66a98d5f97f4831c24592c9876585",
+          "innerReport": "blob-report-containers-4-13034728653/report-containers-f8195dd.zip",
+          "innerReportSha256": "e73cf5801e1fc4a9d11896f1b9eff452f8281610a7f93f4c88169eb96c0a32e3",
+          "errors": [
+            {
+              "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false",
+              "stack": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n    at /home/runner/work/kandev/kandev/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts:79:34",
+              "location": {
+                "file": "/home/runner/work/kandev/kandev/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+                "column": 34,
+                "line": 79
+              },
+              "snippet": "  77 |         `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSet!.id}/files/${file!.id}/content?variant=canonical_patch`,\n  78 |       );\n> 79 |       expect(contentResponse.ok).toBe(true);\n     |                                  ^\n  80 |       const content = (await contentResponse.json()) as { content: string };\n  81 |       expect(Buffer.from(content.content, \"base64\").toString(\"utf8\")).toContain(\"INITIAL_CONTENT\");\n  82 |     } finally {"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "7a3c96941bbb715914ba365a7b3d5cd7",
+              "innerReport": "blob-report-containers-4-13034728653/report-containers-f8195dd.zip",
+              "innerReportPath": "resources/e860fa27bc26851ccd55cae99bd43bb7bac1723a.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "fd2bfc55eaef98571973bc9adc1b294b70c8e4af05b1a745c2f445e829a0354b",
+                  "size": 4868
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/e860fa27bc26851ccd55cae99bd43bb7bac1723a.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "fd2bfc55eaef98571973bc9adc1b294b70c8e4af05b1a745c2f445e829a0354b",
+              "diagnosticsSize": 4868,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809141,
+          "jobName": "E2E Containers Shard 4/6",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809141"
+        },
+        {
+          "retry": 1,
+          "status": "passed",
+          "resultId": "30c7f0ebb2f869d17802e7c144fe7f51",
+          "durationMs": 13809,
+          "outerArtifact": "blob-report-containers-4",
+          "outerArtifactId": 13034728653,
+          "outerArtifactSha256": "sha256:adad37308301d991f517f06eec935d5a9eb66a98d5f97f4831c24592c9876585",
+          "innerReport": "blob-report-containers-4-13034728653/report-containers-f8195dd.zip",
+          "innerReportSha256": "e73cf5801e1fc4a9d11896f1b9eff452f8281610a7f93f4c88169eb96c0a32e3",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "contentType": "application/zip",
+              "attemptStatus": "passed",
+              "retry": 1,
+              "resultId": "30c7f0ebb2f869d17802e7c144fe7f51",
+              "innerReport": "blob-report-containers-4-13034728653/report-containers-f8195dd.zip",
+              "innerReportPath": "resources/108f1e7a815cb99e1af6288f5ff92cce0f08857e.zip",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "b1d47b44113fe7ab991298a06f52f95dc783ccfb6625116dde874a668111fbf0",
+                  "size": 27519
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/108f1e7a815cb99e1af6288f5ff92cce0f08857e.zip",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "b1d47b44113fe7ab991298a06f52f95dc783ccfb6625116dde874a668111fbf0",
+              "diagnosticsSize": 27519,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809141,
+          "jobName": "E2E Containers Shard 4/6",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809141"
+        }
+      ],
+      "failedRetryHasTraceAttachment": false,
+      "passingRetryTraceAttachmentCount": 1,
+      "exactRetry0Assertion": {
+        "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false",
+        "location": {
+          "file": "/home/runner/work/kandev/kandev/apps/web/e2e/tests/git/turn-changed-files-executors.spec.ts",
+          "column": 34,
+          "line": 79
+        },
+        "snippet": "  77 |         `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSet!.id}/files/${file!.id}/content?variant=canonical_patch`,\n  78 |       );\n> 79 |       expect(contentResponse.ok).toBe(true);\n     |                                  ^\n  80 |       const content = (await contentResponse.json()) as { content: string };\n  81 |       expect(Buffer.from(content.content, \"base64\").toString(\"utf8\")).toContain(\"INITIAL_CONTENT\");\n  82 |     } finally {"
+      }
+    },
+    {
+      "testId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+      "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+      "project": "mobile-chrome",
+      "file": "tests/task/mobile-plan-download.spec.ts",
+      "title": "task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+      "summaryOutcome": "flaky",
+      "summaryFinalStatus": "passed",
+      "summaryStatuses": [
+        "failed",
+        "passed"
+      ],
+      "summaryAttempts": 2,
+      "errorCategory": "timeout",
+      "newRelativeToKnown14": false,
+      "matchingKnownTargetGroups": [
+        "previous-nine"
+      ],
+      "attempts": [
+        {
+          "retry": 0,
+          "resultId": "4c320d563ee6fc45cea88da9dc23dcf1",
+          "status": "failed",
+          "durationMs": 17311,
+          "outerArtifact": "blob-report-10-13035192932",
+          "innerReport": "report-normal-10-2-0.zip",
+          "errors": [
+            {
+              "message": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n",
+              "stack": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/task/mobile-plan-download.spec.ts:60:22",
+              "location": {
+                "file": "/__w/kandev/kandev/apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+                "column": 22,
+                "line": 60
+              },
+              "snippet": "  58 |   await testPage.keyboard.press(\"Escape\");\n  59 |   await expect(menuContent).toBeHidden();\n> 60 |   await expect(menu).toBeFocused();\n     |                      ^\n  61 |   const actions = download.locator(\"xpath=..\");\n  62 |   const box = await actions.boundingBox();\n  63 |   expect(box).not.toBeNull();"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "path": "resources/62d9fcfce710cf3672693a6cd5610222d62ed978.png",
+              "contentType": "image/png"
+            },
+            {
+              "name": "error-context",
+              "path": "resources/07230c3121d02920c1dc5d5fe8748155af2d26c4.markdown",
+              "contentType": "text/markdown"
+            }
+          ]
+        },
+        {
+          "retry": 1,
+          "resultId": "fcd7d660a86eee356bbccd63aa8efee4",
+          "status": "passed",
+          "durationMs": 14739,
+          "outerArtifact": "blob-report-10-13035192932",
+          "innerReport": "report-normal-10-2-0.zip",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "path": "resources/2b4694856186c66ff98f780747e8ab59eac22ae6.zip",
+              "contentType": "application/zip"
+            }
+          ]
+        }
+      ],
+      "retry0OuterArtifact": {
+        "name": "blob-report-10",
+        "id": 13035192932,
+        "sha256": "sha256:e84ed8138a3b1cc7470d409e3a091e7039dcea8dd82b73057750e02808ddc391",
+        "innerReport": "report-normal-10-2-0.zip",
+        "jobId": 124479809358,
+        "jobName": "E2E Shard 10/28",
+        "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809358"
+      },
+      "passingRetryTraceIsNotFailedAttemptTrace": true,
+      "rawReconciledAttempts": [
+        {
+          "retry": 0,
+          "status": "failed",
+          "resultId": "4c320d563ee6fc45cea88da9dc23dcf1",
+          "durationMs": 17311,
+          "outerArtifact": "blob-report-10",
+          "outerArtifactId": 13035192932,
+          "outerArtifactSha256": "sha256:e84ed8138a3b1cc7470d409e3a091e7039dcea8dd82b73057750e02808ddc391",
+          "innerReport": "blob-report-10-13035192932/report-normal-10-2-0.zip",
+          "innerReportSha256": "9ae504a425e9a2a650761021283166b6bd35ea2ecccdcd5dce57e1935541f849",
+          "errors": [
+            {
+              "message": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n",
+              "stack": "Error: expect(locator).toBeFocused() failed\n\nLocator:  getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\nExpected: focused\nReceived: inactive\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toBeFocused\" with timeout 5000ms\n  - waiting for getByTestId('plan-panel').getByTestId('plan-toolbar-implement-menu-trigger')\n    14 × locator resolved to <button type=\"button\" data-size=\"sm\" id=\"radix-_r_6q_\" data-state=\"closed\" data-variant=\"ghost\" aria-haspopup=\"menu\" aria-disabled=\"false\" aria-expanded=\"false\" data-slot=\"dropdown-menu-trigger\" aria-label=\"More implement options\" data-testid=\"plan-toolbar-implement-menu-trigger\" class=\"focus-visible:border-ring focus-visible:ring-ring/35 aria-invalid:border-destructive aria-invalid:ring-destructive/25 rounded-md border bg-clip-padding font-medium aria-invalid:ring-[2px] inline-flex items-center justi…>…</button>\n       - unexpected value \"inactive\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/task/mobile-plan-download.spec.ts:60:22",
+              "location": {
+                "file": "/__w/kandev/kandev/apps/web/e2e/tests/task/mobile-plan-download.spec.ts",
+                "column": 22,
+                "line": 60
+              },
+              "snippet": "  58 |   await testPage.keyboard.press(\"Escape\");\n  59 |   await expect(menuContent).toBeHidden();\n> 60 |   await expect(menu).toBeFocused();\n     |                      ^\n  61 |   const actions = download.locator(\"xpath=..\");\n  62 |   const box = await actions.boundingBox();\n  63 |   expect(box).not.toBeNull();"
+            }
+          ],
+          "attachments": [
+            {
+              "name": "screenshot",
+              "contentType": "image/png",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "4c320d563ee6fc45cea88da9dc23dcf1",
+              "innerReport": "blob-report-10-13035192932/report-normal-10-2-0.zip",
+              "innerReportPath": "resources/62d9fcfce710cf3672693a6cd5610222d62ed978.png",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "816e5b85cad6f25e1048319a06ffc00399bf99699f049e780badd5e0e18c134c",
+                  "size": 334903
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/62d9fcfce710cf3672693a6cd5610222d62ed978.png",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "816e5b85cad6f25e1048319a06ffc00399bf99699f049e780badd5e0e18c134c",
+              "diagnosticsSize": 334903,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            },
+            {
+              "name": "error-context",
+              "contentType": "text/markdown",
+              "attemptStatus": "failed",
+              "retry": 0,
+              "resultId": "4c320d563ee6fc45cea88da9dc23dcf1",
+              "innerReport": "blob-report-10-13035192932/report-normal-10-2-0.zip",
+              "innerReportPath": "resources/07230c3121d02920c1dc5d5fe8748155af2d26c4.markdown",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "b9dd82c9cf55398313500f11ea0c7353bce7ed93e9d84006f3377f1955291f9b",
+                  "size": 5825
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/07230c3121d02920c1dc5d5fe8748155af2d26c4.markdown",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "b9dd82c9cf55398313500f11ea0c7353bce7ed93e9d84006f3377f1955291f9b",
+              "diagnosticsSize": 5825,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809358,
+          "jobName": "E2E Shard 10/28",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809358"
+        },
+        {
+          "retry": 1,
+          "status": "passed",
+          "resultId": "fcd7d660a86eee356bbccd63aa8efee4",
+          "durationMs": 14739,
+          "outerArtifact": "blob-report-10",
+          "outerArtifactId": 13035192932,
+          "outerArtifactSha256": "sha256:e84ed8138a3b1cc7470d409e3a091e7039dcea8dd82b73057750e02808ddc391",
+          "innerReport": "blob-report-10-13035192932/report-normal-10-2-0.zip",
+          "innerReportSha256": "9ae504a425e9a2a650761021283166b6bd35ea2ecccdcd5dce57e1935541f849",
+          "errors": [],
+          "attachments": [
+            {
+              "name": "trace",
+              "contentType": "application/zip",
+              "attemptStatus": "passed",
+              "retry": 1,
+              "resultId": "fcd7d660a86eee356bbccd63aa8efee4",
+              "innerReport": "blob-report-10-13035192932/report-normal-10-2-0.zip",
+              "innerReportPath": "resources/2b4694856186c66ff98f780747e8ab59eac22ae6.zip",
+              "innerReportPresent": true,
+              "innerReportCopyCount": 1,
+              "innerReportCopies": [
+                {
+                  "sha256": "a88d8ca4e9cbdecadcec7d1888c8db06c20466d8d9cf67a972d4445c0731a317",
+                  "size": 2306053
+                }
+              ],
+              "diagnosticsPath": "retry-artifacts/2b4694856186c66ff98f780747e8ab59eac22ae6.zip",
+              "diagnosticsPresent": true,
+              "diagnosticsSha256": "a88d8ca4e9cbdecadcec7d1888c8db06c20466d8d9cf67a972d4445c0731a317",
+              "diagnosticsSize": 2306053,
+              "diagnosticsMatchesOneReportCopy": true,
+              "diagnosticsMatchesRepeatedReportCopies": false
+            }
+          ],
+          "jobId": 124479809358,
+          "jobName": "E2E Shard 10/28",
+          "jobUrl": "https://github.com/kdlbs/kandev/actions/runs/41181339261/job/124479809358"
+        }
+      ],
+      "failedRetryHasTraceAttachment": false,
+      "passingRetryTraceAttachmentCount": 1
+    }
+  ],
+  "parentAction": "Investigate the new retry-0 failure; G10 continues the complete artifact audit.",
+  "rawReportReconciliation": {
+    "uniqueTestIds": 4599,
+    "rawAttempts": 4602,
+    "rawStatuses": {
+      "failed": 3,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "summaryCountsMatchRawAttempts": true,
+    "allIdsStatusesOutcomesAndDescriptorsMatch": true,
+    "failingRetry0Traces": 0,
+    "passingRetry1Traces": 3
+  },
+  "triageEnrichedAtEpoch": 1793434060.8463016
+}

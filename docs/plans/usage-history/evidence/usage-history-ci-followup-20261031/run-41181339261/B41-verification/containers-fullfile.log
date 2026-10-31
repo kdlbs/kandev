@@ -1,0 +1,17 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --shards 1 --project containers tests/git/turn-changed-files-executors.spec.ts -- --retries\=0 --reporter\=list --output\=/tmp/usage-history-luna-B38-runs/containers-e2e-20261031T110605Z-621872/containers-fullfile-results
+
+[36m[e2e][0m mode=host  shards=1  project=containers  strict=1  workers=1
+
+Running 1 test using 1 worker
+
+(node:663487) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To /tmp/kandev-e2e-0-kkbZQk/fixture/e2e-docker.git
+ * [new branch]      main -> main
+Cloning into '/tmp/kandev-e2e-0-kkbZQk/repos/e2e-docker-repo'...
+done.
+  ✓  1 [containers] › e2e/tests/git/turn-changed-files-executors.spec.ts:11:7 › Docker executor turn change retention › keeps exported turn content after container removal and backend restart (15.3s)
+
+  1 passed (39.7s)

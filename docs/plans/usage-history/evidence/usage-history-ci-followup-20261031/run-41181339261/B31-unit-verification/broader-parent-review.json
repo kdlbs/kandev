@@ -1,0 +1,16 @@
+{
+  "reviewed_at": "2026-10-31T09:45:40.754556+00:00",
+  "worker": "B35Luna6Max",
+  "actual_log_checked": "/tmp/usage-history-B35-units.log",
+  "log_sha256": "b27a1fd9388fc3a16aa3072c4ac5e9e23a66c638820a116a3e7f5ab27b2a6088",
+  "test_files": 4,
+  "tests_passed": 90,
+  "failures": 0,
+  "skips": 0,
+  "duration_seconds": 3.632,
+  "includes_focused_10": true,
+  "source_hashes_verified": 5,
+  "no_source_changes": true,
+  "resource_scope": "ONElightnice19singleworker512MBbounded30sNodecommandduringC12confirmedPGfixtureconstruction",
+  "remaining": "Typecheck/build/browser/Go/DockerandfreshCIstillpending"
+}
