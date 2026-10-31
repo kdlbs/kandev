@@ -7,7 +7,8 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-NATIVE-WORKER-001
-acceptance_criteria: []
+acceptance_criteria:
+  - AC-EXECUTORS-NATIVE-WORKER-001.7
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
 ---
