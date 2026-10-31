@@ -448,7 +448,9 @@ Parent review verified their hashes, counts, percentiles, and matching plain/ins
 These completed scenarios do not constitute a full performance pass.
 
 The four recent-history comparisons retain equal selections after older data is added.
-Recent UTC used 3,797 instrumented row visits; non-UTC scans and broader reports still require correction.
+Recent UTC used 3,797 instrumented row visits.
+New York's recent query used 254,895 visits before older history and 254,896 afterward.
+All four recent workspace charts remained bounded; the five deadline failures require correction.
 The measured fixture occupied 24,147,398,656 bytes, including SQLite, WAL, and shared-memory files.
 This is a fixture measurement, not a general storage prediction.
 

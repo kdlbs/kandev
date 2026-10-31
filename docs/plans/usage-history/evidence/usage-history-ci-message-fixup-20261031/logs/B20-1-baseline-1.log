@@ -1,0 +1,15 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium -- e2e/tests/session/opencode-capacity-retry.spec.ts --grep 'desktop preserves the episode when the OpenCode continuation fails without new tools' --retries\=0 --repeat-each\=1 --output\=/tmp/usage-history-luna-opencode-capacity-20261031/baseline-1-output
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 1 test using 1 worker
+
+(node:3863733) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-u3vNSS/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [chromium] › e2e/tests/session/opencode-capacity-retry.spec.ts:70:5 › desktop preserves the episode when the OpenCode continuation fails without new tools (8.9s)
+
+  1 passed (11.2s)

@@ -1,0 +1,15 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium -- tests/chat/jump-to-latest.spec.ts --grep 'Jump to latest returns' --retries\=0 --workers\=1 --trace\=on --output\=/tmp/luna-jump-to-latest-baseline-20261031/results
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 1 test using 1 worker
+
+(node:3855261) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-4hQE9I/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [chromium] › e2e/tests/chat/jump-to-latest.spec.ts:67:5 › Jump to latest returns to the newest grouped reply and preserves auto-scroll (8.1s)
+
+  1 passed (11.0s)

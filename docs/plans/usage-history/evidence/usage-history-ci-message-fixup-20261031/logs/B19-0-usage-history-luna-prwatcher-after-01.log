@@ -1,0 +1,90 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --no-build --project chromium -- e2e/tests/pr/pr-watcher-dockview-layout.spec.ts --grep 'layout remains correct when switching between PR watcher tasks with plan mode' --retries\=0 --repeat-each\=5 --output\=/tmp/usage-history-luna-prwatcher-after-01
+
+[36m[e2e][0m mode=host  shards=1  project=chromium  strict=1  workers=1
+
+Running 5 tests using 1 worker
+
+(node:3873725) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-rLAfvc/repos/e2e-remote.git
+ * [new branch]      main -> main
+To file:///tmp/kandev-e2e-0-rLAfvc/repos/empty-remote-pr-watcher-layout-1793416941336-3873725/origin.git
+ * [new branch]      HEAD -> main
+To file:///tmp/kandev-e2e-0-rLAfvc/repos/empty-remote-pr-watcher-layout-1793416941336-3873725/origin.git
+ * [new branch]      fix/auth -> fix/auth
+ * [new reference]   fix/auth -> refs/pull/101/head
+To file:///tmp/kandev-e2e-0-rLAfvc/repos/empty-remote-pr-watcher-layout-1793416941336-3873725/origin.git
+ * [new branch]      feat/dashboard -> feat/dashboard
+ * [new reference]   feat/dashboard -> refs/pull/202/head
+To file:///tmp/kandev-e2e-0-rLAfvc/repos/empty-remote-pr-watcher-layout-1793416941336-3873725/origin.git
+ * [new branch]      docs/update -> docs/update
+ * [new reference]   docs/update -> refs/pull/303/head
+  ✓  1 [chromium] › e2e/tests/pr/pr-watcher-dockview-layout.spec.ts:189:7 › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode (9.3s)
+(node:3875962) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-1-k6rUnJ/repos/e2e-remote.git
+ * [new branch]      main -> main
+To file:///tmp/kandev-e2e-1-k6rUnJ/repos/empty-remote-pr-watcher-layout-1793416953340-3875962/origin.git
+ * [new branch]      HEAD -> main
+To file:///tmp/kandev-e2e-1-k6rUnJ/repos/empty-remote-pr-watcher-layout-1793416953340-3875962/origin.git
+ * [new branch]      fix/auth -> fix/auth
+ * [new reference]   fix/auth -> refs/pull/101/head
+To file:///tmp/kandev-e2e-1-k6rUnJ/repos/empty-remote-pr-watcher-layout-1793416953340-3875962/origin.git
+ * [new branch]      feat/dashboard -> feat/dashboard
+ * [new reference]   feat/dashboard -> refs/pull/202/head
+To file:///tmp/kandev-e2e-1-k6rUnJ/repos/empty-remote-pr-watcher-layout-1793416953340-3875962/origin.git
+ * [new branch]      docs/update -> docs/update
+ * [new reference]   docs/update -> refs/pull/303/head
+  ✓  2 [chromium] › e2e/tests/pr/pr-watcher-dockview-layout.spec.ts:189:7 › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode (8.1s)
+(node:3877553) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-2-M4jWBj/repos/e2e-remote.git
+ * [new branch]      main -> main
+To file:///tmp/kandev-e2e-2-M4jWBj/repos/empty-remote-pr-watcher-layout-1793416963440-3877553/origin.git
+ * [new branch]      HEAD -> main
+To file:///tmp/kandev-e2e-2-M4jWBj/repos/empty-remote-pr-watcher-layout-1793416963440-3877553/origin.git
+ * [new branch]      fix/auth -> fix/auth
+ * [new reference]   fix/auth -> refs/pull/101/head
+To file:///tmp/kandev-e2e-2-M4jWBj/repos/empty-remote-pr-watcher-layout-1793416963440-3877553/origin.git
+ * [new branch]      feat/dashboard -> feat/dashboard
+ * [new reference]   feat/dashboard -> refs/pull/202/head
+To file:///tmp/kandev-e2e-2-M4jWBj/repos/empty-remote-pr-watcher-layout-1793416963440-3877553/origin.git
+ * [new branch]      docs/update -> docs/update
+ * [new reference]   docs/update -> refs/pull/303/head
+  ✓  3 [chromium] › e2e/tests/pr/pr-watcher-dockview-layout.spec.ts:189:7 › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode (9.7s)
+(node:3879841) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-3-uVTwfu/repos/e2e-remote.git
+ * [new branch]      main -> main
+To file:///tmp/kandev-e2e-3-uVTwfu/repos/empty-remote-pr-watcher-layout-1793416975547-3879841/origin.git
+ * [new branch]      HEAD -> main
+To file:///tmp/kandev-e2e-3-uVTwfu/repos/empty-remote-pr-watcher-layout-1793416975547-3879841/origin.git
+ * [new branch]      fix/auth -> fix/auth
+ * [new reference]   fix/auth -> refs/pull/101/head
+To file:///tmp/kandev-e2e-3-uVTwfu/repos/empty-remote-pr-watcher-layout-1793416975547-3879841/origin.git
+ * [new branch]      feat/dashboard -> feat/dashboard
+ * [new reference]   feat/dashboard -> refs/pull/202/head
+To file:///tmp/kandev-e2e-3-uVTwfu/repos/empty-remote-pr-watcher-layout-1793416975547-3879841/origin.git
+ * [new branch]      docs/update -> docs/update
+ * [new reference]   docs/update -> refs/pull/303/head
+  ✓  4 [chromium] › e2e/tests/pr/pr-watcher-dockview-layout.spec.ts:189:7 › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode (9.3s)
+(node:3881961) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-4-vBrSwD/repos/e2e-remote.git
+ * [new branch]      main -> main
+To file:///tmp/kandev-e2e-4-vBrSwD/repos/empty-remote-pr-watcher-layout-1793416986963-3881961/origin.git
+ * [new branch]      HEAD -> main
+To file:///tmp/kandev-e2e-4-vBrSwD/repos/empty-remote-pr-watcher-layout-1793416986963-3881961/origin.git
+ * [new branch]      fix/auth -> fix/auth
+ * [new reference]   fix/auth -> refs/pull/101/head
+To file:///tmp/kandev-e2e-4-vBrSwD/repos/empty-remote-pr-watcher-layout-1793416986963-3881961/origin.git
+ * [new branch]      feat/dashboard -> feat/dashboard
+ * [new reference]   feat/dashboard -> refs/pull/202/head
+To file:///tmp/kandev-e2e-4-vBrSwD/repos/empty-remote-pr-watcher-layout-1793416986963-3881961/origin.git
+ * [new branch]      docs/update -> docs/update
+ * [new reference]   docs/update -> refs/pull/303/head
+  ✓  5 [chromium] › e2e/tests/pr/pr-watcher-dockview-layout.spec.ts:189:7 › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode (8.1s)
+
+  5 passed (56.1s)
