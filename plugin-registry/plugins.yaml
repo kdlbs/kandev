@@ -74,6 +74,9 @@ plugins:
   - id: kandev-plugin-shapeup
     repo: scottof/kandev-plugin-shapeup
     categories: [tools]
+  - id: kandev-plugin-telegram
+    repo: scottof/kandev-plugin-telegram
+    categories: [integrations, automation]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
