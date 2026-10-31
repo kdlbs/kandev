@@ -11,7 +11,12 @@ import (
 // fixedResourceForCleanCompletion captures the execution's resource only while its
 // execution still owns the completing turn. The caller resets its count only
 // after checked turn settlement succeeds, under the same session guard.
-func (s *Service) fixedResourceForCleanCompletion(ctx context.Context, data watcher.AgentEventData) string {
+// The caller supplies its accepted turn snapshot; this helper never infers it.
+func (s *Service) fixedResourceForCleanCompletion(ctx context.Context, data watcher.AgentEventData, capturedTurnID string) string {
+	if capturedTurnID == "" || (data.TurnID != "" && data.TurnID != capturedTurnID) {
+		return ""
+	}
+	data.TurnID = capturedTurnID
 	if s.profileExecutionResolver == nil || s.repo == nil || s.turnService == nil || !cleanFixedCompletion(data) {
 		return ""
 	}
@@ -63,5 +68,5 @@ func (s *Service) fixedResourceForCleanStreamCompletion(
 		ExecutionProfileID: payload.ExecutionProfileID, ProviderError: payload.Data.ProviderError,
 		ResourceCircuitKey: payload.ResourceCircuitKey,
 		ErrorMessage:       payload.Data.Error,
-	})
+	}, turnID)
 }
