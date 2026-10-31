@@ -14,6 +14,7 @@ const (
 	Capability      = "launch-wrapper.v1"
 	WorkDir         = "{{kandev.work_dir}}"
 	ManagedNPMDir   = "{{kandev.managed_npm_dir}}"
+	AllocDir        = "{{kandev.alloc_dir}}"
 	referencePrefix = "{{kandev."
 )
 
@@ -31,6 +32,8 @@ type Spec struct {
 }
 
 // ValidateTokens checks the prefix without filesystem access or expansion.
+// It accepts every reference. Only a node wrapper may use AllocDir, which
+// Spec.Validate enforces for profile wrappers.
 func ValidateTokens(argv []string) error {
 	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" || strings.HasPrefix(strings.TrimSpace(argv[0]), "-") {
 		return ErrInvalid
@@ -45,7 +48,7 @@ func ValidateTokens(argv []string) error {
 		if i == 0 {
 			return ErrInvalid
 		}
-		if arg == WorkDir || arg == ManagedNPMDir || escapedReference(arg) != "" {
+		if arg == WorkDir || arg == ManagedNPMDir || arg == AllocDir || escapedReference(arg) != "" {
 			continue
 		}
 		return ErrInvalid
@@ -67,6 +70,9 @@ func escapedReference(arg string) string {
 // Validate checks an explicitly supplied wrapper envelope.
 func (s Spec) Validate() error {
 	if s.Version != Version || s.Source != SourceProfile {
+		return ErrInvalid
+	}
+	if UsesAllocDir(s.Argv) {
 		return ErrInvalid
 	}
 	return ValidateTokens(s.Argv)

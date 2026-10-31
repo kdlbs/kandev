@@ -8,6 +8,7 @@ requirements:
   - REQ-AGENTS-NODEWRAP-003
   - REQ-AGENTS-NODEWRAP-004
   - REQ-AGENTS-NODEWRAP-005
+  - REQ-AGENTS-NODEWRAP-006
 ---
 
 # Node launch wrapper system design
@@ -28,16 +29,18 @@ It adds no provider registry entry, plugin API, or profile field.
 | REQ-AGENTS-NODEWRAP-003 | Launch coverage, Failure modes |
 | REQ-AGENTS-NODEWRAP-004 | Identity |
 | REQ-AGENTS-NODEWRAP-005 | Launch coverage, Backend passthrough runner |
+| REQ-AGENTS-NODEWRAP-006 | Allocation directory |
 
 ## Configuration
 
-agentctl takes two flags:
+agentctl takes these flags:
 
 | Flag | Meaning |
 | --- | --- |
 | `--node-launch-wrapper-file PATH` | File holding the node wrapper envelope |
 | `--require-node-launch-wrapper` | Refuse startup and every launch unless a wrapper is loaded |
 | `--node-launch-wrapper-owner-uid UID` | Expected owner. Default `-1` means the agentctl process owner |
+| `--node-launch-wrapper-alloc-dir PATH` | Directory that replaces `{{kandev.alloc_dir}}`. See Allocation directory |
 
 The file holds the existing envelope with source `node`:
 
@@ -45,7 +48,7 @@ The file holds the existing envelope with source `node`:
 {"version": 1, "source": "node", "argv": ["/opt/wrap/launch", "--root", "{{kandev.work_dir}}", "--"]}
 ```
 
-Tokens follow the generic grammar: whole-argument `{{kandev.work_dir}}` and `{{kandev.managed_npm_dir}}`, triple-brace escape, no reference in the executable position.
+Tokens follow the generic grammar: whole-argument `{{kandev.work_dir}}`, `{{kandev.managed_npm_dir}}` and, for a node wrapper only, `{{kandev.alloc_dir}}`, triple-brace escape, no reference in the executable position.
 The executable shall be an absolute path, because there is no working directory or profile PATH at startup to resolve against.
 Decoding is strict. Unknown fields and any source other than `node` are refused.
 `Spec.Validate` is unchanged and accepts only `profile`, so no wire request that feeds a profile path can carry source `node`.
@@ -67,6 +70,27 @@ It never falls back to an unwrapped launch.
 The expected owner is configuration. The default is the effective user of agentctl. Root is accepted only as an ancestor owner.
 Windows has no equivalent mode model here, so a node wrapper file is refused on Windows.
 The check is a startup check. It does not defend against an operator, or a process running as the owner, who edits the files afterwards.
+
+## Allocation directory
+
+A node wrapper often needs state the agent cannot rewrite, such as bindings or fences. That state lives in a per-workload directory outside the workspace.
+Core does not discover it. The node operator, who knows which scheduler created it, passes it once with `--node-launch-wrapper-alloc-dir`.
+Core reads no environment variable for it, so no scheduler name is built in and a variable in the agent environment cannot stand in for it.
+
+`launchwrapper.ValidateTokens` accepts `{{kandev.alloc_dir}}` as a whole argument after the executable. `Spec.Validate`, the profile path, and the profile command prefix check reject it, so only a node wrapper can use it.
+The value lives in `launchwrapper.Node.AllocDir` with `json:"-"`. `Node` already travels to every launch seam, so none of them changed. `Context` has no field for it, so a caller cannot supply one.
+
+`Node.Prepare` resolves it only when the wrapper references it. It calls `ResolveAllocDir`, which requires an absolute path, resolves symlinks, and requires an existing directory owned by the agentctl effective user with no group or world write bit. It then refuses a result inside the launch work directory. Windows refuses.
+Ancestors are not walked: the directory is created by the scheduler client under its own tree, and the owner and mode check on the resolved directory is the guard.
+The check repeats at every launch, so a directory replaced after startup is refused.
+
+At startup `applyNodeAllocDir` runs the same check when the loaded policy references the token, so a node with a missing or bad value refuses to start rather than failing each launch. A value without a node wrapper file is refused as a misconfiguration.
+A policy that does not reference the token ignores any value, so existing policies behave exactly as before.
+
+No capability change. The host's only signal is `node-launch-wrapper.v1`, which means a wrapper is applied.
+A host must know whether the agentctl it started supports the token only to avoid launching a policy that needs it on an agentctl that lacks it.
+That combination already fails closed: an older agentctl exits on the unknown flag and also refuses the token in the policy, so it never starts and never runs an agent unwrapped.
+A version bump would also break the passthrough rule, which matches the exact name `node-launch-wrapper.v1`.
 
 ## Composition
 
@@ -121,6 +145,8 @@ Gap: when the backend has no adopted agentctl, for example it launched its own c
 | Required, no file | agentctl refuses to start |
 | File missing, unreadable, not owned, writable, bad JSON, wrong source, bad token | agentctl refuses to start |
 | Required, wrapper absent from configuration at launch | Launch refused, no child |
+| Policy uses `{{kandev.alloc_dir}}`, no usable `--node-launch-wrapper-alloc-dir` | agentctl refuses to start |
+| Allocation directory unusable at launch (replaced, unsafe owner or mode, inside the workspace) | Launch refused, no child |
 | Wrapper executable missing or not executable at launch, work directory missing | Launch refused with the existing generic classification, no child |
 | Backend passthrough runner, peer advertises the capability | Launch refused, no child |
 | Wrapper fails or exits non-zero | Treated as a process failure with the existing sanitized messages, no unwrapped retry |

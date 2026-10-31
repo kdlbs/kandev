@@ -20,10 +20,12 @@ func Prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	return prepare(spec, inner, ctx)
+	return prepare(spec, inner, ctx, "")
 }
 
-func prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
+// prepare takes the allocation directory apart from Context so that only
+// Node.Prepare, from the operator's value, can supply it.
+func prepare(spec Spec, inner []string, ctx Context, allocDir string) ([]string, error) {
 	if len(inner) == 0 || strings.TrimSpace(inner[0]) == "" {
 		return nil, ErrInvalid
 	}
@@ -51,7 +53,7 @@ func prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
 	if err := managednpm.PrepareNPMProjectPrefix(child); err != nil {
 		return nil, ErrContext
 	}
-	prefix, err := resolveReferences(spec.Argv, ctx.WorkDir)
+	prefix, err := resolveReferences(spec.Argv, ctx.WorkDir, allocDir)
 	if err != nil {
 		return nil, err
 	}
@@ -59,13 +61,18 @@ func prepare(spec Spec, inner []string, ctx Context) ([]string, error) {
 	return append(prefix, child...), nil
 }
 
-func resolveReferences(tokens []string, workDir string) ([]string, error) {
+func resolveReferences(tokens []string, workDir, allocDir string) ([]string, error) {
 	prefix := slices.Clone(tokens)
 	npmDir := ""
 	for i := 1; i < len(prefix); i++ {
 		switch prefix[i] {
 		case WorkDir:
 			prefix[i] = workDir
+		case AllocDir:
+			if allocDir == "" {
+				return nil, allocDirError("not supplied")
+			}
+			prefix[i] = allocDir
 		case ManagedNPMDir:
 			if npmDir == "" {
 				var err error
