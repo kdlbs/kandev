@@ -1002,9 +1002,13 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		inventory.DrainClaim = claim.OperationID
 		inventory.DrainOutcome = decision.outcome
 		inventory.DrainReceiptID = decision.receipt.GetReceiptId()
+		// A provider checkpoints artifact_staging and bootstrapping from inside
+		// its provision call, so this launch's phase can be behind the stored
+		// row and the store refuses a move back to allocating. Cleanup is owed
+		// from here, and every live phase may move to cleanup_pending.
+		inventory.Resource = retained
+		inventory.Phase = pluginExecutorPhaseCleanupPending
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
-			inventory.Resource = retained
-			inventory.Phase = pluginExecutorPhaseCleanupPending
 			if retainErr := checkpointPluginExecutor(cleanupCtx, req, inventory); retainErr != nil {
 				return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
 			}
