@@ -30,6 +30,9 @@ func TestRequiresHostCapabilitiesValidatorTable(t *testing.T) {
 		{"duplicate", "    requires_host_capabilities: [{name: workspace_descriptor, version: 1}, {name: workspace_descriptor, version: 1}]\n", "duplicate capability"},
 		{"zero version", "    requires_host_capabilities: [{name: workspace_descriptor, version: 0}]\n", "at least 1"},
 		{"out of range", "    requires_host_capabilities: [{name: workspace_descriptor, version: 2}]\n", "outside the supported range 1-1"},
+		{"drain receipt at version 1", "    requires_host_capabilities: [{name: drain_receipt, version: 1}]\n", ""},
+		{"drain receipt at version 2", "    requires_host_capabilities: [{name: drain_receipt, version: 2}]\n", ""},
+		{"drain receipt above range", "    requires_host_capabilities: [{name: drain_receipt, version: 3}]\n", "outside the supported range 1-2"},
 		{"missing dependency", "    requires_host_capabilities: [{name: provider_maintenance, version: 1}]\n", `requires "provider_operations"`},
 	}
 	for _, tc := range cases {
