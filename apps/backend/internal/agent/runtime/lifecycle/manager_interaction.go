@@ -3478,6 +3478,9 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		ManagedRuntimeSource:  managedRuntimeOptions.ManagedRuntimeSource,
 		NativeRuntimeVersion:  managedRuntimeOptions.NativeRuntimeVersion,
 	}
+	if err := applyCommandOverride(&opts, profileInfo, agentConfig); err != nil {
+		return agentCommands{}, err
+	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)
 	if err := validateBuiltAgentCommands(args, continueArgs); err != nil {

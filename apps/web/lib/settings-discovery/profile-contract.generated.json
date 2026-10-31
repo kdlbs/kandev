@@ -230,6 +230,21 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.command_override",
+          "field_path": "command_override",
+          "label": "command_override",
+          "description": "Optional absolute path to a preinstalled agent executable that replaces the npm launch.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.provider_kind",
           "field_path": "provider_kind",
           "label": "provider_kind",
@@ -447,6 +462,7 @@
       "auto_fallback",
       "cli_flags",
       "cli_passthrough",
+      "command_override",
       "command_prefix",
       "config_options",
       "copilot_selected_plugins",

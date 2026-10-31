@@ -111,7 +111,7 @@ func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	return a.ManagedNPMRuntime().CommandFor(opts)
 }
 
 func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
