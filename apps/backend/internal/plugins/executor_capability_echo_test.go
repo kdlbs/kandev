@@ -220,3 +220,22 @@ func TestGateComparesEachProviderEntryWithItsOwnDeclaration(t *testing.T) {
 		t.Fatalf("provider b must be compared with its own declaration: %v", err)
 	}
 }
+
+// drain_receipt is negotiated at exactly the declared version: a provider that
+// declares @2 and echoes @1 (or the reverse) is a mismatch, and the two
+// versions are never interchangeable.
+func TestGateNegotiatesDrainReceiptAtExactlyTheDeclaredVersion(t *testing.T) {
+	for _, tc := range []struct {
+		declared, echoed int
+		wantMismatch     bool
+	}{{1, 1, false}, {2, 2, false}, {2, 1, true}, {1, 2, true}} {
+		var gate capabilityGate
+		declared := []hostcaps.Requirement{{Name: "drain_receipt", Version: tc.declared}}
+		err := gate.confirm(context.Background(), newGateKey(new(int)), declared, func(context.Context) (*pluginsdk.ValidateExecutorProfileResponse, error) {
+			return echoResponse(hostcaps.Requirement{Name: "drain_receipt", Version: tc.echoed}), nil
+		})
+		if errors.Is(err, ErrExecutorCapabilityMismatch) != tc.wantMismatch || (!tc.wantMismatch && err != nil) {
+			t.Fatalf("declared @%d echoed @%d: confirm() = %v, want mismatch=%v", tc.declared, tc.echoed, err, tc.wantMismatch)
+		}
+	}
+}

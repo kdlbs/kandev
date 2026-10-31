@@ -16853,6 +16853,13 @@ type DestroyExecutorEnvironmentRequest struct {
 	CleanupClaim  string                          `protobuf:"bytes,4,opt,name=cleanup_claim,json=cleanupClaim,proto3" json:"cleanup_claim,omitempty"`
 	// drain_outcome is one of drained, unreachable, uncertain or not_attempted.
 	// It is set only for a provider that requires the drain_receipt capability.
+	// Under drain_receipt version 1, not_attempted is sent only with the cleanup
+	// reason launch_failed, when no agentctl handshake was ever started. Under
+	// version 2, not_attempted means the host never held an agentctl credential
+	// for this runtime, so no agentctl instance, agent or shell can exist; it is
+	// sent for any cleanup reason and says nothing about the provider's own
+	// resource, which the provider still verifies. The version is the one the
+	// environment recorded when it was admitted.
 	DrainOutcome string `protobuf:"bytes,5,opt,name=drain_outcome,json=drainOutcome,proto3" json:"drain_outcome,omitempty"`
 	// drain_receipt is present only when drain_outcome is drained.
 	DrainReceipt *ExecutorDrainReceipt `protobuf:"bytes,6,opt,name=drain_receipt,json=drainReceipt,proto3" json:"drain_receipt,omitempty"`

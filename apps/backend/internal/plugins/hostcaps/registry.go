@@ -53,7 +53,7 @@ var registry = []Entry{
 	{Name: "repository_intent", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: TunnelTransport, Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "api_url_forward", Min: 1, Max: 1, IntroducedIn: firstRelease},
-	{Name: "drain_receipt", Min: 1, Max: 1, IntroducedIn: firstRelease},
+	{Name: "drain_receipt", Min: 1, Max: 2, IntroducedIn: firstRelease},
 	{Name: destroyCheckpoints, Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "durable_bootstrap", Min: 1, Max: 1, IntroducedIn: firstRelease},
 	{Name: "admission_context", Min: 1, Max: 1, IntroducedIn: firstRelease},

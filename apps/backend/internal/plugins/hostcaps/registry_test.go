@@ -20,8 +20,32 @@ func TestRegistryHoldsTheClosedNameSetAtVersionOne(t *testing.T) {
 	}
 	for i, name := range want {
 		entry := got[i]
-		if entry.Name != name || entry.Min != 1 || entry.Max != 1 || entry.IntroducedIn == "" {
-			t.Fatalf("entry %d = %+v, want %s at version 1 with an introduced_in release", i, entry, name)
+		wantMax := 1
+		if name == "drain_receipt" {
+			wantMax = 2
+		}
+		if entry.Name != name || entry.Min != 1 || entry.Max != wantMax || entry.IntroducedIn == "" {
+			t.Fatalf("entry %d = %+v, want %s at versions 1-%d with an introduced_in release", i, entry, name, wantMax)
+		}
+	}
+}
+
+func TestDrainReceiptIsAcceptedAtVersionsOneAndTwoOnly(t *testing.T) {
+	for _, tc := range []struct {
+		version int
+		want    string
+	}{
+		{1, ""},
+		{2, ""},
+		{3, `capability "drain_receipt" version 3 is outside the supported range 1-2`},
+	} {
+		errs := ValidateRequirements([]Requirement{{"drain_receipt", tc.version}})
+		got := ""
+		if len(errs) > 0 {
+			got = errs[0].Error()
+		}
+		if !strings.Contains(got, tc.want) || (tc.want == "" && got != "") {
+			t.Fatalf("drain_receipt@%d: got %q, want %q", tc.version, got, tc.want)
 		}
 	}
 }

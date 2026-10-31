@@ -147,3 +147,21 @@ func TestRetainedAttachRefusesARecordedVersionTheHostNoLongerSupports(t *testing
 		t.Fatalf("confirm calls = %d; an unsupported recorded version fails before any confirmation", fake.calls)
 	}
 }
+
+// A record keeps its recorded drain_receipt version: @1 and @2 both stay
+// attachable by a host whose registry covers 1-2; @3 is refused before any
+// confirmation.
+func TestRetainedAttachAcceptsEveryRegisteredDrainReceiptVersion(t *testing.T) {
+	profile := &models.ExecutorProviderLaunchProfile{Provider: testPluginExecutorLaunchProvider()}
+	for recorded, wantOK := range map[string]bool{"drain_receipt@1": true, "drain_receipt@2": true, "drain_receipt@3": false} {
+		fake := &capabilityConfirmerFake{}
+		runtime := NewPluginRemoteExecutor(fake, newTestLogger())
+		err := runtime.confirmRetainedPluginExecutorCapabilities(context.Background(), pluginExecutorInventory{NegotiatedCapabilities: []string{recorded}}, profile)
+		if wantOK && (err != nil || fake.calls != 1) {
+			t.Fatalf("%s: err = %v, calls = %d; want a confirmed attach", recorded, err, fake.calls)
+		}
+		if !wantOK && (!errors.Is(err, models.ErrExecutorCapabilityMismatch) || fake.calls != 0) {
+			t.Fatalf("%s: err = %v, calls = %d; want capability_mismatch before confirmation", recorded, err, fake.calls)
+		}
+	}
+}

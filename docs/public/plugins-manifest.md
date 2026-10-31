@@ -452,6 +452,16 @@ provider must start the agent runtime with its idle reaper disabled
 declaring this capability can set `destroy_timeout_seconds` (30 to 300, default
 30) to bound the destroy call; a value above 30 requires `drain_receipt`.
 
+`drain_receipt` has versions 1 and 2; a manifest names exactly one. Under
+version 1, `not_attempted` is sent only for a failed-launch rollback that never
+started an agentctl handshake. Under version 2 it means the host never held an
+agentctl credential for the runtime, so no agentctl instance, agent or shell can
+exist, and it is sent for any cleanup reason (with `durable_bootstrap` also
+covering a handshake that failed before a token existed). It says nothing about
+the provider's own resource: a version 2 provider still verifies that its
+resource is stopped and removed before it reports absence. A handshake that
+agentctl rejected stays `unreachable`.
+
 With `durable_bootstrap`, Kandev keeps the one-time agent runtime bootstrap
 nonce in its runtime secret store until the launch is published, so a backend
 restart in the middle of a launch can be recovered. On restart the host takes

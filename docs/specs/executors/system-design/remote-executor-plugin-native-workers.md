@@ -145,9 +145,11 @@ and `drain_outcome`. The (cleanup reason, drain outcome) pairs a provider may re
 | The credential is known, the reply was lost or the 60 s deadline passed | `uncertain` | Retain unless the provider can prove the runtime is stopped. |
 | An agentctl handshake was started and no usable credential remains (secret lost or unreadable) | `unreachable` | The host cannot drain; it makes no claim about a runtime. |
 | No handshake was ever started, reason `launch_failed` | `not_attempted` | Positive proof that no runtime ever existed. |
-| No handshake was ever started, any other reason (`task_cleanup`, `task_environment_reset`, `recovery_cleanup`, `bootstrap_consumed`, `incomplete_bootstrap`) | `unreachable` | `not_attempted` is never sent: the host did not drain and a runtime may exist. |
+| No handshake was ever started, any other reason (`task_cleanup`, `task_environment_reset`, `recovery_cleanup`, `bootstrap_consumed`, `incomplete_bootstrap`) | `unreachable` | Version 1: the host did not drain; a runtime may exist. |
 
-`not_attempted` is therefore sent only with `launch_failed`, and only when no handshake was ever started. The host records
+These rows are `drain_receipt` version 1; [version 2](remote-executor-plugin-native-workers-drain-receipt-v2.md) differs.
+
+Under version 1 `not_attempted` is sent only with `launch_failed` and no handshake ever started. The host records
 `HandshakeStarted` in the envelope before every handshake, so a crash between the provider's ready and the host's
 provision response still counts as a handshake. A runtime core that was never recorded (a hand-off, or a crash between
 provider ready and the provision response) is destroyed under `launch_failed` only when no handshake happened;

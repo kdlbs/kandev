@@ -36,6 +36,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Remote executor plugins](requirements/remote-executor-plugins.md)
 - [Remote executor plugins: native worker capabilities](requirements/remote-executor-plugin-native-workers.md)
 - [Remote executor plugins: native worker recovery and proof](requirements/remote-executor-plugin-native-workers-recovery.md)
+- [Remote executor plugins: drain receipt version 2](requirements/remote-executor-plugin-native-workers-drain-receipt-v2.md)
 - [Remote executor plugins: capability negotiation and versioning](requirements/remote-executor-plugin-capability-versioning.md)
 - [Remote executor plugins: admission and placement](requirements/remote-executor-plugin-admission.md)
 - [Remote executor plugins: queued and pending placement](requirements/remote-executor-plugin-placement.md)
