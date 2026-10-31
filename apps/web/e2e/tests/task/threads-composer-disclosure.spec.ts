@@ -119,7 +119,13 @@ for (const zoom of [1, 0.9]) {
           .poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
           .toBeLessThan(3);
         if (autoHideComposer) {
+          await expect(tile.getByTestId("session-chat")).toHaveAttribute(
+            "data-session-id",
+            task.session_id!,
+          );
+          await tile.focus();
           const freeze = tile.getByTestId("auto-scroll-toggle-button");
+          await expect(freeze).toHaveAttribute("aria-pressed", "true");
           await freeze.click();
           await expect(freeze).toHaveAttribute("aria-pressed", "false");
           // Return from the composer control to the question's original allocation.

@@ -243,8 +243,8 @@ Both full runs remain pending on the current source: SQLite and real PostgreSQL 
 
 | Required run | Status |
 | --- | --- |
-| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Pending. |
-| Current-source PostgreSQL 18.6, same fixture and sample count | Pending. |
+| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Failed on `5b79da2`; five deadline failures require correction and a fresh run. |
+| Current-source PostgreSQL 18.6, same fixture and sample count | Not run after the SQLite failure. Required after the correction. |
 | C4 construction diagnostics, SQLite | Complete at 20,000/2,000 rows in 59.597 seconds and 100,000/10,000 rows in 664.684 seconds. |
 | 100,000/10,000 actual rows | 100,005 native, 10,013 external, 110,017 facts, and 220,032 contributions. The recorder dropped zero SQL statements. |
 
@@ -288,7 +288,7 @@ The C2 receipts remain in `evidence/usage-history-luna-C2-20261030T1032Z/` and `
 
 At this prepublication checkpoint, the new core and plugin source remain unpushed. Public core and plugin heads are `9aecf156c65e7522a43f2a1c8310737179c25d70` and `127bc4a6e98f9121c216135b71c5e17aa8832cf1`.
 The parent plans to publish reviewed core after integrated checks, so CI can run alongside the remaining manual gates.
-Acceptance remains unchanged. Merge readiness requires both full runs, the final SDK pin, and five rebuilt archives.
+Acceptance remains unchanged. Merge readiness requires both full runs, the final SDK pin, and a verified archive with five platform binaries.
 It also requires five actual Host cases, older-host checks, and browser evidence. Current-head CI must pass with zero flaky artifacts.
 The final current-head review audit remains pending.
 
@@ -421,3 +421,38 @@ The helper unit tests passed all six cases.
 Evidence is in `evidence/usage-history-ci-browser-followup-20261031/`.
 These corrections change test fixtures only; production code and test deadlines remain unchanged.
 Fresh CI, a zero-flake artifact audit, and both full performance gates remain required.
+
+### Focus and disclosure verification
+
+CI at `5b79da2` passed 95 checks and skipped 11.
+Its full artifact audit found two new flaky tests; the four previous cases each passed on their first attempt.
+The Threads fixture now verifies the seeded session and focuses the auto-hide tile before the existing toggle click.
+The mobile plan fixture waits for finite menu animations and dismissal before the existing focus assertion.
+Existing scrolling, zoom, touch, download, focus, and timeout assertions remain.
+
+The reviewed patches passed 19 browser cases with zero retries: five Threads repetitions, four ordered Threads variants, and ten mobile repetitions.
+The eight baseline repetitions also passed, so local runs do not establish either failure's cause or a reduced flake rate.
+Evidence is in `evidence/usage-history-ci-focus-fixup-20261031/`.
+Fresh exact-head CI and a zero-flake artifact audit remain required.
+
+### Full-scale query failure
+
+The unchanged normal SQLite benchmark on `5b79da2` failed after 3,618.666 seconds with exit status 1.
+The fixture contained 1,000,005 native observations, 100,013 external observations, and 1,100,017 canonical facts.
+Construction through the ordinary bounded projection worker took 50 minutes 22.971 seconds.
+This query fixture does not measure production ingestion throughput.
+
+Five full-scale scenarios exceeded the existing analytics deadline: the New York, Kathmandu, and Lisbon five-year views, native usage, and deleted-task reporting.
+All 16 one-year scenarios and 11 full-scale scenarios produced ten-sample receipts.
+Parent review verified their hashes, counts, percentiles, and matching plain/instrumented publications.
+These completed scenarios do not constitute a full performance pass.
+
+The four recent-history comparisons retain equal selections after older data is added.
+Recent UTC used 3,797 instrumented row visits; non-UTC scans and broader reports still require correction.
+The measured fixture occupied 24,147,398,656 bytes, including SQLite, WAL, and shared-memory files.
+This is a fixture measurement, not a general storage prediction.
+
+PostgreSQL was not run after this failure.
+Normal cleanup removed the temporary database; the logs, 27 scenario receipts, comparisons, and resource observations remain.
+Evidence is in `evidence/usage-history-luna-C8-full-normal-20261031T0122Z/`.
+Both full normal database runs remain required after the query correction, with their original counts, samples, oracle, and deadlines.

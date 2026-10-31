@@ -1,0 +1,27 @@
+{
+  "reviewed_at": "2026-10-31T02:44:34.872723+00:00",
+  "status": "accepted_for_normal_commit_and_new_CI",
+  "source_head": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+  "scope": [
+    "apps/web/e2e/tests/task/threads-composer-disclosure.spec.ts",
+    "apps/web/e2e/tests/task/mobile-plan-download.spec.ts"
+  ],
+  "actual_postpatch_passes": 19,
+  "actual_baseline_passes": 8,
+  "all_retries": 0,
+  "baseline_vs_patch_causality_proven": false,
+  "findings_reviewed": [
+    "Threads auto-hide tile exposes tabIndex and onFocusCapture through composer bindings; focusing it is a valid setup step before the real toggle click. Correct-session and pre-click aria-pressed assertions strengthen setup.",
+    "Mobile menu waits only for existing finite entrance animation, then real Escape, completed dismissal and original trigger-focus/touch/download assertions. No forced focus, timeout increase or production change."
+  ],
+  "source_hashes": {
+    "threads": "914d6f0d10a19ef7add2c0b38d1f309265cc289889cf0cc754d05654ad959efb",
+    "mobile": "5f73dd6e42c7592c3bc7a78d956ad8ccafc96148b282fc3d0ba76c5a83b797e7"
+  },
+  "integrity": "Actual command logs, discovered test counts, .last-run records, source bytes and baseline restoration receipts verified independently.",
+  "limits": [
+    "Both original baselines passed locally; the root-cause theories remain inferred.",
+    "Current remote5b79 still has2FLAKY; a new exact-head CI artifact audit is required.",
+    "Scale gates failed in5cases; no feature readiness or completion is claimed."
+  ]
+}

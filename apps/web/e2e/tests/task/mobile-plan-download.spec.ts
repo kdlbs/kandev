@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { checkDownload, checkGeometry, openDownloadPlan } from "./plan-download-helpers";
 
@@ -50,10 +51,13 @@ test("keeps the download control touch-sized on a coarse-pointer workbench", asy
     }),
   ).toBe(true);
   await menu.tap();
-  await expect(testPage.getByTestId("plan-toolbar-implement-fresh-menu-item")).toBeVisible();
+  const freshMenuItem = testPage.getByTestId("plan-toolbar-implement-fresh-menu-item");
+  const menuContent = testPage.getByRole("menu").filter({ has: freshMenuItem });
+  await expect(freshMenuItem).toBeVisible();
+  await waitForFiniteAnimations(menuContent);
   await testPage.keyboard.press("Escape");
+  await expect(menuContent).toBeHidden();
   await expect(menu).toBeFocused();
-  await expect(testPage.getByTestId("plan-toolbar-implement-fresh-menu-item")).toBeHidden();
   const actions = download.locator("xpath=..");
   const box = await actions.boundingBox();
   expect(box).not.toBeNull();

@@ -1,0 +1,415 @@
+{
+  "review_status": "SQLITE_GATE_FAILED_PARTIAL_EVIDENCE",
+  "reviewed_utc": "2026-10-31T02:34:47Z",
+  "review_method": "Read-only independent artifact audit of runner logs, per-scenario JSON, comparison JSON, resource chronology, checkpoint observations, frozen source assertions, and acceptance criteria. No benchmark or database query was rerun.",
+  "source_frame": {
+    "commit": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+    "expected_commit": "5b79da2f41f9a6e2c9bd9f421313276981e95c00",
+    "isolated_worktree": "/tmp/usage-history-C8-benchmark-worktree",
+    "detached_head": true,
+    "tracked_and_staged_clean": true,
+    "only_untracked_path_is_c8_evidence_root": true,
+    "status_entries_at_review": [
+      "?? docs/plans/usage-history/evidence/usage-history-luna-C8-full-normal-20261031T0122Z/"
+    ]
+  },
+  "runner": {
+    "invocation": "bash /tmp/usage-history-C8-run-full-normal-gates.sh",
+    "normal_go_command": "/root/.local/share/mise/installs/go/1.26.0/bin/go test -p 1 -trimpath -tags sqlite_trace usage_history_scanstatus ./internal/analytics/repository/sqlite -run ^$ -bench ^BenchmarkUsageHistoryFiveYears$ -benchtime=10x -benchmem -count=1 -timeout=0",
+    "working_directory": "/tmp/usage-history-C8-benchmark-worktree/apps/backend",
+    "go": "go1.26.0 linux/amd64",
+    "environment": {
+      "CGO_ENABLED": "1",
+      "CGO_CFLAGS": "-O2 -g -DSQLITE_ENABLE_STMT_SCANSTATUS",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "3GiB",
+      "build_tags": "sqlite_trace usage_history_scanstatus"
+    },
+    "go_test_timeout": "0 (no Go test timeout bound)",
+    "external_timeout_or_manual_stop": false,
+    "exit_status": 1,
+    "elapsed_seconds_reported_by_go": 3618.666,
+    "pids_observed": {
+      "wrapper_parent_shell": 3665602,
+      "runner_bash": 3665700,
+      "go_test": 3665753,
+      "sqlite_test_binary": 3669393
+    },
+    "runner_status_recorded_from_outer_session": true,
+    "process_quiescence_confirmed_utc": "2026-10-31T02:33:44Z",
+    "original_runner_sha256": "a55f77acb6589deea828b27cd1ff8ac62c8ddc4378a23f8a6d1674fa7628e955",
+    "adapted_runner_sha256": "c67fa79e7b91d2c899f978df60004eece57c9658045e02d70d8d53236cdfde59",
+    "adapted_runner_diff_sha256": "ab1c6d8f8e6f4538934e7ac506d6239245a8603ae092284c656bafa332574dcd",
+    "adapted_runner_allowed_changes": [
+      "REPO",
+      "EXPECTED_HEAD",
+      "EVIDENCE_ROOT",
+      "EVIDENCE_REL",
+      "LOG_ROOT"
+    ]
+  },
+  "sqlite_gate": {
+    "status": "failed",
+    "phase_order": [
+      "one_year",
+      "five_years"
+    ],
+    "expected_scenarios_per_phase": 16,
+    "scenario_receipts": 27,
+    "scenario_receipts_by_phase": {
+      "five_years": 11,
+      "one_year": 16
+    },
+    "samples_per_available_scenario": 10,
+    "missing_scenario_receipts": [
+      "five_years/America/New_York",
+      "five_years/Asia/Kathmandu",
+      "five_years/Europe/Lisbon",
+      "native",
+      "deleted_task"
+    ],
+    "missing_expected_filenames": [
+      "usage-history-worker4-bench-sqlite-five_years-deleted_task.json",
+      "usage-history-worker4-bench-sqlite-five_years-five_years-America-New_York.json",
+      "usage-history-worker4-bench-sqlite-five_years-five_years-Asia-Kathmandu.json",
+      "usage-history-worker4-bench-sqlite-five_years-five_years-Europe-Lisbon.json",
+      "usage-history-worker4-bench-sqlite-five_years-native.json"
+    ],
+    "failures": [
+      {
+        "sqlite_log_line": 81,
+        "benchmark_case": "BenchmarkUsageHistoryFiveYears/five_years/five_years/America/New_York",
+        "error_line": "usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded"
+      },
+      {
+        "sqlite_log_line": 87,
+        "benchmark_case": "BenchmarkUsageHistoryFiveYears/five_years/five_years/Asia/Kathmandu",
+        "error_line": "usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded"
+      },
+      {
+        "sqlite_log_line": 93,
+        "benchmark_case": "BenchmarkUsageHistoryFiveYears/five_years/five_years/Europe/Lisbon",
+        "error_line": "usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded"
+      },
+      {
+        "sqlite_log_line": 99,
+        "benchmark_case": "BenchmarkUsageHistoryFiveYears/five_years/native",
+        "error_line": "usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded"
+      },
+      {
+        "sqlite_log_line": 109,
+        "benchmark_case": "BenchmarkUsageHistoryFiveYears/five_years/deleted_task",
+        "error_line": "usage_history_bench_run_test.go:94: analytics busy: context deadline exceeded"
+      }
+    ],
+    "failure_stage": "warm in-process fetchUsageBenchReport call; failed before isolated plain/instrumented child queries, sample collection, result validation, and per-scenario evidence write",
+    "source_call_context": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go:93-97; the error is surfaced at line 94 before runUsageBenchProcess",
+    "go_test_timeout_note": "The run used -timeout=0 and ran for the reported 3618.666 seconds; failures are analytics request context deadline exceeded, not the Go test timeout.",
+    "runner_evidence_validator_reached": false,
+    "fixture_build_completed": true,
+    "fixture_construction_ns": 3022971131796,
+    "fixture_construction_readable": "50m22.971131796s",
+    "fixture_counts_by_phase": {
+      "one_year": {
+        "retained_native_observations": 200005,
+        "retained_external_observations": 20013,
+        "published_metric_contributions": 440032,
+        "published_canonical_facts": 220017,
+        "daily_summary_rows": 3666,
+        "lifetime_summary_rows": 8,
+        "provider_option_dimension_rows": 17,
+        "fixture_disk_bytes": 3723546624,
+        "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+      },
+      "five_years": {
+        "retained_native_observations": 1000005,
+        "retained_external_observations": 100013,
+        "published_metric_contributions": 2200032,
+        "published_canonical_facts": 1100017,
+        "daily_summary_rows": 18276,
+        "lifetime_summary_rows": 8,
+        "provider_option_dimension_rows": 17,
+        "fixture_disk_bytes": 24147398656,
+        "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+      }
+    },
+    "completed_phase_metrics": {
+      "one_year": {
+        "scenario_receipts": 16,
+        "receipt_samples": 160,
+        "p95_ns_min_max": [
+          2434244,
+          7566272311
+        ],
+        "sqlite_instrumented_nvisit_min_max": [
+          22,
+          5872413
+        ],
+        "query_process_peak_rss_max_bytes": 57073664,
+        "sqlite_native_peak_max_bytes": 12356256,
+        "fixture": {
+          "retained_native_observations": 200005,
+          "retained_external_observations": 20013,
+          "published_metric_contributions": 440032,
+          "published_canonical_facts": 220017,
+          "daily_summary_rows": 3666,
+          "lifetime_summary_rows": 8,
+          "provider_option_dimension_rows": 17,
+          "fixture_disk_bytes": 3723546624,
+          "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+        }
+      },
+      "five_years": {
+        "scenario_receipts": 11,
+        "receipt_samples": 110,
+        "p95_ns_min_max": [
+          2905943,
+          4869356779
+        ],
+        "sqlite_instrumented_nvisit_min_max": [
+          23,
+          5501968
+        ],
+        "query_process_peak_rss_max_bytes": 49479680,
+        "sqlite_native_peak_max_bytes": 10073056,
+        "fixture": {
+          "retained_native_observations": 1000005,
+          "retained_external_observations": 100013,
+          "published_metric_contributions": 2200032,
+          "published_canonical_facts": 1100017,
+          "daily_summary_rows": 18276,
+          "lifetime_summary_rows": 8,
+          "provider_option_dimension_rows": 17,
+          "fixture_disk_bytes": 24147398656,
+          "fixture_disk_scope": "SQLite database plus WAL and shared-memory files"
+        }
+      }
+    },
+    "representative_queries": {
+      "five_years/five_years/UTC": {
+        "p95_ns": 560917807,
+        "sqlite_nvisit": 438690,
+        "statement_count": 100,
+        "read_statement_count": 26
+      },
+      "five_years/recent/UTC": {
+        "p95_ns": 12281087,
+        "sqlite_nvisit": 3797,
+        "statement_count": 22,
+        "read_statement_count": 13
+      },
+      "five_years/mixed_actors": {
+        "p95_ns": 4869356779,
+        "sqlite_nvisit": 5501968,
+        "statement_count": 50,
+        "read_statement_count": 13
+      },
+      "one_year/deleted_task": {
+        "p95_ns": 7566272311,
+        "sqlite_nvisit": 5872413,
+        "statement_count": 26,
+        "read_statement_count": 13
+      }
+    },
+    "recent_growth_comparison": {
+      "recent/America/New_York": {
+        "same_selection_sha256": true,
+        "different_publication": true,
+        "sample_counts": [
+          10,
+          10
+        ]
+      },
+      "recent/Asia/Kathmandu": {
+        "same_selection_sha256": true,
+        "different_publication": true,
+        "sample_counts": [
+          10,
+          10
+        ]
+      },
+      "recent/Europe/Lisbon": {
+        "same_selection_sha256": true,
+        "different_publication": true,
+        "sample_counts": [
+          10,
+          10
+        ]
+      },
+      "recent/UTC": {
+        "same_selection_sha256": true,
+        "different_publication": true,
+        "sample_counts": [
+          10,
+          10
+        ]
+      }
+    },
+    "available_receipt_integrity_checks": {
+      "all_27_scenario_receipts_parse": true,
+      "phase_counts_are_16_and_11": true,
+      "every_available_receipt_has_10_samples": true,
+      "p50_p95_p99_recomputed_from_samples": true,
+      "phase_fixture_counts_match_contract": true,
+      "plain_and_instrumented_publication_match": true,
+      "four_recent_timezone_comparisons_pass": true
+    },
+    "sqlite_plan_artifacts": "Actual instrumented SQLite statements and scan loops are retained in each available scenario JSON; 34 distinct scan-loop names appear across those reports. Missing failure cases have no query plans.",
+    "resource_chronology": {
+      "path": "/tmp/usage-history-C8-benchmark-worktree/docs/plans/usage-history/evidence/usage-history-luna-C8-full-normal-20261031T0122Z/resource-chronology.txt",
+      "samples": 84,
+      "first_utc": "2026-10-31T01:24:35Z",
+      "last_utc": "2026-10-31T02:25:35Z",
+      "tmp_free_min_bytes": 57108541440,
+      "tmp_free_start_bytes": 81366962176,
+      "tmp_free_last_sample_bytes": 81511911424,
+      "host_mem_available_min_bytes": 27546885120
+    },
+    "plan_review": {
+      "scope": "Saved instrumented SQLite query plans from completed scenarios only; no plan evidence exists for the five timed-out full-scale cases.",
+      "five_years_recent_UTC": {
+        "p95_ns": 12281087,
+        "sqlite_nvisit": 3797,
+        "statement_count": 22,
+        "read_statement_count": 13,
+        "plan_excerpts": [
+          {
+            "name": "usage_report_range",
+            "plan": "SCAN usage_report_range",
+            "nvisit": 314
+          },
+          {
+            "name": "usage_report_range",
+            "plan": "SEARCH usage_report_range",
+            "nvisit": 314
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "nvisit": 2
+          }
+        ],
+        "review": "The captured plan uses the report calendar index, scans the date-bounded 314-row report-range relation, and looks up canonical facts by the composite scope/generation/build/fact key index. The captured plans do not show a full canonical-facts table scan for this recent UTC case."
+      },
+      "five_years_full_range_UTC": {
+        "p95_ns": 560917807,
+        "sqlite_nvisit": 438690,
+        "statement_count": 100,
+        "read_statement_count": 26,
+        "plan_excerpts": [
+          {
+            "name": "usage_report_range",
+            "plan": "SCAN usage_report_range",
+            "nvisit": 18276
+          },
+          {
+            "name": "usage_report_range",
+            "plan": "SEARCH usage_report_range",
+            "nvisit": 18276
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH usage_report_calendar USING COVERING INDEX sqlite_autoindex_usage_report_calendar_1",
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_usage_report_calendar_1",
+            "plan": "SEARCH g USING INDEX sqlite_autoindex_usage_report_calendar_1 (period=?)",
+            "nvisit": 18272
+          }
+        ],
+        "review": "The full-range calendar path touches the full 18,276-row daily summary range and uses the report-calendar index. This is a five-year calendar query, not one of the missing timed-out time-zone variants."
+      },
+      "five_years_mixed_actors": {
+        "p95_ns": 4869356779,
+        "sqlite_nvisit": 5501968,
+        "contribution_and_fact_plan_excerpts": [
+          {
+            "name": "idx_usage_contribution_points",
+            "plan": "SEARCH c USING INDEX idx_usage_contribution_points (scope_id=? AND generation=? AND calendar=? AND coverage_kind=? AND coverage_start>? AND coverage_start<?)",
+            "nvisit": 2200019
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_contributions_1",
+            "plan": "SEARCH lt USING INDEX sqlite_autoindex_usage_projection_contributions_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=? AND metric_kind=?)",
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_projection_contributions_1",
+            "plan": "SEARCH lp USING INDEX sqlite_autoindex_usage_projection_contributions_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=? AND metric_kind=?)",
+            "nvisit": 0
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=? AND fact_key=?)",
+            "nvisit": 1
+          },
+          {
+            "name": "sqlite_autoindex_usage_canonical_facts_1",
+            "plan": "SEARCH f USING INDEX sqlite_autoindex_usage_canonical_facts_1 (scope_id=? AND generation=? AND build_id=?)",
+            "nvisit": 1100017
+          }
+        ],
+        "review": "Captured index searches visit about 2.20M contribution-point rows, 2.20M projection-contribution rows, and 1.10M canonical-fact rows in this scenario; aggregate instrumented visits are 5,501,968 and p95 is about 4.87s. The design text defines measured evidence, not a capacity threshold."
+      },
+      "interpretation_limit": "These are exact saved plan excerpts and visit counters for successful scenarios. They do not explain the five failed cases, which timed out during warm fetch before child query tracing."
+    },
+    "harness_oracle_validation_path": {
+      "source": "apps/backend/internal/analytics/repository/sqlite/usage_history_bench_run_test.go:93-114",
+      "fact": "The frozen benchmark invokes validateUsageBenchResult before timed samples and after each sample, then writes the JSON receipt only after those checks succeed.",
+      "review_limit": "The JSON retains expected oracle data but does not serialize actual result rows, so this artifact review does not independently recompute report values."
+    }
+  },
+  "postgres_gate": {
+    "status": "not_run",
+    "reason": "SQLite gate failed; parent explicitly directed not to run PostgreSQL on the known-failed source.",
+    "target_container": "usage-history-pr3660-postgres",
+    "version_observed": null,
+    "dsn_value_recorded": false,
+    "postgres_log_created": false,
+    "plans_or_performance_receipts": 0
+  },
+  "fixture_retention": {
+    "preserved": false,
+    "path": null,
+    "why": "The harness creates the SQLite database at filepath.Join(t.TempDir(), \"usage-history.db\") (apps/backend/internal/analytics/repository/sqlite/usage_history_bench_fixture_test.go:91). Go cleanup removed the fixture when the normal command exited. No live-file copy or online backup was attempted after exit.",
+    "recorded_full_scale_fixture_disk_bytes": 24147398656,
+    "disk_scope": "SQLite database plus WAL and shared-memory files, as recorded in full-scale receipts.",
+    "query_diagnosis_limit": "The JSON retains expected oracle metadata and query measurements for completed scenarios, but not the database or actual result rows. Failed cases produced no per-scenario JSON."
+  },
+  "acceptance_review": {
+    "five_year_fixture_minimum": "met in the constructed fixture: 1,000,005 native observations and 100,013 external observations, including special cases",
+    "sqlite_plans_visits_latency_memory_hardware": "partially evidenced for 11 of 16 five-year scenarios and all 16 one-year scenarios",
+    "recent_30_day_selection_unchanged_after_four_years_added": "verified for UTC, America/New_York, Asia/Kathmandu, Europe/Lisbon; ten samples in both phases; same selection digest and distinct publication",
+    "postgresql_explain_analyze_buffers": "missing because PostgreSQL was not run",
+    "overall_acceptance": "not met: SQLite gate failed in five full-scale scenarios, and PostgreSQL evidence is absent",
+    "criteria_sources": [
+      "docs/plans/usage-history/task-05-retained-reporting.md:64-68",
+      "docs/specs/costs/system-design/usage-history.md:342-347,413-414"
+    ]
+  },
+  "limits": [
+    "Each available scenario JSON contains ten sample measurements and an expected-oracle object. The frozen benchmark calls validateUsageBenchResult for warm and measured responses before writing each receipt; successful receipt creation therefore records the harness assertions passing. The actual result rows are not serialized, so this artifact audit did not independently recompute report rows.",
+    "The five failed cases errored on the warm query before child query capture; they have no latency samples, query plans, or JSON receipts. No placeholder report was fabricated.",
+    "The fixture database is not retained; query diagnosis must use the preserved source/log/evidence or a future corrected run.",
+    "This is a truthful partial SQLite failure packet, not a SQLite or PostgreSQL performance pass."
+  ],
+  "log_files": {
+    "runner.stdout.log": {
+      "path": "/tmp/usage-history-luna-C8-full-normal/runner.stdout.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "runner.stderr.log": {
+      "path": "/tmp/usage-history-luna-C8-full-normal/runner.stderr.log",
+      "bytes": 15567,
+      "sha256": "55ac4119583f0c5d74fa4dbca32ada13b15b64e59729120bd203875c526fecb1"
+    },
+    "sqlite.log": {
+      "path": "/tmp/usage-history-luna-C8-full-normal/sqlite.log",
+      "bytes": 463276,
+      "sha256": "abb5d849ffeaeb474c896f2186a12eac5696f88f042c03bb36c20ef2252e6356",
+      "last_write_utc": "2026-10-31T02:24:53.198Z"
+    }
+  }
+}

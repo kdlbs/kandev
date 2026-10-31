@@ -1,0 +1,912 @@
+utc=2026-10-31T01:24:35Z
+Mounted on        Avail Use%
+/          163158650880  66%
+/tmp        81366962176  53%
+MemAvailable:   27115486 kB
+SwapFree:       19120796 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665700 3665602 bash             0.0  0.0  4124
+3665753 3665700 go               3.1  0.1 54244
+scenario_receipts=0
+utc=2026-10-31T01:25:36Z
+Mounted on        Avail Use%
+/          163161702400  66%
+/tmp        80622571520  53%
+MemAvailable:   27099554 kB
+SwapFree:       19121060 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665700 3665602 bash                  01:57 S     0.0  0.0  4124
+3665753 3665700 go                    01:57 Sl    1.5  0.1 54244
+scenario_receipts=0
+utc=2026-10-31T01:25:55Z
+Mounted on        Avail Use%
+/          163159973888  66%
+/tmp        80395337728  54%
+MemAvailable:   27092561 kB
+SwapFree:       19122012 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665700 3665602 bash                  02:16 S     0.0  0.0  4124
+3665753 3665700 go                    02:16 Sl    1.3  0.1 54244
+3669393 3665753 sqlite.test           01:22 Sl   74.9  0.1 50596
+pid=3665753 rchar:=1226925998 wchar:=442277693 read_bytes:=389664768 write_bytes:=502853632 cancelled_write_bytes:=62496768 
+pid=3669393 rchar:=35337379015 wchar:=28224913392 read_bytes:=434176 write_bytes:=24274468864 cancelled_write_bytes:=6789165056 
+scenario_receipts=0
+utc=2026-10-31T01:26:44Z
+Mounted on        Avail Use%
+/          163161071616  66%
+/tmp        79855607808  54%
+MemAvailable:   27106593 kB
+SwapFree:       19122012 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    03:05 00:00:01  0.9 54268
+3669393 3665753 sqlite.test           02:11 00:01:45 80.3 54776
+pid=3669393 rchar:=53573116577 wchar:=41401185020 read_bytes:=450560 write_bytes:=35751022592 cancelled_write_bytes:=9940791296 
+scenario_receipts=0
+utc=2026-10-31T01:27:26Z
+Mounted on        Avail Use%
+/          163160768512  66%
+/tmp        79146782720  54%
+MemAvailable:   27055462 kB
+SwapFree:       19122652 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    03:47 00:00:01  0.8 54268
+3669393 3665753 sqlite.test           02:53 00:02:33 88.5 57416
+pid=3669393 rchar:=58629272337 wchar:=46279949332 read_bytes:=471040 write_bytes:=40508571648 cancelled_write_bytes:=11293655040 
+scenario_receipts=0
+utc=2026-10-31T01:28:05Z
+Mounted on        Avail Use%
+/          163160223744  66%
+/tmp        78664663040  55%
+MemAvailable:   27065590 kB
+SwapFree:       19122676 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    04:26 00:00:01  0.6 46840
+3669393 3665753 sqlite.test           03:32 00:03:12 90.6 56000
+pid=3669393 rchar:=63725298737 wchar:=50753297732 read_bytes:=487424 write_bytes:=44912140288 cancelled_write_bytes:=12178034688 
+scenario_receipts=0
+utc=2026-10-31T01:28:53Z
+Mounted on        Avail Use%
+/          163159621632  66%
+/tmp        78605807616  55%
+MemAvailable:   27066015 kB
+SwapFree:       19122880 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    05:14 00:00:01  0.5 46840
+3669393 3665753 sqlite.test           04:20 00:04:03 93.3 57996
+pid=3669393 rchar:=73370855065 wchar:=58994163256 read_bytes:=491520 write_bytes:=50006790144 cancelled_write_bytes:=12460007424 
+scenario_receipts=0
+utc=2026-10-31T01:29:32Z
+Mounted on        Avail Use%
+/          163155435520  66%
+/tmp        78233079808  55%
+MemAvailable:   27048159 kB
+SwapFree:       19122944 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    05:53 00:00:01  0.5 46840
+3669393 3665753 sqlite.test           04:59 00:04:43 94.6 57124
+pid=3669393 rchar:=89825514193 wchar:=67690432876 read_bytes:=499712 write_bytes:=54776930304 cancelled_write_bytes:=12804337664 
+scenario_receipts=0
+utc=2026-10-31T01:30:14Z
+Mounted on        Avail Use%
+/          163155177472  66%
+/tmp        78199152640  55%
+MemAvailable:   27028040 kB
+SwapFree:       19123056 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    06:35 00:00:01  0.4 41848
+3669393 3665753 sqlite.test           05:41 00:05:28 96.0 55920
+pid=3669393 rchar:=102627071081 wchar:=69764880004 read_bytes:=499712 write_bytes:=56875270144 cancelled_write_bytes:=13308911616 
+scenario_receipts=0
+utc=2026-10-31T01:30:53Z
+Mounted on        Avail Use%
+/          163154149376  66%
+/tmp        77784576000  55%
+MemAvailable:   27029568 kB
+SwapFree:       19123600 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    07:14 00:00:01  0.4 41848
+3669393 3665753 sqlite.test           06:20 00:06:08 96.9 57320
+pid=3669393 rchar:=119012996169 wchar:=75950521748 read_bytes:=503808 write_bytes:=60634513408 cancelled_write_bytes:=13688897536 
+scenario_receipts=0
+utc=2026-10-31T01:32:00Z
+Mounted on        Avail Use%
+/          163154595840  66%
+/tmp        77684858880  55%
+MemAvailable:   27015544 kB
+SwapFree:       19123844 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    08:21 00:00:01  0.3 41848
+3669393 3665753 sqlite.test           07:27 00:07:23 99.1 56984
+pid=3669393 rchar:=157138933345 wchar:=80073077556 read_bytes:=503808 write_bytes:=63783714816 cancelled_write_bytes:=14394720256 
+scenario_receipts=0
+utc=2026-10-31T01:32:38Z
+Mounted on        Avail Use%
+/          163089477632  66%
+/tmp        77684547584  55%
+MemAvailable:   27001485 kB
+SwapFree:       19123876 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    08:59 00:00:01  0.3 41848
+3669393 3665753 sqlite.test           08:05 00:07:44 95.6 65444
+pid=3669393 rchar:=196138561712 wchar:=81557517373 read_bytes:=503808 write_bytes:=64659496960 cancelled_write_bytes:=15161548800 
+scenario_receipts=4
+utc=2026-10-31T01:33:27Z
+Mounted on        Avail Use%
+/          163129815040  66%
+/tmp        77684322304  55%
+MemAvailable:   26975728 kB
+SwapFree:       19126836 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101.1MiB / 28GiB
+3665753 3665700 go                    09:48 00:00:01  0.3 41848
+3669393 3665753 sqlite.test           08:54 00:08:21 93.9 63928
+3684046 3669393 sqlite.test           00:02 00:00:02  100 42468
+pid=3669393 rchar:=243870130815 wchar:=83847378828 read_bytes:=503808 write_bytes:=65891012608 cancelled_write_bytes:=16415109120 
+pid=3684046 rchar:=3224231889 wchar:=75490695 read_bytes:=0 write_bytes:=75493376 cancelled_write_bytes:=0 
+scenario_receipts=6
+utc=2026-10-31T01:34:05Z
+Mounted on        Avail Use%
+/          163153432576  66%
+/tmp        77684269056  55%
+MemAvailable:   26973134 kB
+SwapFree:       19128088 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    10:26 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           09:32 00:08:53 93.2 63244
+pid=3669393 rchar:=286938875721 wchar:=85841093873 read_bytes:=503808 write_bytes:=66984804352 cancelled_write_bytes:=17497460736 
+scenario_receipts=7
+utc=2026-10-31T01:34:47Z
+Mounted on        Avail Use%
+/          163125559296  66%
+/tmp        77684137984  55%
+MemAvailable:   26998768 kB
+SwapFree:       19129768 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    11:09 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           10:14 00:09:21 91.3 64724
+pid=3669393 rchar:=329898484086 wchar:=87933523226 read_bytes:=503808 write_bytes:=68104081408 cancelled_write_bytes:=18547200000 
+scenario_receipts=8
+utc=2026-10-31T01:35:26Z
+Mounted on        Avail Use%
+/          163104620544  66%
+/tmp        77683986432  55%
+MemAvailable:   27001649 kB
+SwapFree:       19129768 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    11:47 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           10:53 00:09:45 89.5 63704
+pid=3669393 rchar:=368950139872 wchar:=89773131726 read_bytes:=503808 write_bytes:=69029793792 cancelled_write_bytes:=19544154112 
+scenario_receipts=10
+utc=2026-10-31T01:36:07Z
+Mounted on        Avail Use%
+/          163152691200  66%
+/tmp        77683875840  55%
+MemAvailable:   26989718 kB
+SwapFree:       19129768 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    12:28 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           11:34 00:10:21 89.5 71228
+pid=3669393 rchar:=423554866126 wchar:=91133384138 read_bytes:=622592 write_bytes:=69807382528 cancelled_write_bytes:=20271800320 
+scenario_receipts=12
+utc=2026-10-31T01:36:46Z
+Mounted on        Avail Use%
+/          163070746624  66%
+/tmp        77683712000  55%
+MemAvailable:   26969283 kB
+SwapFree:       19129832 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    13:07 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           12:13 00:10:39 87.2 83996
+3689358 3669393 sqlite.test           00:03 00:00:03  100 49208
+pid=3669393 rchar:=470486934025 wchar:=92762524461 read_bytes:=622592 write_bytes:=71142400000 cancelled_write_bytes:=21665738752 
+pid=3689358 rchar:=4875568143 wchar:=198751369 read_bytes:=0 write_bytes:=166076416 cancelled_write_bytes:=128491520 
+scenario_receipts=13
+utc=2026-10-31T01:37:24Z
+Mounted on        Avail Use%
+/          163108274176  66%
+/tmp        77683597312  55%
+MemAvailable:   27016460 kB
+SwapFree:       19129836 kB
+usage-history-pr3660-postgres cpu=0.00% mem=101MiB / 28GiB
+3665753 3665700 go                    13:46 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           12:51 00:11:05 86.1 79516
+pid=3669393 rchar:=526498438268 wchar:=94801354099 read_bytes:=622592 write_bytes:=72821739520 cancelled_write_bytes:=23316652032 
+scenario_receipts=13
+utc=2026-10-31T01:38:04Z
+Mounted on        Avail Use%
+/          163152277504  66%
+/tmp        77683601408  55%
+MemAvailable:   27016972 kB
+SwapFree:       19129864 kB
+usage-history-pr3660-postgres cpu=0.00% mem=100.9MiB / 28GiB
+3665753 3665700 go                    14:25 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           13:31 00:11:44 86.8 79780
+pid=3669393 rchar:=581331551348 wchar:=96827348331 read_bytes:=622592 write_bytes:=74488328192 cancelled_write_bytes:=24967565312 
+scenario_receipts=13
+utc=2026-10-31T01:38:43Z
+Mounted on        Avail Use%
+/          163151638528  66%
+/tmp        77490814976  55%
+MemAvailable:   26966418 kB
+SwapFree:       19128472 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.53MiB / 28GiB
+3665753 3665700 go                    15:04 00:00:01  0.2 41848
+3669393 3665753 sqlite.test           14:10 00:12:16 86.6 83000
+pid=3669393 rchar:=616656118930 wchar:=106210398895 read_bytes:=622592 write_bytes:=82545102848 cancelled_write_bytes:=27589148672 
+scenario_receipts=16
+utc=2026-10-31T01:39:25Z
+Mounted on        Avail Use%
+/          163149942784  66%
+/tmp        77001842688  56%
+MemAvailable:   26960487 kB
+SwapFree:       19128472 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.49MiB / 28GiB
+3665753 3665700 go                    15:46 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           14:52 00:12:50 86.2 82464
+pid=3669393 rchar:=638101316066 wchar:=121050918959 read_bytes:=634880 write_bytes:=95293091840 cancelled_write_bytes:=31178723328 
+sqlite_receipt_files=16
+utc=2026-10-31T01:40:04Z
+Mounted on        Avail Use%
+/          163143323648  66%
+/tmp        76512067584  56%
+MemAvailable:   26971909 kB
+SwapFree:       19128488 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.47MiB / 28GiB
+3665753 3665700 go                    16:25 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           15:31 00:13:22 86.1 83364
+pid=3669393 rchar:=659402721018 wchar:=135328205003 read_bytes:=643072 write_bytes:=107537846272 cancelled_write_bytes:=34626682880 
+sqlite_receipt_files=16
+utc=2026-10-31T01:40:44Z
+Mounted on        Avail Use%
+/          163146649600  66%
+/tmp        75995684864  56%
+MemAvailable:   26995623 kB
+SwapFree:       19129716 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.45MiB / 28GiB
+3665753 3665700 go                    17:05 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           16:11 00:13:54 85.9 80072
+pid=3669393 rchar:=681298137730 wchar:=149708192139 read_bytes:=655360 write_bytes:=119859585024 cancelled_write_bytes:=38097788928 
+sqlite_receipt_files=16
+utc=2026-10-31T01:41:23Z
+Mounted on        Avail Use%
+/          163148361728  66%
+/tmp        75539894272  56%
+MemAvailable:   27004772 kB
+SwapFree:       19130056 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.43MiB / 28GiB
+3665753 3665700 go                    17:44 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           16:50 00:14:25 85.6 81784
+pid=3669393 rchar:=702102151690 wchar:=163306704051 read_bytes:=675840 write_bytes:=131516604416 cancelled_write_bytes:=41382633472 
+sqlite_receipt_files=16
+utc=2026-10-31T01:42:03Z
+Mounted on        Avail Use%
+/          163147964416  66%
+/tmp        75102552064  57%
+MemAvailable:   26995009 kB
+SwapFree:       19130056 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.41MiB / 28GiB
+3665753 3665700 go                    18:24 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           17:30 00:14:56 85.4 83036
+pid=3669393 rchar:=723506237874 wchar:=177157774615 read_bytes:=696320 write_bytes:=143395028992 cancelled_write_bytes:=44724916224 
+sqlite_receipt_files=16
+utc=2026-10-31T01:42:41Z
+Mounted on        Avail Use%
+/          163145043968  66%
+/tmp        74654035968  57%
+MemAvailable:   27002769 kB
+SwapFree:       19130132 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.37MiB / 28GiB
+3665753 3665700 go                    19:02 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           18:08 00:15:28 85.3 82252
+pid=3669393 rchar:=745228976418 wchar:=191128438783 read_bytes:=708608 write_bytes:=155373727744 cancelled_write_bytes:=48105897984 
+sqlite_receipt_files=16
+utc=2026-10-31T01:43:22Z
+Mounted on        Avail Use%
+/          163147616256  66%
+/tmp        74184396800  57%
+MemAvailable:   26981906 kB
+SwapFree:       19130160 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.37MiB / 28GiB
+3665753 3665700 go                    19:43 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           18:49 00:16:01 85.1 83240
+pid=3669393 rchar:=767777267874 wchar:=205558378375 read_bytes:=724992 write_bytes:=167752753152 cancelled_write_bytes:=51588653056 
+sqlite_receipt_files=16
+utc=2026-10-31T01:44:00Z
+Mounted on        Avail Use%
+/          163141062656  66%
+/tmp        73755365376  57%
+MemAvailable:   26997519 kB
+SwapFree:       19130160 kB
+usage-history-pr3660-postgres cpu=0.00% mem=99.36MiB / 28GiB
+3665753 3665700 go                    20:21 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           19:27 00:16:32 85.0 82664
+pid=3669393 rchar:=788729997602 wchar:=218851545475 read_bytes:=741376 write_bytes:=179159646208 cancelled_write_bytes:=54805614592 
+sqlite_receipt_files=16
+utc=2026-10-31T01:44:38Z
+Mounted on        Avail Use%
+/          163144208384  66%
+/tmp        73311772672  58%
+MemAvailable:   26901255 kB
+SwapFree:       19127328 kB
+usage-history-pr3660-postgres cpu=0.00% mem=97.08MiB / 28GiB
+3665753 3665700 go                    20:59 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           20:05 00:17:04 84.9 82272
+pid=3669393 rchar:=810451456210 wchar:=232598210975 read_bytes:=753664 write_bytes:=190954557440 cancelled_write_bytes:=58130808832 
+sqlite_receipt_files=16
+utc=2026-10-31T01:45:12Z
+Mounted on        Avail Use%
+/          163144429568  66%
+/tmp        72920571904  58%
+MemAvailable:   26938875 kB
+SwapFree:       19127440 kB
+usage-history-pr3660-postgres cpu=0.00% mem=97.09MiB / 28GiB
+3665753 3665700 go                    21:33 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           20:39 00:17:31 84.8 83540
+pid=3669393 rchar:=828899354618 wchar:=244220796519 read_bytes:=761856 write_bytes:=200929824768 cancelled_write_bytes:=60939571200 
+sqlite_receipt_files=16
+utc=2026-10-31T01:45:49Z
+Mounted on        Avail Use%
+/          163140325376  66%
+/tmp        72510361600  58%
+MemAvailable:   26935883 kB
+SwapFree:       19127484 kB
+usage-history-pr3660-postgres cpu=0.47% mem=97.26MiB / 28GiB
+3665753 3665700 go                    22:10 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           21:16 00:17:59 84.5 81624
+pid=3669393 rchar:=848226704674 wchar:=256349631583 read_bytes:=774144 write_bytes:=211333906432 cancelled_write_bytes:=63872262144 
+sqlite_receipt_files=16
+utc=2026-10-31T01:46:26Z
+Mounted on        Avail Use%
+/          163142512640  66%
+/tmp        72086941696  58%
+MemAvailable:   26975697 kB
+SwapFree:       19122660 kB
+usage-history-pr3660-postgres cpu=0.00% mem=91.65MiB / 28GiB
+3665753 3665700 go                    22:47 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           21:53 00:18:33 84.7 83516
+pid=3669393 rchar:=862487230738 wchar:=266247185171 read_bytes:=782336 write_bytes:=219976536064 cancelled_write_bytes:=66252980224 
+sqlite_receipt_files=16
+utc=2026-10-31T01:47:04Z
+Mounted on        Avail Use%
+/          163141447680  66%
+/tmp        71693099008  59%
+MemAvailable:   27056478 kB
+SwapFree:       19089308 kB
+usage-history-pr3660-postgres cpu=0.00% mem=68.29MiB / 28GiB
+3665753 3665700 go                    23:26 00:00:01  0.1 41848
+3669393 3665753 sqlite.test           22:31 00:19:12 85.2 81972
+pid=3669393 rchar:=871558669074 wchar:=274006788055 read_bytes:=798720 write_bytes:=226993078272 cancelled_write_bytes:=68117651456 
+sqlite_receipt_files=16
+utc=2026-10-31T01:47:42Z
+Mounted on        Avail Use%
+/          163139260416  66%
+/tmp        71026483200  59%
+MemAvailable:   27056693 kB
+SwapFree:       19084352 kB
+usage-history-pr3660-postgres cpu=0.00% mem=65.64MiB / 28GiB
+3665753 3665700 go                    24:03 00:00:01  0.1 41844
+3669393 3665753 sqlite.test           23:09 00:19:48 85.5 82476
+pid=3669393 rchar:=878819124122 wchar:=280782511483 read_bytes:=823296 write_bytes:=233318756352 cancelled_write_bytes:=69721567232 
+sqlite_receipt_files=16
+utc=2026-10-31T01:48:19Z
+Mounted on        Avail Use%
+/          163140132864  66%
+/tmp        70003871744  60%
+MemAvailable:   27072351 kB
+SwapFree:       19078636 kB
+usage-history-pr3660-postgres cpu=0.01% mem=59.64MiB / 28GiB
+3665753 3665700 go                    24:41 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           23:47 00:20:23 85.7 82052
+pid=3669393 rchar:=885360522362 wchar:=287626373903 read_bytes:=851968 write_bytes:=239946727424 cancelled_write_bytes:=71406678016 
+sqlite_receipt_files=16
+utc=2026-10-31T01:48:59Z
+Mounted on        Avail Use%
+/          163139330048  66%
+/tmp        68904218624  60%
+MemAvailable:   27065054 kB
+SwapFree:       19078636 kB
+usage-history-pr3660-postgres cpu=0.00% mem=59.62MiB / 28GiB
+3665753 3665700 go                    25:20 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           24:26 00:21:01 86.0 82308
+pid=3669393 rchar:=892674626938 wchar:=295063808971 read_bytes:=892928 write_bytes:=247153520640 cancelled_write_bytes:=73248342016 
+sqlite_receipt_files=16
+utc=2026-10-31T01:49:36Z
+Mounted on        Avail Use%
+/          163138953216  66%
+/tmp        67882987520  61%
+MemAvailable:   27075750 kB
+SwapFree:       19076360 kB
+usage-history-pr3660-postgres cpu=0.00% mem=57.98MiB / 28GiB
+3665753 3665700 go                    25:57 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           25:03 00:21:37 86.3 82400
+pid=3669393 rchar:=899750577778 wchar:=302130728755 read_bytes:=11702272 write_bytes:=254003806208 cancelled_write_bytes:=75004362752 
+sqlite_receipt_files=16
+utc=2026-10-31T01:50:15Z
+Mounted on        Avail Use%
+/          163138232320  66%
+/tmp        66931122176  61%
+MemAvailable:   27074360 kB
+SwapFree:       19075172 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.99MiB / 28GiB
+3665753 3665700 go                    26:36 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           25:42 00:22:12 86.3 81864
+pid=3669393 rchar:=906372491114 wchar:=308669076155 read_bytes:=108744704 write_bytes:=260341207040 cancelled_write_bytes:=76627587072 
+sqlite_receipt_files=16
+utc=2026-10-31T01:50:51Z
+Mounted on        Avail Use%
+/          163137806336  66%
+/tmp        66615341056  62%
+MemAvailable:   27059291 kB
+SwapFree:       19076140 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.98MiB / 28GiB
+3665753 3665700 go                    27:13 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           26:18 00:22:52 86.8 82152
+pid=3669393 rchar:=910500722746 wchar:=311913744555 read_bytes:=154304512 write_bytes:=263539093504 cancelled_write_bytes:=77016457216 
+sqlite_receipt_files=16
+utc=2026-10-31T01:51:29Z
+Mounted on        Avail Use%
+/          163137114112  66%
+/tmp        66558963712  62%
+MemAvailable:   27055893 kB
+SwapFree:       19076140 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.98MiB / 28GiB
+3665753 3665700 go                    27:50 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           26:56 00:23:33 87.4 82604
+pid=3669393 rchar:=914607733050 wchar:=314567395435 read_bytes:=154304512 write_bytes:=266194710528 cancelled_write_bytes:=77016457216 
+sqlite_receipt_files=16
+utc=2026-10-31T01:52:11Z
+Mounted on        Avail Use%
+/          163136987136  66%
+/tmp        66490679296  62%
+MemAvailable:   27059594 kB
+SwapFree:       19076188 kB
+usage-history-pr3660-postgres cpu=0.00% mem=56.5MiB / 28GiB
+3665753 3665700 go                    28:32 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           27:38 00:24:21 88.1 82648
+pid=3669393 rchar:=919732189794 wchar:=317800749147 read_bytes:=154308608 write_bytes:=269430648832 cancelled_write_bytes:=77016457216 
+sqlite_receipt_files=16
+utc=2026-10-31T01:52:49Z
+Mounted on        Avail Use%
+/          163136835584  66%
+/tmp        66435072000  62%
+MemAvailable:   27063536 kB
+SwapFree:       19076188 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.98MiB / 28GiB
+3665753 3665700 go                    29:10 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           28:16 00:25:01 88.5 82848
+pid=3669393 rchar:=924006628186 wchar:=320452737875 read_bytes:=154308608 write_bytes:=272084717568 cancelled_write_bytes:=77016457216 
+sqlite_receipt_files=16
+utc=2026-10-31T01:53:27Z
+Mounted on        Avail Use%
+/          163136483328  66%
+/tmp        66114355200  62%
+MemAvailable:   27059627 kB
+SwapFree:       19077188 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.98MiB / 28GiB
+3665753 3665700 go                    29:48 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           28:54 00:25:42 88.9 80800
+pid=3669393 rchar:=929142888074 wchar:=325302826691 read_bytes:=293154816 write_bytes:=275459850240 cancelled_write_bytes:=77156073472 
+sqlite_receipt_files=16
+utc=2026-10-31T01:54:05Z
+Mounted on        Avail Use%
+/          163135365120  66%
+/tmp        65576357888  62%
+MemAvailable:   27034008 kB
+SwapFree:       19077176 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    30:26 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           29:32 00:26:15 88.8 84556
+pid=3669393 rchar:=934654201194 wchar:=331850843339 read_bytes:=500338688 write_bytes:=279173431296 cancelled_write_bytes:=77459873792 
+sqlite_receipt_files=16
+utc=2026-10-31T01:54:43Z
+Mounted on        Avail Use%
+/          163136147456  66%
+/tmp        64928391168  63%
+MemAvailable:   27039426 kB
+SwapFree:       19077176 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    31:04 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           30:10 00:26:52 89.0 81824
+pid=3669393 rchar:=941250295050 wchar:=339674566323 read_bytes:=688300032 write_bytes:=283634548736 cancelled_write_bytes:=77826560000 
+sqlite_receipt_files=16
+utc=2026-10-31T01:55:21Z
+Mounted on        Avail Use%
+/          163136008192  66%
+/tmp        64302694400  63%
+MemAvailable:   27035134 kB
+SwapFree:       19077180 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    31:42 00:00:01  0.1 41840
+3669393 3665753 sqlite.test           30:48 00:27:27 89.1 84628
+pid=3669393 rchar:=947785878586 wchar:=347420539887 read_bytes:=723447808 write_bytes:=288059969536 cancelled_write_bytes:=78190678016 
+sqlite_receipt_files=16
+utc=2026-10-31T01:56:00Z
+Mounted on        Avail Use%
+/          163135713280  66%
+/tmp        63754711040  63%
+MemAvailable:   27035718 kB
+SwapFree:       19077188 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    32:21 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           31:27 00:28:03 89.2 85932
+pid=3669393 rchar:=964747703843 wchar:=355271942092 read_bytes:=752111616 write_bytes:=292259926016 cancelled_write_bytes:=78598275072 
+sqlite_receipt_files=16
+utc=2026-10-31T01:56:37Z
+Mounted on        Avail Use%
+/          163134410752  66%
+/tmp        63055495168  64%
+MemAvailable:   27025313 kB
+SwapFree:       19077276 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.71MiB / 28GiB
+3665753 3665700 go                    32:58 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           32:04 00:28:42 89.4 82700
+pid=3669393 rchar:=972323431883 wchar:=364150667356 read_bytes:=767422464 write_bytes:=297317974016 cancelled_write_bytes:=79002214400 
+sqlite_receipt_files=16
+utc=2026-10-31T01:57:15Z
+Mounted on        Avail Use%
+/          163135148032  66%
+/tmp        62404878336  64%
+MemAvailable:   27056842 kB
+SwapFree:       19077276 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    33:36 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           32:42 00:29:19 89.6 83888
+pid=3669393 rchar:=979434857051 wchar:=372517142260 read_bytes:=795537408 write_bytes:=302097129472 cancelled_write_bytes:=79384309760 
+sqlite_receipt_files=16
+utc=2026-10-31T01:57:54Z
+Mounted on        Avail Use%
+/          163134787584  66%
+/tmp        61885235200  64%
+MemAvailable:   27055904 kB
+SwapFree:       19077276 kB
+usage-history-pr3660-postgres cpu=0.00% mem=55.7MiB / 28GiB
+3665753 3665700 go                    34:15 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           33:21 00:29:54 89.6 81784
+pid=3669393 rchar:=994906620988 wchar:=380233760029 read_bytes:=914419712 write_bytes:=306236121088 cancelled_write_bytes:=79787704320 
+sqlite_receipt_files=16
+utc=2026-10-31T01:58:31Z
+Mounted on        Avail Use%
+/          163134599168  66%
+/tmp        61364633600  65%
+MemAvailable:   27056918 kB
+SwapFree:       19077336 kB
+usage-history-pr3660-postgres cpu=0.00% mem=56MiB / 28GiB
+3665753 3665700 go                    34:52 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           33:58 00:30:27 89.6 77340
+pid=3669393 rchar:=1000791469028 wchar:=387209672061 read_bytes:=1262026752 write_bytes:=310181715968 cancelled_write_bytes:=80089497600 
+sqlite_receipt_files=16
+utc=2026-10-31T01:59:08Z
+Mounted on        Avail Use%
+/          163134345216  66%
+/tmp        60851273728  65%
+MemAvailable:   27057243 kB
+SwapFree:       19077056 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.71MiB / 28GiB
+3665753 3665700 go                    35:29 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           34:35 00:30:58 89.5 77452
+pid=3669393 rchar:=1006531521268 wchar:=393924817949 read_bytes:=1372119040 write_bytes:=314004541440 cancelled_write_bytes:=80383148032 
+sqlite_receipt_files=16
+utc=2026-10-31T01:59:50Z
+Mounted on        Avail Use%
+/          163134119936  66%
+/tmp        60134248448  65%
+MemAvailable:   27059509 kB
+SwapFree:       19077532 kB
+usage-history-pr3660-postgres cpu=0.51% mem=54.87MiB / 28GiB
+3665753 3665700 go                    36:11 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           35:17 00:31:39 89.7 75632
+pid=3669393 rchar:=1014644402948 wchar:=403493798125 read_bytes:=1543458816 write_bytes:=319469981696 cancelled_write_bytes:=80804966400 
+sqlite_receipt_files=16
+utc=2026-10-31T02:00:28Z
+Mounted on        Avail Use%
+/          163133845504  66%
+/tmp        59898793984  66%
+MemAvailable:   27057660 kB
+SwapFree:       19077752 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.7MiB / 28GiB
+3665753 3665700 go                    36:49 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           35:55 00:32:16 89.8 73980
+pid=3669393 rchar:=1033025391203 wchar:=408744032576 read_bytes:=1584054272 write_bytes:=322474430464 cancelled_write_bytes:=81351925760 
+sqlite_receipt_files=16
+utc=2026-10-31T02:01:05Z
+Mounted on        Avail Use%
+/          163133747200  66%
+/tmp        59898793984  66%
+MemAvailable:   27054218 kB
+SwapFree:       19077752 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.69MiB / 28GiB
+3665753 3665700 go                    37:26 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           36:32 00:32:57 90.2 74752
+pid=3669393 rchar:=1051137948451 wchar:=410513404144 read_bytes:=1638244352 write_bytes:=324264685568 cancelled_write_bytes:=81810808832 
+sqlite_receipt_files=16
+utc=2026-10-31T02:01:46Z
+Mounted on        Avail Use%
+/          163133632512  66%
+/tmp        59884785664  66%
+MemAvailable:   27048107 kB
+SwapFree:       19077752 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.59MiB / 28GiB
+3665753 3665700 go                    38:08 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           37:13 00:33:44 90.6 74908
+pid=3669393 rchar:=1084445912051 wchar:=412205951132 read_bytes:=1667665920 write_bytes:=325977268224 cancelled_write_bytes:=82249625600 
+sqlite_receipt_files=16
+utc=2026-10-31T02:02:24Z
+Mounted on        Avail Use%
+/          163133579264  66%
+/tmp        59850260480  66%
+MemAvailable:   27053936 kB
+SwapFree:       19077864 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.59MiB / 28GiB
+3665753 3665700 go                    38:45 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           37:51 00:34:24 90.9 74932
+pid=3669393 rchar:=1118497144035 wchar:=413432689680 read_bytes:=1689899008 write_bytes:=327218692096 cancelled_write_bytes:=82564403200 
+sqlite_receipt_files=16
+utc=2026-10-31T02:03:01Z
+Mounted on        Avail Use%
+/          163133321216  66%
+/tmp        59819786240  66%
+MemAvailable:   27054420 kB
+SwapFree:       19077864 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.57MiB / 28GiB
+3665753 3665700 go                    39:22 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           38:28 00:35:03 91.1 74948
+pid=3669393 rchar:=1155286265299 wchar:=414529293312 read_bytes:=1709858816 write_bytes:=328328523776 cancelled_write_bytes:=82849767424 
+sqlite_receipt_files=16
+utc=2026-10-31T02:03:42Z
+Mounted on        Avail Use%
+/          163133214720  66%
+/tmp        59789991936  66%
+MemAvailable:   27053130 kB
+SwapFree:       19077864 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.56MiB / 28GiB
+3665753 3665700 go                    40:03 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           39:09 00:35:45 91.3 75012
+pid=3669393 rchar:=1197947240179 wchar:=415607025852 read_bytes:=1728704512 write_bytes:=329419091968 cancelled_write_bytes:=83126218752 
+sqlite_receipt_files=16
+utc=2026-10-31T02:04:19Z
+Mounted on        Avail Use%
+/          163133018112  66%
+/tmp        59763912704  66%
+MemAvailable:   26988759 kB
+SwapFree:       19079316 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.54MiB / 28GiB
+3665753 3665700 go                    40:40 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           39:46 00:36:24 91.5 75020
+pid=3669393 rchar:=1239689945011 wchar:=416532309980 read_bytes:=1743175680 write_bytes:=330355380224 cancelled_write_bytes:=83361939456 
+sqlite_receipt_files=16
+utc=2026-10-31T02:04:56Z
+Mounted on        Avail Use%
+/          163132878848  66%
+/tmp        59738427392  66%
+MemAvailable:   27045995 kB
+SwapFree:       19079516 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.55MiB / 28GiB
+3665753 3665700 go                    41:17 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           40:23 00:37:05 91.8 74284
+pid=3669393 rchar:=1285756035171 wchar:=417456846884 read_bytes:=1759768576 write_bytes:=331290988544 cancelled_write_bytes:=83598327808 
+sqlite_receipt_files=16
+utc=2026-10-31T02:05:38Z
+Mounted on        Avail Use%
+/          163132596224  66%
+/tmp        59711270912  66%
+MemAvailable:   27045457 kB
+SwapFree:       19079524 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.53MiB / 28GiB
+3665753 3665700 go                    41:59 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           41:05 00:37:50 92.0 75028
+pid=3669393 rchar:=1338895438075 wchar:=418427267012 read_bytes:=1776787456 write_bytes:=332273004544 cancelled_write_bytes:=83848470528 
+sqlite_receipt_files=16
+utc=2026-10-31T02:06:16Z
+Mounted on        Avail Use%
+/          163132350464  66%
+/tmp        59688218624  66%
+MemAvailable:   27041204 kB
+SwapFree:       19079552 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.53MiB / 28GiB
+3665753 3665700 go                    42:37 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           41:43 00:38:31 92.3 75028
+pid=3669393 rchar:=1389058228523 wchar:=419263569368 read_bytes:=1791348736 write_bytes:=333119311872 cancelled_write_bytes:=84061523968 
+sqlite_receipt_files=16
+utc=2026-10-31T02:06:54Z
+Mounted on        Avail Use%
+/          163131977728  66%
+/tmp        59666505728  66%
+MemAvailable:   27052525 kB
+SwapFree:       19079748 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.51MiB / 28GiB
+3665753 3665700 go                    43:15 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           42:21 00:39:11 92.5 75088
+pid=3669393 rchar:=1439258534371 wchar:=420046805888 read_bytes:=1800519680 write_bytes:=333911867392 cancelled_write_bytes:=84261011456 
+sqlite_receipt_files=16
+utc=2026-10-31T02:07:33Z
+Mounted on        Avail Use%
+/          163131527168  66%
+/tmp        59644829696  66%
+MemAvailable:   27028977 kB
+SwapFree:       19079884 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.52MiB / 28GiB
+3665753 3665700 go                    43:54 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           43:00 00:39:53 92.7 75128
+pid=3669393 rchar:=1492921762419 wchar:=420829900752 read_bytes:=1816834048 write_bytes:=334704357376 cancelled_write_bytes:=84459589632 
+sqlite_receipt_files=16
+utc=2026-10-31T02:08:11Z
+Mounted on        Avail Use%
+/          163131076608  66%
+/tmp        59624869888  66%
+MemAvailable:   27055097 kB
+SwapFree:       19079892 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.58MiB / 28GiB
+3665753 3665700 go                    44:32 00:00:01  0.0 41840
+3669393 3665753 sqlite.test           43:38 00:40:33 92.9 75096
+pid=3669393 rchar:=1545194267315 wchar:=421552730456 read_bytes:=1826230272 write_bytes:=335435816960 cancelled_write_bytes:=84644102144 
+sqlite_receipt_files=16
+utc=2026-10-31T02:08:48Z
+Mounted on        Avail Use%
+/          163130884096  66%
+/tmp        59605397504  66%
+MemAvailable:   27058806 kB
+SwapFree:       19079964 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.48MiB / 28GiB
+3665753 3665700 go                    45:10 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           44:15 00:41:12 93.1 75100
+pid=3669393 rchar:=1598526448387 wchar:=422254603480 read_bytes:=1826430976 write_bytes:=336146006016 cancelled_write_bytes:=84822204416 
+sqlite_receipt_files=16
+utc=2026-10-31T02:09:27Z
+Mounted on        Avail Use%
+/          163130286080  66%
+/tmp        59154817024  66%
+MemAvailable:   27057610 kB
+SwapFree:       19079964 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.47MiB / 28GiB
+3665753 3665700 go                    45:48 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           44:54 00:41:52 93.2 78936
+pid=3669393 rchar:=1622227607307 wchar:=429183515152 read_bytes:=1894780928 write_bytes:=340146946048 cancelled_write_bytes:=85157629952 
+sqlite_receipt_files=16
+utc=2026-10-31T02:10:04Z
+Mounted on        Avail Use%
+/          163129794560  66%
+/tmp        58593370112  66%
+MemAvailable:   27064996 kB
+SwapFree:       19079976 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.45MiB / 28GiB
+3665753 3665700 go                    46:25 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           45:31 00:42:25 93.1 79324
+pid=3669393 rchar:=1628830405963 wchar:=436932835760 read_bytes:=1951068160 write_bytes:=344535769088 cancelled_write_bytes:=85484322816 
+sqlite_receipt_files=16
+utc=2026-10-31T02:10:43Z
+Mounted on        Avail Use%
+/          163130593280  66%
+/tmp        57909399552  67%
+MemAvailable:   27063828 kB
+SwapFree:       19079992 kB
+usage-history-pr3660-postgres cpu=0.00% mem=54.44MiB / 28GiB
+3665753 3665700 go                    47:04 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           46:10 00:43:05 93.3 77864
+pid=3669393 rchar:=1636907201707 wchar:=446472523208 read_bytes:=2134368256 write_bytes:=349963558912 cancelled_write_bytes:=85888114688 
+sqlite_receipt_files=16
+utc=2026-10-31T02:11:23Z
+Mounted on        Avail Use%
+/          163130531840  66%
+/tmp        57434521600  67%
+MemAvailable:   27075374 kB
+SwapFree:       19079144 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.73MiB / 28GiB
+3665753 3665700 go                    47:44 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           46:50 00:43:43 93.3 76424
+pid=3669393 rchar:=1649257253774 wchar:=454355469071 read_bytes:=2286452736 write_bytes:=354203226112 cancelled_write_bytes:=86395400192 
+sqlite_receipt_files=16
+utc=2026-10-31T02:12:01Z
+Mounted on        Avail Use%
+/          163130236928  66%
+/tmp        57434517504  67%
+MemAvailable:   27066746 kB
+SwapFree:       19079144 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.73MiB / 28GiB
+3665753 3665700 go                    48:22 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           47:28 00:44:25 93.5 76756
+pid=3669393 rchar:=1664207105102 wchar:=456360547851 read_bytes:=2338512896 write_bytes:=356231667712 cancelled_write_bytes:=86919696384 
+sqlite_receipt_files=16
+utc=2026-10-31T02:12:41Z
+Mounted on        Avail Use%
+/          163130175488  66%
+/tmp        57430458368  67%
+MemAvailable:   27064003 kB
+SwapFree:       19079144 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.7MiB / 28GiB
+3665753 3665700 go                    49:03 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           48:08 00:45:10 93.8 76752
+pid=3669393 rchar:=1694297005374 wchar:=458082788099 read_bytes:=2390511616 write_bytes:=357974130688 cancelled_write_bytes:=87372251136 
+sqlite_receipt_files=16
+utc=2026-10-31T02:13:19Z
+Mounted on        Avail Use%
+/          163130064896  66%
+/tmp        57393524736  67%
+MemAvailable:   27053004 kB
+SwapFree:       19079284 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.7MiB / 28GiB
+3665753 3665700 go                    49:40 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           48:46 00:45:49 93.9 76360
+pid=3669393 rchar:=1726353673782 wchar:=459364847679 read_bytes:=2431533056 write_bytes:=359271428096 cancelled_write_bytes:=87705731072 
+sqlite_receipt_files=16
+utc=2026-10-31T02:13:58Z
+Mounted on        Avail Use%
+/          163130032128  66%
+/tmp        57358176256  67%
+MemAvailable:   27022914 kB
+SwapFree:       19082320 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.71MiB / 28GiB
+3665753 3665700 go                    50:19 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           49:25 00:46:30 94.1 76852
+pid=3669393 rchar:=1764961345358 wchar:=460604350207 read_bytes:=2471546880 write_bytes:=360525709312 cancelled_write_bytes:=88028426240 
+sqlite_receipt_files=16
+utc=2026-10-31T02:14:37Z
+Mounted on        Avail Use%
+/          163129946112  66%
+/tmp        57323458560  67%
+MemAvailable:   27017228 kB
+SwapFree:       19083528 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.7MiB / 28GiB
+3665753 3665700 go                    50:58 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           50:04 00:47:14 94.3 76828
+pid=3669393 rchar:=1809441648662 wchar:=461804324319 read_bytes:=2509361152 write_bytes:=361739993088 cancelled_write_bytes:=88340094976 
+sqlite_receipt_files=16
+utc=2026-10-31T02:19:18Z
+Mounted on        Avail Use%
+/          163128668160  66%
+/tmp        57135562752  67%
+MemAvailable:   27012263 kB
+SwapFree:       19084040 kB
+usage-history-pr3660-postgres cpu=0.00% mem=53.71MiB / 28GiB
+3665753 3665700 go                    55:39 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           54:45 00:52:13 95.3 77328
+pid=3669393 rchar:=2175735850062 wchar:=468363240899 read_bytes:=2644905984 write_bytes:=368377184256 cancelled_write_bytes:=90041163776 
+sqlite_receipt_files=16
+utc=2026-10-31T02:21:12Z
+Mounted on        Avail Use%
+/          163128311808  66%
+/tmp        57108541440  67%
+MemAvailable:   26994007 kB
+3665753 3665700 go                    57:31 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           56:37 00:53:38 94.7 79284
+utc=2026-10-31T02:22:23Z
+Mounted on        Avail Use%
+/          162977161216  66%
+/tmp        57175896064  67%
+MemAvailable:   26994651 kB
+3665753 3665700 go                    58:42 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           57:48 00:54:18 93.9 80788
+sqlite_log_bytes=20556 mtime=2026-10-31 02:22:13.967560392 +0000
+scenario_receipts=20
+utc=2026-10-31T02:23:00Z
+Mounted on        Avail Use%
+/          163127812096  66%
+/tmp        57175752704  67%
+MemAvailable:   26982237 kB
+3665753 3665700 go                    59:20 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           58:26 00:54:42 93.6 80480
+sqlite_log_bytes=23038 mtime=2026-10-31 02:22:56.438816741 +0000
+scenario_receipts=22
+utc=2026-10-31T02:23:40Z
+Mounted on        Avail Use%
+/          163127738368  66%
+/tmp        57175646208  67%
+MemAvailable:   26976159 kB
+3665753 3665700 go                 01:00:00 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           59:06 00:55:00 93.0 82672
+sqlite_log_bytes=23113 mtime=2026-10-31 02:23:19.046420893 +0000
+scenario_receipts=23
+utc=2026-10-31T02:24:18Z
+Mounted on        Avail Use%
+/          163127640064  66%
+/tmp        57175646208  67%
+MemAvailable:   26988156 kB
+3665753 3665700 go                 01:00:37 00:00:02  0.0 41840
+3669393 3665753 sqlite.test           59:43 00:55:37 93.1 82920
+sqlite_log_bytes=23113 mtime=2026-10-31 02:23:19.046420893 +0000
+scenario_receipts=23
+utc=2026-10-31T02:25:35Z
+Mounted on        Avail Use%
+/          163127422976  66%
+/tmp        81511911424  53%
+MemAvailable:   27077580 kB
+sqlite_log_bytes=463276 mtime=2026-10-31 02:24:53.198772331 +0000
+scenario_receipts=28
