@@ -82,3 +82,5 @@ Completed on 2026-10-31. The real-SQL regression first returned blocked despite 
 - Existing task/session identities, states and executor/profile settings matched the baseline. The original backend process stayed ready. New test tasks, relay and test services were stopped; a scoped remote working-directory scan found no residual test runtimes.
 
 The source and tested binary remain independent of the installed app. No existing-session control or database override was performed. Browser rendering was not separately tested.
+
+PR review found the direct runtime-settled branch still returned the pre-attempt revision. A real-SQL regression reproduced expected revision 2 versus returned revision 1. Canonical refresh now runs after settlement reconciliation for both runtime outcomes; the regression checks the saved revision and absence of prompt dispatch.

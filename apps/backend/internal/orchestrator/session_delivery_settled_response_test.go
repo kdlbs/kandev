@@ -14,10 +14,14 @@ import (
 type settlingPromptRecoveryManager struct {
 	*mockAgentManager
 	during func()
+	result *lifecycle.DeliveryReconciliationResult
 }
 
 func (m *settlingPromptRecoveryManager) RecoverAgentPromptStreamWithIdentity(context.Context, lifecycle.AgentDeliveryRecoveryIdentity) lifecycle.DeliveryReconciliationResult {
 	m.during()
+	if m.result != nil {
+		return *m.result
+	}
 	return lifecycle.DeliveryReconciliationResult{Outcome: lifecycle.DeliveryReconciliationOwnerMismatch, Err: lifecycle.ErrDeliveryOwnerMismatch}
 }
 
@@ -119,5 +123,25 @@ func TestRetrySessionDeliveryConcurrentSettlementRequiresReadableEvidence(t *tes
 	response, err := f.service.RetrySessionDelivery(context.Background(), f.session.TaskID, f.session.ID)
 	require.Error(t, err)
 	require.Nil(t, response)
+	require.Empty(t, manager.capturedPromptCalls)
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
+func TestRetrySessionDeliveryDirectSettlementReturnsCanonicalRevision(t *testing.T) {
+	ctx := context.Background()
+	f := newRetryTerminalFixture(t)
+	manager := &settlingPromptRecoveryManager{
+		mockAgentManager: &mockAgentManager{}, during: f.settle,
+		result: &lifecycle.DeliveryReconciliationResult{Outcome: lifecycle.DeliveryReconciliationTerminalSettled},
+	}
+	f.service.agentManager = manager
+	response, err := f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoverySettled, response.Outcome, response.Reason)
+	latest, err := f.repo.GetTaskSession(ctx, f.session.ID)
+	require.NoError(t, err)
+	recovery, ok := models.LoadAgentDeliveryRecovery(latest.Metadata)
+	require.True(t, ok)
+	require.Equal(t, recovery.Revision, response.RecoveryRevision)
 	require.Empty(t, manager.capturedPromptCalls)
 }
