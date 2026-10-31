@@ -23,6 +23,9 @@ var (
 type Node struct {
 	Spec     Spec `json:"-"`
 	Required bool `json:"-"`
+	// AllocDir is the allocation directory the operator gave agentctl at
+	// startup. It resolves AllocDir references and comes from nowhere else.
+	AllocDir string `json:"-"`
 }
 
 // Active reports whether a launch must go through a node wrapper or be refused.
@@ -83,5 +86,12 @@ func (n Node) Prepare(profile Spec, inner []string, ctx Context) ([]string, erro
 			return nil, err
 		}
 	}
-	return prepare(n.Spec, inner, ctx)
+	alloc := ""
+	if UsesAllocDir(n.Spec.Argv) {
+		var err error
+		if alloc, err = resolveAllocDir(n.AllocDir, ctx.WorkDir); err != nil {
+			return nil, err
+		}
+	}
+	return prepare(n.Spec, inner, ctx, alloc)
 }

@@ -72,3 +72,58 @@ func TestApplyNodeLaunchWrapperRefusals(t *testing.T) {
 	require.NoError(t, os.Chmod(path, 0o600))
 	require.Error(t, applyNodeLaunchWrapper(&config.Config{}, path, true, -1), "invalid json")
 }
+
+func allocPolicy(t *testing.T, argv ...string) *config.Config {
+	t.Helper()
+	spec := launchwrapper.Spec{Version: launchwrapper.Version, Source: launchwrapper.SourceNode, Argv: argv}
+	return &config.Config{NodeLaunchWrapper: launchwrapper.Node{Spec: spec, Required: true}}
+}
+
+func allocDirFixture(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX ownership model")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	dir := filepath.Join(root, "alloc")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	return dir
+}
+
+// @covers AC-AGENTS-NODEWRAP-006.4
+func TestApplyNodeAllocDirRefusesTokenWithoutValue(t *testing.T) {
+	cfg := allocPolicy(t, "/opt/wrap", "--allocation", launchwrapper.AllocDir, "--")
+	t.Setenv("NOMAD_ALLOC_DIR", allocDirFixture(t))
+	err := applyNodeAllocDir(cfg, "")
+	require.ErrorIs(t, err, launchwrapper.ErrAllocDir)
+	require.Contains(t, err.Error(), "--node-launch-wrapper-alloc-dir")
+	require.Empty(t, cfg.NodeLaunchWrapper.AllocDir, "the process environment is not a source")
+}
+
+// @covers AC-AGENTS-NODEWRAP-006.2 AC-AGENTS-NODEWRAP-006.4
+func TestApplyNodeAllocDirChecksValueAtStartup(t *testing.T) {
+	dir := allocDirFixture(t)
+	cfg := allocPolicy(t, "/opt/wrap", launchwrapper.AllocDir)
+	require.NoError(t, applyNodeAllocDir(cfg, dir))
+	require.Equal(t, dir, cfg.NodeLaunchWrapper.AllocDir)
+	require.Equal(t, dir, cfg.NewInstanceConfig(0, nil).NodeLaunchWrapper.AllocDir)
+
+	for name, value := range map[string]string{"relative": "alloc", "missing": filepath.Join(dir, "absent")} {
+		cfg := allocPolicy(t, "/opt/wrap", launchwrapper.AllocDir)
+		require.ErrorIs(t, applyNodeAllocDir(cfg, value), launchwrapper.ErrAllocDir, name)
+		require.Empty(t, cfg.NodeLaunchWrapper.AllocDir, name)
+	}
+	require.NoError(t, os.Chmod(dir, 0o777))
+	require.ErrorIs(t, applyNodeAllocDir(allocPolicy(t, "/opt/wrap", launchwrapper.AllocDir), dir), launchwrapper.ErrAllocDir)
+}
+
+// @covers AC-AGENTS-NODEWRAP-006.4
+func TestApplyNodeAllocDirIsInertWithoutTheToken(t *testing.T) {
+	require.NoError(t, applyNodeAllocDir(allocPolicy(t, "/opt/wrap", launchwrapper.WorkDir), ""))
+	require.NoError(t, applyNodeAllocDir(&config.Config{}, ""), "no node wrapper at all")
+	cfg := allocPolicy(t, "/opt/wrap", launchwrapper.WorkDir)
+	require.NoError(t, applyNodeAllocDir(cfg, "relative-and-unused"))
+	require.Equal(t, "relative-and-unused", cfg.NodeLaunchWrapper.AllocDir, "kept for launch, which ignores it")
+	require.Error(t, applyNodeAllocDir(&config.Config{}, "/some/dir"), "a value with no wrapper is a misconfiguration")
+}

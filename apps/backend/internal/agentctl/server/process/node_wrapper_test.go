@@ -273,3 +273,24 @@ func TestRunnerWithoutRequirementBehavesAsToday(t *testing.T) {
 	})
 	require.Eventually(t, func() bool { return f.receiptLines(t) == "child\n" }, 3*time.Second, 10*time.Millisecond)
 }
+
+// @covers AC-AGENTS-NODEWRAP-006.3 AC-AGENTS-NODEWRAP-006.4
+func TestNodeWrapperAllocDirReachesSessionCommand(t *testing.T) {
+	f := newNodeFixture(t)
+	alloc, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	cfg := f.config(false)
+	cfg.NodeLaunchWrapper.Spec.Argv = []string{f.node, "--allocation", launchwrapper.AllocDir, "--"}
+
+	cfg.NodeLaunchWrapper.AllocDir = alloc
+	manager := NewManager(cfg, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+	require.NoError(t, manager.buildFinalCommand())
+	require.Equal(t, []string{f.node, "--allocation", alloc, "--", f.child}, manager.cmd.Args)
+
+	cfg.NodeLaunchWrapper.AllocDir = ""
+	manager = NewManager(cfg, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+	require.ErrorIs(t, manager.buildFinalCommand(), launchwrapper.ErrAllocDir)
+	require.Nil(t, manager.cmd, "no child without an allocation directory")
+}
