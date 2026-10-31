@@ -817,15 +817,37 @@ func (e *Engine) applyPolicyFailure(
 	candidate Candidate,
 	failure *routingerr.Error,
 ) (RouteDecision, error) {
-	state, exists, policyState, evaluation, now, err := e.preparePolicyFailure(
+	decision, skip, err := e.recordPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
+	if skip {
+		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "policy_skip")
+	}
+	return decision, err
+}
+
+// recordPolicyFailure holds e.mu across the route read, its durable write, and
+// the cache update, so a continuation save cannot land between them and be
+// overwritten by the stale snapshot. skip reports a policy skip, which the
+// caller routes through selectContext after the lock is released.
+func (e *Engine) recordPolicyFailure(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	currentCandidateID string,
+	candidate Candidate,
+	failure *routingerr.Error,
+) (RouteDecision, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, policyState, evaluation, now, err := e.preparePolicyFailureLocked(
 		ctx, sessionID, expectedGeneration, candidate, failure,
 	)
 	if err != nil {
-		return RouteDecision{}, err
+		return RouteDecision{}, false, err
 	}
 
 	if evaluation.Kind == routingpolicy.DecisionSkip {
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "policy_skip")
+		return RouteDecision{}, true, nil
 	}
 	nextState := state
 	if !exists {
@@ -844,11 +866,9 @@ func (e *Engine) applyPolicyFailure(
 		nextState.Status = routeStatusActionRequired
 	}
 	if err := e.persistSameGeneration(ctx, expectedGeneration, state.Status, nextState); err != nil {
-		return RouteDecision{}, err
+		return RouteDecision{}, false, err
 	}
-	e.mu.Lock()
 	e.states[sessionID] = nextState
-	e.mu.Unlock()
 	var deadline *time.Time
 	if !evaluation.Deadline.IsZero() {
 		value := evaluation.Deadline
@@ -864,19 +884,20 @@ func (e *Engine) applyPolicyFailure(
 		RetryOrdinal:     evaluation.RetryOrdinal, PendingOutcome: evaluation.PendingOutcome,
 	}
 	if evaluation.Kind == routingpolicy.DecisionStop {
-		return decision, ErrNoEligibleCandidate
+		return decision, false, ErrNoEligibleCandidate
 	}
-	return decision, fmt.Errorf("%w: %s", ErrRecoveryPending, evaluation.Kind)
+	return decision, false, fmt.Errorf("%w: %s", ErrRecoveryPending, evaluation.Kind)
 }
 
-func (e *Engine) preparePolicyFailure(
+// preparePolicyFailureLocked must be called with e.mu held.
+func (e *Engine) preparePolicyFailureLocked(
 	ctx context.Context,
 	sessionID string,
 	expectedGeneration int64,
 	candidate Candidate,
 	failure *routingerr.Error,
 ) (RouteState, bool, PolicyState, routingpolicy.Evaluation, time.Time, error) {
-	state, exists, err := e.stateForFailure(ctx, sessionID)
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
 	if err != nil {
 		return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, err
 	}
@@ -1045,7 +1066,11 @@ func (e *Engine) CancelPending(
 	expectedGeneration int64,
 	reason string,
 ) (RouteDecision, error) {
-	state, exists, err := e.stateForFailure(ctx, sessionID)
+	// Hold e.mu across the read, the durable write, and the cache update so a
+	// continuation save cannot be overwritten by this stale snapshot.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -1075,9 +1100,7 @@ func (e *Engine) CancelPending(
 	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return RouteDecision{}, err
 	}
-	e.mu.Lock()
 	e.states[sessionID] = state
-	e.mu.Unlock()
 	return RouteDecision{
 		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
 		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,

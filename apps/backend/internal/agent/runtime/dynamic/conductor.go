@@ -373,10 +373,14 @@ func (c *Conductor) persistContinuation(ctx context.Context, decision RouteDecis
 	if c.continuationPersistence == nil {
 		return nil
 	}
-	return c.continuationPersistence.SaveRouteContinuation(ctx, ContinuationRecord{
+	record := ContinuationRecord{
 		SessionID: decision.SessionID, Generation: decision.Generation,
 		Continuation: continuation, UpdatedAt: time.Now().UTC(),
-	})
+	}
+	if c.engine != nil {
+		return c.engine.saveContinuation(ctx, c.continuationPersistence, record)
+	}
+	return c.continuationPersistence.SaveRouteContinuation(ctx, record)
 }
 
 // Resume reuses a downstream ACP session only when its concrete profile owns
