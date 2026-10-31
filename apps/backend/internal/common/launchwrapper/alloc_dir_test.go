@@ -156,10 +156,10 @@ func TestNodePrepareResolvesAllocDirFromSuppliedValue(t *testing.T) {
 func TestNodePrepareRefUsesAllocDirTokenWithoutUsableValue(t *testing.T) {
 	l := newAllocLaunch(t, "--allocation", AllocDir, "--")
 	alloc := allocFixtureDir(t, 0o755)
-	t.Setenv("NOMAD_ALLOC_DIR", alloc)
+	t.Setenv("SCHEDULER_ALLOC_DIR", alloc)
 	t.Setenv("KANDEV_ALLOC_DIR", alloc)
 	t.Setenv("ALLOC_DIR", alloc)
-	l.ctx.Env = append(l.ctx.Env, "NOMAD_ALLOC_DIR="+alloc, "KANDEV_ALLOC_DIR="+alloc)
+	l.ctx.Env = append(l.ctx.Env, "SCHEDULER_ALLOC_DIR="+alloc, "KANDEV_ALLOC_DIR="+alloc)
 
 	for name, value := range map[string]string{
 		"not supplied": "", "relative": "alloc", "missing": filepath.Join(alloc, "absent"),
