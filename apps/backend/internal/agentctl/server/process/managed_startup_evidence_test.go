@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
@@ -67,6 +69,36 @@ func TestManagedStartupEvidence(t *testing.T) {
 			t.Fatalf("mismatched generation evidence = %#v, want nil", got)
 		}
 	})
+}
+
+func TestProcessManagerIdentityScopesRecoveryDescriptor(t *testing.T) {
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(), SessionID: "session", DeliveryIncarnationID: "incarnation",
+		DeliveryStreamID: "incarnation:g1", DurableJournalPath: filepath.Join(t.TempDir(), "delivery.bbolt"),
+	}, newTestLogger(t))
+	t.Cleanup(func() {
+		if err := manager.StopForTeardown(context.Background()); err != nil {
+			t.Errorf("manager teardown: %v", err)
+		}
+	})
+	replacement := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
+	t.Cleanup(func() {
+		if err := replacement.StopForTeardown(context.Background()); err != nil {
+			t.Errorf("replacement teardown: %v", err)
+		}
+	})
+
+	managerID := manager.ProcessManagerID()
+	if managerID == "" || managerID == replacement.ProcessManagerID() {
+		t.Fatalf("manager identities = %q and %q, want distinct non-empty lifetimes", managerID, replacement.ProcessManagerID())
+	}
+	descriptor, err := manager.DeliveryRecoveryDescriptor(context.Background(), "incarnation:g1")
+	if err != nil {
+		t.Fatalf("DeliveryRecoveryDescriptor() error = %v", err)
+	}
+	if descriptor.ProcessManagerID != managerID {
+		t.Fatalf("descriptor process manager identity = %q, want %q", descriptor.ProcessManagerID, managerID)
+	}
 }
 
 func TestManagedStartupEvidenceSeparatesEmptyUnknownAndIncompleteDiagnostics(t *testing.T) {
