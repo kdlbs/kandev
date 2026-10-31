@@ -47,6 +47,7 @@ acceptance_criteria:
   - AC-EXECUTORS-PLUGIN-CAPABILITY-002.7
   - AC-EXECUTORS-PLUGIN-CAPABILITY-003.9
 system_design:
+  - ../../specs/executors/system-design/remote-executor-plugin-native-workers.md
   - ../../specs/executors/system-design/remote-executor-plugin-capability-versioning.md
 ---
 
