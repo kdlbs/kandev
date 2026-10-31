@@ -690,6 +690,58 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		return err
 	}
 
+	// A task message send operation is claimed before the first delivery side
+	// effect so a caller that lost the response can read the outcome back
+	// instead of retrying blind. It carries no foreign key: a retained
+	// operation record must outlive the task it named so a late readback still
+	// resolves, and a caller must not be able to erase its own history by
+	// deleting the target. The delivery-determining request fields are stored
+	// verbatim -- there is deliberately no derived digest column.
+	_ = r.migrate.Apply("task_message_send_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_message_send_operations (
+			id TEXT PRIMARY KEY,
+			operation_id TEXT NOT NULL,
+			sender_task_id TEXT NOT NULL,
+			sender_session_id TEXT NOT NULL,
+			target_task_id TEXT NOT NULL DEFAULT '',
+			target_session_id TEXT NOT NULL DEFAULT '',
+			requested_prompt TEXT NOT NULL DEFAULT '',
+			requested_delivery_mode TEXT NOT NULL DEFAULT '',
+			requested_session_id TEXT NOT NULL DEFAULT '',
+			requested_question_id TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL CHECK (state IN ('pending', 'committed', 'failed')),
+			delivery_status TEXT NOT NULL DEFAULT '',
+			message_id TEXT NOT NULL DEFAULT '',
+			queued_entry_id TEXT NOT NULL DEFAULT '',
+			failure_code TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			settled_at TIMESTAMP
+		)`)
+	// Same explicit deterministic collation rationale as tasks.external_id: an
+	// unqualified PostgreSQL TEXT column inherits the database default, which
+	// may be case-insensitive or nondeterministic, and two identities differing
+	// only in case would then collide. This index is what makes claim-before-
+	// delivery authoritative, so a failure to create it must fail startup via
+	// the migrate.Err() check below rather than silently leaving concurrent
+	// claims for one identity. No WHERE clause is needed here (unlike
+	// uniq_tasks_external_id): operation_id is NOT NULL and a send without an
+	// identity writes no row at all.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		_ = r.migrate.Apply("task_message_send_operations.identity", `
+			CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_message_send_operations_identity
+				ON task_message_send_operations(sender_task_id, sender_session_id, operation_id COLLATE "C")`)
+	} else {
+		_ = r.migrate.Apply("task_message_send_operations.identity", `
+			CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_message_send_operations_identity
+				ON task_message_send_operations(sender_task_id, sender_session_id, operation_id COLLATE BINARY)`)
+	}
+	_ = r.migrate.Apply("task_message_send_operations.retention", `
+		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
+			ON task_message_send_operations(created_at)`)
+
+	_ = r.migrate.Apply("task_message_send_operations.requested_question_id", `ALTER TABLE task_message_send_operations ADD COLUMN requested_question_id TEXT NOT NULL DEFAULT ''`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.

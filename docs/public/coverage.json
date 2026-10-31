@@ -253,6 +253,7 @@
         "ask_parent_question_kandev",
         "ask_user_question_kandev",
         "get_task_conversation_kandev",
+        "get_task_message_operation_kandev",
         "get_task_document_kandev",
         "list_related_tasks_kandev",
         "list_pending_agent_permissions_kandev",
