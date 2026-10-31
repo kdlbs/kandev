@@ -90,7 +90,7 @@ func (a *MuseACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *MuseACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	return a.ManagedNPMRuntime().CommandFor(opts)
 }
 
 func (a *MuseACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

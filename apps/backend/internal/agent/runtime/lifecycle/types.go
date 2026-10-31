@@ -1939,6 +1939,9 @@ type AgentProfileInfo struct {
 	// CommandPrefix is an optional launcher prefix (e.g. "greywall --")
 	// shell-tokenised and prepended to the agent command at launch time.
 	CommandPrefix string
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch command.
+	CommandOverride string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
 

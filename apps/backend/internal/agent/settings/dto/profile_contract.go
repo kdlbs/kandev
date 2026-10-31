@@ -27,6 +27,7 @@ type ProfileCreateRequest struct {
 	CLIFlags                []CLIFlagDTO            `json:"cli_flags,omitempty"`
 	EnvVars                 []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
 	CommandPrefix           string                  `json:"command_prefix,omitempty"`
+	CommandOverride         string                  `json:"command_override,omitempty"`
 	ProviderKind            string                  `json:"provider_kind,omitempty"`
 	ProviderBaseURL         string                  `json:"provider_base_url,omitempty"`
 	ProviderAPIKeySecretID  string                  `json:"provider_api_key_secret_id,omitempty"`
@@ -57,6 +58,7 @@ type ProfileUpdateRequest struct {
 	CLIFlags          *[]CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars           *[]ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CommandPrefix     *string             `json:"command_prefix,omitempty"`
+	CommandOverride   *string             `json:"command_override,omitempty"`
 	// Provider* replace their value when non-nil. The settings editor always
 	// sends the full triple on save, so a switch back to Native persists.
 	ProviderKind            *string                 `json:"provider_kind,omitempty"`
@@ -195,6 +197,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "cli_flags", JSONType: "array", Support: "read_write", Description: "Complete replacement list of CLI flags.", Replacement: true},
 		{Path: "env_vars", JSONType: "array", Support: "read_write", Description: "Complete replacement list of environment variables.", Replacement: true, Sensitive: true},
 		{Path: "command_prefix", JSONType: "string", Support: "read_write", Description: "Optional launcher command prefix."},
+		{Path: "command_override", JSONType: "string", Support: "read_write", Description: "Optional absolute path to a preinstalled agent executable that replaces the npm launch."},
 		{Path: "provider_kind", JSONType: "string", Support: "read_write", Description: "Provider routing kind."},
 		{Path: "provider_base_url", JSONType: "string", Support: "read_write", Description: "OpenAI-compatible provider base URL."},
 		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},

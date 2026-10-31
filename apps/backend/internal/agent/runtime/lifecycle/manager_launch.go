@@ -769,6 +769,9 @@ func (m *Manager) buildAgentCommandWithContext(
 	if runtime != "" && runtime != agentruntime.RuntimeStandalone && agentConfig.ID() == agents.OpenCodeACPAgentID {
 		cmdOpts.PreferNativeBinary = false
 	}
+	if err := applyCommandOverride(&cmdOpts, profileInfo, agentConfig); err != nil {
+		return agentCommands{}, err
+	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
 	if err := validateBuiltAgentCommands(args, continueArgs); err != nil {
@@ -777,6 +780,38 @@ func (m *Manager) buildAgentCommandWithContext(
 	commands := newAgentCommands(args, continueArgs)
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
+}
+
+// applyCommandOverride copies the profile's preinstalled-command override into
+// the command options. It fails closed: an invalid value, or an agent that does
+// not launch from a managed npm runtime, refuses the launch instead of quietly
+// running npx. The override also wins over a native-binary preference.
+func applyCommandOverride(opts *agents.CommandOptions, profileInfo *AgentProfileInfo, agentConfig agents.Agent) error {
+	if profileInfo == nil || profileInfo.CommandOverride == "" {
+		return nil
+	}
+	if err := agents.ValidateCommandOverride(profileInfo.CommandOverride); err != nil {
+		return fmt.Errorf("resolve command_override for profile %s: %w", profileInfo.ProfileID, err)
+	}
+	// OpenCode selects its runtime family and native source separately, so it
+	// does not honour an override and must not appear to.
+	if _, ok := agentConfig.(agents.ManagedNPMRuntimeAgent); !ok || agentConfig.ID() == agents.OpenCodeACPAgentID {
+		return fmt.Errorf("resolve command_override for profile %s: agent %s does not launch from a managed npm runtime",
+			profileInfo.ProfileID, agentConfig.ID())
+	}
+	opts.CommandOverride = profileInfo.CommandOverride
+	opts.PreferNativeBinary = false
+	return nil
+}
+
+// validCommandOverride returns the profile's override only when applyCommandOverride
+// would accept it, so remote preflight never probes a value the launch rejects.
+func validCommandOverride(profileInfo *AgentProfileInfo, agentConfig agents.Agent) string {
+	var opts agents.CommandOptions
+	if applyCommandOverride(&opts, profileInfo, agentConfig) != nil {
+		return ""
+	}
+	return opts.CommandOverride
 }
 
 func (m *Manager) resolveManagedRuntimeCommandOptions(
@@ -1475,6 +1510,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
+		CommandOverride:                validCommandOverride(profileInfo, agentConfig),
 		CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,

@@ -1440,6 +1440,7 @@ func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command
 	return req.AgentConfig.BuildCommand(agents.CommandOptions{
 		Runtime:               agentruntime.RuntimeSSH,
 		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+		CommandOverride:       req.CommandOverride,
 		ManagedRuntimeFamily:  req.ManagedRuntimeFamily,
 		ManagedRuntimeSource:  req.ManagedRuntimeSource,
 		NativeRuntimeVersion:  req.NativeRuntimeVersion,

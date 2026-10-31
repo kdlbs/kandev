@@ -1189,6 +1189,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			WorkspacePath:                  info.WorkspacePath,
 			WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 			Protocol:                       string(agentConfig.Runtime().Protocol),
+			CommandOverride:                validCommandOverride(profileInfo, agentConfig),
 			CodexAppServerEnabled:          agentConfig.Enabled() && agentConfig.Runtime().Protocol == agent.ProtocolCodexAppServer,
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,

@@ -725,9 +725,12 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
-	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
-	ManagedRuntimeSource  managedruntime.OpenCodeSource
-	NativeRuntimeVersion  string
+	// CommandOverride is the validated preinstalled-executable override of the
+	// launching profile. Remote preflight probes it instead of npx.
+	CommandOverride      string
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	NativeRuntimeVersion string
 	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
 	// Kandev integration plugin. Nil keeps the integration off.
 	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime

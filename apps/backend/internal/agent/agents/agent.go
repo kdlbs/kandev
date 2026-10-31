@@ -252,6 +252,11 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// CommandOverride is an operator-configured absolute path to a preinstalled
+	// executable that replaces the managed npm command of a
+	// ManagedNPMRuntimeAgent. Empty keeps the npm launch. It is validated by
+	// ValidateCommandOverride before it reaches command construction.
+	CommandOverride string
 	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
 	// install-wide OpenCode choice into command construction.
 	ManagedRuntimeFamily managedruntime.OpenCodeFamily

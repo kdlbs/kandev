@@ -176,6 +176,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidCommandOverride) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -245,6 +246,7 @@ func writeProfileUpdateError(c *gin.Context, err error) bool {
 func isInvalidProfileUpdateError(err error) bool {
 	return errors.Is(err, controller.ErrInvalidProfileEnvVars) ||
 		errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+		errors.Is(err, controller.ErrInvalidCommandOverride) ||
 		errors.Is(err, controller.ErrInvalidProviderConfig) ||
 		errors.Is(err, controller.ErrRequireExactModelNeedsModel) ||
 		errors.Is(err, controller.ErrRequireExactModelUnsupported)

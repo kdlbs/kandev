@@ -85,7 +85,7 @@ func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *PiACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	return a.ManagedNPMRuntime().CommandFor(opts)
 }
 
 func (a *PiACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
