@@ -272,6 +272,11 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 		PromptGeneration: recovery.PromptGeneration,
 		HistoryGap:       recovery.HistoryGap, PayloadHash: submission.PayloadHash,
 	})
+	if attempt.outcome != SessionDeliveryRecoverySettled {
+		if settled, err := s.retryConcurrentlySettledDelivery(retryCtx, session, recovery); settled != nil || err != nil {
+			return settled, err
+		}
+	}
 	response := sessionDeliveryRecoveryResponse(session.TaskID, session.ID, attempt.outcome,
 		attempt.reason, recovery.Revision, identity)
 	if attempt.outcome == SessionDeliveryRecoverySettled {

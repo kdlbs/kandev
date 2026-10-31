@@ -208,3 +208,23 @@ publishes the cleared block array even when no runtime recovery metadata exists.
 Explicit Resume publishes the same projection after resolving the saved block,
 before releasing parked queue work. A later queue failure does not hide a
 committed block resolution from the browser.
+
+## SSH transport restoration before delivery proof
+
+This extension satisfies AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4 and .16. Platform owns delivery proof; Executors owns SSH trust, process verification and connection disposal. The transport-liveness contract deliberately closes failed transport without redialing and may skip remote Stop after loss.
+
+`Manager.RecoverAgentPromptStreamWithIdentity` calls `reconnectSSHDelivery` for an exact tracked SSH owner before `StreamManager.ReconcileAgentDelivery`. The manager holds the execution's remote lifecycle lease, resolves the recorded credentials through the existing secret boundary, and requests a staged `ReconnectDeliveryInstance` from the executor. Healthy tracked transports are retained.
+
+`SSHExecutor.prepareSSHRecovery` is shared with startup recovery. It dials the pinned target, proves the recorded remote PID and session/task directory, authenticates the exact native instance, and opens replacement forwarding. `stagedSSHDeliveryRefresh` commits only if the original transport-lost state is still current. It publishes the new lifecycle client through the existing client replacement write lease before releasing old local transport handles. Candidate abortion and losing concurrent commits never stop the remote controller. Request cancellation prevents commit; a later request can retry.
+
+The lifecycle owner merges and persists refreshed metadata, commits the matching client, and persists its endpoint. It then uses ordinary authenticated descriptor/submission reconciliation and cursor replay. Task/session/execution/native identity, incarnation, harness generation, stream and submission remain unchanged. Only authoritative terminal settlement and projection can resolve the matching delivery block. Old client callbacks retain existing client and stream fences.
+
+If no execution is tracked, `recoverSavedSSHDelivery` resolves the persisted runtime first and places a saved SSH owner behind the existing remote recovery guard. Exact-owner startup recovery performs adoption and replay. Unavailable remote evidence remains retryable instead of reading the local retained journal for that remote owner. A remote PID is checked on its remote host; local original-runtime PID zero never proves remote termination.
+
+No new endpoint, configuration, schema, UI layout or dispatch authority is introduced. Reattachment never initializes or resumes ACP, creates a conversation, replays an instruction, or overrides SQL evidence. Other executors keep their existing paths. Stop keeps its existing transport-liveness contract.
+
+### First Retry response and committed settlement
+
+AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5 and .16 require the response to reflect committed evidence. A completion can retire the in-memory active prompt while retained events are replayed, causing the runtime peer to return owner mismatch after the matching SQL recovery already settled. The orchestrator must reread the canonical task/session, current generation, recovery binding and original submission after reconciliation before returning that transient failure.
+
+Only a matching execution, incarnation, harness generation, stream, submission and prompt generation with authoritative terminal SQL evidence is eligible. Reuse existing terminal settlement and recovery-block checks with the refreshed records and revision. A new owner or generation, missing proof or an independent block preserves failure. This is a bounded read and existing reconciliation, not a retry of the prompt or a new polling loop.

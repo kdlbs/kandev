@@ -6,10 +6,20 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRetrySessionDeliverySettlesProjectedTerminalWithoutOpenBlock(t *testing.T) {
+type retryTerminalFixture struct {
+	service  *Service
+	repo     *tasksqlite.Repository
+	session  *models.TaskSession
+	recovery models.AgentDeliveryRecovery
+	settle   func()
+}
+
+func newRetryTerminalFixture(t *testing.T) *retryTerminalFixture {
+	t.Helper()
 	ctx := context.Background()
 	service, repo := newServiceWithRealRepo(t)
 	seedSession(t, repo, "terminal-task", "terminal-session", "step-1")
@@ -32,15 +42,25 @@ func TestRetrySessionDeliverySettlesProjectedTerminalWithoutOpenBlock(t *testing
 	})
 	require.NoError(t, err)
 	require.True(t, changed)
-	event := persistedTerminalEvent(session.ID, session.QueueIncarnationID, 1, recovery.SubmissionID, recovery.StreamID, "complete")
-	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
-	settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, models.DeliverySubmissionCompleted, time.Now().UTC())
-	require.NoError(t, err)
-	require.True(t, settled)
-	result, err := service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
+
+	settle := func() {
+		event := persistedTerminalEvent(session.ID, session.QueueIncarnationID, 1, recovery.SubmissionID, recovery.StreamID, "complete")
+		projectOrchestratorDeliveryEvent(t, repo, ctx, event)
+		settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, models.DeliverySubmissionCompleted, time.Now().UTC())
+		require.NoError(t, err)
+		require.True(t, settled)
+	}
+	return &retryTerminalFixture{service: service, repo: repo, session: session, recovery: recovery, settle: settle}
+}
+
+func TestRetrySessionDeliverySettlesProjectedTerminalWithoutOpenBlock(t *testing.T) {
+	ctx := context.Background()
+	f := newRetryTerminalFixture(t)
+	f.settle()
+	result, err := f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
 	require.NoError(t, err)
 	require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome, result.Reason)
-	result, err = service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
+	result, err = f.service.RetrySessionDelivery(ctx, f.session.TaskID, f.session.ID)
 	require.NoError(t, err)
 	require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome)
 }
