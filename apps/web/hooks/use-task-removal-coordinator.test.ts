@@ -1,16 +1,18 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
-import { taskRemovalCoversTask } from "@/lib/state/task-removal";
+import { isTaskRemovalPending, taskRemovalCoversTask } from "@/lib/state/task-removal";
 
 const fetchTaskMock = vi.fn();
 const listTaskSessionsMock = vi.fn();
 const softNavigateMock = vi.fn();
 const performLayoutSwitchMock = vi.fn();
+const querySidebarTasksMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   fetchTask: (...args: unknown[]) => fetchTaskMock(...args),
   listTaskSessions: (...args: unknown[]) => listTaskSessionsMock(...args),
+  querySidebarTasks: (...args: unknown[]) => querySidebarTasksMock(...args),
 }));
 
 vi.mock("@/lib/links", () => ({
@@ -30,6 +32,9 @@ import { useTaskRemoval } from "./use-task-removal";
 
 const TASK_A = "task-a";
 const TASK_B = "task-b";
+const TASK_C = "task-c";
+const WORKSPACE = "workspace-1";
+const OVERVIEW_URL = "/?home=overview";
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -41,26 +46,25 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function makeTask(id: string, sessionId: string) {
+function makeTask(id: string, sessionId: string | null) {
   return {
     id,
-    workspaceId: "workspace-1",
+    workspaceId: WORKSPACE,
     workflowId: "workflow-1",
     workflowStepId: "step-1",
     title: id,
-    position: id === TASK_A ? 0 : 1,
+    position: [TASK_A, TASK_B, TASK_C].indexOf(id),
     primarySessionId: sessionId,
   };
 }
 
-function makeStore() {
-  const store = createAppStore();
+function setStoreTasks(
+  store: ReturnType<typeof createAppStore>,
+  tasks: ReturnType<typeof makeTask>[],
+) {
   store.setState((state) => ({
     ...state,
-    kanban: {
-      ...state.kanban,
-      tasks: [makeTask(TASK_A, "session-a"), makeTask(TASK_B, "session-b")],
-    },
+    kanban: { ...state.kanban, tasks },
     kanbanMulti: {
       ...state.kanbanMulti,
       snapshots: {
@@ -68,12 +72,27 @@ function makeStore() {
           workflowId: "workflow-1",
           workflowName: "Workflow",
           steps: [],
-          tasks: [makeTask(TASK_A, "session-a"), makeTask(TASK_B, "session-b")],
+          tasks,
         },
       },
     },
-    workspaces: { ...state.workspaces, activeId: "workspace-1" },
   }));
+}
+
+function makeStore(
+  tasks: ReturnType<typeof makeTask>[] = [
+    makeTask(TASK_A, "session-a"),
+    makeTask(TASK_B, "session-b"),
+  ],
+) {
+  const store = createAppStore();
+  // The workspace scope must settle before board writes: a later activeId
+  // change isolates unchanged projections and drops their rows.
+  store.setState((state) => ({
+    ...state,
+    workspaces: { ...state.workspaces, activeId: WORKSPACE },
+  }));
+  setStoreTasks(store, tasks);
   store.getState().setActiveSession(TASK_A, "session-a");
   return store;
 }
@@ -85,6 +104,7 @@ beforeEach(() => {
     archived_at: null,
   }));
   listTaskSessionsMock.mockResolvedValue({ sessions: [] });
+  querySidebarTasksMock.mockResolvedValue({ entries: [], has_next: false });
 });
 
 describe("useTaskRemoval coordinator", () => {
@@ -287,8 +307,266 @@ describe("useTaskRemoval coordinator — recovery validation", () => {
       });
 
       expect(store.getState().tasks.activeTaskId).toBe(TASK_B);
-      expect(softNavigateMock).toHaveBeenLastCalledWith("/?home=overview", "replace");
+      expect(softNavigateMock).toHaveBeenLastCalledWith(OVERVIEW_URL, "replace");
       expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_A}`, "replace");
     },
   );
+});
+function renderCoordinator(store: ReturnType<typeof makeStore>) {
+  return renderHook(() => useTaskRemoval({ store })).result;
+}
+
+function makeDelayedCandidateRead(taskId: string) {
+  const read = deferred<{ id: string; archived_at: null }>();
+  fetchTaskMock.mockImplementation(async (candidateId: string) =>
+    candidateId === taskId ? read.promise : { id: candidateId, archived_at: null },
+  );
+  return read;
+}
+
+describe("useTaskRemoval coordinator — delayed replacement reads", () => {
+  it("does not select another independently pending archive after a delayed candidate read", async () => {
+    const store = makeStore();
+    const candidateRead = makeDelayedCandidateRead(TASK_B);
+    const firstMutation = deferred<void>();
+    const secondMutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let firstArchive!: Promise<unknown>;
+    act(() => {
+      firstArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: () => firstMutation.promise,
+      });
+    });
+    await vi.waitFor(() =>
+      expect(fetchTaskMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }),
+    );
+
+    let secondArchive!: Promise<unknown>;
+    act(() => {
+      secondArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_B,
+        mutate: () => secondMutation.promise,
+      });
+    });
+    expect(isTaskRemovalPending(store.getState().taskRemoval, TASK_B, WORKSPACE)).toBe(true);
+
+    await act(async () => {
+      candidateRead.resolve({ id: TASK_B, archived_at: null });
+      await candidateRead.promise;
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+
+    await act(async () => {
+      firstMutation.resolve();
+      await firstArchive;
+    });
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(softNavigateMock).toHaveBeenLastCalledWith(OVERVIEW_URL, "replace");
+
+    await act(async () => {
+      secondMutation.resolve();
+      await secondArchive;
+    });
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(store.getState().kanban.tasks).toEqual([]);
+  });
+
+  it("does not select another independently pending archive after a delayed session load", async () => {
+    const store = makeStore([makeTask(TASK_A, "session-a"), makeTask(TASK_B, null)]);
+    const sessionsRead = deferred<{ sessions: Array<{ id: string; task_id: string }> }>();
+    listTaskSessionsMock.mockImplementation((taskId: string) =>
+      taskId === TASK_B ? sessionsRead.promise : Promise.resolve({ sessions: [] }),
+    );
+    const firstMutation = deferred<void>();
+    const secondMutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let firstArchive!: Promise<unknown>;
+    act(() => {
+      firstArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: () => firstMutation.promise,
+      });
+    });
+    await vi.waitFor(() =>
+      expect(listTaskSessionsMock).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }),
+    );
+
+    let secondArchive!: Promise<unknown>;
+    act(() => {
+      secondArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_B,
+        mutate: () => secondMutation.promise,
+      });
+    });
+
+    await act(async () => {
+      sessionsRead.resolve({ sessions: [{ id: "session-b", task_id: TASK_B }] });
+      await sessionsRead.promise;
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(store.getState().tasks.activeSessionId).not.toBe("session-b");
+    expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+
+    await act(async () => {
+      firstMutation.resolve();
+      secondMutation.resolve();
+      await Promise.all([firstArchive, secondArchive]);
+    });
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(store.getState().tasks.activeSessionId).not.toBe("session-b");
+  });
+});
+
+describe("useTaskRemoval coordinator — candidate eligibility", () => {
+  it("selects the next eligible candidate when a candidate enters another removal", async () => {
+    const store = makeStore([
+      makeTask(TASK_A, "session-a"),
+      makeTask(TASK_B, "session-b"),
+      makeTask(TASK_C, "session-c"),
+    ]);
+    const candidateRead = makeDelayedCandidateRead(TASK_B);
+    const firstMutation = deferred<void>();
+    const secondMutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let firstArchive!: Promise<unknown>;
+    act(() => {
+      firstArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: () => firstMutation.promise,
+      });
+    });
+    let secondArchive!: Promise<unknown>;
+    act(() => {
+      secondArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_B,
+        mutate: () => secondMutation.promise,
+      });
+    });
+
+    await act(async () => {
+      candidateRead.resolve({ id: TASK_B, archived_at: null });
+      await candidateRead.promise;
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.activeTaskId).toBe(TASK_C);
+    expect(store.getState().tasks.activeSessionId).toBe("session-c");
+    expect(softNavigateMock).toHaveBeenCalledWith(`/t/${TASK_C}`, "replace");
+    expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+
+    await act(async () => {
+      firstMutation.resolve();
+      secondMutation.resolve();
+      await Promise.all([firstArchive, secondArchive]);
+    });
+  });
+
+  it("opens the overview when every remaining candidate is already pending", async () => {
+    const store = makeStore();
+    const firstMutation = deferred<void>();
+    const secondMutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let secondArchive!: Promise<unknown>;
+    act(() => {
+      secondArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_B,
+        mutate: () => secondMutation.promise,
+      });
+    });
+
+    let firstArchive!: Promise<unknown>;
+    act(() => {
+      firstArchive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: () => firstMutation.promise,
+      });
+    });
+    await act(async () => {
+      firstMutation.resolve();
+      await firstArchive;
+    });
+
+    expect(store.getState().tasks.activeTaskId).not.toBe(TASK_B);
+    expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+    expect(softNavigateMock).toHaveBeenLastCalledWith(OVERVIEW_URL, "replace");
+
+    await act(async () => {
+      secondMutation.resolve();
+      await secondArchive;
+    });
+  });
+});
+
+describe("useTaskRemoval coordinator — navigation and workspace scope", () => {
+  it("keeps later manual navigation instead of committing a delayed candidate", async () => {
+    const store = makeStore();
+    const candidateRead = makeDelayedCandidateRead(TASK_B);
+    const mutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let archive!: Promise<unknown>;
+    act(() => {
+      archive = result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: () => mutation.promise,
+      });
+    });
+
+    await act(async () => {
+      store.getState().setActiveTask(TASK_C);
+      candidateRead.resolve({ id: TASK_B, archived_at: null });
+      await candidateRead.promise;
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.activeTaskId).toBe(TASK_C);
+    expect(softNavigateMock).not.toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+
+    await act(async () => {
+      mutation.resolve();
+      await archive;
+    });
+    expect(store.getState().tasks.activeTaskId).toBe(TASK_C);
+    expect(softNavigateMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores a pending removal captured for another workspace", async () => {
+    const store = makeStore();
+    const secondMutation = deferred<void>();
+    const result = renderCoordinator(store);
+
+    let secondArchive!: Promise<unknown>;
+    act(() => {
+      secondArchive = result.current.runTaskRemoval(
+        "archive",
+        { taskId: TASK_B, mutate: () => secondMutation.promise },
+        { workspaceId: "workspace-2" },
+      );
+    });
+    expect(isTaskRemovalPending(store.getState().taskRemoval, TASK_B, WORKSPACE)).toBe(false);
+
+    await act(async () => {
+      await result.current.runTaskRemoval("archive", {
+        taskId: TASK_A,
+        mutate: async () => undefined,
+      });
+    });
+
+    expect(softNavigateMock).toHaveBeenCalledWith(`/t/${TASK_B}`, "replace");
+
+    await act(async () => {
+      secondMutation.resolve();
+      await secondArchive;
+    });
+  });
 });

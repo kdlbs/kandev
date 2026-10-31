@@ -98,6 +98,8 @@
   "failedToMigrateTasks": "タスクの移行に失敗しました",
   "failedToSaveWorkflowChanges": "ワークフローの変更の保存に失敗しました",
   "failedToUpdateWorkflowStep": "ワークフローステップの更新に失敗しました",
+  "holdStep": "保留ステップ",
+  "holdStepHelp": "このステップを保留ステップとしてマークします。分類はステップに保存され、タスクを開始したり停止したり移動したりしません。",
   "hopNumber": "ホップ {{index}}",
   "import": "インポート",
   "importCompleteTitle": "インポートが完了しました",

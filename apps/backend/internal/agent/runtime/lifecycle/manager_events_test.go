@@ -329,6 +329,9 @@ func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
 	if readyPayload.CausingRunID != "office-run-1" {
 		t.Fatalf("ready event causing run ID = %q, want office-run-1", readyPayload.CausingRunID)
 	}
+	if readyPayload.TerminalCausingRunID != "office-run-1" {
+		t.Fatalf("ready event terminal causing run ID = %q, want office-run-1", readyPayload.TerminalCausingRunID)
+	}
 	if readyPayload.DeliveryStreamID != "stream-office" ||
 		readyPayload.DeliveryIncarnationID != "incarnation-office" ||
 		readyPayload.DeliveryHarnessGeneration != 3 || readyPayload.DeliverySequence != 9 ||
@@ -340,6 +343,21 @@ func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
 	}
 	if _, ok := execution.metadataValue(MetadataKeyCausingRunID); ok {
 		t.Fatal("causing run metadata remains after the first turn completed")
+	}
+	if execution.TerminalCausingRunID != "office-run-1" {
+		t.Fatalf("terminal causing run ID after ready = %q, want office-run-1", execution.TerminalCausingRunID)
+	}
+	if execution.metadataString(MetadataKeyTerminalCausingRunID) != "office-run-1" {
+		t.Fatalf("terminal causing run metadata = %q, want office-run-1", execution.metadataString(MetadataKeyTerminalCausingRunID))
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin follow-up prompt: %v", err)
+	}
+	if execution.TerminalCausingRunID != "" {
+		t.Fatalf("terminal causing run ID on follow-up prompt = %q, want empty", execution.TerminalCausingRunID)
+	}
+	if _, ok := execution.metadataValue(MetadataKeyTerminalCausingRunID); ok {
+		t.Fatal("terminal causing run metadata remains on a follow-up prompt")
 	}
 }
 

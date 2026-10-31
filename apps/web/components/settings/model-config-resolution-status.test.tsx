@@ -41,4 +41,32 @@ describe("ModelConfigResolutionStatus", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledOnce();
   });
+
+  it("shows policy recovery inline and falls back for an unknown reason", () => {
+    const { rerender } = render(
+      <ModelConfigResolutionStatus
+        status="unsupported"
+        reasonCode="policy_unverified"
+        error="model option resolution failed"
+        isLoading={false}
+        onRetry={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(screen.getByTestId("model-config-resolution-error").textContent).toContain(
+      "Model options are blocked by this plugin selection. Uncheck plugins, Save, then retry model options.",
+    );
+    expect(screen.queryByText("Model options could not be loaded.")).toBeNull();
+
+    rerender(
+      <ModelConfigResolutionStatus
+        status="unsupported"
+        reasonCode="native_output"
+        error="model option resolution failed"
+        isLoading={false}
+        onRetry={vi.fn(async () => {})}
+      />,
+    );
+    expect(screen.getByText("Model options could not be loaded.")).toBeTruthy();
+  });
 });

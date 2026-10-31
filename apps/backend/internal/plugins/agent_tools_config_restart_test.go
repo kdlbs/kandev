@@ -70,7 +70,7 @@ func awaitAgentToolConfigDispatch(t *testing.T, ctx context.Context, invoked <-c
 		}
 		stacks := string(buffer[:goruntime.Stack(buffer, true)])
 		for _, stack := range strings.Split(stacks, "\n\n") {
-			if strings.Contains(stack, ".(*Service).InvokeAgentTool(") && strings.Contains(stack, "sync.(*RWMutex).RLock(") {
+			if strings.Contains(stack, ".(*Service).InvokeAgentTool(") && strings.Contains(stack, ".(*contextRWMutex).RLock(") {
 				return
 			}
 		}

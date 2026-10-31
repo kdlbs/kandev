@@ -35,30 +35,32 @@ const (
 )
 
 var (
-	ErrJournalCorrupt       = errors.New("agent delivery journal is corrupt")
-	ErrJournalClosed        = bolt.ErrDatabaseNotOpen
-	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
-	ErrJournalFull          = errors.New("agent delivery journal is full")
-	ErrStreamFull           = errors.New("agent delivery stream is full")
-	ErrEventTooLarge        = fmt.Errorf("%w: event payload exceeds the maximum event size", ErrStreamFull)
-	ErrReplayPageTooLarge   = errors.New("agent delivery replay page exceeds the byte budget")
-	ErrStreamNotFound       = errors.New("agent delivery stream not found")
-	ErrCursorExpired        = errors.New("agent delivery cursor expired")
-	ErrSequenceConflict     = errors.New("agent delivery sequence conflict")
-	ErrSubmissionConflict   = errors.New("agent delivery submission conflict")
-	ErrSubmissionNotFound   = errors.New("agent delivery submission not found")
-	ErrSubmissionState      = errors.New("invalid agent delivery submission transition")
-	ErrSubmissionGeneration = errors.New("agent delivery submission requires a newer harness generation")
-	ErrOwnerMismatch        = errors.New("agent delivery owner mismatch")
+	ErrJournalCorrupt        = errors.New("agent delivery journal is corrupt")
+	ErrJournalClosed         = bolt.ErrDatabaseNotOpen
+	ErrJournalNewerVersion   = errors.New("agent delivery journal uses a newer version")
+	ErrJournalFull           = errors.New("agent delivery journal is full")
+	ErrStreamFull            = errors.New("agent delivery stream is full")
+	ErrEventTooLarge         = fmt.Errorf("%w: event payload exceeds the maximum event size", ErrStreamFull)
+	ErrReplayPageTooLarge    = errors.New("agent delivery replay page exceeds the byte budget")
+	ErrStreamNotFound        = errors.New("agent delivery stream not found")
+	ErrCursorExpired         = errors.New("agent delivery cursor expired")
+	ErrSequenceConflict      = errors.New("agent delivery sequence conflict")
+	ErrSubmissionConflict    = errors.New("agent delivery submission conflict")
+	ErrSubmissionNotFound    = errors.New("agent delivery submission not found")
+	ErrSubmissionState       = errors.New("invalid agent delivery submission transition")
+	ErrSubmissionGeneration  = errors.New("agent delivery submission requires a newer harness generation")
+	ErrOwnerMismatch         = errors.New("agent delivery owner mismatch")
+	ErrEventIdentityConflict = errors.New("agent delivery event identity conflicts with a committed event")
 )
 
 var (
-	bucketMeta        = []byte("meta")
-	bucketEvents      = []byte("events")
-	bucketStreamMeta  = []byte("stream_meta")
-	bucketSubmissions = []byte("submissions")
-	keyVersion        = []byte("version")
-	keyJournalBytes   = []byte("journal_bytes")
+	bucketMeta            = []byte("meta")
+	bucketEvents          = []byte("events")
+	bucketStreamMeta      = []byte("stream_meta")
+	bucketSubmissions     = []byte("submissions")
+	bucketEventIdentities = []byte("event_identities")
+	keyVersion            = []byte("version")
+	keyJournalBytes       = []byte("journal_bytes")
 )
 
 type Config struct {
@@ -114,16 +116,19 @@ func (c Config) withDefaults() Config {
 }
 
 type Event struct {
-	SessionID         string    `json:"session_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration uint64    `json:"harness_generation"`
-	StreamID          string    `json:"stream_id"`
-	Sequence          uint64    `json:"sequence"`
-	SubmissionID      string    `json:"submission_id,omitempty"`
-	Type              string    `json:"type"`
-	Payload           []byte    `json:"payload"`
-	Terminal          bool      `json:"terminal,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
+	SessionID         string `json:"session_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration uint64 `json:"harness_generation"`
+	StreamID          string `json:"stream_id"`
+	Sequence          uint64 `json:"sequence"`
+	SubmissionID      string `json:"submission_id,omitempty"`
+	// Identity is an optional stable producer identity. A retry with the same
+	// identity returns the committed event without a second projection.
+	Identity  string    `json:"identity,omitempty"`
+	Type      string    `json:"type"`
+	Payload   []byte    `json:"payload"`
+	Terminal  bool      `json:"terminal,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Stream struct {
@@ -181,6 +186,7 @@ type Journal struct {
 }
 
 func Open(config Config) (journal *Journal, err error) {
+	started := time.Now()
 	defer func() {
 		if err != nil {
 			RecordJournalError(classifyJournalError(err))
@@ -194,10 +200,10 @@ func Open(config Config) (journal *Journal, err error) {
 		config.ExistingOnly = true
 	} else {
 		if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("create journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("create journal directory: %w", err))
 		}
 		if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
-			return nil, fmt.Errorf("secure journal directory: %w", err)
+			return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("secure journal directory: %w", err))
 		}
 	}
 	options := &bolt.Options{Timeout: config.OpenTimeout, NoSync: false, ReadOnly: config.ReadOnly}
@@ -208,7 +214,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	db, err := bolt.Open(config.Path, 0o600, options)
 	if err != nil {
-		return nil, fmt.Errorf("open delivery journal: %w", err)
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), fmt.Errorf("open delivery journal: %w", err))
 	}
 	// Page size is immutable; Info also reads the mapping, so capture it before concurrent writes.
 	journal = &Journal{db: db, pageSize: int64(db.Info().PageSize), config: config}
@@ -219,7 +225,7 @@ func Open(config Config) (journal *Journal, err error) {
 	}
 	if err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, newOpenError(config.Path, config.OpenTimeout, time.Since(started), err)
 	}
 	journal.refreshMetrics()
 	return journal, nil
@@ -260,7 +266,8 @@ func (j *Journal) validateReadOnly() error {
 }
 
 func initializeFreshJournal(tx *bolt.Tx, meta *bolt.Bucket) error {
-	if meta.Stats().KeyN != 0 || tx.Bucket(bucketEvents) != nil || tx.Bucket(bucketStreamMeta) != nil || tx.Bucket(bucketSubmissions) != nil {
+	if meta.Stats().KeyN != 0 || tx.Bucket(bucketEvents) != nil || tx.Bucket(bucketStreamMeta) != nil ||
+		tx.Bucket(bucketSubmissions) != nil || tx.Bucket(bucketEventIdentities) != nil {
 		return ErrJournalCorrupt
 	}
 	var encoded [4]byte
@@ -364,7 +371,7 @@ func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err 
 }
 
 func createJournalBuckets(tx *bolt.Tx) error {
-	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions} {
+	for _, name := range [][]byte{bucketEvents, bucketStreamMeta, bucketSubmissions, bucketEventIdentities} {
 		if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 			return err
 		}
@@ -605,6 +612,9 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 		if event.StreamID == "" || event.SessionID == "" || event.Type == "" {
 			return fmt.Errorf("event stream, session, and type are required")
 		}
+		if len(event.Identity) > maxEventIdentityBytes {
+			return fmt.Errorf("event identity exceeds the maximum length")
+		}
 		if len(event.Payload) > int(maxEventBytes) {
 			return NewStorageError(StorageReasonEventTooLarge, ErrEventTooLarge,
 				WithEventBytes(int64(len(event.Payload))), withLimitBytes(maxEventBytes))
@@ -619,6 +629,20 @@ func prepareAppendEvents(events []Event, maxEventBytes int64) error {
 func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if event.Identity != "" {
+		receipt, found, err := lookupEventIdentityTx(tx, event.Identity)
+		if err != nil {
+			return err
+		}
+		if found {
+			if receipt.StreamID != event.StreamID || receipt.Type != event.Type || receipt.PayloadHash != eventPayloadHash(*event) {
+				return ErrEventIdentityConflict
+			}
+			event.Sequence = receipt.Sequence
+			event.CreatedAt = receipt.CreatedAt
+			return nil
+		}
 	}
 	stream, err := appendStream(tx, *event)
 	if err != nil {
@@ -646,6 +670,11 @@ func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) 
 	}
 	if err := writeAppendedEvent(tx, stream, *event, encoded, journalBytes+newBytes); err != nil {
 		return err
+	}
+	if event.Identity != "" {
+		if err := putEventIdentityTx(tx, *event); err != nil {
+			return err
+		}
 	}
 	if event.Terminal && event.SubmissionID != "" {
 		return markSubmissionTerminalTx(ctx, tx, *event, j.config.MaxJournalBytes)

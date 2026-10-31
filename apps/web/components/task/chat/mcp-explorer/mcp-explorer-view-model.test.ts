@@ -134,6 +134,7 @@ it.each([
   ["definition_disabled", "DefinitionDisabled"],
   ["definition_missing", "DefinitionMissing"],
   ["secret_resolution_failed", "SecretResolution"],
+  ["session_excluded", "SessionExcluded"],
 ])("explains the recorded %s exclusion safely", (reason_code, suffix) => {
   expect(mcpStatusPresentation(server({ status: "filtered", reason_code })).explanationKey).toBe(
     `task:mcpReason${suffix}`,

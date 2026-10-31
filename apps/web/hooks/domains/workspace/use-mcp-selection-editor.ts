@@ -48,6 +48,7 @@ function resetMCPSelectionEditor({
 
 async function saveMCPSelection({
   definitionIds,
+  excludedDefinitionIds,
   ownerId,
   workspaceId,
   scope,
@@ -62,6 +63,7 @@ async function saveMCPSelection({
   setSaving,
 }: {
   definitionIds: string[];
+  excludedDefinitionIds?: string[];
   ownerId: string;
   workspaceId: string;
   scope: MCPSelectionScope;
@@ -100,6 +102,9 @@ async function saveMCPSelection({
         ? {
             expected_revision:
               accepted.selection_revision ?? accepted.mcp_state?.desired_revision ?? 0,
+            ...(excludedDefinitionIds !== undefined
+              ? { excluded_definition_ids: excludedDefinitionIds }
+              : {}),
           }
         : { expected_definition_ids: accepted.definition_ids };
     const next = await replaceMCPSelections(scope, ownerId, workspaceId, definitionIds, condition);
@@ -149,10 +154,11 @@ function useMCPSelectionSave({
   setSaving: (value: boolean) => void;
 }) {
   return useCallback(
-    (definitionIds: string[]) => {
+    (definitionIds: string[], excludedDefinitionIds?: string[]) => {
       if (!ownerId || !workspaceId) throw new Error("MCP selection context is required");
       return saveMCPSelection({
         definitionIds,
+        excludedDefinitionIds,
         ownerId,
         workspaceId,
         scope,

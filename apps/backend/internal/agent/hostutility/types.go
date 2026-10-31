@@ -145,6 +145,7 @@ type ProfileCapabilityRequest struct {
 type ProfileCapabilityResult struct {
 	Capabilities    AgentCapabilities
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // ModelConfigResolution is the provider's complete option snapshot for one
@@ -156,6 +157,7 @@ type ModelConfigResolution struct {
 	ConfigOptions   []ConfigOption
 	Error           string
 	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

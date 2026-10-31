@@ -459,34 +459,26 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				}
 			}()
 			if s.profileExecutionResolver != nil {
-				launchSession, loadErr := s.repo.GetTaskSession(bgCtx, sessionID)
-				if loadErr != nil {
-					s.logger.Warn("failed to reload prepared session for dynamic route resolution",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(loadErr))
-					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, loadErr)
-					return
-				}
-				resolved, routeClaimed, resolveErr := s.resolveExecutionForLaunchSession(bgCtx, launchSession)
-				if resolveErr != nil {
-					s.recordDynamicRouteResolutionFailure(bgCtx, launchSession, resolveErr)
-					s.logger.Warn("failed to resolve dynamic route for prepared session",
-						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(resolveErr))
-					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, resolveErr, launchSession)
-					return
-				}
-				if resolved.ExecutionProfileID != "" {
-					launchProfileID = resolved.ExecutionProfileID
-					if routeClaimed {
-						claimedRouteGeneration = resolved.Generation
-						applyResolvedExecution(launchSession, resolved)
-						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
-							s.logger.Warn("failed to persist dynamic route for prepared session",
-								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(updateErr))
-							_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, updateErr, launchSession)
-							return
-						}
+				route, routeErr := s.resolvePreparedSessionDynamicRoute(bgCtx, sessionID, launchProfileID)
+				if routeErr != nil {
+					launchSession := route.session
+					switch {
+					case launchSession == nil:
+						s.logger.Warn("failed to reload prepared session for dynamic route resolution",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
+					case route.resolutionErr != nil:
+						s.recordDynamicRouteResolutionFailure(bgCtx, launchSession, routeErr)
+						s.logger.Warn("failed to resolve dynamic route for prepared session",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
+					default:
+						s.logger.Warn("failed to persist dynamic route for prepared session",
+							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routeErr))
 					}
+					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, routeErr, launchSession)
+					return
 				}
+				launchProfileID = route.launchProfileID
+				claimedRouteGeneration = route.claimedRouteGeneration
 			}
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: launchProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
@@ -513,6 +505,49 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 		zap.String("session_id", sessionID))
 
 	return sessionID, nil
+}
+
+type preparedSessionDynamicRoute struct {
+	session                *models.TaskSession
+	launchProfileID        string
+	claimedRouteGeneration int64
+	resolutionErr          error
+}
+
+// resolvePreparedSessionDynamicRoute keeps the prepared session snapshot and
+// its durable route claim under the same ownership as a start that may change
+// the logical profile.
+func (s *Service) resolvePreparedSessionDynamicRoute(
+	ctx context.Context,
+	sessionID, launchProfileID string,
+) (preparedSessionDynamicRoute, error) {
+	route := preparedSessionDynamicRoute{launchProfileID: launchProfileID}
+	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
+	defer releaseLifecycleLock()
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return route, err
+	}
+	route.session = session
+	resolved, routeClaimed, err := s.resolveExecutionForLaunchSession(ctx, session)
+	if err != nil {
+		route.resolutionErr = err
+		return route, err
+	}
+	if resolved.ExecutionProfileID == "" {
+		return route, nil
+	}
+	route.launchProfileID = resolved.ExecutionProfileID
+	if !routeClaimed {
+		return route, nil
+	}
+	route.claimedRouteGeneration = resolved.Generation
+	applyResolvedExecution(session, resolved)
+	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		return route, err
+	}
+	return route, nil
 }
 
 type initialPromptPreviewContextKey struct{}
@@ -875,6 +910,9 @@ func (s *Service) startCreatedSession(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.refuseMaterializedRouteProfileChange(ctx, session, effectiveProfileID); err != nil {
+		return nil, err
 	}
 
 	// If the workflow step overrode the profile, update the session record in DB
@@ -10261,6 +10299,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 	}
 	if err := s.checkSessionRecoveryBlock(ctx, identity.SessionID); err != nil {
 		return false, err
+	}
+	if s.queueDrainBlockedByDynamicRoute(ctx, identity.SessionID) {
+		return false, nil
 	}
 	if s.isInitialTaskBriefDispatchPending(identity.SessionID) {
 		return false, nil

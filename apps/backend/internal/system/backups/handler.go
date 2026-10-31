@@ -52,15 +52,15 @@ func HandleDownload(svc *Service) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 			return
 		}
-		f, size, err := svc.OpenForDownload(name)
+		reader, size, filename, contentType, err := svc.OpenForDownloadBundle(name)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		defer func() { _ = f.Close() }()
-		c.Header("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(name, `"`, `\"`)+`"`)
-		c.Header("Content-Type", "application/octet-stream")
-		c.DataFromReader(http.StatusOK, size, "application/octet-stream", f, nil)
+		defer func() { _ = reader.Close() }()
+		c.Header("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filename, `"`, `\"`)+`"`)
+		c.Header("Content-Type", contentType)
+		c.DataFromReader(http.StatusOK, size, contentType, reader, nil)
 	}
 }
 

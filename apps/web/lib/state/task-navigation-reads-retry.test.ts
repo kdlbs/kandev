@@ -342,3 +342,70 @@ describe("task navigation attempt deadline", () => {
     });
   });
 });
+
+describe("task navigation exhausted latch", () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-007.4
+  it("latches exhaustion, keeps it through manual recovery, and clears it on success", async () => {
+    vi.useFakeTimers();
+    const failure = temporaryNetworkFailure;
+    const load = vi
+      .fn<(taskId: string) => Promise<TaskNavigationIdentity>>()
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockResolvedValueOnce(identity("task-1"));
+    const reads = createTaskNavigationReads(load);
+    const generation = reads.beginNavigation({}, "/t/task-1");
+    const first = reads.read("task-1", generation);
+    const firstError = first.catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    await expect(firstError).resolves.toBeInstanceOf(TypeError);
+    expect(reads.getSnapshot("task-1", generation)).toMatchObject({
+      phase: "failed",
+      temporary: true,
+      exhausted: true,
+    });
+
+    const retry = reads.read("task-1", generation, { manualRetry: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const recovering = reads.getSnapshot("task-1", generation);
+    expect(recovering.exhausted).toBe(true);
+    expect(["loading", "retrying"]).toContain(recovering.phase);
+    expect(recovering.temporary).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(retry).resolves.toMatchObject({ task: { id: "task-1" } });
+    expect(reads.getSnapshot("task-1", generation)).toMatchObject({
+      phase: "succeeded",
+      exhausted: false,
+    });
+  });
+
+  it("clears the latch when a later permanent failure replaces the temporary one", async () => {
+    vi.useFakeTimers();
+    const load = vi
+      .fn<(taskId: string) => Promise<TaskNavigationIdentity>>()
+      .mockImplementation(temporaryNetworkFailure);
+    const reads = createTaskNavigationReads(load);
+    const generation = reads.beginNavigation({}, "/t/task-1");
+    const first = reads.read("task-1", generation).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await expect(first).resolves.toBeInstanceOf(TypeError);
+    expect(reads.getSnapshot("task-1", generation).exhausted).toBe(true);
+
+    vi.mocked(load).mockRejectedValueOnce(new ApiError("denied", 403, {}));
+    const retry = reads
+      .read("task-1", generation, { manualRetry: true })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(retry).resolves.toMatchObject({ status: 403 });
+    expect(reads.getSnapshot("task-1", generation)).toMatchObject({
+      phase: "failed",
+      temporary: false,
+      exhausted: false,
+    });
+  });
+});

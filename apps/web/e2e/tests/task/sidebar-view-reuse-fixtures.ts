@@ -17,6 +17,38 @@ function gate() {
   return { promise, release };
 }
 
+function deferredVoid() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Resolves when any single sidebar query reaches its fifth rejected attempt. */
+function sidebarFailureBarrier() {
+  const counts = new Map<string, number>();
+  const exhausted = deferredVoid();
+  const count = (body: unknown) => {
+    const key = JSON.stringify(body);
+    const attempts = (counts.get(key) ?? 0) + 1;
+    counts.set(key, attempts);
+    if (attempts === 5) exhausted.resolve();
+  };
+  return { count, exhausted: exhausted.promise };
+}
+
+async function retrySidebarRecovery(page: Page, surface: ReturnType<Page["locator"]>) {
+  const retry = surface.getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeEnabled();
+  const recovered = waitForHttp(page, "POST", /\/sidebar\/query$/, {
+    predicate: (response) => response.ok(),
+  });
+  await retry.click();
+  expect((await recovered).ok()).toBe(true);
+  await expect(surface.getByRole("alert")).toHaveCount(0);
+}
+
 function taskRowTop(surface: ReturnType<Page["locator"]>, taskId: string) {
   return surface.evaluate((element, id) => {
     const row = element.querySelector(`[data-task-row-id="${id}"]`)!;
@@ -151,18 +183,22 @@ async function verifySidebarViewReuse(
 
   const arrived = gate(),
     release = gate();
+  const refreshFailures = sidebarFailureBarrier();
   let failRefresh = false;
+  await page.bringToFront();
   await page.route("**/sidebar/query", async (route) => {
     const query = route.request().postDataJSON();
     if (query.filters?.[0]?.dimension !== "repository") return route.continue();
     arrived.release();
     await release.promise;
-    if (failRefresh)
+    if (failRefresh) {
+      refreshFailures.count(query);
       return route.fulfill({
         status: 503,
         contentType: "application/json",
         body: '{"error":"private internal failure"}',
       });
+    }
     return route.continue();
   });
   const refreshed = waitForHttp(page, "POST", /\/sidebar\/query$/);
@@ -181,6 +217,9 @@ async function verifySidebarViewReuse(
     failRefresh = true;
     release.release();
     await refreshed;
+    await expect(surface.getByRole("alert")).toHaveCount(0);
+    await expect(surface.locator("[data-task-row-id]")).toHaveCount(taskIds.length);
+    await refreshFailures.exhausted;
     await expect(surface.getByRole("alert")).toHaveCount(1);
     await expect(surface.getByRole("alert")).toContainText("Tasks could not be refreshed");
     await expect(surface).not.toContainText("private internal failure");
@@ -191,12 +230,9 @@ async function verifySidebarViewReuse(
         "A failed background refresh preserves the selected view and offers one Retry action.",
     });
     failRefresh = false;
-    const recovered = waitForHttp(page, "POST", /\/sidebar\/query$/);
     const retry = surface.getByRole("button", { name: "Retry", exact: true });
     if (mobile) expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await retry.click();
-    await recovered;
-    await expect(surface.getByRole("alert")).toHaveCount(0);
+    await retrySidebarRecovery(page, surface);
     await expect(refreshStatus).toHaveCount(0);
     expect(await taskRowTop(surface, firstTaskId)).toBeCloseTo(settledRowTop, 0);
   } finally {
@@ -219,17 +255,23 @@ async function verifySidebarViewReuse(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
-  await page.route("**/sidebar/query", (route) =>
-    route.fulfill({
+  const initialFailures = sidebarFailureBarrier();
+  await page.bringToFront();
+  await page.route("**/sidebar/query", (route) => {
+    initialFailures.count(route.request().postDataJSON());
+    return route.fulfill({
       status: 503,
       contentType: "application/json",
       body: '{"error":"private initial failure"}',
-    }),
-  );
+    });
+  });
   try {
     await page.reload();
     await session.waitForLoad();
     if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
+    await expect(surface.locator("[data-task-row-id]")).toHaveCount(0);
+    await expect(surface.getByRole("alert")).toHaveCount(0);
+    await initialFailures.exhausted;
     await expect(surface.getByRole("alert")).toHaveCount(1);
     await expect(surface.getByRole("alert")).toContainText("Could not load this page");
     await expect(surface.locator("[data-task-row-id]")).toHaveCount(0);
@@ -237,10 +279,7 @@ async function verifySidebarViewReuse(
   } finally {
     await page.unrouteAll({ behavior: "wait" });
   }
-  const retryLoaded = waitForHttp(page, "POST", /\/sidebar\/query$/);
-  await surface.getByRole("button", { name: "Retry", exact: true }).click();
-  await retryLoaded;
-  await expect(surface.getByRole("alert")).toHaveCount(0);
+  await retrySidebarRecovery(page, surface);
   for (const id of taskIds.slice(1))
     await expect(surface.locator(`[data-task-row-id="${id}"]`)).toBeVisible();
   if (mobile) {

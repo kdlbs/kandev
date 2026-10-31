@@ -70,11 +70,13 @@ func TestBuildLaunchMetadataUsesTrustedCausingRunID(t *testing.T) {
 		Metadata:     map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
 	}, "", "", "")
 	require.Equal(t, "office-run-1", metadata[MetadataKeyCausingRunID])
+	require.Equal(t, "office-run-1", metadata[MetadataKeyTerminalCausingRunID])
 
 	metadata = buildLaunchMetadata(&LaunchRequest{
 		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
 	}, "", "", "")
 	require.NotContains(t, metadata, MetadataKeyCausingRunID)
+	require.NotContains(t, metadata, MetadataKeyTerminalCausingRunID)
 }
 
 func TestBuildLaunchMetadataExecutorConfigWinsForKubernetesConnectionKeys(t *testing.T) {

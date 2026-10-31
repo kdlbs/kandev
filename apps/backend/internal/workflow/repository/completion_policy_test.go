@@ -299,3 +299,175 @@ func TestCompletionPolicyMigrationRollsBackAndRetries(t *testing.T) {
 		t.Fatalf("read retried marker: %v", err)
 	}
 }
+
+func TestHoldStageTypeBackfillScopesToDefaultNature(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	database := sqlx.NewDb(db, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+
+	_, err = database.Exec(`
+		CREATE TABLE workflows (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_template_id TEXT DEFAULT '',
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+		CREATE TABLE workflow_templates (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT,
+			is_system INTEGER DEFAULT 0,
+			steps TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		INSERT INTO workflows (id, name, created_at, updated_at)
+		VALUES ('wf-hold', 'Hold flow', datetime('now'), datetime('now'));
+		INSERT INTO workflow_templates (id, name, description, steps, created_at, updated_at)
+		VALUES ('hold-template', 'Hold template', '', '[
+			{"id":"t-custom","name":"Blocked","position":0,"stage_type":"custom"},
+			{"id":"t-empty","name":"On Hold","position":1,"stage_type":""},
+			{"id":"t-review","name":"Paused","position":2,"stage_type":"review"},
+			{"id":"t-approval","name":"Hold","position":3,"stage_type":"approval"},
+			{"id":"t-none","name":"보류","position":4},
+			{"id":"t-number","name":"Paused","position":5,"stage_type":123},
+			{"id":"t-null","name":"Paused","position":6,"stage_type":null}
+		]', datetime('now'), datetime('now'));
+		CREATE TABLE workflow_steps (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			color TEXT,
+			prompt TEXT,
+			events TEXT,
+			allow_manual_move INTEGER DEFAULT 1,
+			is_start_step INTEGER DEFAULT 0,
+			show_in_command_panel INTEGER DEFAULT 1,
+			auto_archive_after_hours INTEGER DEFAULT 0,
+			stage_type TEXT NOT NULL DEFAULT 'custom',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+		);
+		INSERT INTO workflow_steps (id, workflow_id, name, position, stage_type, created_at, updated_at)
+		VALUES
+			('step-custom', 'wf-hold', 'Blocked', 0, 'custom', datetime('now'), datetime('now')),
+			('step-empty', 'wf-hold', 'On Hold', 1, '', datetime('now'), datetime('now')),
+			('step-review', 'wf-hold', 'Paused', 2, 'review', datetime('now'), datetime('now')),
+			('step-approval', 'wf-hold', 'Hold', 3, 'approval', datetime('now'), datetime('now')),
+			('step-work', 'wf-hold', '보류', 4, 'work', datetime('now'), datetime('now')),
+			('step-hold', 'wf-hold', 'hold', 5, 'hold', datetime('now'), datetime('now')),
+			('step-plain', 'wf-hold', 'Work', 6, 'custom', datetime('now'), datetime('now'));
+	`)
+	if err != nil {
+		t.Fatalf("seed hold schema: %v", err)
+	}
+
+	repo, err := NewWithDB(database, database, nil)
+	if err != nil {
+		t.Fatalf("initialize workflow repository: %v", err)
+	}
+	ctx := context.Background()
+
+	for id, want := range map[string]string{
+		"step-custom":   "hold",
+		"step-empty":    "hold",
+		"step-review":   "review",
+		"step-approval": "approval",
+		"step-work":     "work",
+		"step-hold":     "hold",
+		"step-plain":    "custom",
+	} {
+		step, err := repo.GetStep(ctx, id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if string(step.StageType) != want {
+			t.Fatalf("%s stage_type = %q, want %q", id, step.StageType, want)
+		}
+	}
+
+	var stepsJSON string
+	if err := database.Get(&stepsJSON, `SELECT steps FROM workflow_templates WHERE id = 'hold-template'`); err != nil {
+		t.Fatalf("read template steps: %v", err)
+	}
+	var rawSteps []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stepsJSON), &rawSteps); err != nil {
+		t.Fatalf("decode template steps: %v", err)
+	}
+	templateStage := func(id string) (string, json.RawMessage) {
+		for _, raw := range rawSteps {
+			var stepID string
+			if err := json.Unmarshal(raw["id"], &stepID); err != nil {
+				t.Fatalf("decode template step id: %v", err)
+			}
+			if stepID != id {
+				continue
+			}
+			rawType, ok := raw["stage_type"]
+			if !ok {
+				return "", nil
+			}
+			var value string
+			_ = json.Unmarshal(rawType, &value)
+			return value, rawType
+		}
+		t.Fatalf("template step %s not found", id)
+		return "", nil
+	}
+	// A default-nature hold-named template step becomes hold; an explicit
+	// nature (review, approval) and a non-string value are left alone.
+	for id, want := range map[string]string{
+		"t-custom":   "hold",
+		"t-empty":    "hold",
+		"t-none":     "hold",
+		"t-review":   "review",
+		"t-approval": "approval",
+		"t-number":   "",
+		"t-null":     "",
+	} {
+		got, _ := templateStage(id)
+		if got != want {
+			t.Fatalf("template %s stage_type = %q, want %q", id, got, want)
+		}
+	}
+	if _, rawType := templateStage("t-number"); string(rawType) != "123" {
+		t.Fatalf("template non-string stage_type = %s, want 123", rawType)
+	}
+	if _, rawType := templateStage("t-null"); string(rawType) != "null" {
+		t.Fatalf("template null stage_type = %s, want null", rawType)
+	}
+
+	var marker string
+	if err := database.Get(&marker, database.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), holdStageTypeBackfillMetaKey); err != nil {
+		t.Fatalf("read hold backfill marker: %v", err)
+	}
+	if marker != "completed" {
+		t.Fatalf("hold backfill marker = %q, want completed", marker)
+	}
+
+	// A second run is a no-op through the marker: reset a converted row and
+	// prove the replayed backfill does not convert it again.
+	if _, err := database.Exec(`UPDATE workflow_steps SET stage_type = 'custom' WHERE id = 'step-custom'`); err != nil {
+		t.Fatalf("reset converted step: %v", err)
+	}
+	if err := repo.backfillHoldStageType(); err != nil {
+		t.Fatalf("replay hold backfill: %v", err)
+	}
+	replayed, err := repo.GetStep(ctx, "step-custom")
+	if err != nil {
+		t.Fatalf("reload replayed step: %v", err)
+	}
+	if string(replayed.StageType) != "custom" {
+		t.Fatalf("replayed backfill re-converted step-custom = %q, want custom", replayed.StageType)
+	}
+}

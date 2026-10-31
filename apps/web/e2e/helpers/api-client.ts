@@ -1644,7 +1644,7 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       complete_task_on_enter?: boolean;
-      stage_type?: "work" | "review" | "approval" | "custom";
+      stage_type?: "work" | "review" | "approval" | "custom" | "hold";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       session_target?: WorkflowSessionTarget | null;

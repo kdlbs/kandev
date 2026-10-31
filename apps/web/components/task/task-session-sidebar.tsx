@@ -44,6 +44,7 @@ import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { applySidebarPageMetadata } from "./sidebar-page-metadata";
 import { findSidebarTask } from "./task-session-sidebar-task-lookup";
+import { useArchiveActions } from "./task-session-sidebar-archive-actions";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -206,69 +207,6 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function useArchiveActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
-  const { t } = useTranslation();
-  const { runArchive: archiveAndSwitch } = useTaskMenuActions({ useLayoutSwitch: true });
-  const [archivingTask, setArchivingTask] = useState<{
-    id: string;
-    title: string;
-    executorType?: string | null;
-  } | null>(null);
-  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
-  const [isArchiving, setIsArchiving] = useState(false);
-
-  const runArchive = useCallback(
-    async (taskId: string, opts: TaskActionOptions) => {
-      setIsArchiving(true);
-      setArchivingTaskId(taskId);
-      try {
-        await archiveAndSwitch(taskId, opts);
-      } catch (error) {
-        console.error("Failed to archive task:", error);
-      } finally {
-        setIsArchiving(false);
-        setArchivingTaskId((current) => (current === taskId ? null : current));
-        setArchivingTask((current) => (current?.id === taskId ? null : current));
-      }
-    },
-    [archiveAndSwitch],
-  );
-
-  const handleArchiveTask = useCallback(
-    (taskId: string, opts?: TaskActionOptions) => {
-      if (opts) {
-        void runArchive(taskId, opts);
-        return;
-      }
-      const state = store.getState();
-      const task = findSidebarTask(state, taskId, pageTasks);
-      setArchivingTask({
-        id: taskId,
-        title: task?.title ?? t("task:thisTask"),
-        executorType: task?.primaryExecutorType,
-      });
-    },
-    [pageTasks, runArchive, store, t],
-  );
-
-  const handleArchiveConfirm = useCallback(
-    async (opts: { cascade: boolean }) => {
-      if (!archivingTask) return;
-      await runArchive(archivingTask.id, opts);
-    },
-    [archivingTask, runArchive],
-  );
-
-  return {
-    archivingTask,
-    setArchivingTask,
-    archivingTaskId,
-    isArchiving,
-    handleArchiveTask,
-    handleArchiveConfirm,
-  };
-}
-
 function useDeleteActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
   const { t } = useTranslation();
   const { runDelete } = useTaskMenuActions({ useLayoutSwitch: true });
@@ -395,7 +333,11 @@ function useSidebarTaskSelection(params: {
   );
 }
 
-export function useSidebarActions(store: StoreApi, pageTasks: AggregatedSidebarTasks["allTasks"]) {
+export function useSidebarActions(
+  store: StoreApi,
+  pageTasks: AggregatedSidebarTasks["allTasks"],
+  workspaceId: string | null = null,
+) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
@@ -417,15 +359,16 @@ export function useSidebarActions(store: StoreApi, pageTasks: AggregatedSidebarT
     setPreparingTaskId,
   });
 
-  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store, pageTasks) };
+  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store, pageTasks, workspaceId) };
 }
 
 export function useTaskRowActions(
   store: StoreApi,
   pageTasks: AggregatedSidebarTasks["allTasks"] = EMPTY_SIDEBAR_TASKS,
+  workspaceId: string | null = null,
 ) {
   const { renameTaskById } = useTaskActions();
-  const archiveActions = useArchiveActions(store, pageTasks);
+  const archiveActions = useArchiveActions(store, pageTasks, workspaceId);
   const deleteActions = useDeleteActions(store, pageTasks);
   const detachActions = useTaskDetachDialog(store, pageTasks);
   const handleNestTask = useNestTaskByDrag(pageTasks);
@@ -521,7 +464,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const highlightedTaskId = onTaskRoute ? activeTaskId : null;
   const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
 
-  const sidebarActions = useSidebarActions(store, allTasks);
+  const sidebarActions = useSidebarActions(store, allTasks, workspaceId);
   const { preparingTaskId, taskMoveError } = sidebarActions;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
   const repositories =

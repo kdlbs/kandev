@@ -387,6 +387,12 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
 	execution.cancelEscalatedPromptGeneration.Store(0)
+	execution.TerminalCausingRunID = execution.CausingRunID
+	if execution.TerminalCausingRunID == "" {
+		execution.deleteMetadataValues(MetadataKeyTerminalCausingRunID)
+	} else {
+		execution.setMetadataValue(MetadataKeyTerminalCausingRunID, execution.TerminalCausingRunID)
+	}
 	execution.promptGeneration++
 	if execution.promptTurnID != "" {
 		if execution.promptTurnIDs == nil {

@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
@@ -446,6 +447,10 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	if dbPool != nil && dbPool.Writer() != nil && dbPool.Writer().DriverName() == "sqlite3" {
+		services.TurnHistoryStore = taskchanges.NewGitHistoryStore(filepath.Join(cfg.ResolvedDataDir(), "turn-history"), nil)
+	}
+	services.TurnHistory = taskchanges.NewHistoryService(repos.Task, services.TurnHistoryStore, nil)
 	if services.PluginsCleanup != nil {
 		addCleanup(services.PluginsCleanup)
 	}
@@ -832,7 +837,7 @@ func startAgentInfrastructure(
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
 	services.capacityRetryClock = newE2ECapacityRetryClock()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.TurnHistoryStore, services.Auth, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, services.capacityRetryClock, repos.RequiredStores)
 	if err != nil {
@@ -1193,6 +1198,7 @@ func startGatewayAndServe(
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
 		orchestratorSvc.AcquireSessionLifecycleFence,
+		cfg.Notifications.WebhookAllowPrivateNetworks,
 		cfg.Limits.LSPMaxConnections,
 	)
 	if terminalSvc != nil {
@@ -1309,6 +1315,8 @@ func startGatewayAndServe(
 		SessionCapacity:            orchestratorSvc,
 		SessionCapacityEnvironment: sessionCapacityEnvironment,
 		TaskSessions:               repos.Task,
+		HistoryCompaction:          historyCompactorAdapter{service: services.TurnHistory},
+		HistoryBackup:              services.TurnHistory,
 		AgentRuntimeRecovery:       agentRuntimeRecovery,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
@@ -2170,6 +2178,10 @@ func startSchedulingRuntime(
 	// Bind Office credentials to the concrete launch session before dispatch.
 	// Deferred starts refresh credentials after their persisted-token redaction.
 	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
+	// Let the run processor settle an Office run whose deferred launch the
+	// session ceiling replayed or terminally dropped. The ceiling remains the
+	// only launcher; this only records the outcome on the run it queued.
+	orchestratorSvc.SetCeilingDeferredLaunchSettler(runProcessorSvc)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
@@ -2846,6 +2858,9 @@ func buildOfficeFeatureServices(
 	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
+	if services.Office != nil {
+		services.Office.SetTaskStateWriter(taskRepo)
+	}
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
 	agentSvc.SetProfileStore(settingsRepo)
@@ -2892,7 +2907,7 @@ func buildOfficeFeatureServices(
 	channelSvc := officechannels.NewChannelService(repo, log, activity, agentSvc)
 	configSvc := officeconfig.NewConfigService(repo, cfgLoader, cfgWriter, log, activity)
 	dashboardSvc := buildOfficeDashboardService(
-		repo, log, activity, agentSvc, costSvc,
+		repo, taskRepo, log, activity, agentSvc, costSvc,
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
@@ -2923,7 +2938,9 @@ func buildOfficeFeatureServices(
 	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
 	pauseSvc.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
 	if services.Office != nil {
-		services.Office.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+		runRuntime := runtimeapi.New(lifecycleMgr)
+		services.Office.SetRunExecutionStopper(runRuntime)
+		services.Office.SetRunPermissionResolver(runRuntime)
 	}
 	routineSvc.SetPauseGate(pauseSvc)
 	routineWakeupDispatcher.SetPauseGate(pauseSvc)
@@ -2987,6 +3004,7 @@ func initOfficeConfigSyncService(
 // buildOfficeFeatureServices to keep the parent under funlen's 80-line cap.
 func buildOfficeDashboardService(
 	repo *officesqlite.Repository,
+	taskRepo *tasksqlite.Repository,
 	log *logger.Logger,
 	activity officeshared.ActivityLogger,
 	agentSvc *officeagents.AgentService,
@@ -2998,6 +3016,7 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	dashboardSvc.SetTaskStateWriter(taskRepo)
 	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)

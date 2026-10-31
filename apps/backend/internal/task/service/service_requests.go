@@ -92,6 +92,8 @@ type CreateTaskRequest struct {
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
 	TrustedHandoffMetadata bool `json:"-"`
+	// RequiredSubtaskCount is set only by the trusted routine materializer.
+	RequiredSubtaskCount int `json:"-"`
 	// AutomationStartOwned reserves the new task's initial start for the
 	// automation run that creates it (models.MetaKeyAutomationStartOwned). It is
 	// internal-only: the marker suppresses workflow auto-start, so it is never

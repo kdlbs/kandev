@@ -464,6 +464,13 @@ GitHub auto-fix turn; it does not report manual work or GitLab auto-fix turns.
 GitLab MR associations in the provider-neutral `change_requests` field; the
 legacy `prs` field remains GitHub-only for compatibility.
 
+`list_related_tasks_kandev` defaults to the current task. Another target is
+readable only when it is an ancestor, a descendant, a sibling with a shared
+non-empty parent, or a blocker of the caller in the same workspace. An
+unrelated task is denied, including in the same workspace. The compact output
+option is not a separate permission: `verbose` adds descriptions and never
+widens access.
+
 Unlinking changes only the active association and its matching automation
 state. It does not delete conversation history, terminal receipts, or the
 upstream pull request or merge request.

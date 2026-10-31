@@ -4740,6 +4740,7 @@ type mockMessageCreator struct {
 	sessionMessageOnce        sync.Once
 	sessionMessageErr         error
 	idempotentSessionMessages map[string]struct{}
+	sessionMessageCreatedAt   map[string]time.Time
 	agentMessages             []mockAgentMessage
 	agentMessageWrites        int
 	agentStreamWrites         int
@@ -4759,9 +4760,11 @@ type mockMessageCreator struct {
 	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
 	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
+	permissionPresentationFn  func(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	permissionMessageDecision *models.PermissionDecision
+	permissionMessageOptions  models.PermissionRequestMessageOptions
 	permissionMessageWrites   int
-	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error)
+	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, models.PermissionRequestMessageOptions) (string, error)
 }
 
 type mockUserMessage struct {
@@ -4770,6 +4773,7 @@ type mockUserMessage struct {
 }
 
 type mockSessionMessage struct {
+	id                                              string
 	taskID, content, sessionID, messageType, turnID string
 	metadata                                        map[string]interface{}
 	requestsInput                                   bool
@@ -4877,7 +4881,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		return nil
 	}
 	m.idempotentSessionMessages[messageID] = struct{}{}
+	if m.sessionMessageCreatedAt != nil {
+		if _, recorded := m.sessionMessageCreatedAt[messageID]; !recorded {
+			m.sessionMessageCreatedAt[messageID] = time.Now().UTC()
+		}
+	}
 	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		id:            messageID,
 		taskID:        taskID,
 		content:       content,
 		sessionID:     sessionID,
@@ -4890,6 +4900,13 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
 	}
 	return nil
+}
+
+func (m *mockMessageCreator) SessionMessageCreatedAt(_ context.Context, messageID string) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	createdAt, ok := m.sessionMessageCreatedAt[messageID]
+	return createdAt, ok
 }
 
 func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, taskID, content, sessionID, messageType string, metadata map[string]interface{}) error {
@@ -4909,11 +4926,12 @@ func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, ta
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
-	m.permissionMessageDecision = decision
+func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
+	m.permissionMessageDecision = messageOptions.Decision
+	m.permissionMessageOptions = messageOptions
 	m.permissionMessageWrites++
 	if m.permissionMessageCreateFn != nil {
-		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, decision)
+		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, messageOptions)
 	}
 	return "", nil
 }
@@ -4923,6 +4941,13 @@ func (m *mockMessageCreator) UpdatePermissionMessage(ctx context.Context, taskID
 		return m.permissionUpdateFn(ctx, taskID, sessionID, requestID, pendingID, status)
 	}
 	return nil
+}
+
+func (m *mockMessageCreator) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	if m.permissionPresentationFn != nil {
+		return m.permissionPresentationFn(ctx, request)
+	}
+	return nil, false, nil
 }
 
 func (m *mockMessageCreator) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {

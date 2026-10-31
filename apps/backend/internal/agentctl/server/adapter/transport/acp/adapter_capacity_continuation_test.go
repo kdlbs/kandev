@@ -258,7 +258,7 @@ func TestCapacityContinuationEvidenceOverflowFailsClosed(t *testing.T) {
 			ToolCallId: sdk.ToolCallId(fmt.Sprintf("tool-%d", i)),
 			Kind:       sdk.ToolKindExecute, Status: sdk.ToolCallStatusCompleted,
 		}
-		turn.observeCapacityToolCall(&call)
+		turn.observeCapacityToolCall(&call, false)
 	}
 	turn.evidenceMu.Unlock()
 	snapshot := a.capacityContinuationSnapshot(turn, true)
@@ -373,6 +373,7 @@ func newCapacityPromptTurn(t *testing.T, generation uint64) (*Adapter, *promptTu
 
 func TestCapacityContinuationSupportIsNarrow(t *testing.T) {
 	require.Equal(t, streams.CapacityContinuationCodexLiveSessionV1, newCodexACPDialect().capacityContinuationSupport)
+	require.Equal(t, streams.CapacityContinuationOpenCodeLiveSessionV1, newACPDialect(openCodeAgentID).capacityContinuationSupport)
 	require.Equal(t, streams.CapacityContinuationMockLiveSessionV1, newMockACPDialect().capacityContinuationSupport)
 	require.Empty(t, newACPDialect(cursorAgentID).capacityContinuationSupport)
 	require.Empty(t, newACPDialect(claudeAgentID).capacityContinuationSupport)

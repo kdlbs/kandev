@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -674,4 +679,106 @@ func TestLaunchDynamicSuccessorDetached_SkipsWhenServiceStopped(t *testing.T) {
 		t.Fatal("a restarted service refused to schedule the detached successor launch")
 	}
 	svc.stopDynamicSuccessorWorkers()
+}
+
+const (
+	materializedRouteTaskID         = "task-materialized-route"
+	materializedRouteSessionID      = "session-materialized-route"
+	materializedRouteLogicalProfile = "profile-dynamic-a"
+	materializedRouteConcrete       = "profile-concrete-a"
+)
+
+func newMaterializedRouteService(t *testing.T) (*Service, *sqliterepo.Repository, *atomic.Int32) {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, materializedRouteTaskID, materializedRouteSessionID, models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, err)
+	session.AgentProfileID = materializedRouteLogicalProfile
+	session.ExecutionProfileID = materializedRouteConcrete
+	session.RouteGeneration = 1
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+		SessionID: materializedRouteSessionID, LogicalProfileID: materializedRouteLogicalProfile,
+		ExecutionProfileID: materializedRouteConcrete, Generation: 1, ProfileVersion: 1,
+		Status: "active", UpdatedAt: time.Now().UTC(),
+	}))
+
+	var launches atomic.Int32
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launches.Add(1)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-materialized-route"}, nil
+		},
+	}
+	schedulerRepo := newMockTaskRepo()
+	schedulerRepo.tasks[materializedRouteTaskID] = &v1.Task{ID: materializedRouteTaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), schedulerRepo, agentManager)
+	return svc, repo, &launches
+}
+
+// Selecting a different logical profile on a session whose dynamic route is
+// already materialized for another family is a session handoff, not a resume.
+// Relabelling in place would show the new profile while the authoritative route
+// keeps launching the previous family's concrete candidate.
+func TestStartCreatedSession_RefusesProfileChangeOnMaterializedDynamicRoute(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, launches := newMaterializedRouteService(t)
+
+	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
+		"profile-dynamic-b", "continue", false, false, true, nil, nil)
+
+	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, getErr)
+	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
+		"the session label must keep the route's logical profile")
+	require.Equal(t, materializedRouteConcrete, session.ExecutionProfileID)
+	require.Zero(t, launches.Load(), "no agent may launch under the mismatched label")
+	require.ErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	state, stateErr := repo.LoadRouteState(ctx, materializedRouteSessionID)
+	require.NoError(t, stateErr)
+	require.Equal(t, materializedRouteLogicalProfile, state.LogicalProfileID)
+	require.EqualValues(t, 1, state.Generation)
+}
+
+// The same logical profile resumes its route, and a session without a
+// materialized route keeps its first profile selection. Both run through the
+// real StartCreatedSession entrypoint and are asserted to succeed and launch
+// exactly once, so the guard's positive wiring is covered and not only the
+// refusal branch.
+func TestStartCreatedSession_MaterializedRouteGuardKeepsSameProfileAndFirstSelection(t *testing.T) {
+	ctx := context.Background()
+
+	// Same logical profile resumes its route and launches once.
+	svc, repo, launches := newMaterializedRouteService(t)
+	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
+		materializedRouteLogicalProfile, "continue", false, false, true, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, launches.Load(), "a route for the requested profile must resume and launch once")
+	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, getErr)
+	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
+		"a route for the requested profile must resume under the same label")
+
+	// A session without a materialized route keeps its first profile selection.
+	unrouted := setupTestRepo(t)
+	seedTaskAndSession(t, unrouted, "task-unrouted", "session-unrouted", models.TaskSessionStateCreated)
+	var unroutedLaunches atomic.Int32
+	unroutedAgent := &mockAgentManager{launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		unroutedLaunches.Add(1)
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-unrouted"}, nil
+	}}
+	unroutedTaskRepo := newMockTaskRepo()
+	unroutedTaskRepo.tasks["task-unrouted"] = &v1.Task{ID: "task-unrouted", WorkspaceID: "ws1", Title: "Test Task"}
+	unroutedSvc := createTestServiceWithScheduler(unrouted, newMockStepGetter(), unroutedTaskRepo, unroutedAgent)
+	_, err = unroutedSvc.StartCreatedSession(ctx, "task-unrouted", "session-unrouted",
+		"profile-first", "go", false, false, true, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, unroutedLaunches.Load(), "an unrouted session must keep its first profile selection and launch once")
+	unroutedSession, getErr := unrouted.GetTaskSession(ctx, "session-unrouted")
+	require.NoError(t, getErr)
+	require.Equal(t, "profile-first", unroutedSession.AgentProfileID,
+		"an unrouted session must keep its first profile selection")
 }

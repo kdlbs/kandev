@@ -100,6 +100,10 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-007.3:** When OpenCode reports a job outcome, the system shall update that job once and retain its available output and exit status.
 - **AC-AGENTS-BACKGROUND-WORK-007.4:** When completion delivery or current liveness is unavailable, the system shall show that limitation without reporting successful completion or verified running activity.
 - **AC-AGENTS-BACKGROUND-WORK-007.5:** When a new foreground turn starts, jobs from earlier turns shall retain their identity and remain inspectable.
+- **AC-AGENTS-BACKGROUND-WORK-007.6:** When the supported v2 plugin reports an owned shell outcome, the workload shall retain its actual terminal state and available exit code.
+- **AC-AGENTS-BACKGROUND-WORK-007.7:** When that outcome arrives after a foreground response or during another turn, it shall settle the original job without changing that turn.
+- **AC-AGENTS-BACKGROUND-WORK-007.8:** When the plugin lacks output or live-activity evidence, the system shall retain those limitations. An unknown job can settle only from actual outcome evidence.
+- **AC-AGENTS-BACKGROUND-WORK-007.9:** When the plugin is absent, disabled, incompatible, or loses an outcome, ordinary ACP prompting and inspection shall retain their existing behavior.
 
 ### REQ-AGENTS-BACKGROUND-WORK-008: OpenCode automatic follow-up delivery
 
@@ -123,9 +127,12 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
 
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
-owns these provider-specific additions. The shared criteria above retain their
-existing meanings. A working-in-background display does not change workflow
-placement, authorize concurrent prompts, or declare the user's goal complete.
+owns full provider continuity. The
+[Kandev plugin design](../system-design/opencode-kandev-plugin.md) owns the
+bounded v2 compatibility path for criteria 007.6 through 007.9. The shared
+criteria retain their existing meanings. A working-in-background display does
+not change workflow placement, authorize concurrent prompts, or declare the
+user's goal complete.
 
 ## Exclusions and related contracts
 

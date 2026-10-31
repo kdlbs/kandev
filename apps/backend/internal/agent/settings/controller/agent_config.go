@@ -462,6 +462,7 @@ func (c *Controller) ResolveAgentModelConfig(
 	}
 	resp.Status = string(resolution.Status)
 	resp.ContextRevision = resolution.ContextRevision
+	resp.ReasonCode = profileProbeReasonCode(agentName, profileContext, resolution.Status, resolution.ReasonCode)
 	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
 	if resolution.Error != "" {
 		message := "model option resolution failed"

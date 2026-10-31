@@ -66,6 +66,17 @@ type TaskLaunchErrorObservation struct {
 // TaskLaunchErrorLoader reads the bounded task-owned pre-session error source.
 type TaskLaunchErrorLoader func(context.Context, string) (TaskLaunchErrorObservation, error)
 
+// TaskTurnErrorObservation reports whether the task-owned turn-error key was
+// observed. An observed absence clears the projection; an unobserved source
+// keeps the last valid one.
+type TaskTurnErrorObservation struct {
+	Error    *TurnErrorSummary
+	Observed bool
+}
+
+// TaskTurnErrorLoader reads the bounded failed-turn attention pointer.
+type TaskTurnErrorLoader func(context.Context, string) (TaskTurnErrorObservation, error)
+
 // TaskActivityLoader rehydrates the durable maximum activity timestamp for a
 // task when a projector starts with a legacy or incomplete summary row.
 type TaskActivityLoader func(context.Context, string) (*time.Time, error)
@@ -102,6 +113,7 @@ type ProjectorConfig struct {
 	LoadPendingActions      PendingActionLoader
 	LoadSessionObservations SessionObservationLoader
 	LoadTaskLaunchError     TaskLaunchErrorLoader
+	LoadTaskTurnError       TaskTurnErrorLoader
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
@@ -135,6 +147,7 @@ type Projector struct {
 	loadPendingActions      PendingActionLoader
 	loadSessionObservations SessionObservationLoader
 	loadTaskLaunchError     TaskLaunchErrorLoader
+	loadTaskTurnError       TaskTurnErrorLoader
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
@@ -172,6 +185,8 @@ type projectionState struct {
 	errors            map[string]*ActiveErrorSummary
 	taskError         *ActiveErrorSummary
 	taskErrorObserved bool
+	turnError         *TurnErrorSummary
+	turnErrorObserved bool
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
@@ -247,6 +262,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPendingActions:      cfg.LoadPendingActions,
 		loadSessionObservations: cfg.LoadSessionObservations,
 		loadTaskLaunchError:     cfg.LoadTaskLaunchError,
+		loadTaskTurnError:       cfg.LoadTaskTurnError,
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
@@ -460,6 +476,13 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			return err
 		}
 	}
+	turnErrorChanged := false
+	if p.loadTaskTurnError != nil && isTaskErrorRefreshEvent(event.Type) {
+		turnErrorChanged, err = p.refreshTaskTurnError(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+	}
 	launchQueueChanged := false
 	if p.loadLaunchQueue != nil && (!state.launchQueueObserved || isLaunchQueueRefreshEvent(event.Type)) {
 		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
@@ -499,7 +522,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged || completionGateChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || turnErrorChanged || launchQueueChanged || completionGateChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -509,11 +532,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
 	if !changed {
 		return nil
 	}

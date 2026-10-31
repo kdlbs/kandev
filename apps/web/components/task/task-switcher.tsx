@@ -116,8 +116,6 @@ function buildTaskRowProps(
     onTogglePin: optionalHandler(props, handlers, "onTogglePin"),
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
-    archivingTaskId: props.archivingTaskId,
-    isArchiving: props.isArchiving,
     selectedTaskIds: props.selectedTaskIds,
     onToggleSelectTask: optionalHandler(props, handlers, "onToggleSelectTask"),
     onSelectTaskRange: optionalHandler(props, handlers, "onSelectTaskRange"),

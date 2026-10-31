@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
@@ -129,6 +130,128 @@ func (r *Repository) ParkRunForProviderCapacity(
 		return fmt.Errorf("run_routing: park: %w", err)
 	}
 	return nil
+}
+
+// SettleCeilingDeferredRun binds the Office run a ceiling replay launched.
+// Only the exact row the deferral parked is accepted, so a duplicate or stale
+// replay cannot claim a different run. sessionID is optional: a replay kind
+// that creates no session still releases the deferral park.
+func (r *Repository) SettleCeilingDeferredRun(
+	ctx context.Context, runID, sessionID, taskID, agentProfileID string,
+) (bool, error) {
+	if runID == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	query := `
+		UPDATE runs
+		SET status = 'claimed',
+		    session_id = CASE WHEN ? = '' THEN session_id ELSE ? END,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    claimed_at = ?,
+		    finished_at = NULL
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?`
+	args := []interface{}{sessionID, sessionID, now, runID, runsmodels.RoutingBlockedActionRequired}
+	if taskID != "" {
+		query += " AND " + dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id") + " = ?"
+		args = append(args, taskID)
+	}
+	if agentProfileID != "" {
+		query += " AND agent_profile_id = ?"
+		args = append(args, agentProfileID)
+	}
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, fmt.Errorf("run_routing: settle ceiling deferral: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// FailCeilingDeferredRun terminally fails the Office run whose ceiling deferral
+// was dropped. Only the exact row the deferral parked is accepted, so a stale
+// drop cannot fail a run another path already settled.
+func (r *Repository) FailCeilingDeferredRun(
+	ctx context.Context, runID, errorMessage, taskID string,
+) (*runsmodels.Run, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	query := `
+		UPDATE runs
+		SET status = 'failed',
+		    outcome = NULL,
+		    error_message = ?,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    finished_at = COALESCE(finished_at, ?)
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?`
+	args := []interface{}{errorMessage, now, runID, runsmodels.RoutingBlockedActionRequired}
+	if taskID != "" {
+		query += " AND " + dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id") + " = ?"
+		args = append(args, taskID)
+	}
+	query += " RETURNING *"
+	var run runsmodels.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(query), args...).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: fail ceiling deferral: %w", err)
+	}
+	return &run, nil
+}
+
+// FinishCeilingDeferredRunOnCompletion atomically finishes the exact parked run
+// whose completion event arrived before the ready-recovery claim. The row must
+// still be the queued ceiling-deferred run for this task and Office agent.
+func (r *Repository) FinishCeilingDeferredRunOnCompletion(
+	ctx context.Context, runID, sessionID, taskID, agentProfileID, outcome string,
+) (*runsmodels.Run, error) {
+	if runID == "" || taskID == "" || agentProfileID == "" {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var run runsmodels.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(fmt.Sprintf(`
+		UPDATE runs
+		SET status = 'finished',
+		    outcome = ?,
+		    session_id = CASE WHEN ? = '' THEN session_id ELSE ? END,
+		    routing_blocked_status = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    claimed_at = COALESCE(claimed_at, ?),
+		    finished_at = ?
+		WHERE id = ?
+		  AND status = 'queued'
+		  AND routing_blocked_status = ?
+		  AND (error_message IS NULL OR error_message = '')
+		  AND agent_profile_id = ?
+		  AND %s = ?
+		RETURNING *
+	`, dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id"))),
+		outcome, sessionID, sessionID, now, now, runID,
+		runsmodels.RoutingBlockedActionRequired, agentProfileID, taskID).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: finish ceiling deferral: %w", err)
+	}
+	return &run, nil
 }
 
 // ParkRunForSessionRecovery preserves a pending Office run after its session

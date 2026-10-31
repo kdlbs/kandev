@@ -7,6 +7,7 @@ import type {
   ThreadFilterOp,
   ThreadFilterValue,
   ThreadSortKey,
+  ThreadTaskScope,
 } from "@/lib/state/slices/ui/thread-view-types";
 import type { ThreadCandidate } from "@/lib/threads/thread-view-query";
 
@@ -243,7 +244,19 @@ export const THREAD_SORT_OPTIONS: readonly {
     labelKey: "threads:sortPrimaryAgent",
     descriptionKey: "threads:sortPrimaryAgentDescription",
   },
+  {
+    key: "selection",
+    labelKey: "threads:sortSelection",
+    descriptionKey: "threads:sortSelectionDescription",
+  },
 ];
+
+/** Selection order needs an explicit task list, so the all scope does not offer it. */
+export function threadSortOptionsForScope(mode: ThreadTaskScope["mode"]) {
+  return mode === "selected"
+    ? THREAD_SORT_OPTIONS
+    : THREAD_SORT_OPTIONS.filter((option) => option.key !== "selection");
+}
 
 const FIXED_OPTIONS: Partial<
   Record<ThreadFilterDimension, readonly { value: string; labelKey: string }[]>

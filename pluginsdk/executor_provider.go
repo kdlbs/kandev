@@ -110,6 +110,7 @@ func (r *RemotePlugin) DestroyExecutorEnvironment(ctx context.Context, req *Dest
 }
 
 func (s *grpcPluginServer) ValidateExecutorProfile(ctx context.Context, req *pluginv1.ValidateExecutorProfileRequest) (*pluginv1.ValidateExecutorProfileResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -125,6 +126,7 @@ func (s *grpcPluginServer) ValidateExecutorProfile(ctx context.Context, req *plu
 }
 
 func (s *grpcPluginServer) ProvisionExecutorEnvironment(ctx context.Context, req *pluginv1.ProvisionExecutorEnvironmentRequest) (*pluginv1.ProvisionExecutorEnvironmentResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -140,6 +142,7 @@ func (s *grpcPluginServer) ProvisionExecutorEnvironment(ctx context.Context, req
 }
 
 func (s *grpcPluginServer) RecoverExecutorOperation(ctx context.Context, req *pluginv1.RecoverExecutorOperationRequest) (*pluginv1.RecoverExecutorOperationResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -155,6 +158,7 @@ func (s *grpcPluginServer) RecoverExecutorOperation(ctx context.Context, req *pl
 }
 
 func (s *grpcPluginServer) AttachExecutorEnvironment(ctx context.Context, req *pluginv1.AttachExecutorEnvironmentRequest) (*pluginv1.AttachExecutorEnvironmentResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -170,6 +174,7 @@ func (s *grpcPluginServer) AttachExecutorEnvironment(ctx context.Context, req *p
 }
 
 func (s *grpcPluginServer) InspectExecutorEnvironment(ctx context.Context, req *pluginv1.InspectExecutorEnvironmentRequest) (*pluginv1.InspectExecutorEnvironmentResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -185,6 +190,7 @@ func (s *grpcPluginServer) InspectExecutorEnvironment(ctx context.Context, req *
 }
 
 func (s *grpcPluginServer) ResolveExecutorConnection(ctx context.Context, req *pluginv1.ResolveExecutorConnectionRequest) (*pluginv1.ResolveExecutorConnectionResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")
@@ -200,6 +206,7 @@ func (s *grpcPluginServer) ResolveExecutorConnection(ctx context.Context, req *p
 }
 
 func (s *grpcPluginServer) DestroyExecutorEnvironment(ctx context.Context, req *pluginv1.DestroyExecutorEnvironmentRequest) (*pluginv1.DestroyExecutorEnvironmentResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	provider, ok := s.impl.(ExecutorProviderPlugin)
 	if !ok {
 		return nil, unsupportedPluginExtension("complete executor provider")

@@ -73,6 +73,7 @@ func createSearchTestSchema(t *testing.T, repo *sqlite.Repository) {
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
 			workflow_template_id TEXT DEFAULT '',
+			is_system INTEGER NOT NULL DEFAULT 0,
 			name TEXT NOT NULL DEFAULT '',
 			description TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

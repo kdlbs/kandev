@@ -14,6 +14,8 @@ type SelectionCondition struct {
 	ValidateAdditions     func(context.Context) error
 	ExpectedDefinitionIDs *[]string
 	ExpectedRevision      *int64
+	ExcludedDefinitionIDs *[]string
+	ExclusionContext      *ResolutionContext
 }
 
 func (c SelectionCondition) Validate(scope SelectionScope) error {
@@ -22,6 +24,9 @@ func (c SelectionCondition) Validate(scope SelectionScope) error {
 			return ErrMCPInvalidSelection
 		}
 	} else if c.ExpectedRevision != nil {
+		return ErrMCPInvalidSelection
+	}
+	if c.ExcludedDefinitionIDs != nil && (scope != SelectionScopeTaskSession || c.ExpectedRevision == nil) {
 		return ErrMCPInvalidSelection
 	}
 	if c.ExpectedRevision != nil && *c.ExpectedRevision < 0 {
@@ -33,8 +38,9 @@ func (c SelectionCondition) Validate(scope SelectionScope) error {
 // SelectionSnapshot belongs to one read or committed replacement. State never
 // comes from a subsequent reread of another writer's selection.
 type SelectionSnapshot struct {
-	DefinitionIDs []string
-	State         *SessionMCPSelectionState
+	DefinitionIDs         []string
+	ExcludedDefinitionIDs []string
+	State                 *SessionMCPSelectionState
 }
 
 type ConditionalSelectionRepository interface {
@@ -89,8 +95,11 @@ func (s *SelectionService) replaceConditional(ctx context.Context, origin Select
 	if err := s.validateContext(ctx, origin.Scope, origin.WorkspaceID, origin.OwnerID); err != nil {
 		return SelectionSnapshot{}, err
 	}
+	if err := s.prepareExclusionCondition(ctx, origin, &condition); err != nil {
+		return SelectionSnapshot{}, err
+	}
 	if repo, ok := s.repo.(ConditionalSelectionRepository); ok {
-		snapshot, err := repo.ReplaceMCPSelectionsConditional(ctx, origin, uniqueSelectionIDs(ids), condition)
+		snapshot, err := repo.ReplaceMCPSelectionsConditional(ctx, origin, ids, condition)
 		if err != nil {
 			return snapshot, err
 		}
@@ -100,7 +109,7 @@ func (s *SelectionService) replaceConditional(ctx context.Context, origin Select
 		return s.safeSelectionSnapshot(ctx, origin, snapshot), nil
 	}
 	// Adapters without transactional admission may serve legacy callers only.
-	if condition.ExpectedDefinitionIDs != nil || condition.ExpectedRevision != nil {
+	if condition.ExpectedDefinitionIDs != nil || condition.ExpectedRevision != nil || condition.ExcludedDefinitionIDs != nil {
 		return SelectionSnapshot{}, ErrMCPInvalidSelection
 	}
 	if err := s.Replace(ctx, origin.Scope, origin.WorkspaceID, origin.OwnerID, ids); err != nil {
@@ -120,4 +129,19 @@ func (s *SelectionService) safeSelectionSnapshot(ctx context.Context, origin Sel
 		snapshot.State = &state
 	}
 	return snapshot
+}
+
+func (s *SelectionService) prepareExclusionCondition(ctx context.Context, origin SelectionOrigin, condition *SelectionCondition) error {
+	if condition.ExcludedDefinitionIDs == nil {
+		return nil
+	}
+	if s.resolutionContext == nil {
+		return ErrMCPInvalidSelection
+	}
+	rc, err := s.resolutionContext(ctx, origin.WorkspaceID, origin.OwnerID)
+	if err != nil || rc.WorkspaceID != origin.WorkspaceID || rc.SessionID != origin.OwnerID {
+		return ErrMCPInvalidSelection
+	}
+	condition.ExclusionContext = &rc
+	return nil
 }

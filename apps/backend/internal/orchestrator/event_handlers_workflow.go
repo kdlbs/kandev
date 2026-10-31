@@ -5846,6 +5846,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 			zap.String("session_id", sessionID), zap.Error(err))
 		return queueDrainSkipped
 	}
+	if s.queueDrainBlockedByDynamicRoute(ctx, sessionID) {
+		return queueDrainSkipped
+	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)
 	if !ok {
 		return queueDrainSkipped
@@ -7786,6 +7789,14 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 	}
 	if task.WorkflowStepID == "" || task.IsEphemeral {
 		if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+			return false
+		}
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+
+	if task.IsFromOffice && task.State == v1.TaskStateBlocked {
+		if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "no_automatic_transition") {
 			return false
 		}
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)

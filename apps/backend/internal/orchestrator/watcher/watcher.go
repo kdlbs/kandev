@@ -72,6 +72,7 @@ type AgentEventData struct {
 	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
 	RunID                     string                                `json:"run_id,omitempty"`
 	CausingRunID              string                                `json:"causing_run_id,omitempty"`
+	TerminalCausingRunID      string                                `json:"terminal_causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -109,9 +110,12 @@ type ACPSessionEventData struct {
 
 // PermissionRequestData contains data from permission_request events
 type PermissionRequestData struct {
-	TaskID        string                   `json:"task_id"`
-	TaskSessionID string                   `json:"session_id"`
-	AgentID       string                   `json:"agent_id"`
+	TaskID        string `json:"task_id"`
+	TaskSessionID string `json:"session_id"`
+	AgentID       string `json:"agent_id"`
+	// OwnerKind is "run" for a run-owned Office execution, which Office
+	// answers; the task permission path ignores it.
+	OwnerKind     string                   `json:"owner_kind,omitempty"`
 	RequestID     string                   `json:"request_id"`
 	PendingID     string                   `json:"pending_id"`
 	ToolCallID    string                   `json:"tool_call_id"`

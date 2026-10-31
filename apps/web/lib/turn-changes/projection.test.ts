@@ -55,6 +55,33 @@ describe("projectTurnRepositoryAvailability", () => {
       "content_unavailable",
     ],
     [
+      {
+        availability: "ready",
+        comparison_complete: true,
+        content_complete: false,
+        preservation_pending: true,
+      },
+      "pending",
+    ],
+    [
+      {
+        availability: "ready",
+        comparison_complete: true,
+        content_complete: false,
+        export_state: "queued",
+      },
+      "ready",
+    ],
+    [
+      {
+        availability: "ready",
+        comparison_complete: true,
+        content_complete: false,
+        export_state: "unavailable",
+      },
+      "content_unavailable",
+    ],
+    [
       { availability: "unavailable", comparison_complete: false, content_complete: false },
       "unavailable",
     ],
@@ -93,5 +120,39 @@ describe("turn change transcript eligibility", () => {
     const unavailable = summary({ availability: "unavailable", file_count: 0 });
     expect(projectTurnChangeSummary(unavailable).visible).toBe(true);
     expect(isTurnChangeCardVisible(unavailable)).toBe(false);
+  });
+});
+
+describe("history-unavailable card visibility", () => {
+  it("shows one unavailable card when every comparison is unavailable", () => {
+    const unavailable = summary({
+      availability: "unavailable",
+      counts_available: false,
+      file_count: 0,
+      reason: "history_conflict",
+      repositories: [
+        {
+          id: "repo-1",
+          checkout_id: "checkout-1",
+          availability: "unavailable",
+          comparison_basis: "history_unavailable",
+          enumeration_complete: false,
+          comparison_complete: false,
+          content_complete: false,
+        },
+      ],
+    });
+    expect(isTurnChangeCardVisible(unavailable)).toBe(true);
+  });
+
+  it("keeps ordinary zero-entry unavailable captures hidden", () => {
+    const captureFailure = summary({
+      availability: "unavailable",
+      counts_available: false,
+      file_count: 0,
+      reason: "checkout_unavailable",
+      repositories: [],
+    });
+    expect(isTurnChangeCardVisible(captureFailure)).toBe(false);
   });
 });

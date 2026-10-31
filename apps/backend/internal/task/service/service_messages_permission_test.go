@@ -9,6 +9,53 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestUpdatePermissionPresentationPublishesOnlyMatchedWrites(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-permission-presentation")
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "permission-presentation-message",
+		TaskID:        "task-123",
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypePermissionRequest,
+		Metadata: map[string]any{
+			"request_id":                             "request-presentation",
+			"pending_id":                             "pending-presentation",
+			models.PermissionPresentationMetadataKey: string(models.PermissionPresentationAutomatic),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	eventBus.ClearEvents()
+	_, updated, err := svc.UpdatePermissionPresentation(ctx, models.PermissionPresentationUpdate{
+		TaskID: "task-123", SessionID: sessionID, RequestID: "request-presentation",
+		PendingID: "pending-presentation", Presentation: models.PermissionPresentationInteractive,
+		RequirePresentation: models.PermissionPresentationAutomatic, RequireUnclaimed: true,
+	})
+	if err != nil || !updated {
+		t.Fatalf("update = %v, err=%v", updated, err)
+	}
+	if got := countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated); got != 1 {
+		t.Fatalf("message updates after promotion = %d, want 1", got)
+	}
+
+	_, updated, err = svc.UpdatePermissionPresentation(ctx, models.PermissionPresentationUpdate{
+		TaskID: "task-123", SessionID: sessionID, RequestID: "request-missing",
+		PendingID: "pending-presentation", Presentation: models.PermissionPresentationUnavailable,
+	})
+	if err != nil || updated {
+		t.Fatalf("mismatched update = %v, err=%v", updated, err)
+	}
+	if got := countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated); got != 1 {
+		t.Fatalf("message updates after no-op = %d, want 1", got)
+	}
+}
+
 func TestPermissionResolutionServicePublishesOnlySuccessfulWrites(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

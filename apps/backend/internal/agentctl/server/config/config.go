@@ -186,6 +186,11 @@ type Config struct {
 	// attestation, never the existing Claude/Codex observations.
 	AgentBackgroundWorkEnabled bool
 
+	// OpenCodePluginEnabled is the effective integration-plugin value for this
+	// launch, copied from the managed startup contract. An unmanaged/direct
+	// launch resolves it to false and keeps the legacy launch.
+	OpenCodePluginEnabled bool
+
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
 }
@@ -250,6 +255,10 @@ type McpServerConfig struct {
 // InstanceConfig holds configuration for a single agent instance.
 // This is passed to the process manager and API server.
 type InstanceConfig struct {
+	// HomeDir is the resolved Kandev root for this agentctl process. Private
+	// launch files are created beneath it, never inside the workspace.
+	HomeDir string `json:"-"`
+
 	// InstanceID is the stable identifier the InstanceManager assigned to
 	// this instance. Used by the API middleware to reject requests whose
 	// X-Instance-ID header doesn't match — a stale client that still
@@ -331,6 +340,14 @@ type InstanceConfig struct {
 	// feature value inherited from the server startup contract. False keeps
 	// provider background attestation off for this instance.
 	AgentBackgroundWorkEnabled bool
+
+	// OpenCodePluginEnabled carries features.opencodePlugin for this agentctl
+	// process. It is inherited from the private startup contract.
+	OpenCodePluginEnabled bool
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
 
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
@@ -502,6 +519,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	homeDir := resolveHomeDir()
 	agentSurvivalEnabled := false
 	agentBackgroundWorkEnabled := false
+	openCodePluginEnabled := false
 	if startup != nil {
 		idleTimeout = startup.IdleTimeout
 		idleReaperInterval = startup.IdleReaperInterval
@@ -522,6 +540,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		// unconditionally rather than guarded by a zero-value check.
 		agentSurvivalEnabled = startup.AgentSurvivalEnabled
 		agentBackgroundWorkEnabled = startup.AgentBackgroundWorkEnabled
+		openCodePluginEnabled = startup.OpenCodePluginEnabled
 	}
 
 	cfg := &Config{
@@ -557,6 +576,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		DiagnosticLogPath:          resolveDiagnosticLogPath(homeDir),
 		AgentSurvivalEnabled:       agentSurvivalEnabled,
 		AgentBackgroundWorkEnabled: agentBackgroundWorkEnabled,
+		OpenCodePluginEnabled:      openCodePluginEnabled,
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -679,6 +699,7 @@ func generateSelfToken() string {
 // If port is 0, it should be allocated by the caller.
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
+		HomeDir:                    c.HomeDir,
 		Port:                       port,
 		MCPHost:                    c.MCPReachableHost(),
 		Protocol:                   c.Defaults.Protocol,
@@ -694,6 +715,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 		PromptCancelJoinTimeout:    c.PromptCancelJoinTimeout,
 		DetachedEventLimit:         c.DetachedEventLimit,
 		AgentBackgroundWorkEnabled: c.AgentBackgroundWorkEnabled,
+		OpenCodePluginEnabled:      c.OpenCodePluginEnabled,
 		VscodeCommand:              c.VscodeCommand,
 		McpMode:                    "task",
 		AuthToken:                  c.AuthToken,
@@ -817,6 +839,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
+	if overrides.OpenCodePluginRuntime != nil {
+		cfg.OpenCodePluginRuntime = overrides.OpenCodePluginRuntime
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -866,6 +891,7 @@ type InstanceOverrides struct {
 	DeliveryStreamID           string
 	DeliveryIncarnationID      string
 	DeliveryHarnessGeneration  uint64
+	OpenCodePluginRuntime      *agentctltypes.OpenCodePluginRuntime
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {

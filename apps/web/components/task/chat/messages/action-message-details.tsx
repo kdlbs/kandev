@@ -30,6 +30,7 @@ export type ActionMeta = {
   recovery_phase?: string;
   recovery_disposition?: string;
   recovery_reason?: string;
+  recovery_activity_confirmed?: boolean;
   attempts_started?: number;
   runtime_retained?: boolean;
   failure_scope?: "turn" | "execution";

@@ -36,6 +36,7 @@ import {
 } from "@/lib/state/task-navigation-reads";
 import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
 import { TaskLoadErrorState } from "@/components/task/task-page-content";
+import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
 import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
 import { deriveTaskDetailRouteView } from "./task-detail-route-view";
@@ -121,10 +122,13 @@ export function TaskDetailRoute({
   }
 
   if (route.showInitialLoading) {
-    if (route.readState.phase === "retrying") {
-      return <TaskLoadErrorState temporaryError retrying onRetry={route.retrySessionRead} />;
+    const retrying = route.readState.phase === "loading" || route.readState.phase === "retrying";
+    if (route.readState.exhausted) {
+      return (
+        <TaskLoadErrorState temporaryError retrying={retrying} onRetry={route.retrySessionRead} />
+      );
     }
-    return <TaskRouteLoading />;
+    return <TaskLoadProgressState onRetry={route.retrySessionRead} />;
   }
 
   return (

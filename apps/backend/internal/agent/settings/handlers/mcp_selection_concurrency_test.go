@@ -38,6 +38,9 @@ func selectionRouter(t *testing.T) (*gin.Engine, *int) {
 	}
 	service := mcpconfig.NewSelectionService(repo, repo)
 	service.SetSessionMCPStateRepository(repo)
+	service.SetSessionResolutionContext(func(_ context.Context, workspaceID, sessionID string) (mcpconfig.ResolutionContext, error) {
+		return mcpconfig.ResolutionContext{WorkspaceID: workspaceID, SessionID: sessionID, RepositoryIDs: []string{"r"}}, nil
+	})
 	notifications := 0
 	service.SetSessionMCPChangeNotifier(func(context.Context, string) { notifications++ })
 	h := NewHandlers(nil, nil, log, "")

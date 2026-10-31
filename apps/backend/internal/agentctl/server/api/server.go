@@ -243,6 +243,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/turn-changes/delete", s.handleGitTurnCheckpointDelete)
 		api.POST("/git/turn-changes/compare", s.handleGitTurnCheckpointCompare)
 		api.POST("/git/turn-changes/export", s.handleGitTurnCheckpointExport)
+		api.POST("/git/turn-changes/archive", s.handleGitTurnCheckpointArchive)
 		api.GET("/git/turn-changes/scopes", s.handleGitTurnCheckpointScopes)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)

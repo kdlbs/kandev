@@ -847,11 +847,9 @@ func (si *SchedulerIntegration) launchAgent(
 // (the same status the routed dispatch path uses for the identical
 // disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
 // the scheduler's own wake-up loop from ever picking the run back up on
-// its own. There is no reconciliation path back from the orchestrator's
-// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism), so
-// the run stays parked until an operator finds it and clears the routing
-// block by hand.
+// its own. The orchestrator's ceiling replay owns reconciliation: it settles
+// the exact run when the launch is admitted, ready or terminal events recover
+// failed settlement writes, and a terminal drop fails the parked run.
 func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *runsmodels.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
@@ -1273,6 +1271,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
+	si.enrichRoutineWorkContext(ctx, pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)

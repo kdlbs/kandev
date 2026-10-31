@@ -23,6 +23,18 @@ var (
 	ErrTurnChangeRelationship        = repoerrors.ErrTurnChangeRelationship
 )
 
+const turnRepositoryChangeColumns = `id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
+	worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
+	end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
+	source_git_dir, content_source, preservation_state, preservation_reason, preservation_attempts,
+	preservation_bytes, preservation_receipt, preservation_deadline,
+	availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
+	overlap_intervals_json, created_at, updated_at,
+	start_provenance_json, end_provenance_json, comparison_version, comparison_basis, comparison_reason,
+	effective_start_commit_oid, effective_start_tree_oid, effective_end_commit_oid, effective_end_tree_oid,
+	comparison_ref, export_state, export_cursor, export_attempts, export_next_attempt_at, export_bytes,
+	export_reason, export_claim_owner, export_claim_token, export_claim_expires_at, export_fingerprint`
+
 func (r *Repository) CreateTurnChangeSet(ctx context.Context, changeSet *models.TurnChangeSet) error {
 	if err := prepareTurnChangeSet(changeSet); err != nil {
 		return err
@@ -191,6 +203,34 @@ func (r *Repository) GetTurnChangeSet(ctx context.Context, taskID, sessionID, ch
 	return changeSet, nil
 }
 
+// GetTurnChangeSetByID loads one change set for the task-owned export
+// processor, which only knows the repository row's owning change-set ID.
+func (r *Repository) GetTurnChangeSetByID(ctx context.Context, changeSetID string) (*models.TurnChangeSet, error) {
+	changeSet := &models.TurnChangeSet{}
+	err := r.ro.GetContext(ctx, changeSet, r.ro.Rebind(`
+		SELECT id, task_id, session_id, turn_id, task_environment_id, revision,
+			runtime_execution_id, startup_attempt_id, prompt_generation, execution_profile_id, route_generation,
+			capture_enabled, settings_user_id, actor_id, settings_revision, resolution_kind,
+			availability, reason, start_accepted, complete, summary_complete, content_complete,
+			turn_ordinal, terminal_at, terminal_outcome, final_assistant_message_id,
+			terminal_capture_started_at, terminal_capture_execution_id, terminal_capture_startup_attempt_id,
+			terminal_capture_prompt_generation, terminal_capture_environment_id, terminal_capture_outcome, terminal_capture_final_message_id,
+			fallback_anchor, file_count, added_lines, deleted_lines, binary_file_count, unknown_count_file_count, repository_count,
+			retain_until, expiry_reason, content_bytes, overlap_intervals_json, created_at, updated_at
+		FROM turn_change_sets WHERE id = ?
+	`), changeSetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %s", ErrTurnChangeSetNotFound, changeSetID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeTurnChangeOverlaps(changeSet.OverlapIntervalsJSON, &changeSet.OverlapIntervals); err != nil {
+		return nil, fmt.Errorf("decode turn change overlaps: %w", err)
+	}
+	return changeSet, nil
+}
+
 func (r *Repository) ListTurnChangeSets(ctx context.Context, taskID, sessionID string, offset, limit int) ([]*models.TurnChangeSet, int, error) {
 	if taskID == "" || sessionID == "" {
 		return nil, 0, nil
@@ -261,14 +301,79 @@ func (r *Repository) ListUnfinishedTurnChangeSets(ctx context.Context, limit int
 	return changeSets, nil
 }
 
+// ListUnfinishedTurnChangeSetsAfter returns one stable page of unfinished
+// change sets for bounded reconciliation.
+func (r *Repository) ListUnfinishedTurnChangeSetsAfter(ctx context.Context, afterID string, limit int) ([]*models.TurnChangeSet, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var changeSets []*models.TurnChangeSet
+	err := r.ro.SelectContext(ctx, &changeSets, r.ro.Rebind(`
+		SELECT id, task_id, session_id, turn_id, task_environment_id, revision,
+			runtime_execution_id, startup_attempt_id, prompt_generation, execution_profile_id, route_generation,
+			capture_enabled, settings_user_id, actor_id, settings_revision, resolution_kind,
+			availability, reason, start_accepted, complete, summary_complete, content_complete,
+			turn_ordinal, terminal_at, terminal_outcome, final_assistant_message_id,
+			terminal_capture_started_at, terminal_capture_execution_id, terminal_capture_startup_attempt_id,
+			terminal_capture_prompt_generation, terminal_capture_environment_id, terminal_capture_outcome, terminal_capture_final_message_id,
+			fallback_anchor, file_count, added_lines, deleted_lines, binary_file_count, unknown_count_file_count, repository_count,
+			retain_until, expiry_reason, content_bytes, overlap_intervals_json, created_at, updated_at
+		FROM turn_change_sets
+		WHERE terminal_at IS NULL AND id > ?
+		ORDER BY id
+		LIMIT ?
+	`), afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, changeSet := range changeSets {
+		if err := decodeTurnChangeOverlaps(changeSet.OverlapIntervalsJSON, &changeSet.OverlapIntervals); err != nil {
+			return nil, fmt.Errorf("decode unfinished turn change overlaps: %w", err)
+		}
+	}
+	return changeSets, nil
+}
+
+// ListResumableTurnChangeSets returns unfinished sets that already hold at
+// least one accepted end endpoint, so restart recovery can resume from
+// immutable evidence instead of settling it unavailable.
+func (r *Repository) ListResumableTurnChangeSets(ctx context.Context, afterID string, limit int) ([]*models.TurnChangeSet, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	var changeSets []*models.TurnChangeSet
+	err := r.ro.SelectContext(ctx, &changeSets, r.ro.Rebind(`
+		SELECT id, task_id, session_id, turn_id, task_environment_id, revision,
+			runtime_execution_id, startup_attempt_id, prompt_generation, execution_profile_id, route_generation,
+			capture_enabled, settings_user_id, actor_id, settings_revision, resolution_kind,
+			availability, reason, start_accepted, complete, summary_complete, content_complete,
+			turn_ordinal, terminal_at, terminal_outcome, final_assistant_message_id,
+			terminal_capture_started_at, terminal_capture_execution_id, terminal_capture_startup_attempt_id,
+			terminal_capture_prompt_generation, terminal_capture_environment_id, terminal_capture_outcome, terminal_capture_final_message_id,
+			fallback_anchor, file_count, added_lines, deleted_lines, binary_file_count, unknown_count_file_count, repository_count,
+			retain_until, expiry_reason, content_bytes, overlap_intervals_json, created_at, updated_at
+		FROM turn_change_sets cs
+		WHERE cs.terminal_at IS NULL AND cs.id > ?
+		  AND EXISTS (SELECT 1 FROM turn_repository_changes rc
+		              WHERE rc.change_set_id = cs.id AND rc.end_commit_oid <> '')
+		ORDER BY cs.id
+		LIMIT ?
+	`), afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, changeSet := range changeSets {
+		if err := decodeTurnChangeOverlaps(changeSet.OverlapIntervalsJSON, &changeSet.OverlapIntervals); err != nil {
+			return nil, fmt.Errorf("decode resumable turn change overlaps: %w", err)
+		}
+	}
+	return changeSets, nil
+}
+
 func (r *Repository) ListTurnRepositoryChanges(ctx context.Context, changeSetID string) ([]*models.TurnRepositoryChangeSet, error) {
 	var changes []*models.TurnRepositoryChangeSet
 	err := r.ro.SelectContext(ctx, &changes, r.ro.Rebind(`
-		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
-			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
-			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
-			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
-			overlap_intervals_json, created_at, updated_at
+		SELECT `+turnRepositoryChangeColumns+`
 		FROM turn_repository_changes
 		WHERE change_set_id = ?
 		ORDER BY checkout_id, id
@@ -309,11 +414,7 @@ func (r *Repository) ListTurnRepositoryChangesForSets(ctx context.Context, chang
 	}
 	var changes []*models.TurnRepositoryChangeSet
 	err := r.ro.SelectContext(ctx, &changes, r.ro.Rebind(`
-		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
-			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
-			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
-			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
-			overlap_intervals_json, created_at, updated_at
+		SELECT `+turnRepositoryChangeColumns+`
 		FROM turn_repository_changes
 		WHERE change_set_id IN (`+placeholders+`)
 		ORDER BY change_set_id, checkout_id, id
@@ -333,11 +434,7 @@ func (r *Repository) ListTurnRepositoryChangesForSets(ctx context.Context, chang
 func (r *Repository) GetTurnRepositoryChange(ctx context.Context, changeSetID, repositoryChangeID string) (*models.TurnRepositoryChangeSet, error) {
 	change := &models.TurnRepositoryChangeSet{}
 	err := r.ro.GetContext(ctx, change, r.ro.Rebind(`
-		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
-			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
-			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
-			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
-			overlap_intervals_json, created_at, updated_at
+		SELECT `+turnRepositoryChangeColumns+`
 		FROM turn_repository_changes WHERE change_set_id = ? AND id = ?
 	`), changeSetID, repositoryChangeID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -428,14 +525,38 @@ func (r *Repository) AcceptTurnChangeSetStart(
 }
 
 func (r *Repository) UpdateTurnChangeSetOverlaps(ctx context.Context, changeSetID string, overlaps []models.TurnChangeOverlap) error {
+	_, err := r.UpdateTurnChangeSetOverlapsIfRevision(ctx, changeSetID, 0, overlaps)
+	return err
+}
+
+// UpdateTurnChangeSetOverlapsIfRevision writes the whole overlap list only when
+// the caller still owns the expected revision. A zero revision is an
+// unconditional compatibility write.
+func (r *Repository) UpdateTurnChangeSetOverlapsIfRevision(
+	ctx context.Context,
+	changeSetID string,
+	expectedRevision int64,
+	overlaps []models.TurnChangeOverlap,
+) (bool, error) {
 	encoded, err := encodeTurnChangeOverlaps(overlaps)
 	if err != nil {
-		return fmt.Errorf("encode turn change overlaps: %w", err)
+		return false, fmt.Errorf("encode turn change overlaps: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE turn_change_sets SET overlap_intervals_json = ?, updated_at = ? WHERE id = ?
-	`), encoded, time.Now().UTC(), changeSetID)
-	return err
+	query := `UPDATE turn_change_sets SET overlap_intervals_json = ?, revision = revision + 1, updated_at = ? WHERE id = ?`
+	args := []any{encoded, time.Now().UTC(), changeSetID}
+	if expectedRevision > 0 {
+		query += ` AND revision = ?`
+		args = append(args, expectedRevision)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return updated == 1, nil
 }
 
 func (r *Repository) MarkTurnRepositoryCheckpointRefsCleaned(ctx context.Context, repositoryChangeID string) error {
@@ -589,15 +710,17 @@ func insertTurnRepositoryChangeStart(
 		INSERT INTO turn_repository_changes (
 			id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
 			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, hash_algorithm,
-			start_captured_at, start_ref, availability, reason, cleanup_pending, overlap_intervals_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			start_captured_at, start_ref, source_git_dir, availability, reason, cleanup_pending,
+			overlap_intervals_json, start_provenance_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`), repositoryChange.ID, changeSetID, repositoryChange.CheckoutID, repositoryChange.TaskEnvironmentRepoID,
 		repositoryChange.TaskRepositoryID, repositoryChange.RepositoryID, repositoryChange.WorktreeID,
 		repositoryChange.DisplayName, repositoryChange.RepositorySubpath, repositoryChange.StartCommitOID,
 		repositoryChange.StartTreeOID, repositoryChange.HashAlgorithm, repositoryChange.StartCapturedAt,
-		repositoryChange.StartReachabilityRef, repositoryChange.Availability, repositoryChange.Reason, repositoryChange.CleanupPending,
-		repositoryChange.OverlapIntervalsJSON, repositoryChange.CreatedAt, repositoryChange.UpdatedAt)
+		repositoryChange.StartReachabilityRef, repositoryChange.SourceGitDir, repositoryChange.Availability,
+		repositoryChange.Reason, repositoryChange.CleanupPending, repositoryChange.OverlapIntervalsJSON,
+		repositoryChange.StartProvenanceJSON, repositoryChange.CreatedAt, repositoryChange.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -715,16 +838,32 @@ func finalizeTurnChangeRepositories(
 		repositoryChange.OverlapIntervalsJSON = overlapJSON
 		result, err := tx.ExecContext(ctx, db.Rebind(`
 			UPDATE turn_repository_changes SET end_commit_oid = ?, end_tree_oid = ?, end_captured_at = ?, end_ref = ?,
+				source_git_dir = ?, content_source = ?, preservation_state = ?, preservation_reason = ?, preservation_attempts = ?,
+				preservation_bytes = ?, preservation_receipt = ?,
 				availability = ?, reason = ?, enumeration_complete = ?, comparison_complete = ?, content_complete = ?,
-				overlap_intervals_json = ?, updated_at = ?
+				overlap_intervals_json = ?, end_provenance_json = ?, comparison_version = ?, comparison_basis = ?,
+				comparison_reason = ?, effective_start_commit_oid = ?, effective_start_tree_oid = ?,
+				effective_end_commit_oid = ?, effective_end_tree_oid = ?, comparison_ref = ?,
+				export_state = ?, export_cursor = ?, export_attempts = ?, export_bytes = ?, export_reason = ?,
+				export_next_attempt_at = ?, export_claim_owner = ?, export_claim_expires_at = ?, updated_at = ?
 			WHERE id = ? AND change_set_id = ? AND (
 				(end_commit_oid = '' AND end_tree_oid = '' AND ? = '' AND ? = '' AND ? = '') OR
 				(end_commit_oid = ? AND end_tree_oid = ? AND end_ref = ?)
 			)
 		`), repositoryChange.EndCommitOID, repositoryChange.EndTreeOID, repositoryChange.EndCapturedAt,
-			repositoryChange.EndReachabilityRef, repositoryChange.Availability, repositoryChange.Reason,
+			repositoryChange.EndReachabilityRef, repositoryChange.SourceGitDir, repositoryChange.ContentSource, repositoryChange.PreservationState,
+			repositoryChange.PreservationReason, repositoryChange.PreservationAttempts,
+			repositoryChange.PreservationBytes, repositoryChange.PreservationReceipt,
+			repositoryChange.Availability, repositoryChange.Reason,
 			repositoryChange.EnumerationComplete, repositoryChange.ComparisonComplete, repositoryChange.ContentComplete,
-			repositoryChange.OverlapIntervalsJSON, finalization.TerminalAt, repositoryChange.ID, changeSetID,
+			repositoryChange.OverlapIntervalsJSON, repositoryChange.EndProvenanceJSON,
+			repositoryChange.ComparisonVersion, repositoryChange.ComparisonBasis, repositoryChange.ComparisonReason,
+			repositoryChange.EffectiveStartCommitOID, repositoryChange.EffectiveStartTreeOID,
+			repositoryChange.EffectiveEndCommitOID, repositoryChange.EffectiveEndTreeOID, repositoryChange.ComparisonRef,
+			repositoryChange.ExportState, repositoryChange.ExportCursor, repositoryChange.ExportAttempts,
+			repositoryChange.ExportBytes, repositoryChange.ExportReason, repositoryChange.ExportNextAttemptAt,
+			repositoryChange.ExportClaimOwner, repositoryChange.ExportClaimExpiresAt,
+			finalization.TerminalAt, repositoryChange.ID, changeSetID,
 			repositoryChange.EndCommitOID, repositoryChange.EndTreeOID, repositoryChange.EndReachabilityRef,
 			repositoryChange.EndCommitOID, repositoryChange.EndTreeOID, repositoryChange.EndReachabilityRef)
 		if err != nil {

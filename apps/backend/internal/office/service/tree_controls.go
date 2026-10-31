@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
@@ -127,7 +128,10 @@ func (s *Service) RestoreTaskTree(ctx context.Context, rootTaskID, restoredBy st
 		if member.SkipReason == treeHoldSkipAlreadyCanceled {
 			continue
 		}
-		if err := s.repo.UpdateTaskState(ctx, member.TaskID, member.TaskStatus); err != nil {
+		if s.taskStateWriter == nil {
+			return nil, fmt.Errorf("restore task %s: task state writer is not configured", member.TaskID)
+		}
+		if err := s.taskStateWriter.UpdateTaskState(ctx, member.TaskID, v1.TaskState(member.TaskStatus)); err != nil {
 			return nil, fmt.Errorf("restore task %s: %w", member.TaskID, err)
 		}
 	}

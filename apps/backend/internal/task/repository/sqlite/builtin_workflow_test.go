@@ -534,38 +534,46 @@ func TestRepositoryInitialization_HealsBuiltinWorkflowStepFlags(t *testing.T) {
 }
 
 func TestHealBuiltinWorkflowStepFlags_KeepsUserWorkflowStepUntouched(t *testing.T) {
-	repo := newRepoForBuiltinWorkflowTests(t)
-	ctx := context.Background()
-	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
-
-	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		INSERT INTO workflows (
-			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
-		) VALUES ('user-office', 'ws-1', 'My Office', 'office-default', 0, 0, ?, ?)
-	`), legacyTime, legacyTime)
-	if err != nil {
-		t.Fatalf("insert user office workflow: %v", err)
+	cases := []struct {
+		name, templateID, stepName string
+		system, signal             bool
+	}{
+		{"user Office", templateIDOfficeDefault, "Work", false, false},
+		{"configured Routine", templateIDRoutine, "In Progress", true, true},
 	}
-	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
-		INSERT INTO workflow_steps (
-			id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
-		) VALUES ('user-office-work', 'user-office', 'Work', 1, 'work', '{}', 0, ?, ?)
-	`), legacyTime, legacyTime)
-	if err != nil {
-		t.Fatalf("insert user work step: %v", err)
-	}
-
-	if err := repo.healBuiltinWorkflowStepFlags(); err != nil {
-		t.Fatalf("healBuiltinWorkflowStepFlags: %v", err)
-	}
-
-	steps := loadStepsForWorkflow(t, repo, "user-office")
-	work := findStepByNameLocal(steps, "Work")
-	if work == nil {
-		t.Fatal("missing Work step")
-	}
-	if work.AutoAdvanceRequiresSignal {
-		t.Error("healBuiltinWorkflowStepFlags() touched a user-customised (is_system=0) workflow's step")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepoForBuiltinWorkflowTests(t)
+			ctx := context.Background()
+			legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+			_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+    INSERT INTO workflows (
+     id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+    ) VALUES ('configured-workflow', 'ws-1', ?, ?, ?, 0, ?, ?)
+   `), tc.name, tc.templateID, tc.system, legacyTime, legacyTime)
+			if err != nil {
+				t.Fatalf("insert configured workflow: %v", err)
+			}
+			_, err = repo.db.ExecContext(ctx, repo.db.Rebind(`
+    INSERT INTO workflow_steps (
+     id, workflow_id, name, position, stage_type, events, auto_advance_requires_signal, created_at, updated_at
+    ) VALUES ('configured-step', 'configured-workflow', ?, 1, 'custom', '{}', ?, ?, ?)
+   `), tc.stepName, tc.signal, legacyTime, legacyTime)
+			if err != nil {
+				t.Fatalf("insert configured step: %v", err)
+			}
+			if err := repo.healBuiltinWorkflowStepFlags(); err != nil {
+				t.Fatalf("healBuiltinWorkflowStepFlags: %v", err)
+			}
+			steps := loadStepsForWorkflow(t, repo, "configured-workflow")
+			step := findStepByNameLocal(steps, tc.stepName)
+			if step == nil {
+				t.Fatal("missing configured step")
+			}
+			if step.AutoAdvanceRequiresSignal != tc.signal {
+				t.Fatalf("signal setting = %v, want preserved %v", step.AutoAdvanceRequiresSignal, tc.signal)
+			}
+		})
 	}
 }
 

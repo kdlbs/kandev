@@ -5,12 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 	settings "github.com/kandev/kandev/internal/agent/settings/models"
@@ -310,4 +321,314 @@ func TestNativeReviewHostPolicyUsesSuccessorProviderIdentity(t *testing.T) {
 	require.ErrorIs(t, err, successor)
 	require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
 	require.Equal(t, "codex-acp", identity.Route.AgentID)
+}
+
+type localReviewSessionRepo struct {
+	session          *taskmodels.TaskSession
+	executorType     taskmodels.ExecutorType
+	taskRepositories []*taskmodels.TaskRepository
+}
+
+type unavailableReviewExecution struct{ execution *lifecycle.AgentExecution }
+
+func (e unavailableReviewExecution) GetExecutionBySessionID(string) (*lifecycle.AgentExecution, bool) {
+	return e.execution, true
+}
+func (e unavailableReviewExecution) GetOrEnsureExecution(context.Context, string) (*lifecycle.AgentExecution, error) {
+	return e.execution, nil
+}
+func (unavailableReviewExecution) CheckSessionExecAccess(context.Context, string) error { return nil }
+
+func (r localReviewSessionRepo) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
+	return r.session, nil
+}
+func (r localReviewSessionRepo) GetExecutor(context.Context, string) (*taskmodels.Executor, error) {
+	return &taskmodels.Executor{Type: r.executorType}, nil
+}
+
+func (r localReviewSessionRepo) GetRepository(_ context.Context, id string) (*taskmodels.Repository, error) {
+	return &taskmodels.Repository{ID: id, Name: "repo-" + id}, nil
+}
+
+func (r localReviewSessionRepo) ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error) {
+	return r.taskRepositories, nil
+}
+
+// TestReviewLocalFallbackAnchorsOnLiveTarget keeps changes that already landed
+// on the target branch out of a task review when the session stored base is
+// older than the target the task merged.
+func TestReviewLocalFallbackAnchorsOnLiveTarget(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init")
+	git("config", "user.email", "review@example.test")
+	git("config", "user.name", "Review Test")
+	write("base.txt", "base\n")
+	git("add", ".")
+	git("commit", "-m", "base")
+	base := git("rev-parse", "HEAD")
+	git("checkout", "-b", "upstream")
+	write("upstream.txt", "upstream\n")
+	git("add", ".")
+	git("commit", "-m", "upstream")
+	git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
+	git("checkout", "-b", "task", base)
+	git("merge", "--no-ff", "-m", "merge upstream", "upstream")
+	write("task.txt", "task\n")
+	git("add", ".")
+	git("commit", "-m", "task change")
+	r := localReviewSessionRepo{session: &taskmodels.TaskSession{
+		ID: "s", ExecutorID: "exec", BaseBranch: "main", BaseCommitSHA: base,
+		Worktrees: []*taskmodels.TaskEnvironmentRepo{{WorktreePath: dir}},
+	}, executorType: taskmodels.ExecutorTypeLocal}
+	files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: r}), "s", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, file := range files {
+		if file.Path == "upstream.txt" {
+			t.Fatalf("merged upstream change was reviewed: %+v", files)
+		}
+		if file.Path == "task.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("task change missing: %+v", files)
+	}
+}
+
+func TestReviewLocalFallbackUsesQualifiedComparisonTarget(t *testing.T) {
+	for _, materialized := range []bool{true, false} {
+		name := "materialized target"
+		if !materialized {
+			name = "unavailable target does not fall back to origin"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			git := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			write := func(name, content string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git("init")
+			git("config", "user.email", "review@example.test")
+			git("config", "user.name", "Review Test")
+			write("base.txt", "base\n")
+			git("add", ".")
+			git("commit", "-m", "base")
+			base := git("rev-parse", "HEAD")
+
+			git("checkout", "-b", "origin-main")
+			write("fork.txt", "fork-only\n")
+			git("add", ".")
+			git("commit", "-m", "fork main")
+			git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
+
+			git("checkout", "-b", "upstream-main", base)
+			write("upstream.txt", "upstream target\n")
+			git("add", ".")
+			git("commit", "-m", "upstream main")
+			upstream := git("rev-parse", "HEAD")
+
+			target := taskmodels.ComparisonTarget{
+				Version: taskmodels.ComparisonTargetVersion, Provider: taskmodels.ComparisonTargetProviderGitHub,
+				Kind: taskmodels.ComparisonTargetKindPullRequest, Number: 12, HeadBranch: "feature/review",
+				TargetBranch: "main",
+				HeadRepository: taskmodels.ComparisonTargetRepository{
+					Host: "github.com", Path: "contributor/project", RemoteURL: "https://github.com/contributor/project.git",
+				},
+				TargetRepository: taskmodels.ComparisonTargetRepository{
+					Host: "github.com", Path: "upstream/project", RemoteURL: "https://github.com/upstream/project.git",
+				},
+			}
+			metadata := map[string]interface{}{}
+			if err := taskmodels.PutComparisonTarget(metadata, &target); err != nil {
+				t.Fatal(err)
+			}
+			if materialized {
+				git("update-ref", target.ComparisonRef(), upstream)
+			}
+
+			git("checkout", "-b", "task", upstream)
+			write("task.txt", "task change\n")
+			git("add", ".")
+			git("commit", "-m", "task change")
+
+			repo := localReviewSessionRepo{
+				session: &taskmodels.TaskSession{
+					ID: "s", TaskID: "task", ExecutorID: "exec", RepositoryID: "repo",
+					BaseBranch: "main", BaseCommitSHA: base,
+					Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "repo", WorktreePath: dir}},
+				},
+				executorType:     taskmodels.ExecutorTypeLocal,
+				taskRepositories: []*taskmodels.TaskRepository{{TaskID: "task", RepositoryID: "repo", BaseBranch: "main", Metadata: metadata}},
+			}
+			files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: repo}), "s", "")
+			if !materialized {
+				if !errors.Is(err, review.ErrWorkspaceUnavailable) {
+					t.Fatalf("missing comparison target error = %v, want workspace comparison unavailable", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 || files[0].Path != "task.txt" {
+				t.Fatalf("files = %+v, want only task.txt relative to the upstream target", files)
+			}
+		})
+	}
+}
+
+func TestReviewAgentctlUnavailableUsesLocalGit(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.name", "Review Test")
+	git("config", "user.email", "review@example.test")
+	file := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(file, []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-m", "base")
+	git("tag", "review-base")
+	if err := os.WriteFile(file, []byte("new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "committed.go"), []byte("committed change\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "committed.go")
+	git("commit", "-m", "branch change")
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Close()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &lifecycle.AgentExecution{SessionID: "s"}
+	execution.SetAgentCtlClientForTesting(agentctl.NewClient(u.Hostname(), port, log))
+	for _, typ := range []taskmodels.ExecutorType{taskmodels.ExecutorTypeLocal, taskmodels.ExecutorTypeWorktree, taskmodels.ExecutorTypeSSH} {
+		t.Run(string(typ), func(t *testing.T) {
+			r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", BaseBranch: "review-base", Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "primary", WorktreePath: dir}}}, executorType: typ}
+			src := handlers.NewReviewChangeSource(unavailableReviewExecution{execution}, reviewSessionReader{repo: r})
+			files, err := review.CollectChanges(context.Background(), src, "s", "")
+			if typ == taskmodels.ExecutorTypeSSH {
+				if !errors.Is(err, review.ErrWorkspaceUnavailable) {
+					t.Fatalf("remote executor must not read host disk: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("local git must work without agentctl: %v", err)
+			}
+			if len(files) != 2 || files[0].Path != "committed.go" || !strings.Contains(files[1].Diff, "+new") {
+				t.Fatalf("files = %+v", files)
+			}
+			for _, file := range files {
+				if file.RepositoryName != "" || file.RepositoryID != "" || file.Key() != file.Path {
+					t.Fatalf("single-repo scope must be the legacy bare path: %+v", file)
+				}
+			}
+		})
+	}
+	t.Run("repository scopes", func(t *testing.T) {
+		r := localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", TaskID: "task", ExecutorID: "exec", RepositoryID: "one", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+			{RepositoryID: "one", WorkspaceRelativePath: "one", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
+		}}, executorType: taskmodels.ExecutorTypeLocal, taskRepositories: []*taskmodels.TaskRepository{
+			{TaskID: "task", RepositoryID: "one", BaseBranch: "main"},
+			{TaskID: "task", RepositoryID: "two", BaseBranch: "main"},
+		}}
+		files, err := review.CollectChanges(context.Background(), handlers.NewReviewChangeSource(unavailableReviewExecution{}, reviewSessionReader{repo: r}), "s", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys := make(map[string]bool, len(files))
+		for _, file := range files {
+			keys[file.Key()] = true
+		}
+		if len(files) != 2 || !keys["one\x00main.go"] || !keys["two\x00main.go"] {
+			t.Fatalf("multi-repo scope keys = %+v", files)
+		}
+	})
+	t.Run("map key matches panel scope", func(t *testing.T) {
+		single := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "s", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{{RepositoryID: "primary", WorktreePath: dir}}}, executorType: taskmodels.ExecutorTypeLocal}}
+		uncommitted, err := single.LocalReviewFiles(context.Background(), "s", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := uncommitted["main.go"]; !ok {
+			t.Fatalf("single-repo map key must be the bare path: %v", uncommitted)
+		}
+		multi := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "m", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+			{RepositoryID: "one", WorkspaceRelativePath: "one", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
+		}}, executorType: taskmodels.ExecutorTypeLocal}}
+		scoped, err := multi.LocalReviewFiles(context.Background(), "m", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := scoped["one\x00main.go"]; !ok {
+			t.Fatalf("multi-repo map key must be the panel scope key: %v", scoped)
+		}
+		rooted := reviewSessionReader{repo: localReviewSessionRepo{session: &taskmodels.TaskSession{ID: "r", ExecutorID: "exec", Worktrees: []*taskmodels.TaskEnvironmentRepo{
+			{RepositoryID: "root", WorktreePath: dir},
+			{RepositoryID: "two", WorkspaceRelativePath: "two", WorktreePath: dir},
+		}}, executorType: taskmodels.ExecutorTypeLocal}}
+		pair, err := rooted.LocalReviewFiles(context.Background(), "r", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := pair["\x00main.go"]; !ok {
+			t.Fatalf("multi-repo root key must be the empty scope key: %v", pair)
+		}
+	})
 }

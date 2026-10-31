@@ -107,6 +107,7 @@ func reconcileExpiredAgentDeliveryReplay(
 	repository AgentDeliveryRepository,
 	statusReader agentDeliveryStatusReader,
 	acknowledger agentDeliveryAcknowledger,
+	durability func(context.Context) error,
 ) (uint64, error) {
 	if event == nil || statusReader == nil || acknowledger == nil {
 		return 0, fmt.Errorf("expired delivery recovery dependencies are unavailable: %w", ErrDurableAdoptionBlocked)
@@ -128,7 +129,9 @@ func reconcileExpiredAgentDeliveryReplay(
 		return 0, fmt.Errorf("expired replay is not covered by both retained checkpoints: %w", repoerrors.ErrAgentDeliveryCheckpointMissing)
 	}
 	if status.Stream.Acknowledged < projected {
-		if err := acknowledger.AcknowledgeDelivery(ctx, event.StreamID, projected); err != nil {
+		if err := (deliveryJournalReleaser{durability: durability}).acknowledge(
+			ctx, acknowledger, event.StreamID, projected,
+		); err != nil {
 			return 0, fmt.Errorf("acknowledge projected delivery cursor after expiry: %w", err)
 		}
 	}

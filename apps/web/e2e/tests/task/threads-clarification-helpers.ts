@@ -183,10 +183,12 @@ type QuestionInput = "wheel" | "touch" | "keyboard";
 
 async function scrollQuestion(page: Page, tile: Locator, direction: number, touch: boolean) {
   const area = await tile.getByTestId("clarification-scroll-region").evaluate((inner) => {
-    const box = inner.getBoundingClientRect();
-    const footer = inner
-      .closest('[data-testid="thread-footer-allocation"]')!
-      .getBoundingClientRect();
+    const footerElement = inner.closest('[data-testid="thread-footer-allocation"]')!;
+    const scrollOwner = inner.closest('[data-scroll-owner="thread-footer"]')
+      ? footerElement
+      : inner;
+    const box = scrollOwner.getBoundingClientRect();
+    const footer = footerElement.getBoundingClientRect();
     const top = Math.max(box.top, footer.top, 0);
     const bottom = Math.min(box.bottom, footer.bottom, innerHeight);
     return { x: box.x + box.width / 2, y: (top + bottom) / 2, height: bottom - top };

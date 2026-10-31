@@ -1,7 +1,11 @@
 import { sshTest as test, expect } from "../../fixtures/ssh-test-base";
 import { execInContainer } from "../../helpers/ssh";
 import { waitForLatestSessionDone } from "../../helpers/session";
-import { enableTurnChangedFiles, waitForTurnChangeCount } from "../git/turn-changed-files-helpers";
+import {
+  enableTurnChangedFiles,
+  waitForTurnChangeCount,
+  waitForTurnChangeFileContent,
+} from "../git/turn-changed-files-helpers";
 
 test.describe("SSH executor turn change retention", () => {
   test("keeps exported turn content after the remote checkout is removed", async ({
@@ -59,6 +63,11 @@ test.describe("SSH executor turn change retention", () => {
       };
       const file = filePage.files.find((entry) => entry.path === "untracked_test.txt");
       expect(file?.id).toBeTruthy();
+      // The card is published before content preservation settles. Wait for the
+      // durable export before destroying the checkout it reads from.
+      expect(
+        await waitForTurnChangeFileContent(apiClient, sessionId, changeSet!.id, file!.id),
+      ).toContain("INITIAL_CONTENT");
 
       for (const checkoutPath of checkoutPaths) {
         execInContainer(seedData.sshTarget, ["rm", "-rf", checkoutPath]);

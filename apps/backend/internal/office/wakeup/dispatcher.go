@@ -212,6 +212,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 func (d *Dispatcher) coalesceIntoInflightRun(
 	ctx context.Context, req *officesqlite.WakeupRequest, inflight *runsmodels.Run,
 ) error {
+	if requestRoutineID := routineIDFromPayload(req); requestRoutineID != "" && requestRoutineID != routineIDFromRun(inflight) {
+		return d.createFreshRun(ctx, req)
+	}
 	reason := effectiveReason(req)
 	if reason != "" &&
 		shared.IsPeriodicTasklessWake(inflight.Reason) &&
@@ -228,6 +231,17 @@ func (d *Dispatcher) coalesceIntoInflightRun(
 		return nil
 	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+}
+
+func routineIDFromRun(run *runsmodels.Run) string {
+	if run.RoutineID != "" {
+		return run.RoutineID
+	}
+	var payload RoutinePayload
+	if UnmarshalPayload(run.ContextSnapshot, &payload) != nil {
+		return ""
+	}
+	return payload.RoutineID
 }
 
 // routineIDFromPayload extracts routine_id from req's payload for a

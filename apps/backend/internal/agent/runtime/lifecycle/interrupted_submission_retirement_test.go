@@ -33,14 +33,14 @@ func TestInterruptedNativeRestoreRetiresOnlyObservedSubmission(t *testing.T) {
 		}
 	})
 	execution := &AgentExecution{SessionID: "session", RequiredNativeConversationID: "native", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 4, InterruptedSubmissionID: "old", InterruptedStreamID: "stream", InterruptedHarnessGeneration: 3}
-	if err := retireInterruptedDeliverySubmission(context.Background(), client, execution); err != nil {
+	if err := retireInterruptedDeliverySubmission(context.Background(), deliveryJournalReleaser{}, client, execution); err != nil {
 		t.Fatal(err)
 	}
 	if retired != 1 {
 		t.Fatalf("retire calls=%d, want only observed submission", retired)
 	}
 	execution.InterruptedStreamID = "other-owner"
-	if err := retireInterruptedDeliverySubmission(context.Background(), client, execution); err == nil {
+	if err := retireInterruptedDeliverySubmission(context.Background(), deliveryJournalReleaser{}, client, execution); err == nil {
 		t.Fatal("retired mismatched submission")
 	}
 	if retired != 1 {

@@ -1,6 +1,13 @@
+import {
+  checkOfficeAvailability,
+  setOfficeAvailability,
+} from "../../helpers/storage-office-availability";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Settings header tabs on phones", () => {
+  test.beforeEach(async ({ testPage }) => {
+    await setOfficeAvailability(testPage, true);
+  });
   for (const width of [390, 767, 768, 1024]) {
     test(`keeps touch tabs inside their track at ${width}px`, async ({ testPage }, testInfo) => {
       await testPage.setViewportSize({ width, height: 844 });
@@ -112,3 +119,17 @@ test.describe("Settings header tabs on phones", () => {
     });
   });
 });
+
+for (const enabled of [false, true]) {
+  test(`Office ${enabled ? "enabled" : "disabled"} controls retention availability`, async ({
+    testPage,
+  }, testInfo) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await checkOfficeAvailability(testPage, enabled, true);
+    if (!enabled)
+      await testPage.screenshot({
+        path: testInfo.outputPath("office-disabled-storage.png"),
+        fullPage: true,
+      });
+  });
+}

@@ -349,3 +349,73 @@ it("can disable an enabled policy even after entering an invalid age", async () 
   expect(contributor.canSave).toBe(true);
   expect((screen.getByTestId(AGE_TEST_ID) as HTMLInputElement).value).toBe("3");
 });
+
+it("shows separate tool and history categories from one analysis", async () => {
+  const analysis: ToolPayloadOperation = {
+    id: "mixed-analysis",
+    kind: "analysis",
+    state: "succeeded",
+    scanned: 4,
+    eligible_tasks: 2,
+    eligible_messages: 3,
+    removed_messages: 0,
+    payload_bytes: 2048,
+    history_tasks: 2,
+    history_snapshots: 5,
+    history_sql_bytes: 1024,
+    history_git_bytes: 4096,
+    expired_change_sets: 0,
+    deleted_archive_refs: 0,
+    archive_failures: 0,
+    skipped: {},
+    cutoff: OPERATION_STARTED_AT,
+    started_at: OPERATION_STARTED_AT,
+    finished_at: OPERATION_FINISHED_AT,
+    age: baseline.policy.age,
+  };
+  vi.mocked(api.fetchToolPayloadRetention).mockResolvedValueOnce({
+    ...baseline,
+    last_analysis: analysis,
+  });
+  renderRetentionCard();
+  const estimate = await screen.findByTestId("tool-payload-estimate");
+  expect(estimate.textContent).toMatch(/2\.0 KB in tool details/);
+  expect(estimate.textContent).toMatch(/5\.0 KB in historical content/);
+  expect(estimate.textContent).toMatch(/Historical snapshots: 5 across 2 tasks/);
+  expect(estimate.textContent).toMatch(/1\.0 KB in SQL/);
+  expect(estimate.textContent).toMatch(/4\.0 KB in Git checkpoints/);
+});
+
+it("shows cleanup checkpoint counters without analysis inventory", async () => {
+  const cleanup: ToolPayloadOperation = {
+    id: "cleanup-history",
+    kind: "cleanup",
+    state: "succeeded",
+    scanned: 0,
+    eligible_tasks: 0,
+    eligible_messages: 0,
+    removed_messages: 0,
+    payload_bytes: 0,
+    history_tasks: 0,
+    history_snapshots: 0,
+    history_sql_bytes: 0,
+    history_git_bytes: 0,
+    expired_change_sets: 3,
+    deleted_archive_refs: 4,
+    archive_failures: 1,
+    skipped: {},
+    cutoff: OPERATION_STARTED_AT,
+    started_at: OPERATION_STARTED_AT,
+    finished_at: OPERATION_FINISHED_AT,
+    age: baseline.policy.age,
+  };
+  vi.mocked(api.fetchToolPayloadRetention).mockResolvedValueOnce({
+    ...baseline,
+    last_run: cleanup,
+  });
+  renderRetentionCard();
+  const run = await screen.findByTestId("tool-payload-last-run");
+  expect(run.textContent).toMatch(/Expired 3 historical snapshots/);
+  expect(run.textContent).toMatch(/Removed 4 checkpoint refs/);
+  expect(run.textContent).toMatch(/1 checkpoint cleanup is waiting to retry/);
+});

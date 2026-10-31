@@ -37,6 +37,7 @@
   "configurationChat": "配置聊天",
   "configurationChatDescription": "让智能体更新 Kandev 设置、工作流、智能体配置和 MCP 配置。",
   "configurationChatTab": "配置聊天",
+  "continuationActivityResumed": "智能体已恢复运行",
   "continuationHistoryPreserved": "之前的对话会保留。",
   "continuationIn": "将在 {{countdown}} 后继续。",
   "continuationPhase_continuing": "正在继续之前的请求...",

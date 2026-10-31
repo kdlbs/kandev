@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -37,6 +38,14 @@ func TestTurnChangeSummaryProjectionOmitsPrivateCaptureIdentityAndContent(t *tes
 	}
 	if !strings.Contains(body, `"fallback_anchor":"turn-changes:turn-1"`) || !strings.Contains(body, `"display_name":"app"`) {
 		t.Fatalf("summary projection is missing safe navigation metadata: %s", body)
+	}
+	if !strings.Contains(body, `"counts_available":true`) || strings.Contains(body, `"legacy_counts":true`) {
+		t.Fatalf("summary availability projection = %s", body)
+	}
+	repositories[0].ComparisonBasis = "legacy_raw"
+	payload, err = json.Marshal(projectTurnChangeSummaryEvent(changeSet, repositories))
+	if err != nil || !strings.Contains(string(payload), `"legacy_counts":true`) {
+		t.Fatalf("legacy comparison projection = %s, %v", payload, err)
 	}
 }
 
@@ -76,5 +85,25 @@ func TestTurnChangeHistoryReadsEnforceSessionOwnershipAndRelationships(t *testin
 	}
 	if _, err := svc.ReadTurnChangeContent(ctxAs("user-b"), "sess-b", "set-b", "file-not-owned", models.TurnChangeContentCanonicalPatch); !errors.Is(err, ErrTurnChangeContentExpired) {
 		t.Fatalf("expired content read error = %v, want explicit expiry", err)
+	}
+	retainUntil := time.Now().UTC().Add(-31 * 24 * time.Hour)
+	oldSet := &models.TurnChangeSet{
+		ID: "set-old", TaskID: "task-b", TaskSessionID: "sess-b", TurnID: "turn-old", TaskEnvironmentID: "env-b",
+		Availability: models.TurnChangeAvailabilityReady, RetainUntil: &retainUntil,
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn-old", TaskID: "task-b", TaskSessionID: "sess-b", StartedAt: startedAt.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTurnChangeSet(ctx, oldSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReadTurnChangeContent(ctxAs("user-b"), "sess-b", "set-old", "file-old", models.TurnChangeContentCanonicalPatch); !errors.Is(err, ErrTurnChangeContentExpired) {
+		t.Fatalf("legacy deadline read error = %v, want explicit expiry", err)
+	}
+	content := changes.NewContentService(nil, nil)
+	content.SetHistoryStore(changes.NewGitHistoryStore(t.TempDir(), nil))
+	svc.turnChangeContent = content
+	if _, err := svc.ReadTurnChangeContent(ctxAs("user-b"), "sess-b", "set-old", "file-old", models.TurnChangeContentCanonicalPatch); errors.Is(err, ErrTurnChangeContentExpired) {
+		t.Fatalf("Git-history read enforced the obsolete fixed deadline: %v", err)
 	}
 }

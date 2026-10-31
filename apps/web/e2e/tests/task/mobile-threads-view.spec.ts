@@ -597,6 +597,67 @@ test.describe("Mobile Threads view", () => {
     await expect(reloadedTrigger).toBeFocused();
   });
 
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.18
+  test("offers Selection order and numbers picked tasks in the native drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const { settings } = await apiClient.getUserSettings();
+    previousViewSettings = {
+      thread_views: settings.thread_views ?? [],
+      thread_active_view_id: settings.thread_active_view_id ?? "view-all-threads",
+      thread_view_draft: settings.thread_view_draft ?? null,
+    };
+    const titles = ["Mobile selection first work", "Mobile selection second work"];
+    for (const title of titles) {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        title,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await openTaskSession(testPage, title);
+      await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
+    }
+
+    await testPage.goto("/threads");
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const drawer = testPage.getByTestId("threads-mobile-view-drawer");
+    await drawer.getByTestId("threads-mobile-new-view").tap();
+    const editor = drawer.getByTestId("threads-view-editor");
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId("threads-sort-select").tap();
+    await expect(testPage.getByRole("option", { name: "Selection order" })).toHaveCount(0);
+    await testPage.getByRole("option", { name: "Attention" }).tap();
+
+    await editor.getByTestId("threads-scope-select").tap();
+    await testPage.getByRole("option", { name: "Selected tasks", exact: true }).tap();
+    await editor.getByTestId("threads-sort-select").tap();
+    await testPage.getByRole("option", { name: "Selection order" }).tap();
+    await expect(editor.getByTestId("threads-sort-select")).toContainText("Selection order");
+
+    await editor.getByTestId("threads-open-task-picker").tap();
+    const picker = drawer.getByTestId("threads-task-picker");
+    await expect(picker).toBeVisible();
+    const pickerRow = (title: string) =>
+      picker.getByTestId("threads-task-picker-row").filter({ hasText: title });
+    await pickerRow(titles[1]).getByTestId("threads-task-picker-checkbox").tap();
+    await pickerRow(titles[0]).getByTestId("threads-task-picker-checkbox").tap();
+    await expect(pickerRow(titles[1]).getByTestId("threads-task-picker-position")).toHaveText("1");
+    await expect(pickerRow(titles[0]).getByTestId("threads-task-picker-position")).toHaveText("2");
+    const rowBox = await pickerRow(titles[0]).boundingBox();
+    expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await assertNoHorizontalOverflow(testPage, "mobile Threads selection order picker");
+  });
+
   test("confirms deletion of a saved view inside the native drawer", async ({
     testPage,
     apiClient,

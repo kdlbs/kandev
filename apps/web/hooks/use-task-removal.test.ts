@@ -28,7 +28,7 @@ vi.mock("@/lib/routing/client-router", () => ({
   softNavigate: (...args: unknown[]) => softNavigateMock(...args),
 }));
 
-import { useTaskRemoval, selectNextTaskAfterRemoval } from "./use-task-removal";
+import { useTaskRemoval } from "./use-task-removal";
 import { setRecentTasks } from "@/lib/recent-tasks";
 import type { SidebarTaskPageResponse, Task } from "@/lib/types/http";
 import { makeTaskRemovalStore, type TaskRow } from "./use-task-removal.test-utils";
@@ -616,43 +616,5 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
 
     expect(store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks).toEqual([]);
     expect(softNavigateMock).toHaveBeenCalledWith(OVERVIEW_URL, "replace");
-  });
-});
-
-describe("selectNextTaskAfterRemoval — stale-candidate rejection", () => {
-  const select = selectNextTaskAfterRemoval as unknown as (
-    remaining: TaskRow[],
-    removedTaskId: string,
-    isLive: (taskId: string) => Promise<boolean>,
-    options?: { excludedTaskIds?: ReadonlySet<string> },
-  ) => Promise<TaskRow | null>;
-
-  it("skips every excluded descendant while preserving recent-task order", async () => {
-    const child: TaskRow = { ...CASCADE_CHILD, parentTaskId: null };
-    const deepChild: TaskRow = { ...CASCADE_DEEP_CHILD, parentTaskId: null };
-    const unrelated: TaskRow = { id: "task-unrelated", primarySessionId: "sess-unrelated" };
-    setRecentTasks([
-      { taskId: child.id, title: "Child", visitedAt: CASCADE_CHILD_VISITED_AT },
-      { taskId: deepChild.id, title: "Deep child", visitedAt: CASCADE_DEEP_CHILD_VISITED_AT },
-      { taskId: unrelated.id, title: "Unrelated", visitedAt: RECENT_TASK_VISITED_AT },
-    ]);
-
-    await expect(
-      select([child, deepChild, unrelated], CASCADE_PARENT.id, async () => true, {
-        excludedTaskIds: new Set([CASCADE_PARENT.id, child.id, deepChild.id]),
-      }),
-    ).resolves.toBe(unrelated);
-  });
-
-  it("returns null (redirect home) when the only remaining candidate is not a live board member", async () => {
-    const stale: TaskRow = { id: "task-A-stale", primarySessionId: "sess-A" };
-
-    await expect(select([stale], "task-B", async () => false)).resolves.toBeNull();
-  });
-
-  it("returns the candidate when it is a live board member", async () => {
-    const live: TaskRow = { id: "task-A-live", primarySessionId: "sess-A" };
-
-    await expect(select([live], "task-B", async () => true)).resolves.toBe(live);
   });
 });

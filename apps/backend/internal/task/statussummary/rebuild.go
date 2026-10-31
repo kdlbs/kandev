@@ -62,15 +62,17 @@ type RebuildInput struct {
 	Sessions []RebuildSession
 	// SessionsObserved distinguishes a complete empty snapshot from an
 	// unavailable or partial session source.
-	SessionsObserved bool
-	TaskError        *ActiveErrorSummary
-	PendingActions   map[string]string
-	ActivityObserved bool
-	LastActivityAt   *time.Time
-	Git              []RebuildGit
-	GitObserved      bool
-	PullRequests     []PullRequestInput
-	PRObserved       bool
+	SessionsObserved  bool
+	TaskError         *ActiveErrorSummary
+	TurnError         *TurnErrorSummary
+	TurnErrorObserved bool
+	PendingActions    map[string]string
+	ActivityObserved  bool
+	LastActivityAt    *time.Time
+	Git               []RebuildGit
+	GitObserved       bool
+	PullRequests      []PullRequestInput
+	PRObserved        bool
 	// QueuedPromptCount is the authoritative pending prompt count for the task
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
 	QueuedPromptCount      int
@@ -124,6 +126,10 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	if taskError := normalizeRebuildError(input.TaskError, input.Now); taskError != nil {
 		state.taskError = taskError
 		state.taskErrorObserved = true
+	}
+	if input.TurnErrorObserved {
+		state.turnError = cloneTurnError(input.TurnError)
+		state.turnErrorObserved = true
 	}
 	for sessionID, action := range input.PendingActions {
 		if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(action) == "" {

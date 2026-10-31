@@ -624,6 +624,10 @@ type wsAddMessageRequest struct {
 	PlanCommentRefs       []models.TaskPlanCommentRef     `json:"plan_comment_refs,omitempty"`
 	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef `json:"preview_feedback_refs,omitempty"`
 	RequirePrimarySession bool                            `json:"require_primary_session,omitempty"`
+	// ObservedTurnErrorStamp is the task turn-error stamp the client had
+	// rendered for this target session before submitting. It is optional and
+	// can only acknowledge that exact same-session attention.
+	ObservedTurnErrorStamp string `json:"observed_turn_error_stamp,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
 	canvasGuidanceResolved          bool
@@ -635,19 +639,20 @@ type wsAddMessageRequest struct {
 }
 
 type addMessageReplayIdentity struct {
-	TaskID                string                          `json:"task_id"`
-	TaskSessionID         string                          `json:"session_id"`
-	Content               string                          `json:"content"`
-	AuthorID              string                          `json:"author_id"`
-	Model                 string                          `json:"model"`
-	PlanMode              bool                            `json:"plan_mode"`
-	HasReviewComments     bool                            `json:"has_review_comments"`
-	Attachments           []v1.MessageAttachment          `json:"attachments"`
-	ContextFiles          []v1.ContextFileMeta            `json:"context_files"`
-	EntityReferences      []v1.EntityReference            `json:"entity_references"`
-	PlanCommentRefs       []models.TaskPlanCommentRef     `json:"plan_comment_refs"`
-	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef `json:"preview_feedback_refs"`
-	RequirePrimarySession bool                            `json:"require_primary_session"`
+	TaskID                 string                          `json:"task_id"`
+	TaskSessionID          string                          `json:"session_id"`
+	Content                string                          `json:"content"`
+	AuthorID               string                          `json:"author_id"`
+	Model                  string                          `json:"model"`
+	PlanMode               bool                            `json:"plan_mode"`
+	HasReviewComments      bool                            `json:"has_review_comments"`
+	Attachments            []v1.MessageAttachment          `json:"attachments"`
+	ContextFiles           []v1.ContextFileMeta            `json:"context_files"`
+	EntityReferences       []v1.EntityReference            `json:"entity_references"`
+	PlanCommentRefs        []models.TaskPlanCommentRef     `json:"plan_comment_refs"`
+	PreviewFeedbackRefs    []models.TaskPreviewFeedbackRef `json:"preview_feedback_refs"`
+	RequirePrimarySession  bool                            `json:"require_primary_session"`
+	ObservedTurnErrorStamp string                          `json:"observed_turn_error_stamp,omitempty"`
 }
 
 func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
@@ -657,7 +662,8 @@ func addMessageRequestFingerprint(req wsAddMessageRequest) (string, error) {
 		HasReviewComments: req.HasReviewComments, Attachments: req.Attachments,
 		ContextFiles: req.ContextFiles, EntityReferences: req.EntityReferences,
 		PlanCommentRefs: req.PlanCommentRefs, PreviewFeedbackRefs: req.PreviewFeedbackRefs,
-		RequirePrimarySession: req.RequirePrimarySession,
+		RequirePrimarySession:  req.RequirePrimarySession,
+		ObservedTurnErrorStamp: req.ObservedTurnErrorStamp,
 	})
 }
 
@@ -669,6 +675,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	req.Content = strings.TrimSpace(req.Content)
 	req.MessageID = strings.TrimSpace(req.MessageID)
+	req.ObservedTurnErrorStamp = strings.TrimSpace(req.ObservedTurnErrorStamp)
 	req.ClientMessageID = strings.TrimSpace(req.ClientMessageID)
 	if req.ClientMessageID == "" {
 		req.ClientMessageID = req.MessageID
@@ -1150,7 +1157,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 
+	turnErrorAckFailed := h.acknowledgeObservedTurnError(ctx, req)
 	apiMsg := message.ToAPI()
+	apiMsg.TurnErrorAcknowledgementFailed = turnErrorAckFailed
 	response, err := ws.NewResponse(msg.ID, msg.Action, apiMsg)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
@@ -1169,6 +1178,25 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	return response, nil
+}
+
+// acknowledgeObservedTurnError retires the exact task attention the client had
+// rendered for this session. An acknowledgement failure never rejects the
+// already-accepted prompt and never resends it.
+func (h *MessageHandlers) acknowledgeObservedTurnError(ctx context.Context, req wsAddMessageRequest) bool {
+	if h.service == nil || req.ObservedTurnErrorStamp == "" {
+		return false
+	}
+	if err := h.service.AcknowledgeTaskTurnError(
+		ctx, req.TaskID, req.TaskSessionID, req.ObservedTurnErrorStamp,
+	); err != nil {
+		h.logger.Warn("failed to acknowledge observed task turn error",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.TaskSessionID),
+			zap.Error(err))
+		return true
+	}
+	return false
 }
 
 func (h *MessageHandlers) addMessageReplayResponse(

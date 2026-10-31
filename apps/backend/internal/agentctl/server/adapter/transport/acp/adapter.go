@@ -15,6 +15,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
+	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -197,6 +198,14 @@ type Adapter struct {
 	// "ready" signal, and the last one always wins in the frontend.
 	isLoadingSession bool
 	loadReplayPlan   *acp.SessionUpdatePlan
+
+	// nativeGeneration identifies the current native conversation within this
+	// process. A reset, new, load, or resume advances it so stale plugin claims
+	// and callbacks cannot select a successor session.
+	nativeGeneration uint64
+	// openCodePluginClaims retains immutable launch bindings after the active
+	// tool-call map drops the foreground launch at prompt end.
+	openCodePluginClaims map[string]opencodeplugin.Claim
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
@@ -527,6 +536,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		openCodePluginClaims:      make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
 		handoffProtectedToolCalls: make(map[string]struct{}),

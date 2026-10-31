@@ -558,3 +558,62 @@ describe("hasFailedAgentBootAfter", () => {
     expect(hasFailedAgentBootAfter([setup], ERROR_AT)).toBe(false);
   });
 });
+
+describe("filterVisibleMessages permission presentation", () => {
+  it("hides an automatic standalone permission row", () => {
+    const permission = baseMessage({
+      id: "perm-auto",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "automatic" },
+    });
+
+    expect(filterPlanMessages([permission])).toEqual([]);
+  });
+
+  it("keeps an unavailable row so its feedback is visible", () => {
+    const permission = baseMessage({
+      id: "perm-unavailable",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "unavailable" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-unavailable",
+    ]);
+  });
+
+  it("keeps an interactive row actionable", () => {
+    const permission = baseMessage({
+      id: "perm-interactive",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "interactive" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-interactive",
+    ]);
+  });
+
+  it("keeps the tool row when an attached unavailable permission is deduplicated", () => {
+    const toolCall = baseMessage({
+      id: "tool-1",
+      type: "tool_call",
+      metadata: { tool_call_id: "call-1", status: "complete" },
+    });
+    const permission = baseMessage({
+      id: "perm-attached",
+      type: "permission_request",
+      metadata: {
+        status: "pending",
+        tool_call_id: "call-1",
+        permission_presentation: "unavailable",
+      },
+    });
+
+    expect(
+      filterVisibleMessages([toolCall, permission], new Set(["call-1"]), new Set()).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["tool-1"]);
+  });
+});

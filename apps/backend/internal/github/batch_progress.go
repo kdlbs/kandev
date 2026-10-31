@@ -26,6 +26,13 @@ type batchedBranchProgressEntry struct {
 	active   int
 }
 
+type workflowPhaseProgressEntry struct {
+	progress *workflowPhaseProgress
+	refsKey  string
+	updated  time.Time
+	active   int
+}
+
 func batchedPRProgressRefsKey(refs []graphQLPRRef) string {
 	parts := make([]string, 0, len(refs))
 	for _, ref := range refs {
@@ -106,6 +113,7 @@ func (s *Service) clearBatchedPRProgress() {
 	s.batchedProgressMu.Lock()
 	s.batchedPRProgress = nil
 	s.batchedBranchProgress = nil
+	s.batchedWorkflowProgress = nil
 	s.batchedProgressMu.Unlock()
 }
 
@@ -148,6 +156,74 @@ func (s *Service) expireBatchedProgressLocked(now time.Time) {
 		if entry.active == 0 && now.Sub(entry.updated) >= batchedPRProgressTTL {
 			delete(s.batchedBranchProgress, key)
 		}
+	}
+	for key, entry := range s.batchedWorkflowProgress {
+		if entry.active == 0 && now.Sub(entry.updated) >= batchedPRProgressTTL {
+			delete(s.batchedWorkflowProgress, key)
+		}
+	}
+}
+
+// workflowPhaseProgress returns the retained workflow evidence for one phase
+// identity. A changed target set replaces the entry so a stale head or ref set
+// can never satisfy a new pass.
+func (s *Service) workflowPhaseProgress(key, refsKey string) *workflowPhaseProgress {
+	s.batchedProgressMu.Lock()
+	defer s.batchedProgressMu.Unlock()
+	now := time.Now()
+	s.expireBatchedProgressLocked(now)
+	if s.batchedWorkflowProgress == nil {
+		s.batchedWorkflowProgress = make(map[string]*workflowPhaseProgressEntry)
+	}
+	entry := s.batchedWorkflowProgress[key]
+	if entry != nil && entry.refsKey != refsKey {
+		delete(s.batchedWorkflowProgress, key)
+		entry = nil
+	}
+	if entry == nil {
+		s.evictOldestWorkflowProgressLocked()
+		entry = &workflowPhaseProgressEntry{progress: newWorkflowPhaseProgress(), refsKey: refsKey, updated: now}
+		s.batchedWorkflowProgress[key] = entry
+	}
+	entry.active++
+	entry.updated = now
+	return entry.progress
+}
+
+func (s *Service) finishWorkflowPhaseProgress(key string, progress *workflowPhaseProgress, keep bool) {
+	s.batchedProgressMu.Lock()
+	defer s.batchedProgressMu.Unlock()
+	entry := s.batchedWorkflowProgress[key]
+	if entry == nil || entry.progress != progress {
+		return
+	}
+	if entry.active > 0 {
+		entry.active--
+	}
+	if !keep {
+		delete(s.batchedWorkflowProgress, key)
+		return
+	}
+	entry.updated = time.Now()
+}
+
+func (s *Service) evictOldestWorkflowProgressLocked() {
+	for len(s.batchedWorkflowProgress) >= batchedPRProgressMaxEntries {
+		oldestKey := ""
+		var oldest time.Time
+		for key, entry := range s.batchedWorkflowProgress {
+			if entry.active != 0 {
+				continue
+			}
+			if oldestKey == "" || entry.updated.Before(oldest) {
+				oldestKey = key
+				oldest = entry.updated
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(s.batchedWorkflowProgress, oldestKey)
 	}
 }
 

@@ -229,6 +229,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = ""
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -672,6 +673,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -787,6 +789,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.configGeneration++
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)

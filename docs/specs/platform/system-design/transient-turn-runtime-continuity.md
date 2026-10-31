@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-03
-updated: 2026-10-21
+updated: 2026-10-29
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -16,6 +16,7 @@ owners:
 ## Purpose and boundaries
 
 Separate a provider turn error from terminal execution failure.
+The [prompt-error extension](acp-prompt-error-continuity.md) defines provider-neutral retention for proven ACP error responses.
 The shared runtime owns process and connection lifetime.
 Orchestration owns failed-turn settlement and existing retry admission.
 Provider dialects translate tested error shapes into bounded evidence.
@@ -66,14 +67,17 @@ Require the same initialized native session, nonzero prompt generation, ownershi
 Use the existing SDK `ClientSideConnection.Done()` to reject closed transport.
 Do not send a probe prompt or create another provider session to establish liveness.
 
-The common extractor requires a high-confidence transient classification from sanitized provider evidence.
-It accepts tested application-level `session/prompt` errors and dialect-specific terminal provider-stream diagnostics.
-Generic internal errors, Data-only signatures, auth, hard quota, invalid model, and uncertain transport errors receive no retention attestation.
+The [prompt-error extension](acp-prompt-error-continuity.md) replaces the application-error classification gate with typed response-origin evidence.
+A proven `session/prompt` error response can retain any current usable ACP conversation.
+Error class still governs automatic recovery. Data-only signatures never establish runtime authority.
+Local SDK errors and uncertain transport do not qualify through this generic path.
+Dialect-specific terminal provider-stream diagnostics retain their existing tested contracts.
 Provider classification alone never establishes ACP liveness.
 
 Initial fixtures cover Codex's ordered systemError/capacity notifications, classifying ACP overload and rate-limit replies, and Cursor's tested terminal stream diagnostic.
 Cursor's native restore error contract remains distinct: SDK peer-disconnect errors do not become retention evidence.
-Unsupported providers retain existing behavior until their shape has positive and negative fixtures.
+Provider-specific stream diagnostics require positive and negative fixtures.
+Ordinary prompt error responses use the shared origin and runtime contract.
 
 Propagate the disposition through process forwarding, `TurnOutcomeRecorder`, agentctl JSON, retained-outcome retrieval, lifecycle snapshots, and watcher conversion.
 Remote omission and invalid values fail closed.
@@ -216,6 +220,59 @@ The [capacity plan](../../../plans/model-capacity-continuation/plan.md) owns exa
 Public guidance changes with implementation in `docs/public/tasks-and-workflows.md`.
 The design turn changes internal artifacts only.
 
+## OpenCode capacity support
+
+This amendment extends `REQ-PLATFORM-TURN-CONTINUITY-003` without another recovery owner.
+The [Agents signature contract](../../agents/system-design/provider-error-signatures.md#opencode-admission-refusal)
+maps the tested admission refusal to `CodeModelCapacity` and a bounded short reset hint.
+The [implementation package](../../../plans/opencode-capacity-retry/plan.md) owns delivery and compatibility evidence.
+
+Add `newOpenCodeACPDialect` in `dialect_opencode.go` and select it in `newACPDialect`.
+Add `CapacityContinuationOpenCodeLiveSessionV1` with wire value `opencode_live_session_v1`.
+Recognize it in `CapacityContinuationSnapshot.SafeFor` and `supportsCapacityContinuation`.
+Keep unknown support values ineligible.
+This value identifies a tested live-conversation contract, not a CLI release or provider assertion.
+Do not add OpenCode support to transport-loss restoration.
+
+The generic prompt-error path preserves the tested OpenCode capacity diagnostic and its recovery evidence.
+Capacity recovery keeps its high-confidence semantic gate. Runtime retention uses the shared origin and liveness checks.
+Generic internal, auth, and hard-quota prompt errors can retain a usable runtime under requirement 004.
+They do not qualify for capacity recovery. Cancellation, Data-only signatures, and broken transport grant no capacity authority.
+Capture capacity evidence after the notification queue drains and before synthetic tool cleanup.
+Use the existing bounded ledger for authoritative completed outcomes.
+OpenCode child-session, background, and subagent work must block continuation unless the current evidence accounts for its completion.
+A completed detached execute launch is not completed workload evidence: the ledger stays unresolved until terminal evidence for the same native shell, independent of the background-work inspection feature.
+Missing, malformed, or contradictory launch metadata fails closed.
+A terminal exit resolves the launch only when that launch identity was previously observed and the result does not disagree with it; an exit code alone or conflicting identity spellings never resolve the workload.
+Never infer that completion from a title or a null native retry update.
+
+Forward the existing typed failure and snapshot through process outcomes, lifecycle, and watcher conversion.
+The ordinary `AgentTurnFailed` owner settles the failed turn and retains the usable runtime.
+`handleTransientFailure` selects replay before output or continuation after known completed effects.
+`retryRetainedRuntimeContinuation` sends the existing internal instruction without original text or attachments.
+An eligible clean continuation can fail again before another tool completes.
+Keep its accepted generation and original episode under the existing successor-entry rules.
+
+OpenCode's native retry updates remain advisory while its prompt is active.
+Do not arm host recovery until the terminal prompt result settles and runtime ownership is validated.
+Native attempts do not consume the host's eleven additional dispatches.
+Do not reconstruct native retry metadata after the final null update.
+Duplicate terminal delivery must select the same host owner.
+
+For a capacity episode's first five slots, select the greater of the nominal delay and a valid short reset hint.
+Use the nominal delay when the hint is absent, stale, or more than one minute away.
+Later capacity slots and the fixed admission deadline retain their existing policy.
+Non-capacity reset-hint behavior remains unchanged.
+The first pictured retry therefore waits at least 21 seconds if the terminal hint remains current.
+Success, cancellation, supersession, runtime loss, exhaustion, and restart use existing cleanup owners.
+
+Task Chat reuses `TransientRetryNotice` and its localized capacity labels on desktop and phone.
+No markup, copy, layout, setting, feature flag, or migration is necessary.
+Focused E2E tests must prove the existing notice replaces the session-recovery failure for eligible OpenCode evidence.
+Retain the existing phone wrapping, transcript scroll owner, composer safe area, and reachable Cancel action.
+Native compatibility evidence shows a subsequent prompt on the same initialized OpenCode conversation after a controlled capacity error.
+Recorded notifications alone do not establish post-error liveness.
+
 ## Capacity episode timing
 
 The October 21 timing amendment is specified here and delivered by the
@@ -231,7 +288,7 @@ the global `transientMaxAttempts` or the generic short ladder. A non-capacity
 episode cannot gain a fresh capacity budget halfway through recovery.
 
 For a capacity episode use nominal delays of 5/10/20/40/60/120/240/300/300/300/300
-seconds. Preserve validated short reset hints only within the first five slots;
+seconds. Apply validated short reset hints as a minimum only within the first five slots;
 later slots use the slower ladder. No jitter is introduced in this amendment.
 The first failure starts a fixed thirty-minute window. Each next wait starts
 after the current failure settles, so prompt durations consume window time.
@@ -356,7 +413,8 @@ Correct `action-message-recovery-history.tsx` for existing persisted records too
 An execution ID alone cannot choose the startup view model.
 Use explicit bootstrap phase or typed startup causes for startup presentation.
 For the reported legacy capacity record, retain its provider explanation instead of the startup fallback.
-Existing true bootstrap, quota, runtime failure, and workspace recovery controls remain intact.
+Existing bootstrap, runtime failure, and workspace recovery controls remain intact.
+A quota error on a proven usable ACP conversation follows the nonblocking prompt-error contract.
 
 ## Desktop and phone
 

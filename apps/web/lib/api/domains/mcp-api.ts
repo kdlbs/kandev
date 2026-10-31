@@ -142,6 +142,7 @@ export async function getMCPSelections(
 export type MCPSelectionWriteOptions = ApiRequestOptions & {
   expected_definition_ids?: string[];
   expected_revision?: number;
+  excluded_definition_ids?: string[];
 };
 
 export async function replaceMCPSelections(
@@ -161,6 +162,7 @@ export async function replaceMCPSelections(
         definition_ids: definitionIds,
         expected_definition_ids: options?.expected_definition_ids,
         expected_revision: options?.expected_revision,
+        excluded_definition_ids: options?.excluded_definition_ids,
       }),
     },
   });

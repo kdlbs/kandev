@@ -90,19 +90,36 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
   );
   const draft = useMCPSelectionDraft(contextKey, editor.selection);
   const error = editor.saveError ?? editor.loadError ?? definitions.error;
-  const state = editor.selection?.mcp_state;
-  usePendingSelectionRefresh(
-    state,
-    editor.reload,
-    editor.saving || Boolean(editor.saveError) || isHandledApiError(error),
-  );
+  const {
+    mcp_state: state,
+    definition_ids: savedSelectedIds = [],
+    excluded_definition_ids: excludedIds = [],
+  } = editor.selection ?? {};
+  const blocked = editor.saving || Boolean(editor.saveError);
+  usePendingSelectionRefresh(state, editor.reload, blocked || isHandledApiError(error));
   const inherited = useMemo<MCPInheritedSelection[]>(
     () =>
       Object.entries(editor.inheritedOrigins).flatMap(([id, origins]) => {
         const definition = definitions.definitions.find((item) => item.id === id);
-        return definition ? [{ definition, origins }] : [];
+        const ownOrigin =
+          editor.selection?.definition_ids.includes(id) && context.sessionId && ownerWorkspace
+            ? [
+                {
+                  scope: "task_session" as const,
+                  workspace_id: ownerWorkspace,
+                  owner_id: context.sessionId,
+                },
+              ]
+            : [];
+        return definition ? [{ definition, origins: [...origins, ...ownOrigin] }] : [];
       }),
-    [editor.inheritedOrigins, definitions.definitions],
+    [
+      editor.inheritedOrigins,
+      editor.selection,
+      definitions.definitions,
+      context.sessionId,
+      ownerWorkspace,
+    ],
   );
   const save = useCallback(
     (ids: string[]) => {
@@ -114,7 +131,12 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     },
     [editor.save, draft.setSelectedIds, draft.acknowledge],
   );
-  const savedSelectedIds = editor.selection?.definition_ids ?? [];
+  const onExcludedIdsChange = useCallback(
+    (ids: string[]) => {
+      void editor.save(editor.selection?.definition_ids ?? [], ids).catch(() => undefined);
+    },
+    [editor.save, editor.selection],
+  );
   if (!available) return null;
   return {
     contextKey,
@@ -124,12 +146,14 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     definitionsLoading: definitions.loading || editor.loading,
     selectedIds: draft.selectedIds,
     savedSelectedIds,
+    excludedIds,
+    onExcludedIdsChange,
     inherited,
     onSelectedIdsChange: save,
     state,
-    disabled: editor.saving || Boolean(editor.saveError),
+    disabled: blocked,
     reload: editor.reload,
-    retry: () => save(savedSelectedIds),
+    retry: blocked ? undefined : () => void editor.save(savedSelectedIds).catch(() => undefined),
     retrying: editor.saving,
     error,
   };

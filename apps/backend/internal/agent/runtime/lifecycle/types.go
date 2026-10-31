@@ -41,6 +41,10 @@ type AgentExecution struct {
 	// CausingRunID is the trusted Office run that initiated this task-owned
 	// execution. RunID remains reserved for run-owned runtime identity.
 	CausingRunID string
+	// TerminalCausingRunID keeps the launch cause on terminal events after
+	// CausingRunID is consumed by the first ready event. A new prompt replaces
+	// this value with its current launch cause.
+	TerminalCausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -303,6 +307,12 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// attachedExistingCompute records that this attempt attached to runtime
+	// storage that already existed instead of allocating it. Recovery retention
+	// reads it so a reused workspace is not destroyed with the failed attempt.
+	// Conversation-resume intent is a separate fact and never authorizes or
+	// prevents destructive cleanup.
+	attachedExistingCompute bool
 	// suppressBootStatusMessage is set only for silent restart restore, where a
 	// boot status would otherwise create a synthetic completed transcript turn.
 	suppressBootStatusMessage bool

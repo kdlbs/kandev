@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Scoped session authorization: prompting and controlling an agent are
@@ -75,4 +76,27 @@ func (s *Service) authorizeTaskPrompt(ctx context.Context, taskID string) error 
 // SetTaskPromptChecker installs the task-keyed session.prompt boundary.
 func (s *Service) SetTaskPromptChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskPromptCheck = check
+}
+
+// authorizeTaskSessionPromptPair applies the prompt boundary to both IDs and
+// keeps their pair consistent. Peer-message start is a prompt operation, so it
+// must not require the separate read grant.
+func (s *Service) authorizeTaskSessionPromptPair(ctx context.Context, taskID, sessionID string) error {
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := s.authorizeTaskPrompt(ctx, taskID); err != nil {
+		return err
+	}
+	if taskID == "" || sessionID == "" || s.repo == nil {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
+	}
+	if session.TaskID != taskID {
+		return fmt.Errorf("%w: session %s does not belong to task %s", ErrTaskSessionPairMismatch, sessionID, taskID)
+	}
+	return nil
 }

@@ -222,7 +222,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     await apiClient.clearQueue(identity);
     await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
     await gate.release();
-    await expect(chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+    await expect(chat.getByText("Slow response complete", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
     await session.waitForChatIdle({ timeout: 90_000 });

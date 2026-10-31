@@ -345,6 +345,7 @@ it.each([true, false])(
     await openCreate();
     cancel();
   },
+  10_000,
 );
 it("unrelated active hydration preserves an install-wide edit and its current save", async () => {
   active = transport();

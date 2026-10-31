@@ -110,7 +110,7 @@ Distinct worktrees sharing a common Git object directory remain distinct checkou
 - Opaque server-owned entry ID; checkout ID; exact new path or deleted path; optional old path.
 - Kind: added, deleted, modified, renamed, copied, mode_changed, or type_changed.
 - Old/new blob IDs and modes, submodule/gitlink marker, binary marker, and nullable textual counts.
-- Canonical patch and filtered-patch content keys; optional old/new rendering blob keys.
+- Internal Git source identity for new captures; legacy SQL patch/rendering content keys for existing rows.
 - Content availability, skipped/truncated flags, sizes, and typed reason.
 
 Count distinct `(checkout_id, path)` entries; a rename counts once at its destination with the old path retained.
@@ -151,34 +151,12 @@ Steering within the same turn retains its endpoints; a separately admitted repla
 
 ### End
 
-Use a construction-supplied synchronous runtime terminal interceptor, not an event-bus acknowledgement.
-At the accepted completion boundary, claim immutable turn/execution/generation evidence and block successor dispatch for that ownership.
-Run Git and SQL I/O outside `executionStore` and `promptLifecycleMu` locks.
-Retain the outer startup callback lease only where required; never recursively acquire that lease.
-A small capture fence supplements the existing prompt barrier; it does not replace lifecycle completion authority.
-
-1. Validate terminal evidence and claim finalization for the exact change set.
-2. Freeze accepted terminal ownership while provider writes stop.
-3. Capture endpoints, compare exact objects, and export bounded historical rendering data.
-4. Persist summary, content manifest, and final capture status using compare-and-set revision updates.
-5. Release capture admission. Existing readiness, task/workflow transitions, and prompt completion proceed through their current owners.
-6. Publish revisioned summaries. Replayed terminal events reuse the accepted result.
-
-The interceptor precedes completion-channel release and READY fan-out.
-It covers foreground-idle, dispatch failure after effects, exit, error, cancellation escalation, and cleanup.
-Startup failures without dispatched work have no fabricated interval.
-Runtime cleanup invokes the same idempotent finalizer before stopping agentctl or deleting ephemeral compute.
-Hard loss of the executor records unavailability instead of attempting a current-workspace diff.
-
-Agent completion can project a terminal turn with pending checkpoint processing.
-The capture fence delays successor writes, not the agent-running indicator or task-state authority.
-Persist the pending change-set row before fan-out; summary publication can follow existing completion publication.
-The final assistant anchor can update after READY if the matching COMPLETE output arrives later.
-That update changes only the anchor/revision, never accepted endpoints.
-
-Stop/Cancel immediately cancels provider work and start capture. Backend shutdown stops the process without prompt cancellation.
-After acknowledged stop, capture has an independent deadline before cleanup.
-Timeouts and forced/unconfirmed shutdowns retain unavailable/partial history; startup reconciles unfinished rows. Git waits are bounded.
+The [preservation lifecycle](turn-change-preservation.md) owns terminal capture, content retries, restart recovery, and cleanup ordering.
+`CaptureTerminalEndpoints` freezes the exact turn and accepts immutable ends before successor writes.
+`ProcessTerminal` compares those accepted objects and verifies a retained Git source independently from the prompt fence.
+Transient content errors retain pending work until bounded retry succeeds or settles a final failure.
+Runtime cleanup preserves content or explicitly settles outstanding work before destroying its executor source.
+Existing completion authority, final-message anchoring, and bounded Stop/Cancel behavior remain dependencies of that lifecycle.
 
 ## Git capture
 
@@ -231,7 +209,7 @@ Join metadata/counts by exact path identity; mismatches produce comparison failu
 Do not reuse the existing parser's binary-to-zero conversion.
 
 Compute canonical summaries without whitespace-ignore flags.
-Export per-file canonical patches and an explicitly labeled ignore-all-space patch variant from the same endpoint pair.
+Generate per-file canonical and ignore-all-space patch variants on demand from the same accepted endpoint pair.
 Keep summary totals unchanged for both variants.
 Preserve quoted patch framing and exact path selection using literal pathspec input, never shell interpolation.
 A file-entry ID selects its server-owned old/new path pair.
@@ -242,53 +220,25 @@ Limit breaches preserve known entries and unknown coverage; they never return a 
 
 ## Persistence and retention
 
-Use new relational tables under the task repository's replayable schema conventions:
+[Git history preservation](turn-change-preservation.md) is authoritative for content sources, durability, migration, and expiry.
+New captures retain Git commits/trees/blobs and store compact SQL metadata.
+Local worktrees use verified common-repository storage; disposable sources transfer required objects into backend-owned Git storage before destruction.
+Patches and old/new context are generated on demand through authenticated historical reads.
+They are not copied into SQL for every new turn.
 
-- `turn_change_sets`: unique turn identity, policy, ownership, anchor, status, revision, and expiry metadata.
-- `turn_repository_changes`: unique change-set/checkout relation with write-once start/end OIDs and per-repository states.
-- `turn_file_changes`: unique repository-change/path entries and compact file metadata.
-- `turn_change_contents`: content-addressed compressed patch/rendering payloads with codec, digest, and uncompressed size.
-- `turn_change_content_links`: file-to-content variant relations for authorization and shared-content lifetime.
+The existing `turn_change_contents` and `turn_change_content_links` tables remain legacy readers during migration.
+Existing payloads retain their gzip integrity checks and deduplication rules until verified migration or authorized expiry.
+Do not infer loss from absent SQL content links for a Git-backed capture.
 
-Use SQLite BLOB and PostgreSQL BYTEA through the existing dialect layer.
-Start/end acceptance and finalization use conditional writes; PostgreSQL uses scoped advisory transaction locks before reads where needed.
-Never hold a database transaction across executor I/O.
-Replayable migrations add new columns before dependent indexes/backfills.
-Add deletion cascades and E2E reset cleanup for all side tables.
+The [unified compaction policy](../../system-page/system-design/history-compaction.md) governs historical content and old tool details together.
+There is one enabled value, task-inactivity period, analysis action, manual action, and automatic schedule.
+Remove the independent fixed 30-day destructive sweep after that policy owns an installation's history.
+Preserve summary rows and explicit expiry states until conversation deletion removes their owner.
+Capacity admission remains bounded without silently expiring protected history.
 
-Executor Git objects retain full snapshots while capture/export is pending.
-Before terminal capture is ready, materialize bounded per-file patches and required old/new rendering data into database content records.
-Content-addressing deduplicates unchanged rendering blobs. This export copies changed rendering data, not the checkout.
-Binary entries retain metadata and the renderer's binary notice; do not promise a binary image preview.
-Old/new contents support context expansion after executor loss.
-Historical components must not call the existing live-workspace expansion fetcher.
-
-Canonical and whitespace-filtered variants allow immutable reads without restarting an archived executor.
-Generation of these durable variants occurs at finalization; their transfer to the browser remains on demand.
-A truncated patch or missing required text blob marks that entry partial.
-Counts remain canonical even when only a bounded preview is available.
-
-Proposed initial retention policy:
-
-- Retain rendering content for 30 days from terminal capture.
-- Bound compressed retained content to 1 GiB per installation and 128 MiB per task.
-- Bound accepted export to 32 MiB per turn, with explicit file limits described under Bounds.
-- Evict oldest terminal content first, excluding active capture/export leases.
-- Preserve summary rows and expiry reasons until conversation deletion removes their owner.
-- Apply the same policy to archived tasks; archive itself does not expire history.
-
-Use typed policy constants for these unmeasured defaults; public controls remain outside scope.
-Serialize global byte admission and eviction through existing maintenance/storage mutation conventions.
-Expiry atomically clears content links, marks affected entries expired, and updates the summary revision.
-Delete shared payloads only when no retained link references them.
-An in-flight read holds a short content lease so pruning cannot remove its payload mid-response.
-
-Release executor refs after verified export or explicit unavailability/expiry.
-Reachability persists until all promised content is durable; never delete a sole source before export acknowledgement.
-Persist cleanup intent for unavailable executors and drain it when they reconnect.
-Bound owned loose-object growth and orphan refs through retention and existing executor cleanup, without running destructive user-repository GC.
-A failed export preserves available counts and an explicit missing-content reason before cleanup proceeds.
-SQLite backup and PostgreSQL database backup include durable content because it resides in the database.
+Owned checkpoint refs remain reachable while retained, in use, or awaiting preservation.
+Only proven ownership permits ref deletion. Object reclamation runs explicitly only in Kandev-owned stores.
+Database and Git checkpoint backups share the expanded compaction preparation contract.
 
 ## Application reads and live projection
 
@@ -321,13 +271,10 @@ errors on session change or unmount. Keep initial HTTP reads independent of WS.
 
 ## Recovery
 
-Persist terminal intent and ownership before accepted end capture.
-After restart, reuse accepted object IDs or a capture receipt only after verifying referenced objects and checkout incarnation.
-If a still-running original executor proves the same admitted generation and no successor writes, finish its original capture.
-If it cannot prove that boundary, mark `boundary_lost`; do not capture the current checkout as the old endpoint.
-A retained start alone is insufficient proof of a historical end.
-No automatic relaunch or `GetOrEnsureExecution` can substitute a new checkout for historical content.
-Historical reads use database content and therefore do not need live execution recovery.
+Follow [preservation recovery](turn-change-preservation.md#restart-and-cleanup) for accepted endpoint pairs.
+An unfinished start without an accepted end cannot establish a historical interval after restart.
+Never capture a replacement end, relaunch an executor, or use current workspace contents to repair that interval.
+Historical reads use the retained Git source or legacy SQL content and do not start replacement execution recovery.
 
 Generation-zero synthetic turns receive capture only when an explicit pre-dispatch boundary is available.
 Legacy uncorrelated terminal events cannot acquire new endpoints from a mutable active-turn lookup.
@@ -417,14 +364,16 @@ Proposed bounds require measurement before completion:
 | Work | Initial bound | Limit behavior |
 | --- | --- | --- |
 | Start capture across attached checkouts | 10 seconds total, including admission and retries | Persist failed checkout reasons; dispatch proceeds |
-| Normal terminal capture/comparison/export | 15 seconds total | Preserve accepted endpoints/available entries; release successor fence after typed settlement |
+| Normal terminal endpoint capture | 20 seconds total | Accept immutable ends or settle affected endpoints before releasing the successor fence |
+| Background comparison/object preservation | 90 seconds per attempt, capped by recovery deadline | Retry transient errors against the accepted Git interval |
+| Preservation recovery window | 3 minutes from the persisted terminal claim | Settle remaining content explicitly, then permit owned-ref cleanup |
 | Stop/Cancel terminal preservation | 2 seconds after provider stop acknowledgement | Mark unpreserved content unavailable; permit cleanup |
 | Git capture concurrency | 2 per executor; 1 per actual checkout | Deadline includes queue time; no unbounded waiting |
 | Transient Git retry | At most 2 retries, 75/150 ms backoff inside outer deadline | Retry failed command on same private index; do not move accepted endpoints |
 | Full-index inventory | 8 MiB output and existing deadline; no changed-entry count cap | Explicit bounded failure |
 | Candidate/changed enumeration | 8 MiB and 20,000 entries per checkout | Incomplete summary with reason; no deceptive ready zero |
 | New endpoint object bytes | 256 MiB per endpoint | Preflight eligible blob sizes and track written bytes; reject excess with size reason |
-| Retained text rendering | 8 MiB per blob, 4 MiB per patch variant, 32 MiB total export per turn | Explicit per-entry missing/truncated content; canonical counts retained |
+| Historical rendering response | Existing per-file response/output bounds | Explicit per-entry truncation; canonical counts retained |
 | HTTP content response | One file; 16 MiB uncompressed total | Typed limit response or bounded preview; decompression limit enforced |
 | Summary/file page | 200 entries; compact root preview at most 32 entries | Cursor continuation; omitted coverage stated |
 
@@ -450,6 +399,8 @@ No source-only latency claims are acceptable.
 ## Related decisions and designs
 
 - [Immutable turn intervals](../../../decisions/2026-10-07-immutable-turn-change-intervals.md)
+- [Git preservation](turn-change-preservation.md)
+- [Unified compaction decision](../../../decisions/2026-10-28-git-turn-history-and-unified-compaction.md)
 - [Prompt generation identity](../../../decisions/0035-version-agent-ready-events-by-prompt-generation.md)
 - [Session turn settlement](session-turn-settlement.md)
 - [Prompt completion ownership](../../platform/system-design/prompt-completion-ownership.md)

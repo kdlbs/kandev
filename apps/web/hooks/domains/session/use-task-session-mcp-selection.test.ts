@@ -230,3 +230,88 @@ it("retains a failed session draft and does not poll away its conflict", async (
   expect(vi.mocked(getMCPSelections).mock.calls.length).toBe(count);
   expect(result.current?.error).toBe(conflict);
 });
+
+// @covers AC-AGENTS-SESSION-MCP-EXCLUSIONS-003.1, AC-AGENTS-SESSION-MCP-EXCLUSIONS-003.5
+it("keeps exclusion actions committed until save succeeds and retains them after failure", async () => {
+  vi.mocked(getMCPSelections).mockImplementation(async (scope, owner, workspace) => ({
+    ...response(scope, owner, workspace),
+    ...(scope === "task_session"
+      ? { excluded_definition_ids: [], selection_revision: 2 }
+      : { definition_ids: ["docs"] }),
+  }));
+  const { result } = renderHook(() => useTaskSessionMCPSelection(context));
+  await act(async () => {});
+  let resolve!: (value: MCPSelectionResponse) => void;
+  vi.mocked(replaceMCPSelections).mockReturnValue(
+    new Promise((yes) => {
+      resolve = yes;
+    }),
+  );
+  act(() => result.current?.onExcludedIdsChange?.(["docs"]));
+  expect(result.current?.excludedIds).toEqual([]);
+  expect(result.current?.disabled).toBe(true);
+  expect(replaceMCPSelections).toHaveBeenLastCalledWith(
+    "task_session",
+    "session-a",
+    WORKSPACE,
+    [],
+    { expected_revision: 2, excluded_definition_ids: ["docs"] },
+  );
+  await act(async () =>
+    resolve({
+      ...response("task_session", "session-a", WORKSPACE),
+      excluded_definition_ids: ["docs"],
+      selection_revision: 3,
+    }),
+  );
+  expect(result.current?.excludedIds).toEqual(["docs"]);
+  vi.mocked(replaceMCPSelections).mockRejectedValue(new Error("save failed"));
+  await act(async () => result.current?.onExcludedIdsChange?.([]));
+  expect(result.current?.excludedIds).toEqual(["docs"]);
+  expect(result.current?.error).toBeTruthy();
+});
+
+it.each(["succeeds", "fails"])(
+  "retries saved application without replacing a rejected draft when retry %s",
+  async (outcome) => {
+    const saved = {
+      ...response("task_session", "session-a", WORKSPACE),
+      definition_ids: ["saved"],
+      excluded_definition_ids: ["inherited"],
+      selection_revision: 2,
+      mcp_state: { desired_revision: 2, applied_revision: 1, apply_state: "failed" as const },
+    };
+    vi.mocked(getMCPSelections).mockImplementation(async (scope, owner, workspace) =>
+      scope === "task_session" ? saved : response(scope, owner, workspace),
+    );
+    const { result } = renderHook(() => useTaskSessionMCPSelection(context));
+    await act(async () => {});
+    const staleRetry = result.current?.retry;
+    vi.mocked(replaceMCPSelections).mockRejectedValueOnce(new Error("save rejected"));
+    await act(async () => result.current?.onSelectedIdsChange(["draft"]));
+    expect(result.current?.selectedIds).toEqual(["draft"]);
+    await act(async () => staleRetry?.());
+    expect(result.current?.selectedIds).toEqual(["draft"]);
+    expect(result.current?.retry).toBeUndefined();
+    expect(replaceMCPSelections).toHaveBeenCalledTimes(1);
+    await act(async () => result.current?.reload());
+    expect(result.current?.selectedIds).toEqual(["draft"]);
+    expect(result.current?.retry).toBeTypeOf("function");
+    if (outcome === "succeeds") {
+      vi.mocked(replaceMCPSelections).mockResolvedValue({ ...saved, selection_revision: 3 });
+    } else {
+      vi.mocked(replaceMCPSelections).mockRejectedValue(new Error("retry rejected"));
+    }
+    await act(async () => result.current?.retry?.());
+    expect(replaceMCPSelections).toHaveBeenLastCalledWith(
+      "task_session",
+      "session-a",
+      WORKSPACE,
+      ["saved"],
+      { expected_revision: 2 },
+    );
+    expect(result.current?.selectedIds).toEqual(["draft"]);
+    expect(result.current?.savedSelectedIds).toEqual(["saved"]);
+    expect(result.current?.excludedIds).toEqual(["inherited"]);
+  },
+);

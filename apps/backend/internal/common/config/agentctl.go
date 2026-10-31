@@ -43,6 +43,10 @@ type AgentctlStartupConfig struct {
 	// unresolved value. A backend older than this field omits it, which decodes
 	// as false and keeps the provider-neutral behavior.
 	AgentBackgroundWorkEnabled bool `json:"agentBackgroundWorkEnabled"`
+	// OpenCodePluginEnabled carries the effective features.opencodePlugin value
+	// for this launch. A backend older than this field omits it, which decodes
+	// as false and preserves the legacy launch.
+	OpenCodePluginEnabled bool `json:"opencodePluginEnabled"`
 	// PromptCancelJoinTimeout is the managed ACP cancellation acknowledgement bound.
 	// Zero preserves agentctl's built-in default for non-E2E launches.
 	PromptCancelJoinTimeout time.Duration `json:"promptCancelJoinTimeout"`
@@ -64,6 +68,7 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		DetachedEventLimit:         c.Agentctl.DetachedEventLimit,
 		AgentSurvivalEnabled:       c.Features.AgentSurvival,
 		AgentBackgroundWorkEnabled: c.Features.AgentBackgroundWork,
+		OpenCodePluginEnabled:      c.Features.OpenCodePlugin,
 		PromptCancelJoinTimeout:    e2ePromptCancelJoinTimeout(),
 	}
 }

@@ -138,14 +138,15 @@ func TestBeginPeerMessageStartWaitsForCancelAndRejectsTerminalSession(t *testing
 	}
 }
 
-func TestBeginPeerMessageStartAuthorizesPairBeforeRepositoryRead(t *testing.T) {
+func TestBeginPeerMessageStartAuthorizesPromptPairBeforeRepositoryRead(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
 	seedTaskAndSession(t, baseRepo, "task-auth", "session-auth", models.TaskSessionStateCreated)
 	repo := &peerStartAccessCountingRepository{Repository: baseRepo}
 	svc := NewService(DefaultServiceConfig(), nil, &mockAgentManager{}, newMockTaskRepo(), repo, nil, nil, nil, testLogger())
-	denied := errors.New("session access denied")
-	svc.SetSessionAccessChecker(func(context.Context, string) error { return denied })
+	denied := errors.New("prompt access denied")
+	svc.SetSessionPromptChecker(func(context.Context, string) error { return denied })
+	svc.SetTaskPromptChecker(func(context.Context, string) error { return denied })
 
 	err := func() error {
 		_, beginErr := svc.BeginPeerMessageStart(ctx, messagequeue.QueueSessionIdentity{
@@ -155,7 +156,30 @@ func TestBeginPeerMessageStartAuthorizesPairBeforeRepositoryRead(t *testing.T) {
 	}()
 
 	require.ErrorIs(t, err, denied)
-	assert.Zero(t, repo.getTaskSessionCalls.Load(), "denied identity must not reach repository or runtime admission")
+	assert.Zero(t, repo.getTaskSessionCalls.Load(), "denied prompt identity must not reach repository or runtime admission")
+}
+
+func TestBeginPeerMessageStartUsesPromptScopeNotReadScope(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, "task-prompt", "session-prompt", models.TaskSessionStateCreated)
+	session, err := baseRepo.GetTaskSession(ctx, "session-prompt")
+	require.NoError(t, err)
+	repo := &peerStartAccessCountingRepository{Repository: baseRepo}
+	svc := NewService(DefaultServiceConfig(), nil, &mockAgentManager{}, newMockTaskRepo(), repo, nil, nil, nil, testLogger())
+	readDenied := errors.New("read access denied")
+	svc.SetSessionAccessChecker(func(context.Context, string) error { return readDenied })
+	svc.SetTaskAccessChecker(func(context.Context, string) error { return readDenied })
+	svc.SetSessionPromptChecker(func(context.Context, string) error { return nil })
+	svc.SetTaskPromptChecker(func(context.Context, string) error { return nil })
+
+	admission, err := svc.BeginPeerMessageStart(ctx, messagequeue.QueueSessionIdentity{
+		TaskID: session.TaskID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID,
+	})
+	require.NoError(t, err)
+	if admission != nil {
+		admission.Release()
+	}
 }
 
 func TestStartCreatedSessionForPeerMessage_ActiveRuntimeReturnsBusy(t *testing.T) {

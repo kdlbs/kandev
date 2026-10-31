@@ -418,6 +418,10 @@ curated React, UI, and app-store surface.
   utility-agent calls; and capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
+- When workspace collaboration is enabled, Host calls that read or mutate
+  conversation data require the server context from the handler that produced
+  them; plugin-owned capability operations keep their native behavior. Never
+  synthesize a caller context or store one principal in a shared Host field.
 - Declared webhook keys default to public. Set `webhooks[].access: authenticated`
   for browser UI and billable operations. Kandev does not enforce
   `webhooks[].method`; public integrations must still validate the provider
@@ -1046,6 +1050,7 @@ subscription vocabulary and wildcard rules are in the
 | Interactions               | Interactions().ListPending, Interactions().Get                                                                                   | api_read: interactions                                                                                                                            | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                                                                                                                |
 | Exact interaction responses | `HostExactInteractionCommands(host)`: `RespondPermission`, `AnswerClarification`                                                | `api_write: interactions` plus `host.v2.write:interactions` and a Host-issued human response receipt                                              | The authenticated native UI issues a short-lived receipt for one interaction revision and exact response; legacy v1 response methods return `PermissionDenied`                                                                                                                             |
 | Exact observations         | `pluginsdk.HostExactQueries(host)`                                                                                               | Resource declaration plus matching `host.v2.read:<resource>` workspace grant                                                                      | Snapshot-bound workspace, task, session, interaction, message, inbox, relation, pending-transition, PR-evidence, and usage reads; use capability discovery for per-host support                                                                                                           |
+| Automation history         | `pluginsdk.HostAutomationHistory(host)`: `ListAutomations`, `ListRuns`, `GetRun`                                                   | `api_read: automations` plus `host.v2.read:automations`                                                                                           | Workspace-authorized definition and retained-run observations; list reads use the shared bounded snapshot, and `GetRun` refreshes one known run through current authority                                                                                                                 |
 | Linked issue writeback      | `pluginsdk.HostSourceIssueWriteback(host)`: `GetCapabilities`, `Comment`, `Transition`                                          | `api_read: source_issues` and `host.v2.read:source_issues` for reads; `api_write: source_issues` and `host.v2.write:source_issues` for writes          | Resolves the task's existing Jira/Linear link and uses workspace credentials; commands carry task/source versions and durable receipts, and ambiguous outcomes return `UNCERTAIN` without automatic resend                                                                                     |
 | Agent invocation           | InvokeUtilityAgent(ctx, prompt, options...)                                                                                      | agent_invoke: true                                                                                                                                | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
 | Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
@@ -1752,6 +1757,78 @@ workflow moves. Directive reads stay unsupported until the Host advertises a
 durable directive source. Read `GetCapabilityContext` and use each method's
 `Supported` and `Authorized` values before depending on an optional operation.
 
+### Automation history
+
+Use `pluginsdk.HostAutomationHistory(host)` for supported automation
+definitions, retained run history, and exact run refresh. Declare
+`api_read: [automations]` and obtain the workspace grant
+`host.v2.read:automations`. The manifest declaration alone does not authorize a
+read.
+
+```go
+history, ok := pluginsdk.HostAutomationHistory(host)
+if !ok {
+    return errors.New("automation history is unsupported")
+}
+definitions, err := history.ListAutomations(ctx, pluginsdk.AutomationDefinitionQuery{
+    RequestID: "automation-inventory-01", WorkspaceID: workspaceID,
+    Page: pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+if len(definitions.Items) == 0 {
+    return nil // successful empty query: this workspace has no automations
+}
+// definitions.PageInfo.HasMore reports more pages: repeat the call with Cursor
+// and SnapshotVersion until it is false before treating the inventory as complete.
+runs, err := history.ListRuns(ctx, pluginsdk.AutomationRunQuery{
+    RequestID: "automation-runs-01", WorkspaceID: workspaceID,
+    Filter: pluginsdk.AutomationRunFilter{AutomationID: definitions.Items[0].ID},
+    Page:   pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+if len(runs.Items) == 0 {
+    return nil // successful empty query: this automation has no retained runs
+}
+refreshed, receipt, err := history.GetRun(ctx, pluginsdk.AutomationRunGetQuery{
+    RequestID: "automation-refresh-01", WorkspaceID: workspaceID, RunID: runs.Items[0].ID,
+})
+if err != nil {
+    return err
+}
+_ = refreshed.Status      // current observed status
+_ = refreshed.SourceStatus // stored run status
+_ = receipt.ObservedAt
+```
+
+Definition observations include automation identity, name, enabled state, and
+safe trigger identities. Scheduled triggers expose `cron_expression` and the
+configured timezone only when `schedule_available` is true; other trigger kinds
+keep their identity without configuration. Malformed schedule data leaves the
+automation visible with an unavailable schedule.
+
+Run observations keep `source_status` (what the run recorded) separate from
+`status` (the automation service's current task-aware projection). Retry state
+and delivery state are independent, and absent timestamps and unknown status
+strings remain absent rather than becoming success. `attempt_number` is absent
+when the source did not record one. Summary and error fields are bounded,
+credential-sanitized excerpts, not transcripts.
+
+Lists use the same bounded immutable snapshots as other exact reads: pages are
+at most 200 rows, one snapshot is limited to 5,000 rows and 8 MiB, and
+continuations expire after five minutes. Cursors bind to the installation,
+workspace, method, normalized filters, and approval revision. An oversized
+filtered result fails with `ResourceExhausted`; narrow the automation or
+creation-time filter instead of treating the error as an empty workspace.
+Creation-time bounds are UTC RFC3339 strings; `created_from` is inclusive and
+`created_before` is exclusive. `GetRun` is independent of list snapshots and
+always uses current authorization, so use it to reconcile a missed completion
+event. Optional-method discovery reports support and current authority; an
+older Host returns `Unimplemented` from the new calls.
+
 ## Remote executor providers
 
 A managed plugin can declare one or more remote executor providers. Set
@@ -1958,6 +2035,24 @@ type Host interface {
 	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
 }
 ```
+
+### Conversation caller context
+
+Reuse the `context.Context` Kandev passed to your plugin handler (event, webhook,
+action, or agent-tool invocation) for every Host call. Kandev restores the
+caller's native principal and any workspace collaboration grant from that
+context. Dropping it and calling with `context.Background()` cannot gain
+conversation authority: task, workspace, session, message, interaction, and
+execution operations then fail with `PermissionDenied` while workspace
+collaboration is enabled.
+
+Plugin-owned operations keep their existing capability rules without that
+context: Host state, config, secrets, events, capability context, plugin-owned
+task trees, managed agent conversations and schedules, managed inputs, executor
+progress and artifacts, declared source-issue writeback, utility agents, and
+profile catalogs. Detached background work that uses only those operations
+continues to run when collaboration is enabled. Retain the handler context for
+the duration of each conversation-domain call instead of storing one globally.
 
 Executor profiles are an additive, optional Host extension so older Host
 implementations remain source-compatible. Discover it through the SDK helper:
@@ -2413,6 +2508,31 @@ credentials or provider error details. Invalid output maps to a validation error
 an unavailable error. After successful inspection, Kandev persists the validated
 descriptor with the normal native task flow. Existing repository IDs and built-in
 provider URLs continue to use their existing paths.
+
+### Bare project URL discovery
+
+Office projects store repository source strings without a provider hint. When a
+source is not a public built-in URL and does not name a provider, Kandev asks
+every active manifest owner that declares the workspace `repositories.inspect`
+action to inspect it. Each candidate receives the selected workspace and must
+reject URLs its own connection does not own before any authenticated provider
+call. Return `{"matched":false}` for those URLs.
+
+Kandev keeps all validated candidates and never chooses one by registration
+order, hostname resemblance, or response speed. A project source that two
+providers both recognize is rejected as ambiguous, and so is a source that no
+provider recognizes. Discovery uses at most four simultaneous inspections under
+one 15-second deadline. Cancellation, a deadline, or a plugin that disables,
+upgrades, or uninstalls during the pass discards the whole candidate set, so the
+caller retries rather than accepting a partial result.
+
+An unrelated candidate's ordinary inspection failure does not cancel another
+candidate's match. The host selects that failure for the user-visible error only
+when no provider matched. Plugin participation needs no new wire action, SDK
+method, or host provider list: declare `repository_providers`, declare the
+workspace `repositories.inspect` action, and implement its connection checks.
+Installation makes the capability available; the plugin still owns its
+connection, authentication, and URL rules.
 
 A code-host review provider may publish normalized task chrome on each snapshot:
 

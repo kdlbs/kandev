@@ -220,6 +220,98 @@ test.describe("Threads view", () => {
     await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
   });
 
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.15, AC-UI-THREADS-SAVED-VIEWS-003.18
+  test("keeps selected tasks in the order they were picked across a reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(360_000);
+    const { settings } = await apiClient.getUserSettings();
+    const previousViewSettings = {
+      thread_views: settings.thread_views ?? [],
+      thread_active_view_id: settings.thread_active_view_id ?? "view-all-threads",
+      thread_view_draft: settings.thread_view_draft ?? null,
+    };
+    const first = await startAgentTask(testPage, apiClient, seedData, "threads-selection-a", {
+      title: "Threads selection first work",
+    });
+    const second = await startAgentTask(testPage, apiClient, seedData, "threads-selection-b", {
+      title: "Threads selection second work",
+    });
+    const third = await startAgentTask(testPage, apiClient, seedData, "threads-selection-c", {
+      title: "Threads selection third work",
+    });
+    // Neither creation order nor recency: only the picking order produces it.
+    const picked = [second, first, third];
+
+    try {
+      await testPage.goto("/threads");
+      const board = testPage.getByTestId("threads-board");
+      await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
+
+      await testPage.getByTestId("threads-view-picker").click();
+      await testPage.getByTestId("threads-new-view").click();
+      const editor = testPage.getByTestId("threads-view-settings-popover");
+      await expect(editor).toBeVisible();
+      await editor.getByTestId("threads-scope-select").click();
+      await testPage.getByRole("option", { name: "Selected tasks", exact: true }).click();
+      await editor.getByTestId("threads-sort-select").click();
+      const selectionSort = testPage.getByRole("option", { name: "Selection order" });
+      await expect(selectionSort).toContainText("Order in which you selected the tasks");
+      await selectionSort.click();
+
+      await editor.getByTestId("threads-open-task-picker").click();
+      for (const task of picked) {
+        await editor
+          .getByTestId("threads-task-picker-row")
+          .filter({ hasText: task.title })
+          .getByTestId("threads-task-picker-checkbox")
+          .click();
+      }
+      for (const [index, task] of picked.entries()) {
+        const row = editor.getByTestId("threads-task-picker-row").filter({ hasText: task.title });
+        await expect(row.getByTestId("threads-task-picker-position")).toHaveText(String(index + 1));
+      }
+      await editor.getByTestId("threads-task-picker-back").click();
+
+      const savedViewResponse = testPage.waitForResponse((response) => {
+        const request = response.request();
+        if (
+          !response.ok() ||
+          request.method() !== "PATCH" ||
+          !request.url().includes("/api/v1/user/settings")
+        ) {
+          return false;
+        }
+        const payload = request.postDataJSON() as {
+          thread_view_draft?: unknown;
+          thread_views?: Array<{ sort?: { key?: string } }>;
+        } | null;
+        return (
+          payload?.thread_view_draft === null &&
+          payload.thread_views?.some((view) => view.sort?.key === "selection") === true
+        );
+      });
+      await editor.getByTestId("threads-view-save").click();
+      await savedViewResponse;
+
+      const pickedIds = picked.map((task) => task.id);
+      await expect.poll(() => columnOrder(board)).toEqual(pickedIds);
+
+      await testPage.reload();
+      await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
+      await expect.poll(() => columnOrder(board)).toEqual(pickedIds);
+    } finally {
+      const restored = await apiClient.rawRequest(
+        "PATCH",
+        "/api/v1/user/settings",
+        previousViewSettings,
+      );
+      expect(restored.ok).toBe(true);
+    }
+  });
+
   test("confirms deletion of a saved Threads view before closing settings", async ({
     testPage,
     apiClient,

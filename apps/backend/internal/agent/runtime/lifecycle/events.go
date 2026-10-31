@@ -199,6 +199,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		WorkspaceID:            execution.WorkspaceID,
 		RunID:                  execution.RunID,
 		CausingRunID:           execution.CausingRunID,
+		TerminalCausingRunID:   execution.TerminalCausingRunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
 		TaskID:                 execution.TaskID,
@@ -730,6 +731,14 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 
+		AgentExecutionID: execution.ID,
+		OwnerKind:        executionOwnerKind(execution),
+		WorkspaceID:      execution.WorkspaceID,
+		RunID:            execution.RunID,
+		RunSessionID:     execution.RunSessionID,
+		RunAttempt:       execution.RunAttempt,
+		AgentProfileID:   execution.officeProfileID(),
+
 		AutoApprovedOptionID:   event.AutoApprovedOptionID,
 		AutoApprovalPending:    event.AutoApprovalPending,
 		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
@@ -737,7 +746,9 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
-	subject := events.BuildPermissionRequestSubject(execution.SessionID)
+	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(
+		payload.OwnerKind, execution.SessionID, execution.RunSessionID,
+	))
 
 	const maxAttempts = 3
 	var publishErr error

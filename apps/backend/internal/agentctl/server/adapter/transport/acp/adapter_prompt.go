@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -246,35 +245,33 @@ func (a *Adapter) sendPrompt(
 			return nil
 		}
 		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
+		disposition := a.promptFailureDisposition(
+			conn, sessionID, turn, promptGeneration, notificationsDrained,
+		)
 		if a.agentID == codexAgentID &&
 			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
 			isGenericCodexPromptError(err) {
 			if providerError, ok := turn.codexUsageLimitFailure(); ok {
+				// Retention requires the peer's response, not just quota stream
+				// evidence: a local deadline or undecodable reply can follow the
+				// same notifications. Preserve the richer quota diagnostic on
+				// the conservative failure path when provenance is absent.
+				_, remote := remotePromptRequestError(normalizedErr)
+				if remote && disposition != "" {
+					mergeAllowlistedProviderErrorMetadata(providerError, err, a.agentID, "")
+					a.sendRetainedPromptError(
+						sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+					)
+					return nil
+				}
 				return &providerPromptError{ProviderError: *providerError, cause: normalizedErr}
 			}
 		}
-		if providerError, ok := a.retainableACPApplicationError(normalizedErr); ok {
-			if disposition := a.promptFailureDisposition(
-				conn, sessionID, turn, promptGeneration, notificationsDrained,
-			); disposition != "" {
-				var capacityContinuation *streams.CapacityContinuationSnapshot
-				if classified := routingerr.Classify(routingerr.Input{
-					Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
-				}); classified.Code == routingerr.CodeModelCapacity {
-					capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
-				}
-				a.cancelAsyncTurnComplete(sessionID)
-				a.sendUpdate(AgentEvent{
-					Type:                     streams.EventTypeError,
-					SessionID:                sessionID,
-					PromptGeneration:         promptGeneration,
-					Error:                    providerError.Message,
-					ProviderError:            providerError,
-					CapacityContinuation:     capacityContinuation,
-					PromptFailureDisposition: disposition,
-				})
-				return nil
-			}
+		if providerError, ok := a.retainedACPApplicationError(normalizedErr); ok && disposition != "" {
+			a.sendRetainedPromptError(
+				sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+			)
+			return nil
 		}
 		return normalizedErr
 	}

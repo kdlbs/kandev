@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
-test.describe("ACP peer-disconnected prompt error (transport lost)", () => {
+test.describe("genuine ACP process loss (crash)", () => {
   test("shows the manual recovery banner, not the yellow retrying card", async ({
     testPage,
     apiClient,
@@ -15,12 +15,11 @@ test.describe("ACP peer-disconnected prompt error (transport lost)", () => {
       "Transport Lost Recovery Test",
     );
 
-    await session.sendMessage("/transport-lost");
+    await session.sendMessage("/crash");
 
-    // The signature that classifies this as transient lives only in the ACP
-    // error's Data, which the projection never reads, so the failure is
-    // presented as terminal on the first occurrence: the red Resume /
-    // Start-fresh recovery banner, not the yellow retrying card.
+    // A real subprocess exit is local runtime loss, not a remote error response,
+    // so the session falls to the red Resume / Start-fresh recovery banner
+    // rather than the retained-turn inline error or a retry card.
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.recoveryFreshButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
@@ -32,16 +31,16 @@ test.describe("ACP peer-disconnected prompt error (transport lost)", () => {
     apiClient,
     seedData,
   }) => {
-    // Start the task with the failing prompt as the INITIAL turn. Initial
-    // launches go through LaunchPreparedSession, not PromptTask, so manual
-    // recovery must be reachable from that path too, not only from a prompt
-    // sent to an already-idle session.
+    // Start the task with a real crash as the INITIAL turn. Initial launches
+    // go through LaunchPreparedSession, not PromptTask, so manual recovery must
+    // be reachable from that path too, not only from a prompt sent to an
+    // already-idle session.
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Initial Transport Lost Test",
+      "Initial Runtime Loss Test",
       seedData.agentProfileId,
       {
-        description: "/transport-lost",
+        description: "/crash",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],

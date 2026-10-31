@@ -677,7 +677,19 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 // AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
 // manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
-	if req == nil || req.AuthorType == createdByAgent {
+	if req == nil {
+		return nil
+	}
+	if report, _ := ctx.Value(collaborationReportContextKey{}).(bool); report {
+		return s.authorizeTaskScopeAction(ctx, req.TaskID, authz.ScopeTaskWrite, models.CollaborationReport)
+	}
+	if s.collaborationApplies(ctx) {
+		if req.TaskID != "" {
+			return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		}
+		return s.AuthorizeSessionPromptAccess(ctx, req.TaskSessionID)
+	}
+	if req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
@@ -1716,6 +1728,27 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// row's presentation. Only a matched update publishes a message event, so a
+// concurrent claim or replacement never produces a presentation change.
+func (s *Service) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	message, updated, err := s.messages.UpdatePermissionPresentation(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to update permission presentation",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("presentation", string(request.Presentation)),
+			zap.Error(err))
+		return nil, false, err
+	}
+	if updated && message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	}
+	return message, updated, nil
 }
 
 // ClaimPermissionResolution durably serializes the first resolver before any

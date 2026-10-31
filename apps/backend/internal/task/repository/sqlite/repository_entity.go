@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -123,13 +124,29 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 
 // UpdateRepository updates an existing repository
 func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
-	return r.updateRepository(ctx, r.db, repository, nil)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateRepository(ctx, tx, repository, nil); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateRepositoryIfUnchanged applies the update only while the repository
 // still has the version observed by the exact Host command.
 func (r *Repository) UpdateRepositoryIfUnchanged(ctx context.Context, repository *models.Repository, expected time.Time) error {
-	return r.updateRepository(ctx, r.db, repository, &expected)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateRepository(ctx, tx, repository, &expected); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateRepositoryDefaultBranch updates only the default branch while the
@@ -155,8 +172,37 @@ func (r *Repository) UpdateRepositoryDefaultBranch(ctx context.Context, reposito
 	return nil
 }
 
-func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository, expected *time.Time) error {
-	repository.UpdatedAt = time.Now().UTC()
+// lockRepositoryUpdatedAt reads the stored version under the write lock of the
+// current transaction so every writer advances from the committed row rather
+// than from a caller's stale copy.
+func (r *Repository) lockRepositoryUpdatedAt(ctx context.Context, tx *sqlx.Tx, id string) (time.Time, bool, error) {
+	query := `SELECT updated_at FROM repositories WHERE id = ? AND deleted_at IS NULL`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var updatedAt time.Time
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), id).Scan(&updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return updatedAt, true, nil
+}
+
+func (r *Repository) updateRepository(ctx context.Context, tx *sqlx.Tx, repository *models.Repository, expected *time.Time) error {
+	stored, found, err := r.lockRepositoryUpdatedAt(ctx, tx, repository.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		if expected != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		return fmt.Errorf("repository not found: %s", repository.ID)
+	}
+	repository.UpdatedAt = nextRepositoryUpdatedAt(stored)
 
 	query, args := repositoryUpdateQuery(repository, models.RepositoryCheckoutIntent{
 		DefaultBranch: &repository.DefaultBranch, PullBeforeWorktree: &repository.PullBeforeWorktree,
@@ -165,7 +211,7 @@ func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext,
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expected)
 	}
-	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}

@@ -89,6 +89,7 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   apiClient,
   seedData,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile page retained task", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -112,6 +113,11 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
     },
   });
   let sidebarPageUnavailable = true;
+  let failedSidebarPageReads = 0;
+  let markExhausted: () => void = () => {};
+  const sidebarPageExhausted = new Promise<void>((resolve) => {
+    markExhausted = resolve;
+  });
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (
@@ -119,6 +125,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
       route.request().method() === "POST" &&
       url.pathname === `/api/v1/workspaces/${seedData.workspaceId}/sidebar/query`
     ) {
+      failedSidebarPageReads++;
+      if (failedSidebarPageReads === 5) markExhausted();
       await route.fulfill({
         status: 503,
         contentType: "application/json",
@@ -148,6 +156,8 @@ test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await failedSidebarPageRead;
+  await expect(drawer.getByTestId("sidebar-task-page-load-error")).toHaveCount(0);
+  await sidebarPageExhausted;
   await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 

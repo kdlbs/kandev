@@ -507,11 +507,9 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // the ceiling's own replay into a double launch. Parking under
 // blocked_provider_action_required (the same status parkRunMaxAttempts
 // uses) keeps LiftParkedRuns from ever picking the run back up on its own.
-// There is no reconciliation path back from the orchestrator's ceiling
-// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism),
-// so the run stays parked until an operator finds it and clears the
-// routing block by hand.
+// The orchestrator's ceiling replay owns reconciliation: it settles the
+// exact run when the launch is admitted, and ready or terminal events recover
+// failed settlement writes. A terminal drop fails the parked run.
 func (ss *SchedulerService) handleLaunchDeferred(
 	ctx context.Context, run *runsmodels.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {

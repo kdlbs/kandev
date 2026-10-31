@@ -13,6 +13,19 @@ type rule struct {
 	rawText bool
 }
 
+// RuleOpenCodeCapacityAdmission is the bounded OpenCode capacity signature.
+// Its relative reset hint is derived by Classify from this exact rule only,
+// and capacity continuation on that provider requires this rule rather than a
+// broad capacity phrase.
+const RuleOpenCodeCapacityAdmission = "opencode.capacity.admission_refused.v1"
+
+const openCodeAdmissionRefusedSignature = `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?` +
+	`upstream\s+request\s+failed:\s*\[ttft_admission_refused\]\s+the\s+cell\s+is\s+at\s+capacity\b`
+
+// openCodeAdmissionRefusedLinePattern is the same signature used for rule
+// matching, so the reset hint can be read from the exact line that matched.
+var openCodeAdmissionRefusedLinePattern = regexp.MustCompile(openCodeAdmissionRefusedSignature)
+
 // Provider rules match provider error signatures, never a bare topic word.
 // Every error channel these rules read can also carry an agent's own words
 // (a turn that ends in error reports its final text), and agents routinely
@@ -99,6 +112,11 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 		// Keep this provider-scoped rule limited to OpenCode's unlabelled opening line only.
 		mustRule("opencode.stderr.free_usage_unlabelled.v1", `(?im)^\s*free\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// OpenCode's upstream admission refusal is temporary capacity pressure,
+		// not a quota or generic runtime error. The bracketed token and the full
+		// opening line are required so bare capacity prose or a quoted example
+		// cannot suspend a healthy account.
+		mustRule(RuleOpenCodeCapacityAdmission, openCodeAdmissionRefusedSignature, CodeModelCapacity, ConfHigh),
 		// OpenRouter daily notices state their cadence in reason tokens that the
 		// shared sanitizer redacts. Match the raw diagnostic, but keep this
 		// signature after credit/subscription/quota rules in the existing order.

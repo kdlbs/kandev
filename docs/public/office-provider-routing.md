@@ -31,6 +31,8 @@ The selectors store execution-profile IDs. Model names shown in the editor are d
 
 If no route is available, Kandev keeps the task assigned to the same Office agent and waits for provider capacity or user action. Retryable limits are retried automatically after their retry time. Credential and configuration failures remain blocked until corrected or retried manually.
 
+When the refusal comes from the install-wide automatic session ceiling rather than provider health, the pending launch is still owned by Kandev's ceiling retry sweep, not by the Office scheduler. The run stays visibly parked; once capacity frees, the sweep replays the stored launch and binds its session to the run. If that bind write fails, the launch's ready event retries the same bind. A terminal event can also recover the exact run if it arrives first. If the launch fails, Office applies its normal failure policy; cleanup cannot report the failed launch as successful. If the repository stays unavailable, the run remains parked and visible. Do not clear the run's routing block by hand to retry it: a manual clear re-queues the same run and can launch a second session beside the ceiling's replay. If the ceiling drops the stored launch because it can no longer be replayed, the run is failed with that reason. A failed drop-settlement write keeps the deferral for another ceiling sweep.
+
 A launch rejected because its built agent or continue command is invalid fails the run immediately and reports the error, without consuming the retry budget. Correct the profile command before retrying. Temporary provider and workspace failures retain their existing recovery behavior.
 
 ## What A Provider Switch Preserves

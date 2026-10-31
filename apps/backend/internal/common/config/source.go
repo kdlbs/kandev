@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // InternalConfigFileEnv pins a managed child process to the configuration
@@ -23,6 +25,15 @@ const (
 	InternalConfigFileEnv     = "KANDEV_INTERNAL_CONFIG_FILE"
 	InternalConfigHomeFileEnv = "KANDEV_INTERNAL_CONFIG_HOME_FILE"
 	windowsOS                 = "windows"
+)
+
+// sqliteReaderConnsKey is the startup-only SQLite reader pool size. The
+// default and bounds mirror internal/db's factory contract.
+const (
+	sqliteReaderConnsKey     = "database.sqliteReaderConns"
+	sqliteReaderConnsDefault = 4
+	sqliteReaderConnsMinimum = 1
+	sqliteReaderConnsMaximum = 64
 )
 
 // ConfigSource records configuration provenance without retaining any decoded
@@ -65,44 +76,46 @@ type configSelection struct {
 // AutomaticEnv during Unmarshal: legacy invalid environment values must retain
 // their fallback behavior instead of turning into typed-config startup errors.
 var yamlOnlyStartupKeys = map[string]struct{}{
-	"server.trustedProxies":                    {},
-	"tasks.preparationTimeout":                 {},
-	"tasks.stallDetectionThreshold":            {},
-	"tasks.deliveryRetention.payloadGrace":     {},
-	"tasks.deliveryRetention.replayAge":        {},
-	"tasks.deliveryRetention.replayEvents":     {},
-	"tasks.deliveryRetention.interval":         {},
-	"tasks.deliveryRetention.batchRows":        {},
-	"tasks.deliveryRetention.batchBytes":       {},
-	"credentials.file":                         {},
-	"limits.ghMaxConcurrent":                   {},
-	"limits.gitMaxConcurrent":                  {},
-	"limits.lspMaxConnections":                 {},
-	"messageQueue.maxPerSession":               {},
-	"agentctl.idleTimeout":                     {},
-	"agentctl.idleReaperInterval":              {},
-	"agentctl.notificationQueueCapacity":       {},
-	"agentctl.recoveryDeadline":                {},
-	"agentctl.recoveryReadTimeout":             {},
-	"agentctl.recoveryReadRetries":             {},
-	"agentctl.unownedPeriod":                   {},
-	"agentctl.detachedEventLimit":              {},
-	"planning.coalesceWindowMs":                {},
-	"office.schedulerTickMs":                   {},
-	officeMaxConcurrentInstanceKey:             {},
-	officeMaxConcurrentWorkspaceKey:            {},
-	officeWorkspaceBudgetPerHourKey:            {},
-	officeRoutineBudgetPerHourKey:              {},
-	officePromotionAgeMinutesKey:               {},
-	officeMaxCausationDepthKey:                 {},
-	officeSelfTriggerAllowanceKey:              {},
-	officeSelfTriggerTotalAllowanceKey:         {},
-	officeGateFailureThresholdKey:              {},
-	"observability.otlpEndpoint":               {},
-	"launcher.webPort":                         {},
-	"launcher.healthTimeoutMs":                 {},
-	"launcher.noBrowser":                       {},
-	"executors.sshReachabilityIntervalSeconds": {},
+	"server.trustedProxies":                     {},
+	"notifications.webhookAllowPrivateNetworks": {},
+	"tasks.preparationTimeout":                  {},
+	"tasks.stallDetectionThreshold":             {},
+	"tasks.deliveryRetention.payloadGrace":      {},
+	"tasks.deliveryRetention.replayAge":         {},
+	"tasks.deliveryRetention.replayEvents":      {},
+	"tasks.deliveryRetention.interval":          {},
+	"tasks.deliveryRetention.batchRows":         {},
+	"tasks.deliveryRetention.batchBytes":        {},
+	"credentials.file":                          {},
+	"limits.ghMaxConcurrent":                    {},
+	"limits.gitMaxConcurrent":                   {},
+	sqliteReaderConnsKey:                        {},
+	"limits.lspMaxConnections":                  {},
+	"messageQueue.maxPerSession":                {},
+	"agentctl.idleTimeout":                      {},
+	"agentctl.idleReaperInterval":               {},
+	"agentctl.notificationQueueCapacity":        {},
+	"agentctl.recoveryDeadline":                 {},
+	"agentctl.recoveryReadTimeout":              {},
+	"agentctl.recoveryReadRetries":              {},
+	"agentctl.unownedPeriod":                    {},
+	"agentctl.detachedEventLimit":               {},
+	"planning.coalesceWindowMs":                 {},
+	"office.schedulerTickMs":                    {},
+	officeMaxConcurrentInstanceKey:              {},
+	officeMaxConcurrentWorkspaceKey:             {},
+	officeWorkspaceBudgetPerHourKey:             {},
+	officeRoutineBudgetPerHourKey:               {},
+	officePromotionAgeMinutesKey:                {},
+	officeMaxCausationDepthKey:                  {},
+	officeSelfTriggerAllowanceKey:               {},
+	officeSelfTriggerTotalAllowanceKey:          {},
+	officeGateFailureThresholdKey:               {},
+	"observability.otlpEndpoint":                {},
+	"launcher.webPort":                          {},
+	"launcher.healthTimeoutMs":                  {},
+	"launcher.noBrowser":                        {},
+	"executors.sshReachabilityIntervalSeconds":  {},
 }
 
 func isYAMLOnlyStartupKey(key string) bool {
@@ -189,15 +202,24 @@ func selectConfigFile(configPath, homeDir string) (configSelection, bool, error)
 	return configSelection{}, false, nil
 }
 
-func readSelectedConfig(v *viper.Viper, selection configSelection) error {
+func readSelectedConfig(v *viper.Viper, selection configSelection) (map[string]interface{}, error) {
 	v.SetConfigFile(selection.path)
-	if err := v.ReadInConfig(); err != nil {
-		return fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	contents, err := os.ReadFile(selection.path)
+	if err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	}
+	// Keep raw file values separate because Viper getters can apply AutomaticEnv.
+	var yamlConfig map[string]interface{}
+	if err := yaml.Unmarshal(contents, &yamlConfig); err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
+	}
+	if err := v.ReadConfig(bytes.NewReader(contents)); err != nil {
+		return nil, fmt.Errorf("read configuration file %q: %w", selection.path, err)
 	}
 	if selection.isHome && v.InConfig("homeDir") {
-		return fmt.Errorf("configuration file %q cannot set homeDir because a home configuration file cannot relocate itself", selection.path)
+		return nil, fmt.Errorf("configuration file %q cannot set homeDir because a home configuration file cannot relocate itself", selection.path)
 	}
-	return nil
+	return yamlConfig, nil
 }
 
 func bindCatalogEnvironment(v *viper.Viper) {
@@ -252,6 +274,18 @@ func envValue(snapshot map[string]string, names ...string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// presentEnv distinguishes an absent environment variable from one that is
+// explicitly present with an empty value. The SQLite reader override treats
+// the latter as an invalid value rather than falling back to YAML.
+func presentEnv(snapshot map[string]string, names ...string) (string, string, bool) {
+	for _, name := range names {
+		if value, ok := snapshot[name]; ok {
+			return value, name, true
+		}
+	}
+	return "", "", false
 }
 
 func applyStartupDefaultsAndEnvironment(
@@ -316,6 +350,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
 	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
+	cfg.Database.SQLiteReaderConns = sqliteReaderConnsDefault
 	setDefaultInt("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10)
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
@@ -349,6 +384,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 
 func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources map[string]SettingSource) {
 	applyTrustedProxiesEnv(cfg, envSnapshot, sources)
+	applyBoolEnv("notifications.webhookAllowPrivateNetworks", &cfg.Notifications.WebhookAllowPrivateNetworks, false, envSnapshot, sources)
 	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
 	applyDurationEnv("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour, envSnapshot, sources)
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
@@ -385,6 +421,60 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
 	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
+}
+
+// applySQLiteReaderConns resolves the effective startup value after driver
+// selection. Environment is the higher-priority source: when it is present it
+// is parsed strictly and a lower-priority YAML value is not parsed. When the
+// environment value is absent, the raw YAML value is parsed strictly. A
+// PostgreSQL selection ignores both values so a SQLite-only setting cannot
+// change its startup.
+func applySQLiteReaderConns(cfg *Config, yamlConfig map[string]interface{}, yamlKeys map[string]bool, env map[string]string, sources map[string]SettingSource) (bool, error) {
+	if !sqliteReaderConnsApplies(cfg) {
+		return false, nil
+	}
+	entry, ok := CatalogEntryForKey(sqliteReaderConnsKey)
+	if !ok {
+		return false, nil
+	}
+	if raw, envName, found := presentEnv(env, entry.EnvVars...); found {
+		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			return false, fmt.Errorf("%s: invalid integer %q from %s", sqliteReaderConnsKey, raw, envName)
+		}
+		if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
+			return false, fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+		}
+		cfg.Database.SQLiteReaderConns = parsed
+		sources[sqliteReaderConnsKey] = SourceEnvironment
+		return false, nil
+	}
+	if !yamlKeys[sqliteReaderConnsKey] {
+		return false, nil
+	}
+	raw, found := selectedYAMLValue(yamlConfig, sqliteReaderConnsKey)
+	if !found {
+		return true, fmt.Errorf("%s: value not found in selected configuration file", sqliteReaderConnsKey)
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(fmt.Sprint(raw)))
+	if err != nil {
+		return true, fmt.Errorf("%s: invalid integer %v", sqliteReaderConnsKey, raw)
+	}
+	if parsed < sqliteReaderConnsMinimum || parsed > sqliteReaderConnsMaximum {
+		return true, fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", sqliteReaderConnsKey, parsed, sqliteReaderConnsMinimum, sqliteReaderConnsMaximum)
+	}
+	cfg.Database.SQLiteReaderConns = parsed
+	sources[sqliteReaderConnsKey] = SourceConfiguration
+	return false, nil
+}
+
+// sqliteReaderConnsApplies reports whether the selected database driver uses
+// the SQLite reader pool. The driver is normalized later by validate, so treat
+// an empty value as the SQLite default and compare case-insensitively. An
+// invalid driver is left to the existing driver validation.
+func sqliteReaderConnsApplies(cfg *Config) bool {
+	driver := strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
+	return driver == "" || driver == "sqlite"
 }
 
 func applyDeliveryRetentionEnvironment(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
@@ -666,6 +756,28 @@ func configKeys(v *viper.Viper) map[string]bool {
 		keys[entry.Key] = v.InConfig(entry.Key)
 	}
 	return keys
+}
+
+func selectedYAMLValue(config map[string]interface{}, key string) (interface{}, bool) {
+	var value interface{} = config
+	for _, part := range strings.Split(key, ".") {
+		fields, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		found := false
+		for name, fieldValue := range fields {
+			if strings.EqualFold(name, part) {
+				value = fieldValue
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, false
+		}
+	}
+	return value, true
 }
 
 func buildConfigSource(selection configSelection, v *viper.Viper, sources map[string]SettingSource, warnings []string) ConfigSource {
