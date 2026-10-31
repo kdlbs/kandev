@@ -155,3 +155,11 @@ All receipt filenames start with `usage-history-worker4-bench-`.
 Per-scenario JSON files contain plans, scans, latency samples, memory, publication identity, hardware, and fixture construction details.
 The `*-recent-before-after.json` files compare recent report contents and measured scan work across both fixture shapes.
 The standard benchmark logs contain `ns/op`, `B/op`, and `allocs/op`.
+
+## Latest verification
+
+- [CI run 41174963429 and local browser verification](usage-history-ci-followup-20261031/run-41174963429/README.md): three raw flaky verdicts; 29 changed local cases passed without retries.
+- [C10 normal SQLite failure](usage-history-luna-C10-full-normal-20261031T060630Z/README.md): three timezone deadlines; no PostgreSQL run.
+- [C11 query correction](usage-history-luna-C11-query-fix-20261031/README.md): negative control, bounded scans and focused checks on SQLite and PostgreSQL 18.6.
+
+Both full normal database gates and a fresh zero-flake CI audit remain required.

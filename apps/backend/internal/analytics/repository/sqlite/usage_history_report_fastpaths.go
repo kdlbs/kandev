@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/analytics/models"
@@ -210,65 +209,15 @@ func reportUTCMonthSummarySource(scope, generation string, filter models.Session
 	return usageReportQuery{sql: query + ` UNION ALL ` + coarse.sql, args: append(args, coarse.args...)}
 }
 
-type usageReportUTCMonthEdge struct {
-	start time.Time
-	end   time.Time
-}
-
 func reportUTCMonthEdgeSource(selectSQL, joinSuffix string, predicate usageReportQuery, filter models.SessionUsageFilter) usageReportQuery {
-	if filter.Start == nil || filter.End == nil {
-		edgeDays := `(WITH edge_days AS MATERIALIZED (SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0) SELECT * FROM edge_days)`
-		return usageReportQuery{
-			sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
-			args: append([]any{filter.Timezone}, predicate.args...),
-		}
-	}
-	edges, ok := usageReportUTCMonthEdges(filter)
-	if !ok {
-		edgeDays := `(WITH edge_days AS MATERIALIZED (SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0) SELECT * FROM edge_days)`
-		return usageReportQuery{
-			sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
-			args: append([]any{filter.Timezone}, predicate.args...),
-		}
-	}
-	where := `0=1`
-	args := []any{filter.Timezone}
-	if len(edges) > 0 {
-		var ranges []string
-		for _, edge := range edges {
-			ranges = append(ranges, `(c.coverage_start>=? AND c.coverage_start<?)`)
-			args = append(args, edge.start, edge.end)
-		}
-		where = strings.Join(ranges, ` OR `)
-	}
-	args = append(args, predicate.args...)
+	// Keep one indexed point probe per UTC edge day. A long monthly range has
+	// dozens of disjoint UTC edges; expressing them as an OR over coverage_start
+	// makes SQLite scan every point in the scope instead of seeking each day.
+	edgeDays := `(WITH edge_days AS MATERIALIZED (
+ SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0
+) SELECT * FROM edge_days)`
 	return usageReportQuery{
-		sql:  selectSQL + ` FROM usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND (` + where + `) AND ` + predicate.sql,
-		args: args,
+		sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
+		args: append([]any{filter.Timezone}, predicate.args...),
 	}
-}
-
-func usageReportUTCMonthEdges(filter models.SessionUsageFilter) ([]usageReportUTCMonthEdge, bool) {
-	location, err := timeLocation(filter.Timezone)
-	if err != nil || filter.Start == nil || filter.End == nil || !filter.Start.Before(*filter.End) {
-		return nil, false
-	}
-	day := time.Date(filter.Start.UTC().Year(), filter.Start.UTC().Month(), filter.Start.UTC().Day(), 0, 0, 0, 0, time.UTC)
-	var edges []usageReportUTCMonthEdge
-	for day.Before(*filter.End) {
-		next := day.AddDate(0, 0, 1)
-		start, end := day, next
-		if start.Before(*filter.Start) {
-			start = filter.Start.UTC()
-		}
-		if end.After(*filter.End) {
-			end = filter.End.UTC()
-		}
-		fullMonth := start.Equal(day) && end.Equal(next) && start.In(location).Format("2006-01") == next.Add(-time.Nanosecond).In(location).Format("2006-01")
-		if !fullMonth {
-			edges = append(edges, usageReportUTCMonthEdge{start: start, end: end})
-		}
-		day = next
-	}
-	return edges, true
 }

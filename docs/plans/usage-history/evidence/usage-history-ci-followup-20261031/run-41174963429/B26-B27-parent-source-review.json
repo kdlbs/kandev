@@ -1,0 +1,35 @@
+{
+  "reviewed_at": "2026-10-31T06:41:28.987466+00:00",
+  "source": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+  "workers": [
+    {
+      "worker": "B26",
+      "owned_path": "apps/web/e2e/tests/session/new-session-advanced-settings.spec.ts",
+      "patch": "/tmp/usage-history-luna-B26-final.diff",
+      "patch_sha256": "3de00c923d7e8c5fd90c8632e6d3874f93b14bce890582b1001be76788b4f8d3",
+      "before_sha256": "d0a2c82dfaca79b37ade88dc10d95abb3d1d8aca447a46b06184ff3282696cd5",
+      "after_sha256": "cc767c4490d619f98f666523c6c77b597e5cbf82ce1fa1986ea7622310377638",
+      "patch_applies_to_primary": true,
+      "one_owned_file_only": true,
+      "review": "approved_for_browser_verification_only",
+      "browser_validation": "pending",
+      "no_production_or_assertion_weakening": true
+    },
+    {
+      "worker": "B27",
+      "owned_path": "apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts",
+      "patch": "/tmp/usage-history-luna-B27-final.diff",
+      "patch_sha256": "4c61d968d48786b55b031c5432bc9a3b3251ce6f100bc40274c905b5f2956fcb",
+      "before_sha256": "8a9b3833fa492ff97bdd79cd22df6f782e53d46d29e843e1ecd0e0e3413b92f1",
+      "after_sha256": "9460c3befea09ce26facc2d94d9ddbcb18bf8d004235a354d8230d49630a9ca6",
+      "patch_applies_to_primary": true,
+      "one_owned_file_only": true,
+      "review": "approved_for_browser_verification_only",
+      "browser_validation": "pending",
+      "no_production_or_assertion_weakening": true
+    }
+  ],
+  "B26_contract": "Existingtask-scopedWSreplyawaitbeforeunchangeddialogassert;watcherbefore navigation. RPCresolutionprecedesonClose inuseSessionLaunchSubmit.",
+  "B27_contract": "Existing30sec read-only readinesspoll nowincludescanonical retrying-messageabsencebeforeunchangedUI assertion.",
+  "causality": "Inferredfromfailedassertions,attachmentsandcode; no failedtraces; baseline/browsernotrun."
+}

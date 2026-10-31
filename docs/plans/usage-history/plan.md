@@ -493,3 +493,32 @@ Evidence is in [the CI follow-up packet](evidence/usage-history-ci-followup-2026
 Both PRs remain conflict-free against the observed main commits.
 Final delivery still requires normal hooks, a current backend build, both full performance gates, green CI, and zero flaky verdicts.
 Both full normal database runs remain required after the query correction, with their original counts, samples, oracle, and deadlines.
+### Full-scale and CI follow-up (2026-10-31)
+
+Core `1ce8d0b` finished CI with 95 passed checks and 11 skips.
+The complete raw audit still found three flaky tests among 4,599 identities and 4,602 attempts.
+B26, B27 and B28 prepared reviewed spec corrections for submission, retry-notice cleanup and provider-profile keyboard navigation.
+B29 verified three unmodified baseline cases, 15 focused repetitions and 14 ordered cases with zero retries.
+The local baselines passed, so the CI failure causes remain inferred.
+A fresh zero-flake CI audit remains required after the next push.
+See [the audit and browser verification packet](evidence/usage-history-ci-followup-20261031/run-41174963429/README.md).
+
+The second normal full-scale SQLite run exited 1 after 3,490.834 seconds.
+Three monthly views exceeded the existing deadline: New York, Kathmandu and Lisbon.
+The run retained 29 ten-sample scenario receipts and four recent-history comparisons.
+Native and deleted-task reporting completed at full scale.
+PostgreSQL was not started after the SQLite failure.
+The parent verified the complete receipt inventory and source frame.
+See [the failed C10 gate](evidence/usage-history-luna-C10-full-normal-20261031T060630Z/README.md).
+
+C11 replaces the large month-edge OR expression with indexed probes driven by the existing UTC calendar.
+Its negative control fails against the old production query on the unchanged fixture.
+The corrected query has zero unbounded point-index visits in the focused monthly tests.
+Monthly correctness, scan plans, MaxInt64 and index replay passed on SQLite and PostgreSQL 18.6.
+The monthly race suite, lint and vet also passed.
+All 17 benchmark files remain unchanged.
+See [the C11 correction and review](evidence/usage-history-luna-C11-query-fix-20261031/README.md).
+
+Both normal full-scale database gates remain required from the next immutable source.
+Keep their original fixtures, independent oracle, ten samples, complete scenarios and report deadline.
+No full performance pass is claimed.

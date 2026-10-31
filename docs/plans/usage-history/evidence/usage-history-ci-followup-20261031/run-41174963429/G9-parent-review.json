@@ -1,0 +1,51 @@
+{
+  "reviewed_at": "2026-10-31T06:36:04.010396+00:00",
+  "audit_path": "/tmp/usage-history-luna-G9-ci-audit.json",
+  "audit_sha256": "bd71dea582a96df4e72ccf5646b1644230980b9ca1bb72b72f195eb0c33bb8dc",
+  "exact_source": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+  "run": 41174963429,
+  "attempt": 1,
+  "actual_synthetic_merge": {
+    "sha": "4992a83ec68a821f234989347b7c5e2807a86b14",
+    "treeSha": "4b6a4c3012f546cc01c8c724e0371d20e4fb5ff3",
+    "parents": [
+      "997bc54fae4da15702c91da5c5d120bfe651edc1",
+      "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee"
+    ],
+    "message": "Merge 1ce8d0bfdab088f899cf0ede7a5a911d097e0cee into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "verified_at": "2026-10-31T06:02:33Z"
+    }
+  },
+  "independent_outer_hashes_verified": 69,
+  "independent_member_hashes_verified": 496,
+  "independent_inner_hashes_verified": 118,
+  "ledger_rows": 4599,
+  "attempt_counts": {
+    "passed": 4559,
+    "skipped": 40,
+    "failed": 3
+  },
+  "outcome_counts": {
+    "expected": 4556,
+    "skipped": 40,
+    "flaky": 3
+  },
+  "observed_flaky": 3,
+  "zero_flaky_gate_passed": false,
+  "prior_nine_first_attempt": 8,
+  "quickchat_office_plan_first_attempt": 3,
+  "followup_workers": [
+    "B26",
+    "B27",
+    "B28"
+  ],
+  "notes": [
+    "Complete raw/summary audit script inspected for all report/attempt traversal.",
+    "PR base metadata is a direct ancestor of actual checkout main parent; actual merge tree matches parent pre-push proof.",
+    "Failed attempts have no traces; passing retry1 traces are not treated as failure traces.",
+    "Executor error-context duplicate packaging is recorded by worker."
+  ]
+}

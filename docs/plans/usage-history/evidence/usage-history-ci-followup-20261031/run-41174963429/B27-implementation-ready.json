@@ -1,0 +1,103 @@
+{
+  "observed_at_utc": "2026-10-31 06:40:28 UTC",
+  "worker": "B27 / gpt-6-luna-max",
+  "status": "implementation_ready_pending_fresh_worker_verification",
+  "source": {
+    "worktree": "/tmp/usage-history-B27-opencode-worktree",
+    "head": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "detached": true,
+    "owned_path": "apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts",
+    "sha256_before": "8a9b3833fa492ff97bdd79cd22df6f782e53d46d29e843e1ecd0e0e3413b92f1",
+    "sha256_after": "9460c3befea09ce26facc2d94d9ddbcb18bf8d004235a354d8230d49630a9ca6",
+    "diff_path": "/tmp/usage-history-luna-B27-final.diff",
+    "diff_sha256": "4c61d968d48786b55b031c5432bc9a3b3251ce6f100bc40274c905b5f2956fcb"
+  },
+  "diagnosis": {
+    "ci": {
+      "run_id": 41174963429,
+      "attempt": 1,
+      "source_head": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+      "test_id": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "attempts": [
+        "failed",
+        "passed"
+      ],
+      "failed_retry": 0,
+      "failed_assertion": "transient-retry-card expected count 0, received 1 at spec line 102",
+      "failed_trace_available": false,
+      "retry_1_trace": "PASSING; not used as failed-attempt evidence"
+    },
+    "failed_evidence": {
+      "screenshot": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/096fba2fa7b1f3e8ab4cf5ad80a7ce47e62713f1.png",
+      "error_context": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/a60428fbd33d1d042ea4207a054f0833de406f95.markdown",
+      "note": "Inspected both. The screenshot shows a task view; the markdown snapshot shows Reload required and Task unavailable. The spec's finally calls fixture.dispose(), which deletes the task/profile and restarts the backend, so cleanup may explain the captured state. Neither attachment establishes the browser state at the failed locator check."
+    },
+    "prior_change": {
+      "commit": "4d0e501b0be3f42a3430e90e75a6a31e7ce2a8f6",
+      "summary": "Added a poll for session state WAITING_FOR_INPUT before checking the card. That exact change is already in the source and is insufficient by itself."
+    },
+    "source_evidence": {
+      "path": "apps/backend/internal/orchestrator/event_handlers_transient_retained_runtime.go",
+      "order": "finishRetainedRetryWithoutDispatch persists the retained failure and attention, then clears retry ownership, retires the notice, and resolves persisted messages with metadata.retrying=true. Waiting for the failure record or session state does not directly prove that source notice was deleted."
+    },
+    "conclusion": "Causality is inferred from the source ordering and the failed count assertion. The failed-attempt screenshot/context do not capture a trustworthy pre-cleanup locator state, and no failed trace is available."
+  },
+  "implementation": {
+    "summary": "Kept the existing 30-second poll and WAITING_FOR_INPUT requirement; its predicate now also waits until listSessionMessages contains no message with metadata.retrying === true, the persisted source of the transient retry card. Existing card-removal, retained-feedback, composer, reload, trace, and tool-continuity assertions remain.",
+    "production_source_changed": false,
+    "helper_source_changed": false,
+    "other_paths_changed": false,
+    "comment": "This does not repeat B20's state-only poll. It synchronizes on the transcript message whose deletion removes the card, without increasing the existing poll budget."
+  },
+  "verification": {
+    "git_diff_check": "passed",
+    "tests_run": [],
+    "build_or_go_run": false,
+    "browser_run": false,
+    "control_file": {
+      "path": "/tmp/usage-history-B27-control.json",
+      "exists": true,
+      "allow_tests": false,
+      "reason": "C10immutablefullnormalbenchmark; noheavyjobsduringtiming",
+      "updated_at": "2026-10-31T06:33:16.601603+00:00"
+    },
+    "final_ready_file_created": false
+  },
+  "test_handoff": {
+    "owner_note": "Parent will use a fresh Luna6max verification worker after benchmarks quiesce. Do not run from this worker.",
+    "preconditions": [
+      "Stage/reuse only the existing source1ce8d0 build assets; do not rebuild or change package pins.",
+      "The B27 detached worktree currently lacks apps/backend/bin/kandev, apps/backend/bin/mock-agent, apps/backend/bin/e2e-delivery-fixture, apps/backend/.build/e2e-plugin-identity.json, apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz, apps/web/dist, and apps/node_modules. Do not invoke the runner until the fresh worker has made the required existing artifacts/dependencies available.",
+      "Expected existing backend SHA-256: 58301644f642aca850847221b06d8b126ab6df07d11bc13c920a27b8e989f6b8. Expected web asset SHA-256 supplied by parent: 2d69e2196461414bf5d4aa02bcf8c3d88328affb1b2d13572571733a4eb1c357. Source revision: 1ce8d0bfdab088f899cf0ede7a5a911d097e0cee.",
+      "Run the managed host runner with --no-build. Its normal global setup must pass backend artifact freshness, plugin artifact/identity, Vite dist, and pseudo-catalog checks. Keep KANDEV_E2E_SKIP_FRESHNESS unset; the commands explicitly unset it.",
+      "Keep CAPTURE_PR_ASSETS unset and use output directories under /tmp. Verify all nine baseline PR asset files against assets-before before and after. Do not restore any asset unless a run actually changed it and the change is proven to be owned by that run; restore only that proven file."
+    ],
+    "baseline_restore_trap": "Run baseline in a subshell with set -euo pipefail. Set spec=apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts and backup=$(mktemp /tmp/usage-history-B27-spec.XXXXXX); cp \"$spec\" \"$backup\"; define restore(){ cp \"$backup\" \"$spec\"; rm -f \"$backup\"; }; trap restore EXIT; git show 1ce8d0bfdab088f899cf0ede7a5a911d097e0cee:apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts > \"$spec\"; verify SHA-256 8a9b3833fa492ff97bdd79cd22df6f782e53d46d29e843e1ecd0e0e3413b92f1; run the baseline command. The EXIT trap restores only this owned spec from the saved changed copy; put logs and Playwright output in /tmp.",
+    "baseline_command": "cd /tmp/usage-history-B27-opencode-worktree/apps/web && env -u CAPTURE_PR_ASSETS -u KANDEV_E2E_SKIP_FRESHNESS pnpm e2e:run --host --no-build --project chromium -- e2e/tests/session/opencode-capacity-retry.spec.ts --grep 'desktop preserves the episode when the OpenCode continuation fails without new tools' --retries=0 --repeat-each=5 --output=/tmp/usage-history-luna-B27-baseline-output",
+    "focused_command": "cd /tmp/usage-history-B27-opencode-worktree/apps/web && env -u CAPTURE_PR_ASSETS -u KANDEV_E2E_SKIP_FRESHNESS pnpm e2e:run --host --no-build --project chromium -- e2e/tests/session/opencode-capacity-retry.spec.ts --grep 'desktop preserves the episode when the OpenCode continuation fails without new tools' --retries=0 --repeat-each=5 --output=/tmp/usage-history-luna-B27-focused-output",
+    "ordered_command": "cd /tmp/usage-history-B27-opencode-worktree/apps/web && env -u CAPTURE_PR_ASSETS -u KANDEV_E2E_SKIP_FRESHNESS pnpm e2e:run --host --no-build --project chromium -- e2e/tests/session/opencode-capacity-retry.spec.ts --grep 'desktop continues after the fifth OpenCode admission refusal on the same runtime|desktop preserves the episode when the OpenCode continuation fails without new tools' --retries=0 --repeat-each=2 --output=/tmp/usage-history-luna-B27-ordered-output",
+    "logs": [
+      "/tmp/usage-history-luna-B27-baseline.log",
+      "/tmp/usage-history-luna-B27-focused.log",
+      "/tmp/usage-history-luna-B27-ordered.log"
+    ],
+    "evidence_rule": "Run commands sequentially with retries=0; keep every real log, exit code, exact pass/fail count, and intermediate failed attempt. Continue changed runs even if the baseline exposes a failure; do not overwrite evidence."
+  },
+  "assets": {
+    "before_directory": "/tmp/usage-history-luna-B21-ci/assets-before",
+    "compared_current_source_workspace": "/root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web/.pr-assets",
+    "byte_identical_files": 9,
+    "baseline_sha256": {
+      "manifest.json": "0e493d8e8e72549afd4eb390bee8ada314d08fe721532067529a0c3a33b383ce",
+      "mobile-stats-usage-history-phone-real-collector--real-collector-archived-details.png": "69969087ef726650929564b18bd6dff87aef56a70d96d30b56372e55486fa157",
+      "mobile-stats-usage-history-phone-real-collector--real-collector-deleted-details.png": "3f6d968dc6f4c71e7d020f3aadae14198126bf727bfb96aaf14056d134a7884a",
+      "mobile-stats-usage-history-phone-real-native--real-native-retained-unavailable-session-details.png": "a61835e2adc19c17fd14e494639d9db2f8f3513c13393508f21b14524018a7a6",
+      "plugin-session-cost-action-desktop.png": "3df1a4c8623b5e4e3f4a8459d8862588deb7347acb1bb2de9067e9f06c55289b",
+      "plugin-session-cost-action-phone.png": "e97be4ebf5d96aafa349b460a2079f39948a4beeb66311b81dce220984e601c7",
+      "stats-usage-history-desktop-real-collector--real-collector-archived-details.png": "e7fc3cc2b3554272dafd37bb74db0ce3a8ea4b0cd19ba1488c3c3b758ff39efa",
+      "stats-usage-history-desktop-real-collector--real-collector-deleted-details.png": "6cb6610374ff49fd0f43f5e4834b17b659cce94b9818c45e9f9a1008d3f85800",
+      "stats-usage-history-desktop-real-native--real-native-retained-unavailable-session-details.png": "714080fa44b00462f5d14543768acf2d77c2da7c5f2adeacb1ed63b6b176f290"
+    },
+    "post_run_check_required": true
+  }
+}

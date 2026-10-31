@@ -1,0 +1,992 @@
+{
+  "audit": "G9 verified raw-artifact flaky-case triage",
+  "observedAtUtc": "2026-10-31T06:31:33.082403+00:00",
+  "run": {
+    "repository": "kdlbs/kandev",
+    "pullRequest": 3660,
+    "runId": 41174963429,
+    "attempt": 1,
+    "sourceHead": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "syntheticMerge": "4992a83ec68a821f234989347b7c5e2807a86b14",
+    "runConclusion": "success"
+  },
+  "zeroFlakeGate": {
+    "requiredFlakyVerdicts": 0,
+    "observedFlakyVerdicts": 3,
+    "observedUnexpectedVerdicts": 0,
+    "satisfied": false
+  },
+  "rollup": {
+    "summaryCounts": {
+      "passedFirstAttempt": 4556,
+      "passedAfterRetry": 3,
+      "failed": 0,
+      "timedOut": 0,
+      "skipped": 40
+    },
+    "flake": {
+      "flaky": 3,
+      "unexpected": 0,
+      "executed": 4559,
+      "ratePerThousand": 0.66,
+      "flakyTests": [
+        "chromium::tests/session/new-session-advanced-settings.spec.ts::session/new-session-advanced-settings.spec.ts › New session Advanced settings › preserves the draft and submits only explicit additions through a bounded keyboard picker",
+        "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "chromium::tests/settings/executor-profile-card-keyboard.spec.ts::settings/executor-profile-card-keyboard.spec.ts › opens an existing provider profile with Tab and Enter"
+      ]
+    },
+    "uniqueTestCount": 4599,
+    "rawAttempts": 4602,
+    "rawStatusCounts": {
+      "failed": 3,
+      "passed": 4559,
+      "skipped": 40
+    },
+    "rawSummaryAgreement": {
+      "rawOnlyIds": 0,
+      "summaryOnlyIds": 0,
+      "attemptStatusMismatches": 0,
+      "outcomeMismatches": 0,
+      "descriptorMismatches": 0,
+      "extraRawDescriptors": 0,
+      "rawProjectDescriptorTestIds": 4599,
+      "summaryTestIds": 4599,
+      "rawAttemptsMatchAllSummaryIds": true,
+      "allAttemptStatusesMatch": true,
+      "allOutcomesMatch": true,
+      "allDescriptorsMatch": true,
+      "duplicateProjectDescriptorEmissions": 0,
+      "duplicateProjectDescriptorTestIds": []
+    }
+  },
+  "cases": [
+    {
+      "testId": "f290cfd874dff78cf43c-80e66543e94ce7150385",
+      "key": "chromium::tests/session/new-session-advanced-settings.spec.ts::session/new-session-advanced-settings.spec.ts › New session Advanced settings › preserves the draft and submits only explicit additions through a bounded keyboard picker",
+      "project": "chromium",
+      "file": "tests/session/new-session-advanced-settings.spec.ts",
+      "title": "session/new-session-advanced-settings.spec.ts › New session Advanced settings › preserves the draft and submits only explicit additions through a bounded keyboard picker",
+      "summaryOutcome": "flaky",
+      "finalStatus": "passed",
+      "attemptStatuses": [
+        "failed",
+        "passed"
+      ],
+      "attemptCount": 2,
+      "errorCategory": "timeout",
+      "job": {
+        "id": 124461159230,
+        "name": "E2E Shard 18/28",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/kdlbs/kandev/actions/runs/41174963429/job/124461159230"
+      },
+      "failedAttempt": {
+        "retry": 0,
+        "status": "failed",
+        "resultId": "557bf3631b1a4c0f117fca78e938a7fc",
+        "durationMs": 26578,
+        "innerReport": "blob-report-18-13032821852/report-normal-18-4-0.zip",
+        "innerReportSha256": "31a3b65721783b87d8e6150826721f9b5b696dceb678fb37fdccf38d798c55d9",
+        "errors": [
+          {
+            "message": "Error: expect(locator).not.toBeVisible() failed\n\nLocator:  getByRole('dialog').filter({ hasText: /New agent in|Hand off to/ })\nExpected: not visible\nReceived: visible\nTimeout:  5000ms\n\nCall log:\n  - Expect \"not toBeVisible\" with timeout 5000ms\n  - waiting for getByRole('dialog').filter({ hasText: /New agent in|Hand off to/ })\n",
+            "stack": "Error: expect(locator).not.toBeVisible() failed\n\nLocator:  getByRole('dialog').filter({ hasText: /New agent in|Hand off to/ })\nExpected: not visible\nReceived: visible\nTimeout:  5000ms\n\nCall log:\n  - Expect \"not toBeVisible\" with timeout 5000ms\n  - waiting for getByRole('dialog').filter({ hasText: /New agent in|Hand off to/ })\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/session/new-session-advanced-settings.spec.ts:108:30"
+          }
+        ],
+        "attachments": [
+          {
+            "name": "screenshot",
+            "contentType": "image/png",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "557bf3631b1a4c0f117fca78e938a7fc",
+            "innerReport": "blob-report-18-13032821852/report-normal-18-4-0.zip",
+            "innerReportPath": "resources/1e52917db69cc956365c21f76c8a77e9abc61c55.png",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "8f175e5aece2cb6bb86d8531adcf5d0194d8635ae58d08b3f7622e04803f7fea",
+                "size": 123291
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/1e52917db69cc956365c21f76c8a77e9abc61c55.png",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "8f175e5aece2cb6bb86d8531adcf5d0194d8635ae58d08b3f7622e04803f7fea",
+            "diagnosticsSize": 123291,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/1e52917db69cc956365c21f76c8a77e9abc61c55.png"
+          },
+          {
+            "name": "error-context",
+            "contentType": "text/markdown",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "557bf3631b1a4c0f117fca78e938a7fc",
+            "innerReport": "blob-report-18-13032821852/report-normal-18-4-0.zip",
+            "innerReportPath": "resources/54ff8e420a273c83bfd81185f6ea9b530128e0d6.markdown",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "f2745d9885d0b49c04c662eaf63acd43cb0bbe82eb04a1f88cf4fd10e016be95",
+                "size": 11429
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/54ff8e420a273c83bfd81185f6ea9b530128e0d6.markdown",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "f2745d9885d0b49c04c662eaf63acd43cb0bbe82eb04a1f88cf4fd10e016be95",
+            "diagnosticsSize": 11429,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/54ff8e420a273c83bfd81185f6ea9b530128e0d6.markdown"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-18-13032821852.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-18-13032821852/report-normal-18-4-0.zip"
+      },
+      "retrySuccess": {
+        "retry": 1,
+        "status": "passed",
+        "resultId": "440cef4b361477f74c211e7bd1ca3a2d",
+        "durationMs": 40396,
+        "innerReport": "blob-report-18-13032821852/report-normal-18-4-0.zip",
+        "innerReportSha256": "31a3b65721783b87d8e6150826721f9b5b696dceb678fb37fdccf38d798c55d9",
+        "traceAttachments": [
+          {
+            "name": "trace",
+            "contentType": "application/zip",
+            "attemptStatus": "passed",
+            "retry": 1,
+            "resultId": "440cef4b361477f74c211e7bd1ca3a2d",
+            "innerReport": "blob-report-18-13032821852/report-normal-18-4-0.zip",
+            "innerReportPath": "resources/97068407c201456bf22d54291f7c2c13a4c89fed.zip",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "667e3f95a9ff2c380ae4f6c2d09edadce22e38be411df93a578ee22048c1b37b",
+                "size": 6534354
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/97068407c201456bf22d54291f7c2c13a4c89fed.zip",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "667e3f95a9ff2c380ae4f6c2d09edadce22e38be411df93a578ee22048c1b37b",
+            "diagnosticsSize": 6534354,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/97068407c201456bf22d54291f7c2c13a4c89fed.zip"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-18-13032821852.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-18-13032821852/report-normal-18-4-0.zip"
+      }
+    },
+    {
+      "testId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+      "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "project": "chromium",
+      "file": "tests/session/opencode-capacity-retry.spec.ts",
+      "title": "session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+      "summaryOutcome": "flaky",
+      "finalStatus": "passed",
+      "attemptStatuses": [
+        "failed",
+        "passed"
+      ],
+      "attemptCount": 2,
+      "errorCategory": "timeout",
+      "job": {
+        "id": 124461159201,
+        "name": "E2E Shard 7/28",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/kdlbs/kandev/actions/runs/41174963429/job/124461159201"
+      },
+      "failedAttempt": {
+        "retry": 0,
+        "status": "failed",
+        "resultId": "bd099fa227e533f5dea268388b38e3bc",
+        "durationMs": 25321,
+        "innerReport": "blob-report-7-13033181231/report-normal-7-2-0.zip",
+        "innerReportSha256": "9070c21f2e7c0108ae27f960bfe4a8e45269b74c9eca9a40817f525355a01d9f",
+        "errors": [
+          {
+            "message": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n",
+            "stack": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" with timeout 5000ms\n  - waiting for locator('[data-testid=\\'session-chat\\']:visible').first().getByTestId('transient-retry-card')\n    6 × locator resolved to 1 element\n      - unexpected value \"1\"\n\n    at /__w/kandev/kandev/apps/web/e2e/tests/session/opencode-capacity-retry.spec.ts:102:48"
+          }
+        ],
+        "attachments": [
+          {
+            "name": "screenshot",
+            "contentType": "image/png",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "bd099fa227e533f5dea268388b38e3bc",
+            "innerReport": "blob-report-7-13033181231/report-normal-7-2-0.zip",
+            "innerReportPath": "resources/096fba2fa7b1f3e8ab4cf5ad80a7ce47e62713f1.png",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "3a71075c8ed77d681545d0bd670daa4d760a495f088f48a0548858da1a619981",
+                "size": 52661
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/096fba2fa7b1f3e8ab4cf5ad80a7ce47e62713f1.png",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "3a71075c8ed77d681545d0bd670daa4d760a495f088f48a0548858da1a619981",
+            "diagnosticsSize": 52661,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/096fba2fa7b1f3e8ab4cf5ad80a7ce47e62713f1.png"
+          },
+          {
+            "name": "error-context",
+            "contentType": "text/markdown",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "bd099fa227e533f5dea268388b38e3bc",
+            "innerReport": "blob-report-7-13033181231/report-normal-7-2-0.zip",
+            "innerReportPath": "resources/a60428fbd33d1d042ea4207a054f0833de406f95.markdown",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "b54869925b1bebe80a973cb262b8e6590b435c9d8de0b2eaccebdf6023e2551f",
+                "size": 14779
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/a60428fbd33d1d042ea4207a054f0833de406f95.markdown",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "b54869925b1bebe80a973cb262b8e6590b435c9d8de0b2eaccebdf6023e2551f",
+            "diagnosticsSize": 14779,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/a60428fbd33d1d042ea4207a054f0833de406f95.markdown"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-7-13033181231.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-7-13033181231/report-normal-7-2-0.zip"
+      },
+      "retrySuccess": {
+        "retry": 1,
+        "status": "passed",
+        "resultId": "afdcb139fa83a0d8f0b8d5bf412e586c",
+        "durationMs": 37662,
+        "innerReport": "blob-report-7-13033181231/report-normal-7-2-0.zip",
+        "innerReportSha256": "9070c21f2e7c0108ae27f960bfe4a8e45269b74c9eca9a40817f525355a01d9f",
+        "traceAttachments": [
+          {
+            "name": "trace",
+            "contentType": "application/zip",
+            "attemptStatus": "passed",
+            "retry": 1,
+            "resultId": "afdcb139fa83a0d8f0b8d5bf412e586c",
+            "innerReport": "blob-report-7-13033181231/report-normal-7-2-0.zip",
+            "innerReportPath": "resources/26f242fad2daf045e15e34095a9abe4be8d4a6b1.zip",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "ccea68a640560781e49835e96d63d3bc7bfbfbe3ed4a8212d967acd5322c1ece",
+                "size": 6289264
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/26f242fad2daf045e15e34095a9abe4be8d4a6b1.zip",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "ccea68a640560781e49835e96d63d3bc7bfbfbe3ed4a8212d967acd5322c1ece",
+            "diagnosticsSize": 6289264,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/26f242fad2daf045e15e34095a9abe4be8d4a6b1.zip"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-7-13033181231.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-7-13033181231/report-normal-7-2-0.zip"
+      }
+    },
+    {
+      "testId": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+      "key": "chromium::tests/settings/executor-profile-card-keyboard.spec.ts::settings/executor-profile-card-keyboard.spec.ts › opens an existing provider profile with Tab and Enter",
+      "project": "chromium",
+      "file": "tests/settings/executor-profile-card-keyboard.spec.ts",
+      "title": "settings/executor-profile-card-keyboard.spec.ts › opens an existing provider profile with Tab and Enter",
+      "summaryOutcome": "flaky",
+      "finalStatus": "passed",
+      "attemptStatuses": [
+        "failed",
+        "passed"
+      ],
+      "attemptCount": 2,
+      "errorCategory": "none",
+      "job": {
+        "id": 124461159262,
+        "name": "E2E Shard 10/28",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/kdlbs/kandev/actions/runs/41174963429/job/124461159262"
+      },
+      "failedAttempt": {
+        "retry": 0,
+        "status": "failed",
+        "resultId": "35006d23a59671aeae17c9e85800a331",
+        "durationMs": 11793,
+        "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+        "innerReportSha256": "5dae28ef51085028d5fd0edca6a48a079ddfc207ddd667b772ab334d4c7205da",
+        "errors": [
+          {
+            "message": "Error: {\"tag\":\"BUTTON\",\"text\":\"E2E remote sandbox profile\",\"label\":null}\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false",
+            "stack": "Error: {\"tag\":\"BUTTON\",\"text\":\"E2E remote sandbox profile\",\"label\":null}\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n    at /__w/kandev/kandev/apps/web/e2e/tests/settings/executor-profile-card-keyboard.spec.ts:49:9"
+          }
+        ],
+        "attachments": [
+          {
+            "name": "screenshot",
+            "contentType": "image/png",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "35006d23a59671aeae17c9e85800a331",
+            "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+            "innerReportPath": "resources/6a62dd7aa3649ae0e294d00b3219c92e8dbc05c5.png",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "db27d92f6964a71a2a4376a94b053e00fcd7a1612d9ce476b08468978f6c31d7",
+                "size": 81924
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/6a62dd7aa3649ae0e294d00b3219c92e8dbc05c5.png",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "db27d92f6964a71a2a4376a94b053e00fcd7a1612d9ce476b08468978f6c31d7",
+            "diagnosticsSize": 81924,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/6a62dd7aa3649ae0e294d00b3219c92e8dbc05c5.png"
+          },
+          {
+            "name": "error-context",
+            "contentType": "text/markdown",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "35006d23a59671aeae17c9e85800a331",
+            "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+            "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 2,
+            "innerReportCopies": [
+              {
+                "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+                "size": 7454
+              },
+              {
+                "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+                "size": 7454
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+            "diagnosticsSize": 14908,
+            "diagnosticsMatchesOneReportCopy": false,
+            "diagnosticsMatchesRepeatedReportCopies": true,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown"
+          },
+          {
+            "name": "error-context",
+            "contentType": "text/markdown",
+            "attemptStatus": "failed",
+            "retry": 0,
+            "resultId": "35006d23a59671aeae17c9e85800a331",
+            "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+            "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 2,
+            "innerReportCopies": [
+              {
+                "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+                "size": 7454
+              },
+              {
+                "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+                "size": 7454
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+            "diagnosticsSize": 14908,
+            "diagnosticsMatchesOneReportCopy": false,
+            "diagnosticsMatchesRepeatedReportCopies": true,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-10-13032677185.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-10-13032677185/report-normal-10-4-0.zip"
+      },
+      "retrySuccess": {
+        "retry": 1,
+        "status": "passed",
+        "resultId": "d55927d1b30991b836afbc0579c358f4",
+        "durationMs": 23759,
+        "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+        "innerReportSha256": "5dae28ef51085028d5fd0edca6a48a079ddfc207ddd667b772ab334d4c7205da",
+        "traceAttachments": [
+          {
+            "name": "trace",
+            "contentType": "application/zip",
+            "attemptStatus": "passed",
+            "retry": 1,
+            "resultId": "d55927d1b30991b836afbc0579c358f4",
+            "innerReport": "blob-report-10-13032677185/report-normal-10-4-0.zip",
+            "innerReportPath": "resources/40034e4e9d0c6ccc0b96c7fd3556ac9215374ab7.zip",
+            "innerReportPresent": true,
+            "innerReportCopyCount": 1,
+            "innerReportCopies": [
+              {
+                "sha256": "23017dbe3461213d3057a9acb6ca8328b0aea290820356182a9575811a1cf4cc",
+                "size": 4200229
+              }
+            ],
+            "diagnosticsPath": "retry-artifacts/40034e4e9d0c6ccc0b96c7fd3556ac9215374ab7.zip",
+            "diagnosticsPresent": true,
+            "diagnosticsSha256": "23017dbe3461213d3057a9acb6ca8328b0aea290820356182a9575811a1cf4cc",
+            "diagnosticsSize": 4200229,
+            "diagnosticsMatchesOneReportCopy": true,
+            "diagnosticsMatchesRepeatedReportCopies": false,
+            "diagnosticsAbsolutePath": "/tmp/usage-history-luna-G9-artifacts/extracted/e2e-timing-diagnostics-13033490593/retry-artifacts/40034e4e9d0c6ccc0b96c7fd3556ac9215374ab7.zip"
+          }
+        ],
+        "outerArtifactZipPath": "/tmp/usage-history-luna-G9-artifacts/blob-report-10-13032677185.zip",
+        "innerReportZipPath": "/tmp/usage-history-luna-G9-artifacts/extracted/blob-report-10-13032677185/report-normal-10-4-0.zip"
+      }
+    }
+  ],
+  "errorContextDuplication": [
+    {
+      "testId": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+      "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+      "attemptStatus": "failed",
+      "retry": 0,
+      "innerReportCopies": [
+        {
+          "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+          "size": 7454
+        },
+        {
+          "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+          "size": 7454
+        }
+      ],
+      "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+      "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+      "diagnosticsSize": 14908,
+      "diagnosticsMatchesRepeatedReportCopies": true,
+      "sameResultAttachmentReferenceCount": 2
+    },
+    {
+      "testId": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+      "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+      "attemptStatus": "failed",
+      "retry": 0,
+      "innerReportCopies": [
+        {
+          "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+          "size": 7454
+        },
+        {
+          "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+          "size": 7454
+        }
+      ],
+      "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+      "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+      "diagnosticsSize": 14908,
+      "diagnosticsMatchesRepeatedReportCopies": true,
+      "sameResultAttachmentReferenceCount": 2
+    }
+  ],
+  "traceLimits": {
+    "initialFailedAttemptsHaveTraces": false,
+    "retry1TracesBelongToPassedAttempts": true,
+    "note": "Trace attachments are from retry 1 successes; they do not show the failed retry 0 state."
+  },
+  "artifactEvidence": {
+    "downloadReceiptsPath": "/tmp/usage-history-luna-G9-artifacts/download-receipts.json",
+    "rawReportAuditPath": "/tmp/usage-history-luna-G9-artifacts/raw-report-audit.json",
+    "outerMemberHashInventoryPath": "/tmp/usage-history-luna-G9-artifacts/outer-member-inventory.json",
+    "innerReportInventoryPath": "embedded in raw-report-audit.json: innerReports.reportInventory",
+    "separatelyNamedTestResultsArtifacts": 0,
+    "playwrightReportArtifact": "playwright-report-13033760046.zip",
+    "artifactInventoryPath": "/tmp/usage-history-luna-G9-artifacts/artifact-inventory.json",
+    "targetManifestPath": "/tmp/usage-history-luna-G9-artifacts/target-artifact-manifest.json",
+    "summaryOuterAndInnerHash": {
+      "id": 13032831183,
+      "name": "e2e-retry-summary",
+      "argv": [
+        "/tmp/usage-history-gh-cli-2.103.3-task-G/bin/gh",
+        "api",
+        "repos/kdlbs/kandev/actions/artifacts/13032831183/zip"
+      ],
+      "environment": "GH_DEBUG unset",
+      "exitCode": 0,
+      "downloaded": true,
+      "apiDigest": "sha256:9cf355b07419713eb5daee4d898c29148c06a8165564b396ca867c4bdf7c6793",
+      "localSha256": "sha256:9cf355b07419713eb5daee4d898c29148c06a8165564b396ca867c4bdf7c6793",
+      "apiSizeBytes": 5861258,
+      "localSizeBytes": 5861258,
+      "digestMatch": true,
+      "sizeMatch": true,
+      "localPath": "/tmp/usage-history-luna-G9-artifacts/e2e-retry-summary-13032831183.zip",
+      "stderrSuppressed": true,
+      "innerRetrySummary": {
+        "sha256": "54b89c57e56e8eab534eed3b04ac51b4371185f4bc8bf081257ecfda35a0e954",
+        "sizeBytes": 11728349
+      },
+      "diagnosticsRetrySummary": {
+        "sha256": "54b89c57e56e8eab534eed3b04ac51b4371185f4bc8bf081257ecfda35a0e954",
+        "sizeBytes": 11728349
+      }
+    }
+  },
+  "targetIdentityChecks": {
+    "previousNine": [
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+        "key": "chromium::tests/task/threads-composer-disclosure.spec.ts::task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "3c1151bf8856cc906340-5e3fcac5fddc1acae8e2",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/task/threads-composer-disclosure.spec.ts",
+          "title": "task/threads-composer-disclosure.spec.ts › scrolls long required questions through the Grid footer (zoom 0.9, auto-hide true)"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+        "key": "mobile-chrome::tests/task/mobile-plan-download.spec.ts::task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "90005c1239f5286505ae-901084b3039cf4aa996a",
+        "currentDescriptor": {
+          "project": "mobile-chrome",
+          "file": "tests/task/mobile-plan-download.spec.ts",
+          "title": "task/mobile-plan-download.spec.ts › keeps the download control touch-sized on a coarse-pointer workbench"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588",
+        "key": "chromium::tests/layout/stats-usage-history.spec.ts::layout/stats-usage-history.spec.ts › real first publication and rebuild preserve saved values through a database deadline",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "da6142c07692ecf3d2e4-39d2f21bc126941f8588",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/layout/stats-usage-history.spec.ts",
+          "title": "layout/stats-usage-history.spec.ts › real first publication and rebuild preserve saved values through a database deadline"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "67a94427bba3153eec97-c0ddb32b0b4334be6207",
+        "key": "chromium::tests/office/taskless-routine-permission.spec.ts::office/taskless-routine-permission.spec.ts › Office taskless routine permissions › rejects the request when the launched profile does not auto-approve",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "67a94427bba3153eec97-c0ddb32b0b4334be6207",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/office/taskless-routine-permission.spec.ts",
+          "title": "office/taskless-routine-permission.spec.ts › Office taskless routine permissions › rejects the request when the launched profile does not auto-approve"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "caa386653e4d5920f206-71c3917ef7bc3f13d554",
+        "key": "chromium::tests/task/subtask.spec.ts::task/subtask.spec.ts › Subtask basics › creates a policy branch for a local-executor subtask",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "caa386653e4d5920f206-71c3917ef7bc3f13d554",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/task/subtask.spec.ts",
+          "title": "task/subtask.spec.ts › Subtask basics › creates a policy branch for a local-executor subtask"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "f2b1d27a56205d4f8e3d-c01edec105212a083315",
+        "key": "mobile-chrome::tests/session/mobile-acp-prompt-error-continuity.spec.ts::session/mobile-acp-prompt-error-continuity.spec.ts › phone: visible per-row task actions expose Dismiss turn error",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "f2b1d27a56205d4f8e3d-c01edec105212a083315",
+        "currentDescriptor": {
+          "project": "mobile-chrome",
+          "file": "tests/session/mobile-acp-prompt-error-continuity.spec.ts",
+          "title": "session/mobile-acp-prompt-error-continuity.spec.ts › phone: visible per-row task actions expose Dismiss turn error"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+        "key": "chromium::tests/chat/jump-to-latest.spec.ts::chat/jump-to-latest.spec.ts › Jump to latest returns to the newest grouped reply and preserves auto-scroll",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "1b1a20901b8a953d6a4a-16d082d8dc892d0cbf5b",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/chat/jump-to-latest.spec.ts",
+          "title": "chat/jump-to-latest.spec.ts › Jump to latest returns to the newest grouped reply and preserves auto-scroll"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+        "key": "chromium::tests/pr/pr-watcher-dockview-layout.spec.ts::pr/pr-watcher-dockview-layout.spec.ts › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "a5bfe6022d3309dd0387-8d523238b35bcf9747f4",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/pr/pr-watcher-dockview-layout.spec.ts",
+          "title": "pr/pr-watcher-dockview-layout.spec.ts › PR watcher dockview layout stability › layout remains correct when switching between PR watcher tasks with plan mode"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "previous-nine",
+        "sourceTestId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+        "key": "chromium::tests/session/opencode-capacity-retry.spec.ts::session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "4171eb7cdfd148bc849b-29b7e796904bfaaf0896",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/session/opencode-capacity-retry.spec.ts",
+          "title": "session/opencode-capacity-retry.spec.ts › desktop preserves the episode when the OpenCode continuation fails without new tools"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "failed",
+          "passed"
+        ],
+        "rawAttemptCount": 2,
+        "summaryStatuses": [
+          "failed",
+          "passed"
+        ],
+        "summaryAttempts": 2,
+        "summaryOutcome": "flaky",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "failed",
+        "passFirstAttempt": false
+      }
+    ],
+    "previousNineAllPassFirstAttempt": false,
+    "quickChatOfficePlan": [
+      {
+        "targetGroup": "QuickChat/Office/Plan",
+        "sourceTestId": "30beb86f460dff9e004a-dfdc4d7a1e26a99989e9",
+        "key": "chromium::tests/chat/quick-chat-cancel-palette.spec.ts::chat/quick-chat-cancel-palette.spec.ts › Quick Chat cancellation palette and composer › cancels Quick Chat and leaves the underlying task turn running",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "30beb86f460dff9e004a-dfdc4d7a1e26a99989e9",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/chat/quick-chat-cancel-palette.spec.ts",
+          "title": "chat/quick-chat-cancel-palette.spec.ts › Quick Chat cancellation palette and composer › cancels Quick Chat and leaves the underlying task turn running"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "QuickChat/Office/Plan",
+        "sourceTestId": "e1a7389f33bf22ce6a57-268d26ea489fb6446658",
+        "key": "chromium::tests/office/session-lifecycle.spec.ts::office/session-lifecycle.spec.ts › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "e1a7389f33bf22ce6a57-268d26ea489fb6446658",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/office/session-lifecycle.spec.ts",
+          "title": "office/session-lifecycle.spec.ts › Office task session lifecycle › reassignment: prev assignee's session moves to a terminal state"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      },
+      {
+        "targetGroup": "QuickChat/Office/Plan",
+        "sourceTestId": "292602c485b575a74cfc-4c2129fef5badf2ab8cc",
+        "key": "chromium::tests/task/plan-download.spec.ts::task/plan-download.spec.ts › keeps every Plan action reachable at the narrow desktop panel width",
+        "foundCurrent": true,
+        "matchingSummaryCount": 1,
+        "currentTestId": "292602c485b575a74cfc-4c2129fef5badf2ab8cc",
+        "currentDescriptor": {
+          "project": "chromium",
+          "file": "tests/task/plan-download.spec.ts",
+          "title": "task/plan-download.spec.ts › keeps every Plan action reachable at the narrow desktop panel width"
+        },
+        "testIdUnchanged": true,
+        "rawDescriptorMatchesSummary": true,
+        "rawStatuses": [
+          "passed"
+        ],
+        "rawAttemptCount": 1,
+        "summaryStatuses": [
+          "passed"
+        ],
+        "summaryAttempts": 1,
+        "summaryOutcome": "expected",
+        "summaryFinalStatus": "passed",
+        "firstAttemptStatus": "passed",
+        "passFirstAttempt": true
+      }
+    ],
+    "quickChatOfficePlanAllPassFirstAttempt": true
+  },
+  "provenance": {
+    "sourceHeadVerifiedAcrossRunPrAndLocalCheckout": true,
+    "attemptVerified": {
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee"
+    },
+    "syntheticMerge": {
+      "sha": "4992a83ec68a821f234989347b7c5e2807a86b14",
+      "treeSha": "4b6a4c3012f546cc01c8c724e0371d20e4fb5ff3",
+      "parents": [
+        "997bc54fae4da15702c91da5c5d120bfe651edc1",
+        "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee"
+      ],
+      "message": "Merge 1ce8d0bfdab088f899cf0ede7a5a911d097e0cee into 997bc54fae4da15702c91da5c5d120bfe651edc1",
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "verified_at": "2026-10-31T06:02:33Z"
+      }
+    },
+    "checkoutEvidencePath": "/tmp/usage-history-luna-G9-artifacts/source-metadata.json",
+    "reportedPrBaseRelationship": "The reported PR base is the direct parent and merge-base of the synthetic first parent; the synthetic main parent is one commit ahead."
+  },
+  "errorContextPackagingNote": {
+    "distinctDuplicatedResourcePaths": 1,
+    "failedAttempt": "executor-profile-card-keyboard retry 0",
+    "duplicateAttachmentReferences": 2,
+    "identicalRawInnerCopies": 2,
+    "diagnosticsFileContainsBothCopies": true,
+    "doNotCountAsTwoTestFailures": true,
+    "details": [
+      {
+        "testId": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+        "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+        "attemptStatus": "failed",
+        "retry": 0,
+        "innerReportCopies": [
+          {
+            "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+            "size": 7454
+          },
+          {
+            "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+            "size": 7454
+          }
+        ],
+        "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+        "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+        "diagnosticsSize": 14908,
+        "diagnosticsMatchesRepeatedReportCopies": true,
+        "sameResultAttachmentReferenceCount": 2
+      },
+      {
+        "testId": "bc4ab293302364318a9c-05e92979a5ebc975778d",
+        "innerReportPath": "resources/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+        "attemptStatus": "failed",
+        "retry": 0,
+        "innerReportCopies": [
+          {
+            "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+            "size": 7454
+          },
+          {
+            "sha256": "de3904362a488cbcac776e841af2db8105a5a7d4e0ba32f379945a0a216be3f9",
+            "size": 7454
+          }
+        ],
+        "diagnosticsPath": "retry-artifacts/e83aeafdca5a2a49045e2005a09713e30737e159.markdown",
+        "diagnosticsSha256": "ac26a8840d60cf6fdc866effb29496100b21cabf6bedf0e6e9ef53511c751502",
+        "diagnosticsSize": 14908,
+        "diagnosticsMatchesRepeatedReportCopies": true,
+        "sameResultAttachmentReferenceCount": 2
+      }
+    ]
+  },
+  "allAttemptLedger": {
+    "path": "/tmp/usage-history-luna-G9-artifacts/all-test-attempts.jsonl",
+    "sha256": "5d9ecd63847589b18b927b493a83aedd41a491ec3ff1879129d1e28add5a2c8f",
+    "sizeBytes": 3957641,
+    "testRows": 4599,
+    "rawAttemptRows": 4602
+  },
+  "parentTerminalEvidence": {
+    "source": "parent-provided fresh pr-await40621 terminal evidence",
+    "path": "/tmp/usage-history-core-1ce8d0-terminal-state.json",
+    "sourceHead": "1ce8d0bfdab088f899cf0ede7a5a911d097e0cee",
+    "checks": {
+      "passed": 95,
+      "skipped": 11,
+      "failed": 0,
+      "pending": 0,
+      "total": 106
+    },
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "unresolvedThreads": 0,
+    "approvals": 0,
+    "threadEvidencePath": "/tmp/usage-history-core-1ce8d0-terminal-threads.txt",
+    "threadEvidenceStdout": "empty",
+    "pollingDuplicated": false
+  }
+}

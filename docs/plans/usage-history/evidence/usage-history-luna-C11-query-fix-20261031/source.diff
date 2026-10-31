@@ -1,0 +1,133 @@
+diff --git a/apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go b/apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go
+index cf03d684fa7..d4e9d42923b 100644
+--- a/apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go
++++ b/apps/backend/internal/analytics/repository/sqlite/usage_history_report_fastpaths.go
+@@ -4,7 +4,6 @@ import (
+ 	"context"
+ 	"fmt"
+ 	"strings"
+-	"time"
+ 
+ 	"github.com/jmoiron/sqlx"
+ 	"github.com/kandev/kandev/internal/analytics/models"
+@@ -210,65 +209,15 @@ func reportUTCMonthSummarySource(scope, generation string, filter models.Session
+ 	return usageReportQuery{sql: query + ` UNION ALL ` + coarse.sql, args: append(args, coarse.args...)}
+ }
+ 
+-type usageReportUTCMonthEdge struct {
+-	start time.Time
+-	end   time.Time
+-}
+-
+ func reportUTCMonthEdgeSource(selectSQL, joinSuffix string, predicate usageReportQuery, filter models.SessionUsageFilter) usageReportQuery {
+-	if filter.Start == nil || filter.End == nil {
+-		edgeDays := `(WITH edge_days AS MATERIALIZED (SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0) SELECT * FROM edge_days)`
+-		return usageReportQuery{
+-			sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
+-			args: append([]any{filter.Timezone}, predicate.args...),
+-		}
+-	}
+-	edges, ok := usageReportUTCMonthEdges(filter)
+-	if !ok {
+-		edgeDays := `(WITH edge_days AS MATERIALIZED (SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0) SELECT * FROM edge_days)`
+-		return usageReportQuery{
+-			sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
+-			args: append([]any{filter.Timezone}, predicate.args...),
+-		}
+-	}
+-	where := `0=1`
+-	args := []any{filter.Timezone}
+-	if len(edges) > 0 {
+-		var ranges []string
+-		for _, edge := range edges {
+-			ranges = append(ranges, `(c.coverage_start>=? AND c.coverage_start<?)`)
+-			args = append(args, edge.start, edge.end)
+-		}
+-		where = strings.Join(ranges, ` OR `)
+-	}
+-	args = append(args, predicate.args...)
++	// Keep one indexed point probe per UTC edge day. A long monthly range has
++	// dozens of disjoint UTC edges; expressing them as an OR over coverage_start
++	// makes SQLite scan every point in the scope instead of seeking each day.
++	edgeDays := `(WITH edge_days AS MATERIALIZED (
++ SELECT start_at,end_at FROM usage_report_utc_calendar WHERE full_month=0
++) SELECT * FROM edge_days)`
+ 	return usageReportQuery{
+-		sql:  selectSQL + ` FROM usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND (` + where + `) AND ` + predicate.sql,
+-		args: args,
+-	}
+-}
+-
+-func usageReportUTCMonthEdges(filter models.SessionUsageFilter) ([]usageReportUTCMonthEdge, bool) {
+-	location, err := timeLocation(filter.Timezone)
+-	if err != nil || filter.Start == nil || filter.End == nil || !filter.Start.Before(*filter.End) {
+-		return nil, false
+-	}
+-	day := time.Date(filter.Start.UTC().Year(), filter.Start.UTC().Month(), filter.Start.UTC().Day(), 0, 0, 0, 0, time.UTC)
+-	var edges []usageReportUTCMonthEdge
+-	for day.Before(*filter.End) {
+-		next := day.AddDate(0, 0, 1)
+-		start, end := day, next
+-		if start.Before(*filter.Start) {
+-			start = filter.Start.UTC()
+-		}
+-		if end.After(*filter.End) {
+-			end = filter.End.UTC()
+-		}
+-		fullMonth := start.Equal(day) && end.Equal(next) && start.In(location).Format("2006-01") == next.Add(-time.Nanosecond).In(location).Format("2006-01")
+-		if !fullMonth {
+-			edges = append(edges, usageReportUTCMonthEdge{start: start, end: end})
+-		}
+-		day = next
++		sql:  selectSQL + ` FROM ` + edgeDays + ` d CROSS JOIN usage_projection_contributions c` + joinSuffix + ` WHERE c.calendar='UTC' AND c.coverage_kind='point' AND c.coverage_start>=d.start_at AND c.coverage_start<d.end_at AND ` + predicate.sql,
++		args: append([]any{filter.Timezone}, predicate.args...),
+ 	}
+-	return edges, true
+ }
+diff --git a/apps/backend/internal/analytics/repository/sqlite/usage_history_report_scan_test.go b/apps/backend/internal/analytics/repository/sqlite/usage_history_report_scan_test.go
+index 543d239510e..2ce039fca06 100644
+--- a/apps/backend/internal/analytics/repository/sqlite/usage_history_report_scan_test.go
++++ b/apps/backend/internal/analytics/repository/sqlite/usage_history_report_scan_test.go
+@@ -92,9 +92,9 @@ func TestUsageHistoryDeadlineCasesUseBoundedReportSources(t *testing.T) {
+ }
+ 
+ type usageDeadlineSQLitePlan struct {
+-	pointVisits, summaryVisits, lifetimeWorkVisits, lifetimeIndexVisits int64
+-	subjectFirst, lifetimeIndexPlanned                                  bool
+-	indexed                                                             []string
++	pointVisits, unboundedPointVisits, summaryVisits, lifetimeWorkVisits, lifetimeIndexVisits int64
++	subjectFirst, lifetimeIndexPlanned                                                       bool
++	indexed                                                                                  []string
+ }
+ 
+ func assertUsageHistoryDeadlineScenario(t *testing.T, fixture *usageBenchFixture, observer *usageBenchObserver, scenario *usageBenchCase) {
+@@ -103,9 +103,9 @@ func assertUsageHistoryDeadlineScenario(t *testing.T, fixture *usageBenchFixture
+ 	_, statements := observeRetainedReport(t, fixture, observer, scenario)
+ 	source := usageHistoryDeadlineReportSource(t, statements, scenario.Name)
+ 	plan := usageHistoryDeadlineSQLitePlanFor(t, source, scenario.Name)
+-	t.Logf("published facts=%d contributions=%d daily summaries=%d; point-index visits=%d; daily-summary visits=%d; canonical-work visits=%d; lifetime-index visits=%d; subject-first=%t; indexed loops=%v",
++	t.Logf("published facts=%d contributions=%d daily summaries=%d; point-index visits=%d; unbounded point-index visits=%d; daily-summary visits=%d; canonical-work visits=%d; lifetime-index visits=%d; subject-first=%t; indexed loops=%v",
+ 		fixture.storage.PublishedFacts, fixture.storage.PublishedContributions, fixture.storage.DailySummaries,
+-		plan.pointVisits, plan.summaryVisits, plan.lifetimeWorkVisits, plan.lifetimeIndexVisits, plan.subjectFirst, plan.indexed)
++		plan.pointVisits, plan.unboundedPointVisits, plan.summaryVisits, plan.lifetimeWorkVisits, plan.lifetimeIndexVisits, plan.subjectFirst, plan.indexed)
+ 	assertUsageHistoryDeadlinePlan(t, fixture, scenario, source, plan)
+ }
+ 
+@@ -145,6 +145,9 @@ func usageHistoryDeadlineSQLitePlanFor(t *testing.T, source *usageBenchStatement
+ 	t.Helper()
+ 	var plan usageDeadlineSQLitePlan
+ 	for _, loop := range source.SQLiteLoops {
++		if loop.Name == "idx_usage_contribution_points" && !strings.Contains(loop.Plan, "coverage_start") {
++			plan.unboundedPointVisits += loop.Visits
++		}
+ 		if scenario == "native" && loop.Name == "idx_usage_contribution_model_provider_points" {
+ 			t.Logf("native point-period plan: %s; NLOOP=%d NVISIT=%d SELECT=%d PARENT=%d", loop.Plan, loop.Loops, loop.Visits, loop.SelectID, loop.ParentID)
+ 		}
+@@ -176,6 +179,7 @@ func assertUsageHistoryDeadlinePlan(t *testing.T, fixture *usageBenchFixture, sc
+ 	case "five_years/America/New_York", "five_years/Asia/Kathmandu", "five_years/Europe/Lisbon":
+ 		require.Contains(t, source.SQL, "usage_daily_summaries")
+ 		require.Positive(t, plan.summaryVisits)
++		require.Zero(t, plan.unboundedPointVisits, "monthly UTC edge matching must seek bounded calendar-day ranges")
+ 		require.Less(t, plan.pointVisits, fixture.storage.PublishedContributions/4,
+ 			"the report must combine full UTC days from summaries and probe only bounded edge/mixed keys")
+ 	case "native":

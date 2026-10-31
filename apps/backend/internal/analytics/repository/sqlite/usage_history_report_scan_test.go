@@ -92,9 +92,9 @@ func TestUsageHistoryDeadlineCasesUseBoundedReportSources(t *testing.T) {
 }
 
 type usageDeadlineSQLitePlan struct {
-	pointVisits, summaryVisits, lifetimeWorkVisits, lifetimeIndexVisits int64
-	subjectFirst, lifetimeIndexPlanned                                  bool
-	indexed                                                             []string
+	pointVisits, unboundedPointVisits, summaryVisits, lifetimeWorkVisits, lifetimeIndexVisits int64
+	subjectFirst, lifetimeIndexPlanned                                                        bool
+	indexed                                                                                   []string
 }
 
 func assertUsageHistoryDeadlineScenario(t *testing.T, fixture *usageBenchFixture, observer *usageBenchObserver, scenario *usageBenchCase) {
@@ -103,9 +103,9 @@ func assertUsageHistoryDeadlineScenario(t *testing.T, fixture *usageBenchFixture
 	_, statements := observeRetainedReport(t, fixture, observer, scenario)
 	source := usageHistoryDeadlineReportSource(t, statements, scenario.Name)
 	plan := usageHistoryDeadlineSQLitePlanFor(t, source, scenario.Name)
-	t.Logf("published facts=%d contributions=%d daily summaries=%d; point-index visits=%d; daily-summary visits=%d; canonical-work visits=%d; lifetime-index visits=%d; subject-first=%t; indexed loops=%v",
+	t.Logf("published facts=%d contributions=%d daily summaries=%d; point-index visits=%d; unbounded point-index visits=%d; daily-summary visits=%d; canonical-work visits=%d; lifetime-index visits=%d; subject-first=%t; indexed loops=%v",
 		fixture.storage.PublishedFacts, fixture.storage.PublishedContributions, fixture.storage.DailySummaries,
-		plan.pointVisits, plan.summaryVisits, plan.lifetimeWorkVisits, plan.lifetimeIndexVisits, plan.subjectFirst, plan.indexed)
+		plan.pointVisits, plan.unboundedPointVisits, plan.summaryVisits, plan.lifetimeWorkVisits, plan.lifetimeIndexVisits, plan.subjectFirst, plan.indexed)
 	assertUsageHistoryDeadlinePlan(t, fixture, scenario, source, plan)
 }
 
@@ -145,6 +145,9 @@ func usageHistoryDeadlineSQLitePlanFor(t *testing.T, source *usageBenchStatement
 	t.Helper()
 	var plan usageDeadlineSQLitePlan
 	for _, loop := range source.SQLiteLoops {
+		if loop.Name == "idx_usage_contribution_points" && !strings.Contains(loop.Plan, "coverage_start") {
+			plan.unboundedPointVisits += loop.Visits
+		}
 		if scenario == "native" && loop.Name == "idx_usage_contribution_model_provider_points" {
 			t.Logf("native point-period plan: %s; NLOOP=%d NVISIT=%d SELECT=%d PARENT=%d", loop.Plan, loop.Loops, loop.Visits, loop.SelectID, loop.ParentID)
 		}
@@ -176,6 +179,7 @@ func assertUsageHistoryDeadlinePlan(t *testing.T, fixture *usageBenchFixture, sc
 	case "five_years/America/New_York", "five_years/Asia/Kathmandu", "five_years/Europe/Lisbon":
 		require.Contains(t, source.SQL, "usage_daily_summaries")
 		require.Positive(t, plan.summaryVisits)
+		require.Zero(t, plan.unboundedPointVisits, "monthly UTC edge matching must seek bounded calendar-day ranges")
 		require.Less(t, plan.pointVisits, fixture.storage.PublishedContributions/4,
 			"the report must combine full UTC days from summaries and probe only bounded edge/mixed keys")
 	case "native":
