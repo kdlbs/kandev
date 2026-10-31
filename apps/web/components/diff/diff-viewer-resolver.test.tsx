@@ -5,8 +5,8 @@ vi.mock("@/hooks/use-editor-resolver", () => ({
   useEditorProvider: () => "monaco",
 }));
 
-vi.mock("@/components/editors/monaco/monaco-diff-viewer", () => ({
-  MonacoDiffViewer: (props: Record<string, unknown>) => (
+vi.mock("@/components/editors/monaco/lazy-editors", () => ({
+  LazyMonacoDiffViewer: (props: Record<string, unknown>) => (
     <span data-testid="monaco-diff-props" data-props={JSON.stringify(props)} />
   ),
 }));

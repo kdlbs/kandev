@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import { useEditorProvider } from "@/hooks/use-editor-resolver";
 import { useHtmlPreviewPublisher } from "@/hooks/use-html-preview-publisher";
-import { MonacoCodeEditor } from "@/components/editors/monaco/monaco-code-editor";
+import { LazyMonacoCodeEditor as MonacoCodeEditor } from "@/components/editors/monaco/lazy-editors";
 import { CodeMirrorCodeEditor } from "@/components/editors/codemirror/codemirror-code-editor";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { FilePreviewKind } from "@/lib/utils/file-types";

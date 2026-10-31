@@ -26,8 +26,8 @@ vi.mock("@/hooks/use-editor-resolver", () => ({
   useEditorProvider: () => "monaco",
 }));
 
-vi.mock("@/components/editors/monaco/monaco-code-editor", () => ({
-  MonacoCodeEditor: (props: { path: string; content: string; onPreviewHtml?: () => void }) => (
+vi.mock("@/components/editors/monaco/lazy-editors", () => ({
+  LazyMonacoCodeEditor: (props: { path: string; content: string; onPreviewHtml?: () => void }) => (
     <div data-testid="monaco-editor" data-path={props.path} data-content={props.content}>
       {props.onPreviewHtml && (
         <button type="button" onClick={props.onPreviewHtml}>
