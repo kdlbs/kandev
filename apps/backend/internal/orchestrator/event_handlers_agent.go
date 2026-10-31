@@ -1144,6 +1144,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
 	completionCtx := withWorkflowEffect(ctx, workflowEffectForEvent(data))
 	if turnAtEventFire != "" {
+		fixedProfileID := s.fixedProfileForCleanCompletion(completionCtx, data)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
 			completionCtx, data.TaskID, data.SessionID, turnAtEventFire,
 		); err != nil {
@@ -1154,6 +1155,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				zap.Error(err))
 			return
 		}
+		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedProfileID)
 		s.clearAcceptedQueuedDispatch(data.SessionID)
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
@@ -2789,6 +2791,7 @@ func (s *Service) finishAgentCompleted(
 	}
 	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
 	if data.TurnID != "" {
+		fixedProfileID := s.fixedProfileForCleanCompletion(completionCtx, data)
 		if err := s.completeTurnForTaskSessionCheckedOwned(
 			completionCtx, data.TaskID, data.SessionID, data.TurnID,
 		); err != nil {
@@ -2800,6 +2803,7 @@ func (s *Service) finishAgentCompleted(
 			go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 			return
 		}
+		s.profileExecutionResolver.ResetFixedProfileCircuitFailures(completionCtx, fixedProfileID)
 	} else {
 		s.completeTurnForSession(completionCtx, data.SessionID)
 	}

@@ -502,11 +502,14 @@ func (s *Service) completeTurnForStreamEvent(
 			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 			return
 		}
+		fixedProfileID := s.fixedProfileForCleanStreamCompletion(ctx, payload, capturedTurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+		} else {
+			s.profileExecutionResolver.ResetFixedProfileCircuitFailures(ctx, fixedProfileID)
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)

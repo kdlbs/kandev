@@ -57,6 +57,20 @@ func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
 	)
 }
 
+// ResetFixedProfileCircuitFailures clears only the consecutive count of a
+// concrete profile's shared resource after its owner confirms a clean turn.
+// It does not close a circuit, release a hold, or change a probe lease.
+func (r *ProfileExecutionResolver) ResetFixedProfileCircuitFailures(ctx context.Context, executionProfileID string) bool {
+	if r == nil || r.engine == nil || !r.engine.Circuits().EscalationEnabled() {
+		return false
+	}
+	candidate, ok := r.resourceCircuitCandidate(ctx, executionProfileID)
+	if !ok {
+		return false
+	}
+	return r.engine.Circuits().ResetFailures(candidate.BindingKey)
+}
+
 // FixedProfileSuspension reports the resource circuit refusing a new dispatch
 // for one fixed profile at now. A profile that cannot be resolved reports an
 // unknown verdict instead of a healthy one; a resolvable profile with no
