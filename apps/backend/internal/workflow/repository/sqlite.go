@@ -157,6 +157,9 @@ func (r *Repository) initSchema() error {
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban
 	// workflows are unaffected.
+	if err := r.initPromptSourceSchema(); err != nil {
+		return err
+	}
 	if err := r.initPhase2Schema(); err != nil {
 		return err
 	}
@@ -678,6 +681,9 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutableTx(ctx, tx, step.WorkflowID); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if step.IsStartStep {
@@ -691,32 +697,8 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		}
 	}
 
-	insertQuery := `
-		INSERT INTO workflow_steps (
-			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, disable_unclassified_fallback, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter, wip_limit, pull_from_step_id, session_target, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	args := []interface{}{step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
-		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), dialect.BoolToInt(step.DisableUnclassifiedFallback), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.CreatedAt, step.UpdatedAt}
-	if expectedWorkflow != nil {
-		insertQuery = strings.Replace(insertQuery, `) VALUES (`, `) SELECT `, 1)
-		insertQuery = strings.TrimSuffix(strings.TrimSpace(insertQuery), ")") + ` WHERE EXISTS (SELECT 1 FROM workflows WHERE id = ? AND updated_at = ?)`
-		args = append(args, step.WorkflowID, *expectedWorkflow)
-	}
-	result, err := tx.ExecContext(ctx, tx.Rebind(insertQuery), args...)
-	if err != nil {
+	if err := r.insertStepRecord(ctx, tx, step, eventsJSON, sessionTargetJSON, expectedWorkflow); err != nil {
 		return nil, err
-	}
-	if expectedWorkflow != nil {
-		rows, rowsErr := result.RowsAffected()
-		if rowsErr != nil {
-			return nil, rowsErr
-		}
-		if rows == 0 {
-			return nil, repoerrors.ErrTaskVersionConflict
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -871,6 +853,9 @@ func (r *Repository) updateStepWithDemotedStartSteps(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureStepPromptSourceMutableTx(ctx, tx, step.ID); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if isStartStep != nil && *isStartStep {
@@ -996,6 +981,10 @@ func (r *Repository) ReorderStepsIfUnchanged(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutableTx(ctx, tx, workflowID); err != nil {
+		return err
+	}
+
 	var workflowVersion time.Time
 	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT updated_at FROM workflows WHERE id = ?`), workflowID).Scan(&workflowVersion); err != nil {
 		return repoerrors.ErrTaskVersionConflict
@@ -1033,11 +1022,22 @@ func (r *Repository) ReorderStepsIfUnchanged(
 
 // ClearStartStepFlag clears the is_start_step flag for all steps in a workflow except the given step.
 func (r *Repository) ClearStartStepFlag(ctx context.Context, workflowID, exceptStepID string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutableTx(ctx, tx, workflowID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflow_steps SET is_start_step = 0, updated_at = ?
 		WHERE workflow_id = ? AND id != ? AND is_start_step = 1
 	`), time.Now().UTC(), workflowID, exceptStepID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) demoteOtherStartSteps(ctx context.Context, tx *sqlx.Tx, workflowID, exceptStepID string, updatedAt time.Time) ([]*models.WorkflowStep, error) {
@@ -1180,6 +1180,10 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureStepPromptSourceMutableTx(ctx, tx, id); err != nil {
+		return err
+	}
+
 	cleanupQuery := `
 		UPDATE tasks
 		SET queued_for_step_id = '', queued_at = NULL, wip_admitted = 1, metadata = `

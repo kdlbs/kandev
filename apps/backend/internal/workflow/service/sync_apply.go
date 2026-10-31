@@ -184,7 +184,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		return
 	}
 	for index, sp := range pw.Steps {
-		stepChanged, err := s.applySyncedStep(ctx, wf, desiredSteps[index], existingByName[sp.Name])
+		stepChanged, err := s.applySyncedStep(ctx, wf, sp, desiredSteps[index], existingByName[sp.Name])
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
 			return
@@ -203,12 +203,12 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	}
 }
 
-func (s *Service) applySyncedStep(ctx context.Context, wf *taskmodels.Workflow, step, existing *models.WorkflowStep) (bool, error) {
+func (s *Service) applySyncedStep(ctx context.Context, wf *taskmodels.Workflow, sp models.StepPortable, step, existing *models.WorkflowStep) (bool, error) {
 	if existing == nil {
 		return true, s.repo.CreateStep(ctx, step)
 	}
 	step.CreatedAt = existing.CreatedAt
-	if step.StageType == "" {
+	if sp.StageType == "" {
 		// A document written before stage types were portable states none, so
 		// the step keeps the nature it already has.
 		step.StageType = existing.StageType
@@ -406,6 +406,25 @@ func eventsEqual(a, b models.StepEvents) bool {
 // (and the update must be skipped) when names are ambiguous or a removed step
 // still holds tasks.
 func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, steps []*models.WorkflowStep) (map[string]*models.WorkflowStep, []*models.WorkflowStep, string) {
+	existingByName, toDelete, warning := matchStepChanges(wf, pw, steps)
+	if warning != "" {
+		return nil, nil, warning
+	}
+	for _, st := range toDelete {
+		count, err := s.syncOps.CountTasksByWorkflowStep(ctx, st.ID)
+		if err != nil {
+			return nil, nil, fmt.Sprintf("workflow %q: failed to count tasks in step %q: %v", wf.Name, st.Name, err)
+		}
+		if count > 0 {
+			return nil, nil, fmt.Sprintf("workflow %q not updated: step %q was removed from the definition but still has %d task(s); move or archive them, then sync again", wf.Name, st.Name, count)
+		}
+	}
+	return existingByName, toDelete, ""
+}
+
+// matchStepChanges compares definitions without deciding whether removals may
+// be applied. Read-only drift uses the same names without imposing write gates.
+func matchStepChanges(wf *taskmodels.Workflow, pw models.WorkflowPortable, steps []*models.WorkflowStep) (map[string]*models.WorkflowStep, []*models.WorkflowStep, string) {
 	existingByName := make(map[string]*models.WorkflowStep, len(steps))
 	for _, st := range steps {
 		if _, dup := existingByName[st.Name]; dup {
@@ -424,13 +443,6 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 	for _, st := range steps {
 		if desiredNames[st.Name] {
 			continue
-		}
-		count, err := s.syncOps.CountTasksByWorkflowStep(ctx, st.ID)
-		if err != nil {
-			return nil, nil, fmt.Sprintf("workflow %q: failed to count tasks in step %q: %v", wf.Name, st.Name, err)
-		}
-		if count > 0 {
-			return nil, nil, fmt.Sprintf("workflow %q not updated: step %q was removed from the definition but still has %d task(s); move or archive them, then sync again", wf.Name, st.Name, count)
 		}
 		toDelete = append(toDelete, st)
 	}
