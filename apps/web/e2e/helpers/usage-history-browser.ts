@@ -127,8 +127,9 @@ export async function exerciseProjectionRecovery(
   await installFixturePlugin(page);
   const workspace = seed.workspaceId;
   try {
-    const task = await createUsageTask(api, seed, "Real projection preparation and rebuild");
     await usageControl(page, workspace, "pause");
+    // Stop before creating the task so the empty workspace generation cannot publish.
+    const task = await createUsageTask(api, seed, "Real projection preparation and rebuild");
     const target = await usageTarget(page, workspace, task.id);
     const item: UsageFixtureObservation = {
       subject_binding: target.SubjectBinding,
@@ -172,13 +173,24 @@ export async function exerciseProjectionRecovery(
     await expect(page.getByTestId("token-usage-summary")).toContainText("41");
     if (fault) await exerciseRealUsageReadFault(page, workspace);
     await usageControl(page, workspace, "resume");
+    // The real publication read also proves persistence recovered after the injected deadline.
     const next = await waitForUsage(page, workspace, "43");
     expect(next.projection_generation).not.toBe(complete.projection_generation);
-    await page.getByRole("button", { name: "Retry status", exact: true }).click();
+    if (fault) {
+      await expect(page.getByTestId("token-usage-error")).toHaveCount(2);
+      await expect(page.getByTestId("token-usage-summary")).toContainText("41");
+      await page
+        .getByTestId("token-usage-error")
+        .first()
+        .getByRole("button", { name: "Retry", exact: true })
+        .click();
+    } else {
+      await page.getByRole("button", { name: "Retry status", exact: true }).click();
+    }
     await expect(page.getByTestId("token-usage-summary")).toContainText("43");
+    await expect(page.getByTestId("token-usage-error")).toHaveCount(0);
     await expect(page.getByTestId("token-usage-preparing")).toHaveCount(0);
     await expect(page.getByTestId("token-usage-projection-notice")).toHaveCount(0);
-    await expect(page.getByTestId("token-usage-error")).toHaveCount(0);
   } finally {
     try {
       await usageControl(page, workspace, "release-reader");
@@ -201,14 +213,12 @@ async function exerciseRealUsageReadFault(page: Page, workspace: string) {
   await page.getByRole("button", { name: "Retry status", exact: true }).click();
   expect((await (await failed).json()).error_code).toBe("analytics_busy");
   await expect(page.getByTestId("token-usage-error").first()).toBeVisible();
+  await expect(page.getByTestId("token-usage-error")).toHaveCount(2);
+  await expect(page.getByTestId("token-usage-error").nth(1)).toBeVisible();
   await expect(page.getByTestId("token-usage-summary")).toContainText("41");
   await usageControl(page, workspace, "release-reader");
-  await page
-    .getByTestId("token-usage-error")
-    .first()
-    .getByRole("button", { name: "Retry", exact: true })
-    .click();
-  await expect(page.getByTestId("token-usage-error")).toHaveCount(0);
+  await expect(page.getByTestId("token-usage-error")).toHaveCount(2);
+  await expect(page.getByTestId("token-usage-summary")).toContainText("41");
   await expect(page.getByTestId("token-usage-projection-notice")).toContainText(
     "Saved values remain visible. Updating history...",
   );

@@ -1,0 +1,55 @@
+{
+  "status": "accepted",
+  "files": [
+    {
+      "path": "apps/web/e2e/helpers/turn-changes-history.ts",
+      "sha256": "7f3dc500d0518fb41d3b57b0fd8426d0719058d1fdf543d6567b224c16273340"
+    },
+    {
+      "path": "apps/web/e2e/tests/git/turn-changes-history-pending.spec.ts",
+      "sha256": "ca96b9d8d4e44c4da23915edddb0d39323e0e30888277822c7cca6d54a005f8c"
+    }
+  ],
+  "root_cause": "Pause fixture left Git common source readable; atomic legacy SQL pause and restored source/link metadata now model intended unavailable content. HTTP404 then200 proves transitions; finally restores on failure.",
+  "scope": "Test fixture and test only; no product behavior/spec change.",
+  "source_head_under_test": "68244c2fbd9df85917749eb3d7218ebcde3e93d1",
+  "ci_source_correction": {
+    "worker_receipt_has_transcription_error": true,
+    "actual_verified_head": "9a751dd7d88a12307ee3a23130651cb6a0b8f2d3",
+    "authority": "G2 exact run metadata 41141619982 attempt1"
+  },
+  "logs": [
+    {
+      "path": "/tmp/kandev-run.e2e.zTlnVTim.log",
+      "sha256": "9533f4c0592c8ddd4eeaedb660108b2c3b8865e4f054188365f5534322941765",
+      "passed": 1
+    },
+    {
+      "path": "/tmp/kandev-run.e2e.6MC97LTx.log",
+      "sha256": "a23097effcc387d9c0a4056196c495e011c26144895fb97350501ad068c08a7f",
+      "passed": 1
+    },
+    {
+      "path": "/tmp/kandev-run.e2e.rqCqCm1Z.log",
+      "sha256": "1573d483d2fb2e127865fea6e5a24feab186b7e979ca56902163cd9d8c3fbbd8",
+      "passed": 1
+    },
+    {
+      "path": "/tmp/kandev-run.e2e.IToiM9IH.log",
+      "sha256": "5790e1330bef6804c34fbec8bc126bcd2214f27e26d43319bd93139e9edd506e",
+      "passed": 1
+    },
+    {
+      "path": "/tmp/kandev-run.e2e.kHnEErRO.log",
+      "sha256": "81641912176b6121f49ed9ac878db176e2ead7156023d705fecb7e3c1d94dab4",
+      "passed": 1
+    },
+    {
+      "path": "/tmp/kandev-run.e2e.G57PGi4L.log",
+      "sha256": "1c5a08ae65076d58202ede8bc58322775d3fbca6a2dd62ff92019439292e1608",
+      "passed": 1
+    }
+  ],
+  "validation_nuance": "Six focused passes across fixture iterations; final cleanup-only guard validated by the last managed run. Final full CI/no-flakes evidence still required.",
+  "no_timeouts_or_assertions_weakened": true
+}

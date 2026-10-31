@@ -395,3 +395,10 @@ The functional PostgreSQL fixtures now use the existing optional-DSN helper in S
 PostgreSQL timestamp precision collapsed a point's one-nanosecond interval, so a matching reported price was discarded. The selector now recognizes equality for explicit point coverage. Ending interval boundaries remain exclusive. Matching and unrelated prices, unknown and measured-zero costs, partial coverage, currency and actor cases pass normal and race checks on SQLite and PostgreSQL 18.6. Evidence is in `evidence/usage-history-cost-point-20261030/`. The retained projection is new in this PR, so released databases need no repair migration.
 
 These focused passes do not close delivery. The current CI artifact audit found three browser flakes after retry. Their root causes, fresh remote checks, installed-plugin flows and both complete performance gates remain open.
+
+
+### Browser fixture verification
+
+The exact-head retry audit found three flaky tests despite successful E2E jobs. The Git fixture now pauses the active content source atomically and verifies HTTP 404 before restore and HTTP 200 after restore. The history deadline fixture waits for required persistence and publication to recover before UI Retry; it preserves both error cards and saved values until then. The mobile initial-load fixture waits for all three workload rows to persist before navigation. No product UI or timeout changed.
+
+Reviewed local checks use one worker and zero retries. The Git case passed six runs across fixture iterations. History coverage passed five focused repetitions, all five desktop cases, the affected phone case and a final focused assertion check. The mobile case passed six repetitions and its two-case predecessor sequence. Evidence is in `evidence/usage-history-ci-browser-fixup-20261031/`. The mobile failed attempt has no trace, so its exact event ordering remains unknown. The fix preserves initial snapshot coverage and does not claim to repair a production subscription gap. Fresh full CI and its no-flake audit remain required.

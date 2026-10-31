@@ -1,0 +1,40 @@
+
+> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
+> e2e/scripts/run-e2e.sh --host --project mobile-chrome --no-build -- tests/task/mobile-opencode-background-work.spec.ts --grep 'drawer summary and full-height detail preserve the draft and unsupported controls stay absent' --workers\=1 --retries\=0 --repeat-each\=6 --output\=/tmp/usage-history-B10-e2e-run8-results
+
+[36m[e2e][0m mode=host  shards=1  project=mobile-chrome  strict=1  workers=1
+
+Running 6 tests using 1 worker
+
+(node:3477649) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-0-Z4lPPu/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  1 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (6.2s)
+(node:3478819) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-1-l8Xxnz/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  2 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (5.8s)
+(node:3479672) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-2-Tfg21G/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  3 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (6.1s)
+(node:3480912) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-3-KDxMvk/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  4 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (6.2s)
+(node:3482269) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-4-CkcbQN/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  5 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (5.8s)
+(node:3483151) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+To file:///tmp/kandev-e2e-5-Or9qWK/repos/e2e-remote.git
+ * [new branch]      main -> main
+  ✓  6 [mobile-chrome] › e2e/tests/task/mobile-opencode-background-work.spec.ts:45:7 › OpenCode background inspection on a phone › drawer summary and full-height detail preserve the draft and unsupported controls stay absent (5.8s)
+
+  6 passed (56.8s)
