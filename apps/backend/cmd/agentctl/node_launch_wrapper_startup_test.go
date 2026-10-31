@@ -42,12 +42,13 @@ func TestApplyNodeLaunchWrapperDoesNotRunTheWrapper(t *testing.T) {
 
 // TestAgentctlStartupReferencesOnlyTheNodeWrapperLoader pins, at the source
 // level, that the startup files of cmd/agentctl reach the launchwrapper package
-// only through LoadNodeFile and the Node and Spec types, and that
+// only through LoadNodeFile, the Node and Spec types and the pure allocation
+// directory checks (UsesAllocDir, ResolveAllocDir), and that
 // node_launch_wrapper.go starts no process. The functions that compose and run a
 // wrapper (Node.Prepare, Prepare) are used only by the process manager and the
 // utility executors, which run after an authenticated instance create.
 func TestAgentctlStartupReferencesOnlyTheNodeWrapperLoader(t *testing.T) {
-	allowed := map[string]bool{"LoadNodeFile": true, "Node": true}
+	allowed := map[string]bool{"LoadNodeFile": true, "Node": true, "UsesAllocDir": true, "ResolveAllocDir": true}
 	for _, file := range []string{"main.go", "node_launch_wrapper.go"} {
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
 		require.NoError(t, err)
