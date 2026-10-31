@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-29
+updated: 2026-10-31
 owners:
   - cfl
 ---
@@ -36,6 +36,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.14:** The restart orphan-route sweep shall mark `action_required` a session parked in WAITING_FOR_INPUT whose route is still `starting` and whose `executors_running` row is absent. A live executor row, a read error, or a stale generation shall leave the session and its route unchanged.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.15:** Automatic queue delivery shall not reserve a queued message for a session whose route is `action_required` and whose `executors_running` row is absent. The message shall stay queued and visible with the session's route recovery actions, and a successful route action shall make it deliverable again. A session with a live executor row, and a session without a dynamic route, shall keep the existing delivery behavior.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.16:** When a queued dispatch fails because a WAITING_FOR_INPUT session whose route is still `starting` has no `executors_running` row, Kandev shall mark that route `action_required` with the orphaned-starting reason, keep the message queued, and stop automatic redelivery until a route action runs. It shall not change the session state. A session whose launch is still pending shall keep its existing retry.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.18:** When a dynamic session moves to a different concrete candidate, through automatic fallback, launch resolution, or a manual route action, the next candidate shall not launch with the model, permission mode, or ACP options reported by the previous candidate's provider. Explicit user runtime overrides and the mode declared by the current workflow step shall survive the switch. A retry of the same candidate shall keep its runtime settings. A mode or model event from the previous candidate's execution that arrives after the switch shall not restore its settings.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23:** When a start would change the logical profile of a session whose durable route is already materialized for a different logical profile, Kandev shall refuse the start before writing the session and return a validation error. The session label, concrete profile, and route shall stay unchanged and no agent shall launch. A session without a materialized route keeps its first profile selection, and a route for the requested profile resumes normally. See the [guard package](../../../plans/materialized-route-profile-guard/plan.md).
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback

@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-06
+updated: 2026-10-20
 owners:
   - cfl
 ---
@@ -135,6 +135,14 @@ its work through complete existing agent profiles.
 - A dynamic profile references existing concrete agent profiles. It never
   copies or merges their credentials, environment, model, ACP options, flags,
   permissions, passthrough behavior, or MCP configuration.
+- Switching concrete candidates clears the previous provider's observed
+  `runtime_config` and `session_mode` metadata in the same revision-guarded
+  write as the route projection, under the session settings lock. Explicit
+  `runtime_config_overrides` survive, and the current workflow step's declared
+  `set_session_mode` is restored. Same-candidate retries keep their settings.
+  Mode and model events whose execution profile differs from the session's
+  current concrete profile are stale. A changed session revision rejects the
+  switch instead of overwriting newer state.
 - A dynamic profile's candidate list can reference only concrete, launchable
   profiles. It cannot reference itself, another dynamic profile, or a rich
   Office identity in the first version. An Office identity's separate
