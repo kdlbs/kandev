@@ -94,7 +94,7 @@ func allocDirFixture(t *testing.T) string {
 // @covers AC-AGENTS-NODEWRAP-006.4
 func TestApplyNodeAllocDirRefusesTokenWithoutValue(t *testing.T) {
 	cfg := allocPolicy(t, "/opt/wrap", "--allocation", launchwrapper.AllocDir, "--")
-	t.Setenv("NOMAD_ALLOC_DIR", allocDirFixture(t))
+	t.Setenv("SCHEDULER_ALLOC_DIR", allocDirFixture(t))
 	err := applyNodeAllocDir(cfg, "")
 	require.ErrorIs(t, err, launchwrapper.ErrAllocDir)
 	require.Contains(t, err.Error(), "--node-launch-wrapper-alloc-dir")
