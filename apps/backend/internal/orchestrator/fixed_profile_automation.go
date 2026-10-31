@@ -165,6 +165,9 @@ func (s *Service) retainFixedProfileAutomationStart(
 // An unattempted start has no resumable executor. Re-enter the normal task
 // start and run binder; do not send its initial prompt as a continuation.
 func (s *Service) resumeFixedProfileInitialStart(ctx context.Context, a *automation.Automation, run *automation.AutomationRun, task *models.Task, session *models.TaskSession, wait map[string]interface{}) bool {
+	if s.validateFixedProfileWaitIdentity(ctx, session.ID) != nil {
+		return false
+	}
 	pendingTask := *task
 	pendingTask.Description = models.StringFromAny(wait["prompt"])
 	bound := s.autoStartAutomationTaskForRun(ctx, a, &pendingTask, task.WorkflowStepID, run.ID,
