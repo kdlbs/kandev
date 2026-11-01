@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeSubshards } from "./planned-processes";
+import { buildPlaywrightArgs, executeSubshards } from "./planned-processes";
 import type { ShardManifest } from "./plan-shards";
 
 const directories: string[] = [];
@@ -72,6 +72,29 @@ describe("planned runner transform cache ownership", () => {
     for (const child of second.children) child.emit("close", 0);
     expect(await secondPending).toBe(0);
     expect(fs.existsSync(secondRoot)).toBe(false);
+  });
+});
+
+describe("planned runner project selection", () => {
+  it("runs only projects represented by a shard's planned units", () => {
+    const current = fixture(1);
+    const chromiumArgs = buildPlaywrightArgs(current.manifest, current.shard);
+    const mobileShard = {
+      ...current.shard,
+      units: current.shard.units.map((unit) => ({
+        ...unit,
+        id: `mobile:${unit.file}`,
+        project: "mobile-chrome",
+      })),
+    };
+    const mobileArgs = buildPlaywrightArgs(current.manifest, mobileShard);
+
+    expect(chromiumArgs.filter((arg) => arg.startsWith("--project="))).toEqual([
+      "--project=chromium",
+    ]);
+    expect(mobileArgs.filter((arg) => arg.startsWith("--project="))).toEqual([
+      "--project=mobile-chrome",
+    ]);
   });
 });
 
@@ -153,7 +176,7 @@ describe("planned shard process supervision", () => {
     for (const call of calls) {
       expect(call[1]).toContain("--workers=1");
       expect(call[1]).toContain("--project=chromium");
-      expect(call[1]).toContain("--project=mobile-chrome");
+      expect(call[1]).not.toContain("--project=mobile-chrome");
     }
     expect(
       calls.flatMap((call) => call[1].filter((arg) => arg.endsWith(".spec.ts"))).sort(),

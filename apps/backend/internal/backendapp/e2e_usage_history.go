@@ -90,9 +90,9 @@ func e2eUsageLegacySourceAdoption(pool *db.Pool, adopter e2eUsageSourceAdoptionR
 		}
 		defer func() { _ = tx.Rollback() }()
 		var binding e2eLegacyUsageBinding
-		err = tx.GetContext(ctx, &binding, `SELECT task_id, task_incarnation_id, session_incarnation_id
+		err = tx.GetContext(ctx, &binding, tx.Rebind(`SELECT task_id, task_incarnation_id, session_incarnation_id
 			FROM usage_collection_bindings WHERE workspace_id = ? AND session_id = ?
-			ORDER BY sequence DESC LIMIT 1`, c.Param("workspaceId"), request.SessionID)
+			ORDER BY sequence DESC LIMIT 1`), c.Param("workspaceId"), request.SessionID)
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{errKey: "eligible session not found"})
 			return
@@ -102,8 +102,8 @@ func e2eUsageLegacySourceAdoption(pool *db.Pool, adopter e2eUsageSourceAdoptionR
 			return
 		}
 		contextID := e2eLegacyUsageContextID(c.Param("workspaceId"), binding, request.SessionID)
-		result, err := tx.ExecContext(ctx, `UPDATE usage_collection_contexts SET trusted = 0, evidence = ''
-			WHERE context_id = ? AND workspace_id = ?`, contextID, c.Param("workspaceId"))
+		result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE usage_collection_contexts SET trusted = 0, evidence = ''
+			WHERE context_id = ? AND workspace_id = ?`), contextID, c.Param("workspaceId"))
 		if err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "usage adoption fixture unavailable"})
 			return
@@ -177,9 +177,9 @@ func e2eUsageMarkLegacySourceUnsafe(pool *db.Pool) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
 		var binding e2eLegacyUsageBinding
-		err := pool.Reader().GetContext(ctx, &binding, `SELECT task_id, task_incarnation_id, session_incarnation_id
+		err := pool.Reader().GetContext(ctx, &binding, pool.Reader().Rebind(`SELECT task_id, task_incarnation_id, session_incarnation_id
 			FROM usage_collection_bindings WHERE workspace_id = ? AND session_id = ?
-			ORDER BY sequence DESC LIMIT 1`, c.Param("workspaceId"), request.SessionID)
+			ORDER BY sequence DESC LIMIT 1`), c.Param("workspaceId"), request.SessionID)
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{errKey: "eligible session not found"})
 			return
@@ -188,8 +188,8 @@ func e2eUsageMarkLegacySourceUnsafe(pool *db.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "usage adoption fixture unavailable"})
 			return
 		}
-		result, err := pool.Writer().ExecContext(ctx, `UPDATE usage_collection_contexts SET trusted = 0, evidence = ''
-			WHERE context_id = ? AND workspace_id = ?`, e2eLegacyUsageContextID(c.Param("workspaceId"), binding, request.SessionID), c.Param("workspaceId"))
+		result, err := pool.Writer().ExecContext(ctx, pool.Writer().Rebind(`UPDATE usage_collection_contexts SET trusted = 0, evidence = ''
+			WHERE context_id = ? AND workspace_id = ?`), e2eLegacyUsageContextID(c.Param("workspaceId"), binding, request.SessionID), c.Param("workspaceId"))
 		if err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{errKey: "usage adoption fixture unavailable"})
 			return

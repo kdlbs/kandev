@@ -34,6 +34,7 @@ func segmentContractFixture(t *testing.T, postgres bool) *Repository {
 	require.NoError(t, tasks.CreateWorkspace(t.Context(), &taskmodels.Workspace{ID: "ws-1", Name: "Segments"}))
 	require.NoError(t, tasks.CreateTask(t.Context(), &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Title: "Task", CreatedAt: at, UpdatedAt: at}))
 	require.NoError(t, tasks.CreateTaskSession(t.Context(), &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", StartedAt: at, Metadata: map[string]any{"acp": map[string]any{"session_id": "segment-thread"}}}))
+	completeUsageSourceAdoptionForTest(t, repo)
 	return repo
 }
 

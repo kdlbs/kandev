@@ -37,13 +37,21 @@ export function buildPlaywrightArgs(
   shard: Shard,
   extraArgs: string[] = [],
 ): string[] {
+  const selectedProjects = manifest.projects.filter((project) =>
+    shard.units.some((unit) => unit.project === project),
+  );
+  if (selectedProjects.length === 0) {
+    throw new Error(
+      `Planned shard ${shard.index} has no units for a configured Playwright project`,
+    );
+  }
   return [
     "playwright",
     "test",
     "--config",
     "e2e/playwright.config.ts",
     "--workers=1",
-    ...manifest.projects.map((project) => `--project=${project}`),
+    ...selectedProjects.map((project) => `--project=${project}`),
     ...shard.files,
     ...extraArgs,
   ];
