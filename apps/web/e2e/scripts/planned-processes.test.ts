@@ -95,6 +95,12 @@ describe("planned runner project selection", () => {
     expect(mobileArgs.filter((arg) => arg.startsWith("--project="))).toEqual([
       "--project=mobile-chrome",
     ]);
+    expect(() =>
+      buildPlaywrightArgs(current.manifest, {
+        ...current.shard,
+        units: [...current.shard.units, ...mobileShard.units],
+      }),
+    ).toThrow(/one Playwright project/);
   });
 });
 
@@ -143,6 +149,31 @@ function fixture(count = 2) {
 }
 
 describe("planned shard process supervision", () => {
+  it("runs project-specific partitions sequentially when the process limit is one", async () => {
+    const current = fixture(1);
+    const mobileUnit = {
+      ...current.shard.units[0]!,
+      id: "mobile-chrome:file-mobile.spec.ts",
+      project: "mobile-chrome",
+      file: "file-mobile.spec.ts",
+    };
+    current.shard.files.push(mobileUnit.file);
+    current.shard.units.push(mobileUnit);
+    current.shard.predictedSeconds += mobileUnit.estimatedSeconds;
+
+    const pending = current.start();
+    expect(current.children).toHaveLength(1);
+    expect(current.spawn.mock.calls[0]![1]).toContain("--project=chromium");
+    expect(current.spawn.mock.calls[0]![1]).not.toContain("--project=mobile-chrome");
+    current.children[0]!.emit("close", 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(current.children).toHaveLength(2);
+    expect(current.spawn.mock.calls[1]![1]).toContain("--project=mobile-chrome");
+    expect(current.spawn.mock.calls[1]![1]).not.toContain("--project=chromium");
+    current.children[1]!.emit("close", 0);
+    expect(await pending).toBe(0);
+  });
+
   it("starts all four partitions, joins failed siblings, and preserves every report", async () => {
     const current = fixture(4);
     const pending = current.start();

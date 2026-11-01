@@ -32,8 +32,6 @@ type dataRecordingHost struct {
 	messages       []Message
 	messagePage    *PageInfo
 	utilityText    string
-	usage          []SessionUsageMeasurement
-	usagePage      *PageInfo
 	canonicalUsage []SessionUsageMeasurement
 	canonicalPage  *PageInfo
 	canonicalRead  bool
