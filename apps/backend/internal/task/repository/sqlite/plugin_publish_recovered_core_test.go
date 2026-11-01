@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -70,9 +71,9 @@ func requireMismatch(t *testing.T, err error, reason string) {
 	}
 }
 
-// Core writes task_environment_repos only when it materializes the workspace,
-// which a recovery never does. A repo-backed task whose environment has no rows
-// must be refused, never published ready with an empty workspace.
+// Core materializes repositories through agentctl only after the instance
+// exists, and a recovery never does, so a repo-backed task is refused and the
+// environment stays creating, never published ready with an empty workspace.
 func TestPluginPublishCoreModeRefusesARepoBackedTaskWithNoEnvironmentRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	published, err := publishCore(t, repo, coreEnvelope, func(*models.PublishRecoveredTaskEnvironmentParams) { seedTaskRepository(t, repo) })
@@ -81,7 +82,7 @@ func TestPluginPublishCoreModeRefusesARepoBackedTaskWithNoEnvironmentRows(t *tes
 		t.Fatal("published a repo-backed environment with no repository rows")
 	}
 	if env := publishedEnvironment(t, repo); env.Status != models.TaskEnvironmentStatusCreating {
-		t.Fatalf("status = %q, want creating so cleanup and relaunch handle it", env.Status)
+		t.Fatalf("status = %q, want creating; the caller then fails the environment", env.Status)
 	}
 	if ids := environmentRepoIDs(t, repo); len(ids) != 0 {
 		t.Fatalf("environment repos = %v, want none", ids)
@@ -99,25 +100,51 @@ func TestPluginPublishCoreModePublishesARepoLessTask(t *testing.T) {
 	}
 }
 
-// Rows already on the environment (a prior materialization) are kept.
-func TestPluginPublishCoreModeKeepsRowsTheEnvironmentAlreadyHas(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, coreEnvelope)
-	seedTaskRepository(t, repo)
-	if err := repo.CreateTaskEnvironmentRepo(context.Background(), &models.TaskEnvironmentRepo{
-		TaskEnvironmentID: "environment-descriptor-1", RepositoryID: "repo-core-1", WorktreePath: publishWorkspace + "/core",
-	}); err != nil {
-		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
+// Rows left on the environment by an earlier materialization say nothing about
+// what is on disk after a recovery, so none of them lets a repo-backed task
+// publish: a complete row, a partial set, or a tombstoned one.
+func TestPluginPublishCoreModeRefusesARepoBackedTaskWhateverRowsTheEnvironmentHas(t *testing.T) {
+	for name, rows := range map[string][]*models.TaskEnvironmentRepo{
+		"complete": {{TaskEnvironmentID: "environment-descriptor-1", RepositoryID: "repo-core-1", WorktreePath: publishWorkspace + "/core"}},
+		"partial":  {{TaskEnvironmentID: "environment-descriptor-1", RepositoryID: "repo-core-1", WorktreePath: publishWorkspace + "/core"}},
+		"tombstoned": {{TaskEnvironmentID: "environment-descriptor-1", RepositoryID: "repo-core-1", WorktreePath: publishWorkspace + "/core",
+			DeletedAt: func() *time.Time { now := time.Now().UTC(); return &now }()}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, coreEnvelope)
+			seedTaskRepository(t, repo)
+			if name == "partial" {
+				seedSecondTaskRepository(t, repo)
+			}
+			for _, row := range rows {
+				if err := repo.CreateTaskEnvironmentRepo(context.Background(), row); err != nil {
+					t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
+				}
+			}
+			claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
+			params := publishParams(claim, revision)
+			params.CorePreparedWorkspace, params.WorkspacePath = true, "/workspace"
+			published, err := repo.PublishRecoveredTaskEnvironment(context.Background(), params)
+			requireMismatch(t, err, models.PluginPublishReasonRepos)
+			if published {
+				t.Fatal("published a repo-backed core-prepared environment")
+			}
+			if env := publishedEnvironment(t, repo); env.Status != models.TaskEnvironmentStatusCreating {
+				t.Fatalf("status = %q, want creating", env.Status)
+			}
+		})
 	}
-	claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
-	params := publishParams(claim, revision)
-	params.CorePreparedWorkspace, params.WorkspacePath = true, "/workspace"
-	published, err := repo.PublishRecoveredTaskEnvironment(context.Background(), params)
-	if err != nil || !published {
-		t.Fatalf("publish = %v, %v; want published", published, err)
+}
+
+func seedSecondTaskRepository(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-core-2", WorkspaceID: "workspace-core", Name: "core2"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
 	}
-	if ids := environmentRepoIDs(t, repo); len(ids) != 1 || ids[0] != "repo-core-1" {
-		t.Fatalf("environment repos = %v, want the existing row kept", ids)
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-core-2", TaskID: "task-descriptor-1", RepositoryID: "repo-core-2", BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
 	}
 }
 

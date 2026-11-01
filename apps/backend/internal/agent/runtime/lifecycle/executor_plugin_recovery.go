@@ -215,6 +215,9 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	}
 	if err := r.publishPendingReady(ctx, record, state); err != nil {
 		instance.Client.Close()
+		if errors.As(markUnhealablePublish(err, state.inventory), new(*unhealablePublishError)) {
+			return nil, r.abandonUnhealableLaunch(ctx, record, state, pluginExecutorCleanupReasonPublishRefused)
+		}
 		return nil, err
 	}
 	return instance, nil

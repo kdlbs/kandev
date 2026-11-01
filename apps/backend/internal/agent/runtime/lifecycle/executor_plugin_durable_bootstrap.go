@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	pluginExecutorCapabilityDurableBootstrap     = "durable_bootstrap"
-	pluginExecutorCleanupReasonBootstrapConsumed = "bootstrap_consumed"
-	pluginRuntimeSecretKindBootstrap             = "agentctl-bootstrap"
-	pluginRuntimeSecretKindAuth                  = "agentctl-auth"
+	pluginExecutorCapabilityDurableBootstrap      = "durable_bootstrap"
+	pluginExecutorCleanupReasonBootstrapConsumed  = "bootstrap_consumed"
+	pluginExecutorCleanupReasonCoreUnmaterialized = "core_workspace_not_materialized"
+	pluginExecutorCleanupReasonPublishRefused     = "publish_refused"
+	pluginRuntimeSecretKindBootstrap              = "agentctl-bootstrap"
+	pluginRuntimeSecretKindAuth                   = "agentctl-auth"
 )
 
 // PluginExecutorRuntimeSecrets is the secret-store surface a durable-bootstrap
@@ -163,7 +165,17 @@ func (r *PluginRemoteExecutor) acquirePluginExecutorClaim(
 // The cleanup claim and the recovery claim are one environment's fence, so a
 // consumed nonce is cleaned up only after the recovery claim is released.
 func (r *PluginRemoteExecutor) resumeDurableBootstrap(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) (*ExecutorInstance, error) {
+	unmaterialized, err := r.coreLaunchNeedsMaterialization(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	if unmaterialized {
+		return nil, r.abandonUnhealableLaunch(ctx, record, state, pluginExecutorCleanupReasonCoreUnmaterialized)
+	}
 	instance, consumed, err := r.resumeUnderRecoveryClaim(ctx, record, state)
+	if errors.As(err, new(*unhealablePublishError)) {
+		return nil, r.abandonUnhealableLaunch(ctx, record, state, pluginExecutorCleanupReasonPublishRefused)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -219,10 +231,81 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 	}
 	if err := r.publishRecoveredPluginExecutor(claimedCtx, claim, record, state); err != nil {
 		instance.Client.Close()
-		return nil, false, err
+		return nil, false, markUnhealablePublish(err, state.inventory)
 	}
 	r.clearPublishPending(claimedCtx, record, state)
 	return instance, false, nil
+}
+
+// PluginExecutorMaterializationFailer fails the creating environment a session
+// owns so a relaunch can elect a new one.
+type PluginExecutorMaterializationFailer interface {
+	FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error)
+}
+
+type pluginExecutorTaskRepositoryReader interface {
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+}
+
+// unhealablePublishError marks a core-mode publication refused for a reason
+// that no retry can change.
+type unhealablePublishError struct{ err error }
+
+func (e *unhealablePublishError) Error() string { return e.err.Error() }
+func (e *unhealablePublishError) Unwrap() error { return e.err }
+
+// markUnhealablePublish wraps a core-mode repository or workspace refusal. A
+// provider-mode refusal keeps its current retry behaviour.
+func markUnhealablePublish(err error, inventory pluginExecutorInventory) error {
+	var mismatch *models.PluginPublishMismatchError
+	if pluginProviderPreparesWorkspace(inventory) || !errors.As(err, &mismatch) {
+		return err
+	}
+	if mismatch.Reason == models.PluginPublishReasonRepos || mismatch.Reason == models.PluginPublishReasonWorkspace {
+		return &unhealablePublishError{err: err}
+	}
+	return err
+}
+
+// coreLaunchNeedsMaterialization reports a core-prepared launch of a task with
+// repositories. Core materializes those through agentctl only after the
+// instance exists and a recovery never does, so its /workspace is empty and the
+// launch cannot be resumed. Without a way to read the task's repositories the
+// resume is deferred rather than guessed.
+func (r *PluginRemoteExecutor) coreLaunchNeedsMaterialization(ctx context.Context, record *models.ExecutorRunning) (bool, error) {
+	inventory, err := decodePluginExecutorInventory(record.Metadata)
+	if err != nil {
+		return false, err
+	}
+	if pluginProviderPreparesWorkspace(inventory) {
+		return false, nil
+	}
+	reader, ok := r.inventoryStore.(pluginExecutorTaskRepositoryReader)
+	if !ok {
+		return false, errors.New("plugin executor task repositories are unavailable; recovery is deferred")
+	}
+	repos, err := reader.ListTaskRepositories(ctx, record.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("plugin executor task repositories could not be read: %w", err)
+	}
+	return len(repos) > 0, nil
+}
+
+// abandonUnhealableLaunch ends a launch that can never become ready: it fails
+// the creating environment so a relaunch can elect a new one, then destroys the
+// resource, which removes the inventory row, so no later recovery tick retries.
+// The environment is failed first: if the destroy is unconfirmed the retained
+// cleanup_pending row is retried by the sweep, while a failure after the row
+// was removed would leave the environment creating with nothing to recover it.
+func (r *PluginRemoteExecutor) abandonUnhealableLaunch(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState, reason string) error {
+	failer, ok := r.inventoryStore.(PluginExecutorMaterializationFailer)
+	if !ok {
+		return errors.New("plugin executor environment failure is unavailable; recovery is deferred")
+	}
+	if _, err := failer.FailTaskEnvironmentMaterialization(ctx, record.SessionID); err != nil {
+		return fmt.Errorf("plugin executor environment could not be failed: %w", err)
+	}
+	return r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, reason, state.profile)
 }
 
 // followRecoveryClaimCheckpoints adopts the revision and claim state a

@@ -70,6 +70,19 @@ type pluginExecutorInventoryStoreFake struct {
 	unrecorded    []*models.UnrecordedPluginExecutor
 	// getErr, when set, is what a read of the record fails with.
 	getErr error
+	// taskRepositories is what the task is attached to; failedMaterializations
+	// records the sessions whose creating environment was failed.
+	taskRepositories       []*models.TaskRepository
+	failedMaterializations []string
+}
+
+func (f *pluginExecutorInventoryStoreFake) ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error) {
+	return f.taskRepositories, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) FailTaskEnvironmentMaterialization(_ context.Context, sessionID string) (bool, error) {
+	f.failedMaterializations = append(f.failedMaterializations, sessionID)
+	return true, nil
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
