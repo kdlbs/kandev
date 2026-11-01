@@ -612,6 +612,11 @@ type FeaturesConfig struct {
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 
+	// ReplacedSessionReclaim stops the execution of a session the user replaced
+	// as primary, once it settles. Off in every shipped profile; replaced
+	// sessions otherwise keep running.
+	ReplacedSessionReclaim bool `mapstructure:"replaced_session_reclaim" json:"replacedSessionReclaim"`
+
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
