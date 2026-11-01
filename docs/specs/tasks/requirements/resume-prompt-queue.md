@@ -114,9 +114,12 @@ completes.
   reconciliation then parks the session for explicit recovery and returns the
   same entry to its queue when that recovery completes. The entry is not lost.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-004.2:** The returned entry shall wait for the
-  next existing delivery trigger. Kandev shall not add a timer, retry loop, or
-  new resume attempt for it, and a cancelled resume after a delivery attempt
-  shall keep its current disposition.
+  next delivery trigger under the existing queue policy. The idle-session queue
+  drain of REQ-TASKS-IDLE-QUEUE-DRAIN-001 is one such trigger: a restored entry
+  is offered like any other queued entry when its session is promptable and
+  Auto-run is on. Kandev shall not add a timer, retry loop, or resume attempt
+  specific to a cancelled resume, and a cancelled resume after a delivery
+  attempt shall keep its current disposition.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-004.3:** A dispatch failure that matches no
   retained or retryable case shall be logged as dropped, not as lost.
 

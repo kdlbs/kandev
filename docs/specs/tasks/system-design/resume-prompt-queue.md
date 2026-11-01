@@ -255,6 +255,12 @@ immediately, and the entry returns to its queue when the operator completes
 that recovery (`restorePendingQueueDispatchesForRecovery`). The entry is not
 lost across the shutdown boundary.
 
+A restored entry is ordinary queued work. The idle-session queue drain uses the
+same Auto-run policy, promptability, recovery-block, clarification, and
+in-flight guards as any other drain, so it may offer the restored entry when
+those conditions hold. The cancelled-resume path adds no timer, retry loop, or
+resume attempt of its own (`004.2`).
+
 ## Backend restart
 
 Lazy recovery leaves an idle session without a runtime until a user returns to
