@@ -30,7 +30,13 @@ type pluginPublishEnvelope struct {
 	Repositories []struct {
 		ID string `json:"id"`
 	} `json:"repositories"`
+	// WorkspacePreparation is core or provider; a missing value is core.
+	WorkspacePreparation string `json:"workspace_preparation"`
 }
+
+// pluginPublishCoreWorkspacePath is the fixed workspace path of a provider
+// that records no workspace descriptor.
+const pluginPublishCoreWorkspacePath = "/workspace"
 
 func publishMismatch(reason string) error { return &models.PluginPublishMismatchError{Reason: reason} }
 
@@ -89,10 +95,13 @@ func (r *Repository) publishRecoveredTx(ctx context.Context, tx *sqlx.Tx, params
 	if err != nil || already {
 		return false, err
 	}
-	if !params.CorePreparedWorkspace {
-		if err := r.replacePublishRepos(ctx, tx, env.taskID, params); err != nil {
-			return false, err
-		}
+	if params.CorePreparedWorkspace {
+		err = r.requireCorePublishRepos(ctx, tx, env.taskID, params.EnvironmentID)
+	} else {
+		err = r.replacePublishRepos(ctx, tx, env.taskID, params)
+	}
+	if err != nil {
+		return false, err
 	}
 	return true, r.casPublishReady(ctx, tx, params, env, path)
 }
@@ -103,7 +112,7 @@ func publishWorkspacePath(envelope pluginPublishEnvelope, params models.PublishR
 	if envelope.Descriptor != nil && envelope.Descriptor.Path != "" {
 		return envelope.Descriptor.Path
 	}
-	if params.CorePreparedWorkspace {
+	if params.CorePreparedWorkspace && params.WorkspacePath == pluginPublishCoreWorkspacePath {
 		return params.WorkspacePath
 	}
 	return ""
@@ -126,6 +135,21 @@ func classifyPublishTarget(env pluginPublishEnvironment, descriptorPath, session
 	default:
 		return false, publishMismatch(models.PluginPublishReasonStatus)
 	}
+}
+
+// requireCorePublishRepos keeps the repository rows the environment already
+// has. Core writes them only when it materializes the workspace, which a
+// recovery never does, so a repo-backed task whose environment has none is
+// refused and left to cleanup and relaunch rather than published empty.
+func (r *Repository) requireCorePublishRepos(ctx context.Context, tx *sqlx.Tx, taskID, environmentID string) error {
+	var existing int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_environment_repos WHERE task_environment_id = ?`), environmentID).Scan(&existing); err != nil {
+		return fmt.Errorf("count environment repos to publish: %w", err)
+	}
+	if existing > 0 {
+		return nil
+	}
+	return r.requirePublishRepos(ctx, tx, taskID, nil)
 }
 
 func (r *Repository) replacePublishRepos(ctx context.Context, tx *sqlx.Tx, taskID string, params models.PublishRecoveredTaskEnvironmentParams) error {
@@ -235,6 +259,11 @@ func validatePublishEnvelope(envelope pluginPublishEnvelope, params models.Publi
 		return publishMismatch(models.PluginPublishReasonRuntime)
 	case envelope.Phase != pluginPhaseReady:
 		return publishMismatch(models.PluginPublishReasonPhase)
+	case envelope.WorkspacePreparation != "" && envelope.WorkspacePreparation != "core" && envelope.WorkspacePreparation != "provider",
+		(envelope.WorkspacePreparation == "provider") == params.CorePreparedWorkspace:
+		return publishMismatch(models.PluginPublishReasonWorkspace)
+	case params.CorePreparedWorkspace && len(envelope.Repositories) > 0:
+		return publishMismatch(models.PluginPublishReasonRepos)
 	case publishWorkspacePath(envelope, params) == "":
 		return publishMismatch(models.PluginPublishReasonWorkspace)
 	case !params.CorePreparedWorkspace && !publishReposMatch(envelope, params.Repos):
