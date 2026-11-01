@@ -1466,11 +1466,13 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	promptReferenceContext string,
 	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
+	asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+		asyncQuestionGuidanceResolved, asyncQuestionsSupported,
 	)
 }
 
@@ -1486,11 +1488,13 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	promptReferenceContext string,
 	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
+	asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+		asyncQuestionGuidanceResolved, asyncQuestionsSupported,
 	)
 }
 
@@ -1607,6 +1611,12 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 // the message handler persists a first-turn prompt.
 func (w *orchestratorWrapper) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error) {
 	return w.svc.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
+// TaskSessionAsyncQuestionsSupported forwards the resolved question capability
+// used when the message handler persists a first-turn prompt.
+func (w *orchestratorWrapper) TaskSessionAsyncQuestionsSupported(ctx context.Context, taskID, sessionID string) (bool, error) {
+	return w.svc.TaskSessionAsyncQuestionsSupported(ctx, taskID, sessionID)
 }
 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).

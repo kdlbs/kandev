@@ -35,6 +35,7 @@ func restoreSendNowMetadata(current, claim map[string]interface{}) map[string]in
 
 var (
 	ErrSendNowEmpty               = errors.New("send-now queue selection is empty")
+	ErrAsyncQuestionNotSendable   = errors.New("async question continuations cannot be sent now")
 	ErrSendNowClaimChanged        = errors.New("send-now queue selection changed")
 	ErrSendNowReservationConflict = errors.New("send-now queue selection is reserved")
 	ErrSendNowAttachmentOverflow  = errors.New("send-now attachments exceed the message limits")

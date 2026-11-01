@@ -47,6 +47,7 @@ import {
   defaultPluginsState,
   defaultReviewState,
   defaultNeedsYouInboxState,
+  defaultTaskAsyncQuestionsState,
   defaultFailedInboxState,
   defaultPreviewFeedbackState,
   defaultInboxHistoryState,
@@ -80,6 +81,7 @@ import type {
   NeedsYouInboxBootSeed,
 } from "./slices";
 import type { TaskOverviewSlice } from "./slices/task-overview-types";
+import type { TaskAsyncQuestionsSliceActions } from "./slices/task-async-questions/types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import type { GitStatusRefreshState } from "./slices/session-runtime/types";
@@ -102,7 +104,8 @@ import type {
   TaskSessionHydrationEpoch,
 } from "./slices/session/types";
 // Combined AppState type
-export type AppState = KanbanSlice & {
+type AppStateBase = KanbanSlice & TaskAsyncQuestionsSliceActions;
+export type AppState = AppStateBase & {
   // Workspace slice
   workspaces: (typeof defaultWorkspaceState)["workspaces"];
   repositories: (typeof defaultWorkspaceState)["repositories"];
@@ -237,6 +240,9 @@ export type AppState = KanbanSlice & {
   // Needs-you Inbox slice (actions merged via NeedsYouInboxSliceActions
   // intersection on AppState)
   needsYouInbox: (typeof defaultNeedsYouInboxState)["needsYouInbox"];
+
+  // Task-chat question reads are scoped by workspace and task.
+  taskAsyncQuestions: (typeof defaultTaskAsyncQuestionsState)["taskAsyncQuestions"];
 
   // Failed Inbox slice (actions merged via FailedInboxSliceActions
   // intersection on AppState)

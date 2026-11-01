@@ -801,8 +801,13 @@ Configuration actions can persist or test credentials and can cause outbound net
 ```text
 mcp.add_branch_to_task
 mcp.archive_task
+mcp.ask_parent_question
 mcp.ask_user_question
 mcp.clarification_timeout
+mcp.forward_question
+mcp.list_question_answers
+mcp.wait_for_question_answers
+mcp.withdraw_question
 mcp.create_agent_profile
 mcp.create_executor_profile
 mcp.create_task
@@ -852,6 +857,14 @@ mcp.update_workflow
 mcp.update_workflow_step
 mcp.write_task_document
 ```
+
+The server also emits `task.question.changed` notifications for async question
+creation, resolution, forwarding, withdrawal, and explicit wait changes. The
+payload carries `workspace_id`, `task_id`, `parent_task_id`, `session_id`,
+`recipient`, `question_id`, and a `kind`; clients use the task IDs to invalidate
+the author's task chat, a forwarding parent's chat, and the bounded Inbox read.
+The notification is an invalidation hint, not answer content. Read the question
+through the task-scoped HTTP route to get its current status and outcome.
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 

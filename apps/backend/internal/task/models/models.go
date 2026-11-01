@@ -2067,6 +2067,8 @@ const (
 	MessageTypePermissionRequest MessageType = "permission_request"
 	// MessageTypeClarificationRequest is for agent clarification questions
 	MessageTypeClarificationRequest MessageType = "clarification_request"
+	// MessageTypeAgentQuestionRequest is for non-blocking agent questions.
+	MessageTypeAgentQuestionRequest MessageType = "agent_question_request"
 	// MessageTypeScriptExecution is for setup/cleanup script execution messages
 	MessageTypeScriptExecution MessageType = "script_execution"
 	// MessageTypeThinking is for agent thinking/reasoning content

@@ -127,7 +127,23 @@ func assertQuestionLabelSchema(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	var schema map[string]interface{}
 	require.NoError(t, json.Unmarshal(raw, &schema))
-	answer := schema["additionalProperties"].(map[string]interface{})
+	branches, ok := schema["oneOf"].([]interface{})
+	require.True(t, ok, "output schema must be a discriminated union")
+	var blocking map[string]interface{}
+	for _, branch := range branches {
+		candidate, ok := branch.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, has := candidate["additionalProperties"]; !has {
+			continue
+		}
+		if _, isObject := candidate["additionalProperties"].(map[string]interface{}); isObject {
+			blocking = candidate
+		}
+	}
+	require.NotNil(t, blocking, "blocking answer branch is missing")
+	answer := blocking["additionalProperties"].(map[string]interface{})
 	props := answer["properties"].(map[string]interface{})
 	for _, field := range []string{"selected_option", "selected_label"} {
 		prop, ok := props[field].(map[string]interface{})

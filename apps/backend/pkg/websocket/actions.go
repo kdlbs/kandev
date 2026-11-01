@@ -500,6 +500,11 @@ const (
 	ActionMCPStepComplete                          = "mcp.step_complete" // ADR 0015: agent-emitted explicit completion signal
 	ActionMCPAskUserQuestion                       = "mcp.ask_user_question"
 	ActionMCPAskParentQuestion                     = "mcp.ask_parent_question"
+	ActionMCPListQuestionAnswers                   = "mcp.list_question_answers"
+	ActionMCPWithdrawQuestion                      = "mcp.withdraw_question"
+	ActionMCPForwardQuestion                       = "mcp.forward_question"
+	ActionMCPWaitForQuestionAnswers                = "mcp.wait_for_question_answers"
+	ActionTaskQuestionChanged                      = "task.question.changed"
 	ActionMCPListPendingQuestions                  = "mcp.list_pending_questions"
 	ActionMCPAnswerQuestion                        = "mcp.answer_question"
 	ActionMCPCreateTaskPlan                        = "mcp.create_task_plan"

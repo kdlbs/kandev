@@ -6147,39 +6147,44 @@ func (s *Service) resolveAutoStartPromptContext(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
-) (bool, *models.Task, bool, bool, error) {
+) (bool, *models.Task, bool, bool, bool, error) {
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
-		return false, nil, false, false, fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
+		return false, nil, false, false, false, fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
 	}
 	if isOfficeTask {
-		return true, nil, false, false, nil
+		return true, nil, false, false, false, nil
 	}
 
 	taskForPrompt, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return false, nil, false, false, fmt.Errorf("load task for autopilot prompt: %w", err)
+		return false, nil, false, false, false, fmt.Errorf("load task for autopilot prompt: %w", err)
 	}
 	configMode, _ := session.Metadata["config_mode"].(bool)
 	includeCanvasGuidance := false
+	asyncQuestionsSupported := false
 	if !session.IsPassthrough && !configMode {
 		includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
 		if err != nil {
-			return false, nil, false, false, fmt.Errorf("resolve canvas prompt capability for workflow auto-start: %w", err)
+			return false, nil, false, false, false, fmt.Errorf("resolve canvas prompt capability for workflow auto-start: %w", err)
+		}
+		asyncQuestionsSupported, err = s.taskSessionAsyncQuestionsSupported(ctx, taskID, session, true)
+		if err != nil {
+			return false, nil, false, false, false, fmt.Errorf("resolve async question prompt capability for workflow auto-start: %w", err)
 		}
 	}
 	if session.State != models.TaskSessionStateCreated {
-		return false, taskForPrompt, false, includeCanvasGuidance, nil
+		return false, taskForPrompt, false, includeCanvasGuidance, asyncQuestionsSupported, nil
 	}
 
 	if configMode {
-		return false, taskForPrompt, false, includeCanvasGuidance, nil
+		return false, taskForPrompt, false, includeCanvasGuidance, asyncQuestionsSupported, nil
 	}
 	titleOwner, err := s.ClaimTaskTitleSession(ctx, taskID, session.ID)
 	if err != nil {
-		return false, nil, false, false, fmt.Errorf("claim task title for workflow auto-start: %w", err)
+		return false, nil, false, false, false, fmt.Errorf("claim task title for workflow auto-start: %w", err)
 	}
-	return false, taskForPrompt, titleOwner, includeCanvasGuidance, nil
+	return false, taskForPrompt, titleOwner, includeCanvasGuidance, asyncQuestionsSupported, nil
 }
 
 // handleCreatedAutoStartLaunchFailure preserves a workflow prompt when the
@@ -6342,12 +6347,13 @@ func (s *Service) composeAutoStartStepPrompts(
 	titleOwner := false
 	isOfficeTask := false
 	includeCanvasGuidance := false
+	asyncQuestionsSupported := false
 	var taskForPrompt *models.Task
 	needsRuntimeContext := state.session.State == models.TaskSessionStateCreated ||
 		(state.step != nil && state.step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext))
 	if needsRuntimeContext {
 		var contextErr error
-		isOfficeTask, taskForPrompt, titleOwner, includeCanvasGuidance, contextErr =
+		isOfficeTask, taskForPrompt, titleOwner, includeCanvasGuidance, asyncQuestionsSupported, contextErr =
 			s.resolveAutoStartPromptContext(state.ctx, state.taskID, state.session)
 		if contextErr != nil {
 			return "", "", contextErr
@@ -6364,7 +6370,7 @@ func (s *Service) composeAutoStartStepPrompts(
 	}
 	recordedPrompt, dispatchPrompt = s.injectAutoStartRuntimeContext(
 		state, recordedPrompt, dispatchPrompt, isOfficeTask, taskForPrompt,
-		titleOwner, includeCanvasGuidance, pullRequestTargetContext,
+		titleOwner, includeCanvasGuidance, asyncQuestionsSupported, pullRequestTargetContext,
 	)
 	return recordedPrompt, dispatchPrompt, nil
 }
@@ -6374,7 +6380,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 	recordedPrompt, dispatchPrompt string,
 	isOfficeTask bool,
 	taskForPrompt *models.Task,
-	titleOwner, includeCanvasGuidance bool,
+	titleOwner, includeCanvasGuidance, asyncQuestionsSupported bool,
 	pullRequestTargetContext string,
 ) (string, string) {
 	if state.step == nil || (state.session.State != models.TaskSessionStateCreated &&
@@ -6400,6 +6406,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		AsyncQuestionsSupported:        asyncQuestionsSupported,
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",

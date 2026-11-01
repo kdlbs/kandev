@@ -797,14 +797,16 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 	}
 
 	options := startCreatedSessionOptions{
-		skipTaskDescriptionFallback: boolField(payload, "skip_task_description_fallback"),
-		promptAlreadyComposed:       boolField(payload, "prompt_already_composed"),
-		retryPrompt:                 stringField(payload, "retry_prompt"),
-		canvasGuidanceResolved:      boolField(payload, "canvas_guidance_resolved"),
-		includeCanvasGuidance:       boolField(payload, "include_canvas_guidance"),
-		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
-		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
-		ceilingEntryBinding:         entryBinding,
+		skipTaskDescriptionFallback:   boolField(payload, "skip_task_description_fallback"),
+		promptAlreadyComposed:         boolField(payload, "prompt_already_composed"),
+		retryPrompt:                   stringField(payload, "retry_prompt"),
+		canvasGuidanceResolved:        boolField(payload, "canvas_guidance_resolved"),
+		includeCanvasGuidance:         boolField(payload, "include_canvas_guidance"),
+		asyncQuestionGuidanceResolved: boolField(payload, "async_question_guidance_resolved"),
+		asyncQuestionsSupported:       boolField(payload, "async_questions_supported"),
+		promptReferencesPrepared:      boolField(payload, "prompt_references_prepared"),
+		preserveDirectPrompt:          boolField(payload, "preserve_direct_prompt"),
+		ceilingEntryBinding:           entryBinding,
 	}
 
 	execution, err := s.startCreatedSession(

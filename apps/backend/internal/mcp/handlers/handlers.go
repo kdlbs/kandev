@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/planws"
+	"github.com/kandev/kandev/internal/task/questions"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -92,6 +93,12 @@ type ClarificationInputPauser interface {
 // the orchestrator's own persistence funnels.
 type SessionCeilingReleaser interface {
 	ReleaseCeilingReservation(sessionID string)
+}
+
+// clarificationTurnCapturer snapshots the turn an explicit question wait is
+// bound to before the pause starts.
+type clarificationTurnCapturer interface {
+	CaptureActiveTurnID(ctx context.Context, sessionID string) (string, error)
 }
 
 type clarificationInputPauserWithOptions interface {
@@ -305,6 +312,7 @@ type Handlers struct {
 	clarificationSvc       ClarificationService
 	sessionCanceller       SessionCanceller
 	inputPauser            ClarificationInputPauser
+	questionSvc            *questions.Service
 	sessionCeilingReleaser SessionCeilingReleaser
 	messageCreator         MessageCreator
 	sessionRepo            SessionRepository
@@ -445,6 +453,11 @@ func NewHandlers(
 // attestation. Request payloads never supply coordinator identity.
 func (h *Handlers) SetTaskTransferCoordinatorAuthorizer(authorizer TaskTransferCoordinatorAuthorizer) {
 	h.transferAuthorizer = authorizer
+}
+
+// SetAsyncQuestionService wires the task-owned async question lifecycle.
+func (h *Handlers) SetAsyncQuestionService(service *questions.Service) {
+	h.questionSvc = service
 }
 
 // SetClarificationInputPauser wires the orchestrator-owned hard pause used when
@@ -639,6 +652,10 @@ func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
 func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPAskParentQuestion, h.handleAskParentQuestion)
+	d.RegisterFunc(ws.ActionMCPListQuestionAnswers, h.handleListQuestionAnswers)
+	d.RegisterFunc(ws.ActionMCPWithdrawQuestion, h.handleWithdrawQuestion)
+	d.RegisterFunc(ws.ActionMCPForwardQuestion, h.handleForwardQuestion)
+	d.RegisterFunc(ws.ActionMCPWaitForQuestionAnswers, h.handleWaitForQuestionAnswers)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
@@ -2612,6 +2629,10 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if errMsg != nil {
 		return errMsg, err
 	}
+	if h.questionSvc != nil && h.questionSvc.HasParkedWait(ctx, req.SessionID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"an explicit question wait is active; no completion signal was recorded. End this turn and resume after the answer.", nil)
+	}
 
 	launchStepID, launchEntryID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
@@ -2836,6 +2857,56 @@ func (h *Handlers) publishStepCompletionEvent(
 // Strict validation: missing sender_task_id, same-session targets, and unknown
 // sender tasks reject with an MCP error. Same-task messages are allowed only
 // when session_id names a distinct sibling session.
+// resolveAsyncParentReply resolves a reply_to_question_id that names a durable
+// async request. A blocking clarification message ID falls through to the
+// existing path. handled=false means "not an async request".
+func (h *Handlers) resolveAsyncParentReply(
+	ctx context.Context,
+	msg *ws.Message,
+	questionID, targetTaskID, prompt string,
+	senderTask *models.Task,
+	senderSessionID string,
+) (*ws.Message, bool, error) {
+	if questionID == "" || h.questionSvc == nil {
+		return nil, false, nil
+	}
+	question, err := h.questionSvc.Get(ctx, questionID)
+	if err != nil {
+		if errors.Is(err, questions.ErrNotFound) {
+			return nil, false, nil
+		}
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read async question", nil)
+		return response, true, responseErr
+	}
+	if question == nil {
+		return nil, false, nil
+	}
+	if question.Recipient != models.AsyncQuestionRecipientParent ||
+		question.ParentTaskID != senderTask.ID || question.TaskID != targetTaskID {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"only the direct parent task can answer this async question", nil)
+		return response, true, responseErr
+	}
+	updated, won, resolveErr := h.questionSvc.ResolveParent(ctx, question.ID, senderTask.ID, senderSessionID, questions.AnswerInput{
+		Text: prompt,
+	})
+	if resolveErr != nil {
+		response, responseErr := h.asyncQuestionError(msg, resolveErr)
+		return response, true, responseErr
+	}
+	status := "already_answered"
+	if won {
+		status = "answered"
+	}
+	response, responseErr := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"task_id":              targetTaskID,
+		"reply_to_question_id": question.ID,
+		stopTaskStatusKey:      status,
+		"question_status":      string(updated.Status),
+	})
+	return response, true, responseErr
+}
+
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID            string `json:"task_id"`
@@ -2904,6 +2975,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to look up target task: "+err.Error(), nil)
+	}
+
+	if response, handled, replyErr := h.resolveAsyncParentReply(
+		ctx, msg, req.ReplyToQuestionID, req.TaskID, req.Prompt, senderTask, req.SenderSessionID,
+	); handled || replyErr != nil {
+		return response, replyErr
 	}
 
 	parentReply, err := h.validateParentQuestionReply(ctx, req.ReplyToQuestionID, req.TaskID, senderTask, targetTask)

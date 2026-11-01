@@ -1214,6 +1214,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
 		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
+		{name: "async-question-read", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityAsyncQuestions)), register: func(s *Server) { s.addListQuestionAnswersTool() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
@@ -1974,66 +1975,116 @@ func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
 
 const askUserQuestionOutputSchema = `{
   "type": "object",
-  "properties": {
-    "rejected": {"type": "boolean", "description": "True when the user rejected the question bundle."},
-    "reject_reason": {"type": "string", "description": "Optional reason supplied when the bundle was rejected."}
-  },
-  "additionalProperties": {
-    "type": "object",
-    "description": "Answer keyed by question id.",
-    "properties": {
-      "selected_option": {"type": "string", "description": "ID of the selected option."},
-      "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
-      "custom_text": {"type": "string"},
-      "answered": {"type": "boolean"},
-      "rejected": {"type": "boolean"}
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "question_id": {"type": "string", "description": "Durable async request identity."},
+        "mode": {"type": "string", "enum": ["async"], "description": "Async creation receipt discriminator."},
+        "status": {"type": "string", "description": "Canonical async request state."},
+        "recipient": {"type": "string", "enum": ["user", "parent"], "description": "Who owns the async answer decision."},
+        "parent_task_id": {"type": "string", "description": "Direct parent task for an async parent request."},
+        "created_at": {"type": "string", "description": "Creation time of the async request."}
+      },
+      "required": ["question_id", "mode"],
+      "additionalProperties": false
     },
-    "additionalProperties": false
-  }
+    {
+      "type": "object",
+      "properties": {
+        "rejected": {"type": "boolean", "description": "True when the user rejected the question bundle."},
+        "reject_reason": {"type": "string", "description": "Optional reason supplied when the bundle was rejected."}
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "Answer keyed by question id.",
+        "properties": {
+          "selected_option": {"type": "string", "description": "ID of the selected option."},
+          "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
+          "custom_text": {"type": "string"},
+          "answered": {"type": "boolean"},
+          "rejected": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
 }`
 
 func (s *Server) registerInteractionTools() {
-	s.mcpServer.AddTool(
-		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option ID and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
-			mcp.WithArray(questionsArg, mcp.Required(),
-				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
-				mcp.MinItems(1),
-				mcp.MaxItems(4),
-				mcp.Items(buildOperatorQuestionSchemaItem()),
-			),
-			mcp.WithString("context", mcp.Description("Optional single block of shared background. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
-			mcp.WithArray(contextParagraphsArg,
-				mcp.Description("Optional shared background split into paragraphs. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preferred for multiline context; when non-empty, overrides context and is joined with blank lines."),
-				mcp.Items(map[string]any{"type": "string"}),
-			),
+	description := `Ask the user 1-4 related questions; this call waits for all answers. Each needs 2-6 labeled, described options. Set allow_custom_text=false to require a choice. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, and put full reports outside this call. Returns answers by question ID with selected_option and selected_label. Rejections include rejected and may include reject_reason.`
+	if s.asyncQuestionsSupported() {
+		description = `Ask 1-4 related questions. Block if work cannot continue safely; otherwise set async=true, continue, and read with list_question_answers_kandev. Wait only when all work depends on answers: use wait_for_question_answers_kandev. Withdraw with withdraw_question_kandev when no longer needed. Context: 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it. Keep questions and options self-contained. Use 2-6 options; set allow_custom_text=false to require a choice. Returns answers by ID with selected_label.`
+	}
+	options := []mcp.ToolOption{
+		mcp.WithDescription(description),
+		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
+		mcp.WithArray(questionsArg, mcp.Required(),
+			mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
+			mcp.MinItems(1),
+			mcp.MaxItems(4),
+			mcp.Items(buildOperatorQuestionSchemaItem()),
 		),
+		mcp.WithString("context", mcp.Description("Optional single block of shared background. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
+		mcp.WithArray(contextParagraphsArg,
+			mcp.Description("Optional shared background split into paragraphs. Aim for 1-3 short sentences or brief bullets (about 100 words or fewer). Put full reports, logs, and repeated conversation outside the tool call, before it. Preferred for multiline context; when non-empty, overrides context and is joined with blank lines."),
+			mcp.Items(map[string]any{"type": "string"}),
+		),
+	}
+	options = append(options, s.asyncQuestionToolOptions(
+		"Set true to ask without waiting: the tool returns a durable question_id immediately and you keep working. Read the answer with list_question_answers_kandev at a checkpoint. Omitted or false keeps the blocking behavior.",
+		"Async-only stable retry identity, at most 128 characters. An exact retry with the same id returns the original request; a different payload is a conflict. Do not reuse an id for a different question.",
+	)...)
+	s.mcpServer.AddTool(
+		mcp.NewTool("ask_user_question_kandev", options...),
 		s.wrapHandler("ask_user_question_kandev", s.askUserQuestionHandler()),
 	)
+	if s.asyncQuestionsSupported() {
+		s.registerAsyncOperatorQuestionTools()
+	}
 }
 
 func (s *Server) registerParentQuestionTool() {
-	s.mcpServer.AddTool(
-		mcp.NewTool("ask_parent_question_kandev",
-			mcp.WithDescription(`Ask the direct parent task one or more questions when an autopilot task reaches a critical decision that cannot be inferred safely.
-
-This tool is available only to autopilot child tasks. It sends a durable question message to the direct parent, pauses this child turn, and returns without waiting for the answer. The parent answers with message_task_kandev using the returned question_id as reply_to_question_id. Do not use ask_user_question_kandev for this task, and do not ask unless the decision is truly blocking.`),
-			mcp.WithArray(questionsArg, mcp.Required(),
-				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier), "title" (≤12 chars short label).`),
-				mcp.MinItems(1),
-				mcp.MaxItems(4),
-				mcp.Items(buildQuestionSchemaItem()),
-			),
-			mcp.WithString("context", mcp.Description("Optional single block of shared background information for the direct parent. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
-			mcp.WithArray(contextParagraphsArg,
-				mcp.Description("Optional shared background for the direct parent as separate paragraphs. When non-empty, overrides context and is joined with blank lines."),
-				mcp.Items(map[string]any{"type": "string"}),
-			),
+	description := `Ask the direct parent when an autopilot child reaches a critical decision. The default sends a durable question and pauses this turn. The parent answers with message_task_kandev using question_id as reply_to_question_id. Do not use ask_user_question_kandev for this task.`
+	if s.asyncQuestionsSupported() {
+		description = `Ask the direct parent when an autopilot child reaches a critical decision. The default sends a durable question and pauses this turn. Set async=true when useful independent work remains; read with list_question_answers_kandev. Use wait_for_question_answers_kandev only when all remaining work depends. The parent answers with message_task_kandev using question_id as reply_to_question_id. Do not use ask_user_question_kandev.`
+	}
+	options := []mcp.ToolOption{
+		mcp.WithDescription(description),
+		mcp.WithArray(questionsArg, mcp.Required(),
+			mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier), "title" (≤12 chars short label).`),
+			mcp.MinItems(1),
+			mcp.MaxItems(4),
+			mcp.Items(buildQuestionSchemaItem()),
 		),
+		mcp.WithString("context", mcp.Description("Optional single block of shared background information for the direct parent. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
+		mcp.WithArray(contextParagraphsArg,
+			mcp.Description("Optional shared background for the direct parent as separate paragraphs. When non-empty, overrides context and is joined with blank lines."),
+			mcp.Items(map[string]any{"type": "string"}),
+		),
+	}
+	options = append(options, s.asyncQuestionToolOptions(
+		"Set true to ask without pausing this child turn: the tool returns a durable question_id immediately and you keep working. Read the answer with list_question_answers_kandev. Omitted or false keeps the existing pause behavior.",
+		"Async-only stable retry identity, at most 128 characters. An exact retry with the same id returns the original request.",
+	)...)
+	s.mcpServer.AddTool(
+		mcp.NewTool("ask_parent_question_kandev", options...),
 		s.wrapHandler("ask_parent_question_kandev", s.askParentQuestionHandler()),
 	)
+	if s.asyncQuestionsSupported() {
+		s.registerAsyncParentQuestionTools()
+	}
+}
+
+func (s *Server) asyncQuestionToolOptions(asyncDescription, requestIDDescription string) []mcp.ToolOption {
+	if !s.asyncQuestionsSupported() {
+		return nil
+	}
+	return []mcp.ToolOption{
+		mcp.WithBoolean(asyncArg, mcp.Description(asyncDescription)),
+		mcp.WithString(requestIDArg, mcp.Description(requestIDDescription)),
+	}
 }
 
 func (s *Server) registerPlanTools() {

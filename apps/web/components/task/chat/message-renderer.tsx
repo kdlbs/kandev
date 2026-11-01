@@ -26,6 +26,7 @@ import { ThinkingMessage } from "@/components/task/chat/messages/thinking-messag
 import { TodoMessage } from "@/components/task/chat/messages/todo-message";
 import { ScriptExecutionMessage } from "@/components/task/chat/messages/script-execution-message";
 import { ClarificationRequestMessage } from "@/components/task/chat/messages/clarification-request-message";
+import { AgentQuestionMessage } from "@/components/task/chat/messages/agent-question-message";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
@@ -434,6 +435,10 @@ const adapters: MessageAdapter[] = [
         isCurrentTurn={Boolean(ctx.isContainingTurnActive)}
       />
     ),
+  },
+  {
+    matches: (comment) => comment.type === "agent_question_request",
+    render: (comment) => <AgentQuestionMessage comment={comment} />,
   },
   {
     matches: (comment) => comment.type === "agent_plan",

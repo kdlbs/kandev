@@ -232,6 +232,18 @@ const LATEST_PLAN_CONTENT = `${FIRST_PLAN_CONTENT}\n2. Write`;
 const LEGACY_PLAN_1_ID = "legacy-plan-1";
 const LEGACY_PLAN_2_ID = "legacy-plan-2";
 
+describe("filterVisibleMessages async question transcript", () => {
+  it("keeps agent question requests in the author transcript", () => {
+    const request = baseMessage({
+      id: "async-question-request",
+      type: "agent_question_request",
+      metadata: { async_question_id: "question-1" },
+    });
+
+    expect(filterVisibleMessages([request], new Set(), new Set())).toEqual([request]);
+  });
+});
+
 function planMessage(id: string, content: string, overrides: Partial<Message> = {}): Message {
   return baseMessage({
     id,

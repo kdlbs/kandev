@@ -9,6 +9,39 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
+func TestPostgresAsyncQuestionsParkedGateProjectsPendingAction(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-parked-projection-pg", "session-parked-projection-pg")
+	createAsyncQuestionForTest(t, repo, question)
+	startedAt := time.Now().UTC()
+	const turnID = "turn-parked-projection-pg"
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: turnID, TaskSessionID: question.SessionID, TaskID: question.TaskID,
+		StartedAt: startedAt, CreatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if _, err := repo.CreateAsyncQuestionWait(ctx, &models.AsyncQuestionWait{
+		TaskID: question.TaskID, WorkspaceID: question.WorkspaceID,
+		SessionID: question.SessionID, TurnID: turnID,
+		DependencyIDs: []string{question.ID}, Status: models.AsyncQuestionWaitParked,
+	}); err != nil {
+		t.Fatalf("create parked gate: %v", err)
+	}
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{question.SessionID})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if actions[question.SessionID] != models.TaskPendingActionClarification {
+		t.Fatalf("postgres pending action = %#v, want clarification", actions[question.SessionID])
+	}
+}
+
 // TestPostgresActiveClarificationUsesNewestDurableTurn pins the same ownership
 // rule as SQLite. It skips unless KANDEV_TEST_POSTGRES_DSN is configured.
 func TestPostgresActiveClarificationUsesNewestDurableTurn(t *testing.T) {
