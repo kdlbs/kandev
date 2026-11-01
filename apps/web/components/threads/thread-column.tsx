@@ -236,11 +236,26 @@ type ThreadColumnProps = {
   layoutKey?: string;
   isPreloaded?: boolean;
   isDetailActive?: boolean;
+  isMotionVisible?: boolean;
   requestedSessionId?: string | null;
   onColumnRef?: (taskId: string, element: HTMLElement | null) => void;
   onInvalidRequestedSession?: (taskId: string, sessionId: string) => void;
   onOpenTask: (taskId: string) => void;
 };
+
+function useRegisteredColumnRef(
+  taskId: string,
+  focusRef: RefObject<HTMLElement | null>,
+  onColumnRef: ThreadColumnProps["onColumnRef"],
+) {
+  return useCallback(
+    (element: HTMLElement | null) => {
+      focusRef.current = element;
+      onColumnRef?.(taskId, element);
+    },
+    [focusRef, onColumnRef, taskId],
+  );
+}
 
 function ThreadColumnHeader({
   thread,
@@ -250,6 +265,7 @@ function ThreadColumnHeader({
   onSelectSession,
   onOpenTask,
   mobileNavigation,
+  isMotionVisible,
 }: {
   thread: ActiveThread;
   status: ThreadStatus;
@@ -258,6 +274,7 @@ function ThreadColumnHeader({
   onSelectSession: (sessionId: string) => void;
   onOpenTask: (taskId: string) => void;
   mobileNavigation?: MobileThreadNavigation;
+  isMotionVisible: boolean;
 }) {
   const { t } = useTranslation();
   const onContextMenu = useThreadTaskContextMenu(thread.taskId);
@@ -271,6 +288,7 @@ function ThreadColumnHeader({
         onSelectSession={onSelectSession}
         onOpenTask={onOpenTask}
         navigation={mobileNavigation}
+        isMotionVisible={isMotionVisible}
       />
     );
   }
@@ -281,6 +299,7 @@ function ThreadColumnHeader({
           status={status}
           label={t(status.labelKey)}
           testId={`thread-status-${status.kind}`}
+          ownerVisible={isMotionVisible}
         />
         <p className="min-w-0 flex-1 truncate text-sm font-medium" title={thread.title}>
           {thread.title}
@@ -415,6 +434,7 @@ export function ThreadColumn({
   layoutKey = "columns",
   isPreloaded = false,
   isDetailActive = false,
+  isMotionVisible = true,
   requestedSessionId = null,
   onColumnRef,
   onInvalidRequestedSession,
@@ -461,13 +481,7 @@ export function ThreadColumn({
     isDetailActive ? selectedSessionId : null,
     focusRef,
   );
-  const setColumnRef = useCallback(
-    (element: HTMLElement | null) => {
-      focusRef.current = element;
-      onColumnRef?.(thread.taskId, element);
-    },
-    [focusRef, onColumnRef, thread.taskId],
-  );
+  const setColumnRef = useRegisteredColumnRef(thread.taskId, focusRef, onColumnRef);
   const { bodyRef, value: disclosureContext } = useThreadBodyDisclosure(composer.disclosure);
 
   return (
@@ -482,6 +496,7 @@ export function ThreadColumn({
         className="flex h-full min-h-0 min-w-0 w-full shrink-0 snap-start flex-col overflow-hidden bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-[-2px] data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink md:rounded-lg md:border md:data-[focused=true]:outline-offset-2"
       >
         <ThreadColumnHeader
+          isMotionVisible={isMotionVisible}
           thread={thread}
           mobileNavigation={mobileNavigation}
           status={status}

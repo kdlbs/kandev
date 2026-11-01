@@ -52,3 +52,31 @@ export async function expectCompositorMotionPaused(target: Locator) {
     )
     .toBe(true);
 }
+
+export async function expectReducedStatusMotion(page: import("@playwright/test").Page) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const targets = page.locator(
+    ".spinner-grid-cube, [data-compositor-spin], [data-compositor-pulse]",
+  );
+  await expect.poll(() => targets.count()).toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      targets.evaluateAll((elements) =>
+        elements.every((element) =>
+          element.getAnimations().every((animation) => animation.playState !== "running"),
+        ),
+      ),
+    )
+    .toBe(true);
+  const cubes = page.locator(".spinner-grid-cube:visible");
+  await expect.poll(() => cubes.count()).toBeGreaterThan(0);
+  expect(
+    await cubes.evaluateAll((elements) =>
+      elements.every((element) => {
+        const style = getComputedStyle(element);
+        return style.animationName === "none" && style.transform === "matrix(0.5, 0, 0, 0.5, 0, 0)";
+      }),
+    ),
+  ).toBe(true);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+}

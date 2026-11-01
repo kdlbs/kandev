@@ -13,6 +13,7 @@ export type ThreadColumnActivation = {
   registerColumn: (taskId: string, element: HTMLElement | null) => void;
   preloadTaskIds: ReadonlySet<string>;
   detailTaskIds: ReadonlySet<string>;
+  visibleTaskIds: ReadonlySet<string> | null;
   mobileTaskId: string | null;
 };
 
@@ -100,6 +101,7 @@ function buildActivationSets({
   return {
     preloadTaskIds: new Set(orderedIds.filter((id) => preloadTaskIds.has(id))),
     detailTaskIds,
+    visibleTaskIds: observerReady ? new Set(visible) : null,
   };
 }
 

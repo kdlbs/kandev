@@ -2,20 +2,22 @@ type PersistentMotionVisibilityOptions = {
   ownerVisible?: boolean;
 };
 
+type MotionElement = HTMLElement | SVGElement;
+
 type PersistentMotionRegistration = {
   setAnimation: (animation: Animation | null) => void;
   unregister: () => void;
 };
 
 type PersistentMotionVisibilityController = {
-  register: (element: HTMLElement, animation?: Animation | null) => PersistentMotionRegistration;
+  register: (element: MotionElement, animation?: Animation | null) => PersistentMotionRegistration;
   setOwnerVisible: (visible: boolean) => void;
   isVisible: () => boolean;
   dispose: () => void;
 };
 
 type Registration = {
-  element: HTMLElement;
+  element: MotionElement;
   animation: Animation | null;
   previousPlayState: string;
   cssPaused: boolean;
@@ -81,7 +83,7 @@ export function createPersistentMotionVisibility(
   let currentVisible = doc.visibilityState !== "hidden" && ownerVisible;
   let disposed = false;
   const registrations = new Set<Registration>();
-  const registeredElements = new Set<HTMLElement>();
+  const registeredElements = new Set<MotionElement>();
   const notify = () => {
     if (disposed) return;
     const nextVisible = doc.visibilityState !== "hidden" && ownerVisible && intersectionVisible;
@@ -92,18 +94,25 @@ export function createPersistentMotionVisibility(
 
   const unsubscribeDocument = subscribeToDocumentVisibility(doc, notify);
   let observer: IntersectionObserver | null = null;
-  if (typeof IntersectionObserver !== "undefined") {
-    observer = new IntersectionObserver((entries) => {
+  const updateObservation = () => {
+    if (!ownerVisible) {
+      observer?.disconnect();
+      observer = null;
+      return;
+    }
+    if (observer || typeof IntersectionObserver === "undefined") return;
+    const next = new IntersectionObserver((entries) => {
+      if (observer !== next) return;
       const entry = entries[entries.length - 1];
       if (!entry) return;
-      // The observer uses the default threshold of zero. At the viewport edge
-      // an intersecting target can have a zero intersection ratio, and it is
-      // still visible for threshold-zero motion control.
+      // Threshold zero includes an intersecting target at the viewport edge.
       intersectionVisible = entry.isIntersecting;
       notify();
     });
+    observer = next;
     observer.observe(target);
-  }
+  };
+  updateObservation();
 
   const unregister = (registration: Registration) => {
     if (!registration.active) return;
@@ -153,6 +162,7 @@ export function createPersistentMotionVisibility(
     setOwnerVisible(visible) {
       if (ownerVisible === visible) return;
       ownerVisible = visible;
+      updateObservation();
       notify();
     },
     isVisible() {

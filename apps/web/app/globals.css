@@ -835,6 +835,23 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   animation-delay: 0.2s;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .spinner-grid-cube {
+    animation: none;
+    transform: scale3d(0.5, 0.5, 1);
+  }
+
+  [data-compositor-spin] {
+    animation: none;
+    will-change: auto;
+  }
+
+  [data-compositor-pulse] {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 @keyframes border-flash-glow {
   0%,
   100% {
