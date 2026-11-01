@@ -600,9 +600,11 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 		noCascadeSnapshots, err = s.reparentNoCascadeChildren(postDeleteCtx, rootID)
 		if err != nil {
 			cancelErr := s.cancelCascadeResourceCleanupRange(deleteCompensationCtx, all, cleanupOps)
-			rollbackErr := s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+			// The rollback helper returns err itself (joined with any rollback
+			// failure), so it replaces err rather than being joined to it.
+			err = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 				deleteCompensationCtx, ownershipTransfers, err)
-			return out, errors.Join(err, rollbackErr, cancelErr)
+			return out, errors.Join(err, cancelErr)
 		}
 	}
 
@@ -614,11 +616,11 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	groupIDs, err := s.releaseMembershipsForCascade(postDeleteCtx, all, orchmodels.WorkspaceReleaseReasonDeleted, cascadeID)
 	if err != nil {
 		cancelErr := s.cancelCascadeResourceCleanupRange(deleteCompensationCtx, all, cleanupOps)
-		rollbackErr := s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+		err = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 			deleteCompensationCtx, ownershipTransfers, err)
 		restoreErr := s.restoreReleasedMemberships(deleteCompensationCtx, all, cascadeID, nil)
 		childRestoreErr := s.restoreNoCascadeChildren(deleteCompensationCtx, noCascadeSnapshots)
-		return out, errors.Join(err, rollbackErr, cancelErr, restoreErr, childRestoreErr)
+		return out, errors.Join(err, cancelErr, restoreErr, childRestoreErr)
 	}
 	out.ReleasedGroupIDs = groupIDs
 
@@ -1787,9 +1789,9 @@ func (s *HandoffService) normalizeNoCascadeChildren(
 		if workspace == nil {
 			continue
 		}
+		// Archived inherited children must also be normalized before promotion.
 		guard := models.ObservedWorkspaceGuard(workspace)
 		guard.RequireParentID = child.ParentID
-		guard.RequireTaskNotArchived = true
 		updatedWorkspace := cloneTaskMetadata(workspace)
 		updatedWorkspace["mode"] = workspaceModeSharedGroup
 		clearOrphanedWorkspaceMetadata(updatedWorkspace)
@@ -1801,10 +1803,29 @@ func (s *HandoffService) normalizeNoCascadeChildren(
 			return fmt.Errorf("normalize workspace mode for child %s before delete: %w", child.ID, err)
 		}
 		if !landed {
-			return fmt.Errorf("%w: normalize workspace mode for child %s", errWorkspaceMetadataChangedConcurrently, child.ID)
+			return &TaskDeleteChildWorkspaceConflictError{
+				ChildID: child.ID, Reason: s.noCascadeChildConflictReason(ctx, child),
+			}
 		}
 	}
 	return nil
+}
+
+// noCascadeChildConflictReason re-reads a child whose guarded workspace write
+// matched no row and reports what changed. A failed re-read falls back to the
+// workspace reason, which is what the guard compares.
+func (s *HandoffService) noCascadeChildConflictReason(
+	ctx context.Context, observed *models.Task,
+) TaskDeleteChildConflictReason {
+	current, err := s.tasks.GetTask(ctx, observed.ID)
+	switch {
+	case err == nil && current == nil, errors.Is(err, taskrepo.ErrTaskNotFound):
+		return TaskDeleteChildDeleted
+	case err == nil && current.ParentID != observed.ParentID:
+		return TaskDeleteChildReparented
+	default:
+		return TaskDeleteChildWorkspaceChanged
+	}
 }
 
 func (s *HandoffService) reparentChildrenInWorkspace(
