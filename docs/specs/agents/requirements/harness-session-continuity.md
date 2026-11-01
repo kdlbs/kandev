@@ -44,6 +44,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 - **AC-AGENTS-HARNESS-SESSION-CONTINUITY-002.1:** When the user selects context continuation, Kandev must prepare a bounded snapshot from the current session's authoritative history before creating a replacement.
 - **AC-AGENTS-HARNESS-SESSION-CONTINUITY-002.2:** When context delivery has an uncertain outcome, Kandev must preserve its checkpoint and block automatic resend. History must not grant new permissions.
+- **AC-AGENTS-HARNESS-SESSION-CONTINUITY-002.3:** When the replacement conversation retains setup output before Kandev commits its harness generation, startup must replay that output instead of failing with a missing delivery checkpoint. No receipt or projection may precede the generation commit, and acknowledged, pruned, or prompt-bearing delivery history must remain blocked. A legacy session without a canonical generation requires its exact authorized pending continuation checkpoint; existing unknown delivery evidence is not empty bootstrap.
 
 ### REQ-AGENTS-HARNESS-SESSION-CONTINUITY-003: Consistent restore configuration
 

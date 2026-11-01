@@ -254,15 +254,33 @@ history; current-generation admission no longer consults them. Fresh start never
 receives, projects, or acknowledges the predecessor stream.
 Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).
 
+## Successor setup replay
+
+Authorized context continuation commits its successor after launch; fresh start
+commits on ACP session-created. Either can retain setup on its own stream before
+commit. With no SQL cursor, zero replay requires a predecessor-replacing
+execution, an adjacent pending SQL successor, a fully retained unacknowledged
+stream and no unresolved or retained prompt submissions. Authenticate the
+descriptor first; preflight writes no cursor or receipt. Both successors use the
+bounded commit wait and live-owner check before any receipt or projection.
+Delivery: [Successor setup replay](../../../plans/continuation-setup-replay/plan.md).
+
+
+## Legacy generation-zero continuation setup
+
+The explicit legacy continuation preflight uses the optional read-only pending
+checkpoint predicate described in [harness continuity](../../agents/system-design/harness-session-continuity.md#legacy-generation-zero-continuation-setup).
+Admission permits retained setup replay from zero; the existing first-generation
+wait still prevents receipts/projection until the canonical native generation
+commits and remains caller-cancellable. Ordinary fresh/successor behavior,
+unknown delivery reconciliation, proof/claim authority and deadlines are unchanged.
+
 ## Uncommitted first-generation relaunch
 
-A first launch can fail before any native conversation commits, for example
-when the provider rejects ACP `session/new`. Its child may still have appended
-setup events to stream `<incarnation>:g1`. Without a committed generation, an
-explicit relaunch (Resume or Start fresh) stays on generation one and reuses
-that stream. Such a relaunch is a generation-one bootstrap, not a restored
-session. Preflight permits replay from zero under the fresh-bootstrap rule when
-all of these hold:
+If first launch fails before native commit (e.g. rejected ACP `session/new`),
+setup may remain on `<incarnation>:g1`. With no committed generation, explicit
+relaunch (Resume/Start fresh) reuses generation one and that stream as a fresh
+bootstrap, not a restored session. Zero replay requires all of:
 
 - The launch carries no native session ID and no required native conversation.
 - SQL has no harness generation for the session incarnation and no delivery cursor.
@@ -278,13 +296,10 @@ That covers committed native conversations, retained prompt work, pruned
 history, and an existing cursor. Those cases keep their dedicated recovery
 paths above.
 
-Managed process-exit errors carry both `process_generation` and an opaque
-`process_manager_id`. The authenticated delivery descriptor reports the
-current manager ID. Lifecycle compares manager IDs before it uses the local
-process generation, because each new process manager starts its counter at one.
-An error from a different manager is retired even when both managers report
-generation one. If an event has a manager ID but the current ID is unavailable,
-lifecycle also retires it. A managed exit without an ID is retired when the
-current descriptor has an ID, because the producer cannot be identified. Older
-descriptors keep the existing generation check for compatibility.
+Managed process-exit errors carry `process_generation` and opaque `process_manager_id`.
+The authenticated descriptor supplies the current manager ID. Compare IDs before
+local generations, which restart at one. Retire errors from a different manager
+(even if both report generation one), and events with an ID when the current ID
+is unavailable. Retire managed exits without an ID if the descriptor has one:
+their producer is unknown. Older descriptors keep the existing generation check.
 Delivery: [Uncommitted bootstrap relaunch](../../../plans/uncommitted-bootstrap-relaunch/plan.md).
