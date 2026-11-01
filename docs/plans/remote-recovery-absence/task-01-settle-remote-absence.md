@@ -146,8 +146,10 @@ unrelated-runtime failure, changed-row CAS, changed-owner final validation,
 repair retry, lost-response convergence, and tracked-successor lifecycle tests
 passed under the race detector. SQLite owner-CAS tests and the service absence
 snapshot test passed. The public recovery integration test passed under the
-race detector. The PostgreSQL owner-change serialization test compiled and was
-skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+race detector. The PostgreSQL owner and delivery serialization test passed five
+repetitions under the race detector against an isolated PostgreSQL 18 container.
+The first PR PostgreSQL run caught a placeholder mismatch in the test's direct
+owner update; changing it to PostgreSQL placeholders fixed the test.
 
 The final changed-Go lint run reported zero issues. The backend build passed for
 all configured targets; the Darwin builds reported only the expected missing

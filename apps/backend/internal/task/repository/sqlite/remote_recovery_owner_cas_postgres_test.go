@@ -130,7 +130,7 @@ func TestPostgresRepairExecutorRunningDeadIfOwnerCurrentSerializesOwnerAndDelive
 	go func() {
 		defer close(ownerChangeDone)
 		_, ownerChangeErr = ownerChangerDB.ExecContext(ctx,
-			`UPDATE tasks SET archived_at = ? WHERE id = ?`, time.Now().UTC(), taskID)
+			`UPDATE tasks SET archived_at = $1 WHERE id = $2`, time.Now().UTC(), taskID)
 	}()
 	deliveryChangeDone := make(chan struct{})
 	deliveryChangeErr := make(chan error, 1)
