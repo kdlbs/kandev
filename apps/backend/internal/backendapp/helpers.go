@@ -92,6 +92,7 @@ import (
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	"github.com/kandev/kandev/internal/startup"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/maintenance"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
@@ -2624,6 +2625,22 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
+	if p.taskRepo != nil {
+		mcpHandlers.SetSendOperationStore(p.taskRepo)
+	}
+	if p.taskRepo != nil && p.dbPool != nil {
+		taskRepo, pool, log := p.taskRepo, p.dbPool, p.log
+		mcpHandlers.SetSendOperationRetention(func(ctx context.Context) {
+			release, admitted := maintenance.ForPool(pool).TryAcquire()
+			if !admitted {
+				return
+			}
+			defer release()
+			if _, _, err := taskRepo.PruneSendOperations(ctx, sqliterepo.SendOperationPruneBatch); err != nil {
+				log.Warn("send-operation retention batch failed", zap.Error(err))
+			}
+		})
+	}
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)

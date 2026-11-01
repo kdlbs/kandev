@@ -1209,6 +1209,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "send-operation-readback", enabled: kanban, register: func(s *Server) { s.registerGetTaskMessageOperationTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
@@ -1458,6 +1459,7 @@ func (s *Server) registerKanbanTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+			mcp.WithString("operation_id", mcp.Description("Optional kanban task identity for one send (letters, digits, dot, underscore, colon, hyphen; 1-128 characters). After a timeout, read get_task_message_operation_kandev before deciding to resend. Replaying a retained identity returns its recorded outcome without delivering again; different target, prompt, mode, session, or question fields return operation_id_conflict.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
