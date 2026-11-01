@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
@@ -31,7 +31,10 @@ type pluginExecutorCleanupSweep struct {
 	done   chan struct{}
 	// handoffCursor and pendingCursor are where the next pass resumes in each
 	// list, so work that keeps failing cannot hold the batch.
-	handoffCursor, pendingCursor atomic.Int64
+	// They hold the last visited stable id, not an index, because the lists
+	// shrink and reorder between passes.
+	cursorMu                     sync.Mutex
+	handoffCursor, pendingCursor string
 }
 
 // StartCleanupSweep retries unfinished plugin resource cleanup until
@@ -101,7 +104,7 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 	// keep a reserved share, and each list resumes where the last pass stopped.
 	handoffBudget := pluginExecutorCleanupSweepBatch - min(len(pending), pluginExecutorCleanupSweepBatch/2)
 	var sweepErrors []error
-	attempted := sweepRotated(ctx, &r.cleanupSweep.handoffCursor, handoffs, handoffBudget, func(handoff *models.UnrecordedPluginExecutor) {
+	attempted := sweepRotated(ctx, &r.cleanupSweep, &r.cleanupSweep.handoffCursor, handoffs, handoffBudget, func(h *models.UnrecordedPluginExecutor) string { return h.ExecutionID }, func(handoff *models.UnrecordedPluginExecutor) {
 		if err := r.sweepHandoff(ctx, handoff); r.sweepFailure(err, handoff.ExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
@@ -109,8 +112,17 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 	if recordsErr != nil {
 		return errors.Join(append(sweepErrors, fmt.Errorf("read plugin executor cleanup inventory: %w", recordsErr))...)
 	}
-	sweepRotated(ctx, &r.cleanupSweep.pendingCursor, pending, pluginExecutorCleanupSweepBatch-attempted, func(record *models.ExecutorRunning) {
-		environment, _ := cleanupPendingEnvironment(record)
+	sweepRotated(ctx, &r.cleanupSweep, &r.cleanupSweep.pendingCursor, pending, pluginExecutorCleanupSweepBatch-attempted, func(rec *models.ExecutorRunning) string { return rec.AgentExecutionID }, func(listed *models.ExecutorRunning) {
+		// The listing predates the handoffs settled above, so re-read the row and
+		// skip one that is gone or no longer owes cleanup.
+		record, err := r.currentPluginExecutorRecord(ctx, listed.SessionID, listed.AgentExecutionID)
+		if err != nil {
+			return
+		}
+		environment, owed := cleanupPendingEnvironment(record)
+		if !owed {
+			return
+		}
 		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, nil); r.sweepFailure(err, record.AgentExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
@@ -131,20 +143,33 @@ func cleanupPendingRecords(records []*models.ExecutorRunning) []*models.Executor
 	return pending
 }
 
-// sweepRotated visits at most budget items starting at the stored cursor and
-// advances the cursor past them, so the next pass starts with the items this
-// one did not reach. It returns how many items it visited.
-func sweepRotated[T any](ctx context.Context, cursor *atomic.Int64, items []T, budget int, visit func(T)) int {
+// rotate visits at most budget items in stable key order, starting after the
+// key this list's previous pass ended on, and returns how many it visited. A key
+// that has since disappeared is not needed: the pass resumes at the first key
+// that sorts after it, wrapping to the start.
+func sweepRotated[T any](ctx context.Context, sweep *pluginExecutorCleanupSweep, cursor *string, items []T, budget int, key func(T) string, visit func(T)) int {
 	if len(items) == 0 || budget <= 0 {
 		return 0
 	}
-	start := int(cursor.Load() % int64(len(items)))
+	sorted := append([]T(nil), items...)
+	sort.Slice(sorted, func(i, j int) bool { return key(sorted[i]) < key(sorted[j]) })
+	sweep.cursorMu.Lock()
+	last := *cursor
+	sweep.cursorMu.Unlock()
+	start := sort.Search(len(sorted), func(i int) bool { return key(sorted[i]) > last })
+	if start == len(sorted) {
+		start = 0
+	}
 	visited := 0
-	for visited < min(budget, len(items)) && ctx.Err() == nil {
-		visit(items[(start+visited)%len(items)])
+	for visited < min(budget, len(sorted)) && ctx.Err() == nil {
+		item := sorted[(start+visited)%len(sorted)]
+		visit(item)
+		last = key(item)
 		visited++
 	}
-	cursor.Store(int64((start + visited) % len(items)))
+	sweep.cursorMu.Lock()
+	*cursor = last
+	sweep.cursorMu.Unlock()
 	return visited
 }
 
