@@ -659,6 +659,9 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
+	// rollbackToken is the agentctl credential of a launch in progress, kept so
+	// a failed launch can drain the runtime it handshook with.
+	rollbackToken string
 	InstanceID    string
 	CausingRunID  string
 	IsPassthrough bool
@@ -722,9 +725,12 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
-	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
-	ManagedRuntimeSource  managedruntime.OpenCodeSource
-	NativeRuntimeVersion  string
+	// CommandOverride is the validated preinstalled-executable override of the
+	// launching profile. Remote preflight probes it instead of npx.
+	CommandOverride      string
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	NativeRuntimeVersion string
 	// OpenCodePluginRuntime is the typed resolved runtime evidence for the
 	// Kandev integration plugin. Nil keeps the integration off.
 	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime
@@ -749,6 +755,10 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// RecordUnrecordedRuntimeInventory durably hands a provisioned resource to
+	// the environment cleanup when no inventory row could hold it. It does not
+	// depend on the environment claim.
+	RecordUnrecordedRuntimeInventory func(context.Context, map[string]interface{}) error
 	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
 	// values are transient and must never be copied to runtime metadata.
 	PluginExecutor *PluginExecutorLaunch

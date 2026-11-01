@@ -51,6 +51,9 @@ func ValidateCommandPrefix(prefix string) error {
 	if err := launchwrapper.ValidateTokens(tokens); err != nil {
 		return err
 	}
+	if launchwrapper.UsesAllocDir(tokens) {
+		return fmt.Errorf("the allocation directory reference is only available to a node wrapper")
+	}
 	return nil
 }
 

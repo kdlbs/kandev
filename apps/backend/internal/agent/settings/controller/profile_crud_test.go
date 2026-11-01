@@ -614,3 +614,41 @@ func TestUpdateProfile_NameOnlyLeavesModelUnchanged(t *testing.T) {
 		t.Fatalf("stored model = %q, want unchanged %q", stored.Model, "opus")
 	}
 }
+
+// TestCreateAgentProfiles_CommandOverride confirms a valid preinstalled command
+// is stored verbatim and every malformed value returns ErrInvalidCommandOverride
+// (mapped to HTTP 400) without creating a profile.
+func TestCreateAgentProfiles_CommandOverride(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "absolute path", value: "/opt/pinned/bin/codex"},
+		{name: "empty", value: ""},
+		{name: "relative", value: "codex", wantErr: true},
+		{name: "argv string", value: "/opt/pinned/bin/codex app-server", wantErr: true},
+		{name: "shell metacharacters", value: "/opt/codex; rm -rf /", wantErr: true},
+		{name: "substitution", value: "/opt/$(id)", wantErr: true},
+		{name: "padded", value: " /opt/pinned/bin/codex", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := newTestController(nil)
+			st := newFakeStore()
+			ctrl.repo = st
+			profiles, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+				Name: "Pinned", Model: "model-1", CommandOverride: tt.value,
+			}}, &testAgent{id: "test-agent", name: "test-agent"})
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidCommandOverride) {
+					t.Fatalf("err = %v, want ErrInvalidCommandOverride", err)
+				}
+				return
+			}
+			if err != nil || len(profiles) != 1 || profiles[0].CommandOverride != tt.value {
+				t.Fatalf("profiles = %+v, err = %v", profiles, err)
+			}
+		})
+	}
+}

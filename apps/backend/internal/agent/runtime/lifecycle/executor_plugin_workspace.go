@@ -1,0 +1,99 @@
+package lifecycle
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kdlbs/kandev/pluginsdk"
+)
+
+const pluginExecutorCapabilityWorkspaceDescriptor = "workspace_descriptor"
+
+// negotiatedDeclares reports whether a recorded `name@version` set contains the
+// capability, whatever its version.
+func negotiatedDeclares(negotiated []string, name string) bool {
+	for _, pair := range negotiated {
+		if recorded, _, _ := strings.Cut(pair, "@"); recorded == name {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiatedVersion returns the version a recorded `name@version` set pins for
+// the capability, or 0 when it is absent or malformed.
+func negotiatedVersion(negotiated []string, name string) int {
+	for _, pair := range negotiated {
+		recorded, text, found := strings.Cut(pair, "@")
+		if recorded != name || !found {
+			continue
+		}
+		if version, err := strconv.Atoi(text); err == nil {
+			return version
+		}
+	}
+	return 0
+}
+
+// resolvePluginExecutorWorkspace validates the workspace descriptor of a
+// provider response against the environment's recorded capability set and, when
+// one is already recorded for the generation, against that value. A provider
+// that did not declare the capability must return neither field. The path is
+// parsed by the resource's platform; the backend filesystem is never consulted.
+func resolvePluginExecutorWorkspace(negotiated []string, recorded *workspacedescriptor.Descriptor, resource *pluginsdk.ExecutorResourceDescriptor) (*workspacedescriptor.Descriptor, error) {
+	path, identity := resource.GetWorkspacePath(), resource.GetWorkspaceIdentity()
+	if !negotiatedDeclares(negotiated, pluginExecutorCapabilityWorkspaceDescriptor) {
+		if path != "" || identity != "" {
+			return nil, fmt.Errorf("%w: provider returned a workspace descriptor without declaring the capability", models.ErrExecutorConflict)
+		}
+		return nil, nil
+	}
+	if err := workspacedescriptor.Validate(resource.GetPlatform(), path, identity); err != nil {
+		return nil, fmt.Errorf("provider workspace descriptor is invalid: %w", err)
+	}
+	next := &workspacedescriptor.Descriptor{Path: path, Identity: identity}
+	if recorded != nil && *recorded != *next {
+		return nil, fmt.Errorf("%w: provider changed the recorded workspace descriptor", models.ErrExecutorConflict)
+	}
+	return next, nil
+}
+
+// resolvePluginExecutorEarlyWorkspace is resolvePluginExecutorWorkspace for a
+// launch checkpoint, which a provider may send before it has bound a node. A
+// resource that carries neither descriptor field and has no recorded descriptor
+// leaves the descriptor unset; a half-supplied descriptor, or an empty one after
+// a descriptor was recorded, is still rejected. The provision response and every
+// later use keep the strict check.
+func resolvePluginExecutorEarlyWorkspace(negotiated []string, recorded *workspacedescriptor.Descriptor, resource *pluginsdk.ExecutorResourceDescriptor) (*workspacedescriptor.Descriptor, error) {
+	if recorded == nil && resource.GetWorkspacePath() == "" && resource.GetWorkspaceIdentity() == "" &&
+		negotiatedDeclares(negotiated, pluginExecutorCapabilityWorkspaceDescriptor) {
+		return nil, nil
+	}
+	return resolvePluginExecutorWorkspace(negotiated, recorded, resource)
+}
+
+// workspacePath is the recorded workspace path, or the fixed path of a
+// provider that declares no descriptor.
+func (i pluginExecutorInventory) workspacePath() string {
+	if i.WorkspaceDescriptor != nil {
+		return i.WorkspaceDescriptor.Path
+	}
+	return pluginExecutorWorkspacePath
+}
+
+// requireRecordedPluginExecutorWorkspace fails closed for an environment that
+// declared the capability but has no recorded descriptor, or whose stored
+// resource disagrees with it.
+func requireRecordedPluginExecutorWorkspace(inventory pluginExecutorInventory) error {
+	declared, err := resolvePluginExecutorWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, inventory.Resource)
+	if err != nil {
+		return err
+	}
+	if declared != nil && inventory.WorkspaceDescriptor == nil {
+		return fmt.Errorf("%w: environment has no recorded workspace descriptor", models.ErrExecutorConflict)
+	}
+	return nil
+}

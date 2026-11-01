@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -29,7 +30,16 @@ func (r *Repository) CheckpointPluginExecutorInventory(ctx context.Context, runn
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockPluginEnvelopeWrite(ctx, tx, running); err != nil {
+		return err
+	}
 	if err := r.validatePluginExecutorCheckpointOwner(ctx, tx, running, metadataJSON); err != nil {
+		return err
+	}
+	if err := r.checkPluginStateWritable(ctx, tx, running); err != nil {
+		return err
+	}
+	if err := r.checkPluginWorkspaceUnique(ctx, tx, running); err != nil {
 		return err
 	}
 	if err := checkpointPluginExecutorInventoryRow(ctx, tx, r.db, running, observedRevision, now); err != nil {
@@ -145,6 +155,9 @@ func updatePluginExecutorInventoryRow(ctx context.Context, tx *sqlx.Tx, db *sqlx
 	}
 	if !validPluginExecutorInventoryTransition(currentMetadata, running.Metadata) {
 		return fmt.Errorf("plugin executor inventory phase transition is invalid: %w", models.ErrExecutionRotated)
+	}
+	if err := checkPluginWorkspaceImmutable(currentMetadata, running.Metadata); err != nil {
+		return err
 	}
 	merged, err := mergePluginExecutorInventoryMetadata(currentMetadata, running.Metadata)
 	if err != nil {
@@ -332,6 +345,11 @@ func readPluginExecutorInventoryForUpdate(ctx context.Context, tx *sqlx.Tx, sess
 	return executionID, metadata, updatedAt, nil
 }
 
+// pluginAuthTokenSecretMetadataKey names the stored reference to the agentctl
+// auth-token secret. A checkpoint that adds it must make it durable, because
+// recovery reads the token through it; one that omits it leaves it in place.
+const pluginAuthTokenSecretMetadataKey = "env_secret_id_AGENTCTL_AUTH_TOKEN"
+
 func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface{}) (map[string]interface{}, error) {
 	merged := make(map[string]interface{}, len(current)+1)
 	for key, value := range current {
@@ -349,23 +367,75 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 	if err := json.Unmarshal(encoded, &normalized); err != nil || normalized == nil {
 		return nil, errors.New("plugin executor checkpoint envelope is invalid")
 	}
-	merged["plugin_executor"] = normalized
+	merged["plugin_executor"] = keepPluginClaimState(current, keepPluginCleanupRequested(current, normalized))
+	if ref, ok := incoming[pluginAuthTokenSecretMetadataKey].(string); ok && ref != "" {
+		merged[pluginAuthTokenSecretMetadataKey] = ref
+	}
 	return merged, nil
+}
+
+// keepPluginCleanupRequested carries a recorded cleanup request and abandon
+// marker across a checkpoint that did not observe them; nothing clears them but
+// deleting the record.
+func keepPluginCleanupRequested(current map[string]interface{}, incoming interface{}) interface{} {
+	stored, _ := current["plugin_executor"].(map[string]interface{})
+	next, ok := incoming.(map[string]interface{})
+	if requested, _ := stored["cleanup_requested"].(bool); requested && ok {
+		next["cleanup_requested"] = true
+	}
+	// The abandon marker is sticky for the same reason: a writer holding an
+	// older envelope must not clear the decision to end the launch.
+	if reason, _ := stored["abandon_reason"].(string); reason != "" && ok {
+		if existing, _ := next["abandon_reason"].(string); existing == "" {
+			next["abandon_reason"] = reason
+		}
+	}
+	return incoming
+}
+
+// keepPluginClaimState carries the recorded claim checkpoint state across a host
+// write that did not observe it, so the per-claim sequence and its acquisition
+// stamp are never dropped by a writer holding an older envelope.
+func keepPluginClaimState(current map[string]interface{}, incoming interface{}) interface{} {
+	stored, _ := current["plugin_executor"].(map[string]interface{})
+	next, ok := incoming.(map[string]interface{})
+	if !ok {
+		return incoming
+	}
+	if claim, has := stored["claim"]; has && claim != nil {
+		if _, carried := next["claim"]; !carried {
+			next["claim"] = claim
+		}
+	}
+	return incoming
+}
+
+// PluginExecutorInventoryPhaseMayFollow reports whether the inventory envelope
+// may move from one phase to another. Test doubles of the inventory store use
+// it to enforce the same transition table as the repository.
+func PluginExecutorInventoryPhaseMayFollow(from, to string) bool {
+	return slices.Contains(pluginExecutorPhaseTransitions[from], to)
 }
 
 func validPluginExecutorInventoryTransition(current, incoming map[string]interface{}) bool {
 	from, to := pluginExecutorInventoryPhase(current), pluginExecutorInventoryPhase(incoming)
-	allowed := map[string]map[string]bool{
-		"allocating":       {"allocating": true, "artifact_staging": true, "bootstrapping": true, "provisioned": true, "ready": true, "cleanup_pending": true, "absent": true},
-		"artifact_staging": {"artifact_staging": true, "bootstrapping": true, "provisioned": true, "cleanup_pending": true, "absent": true},
-		"bootstrapping":    {"bootstrapping": true, "provisioned": true, "ready": true, "cleanup_pending": true, "absent": true},
-		"provisioned":      {"provisioned": true, "bootstrapping": true, "ready": true, "cleanup_pending": true, "expired": true, "absent": true},
-		"ready":            {"ready": true, "cleanup_pending": true, "expired": true, "absent": true},
-		"cleanup_pending":  {"cleanup_pending": true, "absent": true},
-		"expired":          {"expired": true, "absent": true},
-		"absent":           {"absent": true},
-	}
-	return allowed[from][to]
+	return slices.Contains(pluginExecutorPhaseTransitions[from], to)
+}
+
+// pluginExecutorPhaseTransitions lists the phases each phase may move to. The
+// progress phases are reachable from any live phase and never regress to a
+// launch phase, except that recovery may complete into one.
+var pluginExecutorPhaseTransitions = map[string][]string{
+	pluginPhaseAllocating:       {pluginPhaseAllocating, pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseArtifactStaging:  {pluginPhaseArtifactStaging, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseBootstrapping:    {pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseAbsent},
+	pluginPhaseProvisioned:      {pluginPhaseProvisioned, pluginPhaseBootstrapping, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},
+	pluginPhaseReady:            {pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseRecoveryProgress, pluginPhaseExpired, pluginPhaseAbsent},
+	pluginPhaseCleanupPending:   {pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseCleanupProgress:  {pluginPhaseCleanupProgress, pluginPhaseCleanupPending, pluginPhaseAbsent},
+	pluginPhaseRecoveryProgress: {pluginPhaseRecoveryProgress, pluginPhaseBootstrapping, pluginPhaseProvisioned, pluginPhaseReady, pluginPhaseCleanupPending, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseExpired:          {pluginPhaseExpired, pluginPhaseCleanupProgress, pluginPhaseAbsent},
+	pluginPhaseAbsent:           {pluginPhaseAbsent},
 }
 
 func pluginExecutorInventoryPhase(metadata map[string]interface{}) string {

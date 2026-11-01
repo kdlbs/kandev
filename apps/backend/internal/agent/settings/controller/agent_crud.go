@@ -145,6 +145,9 @@ type CreateAgentProfileRequest struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch.
+	CommandOverride string
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -267,7 +270,10 @@ func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
 	if err := validateProfileEnvVarDTOs(p.EnvVars); err != nil {
 		return err
 	}
-	return validateCommandPrefix(p.CommandPrefix)
+	if err := validateCommandPrefix(p.CommandPrefix); err != nil {
+		return err
+	}
+	return validateCommandOverride(p.CommandOverride)
 }
 
 func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest, agentConfig agents.Agent) ([]*models.AgentProfile, error) {
@@ -294,6 +300,7 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			CLIFlags:                cliFlags,
 			EnvVars:                 envVarsFromDTO(profileReq.EnvVars),
 			CommandPrefix:           strings.TrimSpace(profileReq.CommandPrefix),
+			CommandOverride:         profileReq.CommandOverride,
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

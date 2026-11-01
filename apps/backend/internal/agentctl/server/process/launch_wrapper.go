@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
@@ -26,8 +27,8 @@ func (m *Manager) prepareSessionArgs(args []string) ([]string, error) {
 	if m.cfg.LaunchWrapperRequired && m.cfg.LaunchWrapper.IsZero() {
 		return nil, errors.New("launch wrapper configuration is missing. Session recovery is required")
 	}
-	if !m.cfg.LaunchWrapper.IsZero() {
-		return launchwrapper.Prepare(m.cfg.LaunchWrapper, args, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
+	if m.cfg.NodeLaunchWrapper.Active() || !m.cfg.LaunchWrapper.IsZero() {
+		return m.cfg.NodeLaunchWrapper.Prepare(m.cfg.LaunchWrapper, args, launchwrapper.Context{WorkDir: m.cfg.WorkDir, Env: m.cfg.AgentEnv})
 	}
 	prepared := slices.Clone(args)
 	if err := managedruntime.PrepareNPMProjectPrefix(prepared); err != nil {
@@ -36,12 +37,26 @@ func (m *Manager) prepareSessionArgs(args []string) ([]string, error) {
 	return prepared, nil
 }
 
+// oneShotBase keeps the unprepared one-shot commands so a restart re-prepares
+// them instead of wrapping an already wrapped command again.
+type oneShotBase struct {
+	config       *adapter.OneShotConfig
+	initial      []string
+	continuation []string
+}
+
 func (m *Manager) prepareOneShotArgs() error {
 	if m.adapterCfg == nil || m.adapterCfg.OneShotConfig == nil {
 		return nil
 	}
 	oneShot := m.adapterCfg.OneShotConfig
 	initial, continuation := oneShot.InitialArgs, oneShot.ContinueArgs
+	if m.cfg.NodeLaunchWrapper.Active() {
+		if m.oneShotBase == nil || m.oneShotBase.config != oneShot {
+			m.oneShotBase = &oneShotBase{config: oneShot, initial: slices.Clone(initial), continuation: slices.Clone(continuation)}
+		}
+		initial, continuation = m.oneShotBase.initial, m.oneShotBase.continuation
+	}
 	if !m.cfg.LaunchWrapper.IsZero() {
 		initial, continuation = m.cfg.AgentArgs, m.cfg.ContinueArgs
 	}
@@ -55,6 +70,12 @@ func (m *Manager) prepareOneShotArgs() error {
 	}
 	oneShot.InitialArgs, oneShot.ContinueArgs = preparedInitial, preparedContinue
 	return nil
+}
+
+// launchWrapped reports whether any wrapper shapes this agent's launch, so
+// logs and errors stay redacted.
+func (m *Manager) launchWrapped() bool {
+	return !m.cfg.LaunchWrapper.IsZero() || m.cfg.NodeLaunchWrapper.Active()
 }
 
 // LaunchWrapperSnapshot returns only the retained, unresolved profile wrapper.

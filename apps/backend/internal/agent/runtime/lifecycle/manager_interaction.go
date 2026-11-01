@@ -1291,6 +1291,13 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 // with no agent to drive it.
 var ErrNoExecutionForSession = errors.New("no execution for session")
 
+const (
+	// pluginRemoteGracefulStopTimeout caps the graceful agentctl stop of a
+	// plugin_remote runtime; the caller's remaining budget share caps it lower.
+	pluginRemoteGracefulStopTimeout     = 15 * time.Second
+	pluginRemoteGracefulStopBudgetShare = 3
+)
+
 // ErrCancelEscalated is returned by CancelAgent when the agent subprocess accepted
 // the ACP cancel but did not publish a completion event before the timeout. The
 // lifecycle manager has locally unblocked the in-flight SendPrompt and marked the
@@ -1469,9 +1476,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// section before any cleanup or event snapshot can acquire prompt state.
 	// Failed runtime stops intentionally retain the closed-but-reusable client so
 	// a later retry can issue the agentctl stop request again.
-	execution.agentctlLifecycleMu.Lock()
-	execution.detachAgentctlClient()
-	execution.agentctlLifecycleMu.Unlock()
+	execution.detachAgentctlAfterStop(ctx)
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1558,13 +1563,44 @@ func (m *Manager) detachAgentExecution(executionID string, execution *AgentExecu
 	return nil
 }
 
+// pluginRemoteGracefulStopContext bounds the graceful agentctl stop of a
+// plugin_remote runtime. A frozen allocation never answers, and an unbounded
+// stop would spend the caller's whole budget (the 2 minute archive deadline)
+// before the archive and its environment cleanup could run. The cleanup drains
+// and destroys the environment itself, so an unconfirmed stop is reported as a
+// failed agent stop and left to it. Other runtimes keep the caller's context.
+func pluginRemoteGracefulStopContext(ctx context.Context, runtime executor.Name) (context.Context, context.CancelFunc) {
+	if runtime != executor.NamePluginRemote {
+		return ctx, func() {}
+	}
+	timeout := pluginRemoteGracefulStopTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if share := time.Until(deadline) / pluginRemoteGracefulStopBudgetShare; share < timeout {
+			timeout = share
+		}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 func (m *Manager) stopExecutionAgentctl(
 	ctx context.Context,
 	executionID string,
 	execution *AgentExecution,
 	force bool,
 ) bool {
-	execution.agentctlLifecycleMu.Lock()
+	if execution.RuntimeName == executor.NamePluginRemote {
+		lockCtx, cancelLock := pluginRemoteGracefulStopContext(ctx, execution.RuntimeName)
+		locked := execution.lockAgentctlLifecycleWithin(lockCtx)
+		cancelLock()
+		if !locked {
+			m.logger.Warn("agentctl is busy; stopping without a graceful agentctl stop",
+				zap.String("execution_id", executionID))
+			execution.closeAgentctlWhenIdle()
+			return true
+		}
+	} else {
+		execution.agentctlLifecycleMu.Lock()
+	}
 	defer execution.agentctlLifecycleMu.Unlock()
 	client := execution.currentAgentCtlClient() // protected by agentctlLifecycleMu
 	if client == nil {
@@ -1574,7 +1610,9 @@ func (m *Manager) stopExecutionAgentctl(
 	if force {
 		return false
 	}
-	if err := client.Stop(ctx); err != nil {
+	stopCtx, cancelStop := pluginRemoteGracefulStopContext(ctx, execution.RuntimeName)
+	defer cancelStop()
+	if err := client.Stop(stopCtx); err != nil {
 		// During shutdown the instance may already be stopping through another
 		// lifecycle path, so a failed HTTP call is expected.
 		if m.IsShuttingDown() {
@@ -3379,6 +3417,9 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		ManagedRuntimeFamily:  managedRuntimeOptions.ManagedRuntimeFamily,
 		ManagedRuntimeSource:  managedRuntimeOptions.ManagedRuntimeSource,
 		NativeRuntimeVersion:  managedRuntimeOptions.NativeRuntimeVersion,
+	}
+	if err := applyCommandOverride(&opts, profileInfo, agentConfig); err != nil {
+		return agentCommands{}, err
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)

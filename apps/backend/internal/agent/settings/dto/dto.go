@@ -37,6 +37,9 @@ type AgentProfileDTO struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch.
+	CommandOverride string `json:"command_override,omitempty"`
 	// ProviderKind is "" (native) or "openai_compatible". When
 	// "openai_compatible", Kandev injects ProviderBaseURL + the key behind
 	// ProviderAPIKeySecretID into the agent it runs.

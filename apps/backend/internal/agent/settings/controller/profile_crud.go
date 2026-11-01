@@ -108,6 +108,9 @@ type CreateProfileRequest struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch.
+	CommandOverride string
 	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
 	// injected OpenAI-compatible provider. Empty ProviderKind = native.
 	ProviderKind            string
@@ -187,6 +190,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
 		return nil, err
 	}
+	if err := validateCommandOverride(req.CommandOverride); err != nil {
+		return nil, err
+	}
 	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
 	profile := &models.AgentProfile{
 		AgentID:                 req.AgentID,
@@ -210,6 +216,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CLIFlags:                cliFlags,
 		EnvVars:                 envVarsFromDTO(req.EnvVars),
 		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
+		CommandOverride:         req.CommandOverride,
 		ProviderKind:            req.ProviderKind,
 		ProviderBaseURL:         req.ProviderBaseURL,
 		ProviderAPIKeySecretID:  req.ProviderAPIKeySecretID,
@@ -466,6 +473,8 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
+	// CommandOverride replaces the value when non-nil; an empty string clears it.
+	CommandOverride *string
 	// Provider* replace their value when non-nil. When any of the three is
 	// non-nil the provider configuration is re-validated and normalized.
 	ProviderKind            *string
@@ -489,7 +498,7 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
+		req.CommandPrefix == nil && req.CommandOverride == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
 		req.CursorPluginsMCPEnabled == nil && req.MCPSelectionMode == nil && req.MCPSelectedServers == nil &&
 		req.CopilotSelectedPlugins == nil && req.Dynamic == nil
 }
@@ -646,6 +655,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
+	}
+	if req.CommandOverride != nil {
+		if err := validateCommandOverride(*req.CommandOverride); err != nil {
+			return nil, err
+		}
+		profile.CommandOverride = *req.CommandOverride
 	}
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
@@ -907,6 +922,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		CLIFlags:                   cloneCLIFlags(source.CLIFlags),
 		EnvVars:                    cloneEnvVars(source.EnvVars),
 		CommandPrefix:              source.CommandPrefix,
+		CommandOverride:            source.CommandOverride,
 		ProviderKind:               source.ProviderKind,
 		ProviderBaseURL:            source.ProviderBaseURL,
 		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
@@ -1048,6 +1064,16 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 func validateCommandPrefix(prefix string) error {
 	if err := cliflags.ValidateCommandPrefix(prefix); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
+	}
+	return nil
+}
+
+// validateCommandOverride rejects a preinstalled-command override that is not
+// a plain absolute path. Empty means no override. Values are not trimmed: a
+// value with surrounding whitespace is invalid rather than silently rewritten.
+func validateCommandOverride(value string) error {
+	if err := agents.ValidateCommandOverride(value); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCommandOverride, err)
 	}
 	return nil
 }
@@ -1474,6 +1500,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CLIPassthrough:          profile.CLIPassthrough,
 		Enabled:                 profile.Enabled,
 		CommandPrefix:           profile.CommandPrefix,
+		CommandOverride:         profile.CommandOverride,
 		ProviderKind:            profile.ProviderKind,
 		ProviderBaseURL:         profile.ProviderBaseURL,
 		ProviderAPIKeySecretID:  profile.ProviderAPIKeySecretID,

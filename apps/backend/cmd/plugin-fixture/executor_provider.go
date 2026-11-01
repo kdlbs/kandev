@@ -199,6 +199,12 @@ func (p *fixturePlugin) DestroyExecutorEnvironment(ctx context.Context, req *plu
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if refusal := fixtureDrainRefusal(req); refusal != nil {
+		return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: refusal}, nil
+	}
+	if refusal := p.checkpointFixtureCleanup(ctx, req); refusal != nil {
+		return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: refusal}, nil
+	}
 	if consumeFixtureFailureBarrier(p.dataDir, req.GetContext().GetOperationId(), fixtureBarrierUnconfirmedCleanupOnce) {
 		return &pluginsdk.DestroyExecutorEnvironmentResponse{Error: fixtureProviderError("cleanup_unconfirmed", "provider.fixture.cleanupUnconfirmed")}, nil
 	}
@@ -232,7 +238,7 @@ func (p *fixturePlugin) allocateFixtureExecutor(request *pluginsdk.ExecutorProvi
 	}
 	if existing, ok := p.executorState.Environments[request.GetOperationId()]; ok {
 		if existing.EnvironmentID != request.GetEnvironmentId() || existing.InputDigest != request.GetInputDigest() {
-			return fixtureExecutorResource{}, errors.New("plugin-fixture: operation identity changed after allocation")
+			return fixtureExecutorResource{}, pluginsdk.CategorizeActionError(pluginsdk.ActionErrorConflict, errors.New("plugin-fixture: operation identity changed after allocation"))
 		}
 		return existing, nil
 	}
@@ -557,4 +563,107 @@ func consumeFixtureFailureBarrier(dataDir, operationID, barrier string) bool {
 	}
 	_ = file.Close()
 	return true
+}
+
+// checkpointFixtureCleanup records cleanup_progress through the host before the
+// destroy mutates anything. A destroy under a cleanup claim whose checkpoint the
+// host refuses fails closed, as a real provider's does.
+func (p *fixturePlugin) checkpointFixtureCleanup(ctx context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) *pluginsdk.ExecutorProviderError {
+	if req.GetCleanupClaim() == "" || !fixtureDeclaresCapability(fixtureCapabilityDestroyCheckpoints) {
+		return nil
+	}
+	host, ok := p.Host().(pluginsdk.ExecutorProviderHost)
+	if !ok {
+		return fixtureProviderError("cleanup_checkpoint_refused", "provider.fixture.cleanupCheckpointRefused")
+	}
+	if _, err := host.ExecutorProvider().CheckpointExecutorResource(ctx, &pluginsdk.CheckpointExecutorResourceRequest{
+		Context: req.GetContext(), Resource: req.GetResource(), Phase: "cleanup_progress", Sequence: 1,
+		Claim: req.GetCleanupClaim(),
+	}); err != nil {
+		return fixtureProviderError("cleanup_checkpoint_refused", "provider.fixture.cleanupCheckpointRefused")
+	}
+	return nil
+}
+
+const (
+	fixtureCapabilitiesEnv               = "KANDEV_PLUGIN_FIXTURE_CAPABILITIES"
+	fixtureCapabilityDestroyCheckpoints  = "destroy_checkpoints"
+	fixtureCapabilityDrainReceipt        = "drain_receipt"
+	fixtureLaunchFailedCleanupReason     = "launch_failed"
+	fixtureDrainOutcomeDrained           = "drained"
+	fixtureDrainOutcomeNotAttempted      = "not_attempted"
+	fixtureDefaultDeclaredCapabilityList = fixtureCapabilityDestroyCheckpoints + "," + fixtureCapabilityDrainReceipt
+)
+
+// fixtureNeverHeldCredentialVersion is the first drain_receipt version whose
+// not_attempted is valid under every cleanup reason.
+const fixtureNeverHeldCredentialVersion = 2
+
+// fixtureDeclaredCapabilities is the configured capability list; an entry is a
+// name, optionally followed by `@version`, and a bare name means version 1.
+func fixtureDeclaredCapabilities() []string {
+	list, ok := os.LookupEnv(fixtureCapabilitiesEnv)
+	if !ok {
+		list = fixtureDefaultDeclaredCapabilityList
+	}
+	return strings.Split(list, ",")
+}
+
+// fixtureCapabilityVersion returns the declared version of the capability, or 0
+// when the fixture does not act as a provider that requires it.
+func fixtureCapabilityVersion(name string) int {
+	for _, declared := range fixtureDeclaredCapabilities() {
+		declaredName, text, versioned := strings.Cut(strings.TrimSpace(declared), "@")
+		if declaredName != name {
+			continue
+		}
+		if !versioned {
+			return 1
+		}
+		if version, err := strconv.Atoi(text); err == nil && version >= 1 {
+			return version
+		}
+	}
+	return 0
+}
+
+// fixtureDeclaresCapability reports whether the fixture acts as a provider that
+// requires the named host capability. The set is configuration, so a test can
+// run the fixture as a provider that declares none.
+func fixtureDeclaresCapability(name string) bool {
+	return fixtureCapabilityVersion(name) > 0
+}
+
+// fixtureDrainRefusal applies the destroy-time drain rules of a provider that
+// requires drain_receipt: under version 1 not_attempted proves "no runtime"
+// only under the launch cleanup reason, under version 2 it states that the host
+// never held an agentctl credential and is accepted under any reason, and a
+// drained outcome carries a receipt bound to the cleanup claim of this destroy.
+func fixtureDrainRefusal(req *pluginsdk.DestroyExecutorEnvironmentRequest) *pluginsdk.ExecutorProviderError {
+	if !fixtureDeclaresCapability(fixtureCapabilityDrainReceipt) {
+		return nil
+	}
+	refuse := func() *pluginsdk.ExecutorProviderError {
+		return fixtureProviderError("drain_evidence_refused", "provider.fixture.drainEvidenceRefused")
+	}
+	switch req.GetDrainOutcome() {
+	case fixtureDrainOutcomeDrained:
+		receipt := req.GetDrainReceipt()
+		if receipt == nil || receipt.GetReceiptId() == "" || receipt.GetCleanupClaim() != req.GetCleanupClaim() {
+			return refuse()
+		}
+	case fixtureDrainOutcomeNotAttempted:
+		launchRollback := req.GetCleanupReason() == fixtureLaunchFailedCleanupReason
+		neverHeldCredential := fixtureCapabilityVersion(fixtureCapabilityDrainReceipt) >= fixtureNeverHeldCredentialVersion
+		if (!launchRollback && !neverHeldCredential) || req.GetDrainReceipt() != nil {
+			return refuse()
+		}
+	case "unreachable", "uncertain":
+		if req.GetDrainReceipt() != nil {
+			return refuse()
+		}
+	default:
+		return refuse()
+	}
+	return nil
 }

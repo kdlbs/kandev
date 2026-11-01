@@ -1579,6 +1579,8 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
+	// Position is the repository's task position; nil when none is recorded.
+	Position           *int
 	TaskRepositoryID   string
 	RepositoryID       string
 	RepositoryPath     string
@@ -1937,6 +1939,9 @@ type AgentProfileInfo struct {
 	// CommandPrefix is an optional launcher prefix (e.g. "greywall --")
 	// shell-tokenised and prepended to the agent command at launch time.
 	CommandPrefix string
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch command.
+	CommandOverride string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
 

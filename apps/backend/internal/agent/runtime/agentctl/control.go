@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,11 @@ type ControlClient struct {
 }
 
 var ErrControlCredentialsRejected = errors.New("agentctl control credentials rejected")
+
+// ErrHandshakeRejected is the agentctl reply that a bootstrap nonce is invalid
+// or already spent; it is the only evidence that separates a spent nonce from a
+// transport failure.
+var ErrHandshakeRejected = errors.New("agentctl handshake rejected")
 
 const createInstanceHTTPTimeout = 120 * time.Second
 
@@ -250,9 +256,9 @@ func (c *ControlClient) Handshake(ctx context.Context, nonce string) (string, er
 			Error string `json:"error"`
 		}
 		if decErr := json.NewDecoder(resp.Body).Decode(&errResp); decErr == nil && errResp.Error != "" {
-			return "", fmt.Errorf("handshake rejected: %s (status %d)", errResp.Error, resp.StatusCode)
+			return "", handshakeStatusError(resp.StatusCode, fmt.Errorf("handshake rejected: %s (status %d)", errResp.Error, resp.StatusCode))
 		}
-		return "", fmt.Errorf("handshake failed: status %d", resp.StatusCode)
+		return "", handshakeStatusError(resp.StatusCode, fmt.Errorf("handshake failed: status %d", resp.StatusCode))
 	}
 
 	var result struct {
@@ -441,6 +447,98 @@ type IdentityInfo struct {
 	// can disagree with across a restart. Use this, not local config, to
 	// compute an adopted server's ownership-renewal cadence.
 	UnownedPeriodMS int64 `json:"unowned_period_ms"`
+}
+
+// RuntimeDrainRequest and RuntimeDrainReceipt are the agentctl seal-and-drain
+// wire types shared with the agentctl control server.
+type (
+	RuntimeDrainRequest = agentctltypes.RuntimeDrainRequest
+	RuntimeDrainReceipt = agentctltypes.RuntimeDrainReceipt
+)
+
+// SealAndDrainRuntime asks agentctl to stop accepting work and stop its
+// managed process groups, and validates the reply before treating it as
+// evidence. A transport error, non-200 status, or reply that does not match
+// the request yields no receipt.
+func (c *ControlClient) SealAndDrainRuntime(ctx context.Context, drain RuntimeDrainRequest) (*RuntimeDrainReceipt, error) {
+	body, err := json.Marshal(drain)
+	if err != nil {
+		return nil, fmt.Errorf("marshal runtime drain request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/runtime/seal-and-drain", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("runtime seal-and-drain failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &RuntimeDrainRejectedError{StatusCode: resp.StatusCode}
+	}
+	var receipt RuntimeDrainReceipt
+	if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+		return nil, fmt.Errorf("decode runtime drain receipt: %w", err)
+	}
+	if receipt.RequestID != drain.RequestID || receipt.ServerIdentity != drain.ExpectedServerIdentity ||
+		!receipt.Sealed || !receipt.Drained || receipt.Scope != agentctltypes.RuntimeDrainScope ||
+		receipt.Version != agentctltypes.RuntimeDrainVersion || receipt.CompletedAt.IsZero() {
+		return nil, errors.New("runtime seal-and-drain returned incomplete or mismatched evidence")
+	}
+	return &receipt, nil
+}
+
+// RuntimeDrainRejectedError is a seal-and-drain reply that agentctl sent with
+// a non-200 status. A 412 means the runtime identity differs from the expected
+// one; a 409 means another request owns the drain.
+type RuntimeDrainRejectedError struct{ StatusCode int }
+
+func (e *RuntimeDrainRejectedError) Error() string {
+	return fmt.Sprintf("runtime seal-and-drain rejected: status %d", e.StatusCode)
+}
+
+// HostAPIProbeError is a probe reply whose status was not 204.
+type HostAPIProbeError struct{ StatusCode int }
+
+func (e *HostAPIProbeError) Error() string {
+	return fmt.Sprintf("host API probe answered status %d", e.StatusCode)
+}
+
+// ProbeHostAPI asks agentctl to request the host's ping route under
+// hostAPIURL with the probe token. Only a 204 reply is success.
+func (c *ControlClient) ProbeHostAPI(ctx context.Context, hostAPIURL, token string) error {
+	return c.ProbeHostAPIURL(ctx, strings.TrimRight(hostAPIURL, "/")+agentctltypes.HostAPIPingPath, token)
+}
+
+// ProbeHostAPIURL is ProbeHostAPI with the full ping URL.
+func (c *ControlClient) ProbeHostAPIURL(ctx context.Context, pingURL, token string) error {
+	body, err := json.Marshal(agentctltypes.HostAPIProbeRequest{URL: pingURL, Token: token})
+	if err != nil {
+		return fmt.Errorf("marshal host API probe request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/runtime/probe-host-api", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("host API probe failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("host API probe was refused: status %d", resp.StatusCode)
+	}
+	var reply agentctltypes.HostAPIProbeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		return fmt.Errorf("decode host API probe reply: %w", err)
+	}
+	if reply.StatusCode != http.StatusNoContent {
+		return &HostAPIProbeError{StatusCode: reply.StatusCode}
+	}
+	return nil
 }
 
 // ServerDetails carries the control-server values an adopting backend
@@ -773,4 +871,12 @@ func (c *ControlClient) AckTurnOutcome(ctx context.Context, instanceID string, t
 		return fmt.Errorf("failed to ack turn outcome: status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// handshakeStatusError marks the status agentctl answers a refused nonce with.
+func handshakeStatusError(status int, err error) error {
+	if status == http.StatusForbidden {
+		return fmt.Errorf("%w: %w", ErrHandshakeRejected, err)
+	}
+	return err
 }

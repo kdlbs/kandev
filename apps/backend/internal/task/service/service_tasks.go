@@ -1833,6 +1833,9 @@ func effectiveRemoteURL(input TaskRepositoryInput) string {
 }
 
 func parseRemoteRepositoryURL(raw, providerHint string) (provider, owner, name, canonical string, err error) {
+	if owner, name, ok := parseE2ELocalRemote(raw); ok {
+		return providerE2ELocal, owner, name, strings.TrimSpace(raw), nil
+	}
 	parsed, sshStyle, parseErr := normalizeRemoteRepositoryURL(raw)
 	if parseErr != nil {
 		return "", "", "", "", parseErr

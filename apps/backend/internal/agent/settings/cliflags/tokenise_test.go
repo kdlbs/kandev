@@ -62,6 +62,7 @@ func TestValidateCommandPrefix(t *testing.T) {
 		{name: "launcher command", prefix: "greywall --"},
 		{name: "runtime arguments", prefix: "runner '{{kandev.work_dir}}' '{{kandev.managed_npm_dir}}'"},
 		{name: "escaped reference", prefix: "runner '{{{kandev.work_dir}}}'"},
+		{name: "allocation reference is node-only", prefix: "runner '{{kandev.alloc_dir}}'", wantErr: true},
 		{name: "unknown reference", prefix: "runner {{kandev.credentials}}", wantErr: true},
 		{name: "embedded reference", prefix: "runner --dir={{kandev.work_dir}}", wantErr: true},
 		{name: "reference executable", prefix: "{{kandev.work_dir}} --", wantErr: true},

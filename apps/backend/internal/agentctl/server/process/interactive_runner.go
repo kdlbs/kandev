@@ -22,6 +22,7 @@ import (
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
 	LaunchWrapper        launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	NodeLaunchWrapper    launchwrapper.Node `json:"-"`
 	InitialPromptChunks  int                `json:"-"`
 	ProcessID            string             `json:"-"`
 	OwnProcessGroup      bool               `json:"-"`
@@ -51,7 +52,7 @@ type InteractiveStartRequest struct {
 // commandForLog returns the command to log: the redacted LogCommand when the
 // caller supplied one, otherwise the raw Command.
 func (r InteractiveStartRequest) commandForLog() []string {
-	if !r.LaunchWrapper.IsZero() {
+	if !r.LaunchWrapper.IsZero() || r.NodeLaunchWrapper.Active() {
 		return []string{"[wrapped agent]"}
 	}
 	if len(r.LogCommand) > 0 {
@@ -124,6 +125,10 @@ type InteractiveRunner struct {
 	outputCallback       OutputCallback
 	statusCallback       StatusCallback
 	stateCallback        AgentStateCallback
+
+	// node is set when this runner's owner needs a node wrapper it cannot
+	// apply itself. Agent launches without their own wrapper are then refused.
+	node launchwrapper.Node
 
 	mu        sync.RWMutex
 	processes map[string]*interactiveProcess
@@ -208,3 +213,8 @@ func (r *InteractiveRunner) HasObservedFirstIdle(processID string) bool {
 		return false
 	}
 }
+
+// SetNodeLaunchWrapper records that a node wrapper governs this runner's host.
+// A runner whose owner cannot apply it fails closed for agent launches: a
+// request that carries no wrapper of its own is refused rather than run bare.
+func (r *InteractiveRunner) SetNodeLaunchWrapper(node launchwrapper.Node) { r.node = node }

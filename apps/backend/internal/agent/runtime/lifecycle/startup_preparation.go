@@ -112,7 +112,7 @@ func (m *Manager) ReconcileStartupPluginInventory(ctx context.Context) error {
 			m.logger.Warn("skipping invalid plugin executor inventory during startup repair", zap.String("session_id", record.SessionID), zap.Error(err))
 			continue
 		}
-		if inventory.Phase != pluginExecutorPhaseAllocating && inventory.Phase != pluginExecutorPhaseCleanupPending {
+		if inventory.Phase != pluginExecutorPhaseAllocating && !pluginExecutorCleanupOwed(inventory.Phase) {
 			continue
 		}
 		pending = append(pending, m.revealRemoteRecoveryCredentials(ctx, record))

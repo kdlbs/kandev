@@ -147,7 +147,9 @@ func (o *PassthroughOwner) runnerRequest(req types.PassthroughStartRequest, id s
 	if o.terminalCols > 0 && o.terminalRows > 0 {
 		req.Cols, req.Rows = o.terminalCols, o.terminalRows
 	}
-	return passthroughRunnerRequest(req, id, o.manager.cfg.WorkDir)
+	runnerReq := passthroughRunnerRequest(req, id, o.manager.cfg.WorkDir)
+	runnerReq.NodeLaunchWrapper = o.manager.cfg.NodeLaunchWrapper
+	return runnerReq
 }
 
 func (o *PassthroughOwner) reserveStart(req types.PassthroughStartRequest, digest [32]byte) (string, *passthroughStartResult, error) {

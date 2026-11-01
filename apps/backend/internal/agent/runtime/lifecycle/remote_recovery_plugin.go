@@ -91,3 +91,16 @@ func samePluginRecoveryResource(initial, current pluginExecutorInventory) bool {
 	}
 	return current.Resource != nil && current.Resource.GetResourceHandle() == initial.Resource.GetResourceHandle()
 }
+
+// pluginStopDefersToEnvironmentCleanup reports whether a stop of a plugin
+// executor that agentctl could not be attached to is complete. A stop that ends
+// the environment has nothing left to stop through agentctl: the task
+// environment cleanup is the single authority that drains, quarantines and
+// destroys, and it fails closed from the stored record (an unreadable credential
+// that was recorded drains as unreachable). The stop therefore leaves the stored
+// record for that cleanup and does not wait for an agentctl that may never
+// answer. Stops that keep the environment stay retryable.
+func pluginStopDefersToEnvironmentCleanup(runtime agentruntime.Runtime, reason string) bool {
+	return runtime == agentruntime.RuntimePluginRemote && shouldRunExecutorCleanup(reason) &&
+		reason != StopReasonLaunchRollback
+}

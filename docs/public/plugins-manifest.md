@@ -401,9 +401,152 @@ fields, must be finite numbers, and `minimum` cannot exceed `maximum`. Each
 schema is limited to 64 KiB. State versions must be unique positive integers.
 The manifest can declare at most 16 providers.
 
+Profile schema fields (not the resource-state schema) can also set `default`,
+`minLength`, `maxLength`, and `pattern` on `string` fields (`default` also
+applies to the other scalar types). Lengths count Unicode code points. A
+`pattern` is an RE2 expression that must match the whole value. The host
+applies a default when the stored value is absent and reports a failed
+check as a field error with the code `too_short`, `too_long`, or
+`pattern_mismatch`. A provider that declares host capabilities also receives
+typed values and secret store IDs, and its profile (public config plus secret
+IDs) is limited to 4096 bytes.
+
+A provider opts in to newer host behavior with `requires_host_capabilities`, a
+list of `{name, version}` entries from the host capability registry. The host
+records the negotiated set, as `name@version`, when it admits an environment,
+and later attach, recovery, and cleanup follow that record instead of the
+installed manifest. A provider response that carries a field belonging to a
+capability the provider did not declare is rejected with `conflict`.
+
+With `workspace_descriptor`, every provision and attach response must carry a
+`workspace_path` and `workspace_identity`. The path is validated against the
+environment platform (an absolute POSIX path for Linux and macOS, a
+drive-letter path for Windows) and is never read or created on the backend host.
+The identity is 1 to 128 characters from `[A-Za-z0-9._:-]`. The host records the
+pair before first use and rejects any later response that changes it. Two
+active environments of one installation cannot share a normalized path or an
+identity. Without the capability the workspace path stays `/workspace`.
+
+With `destroy_checkpoints`, a provider can call `CheckpointExecutorResource`
+while Kandev holds a cleanup or recovery claim for its environment. A cleanup
+claim accepts only the phase `cleanup_progress` and a recovery claim only
+`recovery_progress`. Every such call carries a `sequence` of at least 1 that
+rises with each call for that claim. Repeating the last sequence with the same
+payload succeeds without a write; a lower sequence or a different payload at the
+same sequence is `conflict`, a missing sequence or a phase of the other claim
+kind is `invalid_config`, and a call that names no active claim is `not_found`.
+Kandev treats an environment as absent only when the provider confirms absence
+and at least one checkpoint of that claim was stored, so a provider must
+checkpoint before it reports `confirmed_absent`.
+
+With `drain_receipt`, Kandev seals and drains the agent runtime before it asks
+the provider to destroy an environment that is being cleaned up (task or
+session archive or delete, and launch rollback). An ordinary stop, a backend
+shutdown, and a plugin disable never seal the runtime. The destroy request then
+carries `drain_outcome` (`drained`, `unreachable`, `uncertain`, or
+`not_attempted`; a failed-launch rollback sends `not_attempted`) and, only for `drained`, a `drain_receipt`. A receipt proves
+the runtime stopped; it is never proof that the environment is absent. The
+provider bootstrap payload also carries `idle_timeout_seconds: 0`, and the
+provider must start the agent runtime with its idle reaper disabled
+(`KANDEV_ACP_IDLE_TIMEOUT=0`) so the runtime stays drainable. A provider
+declaring this capability can set `destroy_timeout_seconds` (30 to 300, default
+30) to bound the destroy call; a value above 30 requires `drain_receipt`.
+
+`drain_receipt` has versions 1 and 2; a manifest names exactly one. Under
+version 1, `not_attempted` is sent only for a failed-launch rollback that never
+started an agentctl handshake. Under version 2 it means the host never held an
+agentctl credential for the runtime, so no agentctl instance, agent or shell can
+exist, and it is sent for any cleanup reason (with `durable_bootstrap` also
+covering a handshake that failed before a token existed). It says nothing about
+the provider's own resource: a version 2 provider still verifies that its
+resource is stopped and removed before it reports absence. A handshake that
+agentctl rejected stays `unreachable`.
+
+With `durable_bootstrap`, Kandev keeps the one-time agent runtime bootstrap
+nonce in its runtime secret store until the launch is published, so a backend
+restart in the middle of a launch can be recovered. On restart the host takes
+the environment's recovery claim and repeats the agent runtime handshake with
+the stored nonce. If the runtime accepts it, the host finishes the launch and
+publishes the environment as ready. If the runtime rejects the nonce as already
+consumed, the launch cannot be resumed and the host cleans the environment up
+with the cleanup reason `bootstrap_consumed`. If publication finds that the
+stored evidence no longer matches, the environment is retained and nothing is
+adopted. The provider performs no extra calls for this; it only has to keep the
+agent runtime reachable at the connection lease it returned.
+
+The executor provider key `runtime_api_url` chooses how the agent runtime
+reaches the Kandev API. `host_public` (the default) sends the runtime the
+configured public HTTPS URL, unchanged. `provider_forwarded` requires the
+`api_url_forward` capability: the provider forwards a host API URL into the
+environment, Kandev skips the public HTTPS check, and the bootstrap payload
+carries `host_api_url` instead of `api_url`. Kandev does not open a new
+listener for this. Before it publishes the environment as ready, the host asks
+the agent runtime to call the unauthenticated, read-only
+`GET /api/v1/runtime/ping` on that URL with a one-time token, trying at most
+twice within 10 seconds. If the host does not see its token arrive, the launch
+is rolled back and the environment is cleaned up with the cleanup reason
+`api_unreachable`.
+
+A provider on a remote worker can also require `worker_api_url` (it needs
+`api_url_forward`) and return `worker_api_url` in the provision resource: the
+`http://127.0.0.1:<port>` (or `localhost`, `[::1]`) base URL of its forward on
+the worker. The reachability probe then calls that URL instead of
+`host_api_url`. Any other scheme, a non-loopback host, a missing port, user
+info, a path, a query or a fragment rolls the launch back.
+
+A connection lease has a `transport`: `https` (the default) or `host_tunnel`.
+A provider may return `host_tunnel` only if its manifest requires the
+`tunnel_transport` capability, and the lease then carries no `base_url`. Kandev
+opens each stream to the provider itself, bound to the installation,
+environment, ownership generation and one port (the agent runtime control port
+or the recorded instance port; any other port is refused before a stream
+opens). The provider acknowledges each stream before any request byte is sent;
+a stream that is not acknowledged within 15 seconds closes as unavailable.
+agentctl HTTP and WebSocket traffic, including the embedded editor and preview
+proxies, uses these streams. A plugin restart, disable, a newer ownership
+generation, a cancel or environment release closes them; the next request
+gets a new lease and stream, and a mutating HTTP request is not replayed. An
+environment may hold at most 64 open streams across both ports, in frames of
+at most 64 KiB; the 65th open fails as `rate_limited`.
+
+The executor provider key `workspace_preparation` is `core` (the default) or
+`provider`. With `core`, Kandev materializes repositories through the agent
+runtime as it always has. With `provider`, the manifest must also require
+`repository_intent` and `workspace_descriptor`, the provider prepares the
+repositories inside the workspace path, and Kandev neither clones nor fetches
+into that workspace. The mode is fixed when the environment is allocated and
+reused on recovery. A provider that requires `repository_intent` receives, in
+the provision request, one intent entry per repository (ID, a locator without
+credentials, branch, base branch and checkout ref; unset values are empty
+strings), ordered by repository position and then ID, at most 32 entries and
+2048 bytes per locator, plus an `agent_env` map of non-secret entries (at most
+64 entries and 16 KiB: the profile's plain environment variables and a fixed
+set of `KANDEV_*`, `LANG`, `LC_ALL` and `TZ` names; any name containing
+`TOKEN`, `SECRET`, `PASSWORD`, `KEY` or `CREDENTIAL`, and every managed
+credential, is dropped). A set over a limit fails the launch as
+`invalid_config`. The intent is part of the operation input digest, so the same
+operation ID with a changed intent returns `conflict`. For a provider-prepared
+workspace the provider reports each repository's ID, a path inside the
+workspace, branch and head commit; Kandev requires the reported set to equal
+the intent (no missing, extra or duplicate entry), paths inside the workspace,
+full head commits and the approved branch, and otherwise cleans up with the
+cleanup reason `repository_inventory_mismatch`. Recovery re-checks the set,
+path containment and commit format. A launch that selects managed Git
+credentials is rejected before allocation when the provider prepares the
+workspace: provider preparation uses executor-owned credentials only.
+
 In the provider profile editor, an empty optional non-secret field is submitted
 as an empty value so an existing value can be cleared. Secret fields use
 explicit keep, replace, and clear behavior.
+
+A secret field is saved as its plain value. Kandev stores the value in its
+vault and keeps only an internal reference to it in the profile, so a client
+never sends a `$kandev-secret:` reference and the API refuses one, for secret
+and non-secret fields alike. The provider receives the plain value in
+`secret_values`, keyed by property, for the duration of each operation that
+carries the profile. With the `secret_references` capability it also receives
+the vault ID of each stored secret in `secret_refs`. That ID is not a value and
+cannot be resolved by the provider.
 
 Provider capability declarations are upper bounds. Profile validation and
 environment provisioning can reduce the effective capabilities. `bounded`

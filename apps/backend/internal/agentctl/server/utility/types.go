@@ -226,6 +226,9 @@ type ProbePromptCapabilities struct {
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
 	LaunchWrapper launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	// node is set by the executor from agentctl's startup configuration. It is
+	// unexported so no request can carry it.
+	node launchwrapper.Node
 	// Protocol selects the one-shot inference transport. Empty means ACP.
 	Protocol agent.Protocol `json:"protocol,omitempty"`
 	// Command is the protocol command for one-shot inference.

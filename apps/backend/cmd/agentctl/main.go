@@ -43,6 +43,11 @@ var (
 	agentCommandFlag = flag.String("agent-command", "", "Command to run the agent")
 	workDirFlag      = flag.String("workdir", "", "Working directory for the agent")
 	portFlag         = flag.Int("port", 0, "HTTP server port")
+
+	nodeLaunchWrapperFileFlag = flag.String("node-launch-wrapper-file", "", "File holding the operator-owned launch wrapper applied to every agent launch")
+	requireNodeLaunchWrapper  = flag.Bool("require-node-launch-wrapper", false, "Refuse to start or launch unless a node launch wrapper is loaded")
+	nodeLaunchWrapperOwnerUID = flag.Int("node-launch-wrapper-owner-uid", -1, "User id that must own the node launch wrapper and its directories (default: the agentctl process owner)")
+	nodeLaunchWrapperAllocDir = flag.String("node-launch-wrapper-alloc-dir", "", "Absolute directory that replaces {{kandev.alloc_dir}} in the node launch wrapper (owned by the agentctl process owner, not group or world writable)")
 )
 
 func main() {
@@ -107,6 +112,15 @@ func runMain() int {
 	}
 	if *portFlag != 0 {
 		cfg.Port = *portFlag
+	}
+
+	if err := applyNodeLaunchWrapper(cfg, *nodeLaunchWrapperFileFlag, *requireNodeLaunchWrapper, *nodeLaunchWrapperOwnerUID); err != nil {
+		fmt.Fprintf(os.Stderr, "node launch wrapper refused: %v\n", err)
+		return 1
+	}
+	if err := applyNodeAllocDir(cfg, *nodeLaunchWrapperAllocDir); err != nil {
+		fmt.Fprintf(os.Stderr, "node launch wrapper refused: %v\n", err)
+		return 1
 	}
 
 	applySIGPIPEDisposition(cfg, signal.Ignore)
@@ -284,7 +298,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 		}
 		// Shutdown all instances first so any final ACP frames they emit during
 		// teardown are still captured by the (still-live) debug writers.
-		if err := instMgr.Shutdown(ctx); err != nil {
+		if err := controlServer.ShutdownInstances(ctx); err != nil {
 			log.Error("error shutting down instance manager", zap.Error(err))
 		}
 		// Then flush + close all debug-log writers as the final logging step.

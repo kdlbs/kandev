@@ -44,6 +44,9 @@ func ResolveRepositoryIdentity(input RepositoryIdentityInput) (RepositoryIdentit
 		remoteURL = origin + "/" + strings.Trim(input.ProviderOwner, "/") + "/" + strings.Trim(input.ProviderName, "/") + ".git"
 	}
 
+	if identity, ok := resolveE2ELocalIdentity(input); ok {
+		return identity, nil
+	}
 	remote, err := parseRemote(remoteURL)
 	if err != nil {
 		return RepositoryIdentity{}, repositoryIdentityError(input.RepositoryID, "must use a credential-free HTTPS or SSH clone URL")

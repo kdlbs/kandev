@@ -1377,6 +1377,7 @@ func registerRoutes(p routeParams) {
 	p.router.GET("/api/v1/features", func(c *gin.Context) {
 		c.JSON(http.StatusOK, p.features)
 	})
+	registerRuntimeProbeRoute(p.router, p.services.RuntimeProbes)
 	p.router.GET("/api/v1/app-state", func(c *gin.Context) {
 		routePath := c.Query("path")
 		if routePath == "" {
@@ -2155,6 +2156,7 @@ func registerSecondaryRoutes(
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
 	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
+	registerE2ECrashBarrierRoutes(p.router)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

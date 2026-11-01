@@ -94,6 +94,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		AllowIndexing:              profile.AllowIndexing,
 		CLIFlags:                   profile.CLIFlags,
 		CommandPrefix:              profile.CommandPrefix,
+		CommandOverride:            profile.CommandOverride,
 		EnvVars:                    profile.EnvVars,
 		ProviderKind:               profile.ProviderKind,
 		ProviderBaseURL:            profile.ProviderBaseURL,

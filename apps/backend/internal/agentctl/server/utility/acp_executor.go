@@ -46,7 +46,11 @@ const (
 // collects the response, and tears down the process.
 type ACPInferenceExecutor struct {
 	logger *zap.Logger
+	node   launchwrapper.Node
 }
+
+// SetNodeLaunchWrapper installs the operator-owned wrapper for every launch.
+func (e *ACPInferenceExecutor) SetNodeLaunchWrapper(node launchwrapper.Node) { e.node = node }
 
 // NewACPInferenceExecutor creates a new ACP inference executor.
 func NewACPInferenceExecutor(logger *zap.Logger) *ACPInferenceExecutor {
@@ -60,6 +64,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	}
 
 	cfg := req.InferenceConfig
+	cfg.node = e.node
 	if len(cfg.Command) == 0 {
 		return &PromptResponse{Success: false, Error: "inference command is empty"}, nil
 	}
@@ -133,7 +138,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers, cfg.ProviderGatewayAuth)
 	if err != nil {
 		failure := withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail())
-		if !cfg.LaunchWrapper.IsZero() {
+		if cfg.wrapped() {
 			failure = "wrapped utility execution failed"
 			e.logger.Error(failure, zap.String("agent_id", req.AgentID))
 		} else {
@@ -468,6 +473,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		return &ProbeResponse{Success: false, Error: "inference config is required"}, nil
 	}
 	cfg := req.InferenceConfig
+	cfg.node = e.node
 	if len(cfg.Command) == 0 {
 		return &ProbeResponse{Success: false, Error: "inference command is empty"}, nil
 	}
@@ -484,7 +490,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	isOpenCode := isOpenCodeACPCommand(cfg.Command)
 	var refreshedOpenCodeModels []ProbeModel
 	if isOpenCode && req.Refresh {
-		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
+		refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, true, req.ProfileContext || cfg.wrapped(), cfg)
 	}
 
 	// Probes intentionally omit the model flag so session/new returns the agent's
@@ -551,7 +557,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
 		failureCode := managedFailureCode
 		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
-		if req.ProfileContext || !cfg.LaunchWrapper.IsZero() {
+		if req.ProfileContext || cfg.wrapped() {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
 		}
 		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
@@ -564,19 +570,16 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	if len(resp.Models) == 0 && isOpenCode {
 		if len(refreshedOpenCodeModels) == 0 {
-			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext || !cfg.LaunchWrapper.IsZero(), cfg)
+			refreshedOpenCodeModels = e.loadOpenCodeModels(ctx, resolvedCmd, workDir, false, req.ProfileContext || cfg.wrapped(), cfg)
 		}
 		resp.Models = refreshedOpenCodeModels
 	}
-	observationPrefix := cfg.CommandPrefix
-	if !cfg.LaunchWrapper.IsZero() {
-		observationPrefix = cfg.LaunchWrapper.Argv
-	}
+	observationArgv := observationPrefix(cfg)
 	resp.RuntimeInfo = e.collectRuntimeObservation(
 		ctx,
 		req.RuntimeObservation,
 		cfg.Command,
-		observationPrefix,
+		observationArgv,
 		args,
 		cmd.Env,
 		cmd.Path,
