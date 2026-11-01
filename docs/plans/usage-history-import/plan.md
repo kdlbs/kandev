@@ -158,14 +158,17 @@ The installed-Host flows use a fixture tokscale command, so they do not measure 
 - [x] [Task 08: Retire the repository legacy write path](task-08-retire-legacy-write-path.md)
 - [x] [Task 09: Remove compatibility shims and bound snapshots](task-09-shims-and-snapshots.md)
 - [x] [Task 10: Add the usage history release toggle](task-10-release-toggle.md)
-- [ ] [Task 11: Narrow PR scope and remove raw evidence](task-11-pr-scope-evidence.md)
-- [ ] [Task 12: Close the PostgreSQL and flaky-test gates](task-12-close-pr-gates.md)
-- [ ] [Task 13: Finalize the plugin SDK pin and compatibility](task-13-plugin-release-readiness.md)
+- [x] (moved) [Task 11: Narrow PR scope and remove raw evidence](task-11-pr-scope-evidence.md)
+- [x] (moved) [Task 12: Close the PostgreSQL and flaky-test gates](task-12-close-pr-gates.md)
+- [x] (moved) [Task 13: Finalize the plugin SDK pin and compatibility](task-13-plugin-release-readiness.md)
 
 Dependency order: 01 before 03. 02 before 03. 03 before 04. 04 before 05. 01 to 05 before 06. 07 before 08. 08 and 09 before 10. 01, 07, 08, 09, and 10 before 11. 11 before 12. 06, 07, and 12 before 13.
 Wave 1 candidates: 01 and 02 (different repositories). Wave 2 candidates: 03 and 07 (different repositories). Waves do not authorize subagents.
 
 ## Verification results
+
+Remaining delivery work moved to the [merge readiness package](../usage-history-merge-readiness/plan.md) on 2026-11-01.
+
 
 Core tasks 01, 07, 08, 09, and 10 are implemented and verified on SQLite.
 Task 01 uses `TestSourceAdoption*` on SQLite and the PostgreSQL-gated adoption test.
@@ -186,6 +189,6 @@ Task 13 remains blocked on a merged core release and its final SDK pin and `min_
 - **Overlap with native usage.** Imported sessions that also have native events can show as incomplete where equivalence is unproven. This is correct under AC-COSTS-USAGE-HISTORY-004.2, but users may read it as an import problem.
 - **Toggle off stops preservation.** Deletions while the toggle is off lose usage that was not yet retained. AC-COSTS-USAGE-HISTORY-007.10 makes this a disclosed gap, and promotion remains a user decision.
 - **Fixture migration size.** Task 08 touches about 20 test files, and a rewrite that weakens them would hide regressions. It keeps existing assertions.
-- **Forked or transferred sessions with native usage block deletion.** Native admission records an explicit scope gap because no eligible retained binding exists. Preservation then refuses to discard the unretained event, so task deletion stays fenced indefinitely. `TestUsageHistoryForkedNativeUsageBlocksDeletion` records the current behavior. Do not weaken the preservation rule; resolving this needs a product decision about discarding or explicitly classifying the gap.
+- **Forked or transferred sessions with native usage.** [Merge readiness Task 02](../usage-history-merge-readiness/task-02-deletion-of-unprovable-usage.md) replaces the permanent deletion block with a recorded gap.
 - **Moving base.** Main has advanced beyond the reviewed base. Reconcile before each PR push.
 - **Full PostgreSQL gate may keep failing.** Task 12 cannot finish until it passes with unchanged fixtures, and that may require query work beyond this package.

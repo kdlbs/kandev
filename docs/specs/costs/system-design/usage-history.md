@@ -374,8 +374,8 @@ Projection cutover requires verified source watermarks, not merely an empty batc
 Legacy native adoption captures authoritative scope and a source high-water bound before replay continues.
 Later migration pages do not derive historical ownership from the workspace's current org.
 Missing ownership evidence remains a disclosed gap, including after transfer or erasure.
-Gap records alone do not satisfy deletion preservation.
-Ordinary task or session cleanup must stop before it removes a native ledger row without an accepted retained copy.
+A gap satisfies deletion only after adoption completes (AC-007.12).
+Otherwise, cleanup stops before it removes a native ledger row without an accepted retained copy.
 Retain its raw source values and the last committed preservation cursor so retry remains safe.
 Authorized workspace or organization erasure can still purge this source data.
 

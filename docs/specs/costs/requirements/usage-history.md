@@ -114,7 +114,7 @@ The accepted product direction does not imply that its implementation is complet
 #### Acceptance criteria
 
 - **AC-COSTS-USAGE-HISTORY-007.1:** Migration and reconciliation shall resume bounded durable work after interruption without duplicate history.
-- **AC-COSTS-USAGE-HISTORY-007.2:** Task deletion shall not remove legacy observations before their retained copies commit. Failure shall keep deletion retryable.
+- **AC-COSTS-USAGE-HISTORY-007.2:** Task deletion shall not remove legacy observations before their retained copies commit. Failure shall keep deletion retryable. AC-COSTS-USAGE-HISTORY-007.12 defines the only exception.
 - **AC-COSTS-USAGE-HISTORY-007.3:** New accepted native events shall survive task deletion without depending on a later polling cycle or a volatile callback.
 - **AC-COSTS-USAGE-HISTORY-007.4:** Deleted-task rows shall retain amounts and display a localized unavailable-task label without a broken navigation link.
 - **AC-COSTS-USAGE-HISTORY-007.5:** Desktop and phone views shall expose the same retained amounts, coverage, and attribution states through existing accessible controls.
@@ -123,6 +123,8 @@ The accepted product direction does not imply that its implementation is complet
 - **AC-COSTS-USAGE-HISTORY-007.8:** When the usage history release toggle is off, Kandev shall accept no new retained usage, run no retained usage background work, and keep the statistics page and retained Host APIs unavailable.
 - **AC-COSTS-USAGE-HISTORY-007.9:** When the toggle is turned off after use, already accepted history shall stay stored, and explicit workspace and organization erasure shall still remove it.
 - **AC-COSTS-USAGE-HISTORY-007.10:** When the toggle is turned on again, retained usage shall resume without duplicates, and usage deleted while it was off shall remain a disclosed gap.
+- **AC-COSTS-USAGE-HISTORY-007.11:** When migration completes, native usage recorded before the upgrade on an eligible session shall appear in retained history without the task being deleted, and it shall not produce a history-gap notice.
+- **AC-COSTS-USAGE-HISTORY-007.12:** When eligibility adoption has completed and a native usage event still cannot be retained because its session stayed ineligible, task and session deletion shall succeed, the event shall be removed with its task, and the workspace shall keep a history-gap notice.
 
 ## Out of scope
 

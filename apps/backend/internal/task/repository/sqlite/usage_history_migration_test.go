@@ -56,12 +56,25 @@ func testUsageHistoryBackfillResumesDurableKeysetsAndRecordsUnknownGaps(t *testi
 	seedOrphanExternalUsage(t, taskRepo, "legacy-migrate-orphan")
 	done, err := firstAnalytics.BackfillUsageHistory(ctx, 1)
 	if err != nil {
-		t.Fatalf("first migration page: %v", err)
+		t.Fatalf("first source-adoption page: %v", err)
+	}
+	if done {
+		t.Fatal("first one-row adoption page reported the full migration complete")
+	}
+	var nativeRetained int
+	if err := taskRepo.db.Get(&nativeRetained, `SELECT COUNT(*) FROM session_usage_buckets WHERE source = 'native' AND source_record_id = 'legacy-migrate-native'`); err != nil {
+		t.Fatalf("count native copies before adoption completes: %v", err)
+	}
+	if nativeRetained != 0 {
+		t.Fatalf("native copies before adoption completed = %d, want 0", nativeRetained)
+	}
+	done, err = firstAnalytics.BackfillUsageHistory(ctx, 1)
+	if err != nil {
+		t.Fatalf("first native migration page: %v", err)
 	}
 	if done {
 		t.Fatal("first one-row native page reported the full migration complete")
 	}
-	var nativeRetained int
 	if err := taskRepo.db.Get(&nativeRetained, `SELECT COUNT(*) FROM session_usage_buckets WHERE source = 'native' AND source_record_id = 'legacy-migrate-native'`); err != nil {
 		t.Fatalf("count first native copy: %v", err)
 	}

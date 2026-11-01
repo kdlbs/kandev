@@ -156,8 +156,10 @@ A history-gap notice means some earlier usage cannot be included.
 Evidence can be missing or lack trustworthy workspace and organization ownership.
 A rebuild cannot recreate deleted source evidence or supply missing ownership proof.
 
-If older native usage cannot be safely copied, task or session deletion stops before it removes those records.
-You can archive the task while ownership is unresolved.
+Before source adoption completes, Kandev blocks task or session deletion if it cannot retain a native usage event.
+After adoption completes, deletion can proceed when a gap exists for the event.
+Task deletion removes the event, and the workspace keeps a history-gap notice.
+You can archive the task while adoption is incomplete.
 
 The phone view provides the same filters, totals, and details.
 Open a row to inspect its categories, sources, attribution, and calendar.

@@ -35,7 +35,12 @@ func runInterruptedLegacyNativeScope(t *testing.T, postgres bool) {
 			require.False(t, done)
 			var initial int
 			require.NoError(t, database.Get(&initial, `SELECT COUNT(*) FROM session_usage_buckets WHERE source='native'`))
-			require.Equal(t, 1, initial, "the first page uses captured session-creation ownership")
+			require.Zero(t, initial, "native migration waits for source adoption to finish")
+			done, err = repo.BackfillUsageHistory(t.Context(), 1)
+			require.NoError(t, err)
+			require.False(t, done)
+			require.NoError(t, database.Get(&initial, `SELECT COUNT(*) FROM session_usage_buckets WHERE source='native'`))
+			require.Equal(t, 1, initial, "the first native page uses captured session-creation ownership")
 			_, err = database.Exec(`UPDATE workspaces SET org_id='scope-b' WHERE id='scope-ws'`)
 			require.NoError(t, err)
 			if erase {

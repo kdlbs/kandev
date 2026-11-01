@@ -1,7 +1,7 @@
 ---
 id: "12-close-pr-gates"
 title: "Close the PostgreSQL and flaky-test gates"
-status: pending
+status: cancelled
 wave: 6
 depends_on:
   - "11-pr-scope-evidence"
@@ -74,3 +74,5 @@ Task 11.
 ## Results
 
 Pending.
+
+Superseded on 2026-11-01. Moved to [Tasks 04 and 05](../usage-history-merge-readiness/plan.md).

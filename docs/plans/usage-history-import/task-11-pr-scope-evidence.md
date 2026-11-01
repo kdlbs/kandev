@@ -1,7 +1,7 @@
 ---
 id: "11-pr-scope-evidence"
 title: "Narrow PR scope and remove raw evidence"
-status: in_progress
+status: cancelled
 wave: 5
 depends_on:
   - "01-source-adoption"
@@ -82,3 +82,5 @@ Tasks 01, 07, 08, 09, and 10.
 Raw evidence files were removed from the current diff in a normal staged deletion, and `docs/plans/usage-history/plan.md` now links to the permanent evidence-bearing commit `a0d13b9de8248f8ea8af8130e0dc7609ba030c0f`. No force-push or history rewrite was used. The evidence cleanup acceptance check is expected to pass after the current branch update.
 
 The unrelated production and E2E fixes listed above have not all been extracted into separate PRs. This work order remains in progress until that scope review is complete; the current PR body will identify the remaining exceptions and open validation gates.
+
+Superseded on 2026-11-01. Moved to [Task 03](../usage-history-merge-readiness/task-03-split-unrelated-fixes.md).

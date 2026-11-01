@@ -29,18 +29,15 @@ func (r *Repository) BackfillUsageHistory(ctx context.Context, limit int) (bool,
 	if limit > usageHistoryBatchLimit {
 		limit = usageHistoryBatchLimit
 	}
+	done, err := r.BackfillUsageSourceAdoption(ctx, limit)
+	if err != nil || !done {
+		return false, err
+	}
 	resuming, err := r.usageHistoryResumePending(ctx)
 	if err != nil {
 		return false, err
 	}
 	if resuming {
-		// Sessions written while the toggle was off have no collection
-		// evidence, so adoption must finish before their native events can be
-		// retained. The marker keeps this order across restarts.
-		done, err := r.BackfillUsageSourceAdoption(ctx, limit)
-		if err != nil || !done {
-			return false, err
-		}
 		if err := r.clearUsageHistoryResumeMarker(ctx); err != nil {
 			return false, err
 		}
@@ -54,15 +51,11 @@ func (r *Repository) BackfillUsageHistory(ctx context.Context, limit int) (bool,
 			return false, nil
 		}
 	}
-	done, err := r.BackfillUsageSelection(ctx, limit)
+	done, err = r.BackfillUsageSelection(ctx, limit)
 	if err != nil || !done {
 		return done, err
 	}
-	done, err = r.repairNativeUsageAccountingBatch(ctx, limit)
-	if err != nil || !done {
-		return done, err
-	}
-	return r.BackfillUsageSourceAdoption(ctx, limit)
+	return r.repairNativeUsageAccountingBatch(ctx, limit)
 }
 
 func (r *Repository) backfillUsageHistorySourcePage(ctx context.Context, source string, limit int) (bool, error) {

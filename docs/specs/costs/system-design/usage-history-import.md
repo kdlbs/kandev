@@ -24,7 +24,7 @@ The [source adoption decision](../../../decisions/2026-11-01-usage-source-adopti
 | REQ-COSTS-USAGE-IMPORT-002 | Import worker |
 | REQ-COSTS-USAGE-IMPORT-003 | Status contract, Settings card |
 | REQ-COSTS-USAGE-IMPORT-004 | Worker lifecycle |
-| REQ-COSTS-USAGE-IMPORT-005 | Per-session isolation |
+| REQ-COSTS-USAGE-IMPORT-005 | Per-session isolation, Plugin messaging when retained usage is unavailable |
 
 ## Core source adoption
 
@@ -133,6 +133,17 @@ Remove pending entries that have no `SubjectBinding` and no live session, which 
 
 In `unavailableSource`, add `ReportError="source_ineligible"` for those two errors. The composer maps it to the new safe-attribution copy.
 Live calculation for eligible existing sessions needs no change beyond core adoption.
+
+## Native usage on existing sessions
+
+`BackfillUsageHistory` runs `BackfillUsageSourceAdoption` before any source page. Native backfill needs an eligible binding, so adoption must finish first, or eligible sessions record a permanent gap.
+A successful native retention deletes that event's `usage_history_migration_gaps` row under both record-key forms: `usage_event_id` and the ledger row ID.
+
+Deletion of an event that stays ineligible is allowed only when the `source-adoption` cursor is complete and a native gap row exists for the event. `preserveNativeUsageRowTx` and `requireNativeUsagePreservedTx` share that check. Before adoption completes, they keep failing with `unpreservedNativeUsageError`, so deletion stays retryable. See AC-COSTS-USAGE-HISTORY-007.11 and 007.12.
+
+## Plugin messaging when retained usage is unavailable
+
+`usageUpgrade` and `importUnsupported` name both remedies, because a current Host with `features.usageHistory` off returns the same `Unimplemented` result as an older Host. Live cost is not offered in this state, because `authorizeSessionUsageActionScope` needs the retained API. Plugin 0.5.0 must therefore not be published until the toggle is on in `prod`.
 
 ## Failure and security
 

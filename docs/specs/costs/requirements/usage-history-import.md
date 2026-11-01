@@ -94,6 +94,7 @@ The costs system owns this contract because it owns which sessions may contribut
 - **AC-COSTS-USAGE-IMPORT-005.4:** When a user opens cost details for an eligible existing session with collection disabled, the composer shall show live cost as it did before retained usage.
 - **AC-COSTS-USAGE-IMPORT-005.5:** When a user opens cost details for an ineligible session, the composer shall state that its cost cannot be attributed safely, and it shall not ask the user to upgrade Kandev.
 - **AC-COSTS-USAGE-IMPORT-005.6:** When a Host read fails transiently during collection, that pass shall stop without losing saved work, and the next pass shall retry.
+- **AC-COSTS-USAGE-IMPORT-005.7:** When the Host's retained usage API is unavailable, the composer and settings card shall say that retained usage is unavailable and name both remedies: updating Kandev and turning on the usage history toggle. They shall not name only an upgrade.
 
 ## Out of scope
 

@@ -1,7 +1,7 @@
 ---
 id: "13-plugin-release-readiness"
 title: "Finalize the plugin SDK pin and compatibility"
-status: pending
+status: cancelled
 wave: 7
 depends_on:
   - "06-import-e2e-docs"
@@ -75,3 +75,5 @@ Tasks 06, 07, and 12. The final pin also requires #3660 to be merged.
 ## Results
 
 Pending.
+
+Superseded on 2026-11-01. Moved to [Task 06](../usage-history-merge-readiness/task-06-plugin-pin-and-floor.md).
