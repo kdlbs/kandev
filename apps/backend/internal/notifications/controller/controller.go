@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/notifications/dto"
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/service"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
@@ -29,6 +30,18 @@ func callerUserID(ctx context.Context) string {
 		return userstore.DefaultUserID
 	}
 	return identity.UserID
+}
+
+// CallerUserID exposes the request-scoped user resolution to sibling handlers
+// (such as Web Push) that manage per-user notification state.
+func CallerUserID(ctx context.Context) string { return callerUserID(ctx) }
+
+// WebPush returns the Web Push service, or nil when push is not configured.
+func (c *Controller) WebPush() *webpush.Service { return c.service.WebPush() }
+
+// EnsureWebPushProvider makes sure userID has a Web Push provider.
+func (c *Controller) EnsureWebPushProvider(ctx context.Context, userID string) error {
+	return c.service.EnsureWebPushProvider(ctx, userID)
 }
 
 func (c *Controller) ListProviders(ctx context.Context) (dto.NotificationProvidersResponse, error) {
@@ -113,6 +126,8 @@ func defaultNameForType(providerType string) string {
 		return "Webhook"
 	case string(models.ProviderTypeSystem):
 		return "System Notifications"
+	case string(models.ProviderTypeWebPush):
+		return "Web Push"
 	default:
 		return "Notifications"
 	}

@@ -95,7 +95,7 @@ func (r *sqliteRepository) initSchema(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_notification_deliveries_session_id ON notification_deliveries(task_session_id);
 	`
 
-	if _, err := r.db.Exec(schema); err != nil {
+	if _, err := r.db.Exec(schema + webPushSchema); err != nil {
 		return err
 	}
 	if err := r.migrateDeliveries(); err != nil {

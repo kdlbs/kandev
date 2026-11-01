@@ -8,6 +8,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
+  NOTIFICATION_EVENT_SESSION_FAILED,
+  NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
@@ -38,6 +40,14 @@ const EVENT_MESSAGE_KEYS: Record<string, { title: string; description: string }>
   [NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED]: {
     title: "settings:notificationEventClarificationRequested",
     description: "settings:notificationEventClarificationRequestedDescription",
+  },
+  [NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED]: {
+    title: "settings:notificationEventPermissionRequested",
+    description: "settings:notificationEventPermissionRequestedDescription",
+  },
+  [NOTIFICATION_EVENT_SESSION_FAILED]: {
+    title: "settings:notificationEventSessionFailed",
+    description: "settings:notificationEventSessionFailedDescription",
   },
   [NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]: {
     title: "settings:notificationEventUpdateAvailable",

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/notifications/models"
 	"github.com/kandev/kandev/internal/notifications/providers"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	"go.uber.org/zap"
@@ -22,6 +23,8 @@ import (
 const (
 	EventTaskSessionTurnFinished       = "session.turn_finished"
 	EventTaskSessionClarificationAsked = "session.clarification_requested"
+	EventTaskSessionPermissionAsked    = "session.permission_requested"
+	EventTaskSessionFailed             = "session.failed"
 	EventOfficeInboxItem               = "office.inbox_item"
 	EventSystemUpdateAvailable         = "system.update_available"
 	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
@@ -55,6 +58,7 @@ type Service struct {
 	logger             *logger.Logger
 	providers          map[models.ProviderType]providers.Provider
 	authEnforced       AuthEnforced
+	webPush            *webpush.Service
 }
 
 // NewService builds the notification service. authEnforced decides what
@@ -97,7 +101,14 @@ func (s *Service) AppriseAvailable() bool {
 }
 
 func (s *Service) AvailableEvents() []string {
-	return []string{EventTaskSessionTurnFinished, EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable}
+	return []string{
+		EventTaskSessionTurnFinished,
+		EventTaskSessionClarificationAsked,
+		EventTaskSessionPermissionAsked,
+		EventTaskSessionFailed,
+		EventOfficeInboxItem,
+		EventSystemUpdateAvailable,
+	}
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
@@ -213,6 +224,74 @@ func (s *Service) HandleTaskTurnFinished(ctx context.Context, taskID, sessionID,
 
 func (s *Service) HandleClarificationRequested(ctx context.Context, taskID, sessionID, pendingID string) {
 	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionClarificationAsked, nil)
+}
+
+// SetWebPush wires the Web Push service and its provider adapter. It must be
+// called before the service handles requests.
+func (s *Service) SetWebPush(svc *webpush.Service) {
+	s.webPush = svc
+	s.RegisterProvider(models.ProviderTypeWebPush, webpush.NewProvider(svc))
+}
+
+// WebPush returns the Web Push service, or nil when push is not configured.
+func (s *Service) WebPush() *webpush.Service { return s.webPush }
+
+// HandlePermissionRequested notifies that an agent is blocked on a tool
+// permission. pendingID identifies the request and dedupes redelivery.
+func (s *Service) HandlePermissionRequested(ctx context.Context, taskID, sessionID, pendingID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionPermissionAsked, nil)
+}
+
+// HandleSessionFailed notifies that a session entered the failed state.
+// occurrenceID must be unique per failure so a later failure of the same
+// session is not swallowed by delivery dedupe.
+func (s *Service) HandleSessionFailed(ctx context.Context, taskID, sessionID, occurrenceID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, occurrenceID, EventTaskSessionFailed, nil)
+}
+
+// RegisterProvider installs an adapter for a provider type that is wired after
+// construction (for example Web Push, which needs the database). It must be
+// called before the service handles requests.
+func (s *Service) RegisterProvider(providerType models.ProviderType, adapter providers.Provider) {
+	s.providers[providerType] = adapter
+}
+
+// webPushDefaultEvents are the events a user's Web Push provider starts with:
+// everything that needs attention on a phone. They can be changed in the
+// notification events table like any other provider.
+var webPushDefaultEvents = []string{
+	EventTaskSessionClarificationAsked,
+	EventTaskSessionPermissionAsked,
+	EventTaskSessionFailed,
+	EventTaskSessionTurnFinished,
+}
+
+// EnsureWebPushProvider creates the user's Web Push provider on first use. An
+// existing provider is left untouched so the user's event choices survive
+// resubscribing a device.
+func (s *Service) EnsureWebPushProvider(ctx context.Context, userID string) error {
+	if s.providers[models.ProviderTypeWebPush] == nil {
+		return fmt.Errorf("web push is not available")
+	}
+	s.defaultProvidersMu.Lock()
+	defer s.defaultProvidersMu.Unlock()
+	existing, err := s.repo.ListProvidersByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, provider := range existing {
+		if provider.Type == models.ProviderTypeWebPush {
+			return nil
+		}
+	}
+	return s.repo.CreateProviderWithSubscriptions(ctx, &models.Provider{
+		ID:      uuid.New().String(),
+		UserID:  userID,
+		Name:    "Web Push",
+		Type:    models.ProviderTypeWebPush,
+		Config:  map[string]interface{}{},
+		Enabled: true,
+	}, webPushDefaultEvents)
 }
 
 func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL string) {
@@ -476,6 +555,18 @@ func semanticMessageCopy(eventType, taskTitle string) (string, string) {
 	if eventType == EventSystemUpdateAvailable {
 		return "Kandev update available", fmt.Sprintf("Kandev %s is available. Open Settings > System > Updates to review it.", taskTitle)
 	}
+	if eventType == EventTaskSessionPermissionAsked {
+		if taskTitle == "" {
+			return "Agent needs permission", "The agent is waiting for your approval."
+		}
+		return "Agent needs permission", fmt.Sprintf("The agent is waiting for your approval on \"%s\".", taskTitle)
+	}
+	if eventType == EventTaskSessionFailed {
+		if taskTitle == "" {
+			return "Agent session failed", "The agent session ended with an error."
+		}
+		return "Agent session failed", fmt.Sprintf("The agent session failed on \"%s\".", taskTitle)
+	}
 	if eventType == EventTaskSessionClarificationAsked {
 		if taskTitle == "" {
 			return "Agent needs your answer", "The agent asked a question."
@@ -588,6 +679,8 @@ func (s *Service) validateEvents(events []string) error {
 	allowed := map[string]struct{}{
 		EventTaskSessionTurnFinished:       {},
 		EventTaskSessionClarificationAsked: {},
+		EventTaskSessionPermissionAsked:    {},
+		EventTaskSessionFailed:             {},
 		EventOfficeInboxItem:               {},
 		EventSystemUpdateAvailable:         {},
 	}
