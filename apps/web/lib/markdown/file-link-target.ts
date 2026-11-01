@@ -162,7 +162,7 @@ function blockedAbsolutePath(path: string): { kind: "blocked" } | null {
 function looksLikeHostAbsolutePath(path: string): boolean {
   return (
     isWindowsDriveAbsolutePath(path) ||
-    /^\/(?:Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path)
+    /^\/(?:Users|home|root|tmp|private|var|etc|usr|opt|mnt|Volumes)\//i.test(path)
   );
 }
 
@@ -226,9 +226,9 @@ function resolveAbsoluteTarget(
     normalizedWorkspaceRoot &&
     firstAbsoluteSegment(normalizedPath) === firstAbsoluteSegment(normalizedWorkspaceRoot)
   ) {
-    return { kind: "blocked" };
+    return { kind: "file", path: normalizedPath };
   }
-  if (looksLikeHostAbsolutePath(normalizedPath)) return { kind: "blocked" };
+  if (looksLikeHostAbsolutePath(normalizedPath)) return { kind: "file", path: normalizedPath };
 
   return createFileTarget(normalizedPath.replace(/^\/+/, ""));
 }
@@ -255,7 +255,7 @@ function parseMarkdownFileHref(href: string): ParsedMarkdownFileHref {
   };
 }
 
-/** Resolves an href to a task-workspace-relative file target or a blocked host path. */
+/** Resolves a file href to a workspace alias or an absolute current-file read target. */
 export function resolveMarkdownFileTarget(
   href: string | undefined,
   { workspaceRoot, fileRootAliases = [] }: ResolveMarkdownFileTargetOptions = {},

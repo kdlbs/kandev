@@ -183,8 +183,8 @@ The shared resolver performs these steps in order:
 4. Otherwise, match the absolute path against an eligible registered source root. Replace only
    that root with its `workspace_relative_root`, append the file suffix, and return the resulting
    workspace-relative target.
-5. Apply the existing file-shape check and invoke the current file-open action. The source checkout
-   path never crosses the file-open boundary.
+5. Preserve an unmatched host absolute path for the current-file read under ADR 0016.
+   Otherwise retain the existing relative/root-relative file-shape check and open action.
 
 For example:
 
@@ -201,13 +201,12 @@ same-named repositories or an unrelated sibling directory from becoming accident
 
 ## Failure behavior
 
-- An absolute host path that matches neither the active workspace root nor an eligible repository
-  alias is non-actionable. Its anchor prevents same-origin `/home/...`, `/Users/...`, drive-path,
-  or equivalent filesystem navigation and does not call the workspace file service.
+- An unmatched host absolute path invokes the existing file-open action with that absolute
+  path; its anchor prevents browser navigation to a same-origin filesystem URL.
 - An absolute path contained by a trusted root but not recognized as an openable file is also
   non-actionable, so a directory or extensionless target cannot fall through to browser navigation.
-- A missing repository cache, worktree projection, task link, or identity match fails closed. A
-  later state update can make the link actionable without rewriting stored message content.
+- Missing alias evidence never invents a repository mapping. Ambiguous eligible aliases fail
+  closed. Unmapped absolute reads follow ADR 0016 using the exact requested path.
 - External HTTP, HTTPS, mail, issue, and application links keep their existing navigation behavior.
 - If a resolved task-workspace file no longer exists, the existing desktop or phone file-open flow
   surfaces its localized failure feedback. Resolution does not fall back to the registered source
@@ -258,3 +257,22 @@ cover the fail-closed paths directly.
 
 - [ADR-2026-07-22: Runtime-Mutable Task Workspace Sources](../../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md)
 - [ADR-2026-07-23: Workspace Source Root Move Boundary](../../../decisions/2026-07-23-workspace-source-root-move-boundary.md)
+
+## Local absolute reads and Markdown images
+
+ADR [0016](../../../decisions/0016-observed-external-file-reads.md) owns absolute
+current-file read authority. This governs ordinary absolute file references
+(AC-UI-COMMENT-MARKDOWN-001.10).
+Keep workspace/source alias remapping first; otherwise preserve the absolute path
+instead of stripping its leading separator or blocking known host roots. Malformed
+encoding, relative traversal and ambiguous repository mappings remain rejected.
+
+For AC-UI-COMMENT-MARKDOWN-001.11, shared Markdown images use the same resolver,
+then `requestFileContent` (`workspace.file.get`) with the rendered session ID from
+`TaskMarkdownFileLinkProvider`. `useMarkdownImage` ignores superseded responses.
+Reuse existing binary/text image encoding and `ImagePreviewDialog`, including its
+phone inspection surface. No session means no local read. Loading, request errors
+and decode errors use existing localized states. No backend endpoint, publication,
+file copy, new storage model, or changed write authority is required.
+
+Implementation: [local file media correction](../../../plans/codex-local-file-media/plan.md).

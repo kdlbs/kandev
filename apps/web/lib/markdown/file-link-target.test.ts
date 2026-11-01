@@ -198,7 +198,7 @@ describe("resolveMarkdownFileTarget mapped paths", () => {
         workspaceRoot: windowsWorkspaceRoot,
         fileRootAliases: windowsAliases,
       }),
-    ).toEqual({ kind: "blocked" });
+    ).toEqual({ kind: "file", path: "C:/Windows/System32/kernel32.dll" });
     expect(resolveMarkdownFileTarget("c://example.com/file.ts")).toBeNull();
   });
 
@@ -242,13 +242,13 @@ describe("resolveMarkdownFileTarget safety boundaries", () => {
     ).toEqual({ kind: "blocked" });
   });
 
-  it("classifies unmatched host paths as blocked and leaves web links alone", () => {
+  it("preserves absolute read paths and leaves web links alone", () => {
     expect(
       resolveMarkdownFileTarget("/home/other-project/secret.md", {
         workspaceRoot,
         fileRootAliases: aliases,
       }),
-    ).toEqual({ kind: "blocked" });
+    ).toEqual({ kind: "file", path: "/home/other-project/secret.md" });
     expect(
       resolveMarkdownFileTarget("/home/other-project/%E0%A4%A", {
         workspaceRoot,
@@ -267,6 +267,20 @@ describe("resolveMarkdownFileTarget safety boundaries", () => {
     expect(resolveMarkdownFileTarget("/docs/README.md", { workspaceRoot })).toEqual({
       kind: "file",
       path: "docs/README.md",
+    });
+  });
+});
+
+describe("ADR 0016 Markdown absolute reads", () => {
+  it.each([
+    "/tmp/pdf-timeout-verify/minimax-ontest-progressive.md",
+    "/private/tmp/chart%20one.png",
+    "/Users/person/report.md",
+    "/workspace/sibling/report.md",
+  ])("keeps the executor path %s", (href) => {
+    expect(resolveMarkdownFileTarget(href, { workspaceRoot: "/workspace/current" })).toEqual({
+      kind: "file",
+      path: decodeURIComponent(href),
     });
   });
 });

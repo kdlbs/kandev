@@ -28,7 +28,15 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - **AC-UI-COMMENT-MARKDOWN-001.7:** The comment list in `TaskChat` renders the available comments in transcript order.
 - **AC-UI-COMMENT-MARKDOWN-001.8:** Scroll position is preserved when new comments arrive if the user has scrolled away from the bottom.
 - **AC-UI-COMMENT-MARKDOWN-001.9:** When a task message links to an absolute file path beneath a repository checkout registered to that task, but the active session uses a different worktree path for the same repository, selecting the link opens the corresponding file from the active task workspace on desktop and phone. Kandev does not read or edit the registered source checkout.
-- **AC-UI-COMMENT-MARKDOWN-001.10:** When an absolute host file path cannot be mapped to the active task workspace or to a registered repository represented by that workspace, selecting it does not navigate the current Kandev tab or issue a workspace file request.
+- **AC-UI-COMMENT-MARKDOWN-001.10:** When an absolute file path is not a registered
+  repository alias, selecting it shall pass the original absolute path to the existing
+  session file viewer, without browser navigation. Current-file reads follow ADR 0016;
+  this does not grant writes, directory browsing or search outside the workspace.
+- **AC-UI-COMMENT-MARKDOWN-001.11:** Local Markdown images shall load through the
+  rendered session's existing current-file reader. Missing or undecodable images
+  shall show an unavailable state, and late responses shall not cross session changes.
+  External image URLs retain browser handling. Desktop and phone use existing viewers.
+
 
 ### REQ-UI-COMMENT-MARKDOWN-002: Prose section separators
 
