@@ -131,7 +131,7 @@ Its error-origin implementation and tests remain unchanged.
 The SDK retains the corresponding `FORK.md` entry.
 
 - SDK revision: `d83842969b9eae021b3beb1b14ba7515168cecdc`.
-- Current Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261030214619-d83842969b9e`.
+- Previous Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261030214619-d83842969b9e`.
 - Kandev removes references to the retired `AuthMethod.EnvVar` variant.
 - Probe fixtures supply required config option names. Their assertions remain unchanged.
 - Kandev keeps its advertised capabilities unchanged. Notice, compaction, and subagent support require a separate consumer change.
@@ -148,3 +148,14 @@ Verification:
 - Backend `go build -trimpath -tags fts5 ./...` with the published dependency: passed.
 - Affected Kandev packages with `-race` and a temporary modfile for the identical SDK checkout: passed.
   Packages: `./internal/agentctl/...`, `./internal/agent/acpdbg/`, and `./cmd/mock-agent/`.
+
+### Schema 1.28 merged-main repin
+
+SDK PR #7 was squash-merged to fork `main` at `70cc752b95c6`. Kandev now pins that immutable
+revision, which retains the remote prompt-error origin API and adds schema 1.28 support.
+
+- Current Kandev pin: `github.com/kdlbs/acp-go-sdk v0.13.6-0.20261101161427-70cc752b95c6`.
+- `TestNewSessionResponse_DropsMalformedConfigOptionNames` verifies that options without a name
+  or with an empty name are filtered by the SDK.
+- `TestProbeACPSessionWithContextRejectsProviderWithoutModelSelection` verifies Kandev's existing
+  unsupported-model result when no usable model option is available.

@@ -52,6 +52,7 @@ var mcpServers map[string]mcpServerDef
 type mockAgent struct {
 	conn                           sessionUpdater
 	model                          string
+	clientSupportsCompaction       bool
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
@@ -132,7 +133,11 @@ func main() {
 // suggestions are gated on the explicit suggestion declaration, so the mock must
 // earn each independently the same way a real bridge does or E2E would prove
 // nothing about either gate.
-func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	a.mu.Lock()
+	a.clientSupportsCompaction = req.ClientCapabilities.Session != nil &&
+		req.ClientCapabilities.Session.Compaction != nil
+	a.mu.Unlock()
 	traceACP("initialize", "", nil)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
@@ -542,10 +547,11 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	}
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
+	supportsCompaction := a.clientSupportsCompaction
 	a.mu.Unlock()
 	e := &emitter{
 		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
-		registerDetachedWork: a.registerDetachedWork,
+		registerDetachedWork: a.registerDetachedWork, supportsCompaction: supportsCompaction,
 	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {

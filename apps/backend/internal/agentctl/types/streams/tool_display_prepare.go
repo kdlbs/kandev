@@ -287,10 +287,25 @@ func prepareNormalizedPayload(payload *NormalizedPayload, budget *displayBudget)
 		clone.showPlan, omitted = prepareShowPlan(payload.showPlan, budget)
 	case ToolKindManageTodos:
 		clone.manageTodos, omitted = prepareManageTodos(payload.manageTodos, budget)
+	case ToolKindContextCompaction:
+		clone.contextCompaction = prepareContextCompaction(payload.contextCompaction, budget)
 	case ToolKindMisc:
 		clone.misc, omitted = prepareMisc(payload.misc, budget)
 	}
 	return &clone, omitted
+}
+
+func prepareContextCompaction(source *ContextCompactionPayload, budget *displayBudget) *ContextCompactionPayload {
+	if source == nil {
+		return nil
+	}
+	clone := cloneContextCompactionPayload(source)
+	clone.ID, _ = budget.identity(clone.ID)
+	clone.Status, _ = budget.identity(clone.Status)
+	clone.Trigger, _ = budget.identity(clone.Trigger)
+	clone.Summary, _ = budget.text(clone.Summary)
+	clone.Error, _ = budget.text(clone.Error)
+	return clone
 }
 
 func prepareReadFile(source *ReadFilePayload, budget *displayBudget) *ReadFilePayload {
@@ -451,6 +466,7 @@ func prepareSubagentTask(source *SubagentTaskPayload, budget *displayBudget) *Su
 		return nil
 	}
 	clone := *source
+	budget.identity(source.Name)
 	budget.identity(source.Description)
 	budget.identity(source.SubagentType)
 	budget.identity(source.AgentID)
@@ -677,9 +693,21 @@ func tightenNormalizedPayload(payload *NormalizedPayload) *NormalizedPayload {
 		clone.showPlan = tightenShowPlanPayload(clone.showPlan)
 	case ToolKindManageTodos:
 		clone.manageTodos = tightenManageTodosPayload(clone.manageTodos)
+	case ToolKindContextCompaction:
+		clone.contextCompaction = tightenContextCompactionPayload(clone.contextCompaction)
 	case ToolKindMisc:
 		clone.misc = tightenMiscPayload(clone.misc)
 	}
+	return &clone
+}
+
+func tightenContextCompactionPayload(payload *ContextCompactionPayload) *ContextCompactionPayload {
+	if payload == nil {
+		return nil
+	}
+	clone := *payload
+	clone.Summary = ""
+	clone.Error = ""
 	return &clone
 }
 

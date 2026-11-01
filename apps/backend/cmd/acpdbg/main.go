@@ -88,6 +88,8 @@ Shared flags:
   --verbose        mirror frames to stderr
   --stderr         capture child stderr into the JSONL
   --exec "CMD"     spawn an arbitrary command instead of a registered agent
+  --client-capabilities JSON  merge client capabilities into initialize
+  --air-capabilities LIST     advertise comma-separated AIR capabilities
 
 The JSONL file records every request, response, notification, and meta
 event in chronological order. See .claude/skills/acp-debug/SKILL.md for the
@@ -105,7 +107,28 @@ type sharedFlags struct {
 	exec    string
 	// airCapabilities lists AIR extension capabilities to advertise in the
 	// initialize clientCapabilities._meta block.
-	airCapabilities string
+	airCapabilities    string
+	clientCapabilities map[string]any
+}
+
+type clientCapabilitiesFlag struct {
+	target *map[string]any
+}
+
+func (f clientCapabilitiesFlag) String() string {
+	return ""
+}
+
+func (f clientCapabilitiesFlag) Set(value string) error {
+	var capabilities map[string]any
+	if err := json.Unmarshal([]byte(value), &capabilities); err != nil {
+		return fmt.Errorf("--client-capabilities must be a JSON object: %w", err)
+	}
+	if capabilities == nil {
+		return errors.New("--client-capabilities must be a JSON object")
+	}
+	*f.target = capabilities
+	return nil
 }
 
 func registerShared(fs *flag.FlagSet) *sharedFlags {
@@ -119,6 +142,8 @@ func registerShared(fs *flag.FlagSet) *sharedFlags {
 	fs.StringVar(&f.exec, "exec", "", "spawn an arbitrary command instead of a registered agent")
 	fs.StringVar(&f.airCapabilities, "air-capabilities", "",
 		"comma-separated AIR extension capabilities to advertise (e.g. asyncTasks)")
+	fs.Var(clientCapabilitiesFlag{target: &f.clientCapabilities}, "client-capabilities",
+		"JSON object of additional client capabilities to merge into initialize")
 	return f
 }
 
@@ -470,11 +495,12 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 
 func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig {
 	return acpdbg.RunConfig{
-		AgentID:         spec.ID,
-		Command:         spec.Command,
-		Workdir:         shared.workdir,
-		CaptureStderr:   shared.stderr,
-		AIRCapabilities: splitCapabilities(shared.airCapabilities),
+		AgentID:            spec.ID,
+		Command:            spec.Command,
+		Workdir:            shared.workdir,
+		CaptureStderr:      shared.stderr,
+		ClientCapabilities: shared.clientCapabilities,
+		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
 	}
 }
 
@@ -482,9 +508,10 @@ func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig
 
 func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.RunConfig, error) {
 	cfg := acpdbg.RunConfig{
-		Workdir:         shared.workdir,
-		CaptureStderr:   shared.stderr,
-		AIRCapabilities: splitCapabilities(shared.airCapabilities),
+		Workdir:            shared.workdir,
+		CaptureStderr:      shared.stderr,
+		ClientCapabilities: shared.clientCapabilities,
+		AIRCapabilities:    splitCapabilities(shared.airCapabilities),
 	}
 	if shared.exec != "" {
 		parts := splitExec(shared.exec)

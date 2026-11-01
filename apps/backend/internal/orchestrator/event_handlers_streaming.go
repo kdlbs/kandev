@@ -1083,6 +1083,14 @@ func (s *Service) trackBackgroundToolUpdate(
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
 			kind := backgroundWorkKind(payload.Data.Normalized)
+			if kind == streams.BackgroundWorkKindSubagent {
+				subagent := payload.Data.Normalized.SubagentTask()
+				if subagent == nil || subagent.Status != "async_launched" {
+					// Only the original async-launch result attests a new child.
+					// Settlement and resume updates describe its card, not liveness.
+					return
+				}
+			}
 			// Only attest the parked projection for a workload whose provider
 			// can confirm later liveness on this connection. An identified but
 			// unverified launch stays inspectable without claiming to be live.

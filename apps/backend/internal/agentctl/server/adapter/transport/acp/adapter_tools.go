@@ -106,6 +106,14 @@ func (a *Adapter) convertContentBlockToStreams(cb acp.ContentBlock) *streams.Con
 
 // convertToolCallUpdate converts a ToolCall notification to an AgentEvent.
 func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateToolCall) *AgentEvent {
+	return a.convertToolCallUpdateForGeneration(sessionID, tc, a.currentPromptGeneration())
+}
+
+func (a *Adapter) convertToolCallUpdateForGeneration(
+	sessionID string,
+	tc *acp.SessionUpdateToolCall,
+	promptGeneration uint64,
+) *AgentEvent {
 	args := map[string]any{}
 
 	if tc.Kind != "" {
@@ -147,6 +155,9 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	if suppress {
 		return nil
 	}
+	a.mu.Lock()
+	a.trackClaudeSubagentCallLocked(sessionID, emittedToolCallID, promptGeneration, normalizedPayload)
+	a.mu.Unlock()
 
 	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
 	// on the initial tool_call; rawInput is usually empty here but record
@@ -167,6 +178,8 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	parentToolCallID := parentToolUseID(tc.Meta)
 	if codexParentToolCallID != "" {
 		parentToolCallID = codexParentToolCallID
+	} else if parentToolCallID == "" && a.agentID == copilotAgentID {
+		parentToolCallID = a.copilotSubagentParentToolCallID(sessionID, emittedToolCallID, tc.Meta)
 	}
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
@@ -203,6 +216,8 @@ func (a *Adapter) trackToolCallPayload(
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if signal == codexSubagentSignalNone {
+		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
+		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
 		a.activeToolCalls[toolCallID] = payload
 		return payload, eventType, signal, toolCallID, "", false
@@ -609,7 +624,9 @@ func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
 	if sessionID == "" {
 		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
 		a.codexEmittedToolCallIDs = make(map[string]map[string]*codexSubagentCorrelation)
+		a.codexControlToolCalls = make(map[string]map[string]streams.SubagentControl)
 		a.codexSubagentSequence = 0
+		a.clearCopilotSubagentsLocked("")
 		return
 	}
 	for key := range a.codexSubagentCorrelations {
@@ -618,6 +635,8 @@ func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
 		}
 	}
 	delete(a.codexEmittedToolCallIDs, sessionID)
+	delete(a.codexControlToolCalls, sessionID)
+	a.clearCopilotSubagentsLocked(sessionID)
 }
 
 func cloneSubagentPayload(payload *streams.NormalizedPayload) *streams.NormalizedPayload {
@@ -676,9 +695,16 @@ func codexActivityToolStatus(payload *streams.NormalizedPayload) string {
 }
 
 // convertToolCallResultUpdate converts a ToolCallUpdate notification to an AgentEvent.
-//
-//nolint:gocognit,cyclop,funlen // pre-existing complexity preserved from adapter.go file split
 func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.SessionToolCallUpdate) *AgentEvent {
+	return a.convertToolCallResultUpdateForGeneration(sessionID, tcu, a.currentPromptGeneration())
+}
+
+//nolint:gocognit,cyclop,funlen,maintidx // Correlated tool-call state changes remain in one adapter lock transaction.
+func (a *Adapter) convertToolCallResultUpdateForGeneration(
+	sessionID string,
+	tcu *acp.SessionToolCallUpdate,
+	promptGeneration uint64,
+) *AgentEvent {
 	toolCallID := string(tcu.ToolCallId)
 	convertedContents := a.convertToolCallContents(tcu.Content)
 	status := ""
@@ -714,7 +740,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// under the lock so it can gate on payload kind (subagent_task only).
 	isAsyncLaunchedSub := isSubagentAsyncLaunched(tcu.Meta)
 	supplemental := toolCallUpdateSupplemental(tcu)
-	pluginPromptGeneration := a.currentPromptGeneration()
+	pluginPromptGeneration := promptGeneration
 
 	a.mu.Lock()
 	updateTitle := ""
@@ -819,17 +845,16 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// Subagent (Task) result metadata is split across meta (Claude) and
 	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
 	if payload != nil && payload.Kind() == streams.ToolKindSubagentTask {
-		a.normalizer.EnrichSubagentResult(payload, tcu.Meta, tcu.RawOutput)
-		if isTerminal && a.agentID == codexAgentID &&
-			strings.TrimSpace(payload.SubagentTask().Status) == "" {
-			fillCodexStatus(payload.SubagentTask(), status)
-		}
-		if payload.BackgroundWork() != nil {
-			stampSubagentBackgroundWork(payload, a.agentID)
-		}
-		if isTerminal && a.agentID == codexAgentID && codexSubagentPayloadTerminal(payload) {
-			a.markCodexSubagentTerminalLocked(sessionID, emittedToolCallID)
-		}
+		a.enrichSubagentResultLocked(
+			sessionID,
+			emittedToolCallID,
+			promptGeneration,
+			payload,
+			tcu.Meta,
+			tcu.RawOutput,
+			isTerminal,
+			status,
+		)
 	}
 
 	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
@@ -863,6 +888,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if codexParentToolCallID != "" {
 		parentToolCallID = codexParentToolCallID
 	}
+	if parentToolCallID == "" && a.agentID == copilotAgentID {
+		parentToolCallID = a.copilotSubagentParentToolCallIDLocked(
+			sessionID,
+			copilotChildAgentID(tcu.Meta),
+			emittedToolCallID,
+		)
+	}
 	if parentToolCallID == "" {
 		parentToolCallID = a.toolCallParents[emittedToolCallID]
 	}
@@ -881,6 +913,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 	emittedPayload := cloneSubagentPayload(payload)
 	a.mu.Unlock()
+	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
 	// `_meta.claudeCode.toolResponse.scheduledFor` typically arrive. Once both
@@ -935,6 +968,57 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 	}
+}
+
+func (a *Adapter) enrichSubagentResultLocked(
+	sessionID, emittedToolCallID string,
+	promptGeneration uint64,
+	payload *streams.NormalizedPayload,
+	meta map[string]any,
+	rawOutput any,
+	isTerminal bool,
+	status string,
+) {
+	resumedClaudeSubagent := a.isClaudeSubagentResumedLocked(sessionID, emittedToolCallID, promptGeneration)
+	backgroundBeforeEnrichment := snapshotClaudeBackgroundWork(payload, resumedClaudeSubagent)
+	a.normalizer.EnrichSubagentResult(payload, meta, rawOutput)
+	restoreBackgroundWork(payload, backgroundBeforeEnrichment)
+	a.updateCopilotSubagentCallLocked(sessionID, emittedToolCallID, payload, isTerminal)
+	if isTerminal && a.agentID == codexAgentID && strings.TrimSpace(payload.SubagentTask().Status) == "" {
+		fillCodexStatus(payload.SubagentTask(), status)
+	}
+	if payload.BackgroundWork() != nil && !resumedClaudeSubagent {
+		stampSubagentBackgroundWork(payload, a.agentID)
+	}
+	a.trackClaudeSubagentCallLocked(sessionID, emittedToolCallID, promptGeneration, payload)
+	if isTerminal && a.agentID == codexAgentID && codexSubagentPayloadTerminal(payload) {
+		a.markCodexSubagentTerminalLocked(sessionID, emittedToolCallID)
+	}
+}
+
+func snapshotClaudeBackgroundWork(
+	payload *streams.NormalizedPayload,
+	resumedClaudeSubagent bool,
+) *streams.BackgroundWorkPayload {
+	if payload == nil || !resumedClaudeSubagent || payload.BackgroundWork() == nil {
+		return nil
+	}
+	backgroundCopy := *payload.BackgroundWork()
+	if backgroundCopy.Capabilities != nil {
+		capabilitiesCopy := *backgroundCopy.Capabilities
+		backgroundCopy.Capabilities = &capabilitiesCopy
+	}
+	return &backgroundCopy
+}
+
+func restoreBackgroundWork(
+	payload *streams.NormalizedPayload,
+	background *streams.BackgroundWorkPayload,
+) {
+	if payload == nil || background == nil || payload.BackgroundWork() == nil {
+		return
+	}
+	*payload.BackgroundWork() = *background
 }
 
 func (a *Adapter) markCodexSubagentTerminalLocked(sessionID, emittedToolCallID string) {
