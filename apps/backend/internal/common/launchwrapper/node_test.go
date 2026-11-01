@@ -242,3 +242,26 @@ func TestLoadNodeFileValidatesTheWrapperWithoutRunningIt(t *testing.T) {
 
 	require.NoFileExists(t, sentinel, "loading or validating the node wrapper executed it")
 }
+
+func TestNodeEnforcedNeedsRequiredAndValidLoadedWrapper(t *testing.T) {
+	valid := Spec{Version: Version, Source: SourceNode, Argv: []string{"/usr/bin/true", "--"}}
+	tests := []struct {
+		name string
+		node Node
+		want bool
+	}{
+		{"zero node", Node{}, false},
+		{"required without a wrapper", Node{Required: true}, false},
+		{"optional wrapper loaded", Node{Spec: valid}, false},
+		{"required with relative argv0", Node{Required: true, Spec: Spec{Version: Version, Source: SourceNode, Argv: []string{"true"}}}, false},
+		{"required with wrong source", Node{Required: true, Spec: Spec{Version: Version, Source: "profile", Argv: []string{"/usr/bin/true"}}}, false},
+		{"required with valid wrapper", Node{Required: true, Spec: valid}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.node.Enforced(); got != tt.want {
+				t.Fatalf("Enforced() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

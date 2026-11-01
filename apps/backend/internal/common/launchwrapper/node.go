@@ -31,6 +31,14 @@ type Node struct {
 // Active reports whether a launch must go through a node wrapper or be refused.
 func (n Node) Active() bool { return n.Required || !n.Spec.IsZero() }
 
+// Enforced reports whether every agent launch is guaranteed to run inside the
+// operator's node wrapper: the wrapper is required (so agentctl refuses to
+// start or launch without it) and a valid node envelope is loaded. A merely
+// optional wrapper, or a requirement without a loaded wrapper, is not enforced.
+func (n Node) Enforced() bool {
+	return n.Required && !n.Spec.IsZero() && n.Spec.ValidateNode() == nil
+}
+
 // ValidateNode checks a node envelope. Only this path accepts source "node".
 func (s Spec) ValidateNode() error {
 	if s.Version != Version || s.Source != SourceNode || !filepath.IsAbs(s.Argv0()) {

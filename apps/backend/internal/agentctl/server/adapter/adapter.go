@@ -394,6 +394,10 @@ type Config struct {
 
 	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
 	PromptSuggestions bool
+
+	// OuterSandboxEnforced is true only when agentctl was started with an
+	// enforced node launch wrapper (see launchwrapper.Node.Enforced).
+	OuterSandboxEnforced bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -432,6 +436,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		ProviderGatewayAuth:        c.ProviderGatewayAuth,
 		AuthPolicy:                 c.AuthPolicy,
 		PromptSuggestions:          c.PromptSuggestions,
+		OuterSandboxEnforced:       c.OuterSandboxEnforced,
 	}
 }
 

@@ -2055,6 +2055,7 @@ func (m *Manager) buildAdapterConfig() error {
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		OuterSandboxEnforced:       m.cfg.NodeLaunchWrapper.Enforced(),
 	}
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
