@@ -969,9 +969,17 @@ func removeGitLabCredentialHelpers(env map[string]string) {
 		value, valueOK := env[valueName]
 		delete(env, keyName)
 		delete(env, valueName)
-		if keyOK && valueOK && (!strings.HasPrefix(strings.ToLower(key), "credential.http") || value != gitLabCredentialHelper) {
-			entries = append(entries, entry{key: key, value: value})
+		if !keyOK || !valueOK {
+			continue
 		}
+		if strings.HasPrefix(strings.ToLower(key), "credential.http") && value == gitLabCredentialHelper {
+			// Drop the reset entry appendGitLabCredentialHelper put in front of it.
+			if n := len(entries); n > 0 && entries[n-1].value == "" && strings.EqualFold(entries[n-1].key, key) {
+				entries = entries[:n-1]
+			}
+			continue
+		}
+		entries = append(entries, entry{key: key, value: value})
 	}
 	for i, item := range entries {
 		env[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)] = item.key
@@ -984,6 +992,10 @@ func removeGitLabCredentialHelpers(env map[string]string) {
 	env["GIT_CONFIG_COUNT"] = strconv.Itoa(len(entries))
 }
 
+// appendGitLabCredentialHelper injects the token helper for one origin. An
+// empty-valued entry for the same key goes first: git documents that an empty
+// helper resets the list, so system/global helpers (for example Homebrew's
+// osxkeychain, which can block for a minute) never run before ours.
 func appendGitLabCredentialHelper(env map[string]string, host string) {
 	origin, err := url.Parse(strings.TrimSpace(host))
 	if err != nil || (origin.Scheme != "http" && origin.Scheme != httpsScheme) || origin.Host == "" ||
@@ -995,17 +1007,9 @@ func appendGitLabCredentialHelper(env map[string]string, host string) {
 	origin.RawQuery = ""
 	origin.Fragment = ""
 
-	count, _ := strconv.Atoi(env["GIT_CONFIG_COUNT"])
-	for i := 0; i < count; i++ {
-		key := env[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
-		if strings.EqualFold(key, "credential."+origin.String()+".helper") {
-			env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)] = gitLabCredentialHelper
-			return
-		}
-	}
-	env[fmt.Sprintf("GIT_CONFIG_KEY_%d", count)] = "credential." + origin.String() + ".helper"
-	env[fmt.Sprintf("GIT_CONFIG_VALUE_%d", count)] = gitLabCredentialHelper
-	env["GIT_CONFIG_COUNT"] = strconv.Itoa(count + 1)
+	key := "credential." + origin.String() + ".helper"
+	appendGitConfig(env, key, "")
+	appendGitConfig(env, key, gitLabCredentialHelper)
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
