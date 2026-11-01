@@ -281,8 +281,9 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 	}
 	credentialed := m.revealRemoteRecoveryCredentials(ctx, attemptRecord)
 	var recovered []*ExecutorInstance
+	var outcomes map[string]RecoveryCandidateOutcome
 	if detailed, ok := backend.(DetailedRecoveryBackend); ok {
-		recovered, _, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
+		recovered, outcomes, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{credentialed})
 	} else {
 		recovered, err = backend.RecoverInstances(ctx, []*models.ExecutorRunning{credentialed})
 	}
@@ -298,6 +299,10 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 		}
 	}
 	if ri == nil {
+		if err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, outcomes[entry.record.SessionID]); err != nil {
+			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
+				zap.String("session_id", entry.record.SessionID), zap.Error(err))
+		}
 		return
 	}
 	if err := m.processRecoveredRemoteInstance(ctx, entry, ri); err != nil {

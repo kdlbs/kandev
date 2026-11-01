@@ -677,6 +677,11 @@ export class SessionPage {
       .first();
   }
 
+  /** Retry-connection action shown for uncertain delivery recovery. */
+  recoveryRetryConnectionButton(): Locator {
+    return this.activeChat().getByTestId("recovery-retry-connection-button");
+  }
+
   /** Error returned by a manual session recovery action. */
   recoveryError(): Locator {
     return this.activeChat().getByTestId("session-recovery-error");

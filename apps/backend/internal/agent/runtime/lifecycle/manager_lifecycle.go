@@ -218,12 +218,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	recoveryCtx, cancelRecovery := context.WithDeadline(ctx, m.recoveryDeadlineDeadline())
 	var recovered []*ExecutorInstance
 	var detailedOutcomes map[string]RecoveryCandidateOutcome
+	var recoveryErr error
 	if listErr == nil {
-		var err error
-		recovered, detailedOutcomes, err = m.executorRegistry.recoverDetailed(recoveryCtx, records, deferRemote)
-		if err != nil {
-			m.runRecoveryErr = err
-			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
+		recovered, detailedOutcomes, recoveryErr = m.executorRegistry.recoverDetailed(recoveryCtx, records, deferRemote)
+		if recoveryErr != nil {
+			m.runRecoveryErr = recoveryErr
+			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(recoveryErr))
 		}
 	}
 
@@ -247,6 +247,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	recoveredSessions := make(map[string]struct{}, len(recovered))
+	for _, instance := range recovered {
+		if instance != nil && instance.SessionID != "" {
+			recoveredSessions[instance.SessionID] = struct{}{}
+		}
+	}
 	var stopWG sync.WaitGroup
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
@@ -572,6 +578,26 @@ func (m *Manager) Start(ctx context.Context) error {
 			startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
+	}
+	for _, record := range records {
+		if recoveryErr != nil || record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+			!remoteRecoveryNoMatchProvesStopped(record.Runtime) {
+			continue
+		}
+		if _, returned := recoveredSessions[record.SessionID]; returned || ctx.Err() != nil {
+			continue
+		}
+		pending := m.pendingRemoteRecoveryForSession(record.SessionID)
+		if !m.beginRemoteRecovery(pending) {
+			continue
+		}
+		absenceCtx, cancelAbsence := m.remoteAttemptContext(ctx)
+		if err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, detailedOutcomes[record.SessionID]); err != nil {
+			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
+				zap.String("session_id", record.SessionID), zap.Error(err))
+		}
+		cancelAbsence()
+		m.finishRemoteRecoveryAttempt(pending)
 	}
 	cancelRecovery()
 

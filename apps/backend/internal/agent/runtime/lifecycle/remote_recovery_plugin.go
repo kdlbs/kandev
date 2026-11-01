@@ -14,10 +14,30 @@ func (m *Manager) remoteRecoveryAttemptRecord(ctx context.Context, entry *remote
 		return nil, errors.New("remote recovery attempt record is unavailable")
 	}
 	record := cloneRemoteRecoveryRecord(entry.record)
-	if record.Runtime != agentruntime.RuntimePluginRemote {
+	if record.Runtime == agentruntime.RuntimePluginRemote {
+		return m.currentPluginRemoteRecoveryAttemptRecord(ctx, record)
+	}
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
 		return record, nil
 	}
-	return m.currentPluginRemoteRecoveryAttemptRecord(ctx, record)
+	current, err := reader.GetExecutorRunningBySessionID(ctx, record.SessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrExecutorRunningNotFound) {
+			return record, nil
+		}
+		return nil, fmt.Errorf("read current remote recovery inventory: %w", err)
+	}
+	if !sameRemoteRecoveryRecordOwner(record, current) {
+		return nil, errors.New("remote recovery inventory owner changed")
+	}
+	return cloneRemoteRecoveryRecord(current), nil
+}
+
+func sameRemoteRecoveryRecordOwner(expected, current *models.ExecutorRunning) bool {
+	return expected != nil && current != nil && expected.SessionID == current.SessionID &&
+		expected.TaskID == current.TaskID && expected.AgentExecutionID == current.AgentExecutionID &&
+		expected.Runtime == current.Runtime
 }
 
 func (m *Manager) currentPluginRemoteRecoveryAttemptRecord(

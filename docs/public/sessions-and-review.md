@@ -203,6 +203,13 @@ from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
 
+After a restart, confirmed evidence that the exact Remote Docker or Sprites
+instance is absent ends attachment so the existing recovery actions can check
+the saved state. An unreachable host or control endpoint does not prove that
+the instance stopped, so Kandev keeps that owner protected. Missing native
+conversation or delivery evidence can still block Resume. Kandev does not resend
+an instruction whose outcome is uncertain.
+
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
 original stream and replays committed output from its durable cursor. It does
