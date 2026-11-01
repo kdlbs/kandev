@@ -249,6 +249,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	_ = r.migrate.Apply("task_environment_repos.workspace_relative_path", `ALTER TABLE task_environment_repos ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
+	if err := r.migrate.Apply("workflows.require_explicit_agent_profile", `ALTER TABLE workflows ADD COLUMN require_explicit_agent_profile INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	// User-supplied session tab label. Must run after the

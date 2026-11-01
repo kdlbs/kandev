@@ -982,6 +982,7 @@ func (s *Service) prepareAutomationTask(
 		Repositories:   repositories,
 		Metadata:       metadata,
 		Origin:         taskOrigin,
+		AgentProfileID: a.AgentProfileID,
 
 		AutomationStartOwned: true,
 		AutomationStartOwner: evt.RunID,

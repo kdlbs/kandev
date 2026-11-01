@@ -47,13 +47,28 @@ session. One replacement changes Implement and the conversation that PR reuses.
 
 - **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-001.12:** When a shared workflow changes an affected step's fixed profile, the task shall retain its explicit replacement for that step. Tasks without that override shall use their normal defaults. New steps shall not inherit an existing task override automatically.
 
+### REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-002: Opt-in explicit profile create policy
+
+**Intent:** A workflow for new general tasks can require a deliberate profile choice without changing legacy, Office, control, or recovery flows.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.1:** A workflow shall expose `require_explicit_agent_profile`, default false. The existing HTTP, WebSocket, MCP configuration, and workflow DTO surfaces shall read and write it. Existing workflows shall remain false after upgrade.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.2:** When the policy is true, creating a task shall be rejected before any task, repository, or session row is written unless the caller supplied an explicit `agent_profile_id` or a validated `workflow_agent_overrides` binding that applies to the destination step the task would land on. Create-only and create-and-start requests shall enforce the same rule.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.3:** Creator, parent, workflow-default, workspace-default, and stored metadata fallback values shall never satisfy the policy. A missing explicit choice shall fail with a validation error instead of silently resolving a fallback.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.4:** A duplicate `external_id` request shall return the stored task without re-evaluating the policy, preserving existing idempotency and any replacement profiles that later became unavailable.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.5:** When the policy is false, existing task creation, Office, control workflows, system recovery, dynamic candidate order, and session start/end policies shall remain unchanged.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.6:** An invalid, disabled, cross-workspace, or executor-incompatible replacement shall fail normally. The system shall not fall back to the source profile or a default profile.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.7:** The selected explicit or replacement profile shall remain the effective choice after reload, deferred launch, and workflow step moves. Same-task session reuse and independent reviewer profiles shall keep their existing semantics; a replacement shall not rewrite session targets or review agents.
+- **AC-TASKS-WORKFLOW-AGENT-OVERRIDES-002.8:** MCP `create_task_kandev` shall expose and transport `workflow_agent_overrides` with the same shape and validation as the UI and REST create surface. A malformed map shall be rejected as a validation error instead of being partially applied.
+
 ## Out of scope
 
 - Editing overrides after task creation, per-step exceptions, and new saved workflow templates.
 - Replacing Initial Agent through Advanced settings or changing workflow-level agent defaults.
 - Replacing review-action profiles, Office participants, quorum seats, or dynamic profile candidates.
 - Changing session start/end policies, explicit recipient bindings, or conditional session configuration.
-- Automatic inheritance into child tasks, cloning tasks, and new MCP tool parameters.
+- Automatic inheritance into child tasks and cloning tasks.
 
 ## Implementation plans
 

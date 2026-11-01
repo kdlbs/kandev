@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-001
+  - REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-002
 ---
 
 # Task workflow agent overrides design
@@ -24,6 +25,7 @@ default. Explicit session targets bypass this profile resolver.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-001` | Data and persistence, Creation validation, Runtime routing, Create dialog, Verification |
+| `REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-002` | Data and persistence, Creation validation, Opt-in explicit profile policy, MCP create transport, Observability and verification |
 
 ## Data and persistence
 
@@ -48,6 +50,12 @@ updates preserve it. Generic task updates do not accept replacement changes.
 Expose the effective step bindings in task DTOs only when their stored workflow matches.
 Do not reconstruct them from the workflow's current source profiles.
 Malformed persisted records return a routing error instead of an empty map.
+
+The workflow itself carries the opt-in `require_explicit_agent_profile` boolean,
+default false. Persist it on `workflows` through the same replayable migration
+path and project it through the workflow model, DTO, repository scans and writes,
+and the HTTP, WebSocket, and MCP configuration handlers. Existing workflows read
+as false and keep their current behavior.
 
 This typed column avoids an unvalidated generic metadata write path. A profile
 map expresses the user's single replacement choice in the form. Durable step
@@ -78,6 +86,40 @@ Validate both create-only and create-and-start. Persist the map with the task,
 so deferred execution reads the same choice. Preserve existing external-ID
 idempotency: a replay returns the existing task without mutating its overrides.
 Do not inherit a parent's map in MCP or ordinary child creation.
+
+## Opt-in explicit profile policy
+
+`require_explicit_agent_profile` is a validation-only workflow policy. Task
+creation evaluates it in the shared task service after the external-ID
+short-circuit and workflow resolution, before any task, repository, or session
+row is written. The caller's explicit `agent_profile_id` is carried internally
+as `ExplicitAgentProfileID` and is never decoded from a request body, so a
+creator, parent, workflow, workspace, or metadata fallback cannot satisfy the
+policy. A `workflow_agent_overrides` binding satisfies it only when the service
+normalizes the map and the binding applies to the destination step the create
+would land on; a binding for another step does not count.
+
+Both create-only and create-and-start use the same check. A duplicate
+`external_id` returns the stored task before this evaluation. When the policy is
+false, every legacy path, Office task, control workflow, and recovery flow keeps
+its existing resolution. The policy never changes routing, candidate order,
+session start/end policies, or independent reviewer selection.
+
+## MCP create transport
+
+`create_task_kandev` exposes an optional `workflow_agent_overrides` object with
+the same shape as the UI and REST create surface. The MCP server rejects a
+non-object value or a non-string entry as a tool validation error rather than
+forwarding a partial map. The handler carries the map into the backend request,
+and the shared service validates and expands it before persistence.
+
+The handler resolves the destination step and the replacement that applies to
+it before persistence, so the reported launch metadata and deferred-launch
+record match the task-aware runtime resolver. When the replacement differs from
+the launch profile, the handler drops creator-copied runtime configuration
+instead of re-tagging another profile's model, mode, or options. An external-ID
+retry returns the stored task before override resolution, so a replacement that
+later became unavailable cannot break replay.
 
 ## Runtime routing
 
@@ -210,7 +252,9 @@ Implementation must reconcile their resolution summaries with this extension.
 ## Observability and verification
 
 Use existing structured routing logs with source and effective profile IDs.
-Use existing transition errors. No new metric or high-cardinality labels.
+Use existing transition errors. No new metric or high-cardinality labels. The
+opt-in explicit profile policy adds no metric; its rejection is an ordinary
+validation error.
 
 Repository tests prove migration and reload persistence. Service tests prove
 validation and task isolation. Orchestrator tests prove all routing entry paths,

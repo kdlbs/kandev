@@ -156,6 +156,106 @@ func (s *Service) validateWorkflowAgentOverrides(ctx context.Context, req *Creat
 	return nil
 }
 
+// ErrExplicitAgentProfileRequired rejects a task creation whose resolved
+// workflow opts into require_explicit_agent_profile when the caller supplied
+// neither an available explicit agent_profile_id nor valid
+// workflow_agent_overrides selection. It is a validation failure, not a server fault.
+var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is required by this workflow")
+
+// enforceExplicitAgentProfilePolicy rejects a create before any task,
+// repository, or session row is written when the resolved workflow requires an
+// usable explicit agent profile selection. Only a
+// caller-provided profile (ExplicitAgentProfileID) or a validated
+// workflow_agent_overrides binding for the task's resolved destination step
+// counts: creator/parent/workflow/workspace fallbacks and stored task
+// metadata deliberately do not, and neither does a binding for a different
+// step, so a workflow that requires an explicit choice cannot be satisfied by
+// an inherited default or by a selection that never applies to the step the
+// task actually lands on.
+//
+// workflow is the value validateTaskWorkflow already loaded for this create,
+// so the policy does not repeat that read and cannot add a new failure mode to
+// the policy-off path. destinationStepID and resolveErr are the step
+// prepareTaskForCreation already resolved for this create and its resolver
+// outcome: passing them in (instead of re-resolving here) keeps the policy
+// check and the task row on the same step. A resolver failure is propagated
+// only when the destination is actually needed (opt-in workflow with validated
+// overrides); every other create keeps the historical tolerant behavior, so a
+// transient lookup failure outside this policy never fails the create. It is
+// never reported as a missing explicit profile.
+//
+// It runs after validateWorkflowAgentOverrides so normalized overrides are
+// available, and after CreateTask's external_id short-circuit, so a duplicate
+// retry returns the existing task without re-evaluating this policy.
+func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *CreateTaskRequest, workflow *models.Workflow, destinationStepID string, resolveErr error) error {
+	if req.WorkflowID == "" || workflow == nil || !workflow.RequireExplicitAgentProfile {
+		return nil
+	}
+	if strings.TrimSpace(req.ExplicitAgentProfileID) != "" {
+		return s.validateExplicitProfileSelection(ctx, req)
+	}
+	if req.normalizedWorkflowAgentOverrides != nil && len(req.normalizedWorkflowAgentOverrides.Steps) > 0 {
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if destinationStepID != "" {
+			if _, ok := req.normalizedWorkflowAgentOverrides.ReplacementFor(req.WorkflowID, destinationStepID); ok {
+				return nil
+			}
+		}
+		return ErrExplicitAgentProfileRequired
+	}
+	return ErrExplicitAgentProfileRequired
+}
+
+func (s *Service) validateExplicitProfileSelection(ctx context.Context, req *CreateTaskRequest) error {
+	if s.agentProfiles == nil {
+		return fmt.Errorf("%w: profile validation is unavailable", ErrExplicitAgentProfileRequired)
+	}
+	profile, err := s.agentProfiles.GetAgentProfile(ctx, req.ExplicitAgentProfileID)
+	if err != nil {
+		return fmt.Errorf("%w: could not validate selected profile: %v", ErrExplicitAgentProfileRequired, err)
+	}
+	if profile == nil || !profile.Enabled || profile.DeletedAt != nil ||
+		(profile.WorkspaceID != "" && profile.WorkspaceID != req.WorkspaceID) {
+		return fmt.Errorf("%w: selected profile is unavailable in this workspace", ErrExplicitAgentProfileRequired)
+	}
+	return nil
+}
+
+// ResolveWorkflowAgentOverrideReplacement resolves the replacement profile a
+// requested workflow_agent_overrides map applies to stepID, reusing the same
+// normalization and validation the create path uses (source-key trimming,
+// SessionTarget exclusion, replacement eligibility). A pre-create adapter (the
+// MCP create handler) uses it so the profile it reports and records matches the
+// task-aware runtime resolver instead of re-deriving the map's rules.
+func (s *Service) ResolveWorkflowAgentOverrideReplacement(
+	ctx context.Context, workspaceID, workflowID, stepID string, requested map[string]string,
+) (string, bool, error) {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if len(requested) == 0 || workflowID == "" || stepID == "" {
+		return "", false, nil
+	}
+	lister, ok := s.workflowStepGetter.(workflowStepLister)
+	if !ok || lister == nil {
+		return "", false, fmt.Errorf("%w: workflow step listing unavailable", models.ErrInvalidWorkflowAgentOverrides)
+	}
+	steps, err := lister.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: list workflow steps: %v", models.ErrInvalidWorkflowAgentOverrides, err)
+	}
+	normalized, err := normalizeWorkflowAgentOverrides(ctx, workspaceID, workflowID, requested, steps, s.agentProfiles)
+	if err != nil {
+		return "", false, err
+	}
+	if normalized == nil {
+		return "", false, nil
+	}
+	replacement, ok := normalized.ReplacementFor(workflowID, stepID)
+	return replacement, ok, nil
+}
+
 func (s *Service) validateWorkflowAgentOverrideProfiles(
 	ctx context.Context,
 	overrides *models.WorkflowAgentOverrides,

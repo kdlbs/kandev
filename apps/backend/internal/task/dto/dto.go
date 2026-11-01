@@ -23,8 +23,12 @@ type WorkflowDTO struct {
 	Description    *string `json:"description,omitempty"`
 	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID string  `json:"agent_profile_id,omitempty"`
-	SortOrder      int     `json:"sort_order"`
-	Hidden         bool    `json:"hidden,omitempty"`
+	// RequireExplicitAgentProfile is an opt-in create policy: a create on this
+	// workflow is rejected unless the caller supplies an explicit
+	// agent_profile_id or a valid workflow_agent_overrides selection.
+	RequireExplicitAgentProfile bool `json:"require_explicit_agent_profile"`
+	SortOrder                   int  `json:"sort_order"`
+	Hidden                      bool `json:"hidden,omitempty"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom".
 	Style string `json:"style,omitempty"`
@@ -888,19 +892,20 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	}
 
 	return WorkflowDTO{
-		ID:             workflow.ID,
-		WorkspaceID:    workflow.WorkspaceID,
-		Name:           workflow.Name,
-		Description:    description,
-		Prompt:         prompt,
-		AgentProfileID: workflow.AgentProfileID,
-		SortOrder:      workflow.SortOrder,
-		Hidden:         workflow.Hidden,
-		Style:          workflow.Style,
-		Source:         workflow.Source,
-		SourcePath:     workflow.SourcePath,
-		CreatedAt:      workflow.CreatedAt,
-		UpdatedAt:      workflow.UpdatedAt,
+		ID:                          workflow.ID,
+		WorkspaceID:                 workflow.WorkspaceID,
+		Name:                        workflow.Name,
+		Description:                 description,
+		Prompt:                      prompt,
+		AgentProfileID:              workflow.AgentProfileID,
+		RequireExplicitAgentProfile: workflow.RequireExplicitAgentProfile,
+		SortOrder:                   workflow.SortOrder,
+		Hidden:                      workflow.Hidden,
+		Style:                       workflow.Style,
+		Source:                      workflow.Source,
+		SourcePath:                  workflow.SourcePath,
+		CreatedAt:                   workflow.CreatedAt,
+		UpdatedAt:                   workflow.UpdatedAt,
 	}
 }
 

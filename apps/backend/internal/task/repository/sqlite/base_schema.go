@@ -710,6 +710,7 @@ const infraSchemaDDL = `
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		prompt TEXT NOT NULL DEFAULT '',
+		require_explicit_agent_profile INTEGER NOT NULL DEFAULT 0,
 		hidden INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL

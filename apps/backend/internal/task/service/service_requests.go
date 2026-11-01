@@ -105,6 +105,14 @@ type CreateTaskRequest struct {
 	// service expands it to fixed workflow-step bindings before insertion.
 	WorkflowAgentOverrides           map[string]string              `json:"workflow_agent_overrides,omitempty"`
 	normalizedWorkflowAgentOverrides *models.WorkflowAgentOverrides `json:"-"`
+	// ExplicitAgentProfileID records the caller-supplied agent_profile_id an
+	// authenticated create adapter passed through. It is internal-only
+	// (json:"-") and never decoded from a request body: it exists so the
+	// workflow-level require_explicit_agent_profile policy can distinguish a
+	// caller's deliberate profile choice from a profile resolved out of
+	// creator/parent/workflow/workspace fallbacks. Metadata is deliberately not
+	// used for that decision.
+	ExplicitAgentProfileID string `json:"-"`
 	// ExecutorID and ExecutorProfileID are resolved by authenticated create
 	// adapters and are used to validate task-scoped replacement profiles before
 	// any task row is written.
@@ -226,6 +234,9 @@ type CreateWorkflowRequest struct {
 	Description                string     `json:"description"`
 	Prompt                     string     `json:"prompt,omitempty"`
 	WorkflowTemplateID         *string    `json:"workflow_template_id,omitempty"`
+	// RequireExplicitAgentProfile opts this workflow into rejecting task
+	// creation when the caller supplies no explicit agent profile selection.
+	RequireExplicitAgentProfile bool `json:"require_explicit_agent_profile,omitempty"`
 	// Hidden marks the workflow as system-only; excluded from management UI and pickers.
 	Hidden bool `json:"hidden,omitempty"`
 }
@@ -237,6 +248,9 @@ type UpdateWorkflowRequest struct {
 	Description       *string    `json:"description,omitempty"`
 	Prompt            *string    `json:"prompt,omitempty"`
 	AgentProfileID    *string    `json:"agent_profile_id,omitempty"`
+	// RequireExplicitAgentProfile opts this workflow into rejecting task
+	// creation when the caller supplies no explicit agent profile selection.
+	RequireExplicitAgentProfile *bool `json:"require_explicit_agent_profile,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace

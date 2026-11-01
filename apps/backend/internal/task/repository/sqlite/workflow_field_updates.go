@@ -28,6 +28,10 @@ func (r *Repository) UpdateWorkflowFields(ctx context.Context, id string, update
 	appendString("description", update.Description)
 	appendString("prompt", update.Prompt)
 	appendString("agent_profile_id", update.AgentProfileID)
+	if update.RequireExplicitAgentProfile != nil {
+		assignments = append(assignments, "require_explicit_agent_profile = ?")
+		args = append(args, dialect.BoolToInt(*update.RequireExplicitAgentProfile))
+	}
 	if update.Hidden != nil {
 		assignments = append(assignments, "hidden = ?")
 		args = append(args, dialect.BoolToInt(*update.Hidden))
