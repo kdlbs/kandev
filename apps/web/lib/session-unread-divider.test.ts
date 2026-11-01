@@ -109,6 +109,25 @@ describe("newestAcknowledgeableMessageId", () => {
     );
   });
 
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.6
+  it("never acknowledges a footer-action notice, which a retry can delete", () => {
+    const retryNotice = {
+      ...makeMessage("retry-notice"),
+      metadata: { retrying: true, actions: [{ type: "ws" }] },
+    } as Message;
+    expect(newestAcknowledgeableMessageId([makeMessage("m1"), retryNotice])).toBe("m1");
+    expect(newestAcknowledgeableMessageId([retryNotice])).toBeNull();
+    expect(newestAcknowledgeableMessageId([retryNotice, makeMessage("m2")])).toBe("m2");
+  });
+
+  it("acknowledges a recovery card, which stays inline with its actions", () => {
+    const recoveryCard = {
+      ...makeMessage("recovery-card"),
+      metadata: { recovery_actions: true, actions: [{ type: "ws" }] },
+    } as Message;
+    expect(newestAcknowledgeableMessageId([makeMessage("m1"), recoveryCard])).toBe("recovery-card");
+  });
+
   it("never acknowledges the synthetic task-description placeholder", () => {
     expect(newestAcknowledgeableMessageId([makeMessage("task-description")])).toBeNull();
     expect(

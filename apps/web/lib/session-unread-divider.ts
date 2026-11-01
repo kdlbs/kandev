@@ -1,4 +1,5 @@
 import type { RenderItem } from "@/hooks/use-processed-messages";
+import { isFooterActionMessage } from "@/hooks/processed-message-filtering";
 import type { Message } from "@/lib/types/http";
 
 /** The frontend-only placeholder use-processed-messages.ts injects for a
@@ -73,11 +74,16 @@ export function findUnreadDividerItemId(
  * it. Every message the server can count as unread is stored and loaded
  * before it can render, so acknowledging the loaded tail always reads past
  * hidden or collapsed rows; acknowledging only the rendered tail could leave
- * such a row unread forever.
+ * such a row unread forever. Footer-action notices are skipped: they never
+ * count as unread, and a transient-retry notice is deleted when the retry ends,
+ * which would leave a cursor with no position in the session.
  */
 export function newestAcknowledgeableMessageId(messages: Message[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].id !== TASK_DESCRIPTION_PLACEHOLDER_ID) return messages[i].id;
+    const message = messages[i];
+    if (message.id !== TASK_DESCRIPTION_PLACEHOLDER_ID && !isFooterActionMessage(message)) {
+      return message.id;
+    }
   }
   return null;
 }

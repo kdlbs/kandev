@@ -49,8 +49,7 @@ type SessionObservationSnapshot struct {
 	Sessions         []RebuildSession
 	ActivityObserved bool
 	ErrorsObserved   bool
-	// UnreadObserved is true when every cursor-bearing session's unread
-	// ranks were read. A failed read leaves it false so the stored unread
+	// UnreadObserved is true when every session's unread ranks were read. A failed read leaves it false so the stored unread
 	// aggregate stays authoritative.
 	UnreadObserved bool
 }

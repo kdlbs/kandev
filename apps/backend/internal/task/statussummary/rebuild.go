@@ -17,8 +17,8 @@ type RebuildSession struct {
 	ForegroundActivity  string
 	ActiveSubagentCount int
 	ActiveError         *ActiveErrorSummary
-	// Unread is the session's cursor and newest qualifying rank; nil when the
-	// session has no read cursor or its unread state was not read.
+	// Unread is the session's cursor and newest qualifying rank; nil when its
+	// unread state was not read.
 	Unread *SessionUnreadState
 }
 

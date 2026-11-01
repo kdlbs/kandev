@@ -257,12 +257,15 @@ function TaskRowItem({
 export const TaskRow = memo(function TaskRow({
   activeTaskId,
   selectedTaskId,
+  displayedSessionId,
   ...props
 }: TaskRowProps) {
+  const isSelected = props.task.id === activeTaskId || props.task.id === selectedTaskId;
   return (
     <SelectedTaskRow
       {...props}
-      isSelected={props.task.id === activeTaskId || props.task.id === selectedTaskId}
+      isSelected={isSelected}
+      displayedSessionId={isSelected ? displayedSessionId : null}
     />
   );
 });

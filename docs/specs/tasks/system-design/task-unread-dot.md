@@ -166,10 +166,12 @@ message the client has loaded for the displayed session. `useSessionReadTracking
 receives that message from the raw session message list
 (`newestAcknowledgeableMessageId` in `lib/session-unread-divider.ts`), not the
 newest rendered item. The synthetic `task-description` placeholder is skipped
-because it never exists as a stored row. Every message the server can count is
-stored, delivered, and loaded before it can render, so acknowledging the loaded
-tail always moves the cursor past every qualifying row, including rows the
-transcript collapses or hides.
+because it never exists as a stored row. Footer-action rows are skipped too:
+they never qualify, and a transient-retry notice is deleted when its retry ends,
+which would leave a cursor with no rank. Every message the server can count is
+stored, delivered, and loaded before it can render, so acknowledging the newest
+remaining row always moves the cursor past every qualifying row, including rows
+the transcript collapses or hides.
 
 The divider keeps rendering from rendered items. Because the cursor can now
 point at an unrendered row, `dividerCursorForRenderedItems` maps it to the

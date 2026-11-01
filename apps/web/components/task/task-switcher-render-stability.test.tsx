@@ -187,6 +187,23 @@ describe("TaskSwitcher render stability", () => {
     expect(renderCounts.rows.get("Task C")).toBe(1);
   });
 
+  it("does not rerender unrelated rows when the displayed session changes", () => {
+    const grouped = groupedTogether([task(TASK_A, WORKFLOW_A), task("Task C", WORKFLOW_A)]);
+    const props = {
+      grouped,
+      onSelectTask,
+      onToggleSubtasks,
+      activeTaskId: TASK_A,
+      selectedTaskId: null,
+      unreadMessagesEnabled: true,
+      unreadDotHideDelayMs: 0,
+    };
+    const view = render(<TaskSwitcher {...props} displayedSessionId="session-1" />);
+    view.rerender(<TaskSwitcher {...props} displayedSessionId="session-2" />);
+
+    expect(renderCounts.rows.get("Task C")).toBe(1);
+  });
+
   it("does not rerender an unaffected expanded group when another group task updates", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_B);
