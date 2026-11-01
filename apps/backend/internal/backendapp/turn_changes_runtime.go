@@ -42,15 +42,7 @@ func (h *runtimeTurnChangeCaptureHandler) FinishTurnChanges(
 	terminal agentruntime.TurnChangeTerminal,
 	client agentruntime.TurnChangeCheckpointClient,
 ) error {
-	finishErr := h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
-	if finishErr != nil {
-		// A terminal whose executor deadline expired can still be settled from
-		// the persisted claim and any accepted endpoint. Retry once so a bounded
-		// capture failure becomes a durable unavailable result before the
-		// lifecycle releases its generation fence.
-		finishErr = h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
-	}
-	return finishErr
+	return h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
 }
 
 func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
@@ -81,6 +73,12 @@ func (h *runtimeTurnChangeCaptureHandler) publishTurnChangeSummary(ctx context.C
 		return nil
 	}
 	return err
+}
+
+func (h *runtimeTurnChangeCaptureHandler) AbandonTurnChanges(
+	ctx context.Context, terminal agentruntime.TurnChangeTerminal, _ agentruntime.TurnChangeCheckpointClient,
+) error {
+	return h.coordinator.AbandonTerminal(ctx, coordinatorTurnChangeTerminal(terminal))
 }
 
 func coordinatorTurnChangeTerminal(terminal agentruntime.TurnChangeTerminal) changes.Terminal {

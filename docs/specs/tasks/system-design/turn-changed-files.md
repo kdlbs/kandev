@@ -156,6 +156,7 @@ The [preservation lifecycle](turn-change-preservation.md) owns terminal capture,
 `ProcessTerminal` compares those accepted objects and verifies a retained Git source independently from the prompt fence.
 Transient content errors retain pending work until bounded retry succeeds or settles a final failure.
 Runtime cleanup preserves content or explicitly settles outstanding work before destroying its executor source.
+A terminal failure settles its exact owned interval durably before the successor fence is released.
 Existing completion authority, final-message anchoring, and bounded Stop/Cancel behavior remain dependencies of that lifecycle.
 
 ## Git capture
