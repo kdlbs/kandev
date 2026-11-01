@@ -2847,7 +2847,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install updater signature verifier toolchain
-        run: rustup toolchain install 1.88.0 --profile minimal
+        run: rustup toolchain install 1.90.0 --profile minimal
 
       - name: Generate release notes
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
