@@ -420,13 +420,13 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_rejected", pluginExecutorProviderError(provisioned.GetError()))
 	}
-	if stage, err := launch.checkProvisionedDescriptor(resource); err != nil {
-		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
-			stage, err)
-	}
 	if err := rejectSecretInProviderState(launch.profile.SecretValues, resource); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"secret_in_state", err)
+	}
+	if stage, err := launch.checkProvisionedDescriptor(resource); err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			stage, err)
 	}
 	descriptor, err := resolvePluginExecutorWorkspace(launch.inventory.NegotiatedCapabilities, launch.inventory.WorkspaceDescriptor, resource)
 	if err != nil {
@@ -998,7 +998,10 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			zap.String("cause_type", fmt.Sprintf("%T", cause)))
 	}
 	retained := resource
-	if errors.Is(cause, models.ErrExecutorStateTooLarge) || errors.Is(cause, models.ErrExecutorSecretInState) {
+	// A state that carries a revealed secret is never recorded, whichever gate
+	// refused the response first.
+	if errors.Is(cause, models.ErrExecutorStateTooLarge) || errors.Is(cause, models.ErrExecutorSecretInState) ||
+		req.PluginExecutor != nil && rejectSecretInProviderState(req.PluginExecutor.Profile.SecretValues, resource) != nil {
 		retained = fixedSizePluginExecutorResource(resource)
 	}
 	claim, claimErr := r.acquireLaunchCleanupClaim(context.WithoutCancel(ctx), req, inventory)
