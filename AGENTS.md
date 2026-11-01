@@ -1,5 +1,8 @@
 # Kandev Engineering Guide
 
+## Board coordination in task worktrees
+In a Kandev task worktree, read task-local `../AGENTS.md` before every message or resumed turn; apply its live board rules alongside this guide, and never stage or commit it.
+
 > **Purpose**: Architecture notes, key patterns, and conventions for LLM agents working on Kandev.
 
 ## Repo Layout
@@ -61,9 +64,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 
 ### Engineering language
 
-Use English for all engineering text, including specs, plans, PRs, docs,
-comments, and docstrings. Translate non-English input before recording it.
-Only required product localization and product data can use another language.
+Use English for all engineering text, including specs, plans, PRs, docs, comments, and docstrings. Translate non-English input before recording it. Only required product localization and product data can use another language.
 
 ### Commit Conventions (enforced by CI)
 
@@ -92,8 +93,7 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 
 ### Internationalization
 
-The web UI is localized with i18next (`namespace:key`). **All new user-facing copy
-must go through `t()` / `<Trans>`** — never a hardcoded literal — regardless of
+The web UI is localized with i18next (`namespace:key`). **All new user-facing copy must go through `t()` / `<Trans>`** — never a hardcoded literal — regardless of
 which directory you are in.
 
 This is enforced, not just requested, and the enforcement is now repo-wide:
