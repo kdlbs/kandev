@@ -326,9 +326,7 @@ func (s *Service) persistRetainedTurnFailureMessage(
 		return "", fmt.Errorf("turn failure message creator is unavailable")
 	}
 	message := retainedTurnFailureMessage(data)
-	classified := routingerr.Classify(routingerr.Input{
-		Phase: routingerr.PhasePromptSend, ProviderID: data.AgentID, Stderr: message,
-	})
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message))
 	metadata := map[string]interface{}{
 		"variant":           "error",
 		"scope":             "turn",
