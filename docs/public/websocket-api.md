@@ -488,6 +488,12 @@ and JSON `null` retain stored values; explicit empty strings clear them. Concurr
 updates to different fields retain both edits across backend services. Supplying
 all four fields, as the workflow editor does, replaces all four values.
 
+Both also accept an optional boolean `hidden`. `true` archives the workflow
+(hidden from pickers and management lists) without deleting it or touching its
+tasks, steps, or sessions; `false` restores it. Omission and JSON `null` keep the
+stored value. Changing `hidden` on a built-in workflow is rejected with REST `400`
+or WebSocket `VALIDATION_ERROR`; supplying its current value is a no-op.
+
 Responses and `workflow.updated` events describe the row observed by each write.
 Concurrent events may arrive in a different order from writes. Reconcile with
 `workflow.get` after a gap or an uncertain request outcome.
