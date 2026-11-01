@@ -28,6 +28,10 @@ export {
   createNeedsYouInboxSlice,
   defaultNeedsYouInboxState,
 } from "./needs-you-inbox/needs-you-inbox-slice";
+export {
+  createTaskAsyncQuestionsSlice,
+  defaultTaskAsyncQuestionsState,
+} from "./task-async-questions/task-async-questions-slice";
 export { createFailedInboxSlice, defaultFailedInboxState } from "./failed-inbox/failed-inbox-slice";
 export {
   createInboxHistorySlice,
@@ -118,6 +122,13 @@ export type {
   NeedsYouInboxReadStatus,
   NeedsYouInboxBootSeed,
 } from "./needs-you-inbox/types";
+export type {
+  TaskAsyncQuestionsSlice,
+  TaskAsyncQuestionsSliceActions,
+  TaskAsyncQuestionsSliceState,
+  TaskAsyncQuestionsScopeState,
+  TaskAsyncQuestionsReadStatus,
+} from "./task-async-questions/types";
 export type {
   FailedInboxSlice,
   FailedInboxSliceActions,

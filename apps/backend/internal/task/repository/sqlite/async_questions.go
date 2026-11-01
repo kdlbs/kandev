@@ -52,6 +52,8 @@ const asyncQuestionSchemaDDL = `
 		ON task_async_questions(session_id, created_at);
 	CREATE INDEX IF NOT EXISTS idx_async_questions_parent
 		ON task_async_questions(parent_task_id, status, created_at);
+	CREATE INDEX IF NOT EXISTS idx_async_questions_authority_sweep
+		ON task_async_questions(status, created_at, id);
 
 	CREATE TABLE IF NOT EXISTS task_async_question_forwards (
 		question_id TEXT PRIMARY KEY,
@@ -475,6 +477,19 @@ func asyncQuestionIdentityFilters(opts models.ListAsyncQuestionsOptions) ([]stri
 	if opts.TaskID != "" {
 		conditions = append(conditions, "task_id = ?")
 		args = append(args, opts.TaskID)
+	}
+	if opts.ConversationTaskID != "" {
+		conditions = append(conditions, `((task_id = ? AND recipient_kind = 'user') OR
+			(parent_task_id = ? AND recipient_kind = 'parent' AND EXISTS (
+				SELECT 1 FROM task_async_question_forwards f WHERE f.question_id = task_async_questions.id
+			) AND EXISTS (
+				SELECT 1 FROM tasks child_scope
+				WHERE child_scope.id = task_async_questions.task_id
+				  AND child_scope.parent_id = task_async_questions.parent_task_id
+				  AND child_scope.workspace_id = task_async_questions.workspace_id
+				  AND child_scope.archived_at IS NULL
+			)))`)
+		args = append(args, opts.ConversationTaskID, opts.ConversationTaskID)
 	}
 	return conditions, args
 }

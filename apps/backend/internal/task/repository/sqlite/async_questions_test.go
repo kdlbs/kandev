@@ -199,6 +199,53 @@ func TestAsyncQuestionsLifecycleCleanup(t *testing.T) {
 	}
 }
 
+func TestAsyncQuestionsWorkspaceCascadeRemovesRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-workspace-cascade", "session-workspace-cascade")
+	question.WorkspaceID = "workspace-async-cascade"
+	question.TaskID = "task-async-cascade"
+	question.Recipient = models.AsyncQuestionRecipientParent
+	question.ParentTaskID = "task-parent-async-cascade"
+	question.ParentSessionID = "session-parent-async-cascade"
+	question.ParentSessionIncarnationID = "inc-session-parent-async-cascade"
+	created, _ := createAsyncQuestionForTest(t, repo, question)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO task_async_question_forwards (question_id, parent_task_id, parent_session_id, reason, created_at)
+		VALUES (?, ?, ?, ?, ?)`), created.ID, question.ParentTaskID, question.ParentSessionID, "operator chose parent", time.Now().UTC()); err != nil {
+		t.Fatalf("insert forward: %v", err)
+	}
+	if err := repo.CreateAsyncQuestionDelivery(ctx, &models.AsyncQuestionDelivery{
+		AdmissionID: "delivery-workspace-cascade", QuestionID: question.ID,
+		Kind: models.AsyncQuestionDeliveryParentQuestion, DestinationTaskID: question.ParentTaskID,
+		DestinationSession: question.ParentSessionID, Content: "question",
+	}); err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	if _, err := repo.CreateAsyncQuestionWait(ctx, &models.AsyncQuestionWait{
+		WorkspaceID: question.WorkspaceID, TaskID: question.TaskID, SessionID: question.SessionID,
+		DependencyIDs: []string{question.ID}, Status: models.AsyncQuestionWaitParked,
+	}); err != nil {
+		t.Fatalf("create wait: %v", err)
+	}
+
+	if _, _, err := repo.DeleteWorkspaceCascade(ctx, question.WorkspaceID); err != nil {
+		t.Fatalf("delete workspace cascade: %v", err)
+	}
+	for _, table := range []string{
+		"task_async_questions", "task_async_question_forwards", "task_async_question_deliveries",
+		"task_async_question_waits", "task_async_question_wait_dependencies",
+	} {
+		var count int
+		if err := repo.db.GetContext(ctx, &count, "SELECT count(*) FROM "+table); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Errorf("%s rows after workspace cascade = %d, want 0", table, count)
+		}
+	}
+}
+
 func TestAsyncQuestionsOutboxCrashWindow(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -261,6 +308,54 @@ func TestAsyncQuestionsWithdrawIdempotent(t *testing.T) {
 	}
 	if _, _, _, err := repo.WithdrawAsyncQuestion(ctx, question.ID, "other-session", "nope", nil, nil); err == nil {
 		t.Fatal("a foreign session must not withdraw the request")
+	}
+}
+
+func TestAsyncQuestionsParentForwardSurvivesSessionReplacement(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-parent-forward-replacement", "session-child-forward-replacement")
+	question.Recipient = models.AsyncQuestionRecipientParent
+	question.ParentTaskID = "parent-task-forward-replacement"
+	question.ParentSessionID = "parent-session-original-forward-replacement"
+	question.ParentSessionIncarnationID = "inc-parent-session-original-forward-replacement"
+	created, isNew := createAsyncQuestionForTest(t, repo, question)
+	if !isNew {
+		t.Fatal("expected a new parent request")
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind("DELETE FROM task_sessions WHERE id = ?"), question.ParentSessionID); err != nil {
+		t.Fatalf("delete replaced parent session: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "parent-session-replacement-forward-replacement", TaskID: question.ParentTaskID,
+		State: models.TaskSessionStateRunning, QueueIncarnationID: "inc-parent-session-replacement-forward-replacement",
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create replacement parent session: %v", err)
+	}
+	forward := &models.AsyncQuestionForward{
+		QuestionID: created.ID, ParentTaskID: question.ParentTaskID,
+		ParentSessionID: "parent-session-replacement-forward-replacement", Reason: "needs operator input",
+		CreatedAt: now,
+	}
+	first, err := repo.ForwardAsyncQuestion(ctx, forward)
+	if err != nil {
+		t.Fatalf("forward from replacement session: %v", err)
+	}
+	if !first.Forwarded || first.Status != models.AsyncQuestionStatusPending {
+		t.Fatalf("replacement parent session should preserve the pending request: %+v", first)
+	}
+
+	replay := *forward
+	replay.ParentSessionID = "another-parent-session"
+	replay.Reason = "retried from another replacement"
+	second, err := repo.ForwardAsyncQuestion(ctx, &replay)
+	if err != nil {
+		t.Fatalf("idempotent forward replay: %v", err)
+	}
+	if !second.Forwarded || second.ID != created.ID || second.Status != models.AsyncQuestionStatusPending {
+		t.Fatalf("forward replay changed the canonical request: %+v", second)
 	}
 }
 
@@ -330,5 +425,77 @@ func TestAsyncQuestionsListPagination(t *testing.T) {
 	encoded, _ := json.Marshal(page.Questions[0].Questions)
 	if len(encoded) == 0 {
 		t.Fatal("questions must round-trip")
+	}
+}
+
+func TestAsyncQuestionsTaskScopeIncludesForwarded(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	parentTaskID := "task-conversation-parent"
+	parentSessionID := "session-conversation-parent"
+	workspaceID := "workspace-conversation"
+
+	child := newAsyncQuestionForTest(t, "q-conversation-forwarded", "session-conversation-child")
+	child.WorkspaceID = workspaceID
+	child.Recipient = models.AsyncQuestionRecipientParent
+	child.ParentTaskID = parentTaskID
+	child.ParentSessionID = parentSessionID
+	seedAsyncQuestionBinding(t, repo, child)
+	if _, err := repo.db.Exec(`UPDATE tasks SET workspace_id = ? WHERE id = ?`, workspaceID, parentTaskID); err != nil {
+		t.Fatalf("align parent workspace: %v", err)
+	}
+	createAsyncQuestionForTest(t, repo, child)
+	if _, err := repo.ForwardAsyncQuestion(ctx, &models.AsyncQuestionForward{
+		QuestionID: child.ID, ParentTaskID: parentTaskID, ParentSessionID: parentSessionID,
+		Reason: "the operator can decide", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("forward child question: %v", err)
+	}
+
+	owned := newAsyncQuestionForTest(t, "q-conversation-owned", parentSessionID)
+	owned.TaskID = parentTaskID
+	owned.WorkspaceID = workspaceID
+	createAsyncQuestionForTest(t, repo, owned)
+
+	page, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		WorkspaceID: workspaceID, ConversationTaskID: parentTaskID, OpenOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("list task conversation: %v", err)
+	}
+	if len(page.Questions) != 2 {
+		t.Fatalf("expected authored and forwarded requests, got %+v", page.Questions)
+	}
+	if !page.Questions[0].Forwarded && !page.Questions[1].Forwarded {
+		t.Fatalf("expected one forwarded child request: %+v", page.Questions)
+	}
+}
+
+func TestAsyncQuestionsTaskScopeHidesUnforwardedParent(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	parentTaskID := "task-conversation-parent-unforwarded"
+	parentSessionID := "session-conversation-parent-unforwarded"
+	workspaceID := "workspace-conversation-unforwarded"
+
+	child := newAsyncQuestionForTest(t, "q-conversation-unforwarded", "session-conversation-child-unforwarded")
+	child.WorkspaceID = workspaceID
+	child.Recipient = models.AsyncQuestionRecipientParent
+	child.ParentTaskID = parentTaskID
+	child.ParentSessionID = parentSessionID
+	seedAsyncQuestionBinding(t, repo, child)
+	if _, err := repo.db.Exec(`UPDATE tasks SET workspace_id = ? WHERE id = ?`, workspaceID, parentTaskID); err != nil {
+		t.Fatalf("align parent workspace: %v", err)
+	}
+	createAsyncQuestionForTest(t, repo, child)
+
+	page, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		WorkspaceID: workspaceID, ConversationTaskID: parentTaskID, OpenOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("list task conversation: %v", err)
+	}
+	if len(page.Questions) != 0 {
+		t.Fatalf("unforwarded child question must remain private to its parent: %+v", page.Questions)
 	}
 }

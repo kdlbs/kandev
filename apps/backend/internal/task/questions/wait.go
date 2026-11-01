@@ -136,9 +136,16 @@ func (s *Service) createWaitGate(ctx context.Context, input WaitInput, unique []
 // releaseRacedWait closes a fresh gate whose dependency resolved before the
 // pause started, so the caller resumes instead of stranding the turn.
 func (s *Service) releaseRacedWait(ctx context.Context, sessionID string, unique []string, waitID string) (*WaitResult, error) {
-	if _, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
-		models.AsyncQuestionWaitRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait"); err != nil {
+	won, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
+		models.AsyncQuestionWaitRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait")
+	if err != nil {
 		return nil, err
+	}
+	if !won {
+		if _, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
+			models.AsyncQuestionWaitReleaseRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait"); err != nil {
+			return nil, err
+		}
 	}
 	snapshots, err := s.store.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
 		AuthorSessionID: sessionID, QuestionIDs: unique, Limit: maxPageLimit,
@@ -268,10 +275,23 @@ func (s *Service) notifyWait(ctx context.Context, wait *models.AsyncQuestionWait
 		return
 	}
 	questionID := ""
+	change := QuestionChange{
+		WorkspaceID: wait.WorkspaceID,
+		TaskID:      wait.TaskID,
+		SessionID:   wait.SessionID,
+		Kind:        "wait_changed",
+	}
 	if len(wait.DependencyIDs) > 0 {
 		questionID = wait.DependencyIDs[0]
+		if question, err := s.Get(ctx, questionID); err == nil && question != nil {
+			change.TaskID = question.TaskID
+			change.ParentTaskID = question.ParentTaskID
+			change.SessionID = question.SessionID
+			change.Recipient = question.Recipient
+		}
 	}
-	s.notifier.AsyncQuestionChanged(ctx, wait.WorkspaceID, "wait_changed", questionID)
+	change.QuestionID = questionID
+	s.notifier.AsyncQuestionChanged(ctx, change)
 }
 
 // ReconcileWaitGates closes gates that a restart cannot safely resume. It runs

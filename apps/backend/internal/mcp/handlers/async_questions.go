@@ -69,7 +69,7 @@ func asyncQuestionReceipt(question *models.AsyncQuestion, recipient string) map[
 	return receipt
 }
 
-func asyncQuestionView(question *models.AsyncQuestion) map[string]interface{} {
+func asyncQuestionView(question *models.AsyncQuestion, waiting bool) map[string]interface{} {
 	view := map[string]interface{}{
 		"question_id": question.ID,
 		"task_id":     question.TaskID,
@@ -82,7 +82,7 @@ func asyncQuestionView(question *models.AsyncQuestion) map[string]interface{} {
 		"created_at":  question.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		"updated_at":  question.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		"version":     question.Version,
-		"waiting":     false,
+		"waiting":     waiting,
 	}
 	if question.ParentTaskID != "" {
 		view["parent_task_id"] = question.ParentTaskID
@@ -220,7 +220,11 @@ func (h *Handlers) handleListQuestionAnswers(ctx context.Context, msg *ws.Messag
 	if err != nil {
 		return h.asyncQuestionError(msg, err)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, buildQuestionAnswerList(page))
+	waiting, err := h.questionSvc.WaitingQuestionIDs(ctx, asyncQuestionSessionIDs(page.Questions))
+	if err != nil {
+		return h.asyncQuestionError(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, buildQuestionAnswerList(page, waiting))
 }
 
 func (h *Handlers) loadQuestionSession(
@@ -269,10 +273,10 @@ func (h *Handlers) readQuestionAnswerPage(
 	return nil, fmt.Errorf("%w: scope must be own or children", questions.ErrValidation)
 }
 
-func buildQuestionAnswerList(page *models.AsyncQuestionPage) map[string]interface{} {
+func buildQuestionAnswerList(page *models.AsyncQuestionPage, waitingByQuestion map[string]bool) map[string]interface{} {
 	views := make([]map[string]interface{}, 0, len(page.Questions))
 	for _, question := range page.Questions {
-		views = append(views, asyncQuestionView(question))
+		views = append(views, asyncQuestionView(question, waitingByQuestion[question.ID]))
 	}
 	response := map[string]interface{}{
 		"questions": views,
@@ -284,6 +288,22 @@ func buildQuestionAnswerList(page *models.AsyncQuestionPage) map[string]interfac
 		response["next_cursor"] = encodeAsyncCursor(last.CreatedAt, last.ID)
 	}
 	return response
+}
+
+func asyncQuestionSessionIDs(questions []*models.AsyncQuestion) []string {
+	sessionIDs := make([]string, 0, len(questions))
+	seen := make(map[string]struct{}, len(questions))
+	for _, question := range questions {
+		if question == nil || question.SessionID == "" {
+			continue
+		}
+		if _, exists := seen[question.SessionID]; exists {
+			continue
+		}
+		seen[question.SessionID] = struct{}{}
+		sessionIDs = append(sessionIDs, question.SessionID)
+	}
+	return sessionIDs
 }
 
 func (h *Handlers) handleWithdrawQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -305,7 +325,7 @@ func (h *Handlers) handleWithdrawQuestion(ctx context.Context, msg *ws.Message) 
 	if err != nil {
 		return h.asyncQuestionError(msg, err)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, asyncQuestionView(question))
+	return ws.NewResponse(msg.ID, msg.Action, asyncQuestionView(question, false))
 }
 
 func (h *Handlers) handleForwardQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -332,7 +352,7 @@ func (h *Handlers) handleForwardQuestion(ctx context.Context, msg *ws.Message) (
 	if err != nil {
 		return h.asyncQuestionError(msg, err)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, asyncQuestionView(question))
+	return ws.NewResponse(msg.ID, msg.Action, asyncQuestionView(question, false))
 }
 
 // handleWaitForQuestionAnswers establishes the explicit dependency gate and
@@ -398,7 +418,7 @@ func (h *Handlers) handleWaitForQuestionAnswers(ctx context.Context, msg *ws.Mes
 func readyWaitResponse(questions []*models.AsyncQuestion) map[string]interface{} {
 	views := make([]map[string]interface{}, 0, len(questions))
 	for _, question := range questions {
-		views = append(views, asyncQuestionView(question))
+		views = append(views, asyncQuestionView(question, false))
 	}
 	return map[string]interface{}{"status": "ready", "questions": views}
 }

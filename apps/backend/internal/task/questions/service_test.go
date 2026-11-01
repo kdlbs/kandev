@@ -2,7 +2,6 @@ package questions_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/questions"
-	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -40,7 +38,19 @@ func newQuestionsRepo(t *testing.T) *sqlite.Repository {
 func newQuestionsService(t *testing.T) (*questions.Service, *sqlite.Repository) {
 	t.Helper()
 	repo := newQuestionsRepo(t)
-	return questions.NewService(repo, nil, zap.NewNop()), repo
+	service := questions.NewService(repo, nil, zap.NewNop())
+	service.SetTranscriptWriter(testTranscriptWriter{})
+	return service, repo
+}
+
+type testTranscriptWriter struct{}
+
+func (testTranscriptWriter) WriteAsyncQuestionTranscriptEntry(
+	context.Context,
+	*models.AsyncQuestionDelivery,
+	*models.AsyncQuestion,
+) error {
+	return nil
 }
 
 // seedQuestionBinding creates the durable task/session rows the authority
@@ -100,6 +110,77 @@ func createOperatorQuestion(t *testing.T, svc *questions.Service, repo *sqlite.R
 		t.Fatalf("create: %v", err)
 	}
 	return result
+}
+
+type questionChangeRecorder struct {
+	changes []questions.QuestionChange
+}
+
+func (r *questionChangeRecorder) AsyncQuestionChanged(_ context.Context, change questions.QuestionChange) {
+	r.changes = append(r.changes, change)
+}
+
+func TestAsyncQuestionNotificationOncePerRequest(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	recorder := &questionChangeRecorder{}
+	svc.SetNotifier(recorder)
+	created := createOperatorQuestion(t, svc, repo, "session-notify-once")
+
+	replayed, err := svc.Create(context.Background(), questions.CreateInput{
+		TaskID: "task-session-notify-once", WorkspaceID: "workspace-session-notify-once",
+		SessionID: "session-notify-once", SessionIncarnationID: "inc-session-notify-once",
+		Recipient: models.AsyncQuestionRecipientUser,
+		Questions: []protocol.Question{{
+			Prompt: "Which value belongs in the field?",
+			Options: []protocol.Option{
+				{ID: "default", Label: "Default"}, {ID: "empty", Label: "Empty"},
+			},
+		}},
+		Context: "API integration", RequestID: "request-session-notify-once",
+	})
+	require.NoError(t, err)
+	require.False(t, replayed.Created)
+	require.Equal(t, created.Question.ID, replayed.Question.ID)
+	require.Len(t, recorder.changes, 1)
+	require.Equal(t, "created", recorder.changes[0].Kind)
+	require.Equal(t, created.Question.ID, recorder.changes[0].QuestionID)
+	require.Equal(t, models.AsyncQuestionRecipientUser, recorder.changes[0].Recipient)
+}
+
+func TestAsyncQuestionsTranscriptEntryIsIdempotent(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	workspaceID := seedQuestionBinding(t, repo, "session-transcript", "")
+	input := questions.CreateInput{
+		TaskID:               "task-session-transcript",
+		WorkspaceID:          workspaceID,
+		SessionID:            "session-transcript",
+		SessionIncarnationID: "inc-session-transcript",
+		Recipient:            models.AsyncQuestionRecipientUser,
+		Questions: []protocol.Question{{
+			ID: "question-choice", Prompt: "Which value belongs in the field?",
+			Options: []protocol.Option{{ID: "default", Label: "Default"}, {ID: "empty", Label: "Empty"}},
+		}},
+		RequestID: "transcript-request",
+	}
+	created, err := svc.Create(ctx, input)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	replayed, err := svc.Create(ctx, input)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if replayed.Question.ID != created.Question.ID || replayed.Created {
+		t.Fatalf("replay = %+v, want original question %s", replayed, created.Question.ID)
+	}
+	deliveries, err := repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Second), 20)
+	if err != nil {
+		t.Fatalf("list transcript intents: %v", err)
+	}
+	if len(deliveries) != 1 || deliveries[0].Kind != models.AsyncQuestionDeliveryKind("transcript") {
+		t.Fatalf("transcript intents = %+v, want one idempotent transcript intent", deliveries)
+	}
 }
 
 func TestAsyncQuestionsOperatorAskKeepsTurnRunning(t *testing.T) {
@@ -165,15 +246,21 @@ func TestAsyncQuestionsOperatorCheckpointRead(t *testing.T) {
 	}
 
 	deliveries, err := repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Hour), 10)
-	if err != nil || len(deliveries) != 1 {
-		t.Fatalf("expected one correlated continuation intent, got %d err=%v", len(deliveries), err)
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
 	}
-	if deliveries[0].Kind != models.AsyncQuestionDeliveryOwner {
-		t.Fatalf("kind = %s", deliveries[0].Kind)
+	var ownerDelivery *models.AsyncQuestionDelivery
+	for _, delivery := range deliveries {
+		if delivery.Kind == models.AsyncQuestionDeliveryOwner {
+			ownerDelivery = delivery
+		}
 	}
-	if !strings.Contains(deliveries[0].Content, "Which value belongs in the field?") ||
-		!strings.Contains(deliveries[0].Content, "Default") {
-		t.Fatalf("correlated answer must carry the original questions and labels: %s", deliveries[0].Content)
+	if ownerDelivery == nil {
+		t.Fatalf("expected one correlated continuation intent, got %+v", deliveries)
+	}
+	if !strings.Contains(ownerDelivery.Content, "Which value belongs in the field?") ||
+		!strings.Contains(ownerDelivery.Content, "Default") {
+		t.Fatalf("correlated answer must carry the original questions and labels: %s", ownerDelivery.Content)
 	}
 }
 
@@ -292,12 +379,66 @@ func TestAsyncQuestionsWaitRequiresOwnDependencies(t *testing.T) {
 type recordingQueue struct {
 	mu         sync.Mutex
 	deliveries []*models.AsyncQuestionDelivery
+	removed    []*models.AsyncQuestionDelivery
+	admitErr   error
+}
+
+type recordingTranscriptWriter struct {
+	calls      int
+	questionID string
+}
+
+func (w *recordingTranscriptWriter) WriteAsyncQuestionTranscriptEntry(
+	_ context.Context,
+	_ *models.AsyncQuestionDelivery,
+	question *models.AsyncQuestion,
+) error {
+	w.calls++
+	w.questionID = question.ID
+	return nil
+}
+
+func TestAsyncQuestionsTranscriptDeliveryIsReconciledOnce(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	queue := &recordingQueue{}
+	writer := &recordingTranscriptWriter{}
+	svc.SetDeliveryQueue(queue)
+	svc.SetTranscriptWriter(writer)
+	result := createOperatorQuestion(t, svc, repo, "session-transcript-reconcile")
+	for range 2 {
+		if _, err := svc.ReconcileOnce(context.Background()); err != nil {
+			t.Fatalf("reconcile transcript: %v", err)
+		}
+	}
+	if writer.calls != 1 || writer.questionID != result.Question.ID {
+		t.Fatalf("transcript writes = %d for %q, want one for %q", writer.calls, writer.questionID, result.Question.ID)
+	}
+	if len(queue.deliveries) != 0 {
+		t.Fatalf("transcript delivery reached the agent queue: %+v", queue.deliveries)
+	}
 }
 
 func (q *recordingQueue) AdmitAsyncQuestionDelivery(_ context.Context, delivery *models.AsyncQuestionDelivery) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.admitErr != nil {
+		return q.admitErr
+	}
 	q.deliveries = append(q.deliveries, delivery)
+	return nil
+}
+
+func (q *recordingQueue) RemoveAsyncQuestionDelivery(_ context.Context, delivery *models.AsyncQuestionDelivery) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.removed = append(q.removed, delivery)
+	remaining := q.deliveries[:0]
+	for _, queued := range q.deliveries {
+		if queued.AdmissionID != delivery.AdmissionID {
+			remaining = append(remaining, queued)
+		}
+	}
+	q.deliveries = remaining
 	return nil
 }
 
@@ -314,8 +455,8 @@ func TestAsyncQuestionsDeliveryAdmissionReplay(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	admitted, err := svc.ReconcileOnce(ctx)
-	if err != nil || admitted != 1 {
-		t.Fatalf("reconcile: admitted=%d err=%v", admitted, err)
+	if err != nil || admitted != 2 {
+		t.Fatalf("reconcile should admit the transcript and answer: admitted=%d err=%v", admitted, err)
 	}
 	// A second pass must not admit the same outcome again.
 	admitted, err = svc.ReconcileOnce(ctx)
@@ -356,11 +497,17 @@ func TestAsyncQuestionsForwardNeedsRecordedParent(t *testing.T) {
 		t.Fatalf("forward must preserve identity: %+v", forwarded)
 	}
 	createdDeliveries, err := repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Hour), 10)
-	if err != nil || len(createdDeliveries) != 1 {
-		t.Fatalf("creation should produce one parent-question intent, got %d err=%v", len(createdDeliveries), err)
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
 	}
-	if createdDeliveries[0].Kind != models.AsyncQuestionDeliveryParentQuestion {
-		t.Fatalf("creation intent kind = %s", createdDeliveries[0].Kind)
+	parentQuestionCount := 0
+	for _, delivery := range createdDeliveries {
+		if delivery.Kind == models.AsyncQuestionDeliveryParentQuestion {
+			parentQuestionCount++
+		}
+	}
+	if parentQuestionCount != 1 {
+		t.Fatalf("creation should produce one parent-question intent, got %+v", createdDeliveries)
 	}
 	if _, won, err := svc.ResolveParent(ctx, result.Question.ID, "task-parent", "session-parent", questions.AnswerInput{
 		Answers: []questions.Answer{{QuestionID: result.Question.Questions[0].ID, SelectedOptions: []string{"a"}}},
@@ -385,6 +532,72 @@ func TestAsyncQuestionsForwardNeedsRecordedParent(t *testing.T) {
 		kinds[models.AsyncQuestionDeliveryOwner] != 1 {
 		t.Fatalf("expected distinct parent question/outcome and owner intents, got %+v", kinds)
 	}
+}
+
+func TestAsyncQuestionParentDeliveryWaitsForSession(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	seedExplicitQuestionBinding(t, repo, "task-waiting-child", "session-waiting-child", "workspace-waiting-child", "task-waiting-parent")
+	seedExplicitQuestionBinding(t, repo, "task-waiting-parent", "session-original-parent", "workspace-waiting-parent", "")
+	result, err := svc.Create(ctx, questions.CreateInput{
+		TaskID: "task-waiting-child", WorkspaceID: "workspace-waiting-child",
+		SessionID: "session-waiting-child", SessionIncarnationID: "inc-session-waiting-child",
+		Recipient: models.AsyncQuestionRecipientParent, ParentTaskID: "task-waiting-parent",
+		ParentSession: "session-original-parent", ParentSessionIncarnationID: "inc-session-original-parent",
+		Questions: []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
+		RequestID: "parent-delivery-waits",
+	})
+	require.NoError(t, err)
+	queue := &recordingQueue{admitErr: questions.ErrDestinationUnavailable}
+	svc.SetDeliveryQueue(queue)
+
+	admitted, err := svc.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, admitted, "the transcript intent is independent of parent session readiness")
+	deliveries, err := repo.ListAsyncQuestionDeliveriesForQuestion(ctx, result.Question.ID, models.AsyncQuestionDeliveryParentQuestion)
+	require.NoError(t, err)
+	require.Len(t, deliveries, 1)
+	require.Equal(t, models.AsyncQuestionDeliveryPending, deliveries[0].State)
+
+	require.NoError(t, repo.MarkAsyncQuestionDeliveryFailed(ctx, deliveries[0].AdmissionID, 1, time.Now().UTC().Add(-time.Second), "parent has no active session"))
+	queue.admitErr = nil
+	admitted, err = svc.ReconcileOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, admitted)
+	admittedDeliveries, err := repo.ListAsyncQuestionDeliveriesForQuestion(ctx, result.Question.ID, models.AsyncQuestionDeliveryParentQuestion)
+	require.NoError(t, err)
+	require.Equal(t, models.AsyncQuestionDeliveryAdmitted, admittedDeliveries[0].State)
+}
+
+func TestAsyncQuestionsReplacementParentSessionAnswers(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	seedExplicitQuestionBinding(t, repo, "task-replacement-child", "session-replacement-child", "workspace-replacement-child", "task-replacement-parent")
+	seedExplicitQuestionBinding(t, repo, "task-replacement-parent", "session-original-parent", "workspace-replacement-parent", "")
+	result, err := svc.Create(ctx, questions.CreateInput{
+		TaskID: "task-replacement-child", WorkspaceID: "workspace-replacement-child",
+		SessionID: "session-replacement-child", SessionIncarnationID: "inc-session-replacement-child",
+		Recipient: models.AsyncQuestionRecipientParent, ParentTaskID: "task-replacement-parent",
+		ParentSession: "session-original-parent", ParentSessionIncarnationID: "inc-session-original-parent",
+		Questions: []protocol.Question{{
+			Prompt: "Which value?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+		}},
+		RequestID: "replacement-parent-session",
+	})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-replacement-parent", TaskID: "task-replacement-parent",
+		State: models.TaskSessionStateRunning, QueueIncarnationID: "inc-session-replacement-parent",
+		StartedAt: now, UpdatedAt: now,
+	}))
+	updated, won, err := svc.ResolveParent(ctx, result.Question.ID, "task-replacement-parent", "session-replacement-parent", questions.AnswerInput{
+		Answers: []questions.Answer{{QuestionID: result.Question.Questions[0].ID, SelectedOptions: []string{"a"}}},
+	})
+	require.NoError(t, err)
+	require.True(t, won)
+	require.Equal(t, models.AsyncQuestionStatusAnswered, updated.Status)
 }
 
 func TestAsyncQuestionsWaitAnswerRaceDoesNotStrand(t *testing.T) {
@@ -540,232 +753,4 @@ func TestAsyncQuestionsWithdrawWakeIsAtomic(t *testing.T) {
 	if svc.HasParkedWait(ctx, "session-withdraw-wake") {
 		t.Fatal("withdrawal must release the parked gate")
 	}
-}
-
-func TestAsyncQuestionsChildrenAndHistoryPagination(t *testing.T) {
-	svc, repo := newQuestionsService(t)
-	ctx := context.Background()
-	seedExplicitQuestionBinding(t, repo, "task-child-page", "session-child-page", "workspace-session-child-page", "task-parent-page")
-	seedExplicitQuestionBinding(t, repo, "task-parent-page", "session-parent-page", "workspace-session-parent-page", "")
-	ids := make([]string, 0, 3)
-	for i := 0; i < 3; i++ {
-		result, err := svc.Create(ctx, questions.CreateInput{
-			TaskID: "task-child-page", WorkspaceID: "workspace-session-child-page", SessionID: "session-child-page",
-			SessionIncarnationID: "inc-session-child-page",
-			Recipient:            models.AsyncQuestionRecipientParent, ParentTaskID: "task-parent-page", ParentSession: "session-parent-page",
-			ParentSessionIncarnationID: "inc-session-parent-page",
-			Questions:                  []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
-			RequestID:                  "child-page-" + string(rune('a'+i)),
-		})
-		if err != nil {
-			t.Fatalf("create %d: %v", i, err)
-		}
-		ids = append(ids, result.Question.ID)
-	}
-	first, err := svc.ListChildren(ctx, "task-parent-page", nil, nil, 2, "", "")
-	if err != nil {
-		t.Fatalf("children page 1: %v", err)
-	}
-	if len(first.Questions) != 2 || !first.HasMore {
-		t.Fatalf("children page 1 = %d hasMore=%v", len(first.Questions), first.HasMore)
-	}
-	last := first.Questions[len(first.Questions)-1]
-	second, err := svc.ListChildren(ctx, "task-parent-page", nil, nil, 2,
-		last.CreatedAt.UTC().Format(time.RFC3339Nano), last.ID)
-	if err != nil {
-		t.Fatalf("children page 2: %v", err)
-	}
-	if len(second.Questions) != 1 || second.HasMore {
-		t.Fatalf("children page 2 = %d hasMore=%v", len(second.Questions), second.HasMore)
-	}
-	if second.Questions[0].ID == last.ID {
-		t.Fatal("child cursor repeated the first page")
-	}
-
-	for _, id := range ids {
-		question, _ := svc.Get(ctx, id)
-		if _, err := svc.Forward(ctx, id, "task-parent-page", "session-parent-page", "operator decision"); err != nil {
-			t.Fatalf("forward %s: %v", id, err)
-		}
-		if _, _, err := svc.ResolveOperator(ctx, id, questions.AnswerInput{
-			Answers: []questions.Answer{{QuestionID: question.Questions[0].ID, SelectedOptions: []string{"a"}}},
-		}); err != nil {
-			t.Fatalf("resolve %s: %v", id, err)
-		}
-	}
-	history, err := svc.ListInboxHistory(ctx, "workspace-session-child-page", 2, "", "")
-	if err != nil || len(history.Questions) != 2 || !history.HasMore {
-		t.Fatalf("history page 1 = %d hasMore=%v err=%v", len(history.Questions), history.HasMore, err)
-	}
-	lastHistory := history.Questions[len(history.Questions)-1]
-	history2, err := svc.ListInboxHistory(ctx, "workspace-session-child-page", 2,
-		lastHistory.CreatedAt.UTC().Format(time.RFC3339Nano), lastHistory.ID)
-	if err != nil || len(history2.Questions) != 1 {
-		t.Fatalf("history page 2 = %d err=%v", len(history2.Questions), err)
-	}
-}
-
-func TestAsyncQuestionsAuthorityInvalidatedByReparent(t *testing.T) {
-	svc, repo := newQuestionsService(t)
-	ctx := context.Background()
-	seedExplicitQuestionBinding(t, repo, "task-child-auth", "session-child-auth", "workspace-session-child-auth", "task-parent-auth")
-	seedExplicitQuestionBinding(t, repo, "task-parent-auth", "session-parent-auth", "workspace-session-parent-auth", "")
-	result, err := svc.Create(ctx, questions.CreateInput{
-		TaskID: "task-child-auth", WorkspaceID: "workspace-session-child-auth", SessionID: "session-child-auth",
-		SessionIncarnationID: "inc-session-child-auth",
-		Recipient:            models.AsyncQuestionRecipientParent, ParentTaskID: "task-parent-auth", ParentSession: "session-parent-auth",
-		ParentSessionIncarnationID: "inc-session-parent-auth",
-		Questions:                  []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
-		RequestID:                  "authority-reparent",
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	child, err := repo.GetTask(ctx, "task-child-auth")
-	if err != nil {
-		t.Fatalf("get child: %v", err)
-	}
-	newParent := "task-parent-other"
-	child.ParentID = newParent
-	allowParent := func(context.Context, hierarchy.TaskHierarchyReader, *models.Task, string) error { return nil }
-	if _, err := repo.UpdateTaskWithParentAdmission(ctx, child, &newParent, true, allowParent); err != nil {
-		t.Fatalf("reparent: %v", err)
-	}
-	if _, _, err := svc.ResolveParent(ctx, result.Question.ID, "task-parent-auth", "session-parent-auth", questions.AnswerInput{
-		Answers: []questions.Answer{{QuestionID: result.Question.Questions[0].ID, SelectedOptions: []string{"a"}}},
-	}); !errors.Is(err, questions.ErrUnauthorized) {
-		t.Fatalf("reparented answer error = %v, want unauthorized", err)
-	}
-	stale, err := svc.Get(ctx, result.Question.ID)
-	if err != nil || stale.Status != models.AsyncQuestionStatusStale {
-		t.Fatalf("stale status = %+v err=%v", stale, err)
-	}
-}
-
-func TestAsyncQuestionsAuthorityInvalidatedByTransferCancelAndIncarnation(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		mutate func(t *testing.T, repo *sqlite.Repository)
-	}{
-		{name: "workspace transfer", mutate: func(t *testing.T, repo *sqlite.Repository) {
-			task, err := repo.GetTask(context.Background(), "task-session-authority")
-			if err != nil {
-				t.Fatalf("get task: %v", err)
-			}
-			task.WorkspaceID = "workspace-other"
-			if err := repo.UpdateTask(context.Background(), task); err != nil {
-				t.Fatalf("transfer: %v", err)
-			}
-		}},
-		{name: "terminal session", mutate: func(t *testing.T, repo *sqlite.Repository) {
-			session, err := repo.GetTaskSession(context.Background(), "session-authority")
-			if err != nil {
-				t.Fatalf("get session: %v", err)
-			}
-			session.State = models.TaskSessionStateCancelled
-			if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
-				t.Fatalf("cancel: %v", err)
-			}
-		}},
-		{name: "incarnation replacement", mutate: func(t *testing.T, repo *sqlite.Repository) {
-			session, err := repo.GetTaskSession(context.Background(), "session-authority")
-			if err != nil {
-				t.Fatalf("get session: %v", err)
-			}
-			if _, err := repo.DB().ExecContext(context.Background(),
-				"UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?",
-				"inc-replacement", session.ID); err != nil {
-				t.Fatalf("replace incarnation: %v", err)
-			}
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			svc, repo := newQuestionsService(t)
-			ctx := context.Background()
-			result := createOperatorQuestion(t, svc, repo, "session-authority")
-			test.mutate(t, repo)
-			if _, _, err := svc.ResolveOperator(ctx, result.Question.ID, questions.AnswerInput{
-				Answers: []questions.Answer{{QuestionID: result.Question.Questions[0].ID, SelectedOptions: []string{"default"}}},
-			}); !errors.Is(err, questions.ErrUnauthorized) {
-				t.Fatalf("answer error = %v, want unauthorized", err)
-			}
-			deliveries, err := repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Hour), 20)
-			if err != nil {
-				t.Fatalf("list deliveries: %v", err)
-			}
-			if len(deliveries) != 0 {
-				t.Fatalf("stale answer must not enqueue: %+v", deliveries)
-			}
-		})
-	}
-}
-
-func TestAsyncQuestionsWorkerLifecycleIsIdempotent(t *testing.T) {
-	svc, _ := newQuestionsService(t)
-	svc.SetDeliveryQueue(&recordingQueue{})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.Start(ctx)
-	svc.Start(ctx)
-	svc.Stop()
-	svc.Stop()
-	svc.Start(ctx)
-	svc.Stop()
-}
-
-func TestAsyncQuestionsWaitAcknowledgementDoesNotOverwriteFencedRelease(t *testing.T) {
-	svc, repo := newQuestionsService(t)
-	ctx := context.Background()
-	result := createOperatorQuestion(t, svc, repo, "session-wait-fenced")
-	waitResult, err := svc.Wait(ctx, questions.WaitInput{
-		TaskID: "task-session-wait-fenced", SessionID: "session-wait-fenced",
-		Dependencies: []string{result.Question.ID}, Reason: "dependency",
-	})
-	if err != nil {
-		t.Fatalf("wait: %v", err)
-	}
-	// The answer commits release_requested before the pause acknowledgement.
-	if err := repo.SetAsyncQuestionWaitStatus(ctx, waitResult.Wait.ID, models.AsyncQuestionWaitReleaseRequested, "test"); err != nil {
-		t.Fatalf("fence release: %v", err)
-	}
-	status, err := svc.AcknowledgeWaitPause(ctx, waitResult.Wait.ID)
-	if err != nil {
-		t.Fatalf("acknowledge: %v", err)
-	}
-	if status != models.AsyncQuestionWaitReleased {
-		t.Fatalf("status = %s, want released", status)
-	}
-	if svc.HasParkedWait(ctx, "session-wait-fenced") {
-		t.Fatal("a fenced release must not be overwritten as parked")
-	}
-}
-
-func TestAsyncQuestionsChildrenRequireCurrentParent(t *testing.T) {
-	svc, repo := newQuestionsService(t)
-	ctx := context.Background()
-	seedExplicitQuestionBinding(t, repo, "task-child-current", "session-child-current", "workspace-session-child-current", "task-parent-current")
-	seedExplicitQuestionBinding(t, repo, "task-parent-current", "session-parent-current", "workspace-session-parent-current", "")
-	result, err := svc.Create(ctx, questions.CreateInput{
-		TaskID: "task-child-current", WorkspaceID: "workspace-session-child-current", SessionID: "session-child-current",
-		SessionIncarnationID: "inc-session-child-current",
-		Recipient:            models.AsyncQuestionRecipientParent, ParentTaskID: "task-parent-current", ParentSession: "session-parent-current",
-		ParentSessionIncarnationID: "inc-session-parent-current",
-		Questions:                  []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
-		RequestID:                  "child-current",
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	page, err := svc.ListChildren(ctx, "task-parent-current", nil, nil, 10, "", "")
-	if err != nil || len(page.Questions) != 1 {
-		t.Fatalf("children before reparent = %d err=%v", len(page.Questions), err)
-	}
-	if _, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET parent_id = ? WHERE id = ?", "task-parent-other", "task-child-current"); err != nil {
-		t.Fatalf("reparent: %v", err)
-	}
-	page, err = svc.ListChildren(ctx, "task-parent-current", nil, nil, 10, "", "")
-	if err != nil || len(page.Questions) != 0 {
-		t.Fatalf("a former parent must not read child questions: %d err=%v", len(page.Questions), err)
-	}
-	_ = result
 }

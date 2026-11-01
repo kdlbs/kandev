@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   respond: vi.fn(),
   dismiss: vi.fn(),
   toast: vi.fn(),
+  toastError: vi.fn(),
   responsive: { isMobile: false, isFinePointer: true },
 }));
 
@@ -18,7 +19,9 @@ vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
 }));
 
 vi.mock("@/lib/toast/sonner", () => ({
-  toast: (...args: unknown[]) => mocks.toast(...args),
+  toast: Object.assign((...args: unknown[]) => mocks.toast(...args), {
+    error: (...args: unknown[]) => mocks.toastError(...args),
+  }),
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -26,6 +29,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 }));
 
 import { AsyncQuestionRow } from "./async-question-row";
+import { ApiError } from "@/lib/api/client";
 
 const ROW_TOGGLE = "async-question-row-toggle";
 const OPTION = "async-question-option";
@@ -164,6 +168,23 @@ describe("AsyncQuestionRow — answer flow", () => {
     expect(mocks.respond.mock.calls[0][1].submission_id).toBe(
       mocks.respond.mock.calls[1][1].submission_id,
     );
+  });
+});
+
+describe("AsyncQuestionRow — terminal and phone states", () => {
+  it("closes and reports a request that became unavailable", async () => {
+    mocks.respond.mockRejectedValueOnce(
+      new ApiError("question not found", 404, { error: "question not found" }),
+    );
+    const { onSettled } = renderRow();
+    fireEvent.click(screen.getByTestId(ROW_TOGGLE));
+    fireEvent.click(screen.getAllByTestId(OPTION)[0]);
+    fireEvent.click(screen.getByTestId(SUBMIT));
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalled());
+    expect(mocks.toastError).toHaveBeenCalledWith("This question is no longer available.");
+    expect(screen.queryByTestId("async-question-inline-form")).toBeNull();
+    expect(screen.queryByTestId(ERROR)).toBeNull();
   });
 
   it("opens a full-height answer surface on a phone", () => {

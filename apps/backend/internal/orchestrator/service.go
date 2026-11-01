@@ -387,6 +387,7 @@ type DirectPromptStarterWithCanvasGuidance interface {
 		promptReferenceContext string,
 		promptReferencesPrepared bool,
 		canvasGuidanceResolved, includeCanvasGuidance bool,
+		asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 	) (*executor.TaskExecution, error)
 }
 
@@ -403,6 +404,7 @@ type DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt interface {
 		promptReferenceContext string,
 		promptReferencesPrepared bool,
 		canvasGuidanceResolved, includeCanvasGuidance bool,
+		asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 	) (*executor.TaskExecution, error)
 }
 
@@ -418,6 +420,8 @@ type DirectPromptStartOptions struct {
 	PromptReferencesPrepared      bool
 	CanvasGuidanceResolved        bool
 	IncludeCanvasGuidance         bool
+	AsyncQuestionGuidanceResolved bool
+	AsyncQuestionsSupported       bool
 	PreserveDirectPrompt          bool
 	DeliverySubmissionID          string
 	InitialTaskBriefDispatchOwner bool
@@ -2160,6 +2164,19 @@ func (s *Service) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, 
 	return s.taskSessionCanvasGuidanceEnabled(ctx, taskID, session, true)
 }
 
+// TaskSessionAsyncQuestionsSupported reports whether the resolved MCP profile
+// for a session includes the async question capability.
+func (s *Service) TaskSessionAsyncQuestionsSupported(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return false, err
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return s.taskSessionAsyncQuestionsSupported(ctx, taskID, session, true)
+}
+
 // ErrTaskSessionPairMismatch reports that a task/session API request named
 // two rows that do not belong together.
 var ErrTaskSessionPairMismatch = errors.New("task session pair mismatch")
@@ -2178,6 +2195,22 @@ func (s *Service) taskSessionCanvasGuidanceEnabled(
 		return false, err
 	}
 	return profile.HasCapability(mcpprofile.CapabilityCanvas), nil
+}
+
+func (s *Service) taskSessionAsyncQuestionsSupported(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowTitleTool bool,
+) (bool, error) {
+	if s.executor == nil || session == nil {
+		return false, nil
+	}
+	profile, err := s.executor.ResolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
+	if err != nil {
+		return false, err
+	}
+	return profile.HasCapability(mcpprofile.CapabilityAsyncQuestions), nil
 }
 
 // SetLaunchAttachmentClaimer wires staged-descriptor admission into the

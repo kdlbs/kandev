@@ -227,18 +227,21 @@ func KandevContext() string {
 		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
-		"question_tool_section":            userQuestionSection,
+		"question_tool_section":            userQuestionBlockingSection,
 	})
 }
 
-const userQuestionSection = `- ask_user_question_kandev: Ask 1-4 related questions. Blocking mode is a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. With async=true you get a question_id and keep working; read it with list_question_answers_kandev. Keep 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. On validation error before question creation, correct and retry. If an accepted blocking call returns incomplete, end the turn without inferring an answer or continuing work.
+const userQuestionBlockingSection = `- ask_user_question_kandev: Ask 1-4 related questions. Blocking mode is a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. Keep 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. On validation error before question creation, correct and retry. If an accepted blocking call returns incomplete, end the turn without inferring an answer or continuing work.
 `
 
-const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions, only when you cannot continue safely without a parent decision. Omitted or false async sends the question and MUST end your turn; do not use an operator-question tool. With async=true you keep working and read the answer with list_question_answers_kandev; use wait_for_question_answers_kandev only when no independent work remains. If the parent forwards the request to the operator, the same request identity resolves.
+const asyncQuestionModeGuidance = `Choose blocking mode when no useful work can continue safely without an answer. Set async=true when useful independent work remains. After an async ask, continue independent work and read the answer with list_question_answers_kandev at a checkpoint. Call wait_for_question_answers_kandev only when all remaining work depends on pending answers. Withdraw with withdraw_question_kandev when an answer is no longer needed. Use request_id only to retry the same ask.
+`
+
+const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions, only when you cannot continue safely without a parent decision. Omitted or false async sends the question and MUST end your turn; do not use an operator-question tool. If the parent forwards the request to the operator, the same request identity resolves.
 `
 
 const autopilotSection = `AUTOPILOT MODE:
-This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. By default the question tool ends the current turn. With async=true you keep working until an explicit dependency wait; read list_question_answers_kandev at checkpoints. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
+This task runs in autopilot mode. Continue independently and make reasonable decisions without asking the operator. Ask for help only when a decision is critical, unsafe, or cannot be inferred from the task context. If a direct parent exists, use the available parent-question tool for that critical question. By default the question tool ends the current turn. If there is no parent, do not ask a question; choose the safest reversible path and report the limitation in your final response.
 `
 
 const canvasGuidanceSection = `CANVAS AUTHORING:
@@ -306,6 +309,7 @@ func PendingTaskTitlePassthroughInstruction() string {
 // Kandev context.
 type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
+	AsyncQuestionsSupported        bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
 	IncludeCanvasGuidance          bool
@@ -342,15 +346,26 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		taskTitle = taskTitleSection
 	}
 	questionTool := ""
+	asyncQuestionGuidanceEnabled := options.AsyncQuestionsSupported &&
+		(options.IncludeUserQuestionTool || options.IncludeParentQuestionTool)
 	switch {
 	case options.IncludeParentQuestionTool:
 		questionTool = parentQuestionSection
+		if asyncQuestionGuidanceEnabled {
+			questionTool += asyncQuestionModeGuidance
+		}
 	case options.IncludeUserQuestionTool || !options.Autopilot:
-		questionTool = userQuestionSection
+		questionTool = userQuestionBlockingSection
+		if asyncQuestionGuidanceEnabled {
+			questionTool += asyncQuestionModeGuidance
+		}
 	}
 	autopilot := ""
 	if options.Autopilot {
 		autopilot = autopilotSection
+		if asyncQuestionGuidanceEnabled {
+			autopilot += asyncQuestionModeGuidance
+		}
 	}
 	canvasGuidance := ""
 	if options.IncludeCanvasGuidance {

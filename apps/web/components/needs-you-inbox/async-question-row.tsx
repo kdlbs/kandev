@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
+import { ApiError } from "@/lib/api/client";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { generateUUID } from "@/lib/uuid";
@@ -20,10 +21,7 @@ import {
   type AgentQuestionAnswer,
 } from "@/lib/api/domains/agent-questions-api";
 import { dismissClarificationInboxBundle } from "@/lib/api/domains/clarification-inbox-api";
-import type {
-  ClarificationInboxAsyncQuestion,
-  ClarificationInboxAsyncOutcome,
-} from "@/lib/types/clarification-inbox";
+import type { ClarificationInboxAsyncQuestion } from "@/lib/types/clarification-inbox";
 import {
   ASYNC_SIDECAR_PREFIX,
   asyncQuestionPrimaryText,
@@ -34,6 +32,38 @@ type Draft = {
   selections: Record<string, string>;
   customText: Record<string, string>;
 };
+
+function buildAnswers(
+  question: ClarificationInboxAsyncQuestion,
+  draft: Draft,
+): AgentQuestionAnswer[] | null {
+  const answers: AgentQuestionAnswer[] = [];
+  for (const item of question.questions) {
+    const selected = draft.selections[item.id];
+    const text = draft.customText[item.id]?.trim();
+    if (!selected && !text) return null;
+    answers.push({
+      question_id: item.id,
+      selected_options: selected ? [selected] : [],
+      custom_text: text || undefined,
+    });
+  }
+  return answers;
+}
+
+function closeIfUnavailable(
+  error: unknown,
+  questionId: string,
+  onSettled: () => void,
+  translate: (key: string) => string,
+): boolean {
+  if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 409)) return false;
+  clearDraft(questionId);
+  if (error.status === 409) toast(translate("needsYouInbox:asyncConcurrentWinner"));
+  else toast.error(translate("needsYouInbox:asyncNoLongerAvailable"));
+  onSettled();
+  return true;
+}
 
 // Width changes unmount the desktop expansion and the phone surface, so the
 // unsent draft lives above both presentations.
@@ -51,14 +81,19 @@ function clearDraft(questionId: string) {
   drafts.delete(questionId);
 }
 
-function outcomeSummary(outcome: ClarificationInboxAsyncOutcome | undefined): string {
+function outcomeSummary(question: ClarificationInboxAsyncQuestion): string {
+  const outcome = question.outcome;
   if (!outcome) return "";
   if (outcome.rejected) return outcome.reject_reason ?? "";
   if (outcome.text) return outcome.text;
   return (outcome.answers ?? [])
-    .map((answer) =>
-      [...(answer.selected_options ?? []), answer.custom_text ?? ""].filter(Boolean).join(", "),
-    )
+    .map((answer) => {
+      const item = question.questions.find((entry) => entry.id === answer.question_id);
+      const labels = (answer.selected_options ?? []).map(
+        (optionId) => item?.options.find((option) => option.option_id === optionId)?.label,
+      );
+      return [...labels, answer.custom_text ?? ""].filter(Boolean).join(", ");
+    })
     .filter(Boolean)
     .join(" · ");
 }
@@ -108,21 +143,10 @@ function useAsyncSubmit(question: ClarificationInboxAsyncQuestion, onSettled: ()
   const submit = useCallback(
     async (draft: Draft, rejected: boolean) => {
       if (submitting) return;
-      const answers: AgentQuestionAnswer[] = [];
-      if (!rejected) {
-        for (const item of question.questions) {
-          const selected = draft.selections[item.id];
-          const text = draft.customText[item.id]?.trim();
-          if (!selected && !text) {
-            setError(t("needsYouInbox:asyncAnswerRequired"));
-            return false;
-          }
-          answers.push({
-            question_id: item.id,
-            selected_options: selected ? [selected] : [],
-            custom_text: text || undefined,
-          });
-        }
+      const answers = rejected ? [] : buildAnswers(question, draft);
+      if (answers === null) {
+        setError(t("needsYouInbox:asyncAnswerRequired"));
+        return false;
       }
       setSubmitting(true);
       setError(null);
@@ -137,7 +161,8 @@ function useAsyncSubmit(question: ClarificationInboxAsyncQuestion, onSettled: ()
         if (result.won && rejected) toast(t("needsYouInbox:asyncRejected"));
         onSettled();
         return true;
-      } catch {
+      } catch (error) {
+        if (closeIfUnavailable(error, question.question_id, onSettled, t)) return true;
         setError(t("needsYouInbox:asyncSubmitFailed"));
         return false;
       } finally {
@@ -158,11 +183,16 @@ function RowChevron({ expanded, pending }: { expanded: boolean; pending: boolean
 function AsyncQuestionStatusBadge({ question }: { question: ClarificationInboxAsyncQuestion }) {
   const { t } = useTranslation();
   if (question.status !== "pending") {
+    const statusKey = {
+      answered: "needsYouInbox:asyncAnswered",
+      rejected: "needsYouInbox:asyncRejectedStatus",
+      withdrawn: "needsYouInbox:asyncWithdrawn",
+      stale: "needsYouInbox:asyncStale",
+    }[question.status];
+    const status = t(statusKey);
     return (
       <span className="text-xs text-muted-foreground" data-testid="async-question-terminal-status">
-        {question.status === "withdrawn"
-          ? t("needsYouInbox:asyncWithdrawn")
-          : t("needsYouInbox:asyncResolved")}
+        {status}
       </span>
     );
   }
@@ -189,6 +219,7 @@ function AsyncQuestionHeader({
   onOpen,
   onDismiss,
   dismissDisabled,
+  showDismiss,
 }: {
   question: ClarificationInboxAsyncQuestion;
   expanded: boolean;
@@ -196,13 +227,13 @@ function AsyncQuestionHeader({
   onOpen: () => void;
   onDismiss: () => void;
   dismissDisabled: boolean;
+  showDismiss: boolean;
 }) {
   const { t } = useTranslation();
   const pending = question.status === "pending";
-  const terminalSummary =
-    question.status === "withdrawn"
-      ? (question.withdraw_reason ?? "")
-      : outcomeSummary(question.outcome);
+  const terminalSummary = ["withdrawn", "stale"].includes(question.status)
+    ? (question.withdraw_reason ?? "")
+    : outcomeSummary(question);
   return (
     <div className="flex items-start gap-3 px-3 py-3">
       <button
@@ -231,7 +262,7 @@ function AsyncQuestionHeader({
           <span className="mt-1 block pl-6 text-xs text-muted-foreground">{terminalSummary}</span>
         )}
       </button>
-      {pending && (
+      {pending && showDismiss && (
         <Button
           type="button"
           variant="ghost"
@@ -342,9 +373,13 @@ function AsyncQuestionPhoneSurface({
 export function AsyncQuestionRow({
   question,
   onSettled,
+  showDismiss = true,
+  provenanceText,
 }: {
   question: ClarificationInboxAsyncQuestion;
   onSettled: () => void;
+  showDismiss?: boolean;
+  provenanceText?: string;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
@@ -364,11 +399,13 @@ export function AsyncQuestionRow({
       setDismissing(false);
     }
   }, [dismissing, onSettled, question.question_id, t]);
-  const provenance = question.forwarded
-    ? t("needsYouInbox:asyncForwardedBy", {
-        parent: question.parent_task_title || question.task_title,
-      })
-    : null;
+  const provenance =
+    provenanceText ??
+    (question.forwarded
+      ? t("needsYouInbox:asyncForwardedBy", {
+          parent: question.parent_task_title || question.task_title,
+        })
+      : null);
   const pending = question.status === "pending";
   const runSubmit = async (rejected: boolean) => {
     const settled = await submit(
@@ -406,6 +443,7 @@ export function AsyncQuestionRow({
         onOpen={() => setExpanded(true)}
         onDismiss={() => void dismiss()}
         dismissDisabled={dismissing}
+        showDismiss={showDismiss}
       />
       {expanded && pending && !isMobile && (
         <div className="border-t border-border px-3 pb-3" data-testid="async-question-inline-form">

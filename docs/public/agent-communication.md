@@ -99,9 +99,10 @@ critical decision, it calls `ask_parent_question_kandev`:
 }
 ```
 
-The tool creates a durable pending question for the direct parent and returns
-without waiting. The child must end its turn after the call. The question
-message contains a `question_id`, the child task ID, and the question data.
+In blocking mode, the tool creates a durable question for the direct parent
+and ends the child turn. If the tool exposes `async` and the child sets it to
+true, the child can continue independent work. The question message contains a
+`question_id`, the child task ID, and the question data.
 Only that direct parent may answer it. A parent sends the answer to the child
 with `message_task_kandev`:
 
@@ -115,9 +116,13 @@ with `message_task_kandev`:
 
 The answer is correlated by `reply_to_question_id` and is idempotent. A repeat
 answer, an answer from another task, or an answer after reparenting is rejected
-or reported as already answered; it never starts a second child turn. The
-child leaves the waiting state only after the accepted correlated answer is
-delivered. The existing primary question icon shows this wait in the sidebar.
+or reported as already answered; it never starts a second child turn. In
+blocking mode, the child leaves the waiting state after delivery. An async
+child reads or waits for the same request with the async question tools. A
+direct parent can answer that async request with the same correlated reply, or
+forward it to the operator with `forward_question_kandev`. Forwarded requests
+appear in the parent's task chat and, when enabled, the Needs-you Inbox. The
+operator's answer resolves the child's original request.
 
 An autopilot root has no parent, so its task MCP profile contains no question
 tool. It must continue without asking the operator. A normal task keeps the
@@ -130,8 +135,18 @@ that Codex provides for an "Other" answer.
 
 ## Async questions
 
-Ask without ending the turn when independent work remains. Pass
-`async: true` to `ask_user_question_kandev` or `ask_parent_question_kandev`:
+Use async mode only when the tool exposes the `async` argument. If it is absent,
+use blocking mode. Choose blocking mode when you cannot safely do useful work
+before the answer. Choose async mode when useful independent work remains.
+
+After an async ask, continue independent work. Read the answer at a checkpoint
+with `list_question_answers_kandev`. Use
+`wait_for_question_answers_kandev` only when all remaining work depends on the
+pending requests. Withdraw a request with `withdraw_question_kandev` when you no
+longer need its answer.
+
+For example, pass `async: true` to `ask_user_question_kandev` or
+`ask_parent_question_kandev`:
 
 ```json
 {
@@ -151,30 +166,40 @@ Ask without ending the turn when independent work remains. Pass
 }
 ```
 
-The call returns a durable `question_id` immediately and the agent continues.
-A create retry with the same `request_id` returns the same request; reusing it
-with different content is rejected. The request is visible in the Needs you
-Inbox while the agent works.
+The call returns a durable `question_id` immediately. The agent can continue
+independent work. Retry with the same `request_id` to get the same request.
+The server rejects that ID if the retry changes the request. The author's task
+chat shows and can answer the request, even when the Needs-you Inbox is disabled.
+The Inbox also shows it when enabled.
 
-Read the answer at a checkpoint with `list_question_answers_kandev`. Reads are
-bounded, repeatable, and never consume the answer. An accepted answer also
-arrives as a correlated queued continuation for the original session; the
-current turn finishes first, so the answer does not cancel or redirect it.
-Withdraw a request that is no longer needed with
-`withdraw_question_kandev`; history keeps the reason and the request never
-becomes answerable again.
+Reads are bounded, repeatable, and do not consume an answer. An accepted answer
+also arrives as a queued continuation for the original session. The current
+turn finishes first. The answer does not cancel or redirect it. History keeps
+the withdrawal reason, and a withdrawn request cannot be answered.
 
-When no independent work remains, call
-`wait_for_question_answers_kandev` with the pending request IDs. If any named
-request already resolved, the call returns `status=ready` without pausing.
-Otherwise it parks the captured turn until any named request reaches a
-terminal outcome. Pending async requests that were never named in a wait do
-not block completion.
+When no independent work remains, call `wait_for_question_answers_kandev` with
+the request IDs that block the next step. If any named request already has an
+outcome, the call returns `status=ready`. Otherwise, it pauses the captured
+turn until a named request closes. Unnamed requests do not block completion.
 
-A direct parent can forward a child's pending request to the operator with
-`forward_question_kandev`. The child request keeps its identity; an operator
-answer resolves it and the child receives the same outcome. An autopilot
-parent does not gain direct operator access through forwarding.
+The task chat keeps one transcript entry for each async request. It displays the
+latest status and outcome, including a withdrawal reason, after the conversation
+reloads. A chat request list is scoped to its task and workspace:
+
+```http
+GET /api/v1/agent-questions?workspace_id=<workspace-id>&task_id=<task-id>&status=open
+```
+
+This list includes requests authored by the task and child requests that its
+direct parent has explicitly forwarded. Use `status=history` to read terminal
+requests. `GET /api/v1/agent-questions/<question-id>` returns the latest state
+for one transcript entry. Both reads require workspace access.
+
+A parent can send a child's pending request to the operator with
+`forward_question_kandev`. The request keeps its identity. The operator's answer
+resolves the same request, and the child receives that outcome. The parent can
+answer the forwarded request from its task chat. An autopilot parent cannot use
+forwarding to gain direct operator access.
 
 The tool returns answers keyed by question ID. An option selection includes
 `selected_option` (the option ID) and `selected_label` (the exact displayed label):

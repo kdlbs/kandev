@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -143,4 +144,40 @@ func TestAsyncQuestionsPostgresConcurrentCreateAndWait(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, wins, "only one concurrent wait may be active per session")
+}
+
+func TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-postgres-reparent", "session-postgres-reparent")
+	question.Recipient = models.AsyncQuestionRecipientParent
+	question.ParentTaskID = "parent-postgres-reparent"
+	question.ParentSessionID = "parent-session-postgres-reparent"
+	question.ParentSessionIncarnationID = "inc-parent-session-postgres-reparent"
+	created, isNew := createAsyncQuestionForTest(t, repo, question)
+	require.True(t, isNew)
+
+	now := time.Now().UTC()
+	otherWorkspace := "workspace-postgres-other-parent"
+	otherWorkflow := "workflow-postgres-other-parent"
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: otherWorkspace, Name: otherWorkspace, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: otherWorkflow, WorkspaceID: otherWorkspace, Name: otherWorkflow, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "other-parent-postgres-reparent", WorkspaceID: otherWorkspace, WorkflowID: otherWorkflow,
+		Title: "other parent", State: "TODO", CreatedAt: now, UpdatedAt: now,
+	}))
+	_, err = db.ExecContext(ctx, db.Rebind("UPDATE tasks SET parent_id = ? WHERE id = ?"), "other-parent-postgres-reparent", question.TaskID)
+	require.NoError(t, err)
+
+	updated, err := repo.ReconcileAsyncQuestionAuthority(ctx, 10, nil)
+	require.NoError(t, err)
+	require.Len(t, updated, 1)
+	require.Equal(t, created.ID, updated[0].ID)
+	require.Equal(t, models.AsyncQuestionStatusStale, updated[0].Status)
 }

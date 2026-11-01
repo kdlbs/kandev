@@ -35,6 +35,7 @@ type Capability string
 const (
 	CapabilityUserQuestion   Capability = "user-question"
 	CapabilityParentQuestion Capability = "parent-question"
+	CapabilityAsyncQuestions Capability = "async-questions"
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
@@ -256,6 +257,9 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	}
 	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
 		capabilities = append(capabilities, CapabilityUserQuestion)
+		if surface == SurfaceKanbanTask {
+			capabilities = append(capabilities, CapabilityAsyncQuestions)
+		}
 	}
 	return New(surface, capabilities, providers)
 }

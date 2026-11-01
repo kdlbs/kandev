@@ -870,20 +870,23 @@ tools for one task session. Office sessions use their smaller skill/CLI
 surface and do not receive Kanban task-creation tools.
 
 An autopilot child should ask its parent only when a decision blocks useful
-progress. `ask_parent_question_kandev` returns a `question_id` immediately;
-the child turn then ends. The parent receives a durable question message and
-answers with `message_task_kandev` using the child task ID and
-`reply_to_question_id`. The child stays in the waiting-for-input state until
-the correlated answer arrives, so the sidebar shows the normal question
-indicator during the wait.
+progress. In blocking mode, `ask_parent_question_kandev` ends the child turn.
+The parent receives a durable question message and answers with
+`message_task_kandev` using the child task ID and `reply_to_question_id`. The
+child stays in the waiting-for-input state until that correlated answer arrives.
+In async mode, the child receives a `question_id` and can continue independent
+work. The parent can answer the request directly or forward it to the operator.
+The parent's task chat can answer forwarded requests; the Needs-you Inbox shows
+them when enabled. An operator answer resolves the same child request.
 
 ### Async questions
 
 Both question tools accept an optional `async` boolean. Omitted or `false`
 keeps the blocking behavior above. With `async: true` the tool returns a
 durable `question_id` immediately, the author's turn keeps running, and the
-request appears in the Needs you Inbox without waiting for the turn to end.
-An exact retry with the same `request_id` returns the original request.
+request appears in the author's task chat without waiting for the turn to end.
+The Needs-you Inbox also shows it when enabled. An exact retry with the same
+`request_id` returns the original request.
 
 ```json
 {
@@ -912,12 +915,20 @@ Use the companion tools to manage the request during the same turn:
 | `forward_question_kandev` | Let a direct parent with user-question capability expose a child request to the operator without copying it. |
 | `wait_for_question_answers_kandev` | Pause only when all remaining work depends on named pending requests. If any named request already resolved, the tool returns `status=ready` without pausing. |
 
+The author's chat transcript retains the request and shows its latest state,
+outcome, and withdrawal reason. The task-scoped list used by task chat is
+`GET /api/v1/agent-questions?workspace_id=<workspace-id>&task_id=<task-id>&status=open`.
+It includes questions authored by the task and questions its direct parent
+forwarded. Use `status=history` to read terminal questions. The detail route is
+`GET /api/v1/agent-questions/<question-id>`; both reads require workspace access.
+
 Open async requests alone never block workflow completion. Only an explicit
 dependency wait parks the captured turn. An accepted answer records the
 outcome and a correlated queued continuation; it never cancels or steers a
 running turn. A direct parent answers a child request with
-`message_task_kandev(reply_to_question_id=...)`, and an operator answers a
-forwarded request in the Inbox. Both compete for one canonical outcome.
+`message_task_kandev(reply_to_question_id=...)`; an operator can answer a
+forwarded request in the parent task chat or the Inbox. Those answers compete
+for one canonical outcome.
 
 ### Create idempotency with `external_id`
 

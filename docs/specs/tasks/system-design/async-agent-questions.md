@@ -10,6 +10,8 @@ requirements:
   - REQ-TASKS-ASYNC-QUESTIONS-006
   - REQ-TASKS-ASYNC-QUESTIONS-007
   - REQ-TASKS-ASYNC-QUESTIONS-008
+  - REQ-TASKS-ASYNC-QUESTIONS-009
+  - REQ-TASKS-ASYNC-QUESTIONS-010
 ---
 
 # Async agent questions system design
@@ -20,8 +22,8 @@ Tasks owns the async request record and its lifecycle. Inbox and transcript comp
 This design adds an explicit mode. It does not broaden current-turn clarification authority.
 The [decision record](../../../decisions/2026-10-30-async-question-lifecycle.md) explains this boundary.
 
-This document describes proposed implementation. Names marked **new** do not exist at the investigated source revision.
 The existing [clarification design](clarification-active-lifecycle.md) remains authoritative for blocking calls.
+Sections marked **Remediation** describe the design that work orders 06 to 12 implement.
 
 ## Requirement mapping
 
@@ -35,6 +37,8 @@ The existing [clarification design](clarification-active-lifecycle.md) remains a
 | `REQ-TASKS-ASYNC-QUESTIONS-006` | Explicit wait |
 | `REQ-TASKS-ASYNC-QUESTIONS-007` | Inbox and transcript projection |
 | `REQ-TASKS-ASYNC-QUESTIONS-008` | Compatibility and capability selection |
+| `REQ-TASKS-ASYNC-QUESTIONS-009` | Task chat question surface |
+| `REQ-TASKS-ASYNC-QUESTIONS-010` | Agent mode guidance |
 
 ## Existing integration points
 
@@ -193,6 +197,16 @@ The transaction creates one owner-outcome intent and one parent-outcome intent.
 A concurrent direct-parent answer uses the same conditional update and observes the winning outcome.
 The parent question list reflects the shared canonical state, without a second manual relay.
 
+### Parent session routing (**Remediation**)
+
+The parent task is the authority. `ParentSessionID` records which session the question first targeted and does not authorize.
+`ResolveParent` and `Forward` check the task relationship, so a replacement session of the same parent can answer.
+Parent-kind deliveries store the destination task and choose a session when admitted.
+The adapter uses `GetActiveTaskSessionByTaskID` and that session's current incarnation.
+With no active session, the intent stays pending on the existing bounded backoff.
+A parent task that is archived or missing makes the request stale through the authority sweep.
+Author-kind deliveries keep their exact session and incarnation, and they are never redirected.
+
 ## Explicit wait
 
 The wait tool declares that all remaining work depends on its named request set.
@@ -218,33 +232,51 @@ Once released, ordinary FIFO resumes. Do not reorder unrelated entries to manufa
 A newer accepted operator prompt cancels the old gate while leaving still-valid questions open.
 A stale pause completion or predecessor ready event cannot mutate the newer turn.
 
-On restart, reconcile requested and parked gates before prompt admission.
-Compare the exact stored generation and surviving execution evidence.
-A newer generation cancels the stale gate. A resolved dependency releases a valid gate.
-A preserved live turn with only a requested gate completes its guarded pause before answer dispatch.
-A stopped turn without a successor can settle as parked.
+On restart, reconcile active gates before prompt admission.
+A gate on a terminal destination is cancelled, and a `release_requested` gate is released with a readiness wake.
+A `requested` gate is cancelled because the pause that owned it did not survive. The session keeps its open questions, and the agent can declare a new wait.
+A `parked` gate stays parked, because its release is atomic with the terminal outcome.
 Never infer a pause from pending questions alone.
+
+### Gate settlement (**Remediation**)
+
+`Service.Wait` must not return `ready` while its gate is active.
+When the re-check finds a terminal dependency, it releases from either `requested` or `release_requested`. No pause exists for that call, so nothing else would acknowledge the fence.
+Staleness uses the same release path as other terminal outcomes.
+In one transaction it closes the request, releases dependent gates, and inserts a wake intent for a live author.
+The wake states that the dependency closed as stale, so the agent can choose its next step.
 
 ## Withdrawal and terminal cleanup
 
 Only the original author session can withdraw its request.
 Persist the reason and close the canonical request using the same winner transaction as resolution.
-Remove unsent parent-request intents, and publish terminal state for parent and Inbox consumers.
-An already admitted notification remains correlated history. Its rendering and agent checkpoint read obtain the terminal state.
-It cannot make a withdrawn request answerable.
+Abandon unsent parent-request intents in the closing transaction, and publish terminal state for parent and operator consumers.
+After commit, remove a parent-request queue row that has not been dispatched, using its stored admission identity.
+A row that has already been dispatched remains history, and it cannot make a withdrawn request answerable.
 
 Task/session cancellation, terminalization, archive/delete, reparent, and workspace transfer must revalidate affected requests.
 Use existing lifecycle integration points plus guarded reads and startup reconciliation.
 An archive/delete race cannot enqueue into another session or bypass current ownership.
-Question tables and delivery/wait rows participate in task/session cleanup and E2E reset.
+Task deletion removes question rows through the task service. Workspace cascade deletion removes them in its transaction, because these tables have no foreign keys.
 History follows the owning task's retention lifecycle. No independent retention timer is introduced.
+
+### Authority sweep (**Remediation**)
+
+Several paths can change a task's parent or workspace, so one sweep covers them instead of a hook on each path.
+The reconciliation worker runs a bounded query for pending requests on each tick.
+It selects parent requests whose child no longer names the recorded parent, or whose parent task is archived or missing, plus any request whose task left its recorded workspace.
+Each match uses the shared stale transition described in Gate settlement.
+Every stale transition, including those from answer attempts and session cleanup, publishes a change event after commit.
 
 ## HTTP and event contracts
 
 Add task-authorized **new** routes:
 
-- `GET /api/v1/agent-questions`: bounded request listing, with explicit task/session scope for conversation clients.
+- `GET /api/v1/agent-questions`: bounded request listing, with explicit task scope for conversation clients.
+  Task scope returns the task's operator requests across its sessions, its forwarded child requests, and requests it forwarded as parent.
+- `GET /api/v1/agent-questions/:id`: one authorized request for a transcript entry outside the loaded page.
 - `POST /api/v1/agent-questions/:id/respond`: structured answers or rejection, plus a stable submission ID.
+  The winning outcome stores that ID, so an exact retry reports `won=true` and creates no delivery.
 - `GET /api/v1/agent-questions/:id/images/:imageID?question_id=...`: saved operator-question images only.
 
 HTTP reads and responses expose parent requests only through an authorized forward.
@@ -268,9 +300,9 @@ Reuse per-user Inbox sidecar semantics through typed identities.
 Existing blocking keys remain byte-compatible. Async keys use a namespaced identity and cannot collide with a blocking pending ID.
 History queries add async terminal records with `withdrawn` as a distinct outcome.
 
-Add workspace-scoped `task.question.created`, `task.question.updated`, and `task.question.wait_changed` events.
-Include task/session/request identity and a monotonic snapshot version, without answer text in broad task summaries.
-Clients invalidate the bounded read. A periodic foreground refresh still recovers from missed events.
+Backend `task.question.*` subjects reach clients as one workspace-scoped `task.question.changed` action.
+The payload carries workspace, task, session, parent task, and request identity, without question or answer text.
+Clients invalidate the bounded read, so the event needs no snapshot version. A foreground refresh recovers from missed events.
 
 ## Inbox and transcript projection
 
@@ -279,17 +311,36 @@ List and count updates apply together under workspace/read-generation guards.
 Boot count, the unopened-Inbox sidebar badge, hidden count, and snooze wakeup use the same typed response.
 When several requests share a task group, the count remains a request count.
 
-An async operator request or forwarded request uses the shared question editor with an injected async submit adapter.
-Extract editor/validation behavior from `ClarificationPanelSection` only where needed.
-Do not manufacture blocking clarification messages to activate its lifecycle hook.
+An async operator request or forwarded request uses `AsyncQuestionForm`, on every surface.
+Do not manufacture blocking clarification messages to activate the blocking lifecycle hook.
 Keep blocking hosts and Quick Chat behavior intact.
 
-Add an `agent_question_request` transcript message kind as a projection of the canonical question ID.
-Its status comes from the question service, not copied authoritative message metadata.
-Nonblocking projection messages use `requests_input=false`. The explicit gate supplies pending-action authority separately.
-A running author shows a non-modal question card. It never sets a blocking composer overlay.
-An explicit wait contributes the existing clarification pending-action projection and owning-session navigation.
-An open request without a gate does not label a working agent as blocked.
+A row's waiting state comes from the session's active gate and its named dependencies, loaded once per session.
+Terminal views resolve option IDs to labels from the stored questions, and each terminal status has its own label.
+
+### Task chat question surface (**Remediation**)
+
+The chat surface reads through a task-scoped store slice and domain hook. Neither consults the Inbox feature flag.
+`task.question.changed` invalidates the slice when its task matches the event's task or parent task.
+A strip sits in `ComposerFooterAllocation`, above the composer and outside the transcript scroller, and it renders nothing with no open requests.
+It expands to the shared answer form in the footer region without covering the composer. A phone opens the existing full-height answer surface.
+Blocking clarifications keep precedence: while one is active, the strip collapses to its count.
+A forwarded request appears in the author's chat and the forwarding parent's chat under the same ID. The parent's row names the child task.
+
+A durable `transcript` outbox intent creates an `agent_question_request` message in the author's session, with `requests_input=false`.
+The message ID derives from the question ID, so a retry cannot duplicate it.
+The message stores only the question ID. Its card reads current state from the slice, or from the single-request route, and repeated reads of one ID are deduplicated.
+This message kind stays outside clarification bundle queries and the blocking resume path.
+
+### Operator attention (**Remediation**)
+
+Creating a `user` request, or forwarding a child request, raises `HandleClarificationRequested` with a question-scoped occurrence ID.
+The notification service's occurrence handling keeps a retry from notifying twice. An unforwarded parent request does not notify the operator.
+
+`TaskPendingAction` means a session is blocked on input, so a running session's open question does not use it.
+`pendingActionsBySessionQuery` returns `clarification` for a session with a `parked` or `release_requested` gate.
+Gate transitions publish `session.pending_action_changed` through the existing revisioned projection.
+A separate indicator for open questions on running tasks is out of scope. The notification, chat strip, and enabled Inbox cover discovery.
 
 Desktop uses task-group headings and inline expandable answer rows in the existing Inbox page.
 Phone uses the existing Inbox navigation entry and a full-height answer surface for one request.
@@ -306,6 +357,8 @@ The [plan previews](../../../plans/async-agent-questions/plan.md#ascii-ui-previe
 ## Compatibility and capability selection
 
 The existing profile selects either user-question, parent-question, or neither.
+An `async-questions` capability marks persistent, non-passthrough Kanban task sessions; ephemeral Quick Chat, Office, configuration, and external profiles do not receive it.
+This capability can exist without ask authority, such as on an Autopilot root that only reads child requests.
 Add withdrawal/wait tools only for supported persistent task sessions with an applicable question capability.
 Supported task-mode parents, including Autopilot roots, can use the bounded answer-list tool for direct-child discovery.
 This read tool grants no question creation or forwarding authority.
@@ -313,9 +366,16 @@ Expose forwarding only where the session has user-question authority. Revalidate
 Do not widen configuration, Office, external, quick-chat, or no-question surfaces.
 
 The caller must choose `async: true`. Omitted/false calls keep the existing implementation path.
-Scope current user-question and Autopilot prompt instructions by mode during implementation.
 The existing blocking user-input barrier and parent last-action instruction remain explicit for omitted/false calls.
-Async guidance allows independent work, requires checkpoint reads, explains duplicate correlated notifications, and identifies the explicit wait as terminal.
+
+### Agent mode guidance (**Remediation**)
+
+The agent chooses the mode, because the backend cannot judge whether other useful work remains.
+`KandevContextOptions` gains an async-capability input that follows `asyncQuestionsSupported`.
+Only sessions with an ask tool and the async capability receive mode-selection guidance.
+That guidance covers checkpoints, explicit waits, withdrawal, and stable retry IDs. Other sessions keep blocking-only wording or no question guidance.
+Tool descriptions state blocking as the default and carry a short form of the rule only on surfaces that register `async`.
+Tests assert the required guidance per capability. They do not claim that a model follows it.
 
 | Caller and transport | Identity or capability | Supported async behavior | Evidence and fallback |
 | --- | --- | --- | --- |
@@ -323,12 +383,13 @@ Async guidance allows independent work, requires checkpoint reads, explains dupl
 | Autopilot child through MCP relay | Trusted task/session, parent-question | Ask direct parent, read, withdraw, wait, correlated parent reply | Parent and ownership races. No direct operator tool or forward. |
 | Autopilot root | No question creation capability | Direct-child reads only. No ask, withdraw, wait, or forward. | Profile tests and backend rejection of creation. |
 | Other no-question profile | No applicable capability | No async creation | Profile tests and backend rejection. |
-| Operator browser through HTTP | Existing workspace visibility and action scope | List, answer, reject operator or forwarded requests | HTTP auth tests and desktop/mobile E2E. Unforwarded parent records remain inaccessible. |
+| Operator browser through HTTP | Existing workspace visibility and action scope | List, answer, reject operator or forwarded requests from chat, or from the Inbox when enabled | HTTP auth tests and desktop/mobile E2E. Unforwarded parent records remain inaccessible. |
 | External MCP, Office, config, Quick Chat | Outside this task-mode contract | No async creation or new async tools | Profile exclusion tests. Existing blocking behavior remains available where already supported. |
 
 This is provider-neutral MCP behavior. Do not claim provider-specific mid-turn push support.
 Existing transport discovery and timeout contracts still apply.
-The existing Inbox visibility flag remains effective. This package changes no flag registry or profile default.
+The existing Inbox flag controls only the Inbox. Async tools and the chat surface do not consult it.
+This package changes no flag registry or profile default.
 
 ## Observability and validation
 

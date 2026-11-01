@@ -37,6 +37,8 @@ import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { useDockviewStore, type TranscriptScrollTarget } from "@/lib/state/dockview-store";
 import { ClarificationPanelSection } from "./chat/clarification-panel-section";
+import { AsyncQuestionStrip } from "./chat/async-question-strip";
+import { useTask } from "@/hooks/use-task";
 import { useComposerAgentStartHint } from "./chat/use-composer-agent-start-hint";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
@@ -1218,6 +1220,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  workspaceId = null,
   statusTaskId = null,
   onOpenFile,
   onOpenHistoricalDiff,
@@ -1272,6 +1275,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const taskOverview = useTask(taskId ?? taskIdHint, detailActive);
+  const asyncQuestionTaskId = taskId ?? taskIdHint;
+  const asyncQuestionWorkspaceId = workspaceId ?? taskOverview?.workspaceId ?? null;
   const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const launchErrorOwned = Boolean(taskLaunchError);
@@ -1660,6 +1666,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
               reservedHeightPx={80}
             />
           )}
+          <AsyncQuestionStrip
+            workspaceId={asyncQuestionWorkspaceId}
+            taskId={asyncQuestionTaskId}
+            hasBlockingClarification={Boolean(pendingClarification)}
+            enabled={!isArchived && detailActive}
+          />
           <div ref={chatFooterRef} className="shrink-0">
             <ChatFooter
               isArchived={isArchived}

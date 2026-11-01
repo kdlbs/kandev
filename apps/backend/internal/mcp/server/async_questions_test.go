@@ -22,6 +22,43 @@ func TestAsyncQuestionsSchemaModes(t *testing.T) {
 	assert.NotContains(t, configProps, requestIDArg)
 }
 
+func TestAsyncQuestionToolDescriptionsByCapability(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		capability mcpprofile.Capability
+		toolName   string
+	}{
+		{name: "operator", capability: mcpprofile.CapabilityUserQuestion, toolName: "ask_user_question_kandev"},
+		{name: "parent", capability: mcpprofile.CapabilityParentQuestion, toolName: "ask_parent_question_kandev"},
+	} {
+		for _, asyncSupported := range []bool{false, true} {
+			t.Run(test.name+map[bool]string{false: "-blocking-only", true: "-async-capable"}[asyncSupported], func(t *testing.T) {
+				capabilities := []mcpprofile.Capability{test.capability}
+				if asyncSupported {
+					capabilities = append(capabilities, mcpprofile.CapabilityAsyncQuestions)
+				}
+				profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, capabilities, nil)
+				server := NewWithProfile(&testBackend{}, "session", "task", 10005, newTestLogger(t), "", false, profile)
+				tool, ok := server.mcpServer.ListTools()[test.toolName]
+				require.True(t, ok)
+				if asyncSupported {
+					assert.Contains(t, tool.Tool.Description, "async=true")
+					assert.Contains(t, tool.Tool.Description, "list_question_answers_kandev")
+					assert.Contains(t, tool.Tool.Description, "wait_for_question_answers_kandev")
+					assert.Contains(t, toolInputProperties(t, server, test.toolName), asyncArg)
+					assert.Contains(t, getRegisteredToolNames(server), "list_question_answers_kandev")
+				} else {
+					assert.NotContains(t, tool.Tool.Description, "async=true")
+					assert.NotContains(t, tool.Tool.Description, "list_question_answers_kandev")
+					assert.NotContains(t, tool.Tool.Description, "wait_for_question_answers_kandev")
+					assert.NotContains(t, toolInputProperties(t, server, test.toolName), asyncArg)
+					assert.NotContains(t, getRegisteredToolNames(server), "list_question_answers_kandev")
+				}
+			})
+		}
+	}
+}
+
 func TestAsyncQuestionsBlockingItemIDsSurviveReceiptFields(t *testing.T) {
 	questions := []map[string]interface{}{
 		{"id": "status", "options": []map[string]interface{}{{"label": "A", "option_id": "a"}}},
@@ -77,7 +114,7 @@ func TestAsyncQuestionsRootCanReadChildQuestions(t *testing.T) {
 	backend := &testBackend{}
 	log := newTestLogger(t)
 	server := NewWithProfile(backend, "root-session", "root-task", 10005, log, "", false,
-		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{mcpprofile.CapabilityAsyncQuestions}, nil))
 	tools := getRegisteredToolNames(server)
 	assert.Contains(t, tools, "list_question_answers_kandev")
 	assert.NotContains(t, tools, "ask_user_question_kandev")

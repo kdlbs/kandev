@@ -161,9 +161,20 @@ func TestAsyncQuestionsParentKeepsChildRunning(t *testing.T) {
 	// The parent receives an immediate durable queue intent, not a pause.
 	deliveries, err := fixture.repo.ListAsyncQuestionDeliveries(ctx, time.Now().UTC().Add(time.Minute), 10)
 	require.NoError(t, err)
-	require.Len(t, deliveries, 1)
-	require.Equal(t, models.AsyncQuestionDeliveryParentQuestion, deliveries[0].Kind)
-	require.Equal(t, parentSession.ID, deliveries[0].DestinationSession)
+	require.Len(t, deliveries, 2)
+	var transcriptDelivery, parentDelivery *models.AsyncQuestionDelivery
+	for _, delivery := range deliveries {
+		switch delivery.Kind {
+		case models.AsyncQuestionDeliveryTranscript:
+			transcriptDelivery = delivery
+		case models.AsyncQuestionDeliveryParentQuestion:
+			parentDelivery = delivery
+		}
+	}
+	require.NotNil(t, transcriptDelivery)
+	require.Equal(t, childSession.ID, transcriptDelivery.DestinationSession)
+	require.NotNil(t, parentDelivery)
+	require.Equal(t, parentSession.ID, parentDelivery.DestinationSession)
 }
 
 type recordingPauser struct {

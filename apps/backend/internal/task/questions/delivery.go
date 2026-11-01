@@ -30,6 +30,7 @@ const (
 	deliveryBackoffBase = 2 * time.Second
 	deliveryBackoffMax  = 2 * time.Minute
 	deliveryPageSize    = 50
+	authoritySweepLimit = 100
 )
 
 // admissionID derives the immutable queue admission identity. A restart or
@@ -87,6 +88,18 @@ func (s *Service) parentNotificationDelivery(question *models.AsyncQuestion) *mo
 		question.ParentTaskID, question.ParentSessionID, content, metadata)
 }
 
+func (s *Service) transcriptDelivery(question *models.AsyncQuestion) *models.AsyncQuestionDelivery {
+	data, _ := json.MarshalIndent(question.Questions, "", "  ")
+	content := fmt.Sprintf("ASYNC QUESTION REQUEST\n\nQuestion ID: %s\nContext: %s\n\nQuestions:\n%s",
+		question.ID, strings.TrimSpace(question.Context), data)
+	metadata := map[string]interface{}{
+		MetadataAsyncQuestionID:   question.ID,
+		MetadataAsyncQuestionKind: string(models.AsyncQuestionDeliveryTranscript),
+	}
+	return s.newDelivery(question, models.AsyncQuestionDeliveryTranscript,
+		question.TaskID, question.SessionID, content, metadata)
+}
+
 func (s *Service) ownerOutcomeDelivery(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) *models.AsyncQuestionDelivery {
 	content := formatOutcomeForOwner(question, outcome)
 	metadata := correlatedMetadata(question, models.AsyncQuestionDeliveryOwner)
@@ -132,8 +145,16 @@ func formatOutcomeForParent(question *models.AsyncQuestion, outcome models.Async
 // ReconcileOnce admits every due durable intent. It returns the number of
 // intents that reached an admission receipt.
 func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
-	if s.queue == nil {
-		return 0, ErrQueueUnavailable
+	stale, staleErr := s.store.ReconcileAsyncQuestionAuthority(ctx, authoritySweepLimit, s.buildWaitWakeDelivery)
+	for _, question := range stale {
+		s.notify(ctx, question, "updated")
+		s.retireParentQuestionPrompt(ctx, question)
+	}
+	if len(stale) > 0 {
+		s.signal()
+	}
+	if staleErr != nil {
+		return 0, staleErr
 	}
 	admitted := 0
 	for {
@@ -160,6 +181,38 @@ func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
 }
 
 func (s *Service) admitDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) (bool, error) {
+	if delivery.Kind == models.AsyncQuestionDeliveryTranscript {
+		return s.admitTranscriptDelivery(ctx, delivery)
+	}
+	return s.admitQueuedDelivery(ctx, delivery)
+}
+
+func (s *Service) admitTranscriptDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) (bool, error) {
+	if s.transcript == nil {
+		return false, ErrTranscriptWriterUnavailable
+	}
+	question, err := s.store.GetAsyncQuestion(ctx, delivery.QuestionID)
+	if err != nil {
+		s.recordDeliveryFailure(ctx, delivery, err)
+		return false, nil
+	}
+	if question == nil {
+		return false, s.store.MarkAsyncQuestionDeliveryAbandoned(ctx, delivery.AdmissionID, "question no longer exists")
+	}
+	if err := s.transcript.WriteAsyncQuestionTranscriptEntry(ctx, delivery, question); err != nil {
+		s.recordDeliveryFailure(ctx, delivery, err)
+		return false, nil
+	}
+	if err := s.store.MarkAsyncQuestionDeliveryAdmitted(ctx, delivery.AdmissionID, s.now()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) admitQueuedDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) (bool, error) {
+	if s.queue == nil {
+		return false, ErrQueueUnavailable
+	}
 	if err := s.queue.AdmitAsyncQuestionDelivery(ctx, delivery); err != nil {
 		if errors.Is(err, ErrDestinationTerminal) {
 			return false, s.store.MarkAsyncQuestionDeliveryAbandoned(ctx, delivery.AdmissionID, err.Error())
@@ -194,7 +247,7 @@ func (s *Service) Start(parent context.Context) {
 		s.logger.Warn("failed to reconcile async question waits on startup", zap.Error(err))
 	}
 	s.lifecycleMu.Lock()
-	if s.running || s.queue == nil {
+	if s.running || (s.queue == nil && s.transcript == nil) {
 		s.lifecycleMu.Unlock()
 		return
 	}
@@ -265,11 +318,15 @@ func (s *Service) buildWaitWakeDelivery(
 	question *models.AsyncQuestion,
 	wait *models.AsyncQuestionWait,
 	version int64,
+	reason string,
 ) *models.AsyncQuestionDelivery {
 	if question == nil || wait == nil {
 		return nil
 	}
 	content := fmt.Sprintf("ASYNC QUESTION WITHDRAWN\n\nQuestion ID: %s\nThe explicit wait for this request is released because the question was withdrawn. Continue with your remaining work.", question.ID)
+	if reason != "withdrawn" {
+		content = fmt.Sprintf("ASYNC QUESTION STALE\n\nQuestion ID: %s\nReason: %s\nThe explicit wait for this request is released because the request can no longer receive an answer. Continue with your remaining work.", question.ID, reason)
+	}
 	delivery := s.newDelivery(question, models.AsyncQuestionDeliveryWake,
 		wait.TaskID, wait.SessionID, content,
 		correlatedMetadata(question, models.AsyncQuestionDeliveryWake))

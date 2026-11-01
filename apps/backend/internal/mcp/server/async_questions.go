@@ -26,11 +26,11 @@ const (
 	maxQuestionIDs       = 50
 )
 
-// asyncQuestionsSupported keeps the async lifecycle on persistent kanban task
-// surfaces. Office, configuration, external, quick-chat, and managed
-// conversation profiles keep their existing question behavior.
+// asyncQuestionsSupported keeps async questions on explicitly capable kanban
+// task sessions. Other surfaces retain their existing question behavior.
 func (s *Server) asyncQuestionsSupported() bool {
-	return s.profile.Surface == mcpprofile.SurfaceKanbanTask
+	return s.profile.Surface == mcpprofile.SurfaceKanbanTask &&
+		s.profile.HasCapability(mcpprofile.CapabilityAsyncQuestions)
 }
 
 // readAsyncMode parses the optional async/request_id arguments strictly. A

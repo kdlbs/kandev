@@ -54,6 +54,7 @@ type AsyncQuestionOutcome struct {
 	Answers      []protocol.Answer `json:"answers,omitempty"`
 	Rejected     bool              `json:"rejected,omitempty"`
 	RejectReason string            `json:"reject_reason,omitempty"`
+	SubmissionID string            `json:"submission_id,omitempty"`
 	// Text is the bundle-level free-text answer a direct parent may give
 	// instead of one structured answer per item.
 	Text            string                     `json:"text,omitempty"`
@@ -108,6 +109,7 @@ type AsyncQuestionForward struct {
 type AsyncQuestionDeliveryKind string
 
 const (
+	AsyncQuestionDeliveryTranscript     AsyncQuestionDeliveryKind = "transcript"
 	AsyncQuestionDeliveryOwner          AsyncQuestionDeliveryKind = "owner"
 	AsyncQuestionDeliveryParentQuestion AsyncQuestionDeliveryKind = "parent_question"
 	AsyncQuestionDeliveryParentOutcome  AsyncQuestionDeliveryKind = "parent_outcome"
@@ -172,6 +174,15 @@ type AsyncQuestionWait struct {
 	UpdatedAt     time.Time
 }
 
+// AsyncQuestionWakeBuilder creates a durable wake intent for one released
+// dependency gate. The reason identifies the terminal outcome that released it.
+type AsyncQuestionWakeBuilder func(
+	question *AsyncQuestion,
+	wait *AsyncQuestionWait,
+	outcomeVersion int64,
+	reason string,
+) *AsyncQuestionDelivery
+
 // ListAsyncQuestionsOptions filters bounded question reads. Every predicate
 // is applied inside the query, never as a post-query filter.
 type ListAsyncQuestionsOptions struct {
@@ -187,7 +198,10 @@ type ListAsyncQuestionsOptions struct {
 	WorkspaceIDs         []string
 	WorkspaceID          string
 	TaskID               string
-	SessionID            string
+	// ConversationTaskID returns operator requests authored by this task and
+	// child requests this task explicitly forwarded.
+	ConversationTaskID string
+	SessionID          string
 	// AuthorSessionID restricts reads to requests authored by exactly this
 	// session (the checkpoint read).
 	AuthorSessionID string

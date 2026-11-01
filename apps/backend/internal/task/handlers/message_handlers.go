@@ -103,6 +103,10 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type taskAsyncQuestionGuidanceResolver interface {
+	TaskSessionAsyncQuestionsSupported(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 type promptTaskWithPromptContext interface {
 	PromptTaskWithPromptContext(
 		ctx context.Context,
@@ -140,6 +144,8 @@ type initialTaskBriefDispatchCoordinator interface {
 type canvasGuidanceProjection struct {
 	resolved                      bool
 	include                       bool
+	asyncQuestionResolved         bool
+	asyncQuestionsSupported       bool
 	preserveDirectPrompt          bool
 	promptReferencesPrepared      bool
 	initialTaskBriefDispatchOwner bool
@@ -247,6 +253,7 @@ func (h *MessageHandlers) injectMessageContext(
 	startCreatedSession bool,
 	titleOwner bool,
 	includeCanvasGuidance bool,
+	asyncQuestionsSupported bool,
 	content string,
 	trustedPromptContext string,
 ) string {
@@ -273,6 +280,7 @@ func (h *MessageHandlers) injectMessageContext(
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		AsyncQuestionsSupported:        asyncQuestionsSupported,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
@@ -288,6 +296,17 @@ func (h *MessageHandlers) resolveCanvasGuidance(
 		return false, nil
 	}
 	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
+func (h *MessageHandlers) resolveAsyncQuestionGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskAsyncQuestionGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.TaskSessionAsyncQuestionsSupported(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -632,6 +651,8 @@ type wsAddMessageRequest struct {
 	// to the created-session dispatch. They are intentionally not JSON fields.
 	canvasGuidanceResolved          bool
 	includeCanvasGuidance           bool
+	asyncQuestionGuidanceResolved   bool
+	asyncQuestionsSupported         bool
 	initialTaskBriefSelected        bool
 	promptReferencesPrepared        bool
 	initialTaskBriefDispatchPending bool
@@ -929,6 +950,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		// receives (and "Show formatted" reveals it).
 		includeCanvasGuidance := false
 		canvasGuidanceResolved := false
+		asyncQuestionsSupported := false
+		asyncQuestionGuidanceResolved := false
 		if task != nil && !task.IsFromOffice && !sessionResp.Session.IsPassthrough && !configMode {
 			canvasGuidanceResolved = true
 			var resolveErr error
@@ -943,13 +966,27 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 					zap.Error(resolveErr))
 				includeCanvasGuidance = false
 			}
+			asyncQuestionGuidanceResolved = true
+			asyncQuestionsSupported, resolveErr = h.resolveAsyncQuestionGuidance(ctx, req.TaskID, req.TaskSessionID)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, orchestrator.ErrTaskSessionPairMismatch) {
+					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task and session do not match", nil)
+				}
+				h.logger.Warn("failed to resolve async question prompt capability; omitting optional guidance",
+					zap.String("task_id", req.TaskID),
+					zap.String("session_id", req.TaskSessionID),
+					zap.Error(resolveErr))
+				asyncQuestionsSupported = false
+			}
 		}
 		storedContent = h.injectMessageContext(
-			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, storedContent,
+			ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, includeCanvasGuidance, asyncQuestionsSupported, storedContent,
 			trustedPromptContext,
 		)
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
+		req.asyncQuestionGuidanceResolved = asyncQuestionGuidanceResolved
+		req.asyncQuestionsSupported = asyncQuestionsSupported
 	}
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
 		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
@@ -1709,6 +1746,8 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			trustedPromptContext, canvasGuidanceProjection{
 				resolved:                      req.canvasGuidanceResolved,
 				include:                       req.includeCanvasGuidance,
+				asyncQuestionResolved:         req.asyncQuestionGuidanceResolved,
+				asyncQuestionsSupported:       req.asyncQuestionsSupported,
 				preserveDirectPrompt:          req.initialTaskBriefSelected,
 				promptReferencesPrepared:      req.promptReferencesPrepared,
 				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
@@ -1811,16 +1850,18 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 				_, err = starter.StartCreatedSessionWithDeliverySubmission(
 					ctx, taskID, sessionID, agentProfileID, content,
 					orchestrator.DirectPromptStartOptions{
-						SkipMessageRecord:        true,
-						PlanMode:                 planMode,
-						Attachments:              attachments,
-						References:               references,
-						PromptReferenceContext:   trustedPromptContext,
-						PromptReferencesPrepared: projection.promptReferencesPrepared,
-						CanvasGuidanceResolved:   projection.resolved,
-						IncludeCanvasGuidance:    projection.include,
-						PreserveDirectPrompt:     projection.preserveDirectPrompt,
-						DeliverySubmissionID:     projection.deliverySubmissionID,
+						SkipMessageRecord:             true,
+						PlanMode:                      planMode,
+						Attachments:                   attachments,
+						References:                    references,
+						PromptReferenceContext:        trustedPromptContext,
+						PromptReferencesPrepared:      projection.promptReferencesPrepared,
+						CanvasGuidanceResolved:        projection.resolved,
+						IncludeCanvasGuidance:         projection.include,
+						AsyncQuestionGuidanceResolved: projection.asyncQuestionResolved,
+						AsyncQuestionsSupported:       projection.asyncQuestionsSupported,
+						PreserveDirectPrompt:          projection.preserveDirectPrompt,
+						DeliverySubmissionID:          projection.deliverySubmissionID,
 					},
 				)
 			}
@@ -1831,6 +1872,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 				content, true, planMode, false, attachments, references, trustedPromptContext,
 				projection.promptReferencesPrepared,
 				projection.resolved, projection.include,
+				projection.asyncQuestionResolved, projection.asyncQuestionsSupported,
 			)
 		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidance); ok && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidance(
@@ -1838,6 +1880,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 				content, true, planMode, false, attachments, references, trustedPromptContext,
 				projection.promptReferencesPrepared,
 				projection.resolved, projection.include,
+				projection.asyncQuestionResolved, projection.asyncQuestionsSupported,
 			)
 		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarter); ok {
 			_, err = starter.StartCreatedSessionWithPromptContext(

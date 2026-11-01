@@ -220,6 +220,10 @@
         "agent-communication"
       ],
       "sources": [
+        "apps/backend/internal/task/questions/http_handlers.go",
+        "apps/backend/internal/task/questions/service.go",
+        "apps/backend/internal/backendapp/async_questions.go",
+        "apps/backend/internal/gateway/websocket/task_notifications.go",
         "apps/backend/internal/mcp/handlers/spawn_session.go",
         "apps/backend/internal/mcp/handlers/parent_question.go",
         "apps/backend/internal/mcp/handlers/agent_permissions.go",
@@ -229,12 +233,17 @@
         "apps/web/components/task/dockview-session-tabs.ts",
         "apps/web/components/threads/thread-task-actions.tsx",
         "apps/web/components/task/task-management-surface.tsx",
+        "apps/web/components/task/chat/async-question-strip.tsx",
+        "apps/web/components/task/chat/messages/agent-question-message.tsx",
+        "apps/web/lib/api/domains/agent-questions-api.ts",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/activity.go",
         "apps/backend/internal/orchestrator/conversation_fork.go",
         "apps/web/components/task/chat/messages/message-actions.tsx"
       ],
       "tests": [
+        "apps/backend/internal/task/questions/http_handlers_test.go",
+        "apps/backend/internal/task/questions/service_test.go",
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
         "apps/backend/internal/mcp/handlers/parent_question_test.go",
         "apps/backend/internal/mcp/handlers/agent_permissions_test.go",
@@ -246,7 +255,11 @@
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/adapter_test.go",
         "apps/backend/internal/agentctl/server/adapter/transport/codexappserver/fork_test.go",
         "apps/backend/internal/orchestrator/conversation_fork_test.go",
-        "apps/web/components/task/chat/messages/message-actions.test.tsx"
+        "apps/web/components/task/chat/messages/message-actions.test.tsx",
+        "apps/web/components/task/chat/async-question-strip.test.tsx",
+        "apps/web/components/task/chat/messages/agent-question-message.test.tsx",
+        "apps/web/e2e/tests/chat/async-agent-questions.spec.ts",
+        "apps/web/e2e/tests/chat/mobile-async-agent-questions.spec.ts"
       ],
       "mcpTools": [
         "answer_question_kandev",

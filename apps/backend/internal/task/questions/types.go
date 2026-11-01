@@ -27,9 +27,14 @@ var (
 	ErrWaitActive = errors.New("an explicit question wait is already active")
 	// ErrQueueUnavailable reports a delivery port that is not wired.
 	ErrQueueUnavailable = errors.New("async question delivery queue is unavailable")
+	// ErrTranscriptWriterUnavailable reports that transcript delivery is not wired.
+	ErrTranscriptWriterUnavailable = errors.New("async question transcript writer is unavailable")
 	// ErrDestinationTerminal reports a destination that can no longer accept
 	// an answer. The intent is abandoned, never redirected.
 	ErrDestinationTerminal = errors.New("async question destination is terminal")
+	// ErrDestinationUnavailable reports a task destination with no active
+	// session yet. The intent remains pending and is retried.
+	ErrDestinationUnavailable = errors.New("async question destination is unavailable")
 )
 
 // Store is the durable repository port. Implementations must make resolution,
@@ -41,10 +46,13 @@ type Store interface {
 	CountOpenAsyncQuestions(ctx context.Context, opts models.ListAsyncQuestionsOptions) (int, error)
 	NextHiddenAsyncQuestionSnooze(ctx context.Context, workspaceID, userID string, now time.Time) (*time.Time, error)
 	ResolveAsyncQuestion(ctx context.Context, id string, outcome models.AsyncQuestionOutcome, deliveries []*models.AsyncQuestionDelivery) (*models.AsyncQuestion, bool, error)
-	WithdrawAsyncQuestion(ctx context.Context, id, authorSessionID, reason string, deliveries []*models.AsyncQuestionDelivery, buildWake func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery) (*models.AsyncQuestion, bool, []*models.AsyncQuestionWait, error)
+	ResolveAsyncQuestionWithWake(ctx context.Context, id string, outcome models.AsyncQuestionOutcome, deliveries []*models.AsyncQuestionDelivery, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, bool, error)
+	WithdrawAsyncQuestion(ctx context.Context, id, authorSessionID, reason string, deliveries []*models.AsyncQuestionDelivery, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, bool, []*models.AsyncQuestionWait, error)
 	ForwardAsyncQuestion(ctx context.Context, forward *models.AsyncQuestionForward) (*models.AsyncQuestion, error)
+	ForwardAsyncQuestionWithWake(ctx context.Context, forward *models.AsyncQuestionForward, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, error)
 	CreateAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error
 	ListAsyncQuestionDeliveries(ctx context.Context, now time.Time, limit int) ([]*models.AsyncQuestionDelivery, error)
+	ListAsyncQuestionDeliveriesForQuestion(ctx context.Context, questionID string, kind models.AsyncQuestionDeliveryKind) ([]*models.AsyncQuestionDelivery, error)
 	MarkAsyncQuestionDeliveryAdmitted(ctx context.Context, admissionID string, at time.Time) error
 	MarkAsyncQuestionDeliveryFailed(ctx context.Context, admissionID string, attempts int, nextAttemptAt time.Time, message string) error
 	MarkAsyncQuestionDeliveryAbandoned(ctx context.Context, admissionID, message string) error
@@ -56,6 +64,8 @@ type Store interface {
 	SetAsyncQuestionWaitStatusFrom(ctx context.Context, waitID string, from, to models.AsyncQuestionWaitStatus, releasedBy string) (bool, error)
 	CancelAsyncQuestionWaitsForSession(ctx context.Context, sessionID, reason string) (int, error)
 	MarkStaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string) (int, error)
+	StaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string, buildWake models.AsyncQuestionWakeBuilder) ([]*models.AsyncQuestion, error)
+	ReconcileAsyncQuestionAuthority(ctx context.Context, limit int, buildWake models.AsyncQuestionWakeBuilder) ([]*models.AsyncQuestion, error)
 	DeleteAsyncQuestionsForTask(ctx context.Context, taskID string) error
 }
 
@@ -66,10 +76,37 @@ type DeliveryQueue interface {
 	AdmitAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error
 }
 
+// DeliveryQueueRetirer removes a parent prompt only while its exact queue
+// admission remains undispatched.
+type DeliveryQueueRetirer interface {
+	RemoveAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error
+}
+
+// TranscriptWriter creates the durable chat entry for an async request.
+// Implementations use the question identity to make retries idempotent.
+type TranscriptWriter interface {
+	WriteAsyncQuestionTranscriptEntry(
+		ctx context.Context,
+		delivery *models.AsyncQuestionDelivery,
+		question *models.AsyncQuestion,
+	) error
+}
+
 // Notifier publishes a workspace-scoped question change after commit. It is
 // optional: Inbox reads and periodic refresh still converge without it.
 type Notifier interface {
-	AsyncQuestionChanged(ctx context.Context, workspaceID, kind, questionID string)
+	AsyncQuestionChanged(ctx context.Context, change QuestionChange)
+}
+
+// QuestionChange carries task routing identity for bounded workspace events.
+type QuestionChange struct {
+	WorkspaceID  string
+	TaskID       string
+	ParentTaskID string
+	SessionID    string
+	Recipient    models.AsyncQuestionRecipient
+	Kind         string
+	QuestionID   string
 }
 
 // SessionStateReader reports whether a wait destination is still answerable.
@@ -97,6 +134,7 @@ type AnswerInput struct {
 	Answers      []Answer
 	Rejected     bool
 	RejectReason string
+	SubmissionID string
 	// Text is a bundle-level free-text answer used by direct parent replies.
 	Text        string
 	Responder   models.AsyncQuestionResponderKind

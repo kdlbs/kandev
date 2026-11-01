@@ -140,6 +140,7 @@ func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithPromptContextAn
 	promptReferenceContext string,
 	_ bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
+	_, _ bool,
 ) (*executor.TaskExecution, error) {
 	o.started <- savedPromptStarted{
 		prompt:                 prompt,

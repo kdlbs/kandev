@@ -303,7 +303,13 @@ export type SessionBackendMessageMap = {
   >;
   "task.question.changed": BackendMessage<
     "task.question.changed",
-    { workspace_id: string; question_id: string; kind: string }
+    {
+      workspace_id: string;
+      question_id: string;
+      kind: string;
+      task_id?: string;
+      parent_task_id?: string;
+    }
   >;
   "session.workspace_recovery.changed": BackendMessage<
     "session.workspace_recovery.changed",

@@ -45,9 +45,9 @@ func (r *Repository) CreateAsyncQuestionWait(ctx context.Context, wait *models.A
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_async_question_waits
-			(id, task_id, session_id, turn_id, status, reason, released_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`),
-		wait.ID, wait.TaskID, wait.SessionID, wait.TurnID, string(wait.Status), wait.Reason,
+			(id, workspace_id, task_id, session_id, turn_id, status, reason, released_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`),
+		wait.ID, wait.WorkspaceID, wait.TaskID, wait.SessionID, wait.TurnID, string(wait.Status), wait.Reason,
 		wait.CreatedAt, wait.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -218,27 +218,6 @@ func (r *Repository) CancelAsyncQuestionWaitsForSession(ctx context.Context, ses
 		return 0, err
 	}
 	affected, _ := result.RowsAffected()
-	return int(affected), nil
-}
-
-// MarkStaleAsyncQuestionsForSession closes pending requests whose author
-// session can no longer receive answers.
-func (r *Repository) MarkStaleAsyncQuestionsForSession(ctx context.Context, sessionID, reason string) (int, error) {
-	now := r.nowUTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_async_questions
-		   SET status = 'stale', withdraw_reason = ?, version = version + 1,
-		       updated_at = ?, resolved_at = ?
-		 WHERE session_id = ? AND status = 'pending'`), reason, now, now, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := result.RowsAffected()
-	if affected > 0 {
-		if _, err := r.CancelAsyncQuestionWaitsForSession(ctx, sessionID, reason); err != nil {
-			return int(affected), err
-		}
-	}
 	return int(affected), nil
 }
 

@@ -21,6 +21,7 @@ import (
 const (
 	defaultHTTPLimit = 50
 	maxHTTPLimit     = 200
+	historyStatus    = "history"
 )
 
 // WorkspaceAuthorizer is the workspace-scope check every operator read and
@@ -61,8 +62,8 @@ func RegisterRoutes(router *gin.Engine, service *Service, tasks WorkspaceAuthori
 	}
 	group := router.Group("/api/v1/agent-questions")
 	group.GET("", h.list)
+	group.GET("/:id", h.get)
 	group.POST("/:id/respond", h.respond)
-	group.POST("/:id/withdraw", h.withdraw)
 	group.GET("/:id/images/:imageID", h.image)
 }
 
@@ -126,6 +127,26 @@ func (h *HTTPHandlers) list(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *HTTPHandlers) get(c *gin.Context) {
+	ctx := c.Request.Context()
+	question, err := h.service.Get(ctx, c.Param("id"))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if h.tasks == nil || question.WorkspaceID == "" ||
+		h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead) != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+	views := h.questionViews(ctx, []*taskmodels.AsyncQuestion{question})
+	if len(views) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+	c.JSON(http.StatusOK, views[0])
+}
+
 func parseListQuery(c *gin.Context) (listQuery, bool) {
 	query := listQuery{
 		workspaceID: strings.TrimSpace(c.Query("workspace_id")),
@@ -138,8 +159,8 @@ func parseListQuery(c *gin.Context) (listQuery, bool) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
 		return query, false
 	}
-	if query.status != "" && query.status != "open" && query.status != "history" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be open or history"})
+	if query.status != "" && query.status != "open" && query.status != historyStatus {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be open or " + historyStatus})
 		return query, false
 	}
 	if raw := c.Query("limit"); raw != "" {
@@ -166,7 +187,7 @@ func (h *HTTPHandlers) readListPage(c *gin.Context, query listQuery) (*taskmodel
 	}
 	var page *taskmodels.AsyncQuestionPage
 	var err error
-	if query.status == "history" {
+	if query.status == historyStatus {
 		page, err = h.service.ListInboxHistory(ctx, query.workspaceID, query.limit, query.cursorAt, query.cursorID)
 	} else {
 		page, err = h.service.ListInbox(ctx, query.workspaceID, query.limit, query.cursorAt, query.cursorID)
@@ -183,6 +204,20 @@ func (h *HTTPHandlers) readTaskPage(c *gin.Context, query listQuery) (*taskmodel
 	if h.directory == nil {
 		c.JSON(http.StatusOK, questionListResponse{Questions: []questionView{}})
 		return nil, true
+	}
+	if query.taskID != "" && query.sessionID == "" {
+		if !h.taskBelongsToWorkspace(ctx, query.taskID, query.workspaceID) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task or session not found"})
+			return nil, true
+		}
+		page, err := h.service.ListTaskConversation(
+			ctx, query.workspaceID, query.taskID, query.status, query.limit, query.cursorAt, query.cursorID,
+		)
+		if err != nil {
+			h.writeError(c, err)
+			return nil, true
+		}
+		return page, false
 	}
 	taskID, sessionID, ok := h.resolveScopedTask(ctx, query)
 	if !ok {
@@ -252,11 +287,17 @@ func (h *HTTPHandlers) respond(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
 		return
 	}
+	if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
 	if err := h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "workspace access is not authorized"})
 		return
 	}
-	input := AnswerInput{Rejected: body.Rejected, RejectReason: body.RejectReason}
+	input := AnswerInput{
+		Rejected: body.Rejected, RejectReason: body.RejectReason, SubmissionID: body.SubmissionID,
+	}
 	for _, answer := range body.Answers {
 		input.Answers = append(input.Answers, Answer{
 			QuestionID:      answer.QuestionID,
@@ -276,13 +317,6 @@ func (h *HTTPHandlers) respond(c *gin.Context) {
 		"status":    string(updated.Status),
 		"questions": views,
 	})
-}
-
-func (h *HTTPHandlers) withdraw(c *gin.Context) {
-	// Operator withdrawal is deliberately absent: only the author session may
-	// withdraw. The route exists so an accidental operator call is an explicit
-	// non-disclosing failure rather than a mutation.
-	c.JSON(http.StatusForbidden, gin.H{"error": "only the author session can withdraw a question"})
 }
 
 func (h *HTTPHandlers) image(c *gin.Context) {
@@ -340,9 +374,9 @@ func (h *HTTPHandlers) questionViews(ctx context.Context, questions []*taskmodel
 		return views
 	}
 	titles, sessionStates := h.loadQuestionEnrichment(ctx, questions)
-	waitingBySession := h.waitingSessions(ctx, questions)
+	waitingByQuestion := h.waitingQuestions(ctx, questions)
 	for _, question := range questions {
-		views = append(views, buildQuestionView(question, titles, sessionStates, waitingBySession))
+		views = append(views, buildQuestionView(question, titles, sessionStates, waitingByQuestion))
 	}
 	return views
 }
@@ -390,13 +424,20 @@ func questionTaskIDs(questions []*taskmodels.AsyncQuestion) []string {
 	return taskIDs
 }
 
-func (h *HTTPHandlers) waitingSessions(ctx context.Context, questions []*taskmodels.AsyncQuestion) map[string]bool {
-	waiting := make(map[string]bool, len(questions))
+func (h *HTTPHandlers) waitingQuestions(ctx context.Context, questions []*taskmodels.AsyncQuestion) map[string]bool {
+	sessionIDs := make([]string, 0, len(questions))
+	seen := make(map[string]struct{}, len(questions))
 	for _, question := range questions {
-		if _, seen := waiting[question.SessionID]; seen {
+		if _, exists := seen[question.SessionID]; exists {
 			continue
 		}
-		waiting[question.SessionID] = h.service.HasParkedWait(ctx, question.SessionID)
+		seen[question.SessionID] = struct{}{}
+		sessionIDs = append(sessionIDs, question.SessionID)
+	}
+	waiting, err := h.service.WaitingQuestionIDs(ctx, sessionIDs)
+	if err != nil {
+		h.logger.Warn("failed to load async question wait dependencies", zap.Error(err))
+		return map[string]bool{}
 	}
 	return waiting
 }
@@ -404,7 +445,7 @@ func (h *HTTPHandlers) waitingSessions(ctx context.Context, questions []*taskmod
 func buildQuestionView(
 	question *taskmodels.AsyncQuestion,
 	titles, sessionStates map[string]string,
-	waitingBySession map[string]bool,
+	waitingByQuestion map[string]bool,
 ) questionView {
 	return questionView{
 		QuestionID:      question.ID,
@@ -421,7 +462,7 @@ func buildQuestionView(
 		Questions:       question.Questions,
 		Outcome:         question.Outcome,
 		WithdrawReason:  question.WithdrawReason,
-		Waiting:         waitingBySession[question.SessionID],
+		Waiting:         waitingByQuestion[question.ID],
 		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:       question.UpdatedAt.UTC().Format(time.RFC3339),
 	}

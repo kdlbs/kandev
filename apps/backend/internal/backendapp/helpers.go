@@ -1212,7 +1212,8 @@ func registerRoutes(p routeParams) {
 		queue: p.orchestratorSvc.GetMessageQueue(), sessions: p.taskRepo,
 		readiness: p.orchestratorSvc, log: p.log.Zap(),
 	})
-	asyncQuestionSvc.SetNotifier(asyncQuestionNotifier{bus: p.eventBus})
+	asyncQuestionSvc.SetTranscriptWriter(&asyncQuestionTranscriptWriter{reader: p.taskRepo, creator: p.taskSvc})
+	asyncQuestionSvc.SetNotifier(asyncQuestionNotifier{bus: p.eventBus, pendingActions: p.taskSvc, log: p.log.Zap()})
 	asyncQuestionSvc.SetSessionStateReader(asyncQuestionSessionState{sessions: p.taskRepo})
 	asyncQuestionSvc.SetWakeDestination(func(ctx context.Context, taskID, sessionID string) {
 		p.orchestratorSvc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)

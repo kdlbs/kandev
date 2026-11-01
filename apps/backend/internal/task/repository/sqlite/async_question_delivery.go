@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -26,7 +28,30 @@ func (r *Repository) ListAsyncQuestionDeliveries(ctx context.Context, now time.T
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	deliveries := make([]*models.AsyncQuestionDelivery, 0, limit)
+	return scanAsyncQuestionDeliveryRows(rows, limit)
+}
+
+func (r *Repository) ListAsyncQuestionDeliveriesForQuestion(
+	ctx context.Context,
+	questionID string,
+	kind models.AsyncQuestionDeliveryKind,
+) ([]*models.AsyncQuestionDelivery, error) {
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(`
+		SELECT admission_id, question_id, outcome_version, kind, destination_task_id,
+		       destination_session_id, destination_incarnation_id, content, metadata_json, state, attempts,
+		       next_attempt_at, last_error, created_at, admitted_at
+		  FROM task_async_question_deliveries
+		 WHERE question_id = ? AND kind = ?
+		 ORDER BY created_at ASC, admission_id ASC`), questionID, string(kind))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanAsyncQuestionDeliveryRows(rows, 0)
+}
+
+func scanAsyncQuestionDeliveryRows(rows *sqlx.Rows, capacity int) ([]*models.AsyncQuestionDelivery, error) {
+	deliveries := make([]*models.AsyncQuestionDelivery, 0, capacity)
 	for rows.Next() {
 		var (
 			delivery     models.AsyncQuestionDelivery

@@ -18,6 +18,11 @@ type asyncQuestionSessionReader interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 }
 
+type asyncQuestionActiveSessionReader interface {
+	asyncQuestionSessionReader
+	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+}
+
 // asyncQuestionQueueAdapter translates one immutable delivery intent into the
 // existing exact-session queue admission. The stored admission id is the
 // replay identity, so a crash after admission repeats the same queue row.
@@ -41,17 +46,27 @@ func (a *asyncQuestionQueueAdapter) AdmitAsyncQuestionDelivery(ctx context.Conte
 	if a == nil || a.queue == nil {
 		return questions.ErrQueueUnavailable
 	}
-	if err := a.validateDestination(ctx, delivery); err != nil {
+	destination, err := a.resolveDeliveryDestination(ctx, delivery)
+	if err != nil {
 		return err
 	}
-	identity, err := a.queue.ResolveSessionIdentity(ctx, delivery.DestinationTaskID, delivery.DestinationSession)
+	if err := a.validateDestination(ctx, destination); err != nil {
+		return err
+	}
+	identity, err := a.queue.ResolveSessionIdentity(ctx, destination.DestinationTaskID, destination.DestinationSession)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
+			if parentQuestionDelivery(delivery) {
+				return questions.ErrDestinationUnavailable
+			}
 			return questions.ErrDestinationTerminal
 		}
 		return err
 	}
-	if delivery.DestinationIncarnationID != "" && identity.SessionIncarnationID != delivery.DestinationIncarnationID {
+	if destination.DestinationIncarnationID != "" && identity.SessionIncarnationID != destination.DestinationIncarnationID {
+		if parentQuestionDelivery(delivery) {
+			return questions.ErrDestinationUnavailable
+		}
 		return questions.ErrDestinationTerminal
 	}
 	metadata := make(map[string]interface{}, len(delivery.Metadata)+2)
@@ -60,7 +75,7 @@ func (a *asyncQuestionQueueAdapter) AdmitAsyncQuestionDelivery(ctx context.Conte
 	}
 	metadata[questions.MetadataAsyncQuestionNotification] = true
 	_, _, err = a.queue.QueueMessageWithMetadataForSessionWithClientQueueID(
-		ctx, identity, delivery.AdmissionID, delivery.Content, "", asyncQuestionQueueActor,
+		ctx, identity, delivery.AdmissionID, destination.Content, "", asyncQuestionQueueActor,
 		false, nil, metadata, nil,
 	)
 	if err != nil {
@@ -75,6 +90,91 @@ func (a *asyncQuestionQueueAdapter) AdmitAsyncQuestionDelivery(ctx context.Conte
 	return nil
 }
 
+func (a *asyncQuestionQueueAdapter) RemoveAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error {
+	if delivery == nil {
+		return nil
+	}
+	if a == nil || a.queue == nil {
+		return questions.ErrQueueUnavailable
+	}
+	destination, err := a.resolveDeliveryDestination(ctx, delivery)
+	if errors.Is(err, questions.ErrDestinationUnavailable) || errors.Is(err, questions.ErrDestinationTerminal) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	identity, err := a.queue.ResolveSessionIdentity(ctx, destination.DestinationTaskID, destination.DestinationSession)
+	if err != nil {
+		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
+			return nil
+		}
+		return err
+	}
+	if destination.DestinationIncarnationID != "" && identity.SessionIncarnationID != destination.DestinationIncarnationID {
+		return nil
+	}
+	return a.removeQueueAdmission(ctx, identity, destination)
+}
+
+func (a *asyncQuestionQueueAdapter) removeQueueAdmission(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	delivery *models.AsyncQuestionDelivery,
+) error {
+	metadata := make(map[string]interface{}, len(delivery.Metadata)+2)
+	for key, value := range delivery.Metadata {
+		metadata[key] = value
+	}
+	metadata[questions.MetadataAsyncQuestionNotification] = true
+	queued, found, err := a.queue.LookupQueueAdmissionWithClientQueueID(
+		ctx, identity, delivery.AdmissionID, delivery.Content, "", asyncQuestionQueueActor, false, nil, metadata)
+	if err != nil {
+		return err
+	}
+	if !found || queued == nil {
+		return nil
+	}
+	if _, err := a.queue.RemoveEntryForSession(ctx, identity, queued.ID); errors.Is(err, messagequeue.ErrEntryNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *asyncQuestionQueueAdapter) resolveDeliveryDestination(
+	ctx context.Context,
+	delivery *models.AsyncQuestionDelivery,
+) (*models.AsyncQuestionDelivery, error) {
+	if !parentQuestionDelivery(delivery) || a.sessions == nil {
+		return delivery, nil
+	}
+	reader, ok := a.sessions.(asyncQuestionActiveSessionReader)
+	if !ok {
+		return nil, questions.ErrDestinationUnavailable
+	}
+	session, err := reader.GetActiveTaskSessionByTaskID(ctx, delivery.DestinationTaskID)
+	if errors.Is(err, models.ErrTaskSessionNotFound) || (err == nil && session == nil) {
+		return nil, questions.ErrDestinationUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != delivery.DestinationTaskID || session.ID == "" || terminalAsyncQuestionSessionState(string(session.State)) {
+		return nil, questions.ErrDestinationUnavailable
+	}
+	resolved := *delivery
+	resolved.DestinationSession = session.ID
+	resolved.DestinationIncarnationID = session.QueueIncarnationID
+	return &resolved, nil
+}
+
+func parentQuestionDelivery(delivery *models.AsyncQuestionDelivery) bool {
+	return delivery != nil && (delivery.Kind == models.AsyncQuestionDeliveryParentQuestion ||
+		delivery.Kind == models.AsyncQuestionDeliveryParentOutcome)
+}
+
 func (a *asyncQuestionQueueAdapter) validateDestination(ctx context.Context, delivery *models.AsyncQuestionDelivery) error {
 	if a.sessions == nil {
 		return nil
@@ -84,6 +184,9 @@ func (a *asyncQuestionQueueAdapter) validateDestination(ctx context.Context, del
 		return err
 	}
 	if session == nil || session.TaskID != delivery.DestinationTaskID || terminalAsyncQuestionSessionState(string(session.State)) {
+		if parentQuestionDelivery(delivery) {
+			return questions.ErrDestinationUnavailable
+		}
 		return questions.ErrDestinationTerminal
 	}
 	task, err := a.sessions.GetTask(ctx, delivery.DestinationTaskID)
@@ -108,19 +211,37 @@ func terminalAsyncQuestionSessionState(state string) bool {
 // asyncQuestionNotifier publishes a bounded change notice. Clients invalidate
 // their bounded read; a periodic refresh still recovers missed events.
 type asyncQuestionNotifier struct {
-	bus bus.EventBus
+	bus            bus.EventBus
+	pendingActions asyncQuestionPendingActionPublisher
+	log            *zap.Logger
 }
 
-func (n asyncQuestionNotifier) AsyncQuestionChanged(ctx context.Context, workspaceID, kind, questionID string) {
+type asyncQuestionPendingActionPublisher interface {
+	AsyncQuestionWaitChanged(ctx context.Context, taskID, sessionID string) error
+}
+
+func (n asyncQuestionNotifier) AsyncQuestionChanged(ctx context.Context, change questions.QuestionChange) {
 	if n.bus == nil {
 		return
 	}
-	event := bus.NewEvent("task.question."+kind, "async-questions", map[string]interface{}{
-		"workspace_id": workspaceID,
-		"question_id":  questionID,
-		"kind":         kind,
+	event := bus.NewEvent("task.question."+change.Kind, "async-questions", map[string]interface{}{
+		"workspace_id":   change.WorkspaceID,
+		"task_id":        change.TaskID,
+		"parent_task_id": change.ParentTaskID,
+		"session_id":     change.SessionID,
+		"recipient":      string(change.Recipient),
+		"question_id":    change.QuestionID,
+		"kind":           change.Kind,
 	})
-	_ = n.bus.Publish(ctx, "task.question."+kind, event)
+	_ = n.bus.Publish(ctx, "task.question."+change.Kind, event)
+	if change.Kind == "wait_changed" && n.pendingActions != nil {
+		if err := n.pendingActions.AsyncQuestionWaitChanged(ctx, change.TaskID, change.SessionID); err != nil && n.log != nil {
+			n.log.Warn("failed to publish async question pending action",
+				zap.String("task_id", change.TaskID),
+				zap.String("session_id", change.SessionID),
+				zap.Error(err))
+		}
+	}
 }
 
 // asyncQuestionSessionState reads the mutable destination state through the

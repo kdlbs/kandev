@@ -19,7 +19,17 @@ func (r *Repository) ResolveAsyncQuestion(
 	outcome models.AsyncQuestionOutcome,
 	deliveries []*models.AsyncQuestionDelivery,
 ) (*models.AsyncQuestion, bool, error) {
-	return r.closeAsyncQuestion(ctx, id, "", "", outcome, deliveries, false)
+	return r.ResolveAsyncQuestionWithWake(ctx, id, outcome, deliveries, nil)
+}
+
+func (r *Repository) ResolveAsyncQuestionWithWake(
+	ctx context.Context,
+	id string,
+	outcome models.AsyncQuestionOutcome,
+	deliveries []*models.AsyncQuestionDelivery,
+	buildWake models.AsyncQuestionWakeBuilder,
+) (*models.AsyncQuestion, bool, error) {
+	return r.closeAsyncQuestion(ctx, id, "", "", outcome, deliveries, false, buildWake)
 }
 
 // WithdrawAsyncQuestion closes a pending request as withdrawn without
@@ -28,7 +38,7 @@ func (r *Repository) WithdrawAsyncQuestion(
 	ctx context.Context,
 	id, authorSessionID, reason string,
 	deliveries []*models.AsyncQuestionDelivery,
-	buildWake func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) (*models.AsyncQuestion, bool, []*models.AsyncQuestionWait, error) {
 	question, won, released, err := r.closeAsyncQuestionWithWaits(ctx, id, authorSessionID, reason, models.AsyncQuestionOutcome{}, deliveries, true, buildWake)
 	return question, won, released, err
@@ -40,8 +50,9 @@ func (r *Repository) closeAsyncQuestion(
 	outcome models.AsyncQuestionOutcome,
 	deliveries []*models.AsyncQuestionDelivery,
 	withdraw bool,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) (*models.AsyncQuestion, bool, error) {
-	question, won, _, err := r.closeAsyncQuestionWithWaits(ctx, id, authorSessionID, withdrawReason, outcome, deliveries, withdraw, nil)
+	question, won, _, err := r.closeAsyncQuestionWithWaits(ctx, id, authorSessionID, withdrawReason, outcome, deliveries, withdraw, buildWake)
 	return question, won, err
 }
 
@@ -51,7 +62,7 @@ func (r *Repository) closeAsyncQuestionWithWaits(
 	outcome models.AsyncQuestionOutcome,
 	deliveries []*models.AsyncQuestionDelivery,
 	withdraw bool,
-	buildWake func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) (*models.AsyncQuestion, bool, []*models.AsyncQuestionWait, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -75,7 +86,7 @@ func (r *Repository) closeAsyncQuestionWithWaits(
 	if current.Status.Terminal() {
 		return current, false, nil, tx.Commit()
 	}
-	if err := r.authorizeAsyncQuestionCloseTx(ctx, tx, current, authorSessionID, withdraw, outcome); err != nil {
+	if err := r.authorizeAsyncQuestionCloseTx(ctx, tx, current, authorSessionID, withdraw, outcome, buildWake); err != nil {
 		return nil, false, nil, err
 	}
 
@@ -109,6 +120,7 @@ func (r *Repository) authorizeAsyncQuestionCloseTx(
 	authorSessionID string,
 	withdraw bool,
 	outcome models.AsyncQuestionOutcome,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
 	action := asyncQuestionAuthorityResolveOperator
 	if withdraw {
@@ -116,9 +128,11 @@ func (r *Repository) authorizeAsyncQuestionCloseTx(
 	} else if outcome.ResponderKind == models.AsyncQuestionResponderParent {
 		action = asyncQuestionAuthorityResolveParent
 	}
-	err := r.validateAsyncQuestionAuthorityTx(ctx, tx, current, action, outcome.ResponderID)
+	err := r.validateAsyncQuestionAuthorityTx(ctx, tx, current, action, outcome.ResponderID, buildWake)
 	if errors.Is(err, models.ErrAsyncQuestionStale) {
-		_ = tx.Commit()
+		if commitErr := tx.Commit(); commitErr != nil {
+			return commitErr
+		}
 	}
 	return err
 }
@@ -191,29 +205,30 @@ func (r *Repository) validateAsyncQuestionAuthorityTx(
 	question *models.AsyncQuestion,
 	action asyncQuestionAuthority,
 	responderParentID string,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
 	if question == nil {
 		return ErrAsyncQuestionNotFound
 	}
-	parentID, err := r.validateTaskAuthorityTx(ctx, tx, question)
+	parentID, err := r.validateTaskAuthorityTx(ctx, tx, question, buildWake)
 	if err != nil {
 		return err
 	}
-	if err := r.validateSessionAuthorityTx(ctx, tx, question, action); err != nil {
+	if err := r.validateSessionAuthorityTx(ctx, tx, question, action, buildWake); err != nil {
 		return err
 	}
 	if question.Recipient != models.AsyncQuestionRecipientParent {
 		return nil
 	}
-	return r.validateParentAuthorityTx(ctx, tx, question, action, responderParentID, parentID)
+	return r.validateParentAuthorityTx(ctx, tx, question, action, responderParentID, parentID, buildWake)
 }
 
-func (r *Repository) validateTaskAuthorityTx(ctx context.Context, tx *sqlx.Tx, question *models.AsyncQuestion) (string, error) {
+func (r *Repository) validateTaskAuthorityTx(ctx context.Context, tx *sqlx.Tx, question *models.AsyncQuestion, buildWake models.AsyncQuestionWakeBuilder) (string, error) {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		var locked string
 		err := tx.QueryRowxContext(ctx, r.db.Rebind("SELECT id FROM tasks WHERE id = ?"+forUpdateClause), question.TaskID).Scan(&locked)
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "task_missing")
+			return "", r.markAsyncQuestionStaleTx(ctx, tx, question, "task_missing", buildWake)
 		}
 		if err != nil {
 			return "", err
@@ -225,13 +240,13 @@ func (r *Repository) validateTaskAuthorityTx(ctx context.Context, tx *sqlx.Tx, q
 		`SELECT workspace_id, parent_id, archived_at FROM tasks WHERE id = ?`), question.TaskID,
 	).Scan(&workspaceID, &parentID, &archivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "task_missing")
+		return "", r.markAsyncQuestionStaleTx(ctx, tx, question, "task_missing", buildWake)
 	}
 	if err != nil {
 		return "", err
 	}
 	if archivedAt.Valid || workspaceID != question.WorkspaceID {
-		return "", r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "task_ownership_changed")
+		return "", r.markAsyncQuestionStaleTx(ctx, tx, question, "task_ownership_changed", buildWake)
 	}
 	return parentID, nil
 }
@@ -241,25 +256,26 @@ func (r *Repository) validateSessionAuthorityTx(
 	tx *sqlx.Tx,
 	question *models.AsyncQuestion,
 	action asyncQuestionAuthority,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
 	var sessionTaskID, sessionState, sessionIncarnation string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(
 		`SELECT task_id, state, queue_incarnation_id FROM task_sessions WHERE id = ?`), question.SessionID,
 	).Scan(&sessionTaskID, &sessionState, &sessionIncarnation)
 	if errors.Is(err, sql.ErrNoRows) {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "session_missing")
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "session_missing", buildWake)
 	}
 	if err != nil {
 		return err
 	}
 	if sessionTaskID != question.TaskID {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "session_reassigned")
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "session_reassigned", buildWake)
 	}
 	if question.SessionIncarnationID != "" && sessionIncarnation != question.SessionIncarnationID {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "session_incarnation_changed")
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "session_incarnation_changed", buildWake)
 	}
 	if action != asyncQuestionAuthorityWithdraw && terminalAsyncQuestionSessionState(sessionState) {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "session_terminal")
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "session_terminal", buildWake)
 	}
 	return nil
 }
@@ -270,9 +286,13 @@ func (r *Repository) validateParentAuthorityTx(
 	question *models.AsyncQuestion,
 	action asyncQuestionAuthority,
 	responderParentID, parentID string,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
 	if parentID == "" || parentID != question.ParentTaskID {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "parent_changed")
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "parent_changed", buildWake)
+	}
+	if err := r.validateParentTaskAuthorityTx(ctx, tx, question, parentID, buildWake); err != nil {
+		return err
 	}
 	switch action {
 	case asyncQuestionAuthorityResolveParent:
@@ -280,7 +300,7 @@ func (r *Repository) validateParentAuthorityTx(
 			return ErrAsyncQuestionForwardUnauthorized
 		}
 	case asyncQuestionAuthorityForward:
-		return r.validateParentForwardAuthorityTx(ctx, tx, question)
+		return nil
 	case asyncQuestionAuthorityResolveOperator:
 		var forwarded string
 		err := tx.QueryRowxContext(ctx, r.db.Rebind(
@@ -293,28 +313,41 @@ func (r *Repository) validateParentAuthorityTx(
 			return err
 		}
 		if forwarded != parentID {
-			return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "forward_parent_changed")
+			return r.markAsyncQuestionStaleTx(ctx, tx, question, "forward_parent_changed", buildWake)
 		}
 	}
 	return nil
 }
 
-func (r *Repository) validateParentForwardAuthorityTx(
+func (r *Repository) validateParentTaskAuthorityTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	question *models.AsyncQuestion,
+	parentID string,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
-	if question.ParentSessionIncarnationID == "" {
-		return nil
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var locked string
+		err := tx.QueryRowxContext(ctx, r.db.Rebind("SELECT id FROM tasks WHERE id = ?"+forUpdateClause), parentID).Scan(&locked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return r.markAsyncQuestionStaleTx(ctx, tx, question, "parent_missing", buildWake)
+		}
+		if err != nil {
+			return err
+		}
 	}
-	var parentIncarnation string
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(
-		`SELECT queue_incarnation_id FROM task_sessions WHERE id = ?`), question.ParentSessionID,
-	).Scan(&parentIncarnation)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && parentIncarnation != question.ParentSessionIncarnationID) {
-		return r.markAsyncQuestionStaleTx(ctx, tx, question.ID, "parent_session_changed")
+	var parentArchived sql.NullTime
+	err := tx.QueryRowxContext(ctx, r.db.Rebind("SELECT archived_at FROM tasks WHERE id = ?"), parentID).Scan(&parentArchived)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "parent_missing", buildWake)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if parentArchived.Valid {
+		return r.markAsyncQuestionStaleTx(ctx, tx, question, "parent_archived", buildWake)
+	}
+	return nil
 }
 
 func terminalAsyncQuestionSessionState(state string) bool {
@@ -326,24 +359,102 @@ func terminalAsyncQuestionSessionState(state string) bool {
 	}
 }
 
-func (r *Repository) markAsyncQuestionStaleTx(ctx context.Context, tx *sqlx.Tx, id, reason string) error {
-	now := r.nowUTC()
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_async_questions
-		   SET status = 'stale', withdraw_reason = ?, version = version + 1,
-		       updated_at = ?, resolved_at = ?
-		 WHERE id = ? AND status = 'pending'`), reason, now, now, id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_async_question_waits
-		   SET status = 'cancelled', released_by = 'authority_invalidated', updated_at = ?
-		 WHERE status IN ('requested', 'release_requested', 'parked')
-		   AND id IN (SELECT wait_id FROM task_async_question_wait_dependencies WHERE question_id = ?)`),
-		now, id); err != nil {
+func (r *Repository) markAsyncQuestionStaleTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	question *models.AsyncQuestion,
+	reason string,
+	buildWake models.AsyncQuestionWakeBuilder,
+) error {
+	if err := r.transitionAsyncQuestionStaleTx(ctx, tx, question, reason, buildWake); err != nil {
 		return err
 	}
 	return models.ErrAsyncQuestionStale
+}
+
+func (r *Repository) transitionAsyncQuestionStaleTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	question *models.AsyncQuestion,
+	reason string,
+	buildWake models.AsyncQuestionWakeBuilder,
+) error {
+	now := r.nowUTC()
+	version := question.Version + 1
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_async_questions
+		   SET status = 'stale', withdraw_reason = ?, version = ?, updated_at = ?, resolved_at = ?
+		 WHERE id = ? AND status = 'pending' AND version = ?`),
+		reason, version, now, now, question.ID, question.Version)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return nil
+	}
+	released, err := r.releaseAsyncQuestionWaitsTx(ctx, tx, question.ID, now, "stale:"+reason)
+	if err != nil {
+		return err
+	}
+	if question.Recipient == models.AsyncQuestionRecipientParent {
+		if err := r.abandonParentQuestionIntentsTx(ctx, tx, question.ID, reason); err != nil {
+			return err
+		}
+	}
+	if buildWake == nil || len(released) == 0 {
+		return nil
+	}
+	live, err := r.asyncQuestionAuthorLiveTx(ctx, tx, question)
+	if err != nil || !live {
+		return err
+	}
+	wakes := make([]*models.AsyncQuestionDelivery, 0, len(released))
+	for _, wait := range released {
+		if wait.TaskID != question.TaskID || wait.SessionID != question.SessionID {
+			continue
+		}
+		if delivery := buildWake(question, wait, version, reason); delivery != nil {
+			wakes = append(wakes, delivery)
+		}
+	}
+	return r.insertAsyncQuestionDeliveriesTx(ctx, tx, question.ID, version, now, wakes)
+}
+
+func (r *Repository) asyncQuestionAuthorLiveTx(ctx context.Context, tx *sqlx.Tx, question *models.AsyncQuestion) (bool, error) {
+	var taskID, state, incarnation string
+	var taskFound sql.NullString
+	var archivedAt sql.NullTime
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT session.task_id, session.state, session.queue_incarnation_id, task.id, task.archived_at
+		  FROM task_sessions AS session
+		  LEFT JOIN tasks AS task ON task.id = session.task_id
+		 WHERE session.id = ?`), question.SessionID,
+	).Scan(&taskID, &state, &incarnation, &taskFound, &archivedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if taskID != question.TaskID || !taskFound.Valid || archivedAt.Valid || terminalAsyncQuestionSessionState(state) {
+		return false, nil
+	}
+	if question.SessionIncarnationID != "" && incarnation != question.SessionIncarnationID {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (r *Repository) abandonParentQuestionIntentsTx(ctx context.Context, tx *sqlx.Tx, questionID, reason string) error {
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_async_question_deliveries
+		   SET state = 'abandoned', last_error = ?
+		 WHERE question_id = ? AND kind = 'parent_question' AND state = 'pending'`), reason, questionID)
+	return err
 }
 
 func (r *Repository) finalizeAsyncQuestionTx(
@@ -355,7 +466,7 @@ func (r *Repository) finalizeAsyncQuestionTx(
 	withdrawReason string,
 	now time.Time,
 	deliveries []*models.AsyncQuestionDelivery,
-	buildWake func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) (models.AsyncQuestionStatus, int64, bool, []*models.AsyncQuestionWait, error) {
 	status, nextVersion, won, err := r.applyAsyncQuestionTerminalTx(ctx, tx, current, outcome, withdraw, withdrawReason, now)
 	if err != nil || !won {
@@ -364,12 +475,17 @@ func (r *Repository) finalizeAsyncQuestionTx(
 	if err := r.insertAsyncQuestionDeliveriesTx(ctx, tx, current.ID, nextVersion, now, deliveries); err != nil {
 		return status, nextVersion, false, nil, err
 	}
+	if withdraw {
+		if err := r.abandonParentQuestionIntentsTx(ctx, tx, current.ID, "withdrawn"); err != nil {
+			return status, nextVersion, false, nil, err
+		}
+	}
 	released, err := r.releaseAsyncQuestionWaitsTx(ctx, tx, current.ID, now, string(status))
 	if err != nil {
 		return status, nextVersion, false, nil, err
 	}
 	if withdraw && buildWake != nil {
-		if err := r.insertWithdrawWakesTx(ctx, tx, current.ID, nextVersion, now, released, buildWake); err != nil {
+		if err := r.insertWithdrawWakesTx(ctx, tx, current, nextVersion, now, released, buildWake); err != nil {
 			return status, nextVersion, false, nil, err
 		}
 	}
@@ -379,22 +495,22 @@ func (r *Repository) finalizeAsyncQuestionTx(
 func (r *Repository) insertWithdrawWakesTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	questionID string,
+	question *models.AsyncQuestion,
 	version int64,
 	now time.Time,
 	released []*models.AsyncQuestionWait,
-	buildWake func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery,
+	buildWake models.AsyncQuestionWakeBuilder,
 ) error {
 	wakeDeliveries := make([]*models.AsyncQuestionDelivery, 0, len(released))
 	for _, wait := range released {
 		if wait.Status == models.AsyncQuestionWaitReleaseRequested {
 			continue
 		}
-		if delivery := buildWake(wait, version); delivery != nil {
+		if delivery := buildWake(question, wait, version, "withdrawn"); delivery != nil {
 			wakeDeliveries = append(wakeDeliveries, delivery)
 		}
 	}
-	return r.insertAsyncQuestionDeliveriesTx(ctx, tx, questionID, version, now, wakeDeliveries)
+	return r.insertAsyncQuestionDeliveriesTx(ctx, tx, question.ID, version, now, wakeDeliveries)
 }
 
 // ErrAsyncQuestionNotAuthor reports a withdrawal attempted by another session.
@@ -474,6 +590,14 @@ func (r *Repository) lockAsyncQuestionTx(ctx context.Context, tx *sqlx.Tx, id st
 // first forward wins; a repeated forward by the same parent is idempotent and
 // a different parent is rejected without changing ownership.
 func (r *Repository) ForwardAsyncQuestion(ctx context.Context, forward *models.AsyncQuestionForward) (*models.AsyncQuestion, error) {
+	return r.ForwardAsyncQuestionWithWake(ctx, forward, nil)
+}
+
+func (r *Repository) ForwardAsyncQuestionWithWake(
+	ctx context.Context,
+	forward *models.AsyncQuestionForward,
+	buildWake models.AsyncQuestionWakeBuilder,
+) (*models.AsyncQuestion, error) {
 	if err := validateAsyncQuestionForward(forward); err != nil {
 		return nil, err
 	}
@@ -498,9 +622,11 @@ func (r *Repository) ForwardAsyncQuestion(ctx context.Context, forward *models.A
 	if err := authorizeAsyncQuestionForward(question, forward); err != nil {
 		return nil, err
 	}
-	if err := r.validateAsyncQuestionAuthorityTx(ctx, tx, question, asyncQuestionAuthorityForward, ""); err != nil {
+	if err := r.validateAsyncQuestionAuthorityTx(ctx, tx, question, asyncQuestionAuthorityForward, "", buildWake); err != nil {
 		if errors.Is(err, models.ErrAsyncQuestionStale) {
-			_ = tx.Commit()
+			if commitErr := tx.Commit(); commitErr != nil {
+				return nil, commitErr
+			}
 		}
 		return nil, err
 	}
@@ -540,8 +666,7 @@ func (r *Repository) upsertAsyncQuestionForwardTx(ctx context.Context, tx *sqlx.
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (question_id) DO UPDATE SET
 			reason = task_async_question_forwards.reason
-		WHERE task_async_question_forwards.parent_task_id = excluded.parent_task_id
-		  AND task_async_question_forwards.parent_session_id = excluded.parent_session_id`),
+		WHERE task_async_question_forwards.parent_task_id = excluded.parent_task_id`),
 		forward.QuestionID, forward.ParentTaskID, forward.ParentSessionID, forward.Reason, forward.CreatedAt,
 	)
 	return err

@@ -33,6 +33,7 @@ const (
 type Service struct {
 	store           Store
 	queue           DeliveryQueue
+	transcript      TranscriptWriter
 	notifier        Notifier
 	lookup          TaskLookup
 	sessions        SessionStateReader
@@ -67,6 +68,9 @@ func NewService(store Store, lookup TaskLookup, logger *zap.Logger) *Service {
 
 // SetDeliveryQueue wires exact-session queue admission.
 func (s *Service) SetDeliveryQueue(queue DeliveryQueue) { s.queue = queue }
+
+// SetTranscriptWriter wires idempotent transcript entry creation.
+func (s *Service) SetTranscriptWriter(writer TranscriptWriter) { s.transcript = writer }
 
 // SetNotifier wires workspace-scoped change publication.
 func (s *Service) SetNotifier(notifier Notifier) { s.notifier = notifier }
@@ -136,7 +140,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*CreateResult,
 		Status:                     models.AsyncQuestionStatusPending,
 		Version:                    1,
 	}
-	deliveries := make([]*models.AsyncQuestionDelivery, 0, 1)
+	deliveries := []*models.AsyncQuestionDelivery{s.transcriptDelivery(question)}
 	if question.Recipient == models.AsyncQuestionRecipientParent {
 		deliveries = append(deliveries, s.parentNotificationDelivery(question))
 	}
@@ -263,6 +267,36 @@ func (s *Service) ListOwn(ctx context.Context, sessionID string, statuses []mode
 		return nil, err
 	}
 	opts.AuthorSessionID = sessionID
+	return s.store.ListAsyncQuestions(ctx, opts)
+}
+
+// ListTaskConversation returns operator requests authored by a task across
+// its sessions and child requests that task explicitly forwarded.
+func (s *Service) ListTaskConversation(
+	ctx context.Context,
+	workspaceID, taskID, status string,
+	limit int,
+	cursorAt, cursorID string,
+) (*models.AsyncQuestionPage, error) {
+	if workspaceID == "" || taskID == "" {
+		return nil, fmt.Errorf("%w: workspace and task are required", ErrValidation)
+	}
+	opts, err := buildListOptions(nil, nil, limit, cursorAt, cursorID)
+	if err != nil {
+		return nil, err
+	}
+	opts.WorkspaceID = workspaceID
+	opts.ConversationTaskID = taskID
+	if status == "history" {
+		opts.Statuses = []models.AsyncQuestionStatus{
+			models.AsyncQuestionStatusAnswered,
+			models.AsyncQuestionStatusRejected,
+			models.AsyncQuestionStatusWithdrawn,
+			models.AsyncQuestionStatusStale,
+		}
+	} else {
+		opts.OpenOnly = true
+	}
 	return s.store.ListAsyncQuestions(ctx, opts)
 }
 
@@ -437,9 +471,6 @@ func (s *Service) ResolveParent(ctx context.Context, questionID, parentTaskID, p
 		question.ParentTaskID == "" || question.ParentTaskID != parentTaskID {
 		return nil, false, ErrUnauthorized
 	}
-	if question.ParentSessionID != "" && parentSessionID != "" && question.ParentSessionID != parentSessionID {
-		return nil, false, ErrUnauthorized
-	}
 	input.Responder = models.AsyncQuestionResponderParent
 	input.ResponderID = parentTaskID
 	return s.resolve(ctx, question, input, models.AsyncQuestionResponderParent, parentTaskID)
@@ -453,7 +484,7 @@ func (s *Service) resolve(
 	responderID string,
 ) (*models.AsyncQuestion, bool, error) {
 	if question.Status.Terminal() {
-		return question, false, nil
+		return question, asyncQuestionWonBySubmission(question, input.SubmissionID), nil
 	}
 	var outcome models.AsyncQuestionOutcome
 	var err error
@@ -470,6 +501,7 @@ func (s *Service) resolve(
 	}
 	outcome.ResponderKind = responderKind
 	outcome.ResponderID = responderID
+	outcome.SubmissionID = input.SubmissionID
 	outcome.ResponderTaskID = question.ParentTaskID
 	if responderKind == models.AsyncQuestionResponderUser {
 		outcome.ResponderTaskID = ""
@@ -480,15 +512,24 @@ func (s *Service) resolve(
 	if question.Recipient == models.AsyncQuestionRecipientParent && question.ParentSessionID != "" {
 		deliveries = append(deliveries, s.parentOutcomeDelivery(question, outcome))
 	}
-	updated, won, err := s.store.ResolveAsyncQuestion(ctx, question.ID, outcome, deliveries)
+	updated, won, err := s.store.ResolveAsyncQuestionWithWake(ctx, question.ID, outcome, deliveries, s.buildWaitWakeDelivery)
 	if err != nil {
+		s.handleStaleQuestionError(ctx, question.ID, err)
 		return nil, false, normalizeStoreError(err)
+	}
+	if !won && asyncQuestionWonBySubmission(updated, input.SubmissionID) {
+		return updated, true, nil
 	}
 	if won {
 		s.notify(ctx, updated, "updated")
 		s.signal()
 	}
 	return updated, won, nil
+}
+
+func asyncQuestionWonBySubmission(question *models.AsyncQuestion, submissionID string) bool {
+	return submissionID != "" && question != nil && question.Outcome != nil &&
+		question.Outcome.SubmissionID == submissionID
 }
 
 func buildOutcome(questions []protocol.Question, input AnswerInput) (models.AsyncQuestionOutcome, error) {
@@ -552,14 +593,13 @@ func (s *Service) Withdraw(ctx context.Context, questionID, authorSessionID, rea
 		return nil, ErrUnauthorized
 	}
 	deliveries := make([]*models.AsyncQuestionDelivery, 0, 1)
-	buildWake := func(wait *models.AsyncQuestionWait, version int64) *models.AsyncQuestionDelivery {
-		return s.buildWaitWakeDelivery(question, wait, version)
-	}
 	updated, won, _, err := s.store.WithdrawAsyncQuestion(
-		ctx, questionID, authorSessionID, strings.TrimSpace(reason), deliveries, buildWake)
+		ctx, questionID, authorSessionID, strings.TrimSpace(reason), deliveries, s.buildWaitWakeDelivery)
 	if err != nil {
+		s.handleStaleQuestionError(ctx, questionID, err)
 		return nil, normalizeStoreError(err)
 	}
+	s.retireParentQuestionPrompt(ctx, updated)
 	if won {
 		s.notify(ctx, updated, "updated")
 		s.signal()
@@ -580,14 +620,15 @@ func (s *Service) Forward(ctx context.Context, questionID, parentTaskID, parentS
 	if question.Recipient != models.AsyncQuestionRecipientParent || question.ParentTaskID != parentTaskID {
 		return nil, ErrUnauthorized
 	}
-	updated, err := s.store.ForwardAsyncQuestion(ctx, &models.AsyncQuestionForward{
+	updated, err := s.store.ForwardAsyncQuestionWithWake(ctx, &models.AsyncQuestionForward{
 		QuestionID:      questionID,
 		ParentTaskID:    parentTaskID,
 		ParentSessionID: parentSessionID,
 		Reason:          strings.TrimSpace(reason),
 		CreatedAt:       s.now(),
-	})
+	}, s.buildWaitWakeDelivery)
 	if err != nil {
+		s.handleStaleQuestionError(ctx, questionID, err)
 		return nil, normalizeStoreError(err)
 	}
 	s.notify(ctx, updated, "forwarded")
@@ -608,14 +649,18 @@ func (s *Service) MarkSessionStale(ctx context.Context, sessionID, reason string
 	if sessionID == "" {
 		return 0, nil
 	}
-	count, err := s.store.MarkStaleAsyncQuestionsForSession(ctx, sessionID, reason)
+	updated, err := s.store.StaleAsyncQuestionsForSession(ctx, sessionID, reason, s.buildWaitWakeDelivery)
+	for _, question := range updated {
+		s.notify(ctx, question, "updated")
+		s.retireParentQuestionPrompt(ctx, question)
+	}
+	if len(updated) > 0 {
+		s.signal()
+	}
 	if err != nil {
-		return count, err
+		return len(updated), err
 	}
-	if _, err := s.store.CancelAsyncQuestionWaitsForSession(ctx, sessionID, reason); err != nil {
-		return count, err
-	}
-	return count, nil
+	return len(updated), nil
 }
 
 // CancelActiveWait cancels the session's gate when a newer prompt supersedes
@@ -631,6 +676,46 @@ func (s *Service) CancelActiveWait(ctx context.Context, sessionID, reason string
 // ActiveWait returns the session's requested or parked gate, if any.
 func (s *Service) ActiveWait(ctx context.Context, sessionID string) (*models.AsyncQuestionWait, error) {
 	return s.store.GetActiveAsyncQuestionWait(ctx, sessionID)
+}
+
+// WaitingQuestionIDs returns dependencies in parked or releasing gates. It
+// reads each unique session gate once so unrelated requests stay runnable.
+func (s *Service) WaitingQuestionIDs(ctx context.Context, sessionIDs []string) (map[string]bool, error) {
+	waiting := make(map[string]bool)
+	seen := make(map[string]struct{}, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		if sessionID == "" {
+			continue
+		}
+		if _, exists := seen[sessionID]; exists {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		wait, err := s.store.GetActiveAsyncQuestionWait(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if wait == nil || (wait.Status != models.AsyncQuestionWaitParked &&
+			wait.Status != models.AsyncQuestionWaitReleaseRequested) {
+			continue
+		}
+		if s.sessions != nil {
+			state, archived, found, stateErr := s.sessions.AsyncQuestionSessionState(ctx, sessionID)
+			if stateErr != nil {
+				return nil, stateErr
+			}
+			if !found || archived || terminalSessionState(state) {
+				if cancelErr := s.store.SetAsyncQuestionWaitStatus(ctx, wait.ID, models.AsyncQuestionWaitCancelled, "destination_terminal"); cancelErr != nil {
+					return nil, cancelErr
+				}
+				continue
+			}
+		}
+		for _, questionID := range wait.DependencyIDs {
+			waiting[questionID] = true
+		}
+	}
+	return waiting, nil
 }
 
 // HasParkedWait reports whether completion must remain withheld for an
@@ -684,5 +769,40 @@ func (s *Service) notify(ctx context.Context, question *models.AsyncQuestion, ki
 	if s.notifier == nil || question == nil {
 		return
 	}
-	s.notifier.AsyncQuestionChanged(ctx, question.WorkspaceID, kind, question.ID)
+	s.notifier.AsyncQuestionChanged(ctx, QuestionChange{
+		WorkspaceID: question.WorkspaceID, TaskID: question.TaskID, ParentTaskID: question.ParentTaskID,
+		SessionID: question.SessionID, Recipient: question.Recipient, Kind: kind, QuestionID: question.ID,
+	})
+}
+
+func (s *Service) handleStaleQuestionError(ctx context.Context, questionID string, err error) {
+	if !errors.Is(err, models.ErrAsyncQuestionStale) {
+		return
+	}
+	question, readErr := s.Get(ctx, questionID)
+	if readErr != nil || question == nil || question.Status != models.AsyncQuestionStatusStale {
+		return
+	}
+	s.notify(ctx, question, "updated")
+	s.retireParentQuestionPrompt(ctx, question)
+	s.signal()
+}
+
+func (s *Service) retireParentQuestionPrompt(ctx context.Context, question *models.AsyncQuestion) {
+	retirer, ok := s.queue.(DeliveryQueueRetirer)
+	if !ok || question == nil || question.Recipient != models.AsyncQuestionRecipientParent ||
+		(question.Status != models.AsyncQuestionStatusWithdrawn && question.Status != models.AsyncQuestionStatusStale) {
+		return
+	}
+	deliveries, err := s.store.ListAsyncQuestionDeliveriesForQuestion(ctx, question.ID, models.AsyncQuestionDeliveryParentQuestion)
+	if err != nil {
+		s.logger.Warn("failed to load parent question prompt for cleanup", zap.String("question_id", question.ID), zap.Error(err))
+		return
+	}
+	for _, delivery := range deliveries {
+		if err := retirer.RemoveAsyncQuestionDelivery(ctx, delivery); err != nil {
+			s.logger.Warn("failed to remove undispatched parent question prompt",
+				zap.String("question_id", question.ID), zap.String("admission_id", delivery.AdmissionID), zap.Error(err))
+		}
+	}
 }

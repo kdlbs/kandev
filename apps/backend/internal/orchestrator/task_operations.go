@@ -660,14 +660,17 @@ func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidance(
 	promptReferenceContext string,
 	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
+	asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		startCreatedSessionOptions{
-			canvasGuidanceResolved:   canvasGuidanceResolved,
-			includeCanvasGuidance:    includeCanvasGuidance,
-			promptReferencesPrepared: promptReferencesPrepared,
+			canvasGuidanceResolved:        canvasGuidanceResolved,
+			includeCanvasGuidance:         includeCanvasGuidance,
+			asyncQuestionGuidanceResolved: asyncQuestionGuidanceResolved,
+			asyncQuestionsSupported:       asyncQuestionsSupported,
+			promptReferencesPrepared:      promptReferencesPrepared,
 		},
 	)
 }
@@ -684,15 +687,18 @@ func (s *Service) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservin
 	promptReferenceContext string,
 	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
+	asyncQuestionGuidanceResolved, asyncQuestionsSupported bool,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		startCreatedSessionOptions{
-			canvasGuidanceResolved:   canvasGuidanceResolved,
-			includeCanvasGuidance:    includeCanvasGuidance,
-			promptReferencesPrepared: promptReferencesPrepared,
-			preserveDirectPrompt:     true,
+			canvasGuidanceResolved:        canvasGuidanceResolved,
+			includeCanvasGuidance:         includeCanvasGuidance,
+			asyncQuestionGuidanceResolved: asyncQuestionGuidanceResolved,
+			asyncQuestionsSupported:       asyncQuestionsSupported,
+			promptReferencesPrepared:      promptReferencesPrepared,
+			preserveDirectPrompt:          true,
 		},
 	)
 }
@@ -709,11 +715,13 @@ func (s *Service) StartCreatedSessionWithDeliverySubmission(
 		start.SkipMessageRecord, start.PlanMode, start.AutoStart,
 		start.Attachments, start.References, start.PromptReferenceContext,
 		startCreatedSessionOptions{
-			canvasGuidanceResolved:   start.CanvasGuidanceResolved,
-			includeCanvasGuidance:    start.IncludeCanvasGuidance,
-			promptReferencesPrepared: start.PromptReferencesPrepared,
-			preserveDirectPrompt:     start.PreserveDirectPrompt,
-			deliverySubmissionID:     start.DeliverySubmissionID,
+			canvasGuidanceResolved:        start.CanvasGuidanceResolved,
+			includeCanvasGuidance:         start.IncludeCanvasGuidance,
+			asyncQuestionGuidanceResolved: start.AsyncQuestionGuidanceResolved,
+			asyncQuestionsSupported:       start.AsyncQuestionsSupported,
+			promptReferencesPrepared:      start.PromptReferencesPrepared,
+			preserveDirectPrompt:          start.PreserveDirectPrompt,
+			deliverySubmissionID:          start.DeliverySubmissionID,
 		},
 	)
 }
@@ -786,6 +794,10 @@ type startCreatedSessionOptions struct {
 	// locally because no earlier producer has made a trusted decision.
 	canvasGuidanceResolved bool
 	includeCanvasGuidance  bool
+	// asyncQuestionGuidanceResolved carries the capability projection made by
+	// the prompt producer. When false, this launch resolves it locally.
+	asyncQuestionGuidanceResolved bool
+	asyncQuestionsSupported       bool
 	// promptReferencesPrepared records that the caller accepted the exact
 	// server-owned expansion snapshot, including an empty snapshot.
 	promptReferencesPrepared bool
@@ -1061,6 +1073,7 @@ func (s *Service) startCreatedSession(
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	includeCanvasGuidance := false
+	asyncQuestionsSupported := false
 	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
 		if options.canvasGuidanceResolved {
 			includeCanvasGuidance = options.includeCanvasGuidance
@@ -1070,11 +1083,19 @@ func (s *Service) startCreatedSession(
 				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
 			}
 		}
+		if options.asyncQuestionGuidanceResolved {
+			asyncQuestionsSupported = options.asyncQuestionsSupported
+		} else {
+			asyncQuestionsSupported, err = s.taskSessionAsyncQuestionsSupported(ctx, taskID, session, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve async question prompt capability: %w", err)
+			}
+		}
 	}
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
-			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, references, promptReferenceContext,
+			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, asyncQuestionsSupported, references, promptReferenceContext,
 		)
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
@@ -1219,7 +1240,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	prompt, taskID, sessionID string,
 	session *models.TaskSession,
 	dbTask *models.Task,
-	isOfficeTask, configMode, titleOwner, includeCanvasGuidance bool,
+	isOfficeTask, configMode, titleOwner, includeCanvasGuidance, asyncQuestionsSupported bool,
 	references []v1.EntityReference,
 	promptReferenceContext string,
 ) string {
@@ -1247,6 +1268,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
 			IncludeCanvasGuidance:          includeCanvasGuidance,
+			AsyncQuestionsSupported:        asyncQuestionsSupported,
 			Autopilot:                      dbTask.Autopilot,
 			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
 			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
@@ -2077,10 +2099,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
 		includeCanvasGuidance := false
+		asyncQuestionsSupported := false
 		if !isOfficeTask && !skipKandevMCPWrap && !configMode {
 			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, task.ID, launchSession, true)
 			if err != nil {
 				return nil, failPreparedLaunch(fmt.Errorf("failed to resolve canvas prompt capability: %w", err))
+			}
+			asyncQuestionsSupported, err = s.taskSessionAsyncQuestionsSupported(ctx, task.ID, launchSession, true)
+			if err != nil {
+				return nil, failPreparedLaunch(fmt.Errorf("failed to resolve async question prompt capability: %w", err))
 			}
 		}
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
@@ -2093,6 +2120,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			referenceContext:          promptReferenceContext,
 			includeTaskTitleTool:      !configMode && titleOwner,
 			includeCanvasGuidance:     includeCanvasGuidance,
+			asyncQuestionsSupported:   asyncQuestionsSupported,
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
@@ -2218,6 +2246,7 @@ type launchPromptContext struct {
 	configMode                bool
 	includeTaskTitleTool      bool
 	includeCanvasGuidance     bool
+	asyncQuestionsSupported   bool
 	autopilot                 bool
 	includeParentQuestionTool bool
 	referenceContext          string
@@ -2259,6 +2288,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
+		AsyncQuestionsSupported:        p.asyncQuestionsSupported,
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
