@@ -713,6 +713,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -1352,6 +1353,21 @@ func startGatewayAndServe(
 		return false
 	}
 
+	// Wire subscription usage provider into the office agents service so the
+	// /agents/:id/utilization endpoint can fetch live utilization data.
+	// The added settings read surface shares this cache but is independently gated.
+	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
+		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+		if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		}
+		if cfg.Features.ProviderUsageLimits {
+			allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+			agentSettingsController.SetProfileUsageProvider(allowances)
+			lifecycleMgr.SetProviderTurnAdmission(allowances)
+		}
+	}
+
 	if err := repos.RequiredStores.ValidateComplete(); err != nil {
 		log.Error("Required-store bootstrap is incomplete", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1539,14 +1555,6 @@ func startGatewayAndServe(
 			)
 		})
 		return restoreQuiesceErr
-	}
-
-	// Wire subscription usage provider into the office agents service so the
-	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
-	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
