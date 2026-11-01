@@ -164,7 +164,7 @@ func pluginExecutorRecordMatchesEnvironment(environment *models.TaskEnvironment,
 // row belongs to.
 func cleanupPendingEnvironment(record *models.ExecutorRunning) (*models.TaskEnvironment, bool) {
 	inventory, err := decodePluginExecutorInventory(record.Metadata)
-	if err != nil || inventory.Phase != pluginExecutorPhaseCleanupPending || inventory.EnvironmentID == "" || inventory.EnvironmentGeneration <= 0 {
+	if err != nil || !pluginExecutorCleanupOwed(inventory.Phase) || inventory.EnvironmentID == "" || inventory.EnvironmentGeneration <= 0 {
 		return nil, false
 	}
 	return &models.TaskEnvironment{ID: inventory.EnvironmentID, TaskID: record.TaskID, OwnershipGeneration: inventory.EnvironmentGeneration}, true
