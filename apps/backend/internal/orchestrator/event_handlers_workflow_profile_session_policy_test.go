@@ -288,6 +288,8 @@ func TestHandleAgentCompleted_ProfileSessionStopIntentSuppressesParkedSwitch(t *
 func TestHandleAgentStopped_ProfileSessionStopIntentSuppressesParkedSwitch(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
+	observer := &settlingBackgroundWorkObserver{}
+	svc.SetBackgroundWorkObserver(observer)
 
 	svc.handleAgentStopped(ctx, watcher.AgentEventData{
 		TaskID: "t1", SessionID: "session-a", AgentExecutionID: "execution-a",
@@ -310,6 +312,9 @@ func TestHandleAgentStopped_ProfileSessionStopIntentSuppressesParkedSwitch(t *te
 	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
 	if !ok || !intent.Consumed {
 		t.Fatalf("matching stopped stop intent = %#v, want durable consumed tombstone", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
+	}
+	if got := observer.settledSessions(); len(got) != 1 || got[0] != session.ID {
+		t.Fatalf("settled background workloads = %v, want matching stopped session", got)
 	}
 }
 
@@ -1115,6 +1120,12 @@ func TestSwitchSessionForStep_ParkOnEndContinuesWhenRuntimeStopFails(t *testing.
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	fixture.agentMgr.stopAgentErr = errors.New("runtime teardown failed")
+	fixture.agentMgr.isAgentRunning = false
+	fixture.agentMgr.rowLivenessFn = func(*models.ExecutorRunning) models.ProcessLiveness {
+		return models.ProcessLivenessDead
+	}
+	observer := &settlingBackgroundWorkObserver{}
+	fixture.svc.SetBackgroundWorkObserver(observer)
 
 	selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
 		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy,
@@ -1135,5 +1146,8 @@ func TestSwitchSessionForStep_ParkOnEndContinuesWhenRuntimeStopFails(t *testing.
 	intent, ok := workflowProfileSwitchStopIntentFromMetadata(source.Metadata)
 	if !ok || intent.Consumed {
 		t.Fatalf("source stop intent after runtime stop failure = %#v, want active intent", source.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
+	}
+	if got := observer.settledSessions(); len(got) != 1 || got[0] != fixture.current.ID {
+		t.Fatalf("settled background workloads = %v, want the parked source session", got)
 	}
 }

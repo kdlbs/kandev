@@ -11411,6 +11411,20 @@ func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID strin
 	if s.sessionHasLiveClarification(ctx, sessionID) {
 		return true
 	}
+	if _, inFlight := s.steerInFlight.Load(sessionID); inFlight {
+		return true
+	}
+	if settler := s.backgroundWorkSettler(); settler != nil {
+		sessionIDs, err := settler.ListSessionIDsWithOpenBackgroundWork(ctx)
+		if err != nil {
+			return true
+		}
+		for _, candidate := range sessionIDs {
+			if candidate == sessionID {
+				return true
+			}
+		}
+	}
 	return s.pendingQueuedDispatch(sessionID) != nil || s.isQueuedDispatchAccepted(sessionID)
 }
 

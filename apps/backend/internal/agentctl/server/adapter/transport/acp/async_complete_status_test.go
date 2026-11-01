@@ -192,3 +192,38 @@ func TestHandleACPUpdate_StatuslessToolUpdateKeepsPromptGeneration(t *testing.T)
 		t.Fatalf("prompt generation = %d, want 42", update.PromptGeneration)
 	}
 }
+
+func TestHandleACPUpdate_StatuslessMetadataDoesNotReactivateCompletedTool(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }()
+
+		a.handleACPUpdate(makeNotification("session", acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: "tool",
+				Title:      "Read",
+				Kind:       acp.ToolKind("read"),
+				Status:     acp.ToolCallStatus("in_progress"),
+			},
+		}), 0)
+		completed := acp.ToolCallStatus("completed")
+		a.handleACPUpdate(makeNotification("session", acp.SessionUpdate{
+			ToolCallUpdate: &acp.SessionToolCallUpdate{ToolCallId: "tool", Status: &completed},
+		}), 0)
+		title := "Read package metadata"
+		a.handleACPUpdate(makeNotification("session", acp.SessionUpdate{
+			ToolCallUpdate: &acp.SessionToolCallUpdate{ToolCallId: "tool", Title: &title},
+		}), 0)
+
+		a.asyncTurnMu.Lock()
+		active := len(a.asyncTurnFinalizers["session"].activeTools)
+		a.asyncTurnMu.Unlock()
+		if active != 0 {
+			t.Fatalf("status-less metadata reactivated %d completed tool(s)", active)
+		}
+		if _, completed := drainAdapterEventsWithoutComplete(t, a, 50*time.Millisecond); completed != 1 {
+			t.Fatalf("synthetic completions = %d, want exactly 1", completed)
+		}
+	})
+}

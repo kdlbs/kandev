@@ -24,30 +24,37 @@ process environment. The diagnostic bundle reader in `internal/debug` is a consu
 ## Retention
 
 `acpLogManager.prune` applies the age cap and then the count cap, oldest first by
-mtime. The count cap currently ignores open writers, and `removeFile` closes the
-writer before deleting the file. A burst of new files can therefore delete a live
-session's log. Later frames then start a new file without the earlier history.
+mtime. Both caps call `removeFileIfNoOpenWriter`, which checks the process-local
+writer registry and removes the file while holding the same mutex used by
+`getWriter`. This makes the check and removal atomic with new writer
+registration, so a concurrent frame cannot reopen an unmanaged file after the
+janitor checks it.
 
-The count cap partitions candidates first. A file held by an entry in
-`acpLogManager.writers` is never a deletion candidate, and it still counts toward
-the limit. The directory can exceed the limit only by the number of open writers,
-which live sessions bound. The age cap keeps its existing `writerActiveSince` rule.
+An active segment held by an entry in `acpLogManager.writers` is not a deletion
+candidate, and it still counts toward the count limit. The directory can exceed
+the limit only by the number of active writers when no other candidates remain.
+The age cap uses the same open-writer check; after an idle writer closes, normal
+mtime-based retention can remove its file.
 
-Only the writers of the pruning process are visible. A second agentctl sharing the
-directory is not protected, and environment isolation removes the known source of
-that pressure.
+The registry protects only active segments held by this agentctl process.
+Rotated segments are not associated with their live writer and may be removed by
+retention. A second agentctl sharing the directory is not protected. Cross-process
+coordination and rotated-segment grouping are outside this design.
 
 ## Environment isolation
 
-Agent subprocesses inherit agentctl's environment, so a nested `go test` writes
-through the same flag to the same directory. `KANDEV_DEBUG_AGENT_MESSAGES`,
+Agent subprocesses inherit agentctl's environment, so a nested `go test` could
+write through the same flag to the same directory. `KANDEV_DEBUG_AGENT_MESSAGES`,
 `KANDEV_DEBUG_LOG_DIR`, and the `KANDEV_DEBUG_ACP_*` settings are removed in one
 shared predicate used by `CollectAgentEnvWithoutAdditional`,
-`collectAgentEnvWithError`, and `sanitizeEnvForAgent`. agentctl reads its own
-process environment, so its logging is unaffected.
+`collectAgentEnvWithError`, `sanitizeEnvForAgent`, and ACP terminal creation.
+The terminal path applies the predicate to both the inherited environment and
+explicit overrides. agentctl reads its own process environment, so its logging
+is unaffected.
 
 The `acp` test package gains a `TestMain` that points `KANDEV_DEBUG_LOG_DIR` at a
-temporary directory, for developers who run tests from a debug shell.
+temporary directory, for developers who run tests from a debug shell. If that
+directory cannot be created, the test process exits before running tests.
 
 ## Failure and recovery
 

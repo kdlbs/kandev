@@ -1,6 +1,6 @@
 # ADR-2026-11-01-claude-async-task-lifecycle-capability: Settle Claude background shells from the bridge's task lifecycle
 
-**Status:** proposed (blocked)
+**Status:** rejected
 **Date:** 2026-11-01
 **Area:** backend
 
@@ -19,19 +19,19 @@ and advertising the capability adds other notifications and a tool-call marker.
 
 ## Decision
 
-Advertise `asyncTasks` only when the connected bridge advertises it, and consume
-only terminal state for a workload already recognized by `toolCallId`. Ignore
-stop controls, spawn cards, and progress.
-
-Adoption depends on a recorded capture proving that the capability leaves
-transcript content, turn completion, and prompt admission unchanged. If the
-capture fails, do not advertise it. Rows then settle from process-end evidence only.
+Reject this adoption proposal for the captured bridge behavior. Kandev does not
+advertise `asyncTasks` or consume its task-lifecycle frames. Process-end evidence
+remains the settlement path while the proposal is rejected.
 
 ## Consequences
 
-- Detached shells settle with their reported outcome while the agent is alive.
-- Kandev depends on an AIR-namespaced extension that the bridge can change.
-  Negotiation keeps an older or changed bridge on process-end settlement.
+- `AC-AGENTS-BACKGROUND-WORK-010.2` remains undelivered for detached shells while
+  their owning Claude agent remains alive.
+- The recorded capability adds a task-notification follow-up turn and message.
+  Adopting that behavior requires a product decision.
+- The pinned SDK cannot represent `async_task_state_update`; an unknown frame
+  loses the workload identifiers before adapter handling. Adoption also needs
+  SDK support or a safe raw-frame path.
 
 ## Alternatives considered
 
@@ -44,7 +44,7 @@ capture fails, do not advertise it. Rows then settle from process-end evidence o
 
 ## Outcome
 
-Proposed and blocked. The capture was recorded against bridge 0.81.2:
+Rejected for this proposal. The capture was recorded against bridge 0.81.2:
 advertising `asyncTasks` makes the bridge send `async_task_spawned`,
 `async_task_progress`, and terminal `async_task_state_update` frames carrying
 `asyncTaskId` and the launch tool's `toolCallId`; without it, none are sent.
@@ -52,9 +52,11 @@ The capture also shows that the capability adds a task-notification follow-up
 turn when the job completes, so adoption still needs a product decision on that
 transcript/turn difference.
 
-The remaining blocker is the pinned `acp-go-sdk`, which cannot represent
-`async_task_state_update`: an unknown discriminator is decoded as an empty
-`user_message_chunk`, losing the identifiers before the adapter can read them.
-Adoption resumes when the SDK exposes the variant (or the adapter gains a safe
-raw-frame path). Until then, process-end settlement stays authoritative (see
-`REQ-AGENTS-BACKGROUND-WORK-010.1`), and `010.2` is not yet delivered.
+The capture shows both a protocol implementation blocker and a product decision
+point. The pinned `acp-go-sdk` cannot represent `async_task_state_update`: an
+unknown discriminator is decoded as an empty `user_message_chunk`, losing the
+identifiers before the adapter can read them. The capture also adds a
+task-notification follow-up turn. A future proposal may reopen after SDK support
+or a safe raw-frame path is available and product approves that transcript/turn
+behavior. Until then, process-end settlement stays authoritative (see
+`REQ-AGENTS-BACKGROUND-WORK-010.1`), and `010.2` is not delivered.

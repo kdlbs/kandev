@@ -23,7 +23,7 @@ func TestSessionAdmissionActiveReflectsHeldAndWaitingGates(t *testing.T) {
 	holderDone := make(chan struct{})
 	go func() {
 		defer close(holderDone)
-		_ = svc.WithSessionAdmission(ctx, sessionID, func(context.Context) error {
+		_ = svc.WithPromptAdmission(ctx, sessionID, func(context.Context) error {
 			close(entered)
 			<-release
 			return nil
@@ -35,8 +35,19 @@ func TestSessionAdmissionActiveReflectsHeldAndWaitingGates(t *testing.T) {
 	watcherDone := make(chan struct{})
 	go func() {
 		defer close(watcherDone)
-		_ = svc.WithSessionAdmission(ctx, sessionID, func(context.Context) error { return nil })
+		_ = svc.WithPromptAdmission(ctx, sessionID, func(context.Context) error { return nil })
 	}()
+	require.Eventually(t, func() bool {
+		svc.admissionMu.Lock()
+		defer svc.admissionMu.Unlock()
+		entry := svc.admissions[sessionID]
+		if entry == nil {
+			return false
+		}
+		entry.gate.stateMu.Lock()
+		defer entry.gate.stateMu.Unlock()
+		return len(entry.gate.waiters) == 1
+	}, time.Second, time.Millisecond, "prompt admission did not reach the gate waiter queue")
 	require.True(t, svc.SessionAdmissionActive(sessionID), "waiting admission was not reported active")
 
 	close(release)
@@ -45,4 +56,23 @@ func TestSessionAdmissionActiveReflectsHeldAndWaitingGates(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return !svc.SessionAdmissionActive(sessionID)
 	}, 2*time.Second, 10*time.Millisecond, "admission stayed active after every holder returned")
+}
+
+func TestSessionAdmissionActiveIgnoresGenericQueueAdmission(t *testing.T) {
+	svc := NewServiceMemory(logger.Default())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = svc.WithSessionAdmission(context.Background(), "session", func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	require.False(t, svc.SessionAdmissionActive("session"))
+	close(release)
+	<-done
 }

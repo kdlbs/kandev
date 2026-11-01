@@ -44,7 +44,7 @@ A status-less tool update stops blocking the idle finalizer, and the provider en
 ## Verification
 
 ```bash
-(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath ./internal/agentctl/server/adapter/transport/acp -run 'AsyncTurn|HandleACPUpdate' -count=1)
+(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run 'AsyncTurn|HandleACPUpdate' -count=1)
 (cd apps/backend && make build-mock-agent)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/chat/queue-after-background-followup.spec.ts
 ```
@@ -56,6 +56,9 @@ pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/chat/queu
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/async_complete_status_test.go`
 - `apps/backend/cmd/mock-agent/detached_background.go`
 - `apps/backend/cmd/mock-agent/scenarios.go`
+- `apps/backend/cmd/mock-agent/async_followup.go`
+- `apps/backend/cmd/mock-agent/handler.go`
+- `apps/backend/cmd/mock-agent/main.go`
 - `apps/web/e2e/tests/chat/queue-after-background-followup.spec.ts`
 
 ## Dependencies
@@ -94,3 +97,5 @@ Done.
 - `cmd/mock-agent/async_followup.go` adds `/async-followup` (and the
   `/e2e:async-followup` registry entry) for the E2E flow, which passes on
   chromium.
+- Review rerun: the managed chromium command covering this flow, Quick Chat
+  cancellation, and turn-history conflict passed all 5 tests.

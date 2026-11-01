@@ -38,7 +38,7 @@ A cancel that reaches a fully idle session succeeds without side effects, so a c
 ## Verification
 
 ```bash
-(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath ./internal/orchestrator -run 'Cancel' -count=1)
+(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath -tags fts5 ./internal/orchestrator -run 'Cancel' -count=1)
 ```
 
 ## Files likely touched
@@ -73,8 +73,12 @@ Done.
   `messagequeue` session admission) as live, so a cancel that races a dispatch
   still reaches the runtime.
 - `cancel_idle_target_test.go` covers every state, each refinement (reserved
-  turn, queue dispatch, resume attempt, clarification), and the user-visible
-  no-op. `TestCancelAgent_DeduplicatesConcurrentCalls` and
+  turn, queue dispatch, prompt-only admission, steer dispatch, open background
+  work, resume attempt, clarification), and the user-visible no-op. Background
+  work read failures keep the target non-idle. `TestCancelAgent_DeduplicatesConcurrentCalls` and
   `TestAutoStartAgentCallback_CancellationBeforeResumeRegistration` were updated
   to the new no-op semantics; the latter still proves the stale workflow cannot
   bind a resume.
+- Review rerun: the race-enabled orchestrator and message-queue admission,
+  background-work, and cancel tests passed. The managed Quick Chat cancellation
+  E2E also passed.

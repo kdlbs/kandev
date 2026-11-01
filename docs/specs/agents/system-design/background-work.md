@@ -195,19 +195,17 @@ includes an owned teardown that replaces an execution, which passes the stopped
 execution ID before the successor launches, and `reclaimIdleSession`, which
 settles after its cleanup succeeds.
 
-Startup settlement runs after lifecycle recovery and after session
-reconciliation. Reconciliation can terminalize a row whose runtime recovery
-found no owner and clear its local PID in the same write, after which
-`RowProcessLiveness` answers unknown. A terminal row status (`failed`, `stopped`,
-or `completed`) is therefore stop evidence by itself; a live agent probe or a
-non-terminal row with unknown liveness keeps work open. Idle reclaim remains the
-backstop for an idle session whose runtime is released without a restart.
+Startup settlement follows lifecycle recovery and session reconciliation.
+Reconciliation may clear a recovered row's PID, making `RowProcessLiveness`
+unknown. Terminal row status alone does not prove process exit; after a verified
+no-process probe, it preserves stop evidence. Live or failed probes keep work
+open. Idle reclaim handles released runtimes without restart.
 
-The teardown path is bound to the stopped execution and never waits on the
-session lifecycle lock from an event handler: the publisher of `agent.stopped`
-can be the goroutine that already holds it. A lock-holding owner settles in
-place before it relaunches, and the handler only attempts an opportunistic
-settle or defers one.
+An event handler never waits on the lifecycle lock because `agent.stopped` may
+be published by its owner. That owner settles before relaunch; otherwise a
+service-owned bounded worker waits with a cancellable context, and `Service.Stop`
+drains it. Before settlement, the worker rechecks process liveness and execution
+identity. A live successor remains open until verified process end.
 
 `background_complete` carries no tool identity and also follows Monitor-driven
 turns, so it updates only in-memory activity and never settles a durable row.
@@ -356,7 +354,7 @@ are the implementation authority. `analysis.md` is research context, not evidenc
 | Codex app-server | Typed paginated background list; native targeted terminate; child run events/interrupt; normalized existing child content | Schema and fake RPC round trips required; separately record live observations. Experimental RPCs require initialize experimentalApi. Unknown/unsupported methods disable only their capability. |
 | Codex command output | Handle owned `item/commandExecution/outputDelta` where available; reconcile final `aggregatedOutput` | Test stream/final overlap. Missing stream falls back to labelled snapshot output. Discovery alone cannot provide history. |
 | Codex background stdin | Not advertised initially | `command/exec/write` targets standalone client-created commands, not proven thread-owned background commands. No SIGINT/SIGTERM/SIGKILL selection or restart fallback. |
-| Claude bridge async tasks | Proposed, blocked on the pinned SDK | The capture confirms `async_task_state_update` carries the terminal state and launch `toolCallId` when the client advertises `asyncTasks`; the launch tool's completion arrives first. The SDK cannot represent the variant (unknown frames decode as an empty user message chunk), so no capability is advertised. Process-end settlement stays authoritative and `010.2` is not delivered. See [Decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md). |
+| Claude bridge async tasks | Rejected; `010.2` remains undelivered | The capture carries terminal state and launch `toolCallId`, but the pinned SDK decodes `async_task_state_update` as an empty user message. Advertising adds a task-notification follow-up turn without a product decision. Reopen with SDK or safe raw-frame support and approved turn semantics. See [Decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md). |
 | ACP | Existing normalized subagent and detached-shell observations feed shared inspection | Existing adapter-specific recognizers retain authority. No standard ACP list/stop/write assumption; default actions unsupported. Test observation-only and unavailable data. |
 | Future Claude native | Same normalized contract required | Adapter implementation deferred. No fabricated capability or protocol-name switch now. |
 | Conformance fixture | All normalized capabilities, selective absence, unknown/reordered events | Proves shared routes/UI without claiming real-provider support. |

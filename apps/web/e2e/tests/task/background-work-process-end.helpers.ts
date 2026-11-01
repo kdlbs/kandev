@@ -1,22 +1,7 @@
 import { expect, type Page } from "@playwright/test";
-import type { ApiClient } from "../../helpers/api-client";
+import { firstSessionId } from "../../helpers/session";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-
-async function firstSessionId(apiClient: ApiClient, taskId: string): Promise<string> {
-  let sessionId = "";
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        sessionId = sessions[0]?.id ?? "";
-        return sessionId;
-      },
-      { message: "session row should be created", timeout: 30_000 },
-    )
-    .not.toBe("");
-  return sessionId;
-}
 
 /**
  * The active background count is evidence that a workload still runs. When the
@@ -95,8 +80,6 @@ export async function expectProcessEndClearsBackgroundWork(
       timeout: 60_000,
     })
     .toBe(0);
-  await expect(activeChip).toHaveCount(0, { timeout: 10_000 });
-  await expect(testPage.getByTestId("background-work-history-chip")).toBeVisible({
-    timeout: 10_000,
-  });
+  await expect(activeChip).toHaveCount(0);
+  await expect(testPage.getByTestId("background-work-history-chip")).toBeVisible();
 }

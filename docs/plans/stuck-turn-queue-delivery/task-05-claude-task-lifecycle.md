@@ -41,16 +41,14 @@ When the bridge advertises it, Kandev negotiates task lifecycle and settles a de
 ## Verification
 
 ```bash
-(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath ./internal/agentctl/server/adapter/transport/acp -run 'AsyncTask|ClientCapabilities' -count=1)
-(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath ./internal/orchestrator -run 'BackgroundWork' -count=1)
+(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run 'AsyncTask|ClientCapabilities' -count=1)
+(cd apps/backend && env -u KANDEV_DEBUG_AGENT_MESSAGES go test -trimpath -tags fts5 ./internal/orchestrator -run 'BackgroundWork' -count=1)
 ```
 
 ## Files likely touched
 
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_helpers.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_updates.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/async_task_lifecycle.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/async_task_lifecycle_test.go`
+- `apps/backend/cmd/acpdbg/main.go`
+- `apps/backend/cmd/acpdbg/main_test.go`
 - `docs/decisions/2026-11-01-claude-async-task-lifecycle-capability.md`
 
 ## Dependencies
@@ -74,8 +72,9 @@ Task 04, for the fallback behavior.
 
 ## Results
 
-Blocked on the pinned SDK, with the capture completed. The task stays blocked;
-no capability was advertised and no terminal-state mapping was added.
+Blocked on the pinned SDK and a product decision, with the capture completed.
+The task stays blocked; no capability was advertised and no terminal-state
+mapping was added. The proposal ADR is rejected for this captured behavior.
 
 **Capture** (bridge `@agentclientprotocol/claude-agent-acp` 0.81.2 at
 `/root/.npm/_npx/698eb38f5d7f5a61/node_modules/.bin/claude-agent-acp`, run
@@ -117,5 +116,12 @@ succeeds, which is `user_message_chunk`; the `asyncTaskId` and `toolCallId` are
 lost before `handleACPUpdate` can read them. Consuming the frames therefore
 needs an SDK variant (or raw-frame access), which this task does not change.
 
-Remaining evidence: the capture above (frames and differences) is recorded;
-the blocker is the missing SDK variant. Tasks 01 to 04 stand alone.
+Remaining evidence: the capture above (frames and differences) is recorded. The
+pinned SDK has no `async_task_state_update` variant, and advertising the
+capability changes transcript and follow-up-turn behavior. A revised proposal
+requires SDK support or a safe raw-frame path plus an explicit product decision
+on the task-notification follow-up turn. Tasks 01 to 04 stand alone.
+
+Review rerun: the race-enabled `acpdbg` test passed for the new capability
+advertisement flag. This verifies the probe can reproduce the capture; it does
+not change the rejected protocol adoption.

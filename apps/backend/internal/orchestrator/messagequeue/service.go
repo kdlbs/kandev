@@ -52,8 +52,9 @@ type Service struct {
 }
 
 type sessionAdmission struct {
-	gate *sessionAdmissionGate
-	refs int
+	gate       *sessionAdmissionGate
+	refs       int
+	promptRefs int
 }
 
 type sessionAdmissionContextKey struct{}
@@ -359,20 +360,42 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 	return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, ownBudget, fn)
 }
 
+// WithPromptAdmission marks prompt dispatches while they wait for or hold the
+// shared session admission gate. Other queue operations do not count as work
+// that a user cancellation must interrupt.
+func (s *Service) WithPromptAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
+	if sessionID == "" {
+		return s.WithSessionAdmission(ctx, sessionID, fn)
+	}
+	s.admissionMu.Lock()
+	entry := s.admissions[sessionID]
+	if entry == nil {
+		entry = &sessionAdmission{gate: newSessionAdmissionGate()}
+		s.admissions[sessionID] = entry
+	}
+	entry.promptRefs++
+	s.admissionMu.Unlock()
+	defer func() {
+		s.admissionMu.Lock()
+		entry.promptRefs--
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+	}()
+	return s.WithSessionAdmission(ctx, sessionID, fn)
+}
+
 // SessionAdmissionActive reports whether sessionID's prompt admission gate is
-// held or has waiters. Cancellation uses it to recognize an in-flight dispatch
-// without blocking on the gate.
+// held by or awaiting a prompt dispatch. Generic queue admissions are excluded.
 func (s *Service) SessionAdmissionActive(sessionID string) bool {
 	if s == nil || sessionID == "" {
 		return false
 	}
 	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	entry := s.admissions[sessionID]
-	s.admissionMu.Unlock()
-	if entry == nil {
-		return false
-	}
-	return entry.gate.active()
+	return entry != nil && entry.promptRefs > 0
 }
 
 func (s *Service) withSessionAdmissionLock(
@@ -395,7 +418,7 @@ func (s *Service) withSessionAdmissionLock(
 	if err := entry.gate.lock(waitCtx); err != nil {
 		s.admissionMu.Lock()
 		entry.refs--
-		if entry.refs == 0 && s.admissions[sessionID] == entry {
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()
@@ -405,7 +428,7 @@ func (s *Service) withSessionAdmissionLock(
 		entry.gate.unlock()
 		s.admissionMu.Lock()
 		entry.refs--
-		if entry.refs == 0 && s.admissions[sessionID] == entry {
+		if entry.refs == 0 && entry.promptRefs == 0 && s.admissions[sessionID] == entry {
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()

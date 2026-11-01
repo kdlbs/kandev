@@ -92,7 +92,7 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 	// tool_call_update with no later terminal frame. It still counts as prompt
 	// content for turn attribution, but it must not create or extend an
 	// agent-started turn.
-	if event.Type == streams.EventTypeToolUpdate && event.ToolStatus == "" {
+	if event.Type == streams.EventTypeToolUpdate && (event.ToolStatus == "" || event.ToolStatusMissing) {
 		return
 	}
 	if a.currentPromptTurn() != nil {
@@ -154,7 +154,7 @@ func (f *asyncTurnFinalizer) trackTool(event AgentEvent) {
 	}
 	// Only evidence of foreground activity makes a tool active. A status-less
 	// update neither activates a tool nor retires one that is already tracked.
-	if event.Type == streams.EventTypeToolUpdate && event.ToolStatus == "" {
+	if event.Type == streams.EventTypeToolUpdate && (event.ToolStatus == "" || event.ToolStatusMissing) {
 		return
 	}
 	if isAsyncToolTerminal(event) || event.ParentToolCallID != "" || event.NormalizedPayload.IsActiveBackgroundWork() {

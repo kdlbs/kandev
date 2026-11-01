@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -182,6 +184,13 @@ func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 	return settler
 }
 
+func backgroundWorkCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+}
+
 func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
 	s.settleBackgroundWork(ctx, sessionID, "")
 }
@@ -260,9 +269,42 @@ func (s *Service) settleBackgroundWorkAfterTeardown(ctx context.Context, session
 	if sessionID == "" || s.backgroundWorkSettler() == nil {
 		return
 	}
-	release := s.acquireSessionLifecycleLock(sessionID)
+	release, acquired := s.acquireSessionLifecycleLockWithContext(ctx, sessionID)
+	if !acquired {
+		return
+	}
 	defer release()
 	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+func (s *Service) acquireSessionLifecycleLockWithContext(ctx context.Context, sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if lock.TryLock() {
+			if ctx.Err() == nil {
+				return lock.Unlock, true
+			}
+			lock.Unlock()
+			return nil, false
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false
+		case <-timer.C:
+		}
+	}
 }
 
 // settleBackgroundWorkWithoutWaiting is the lifecycle-event path. The publisher
@@ -276,14 +318,91 @@ func (s *Service) settleBackgroundWorkWithoutWaiting(ctx context.Context, sessio
 	if sessionID == "" || s.backgroundWorkSettler() == nil {
 		return
 	}
+	settleCtx, cancel := backgroundWorkCleanupContext(ctx)
+	defer cancel()
 	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
 	if acquired {
 		defer release()
-		s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+		s.settleBackgroundWorkLocked(settleCtx, sessionID, stoppedExecutionID)
 		return
 	}
-	settleCtx := context.WithoutCancel(ctx)
-	go s.settleBackgroundWorkAfterTeardown(settleCtx, sessionID, stoppedExecutionID)
+	s.startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID)
+}
+
+func (s *Service) startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID string) {
+	s.backgroundWorkSettleMu.Lock()
+	if s.backgroundWorkSettleStopped {
+		s.backgroundWorkSettleMu.Unlock()
+		return
+	}
+	if s.backgroundWorkSettleCtx == nil {
+		s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	}
+	if s.backgroundWorkSettleWorkers == nil {
+		s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	}
+	workerCtx := s.backgroundWorkSettleCtx
+	workers := s.backgroundWorkSettleWorkers
+	workers.Add(1)
+	s.backgroundWorkSettleMu.Unlock()
+
+	go func() {
+		defer workers.Done()
+		ctx, cancel := context.WithTimeout(workerCtx, sendNowClaimRecoveryTimeout)
+		defer cancel()
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, stoppedExecutionID)
+	}()
+}
+
+func (s *Service) resetBackgroundWorkSettleWorkers() error {
+	s.backgroundWorkSettleMu.Lock()
+	defer s.backgroundWorkSettleMu.Unlock()
+	if !s.backgroundWorkSettleStopped {
+		return nil
+	}
+	if s.backgroundWorkSettleDrain != nil {
+		select {
+		case <-s.backgroundWorkSettleDrain:
+		default:
+			return errors.New("background-work settlement workers are still draining")
+		}
+	}
+	s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	s.backgroundWorkSettleDrain = nil
+	s.backgroundWorkSettleStopped = false
+	return nil
+}
+
+func (s *Service) stopBackgroundWorkSettleWorkers() {
+	s.backgroundWorkSettleMu.Lock()
+	s.backgroundWorkSettleStopped = true
+	cancel := s.backgroundWorkSettleCancel
+	workers := s.backgroundWorkSettleWorkers
+	done := s.backgroundWorkSettleDrain
+	startWait := workers != nil && done == nil
+	if startWait {
+		done = make(chan struct{})
+		s.backgroundWorkSettleDrain = done
+	}
+	s.backgroundWorkSettleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if workers == nil {
+		return
+	}
+	if startWait {
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+	}
+	select {
+	case <-done:
+	case <-time.After(sendNowWorkerShutdownTimeout):
+		s.logger.Warn("timed out waiting for background-work settlement workers during shutdown")
+	}
 }
 
 func (s *Service) settleBackgroundWorkLocked(ctx context.Context, sessionID string, stoppedExecutionID string) {

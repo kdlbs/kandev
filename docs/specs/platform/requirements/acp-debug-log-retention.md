@@ -13,7 +13,15 @@ owners:
 When ACP debug logging is on, maintainers use the per-session frame logs to
 diagnose agent sessions. The platform owns this contract because agentctl writes
 the logs for every agent and executor. Retention must not remove the evidence
-for a session that is still in use, and unrelated processes must not consume it.
+for a session that is still writing in the same agentctl process, and agent
+subprocesses must not consume the log directory with inherited debug settings.
+
+## Terminology
+
+An **open writer** is a currently registered writer for an active log segment in
+one `acpLogManager` in the agentctl process that runs retention. Rotated segments
+and writers owned by another agentctl process are not open writers for this
+requirement.
 
 ## Requirements
 
@@ -27,11 +35,12 @@ I can diagnose it after it misbehaves.
 #### Acceptance criteria
 
 - **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-001.1:** When the log directory exceeds
-  its file-count limit, the system shall delete the oldest files that no open
-  writer holds and shall retain every file an open writer holds.
+  its file-count limit, the system shall delete the oldest eligible files that
+  no open writer in the same agentctl process holds and shall retain every
+  active segment held by one of those writers.
 - **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-001.2:** When the files held by open
-  writers alone exceed the limit, the system shall keep them and delete every
-  other file beyond the limit.
+  writers alone exceed the limit, the system shall keep those active segments
+  and delete other eligible files until the limit is met or no candidates remain.
 
 ### REQ-PLATFORM-ACP-DEBUG-LOG-RETENTION-002: Keep unrelated output out of the log directory
 
@@ -54,5 +63,7 @@ session logs.
 ## Out of scope
 
 - Changing the default file-count, age, or per-file size limits.
+- Retaining rotated segments of a live session beyond the limits.
+- Coordinating retention across multiple agentctl processes that share a log directory.
 - Retaining logs for a session with no open writer beyond those limits.
 - Changing whether debug logging is on in each profile.

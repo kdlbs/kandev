@@ -404,8 +404,10 @@ func (m *acpLogManager) prune(now time.Time) {
 		cutoff := now.Add(-m.cfg.retention)
 		survivors := make([]logFileInfo, 0, len(files))
 		for _, f := range files {
-			if f.mtime.Before(cutoff) && !m.writerActiveSince(f.path, cutoff) {
-				m.removeFile(f.path)
+			if f.mtime.Before(cutoff) {
+				if !m.removeFileIfNoOpenWriter(f.path) {
+					survivors = append(survivors, f)
+				}
 			} else {
 				survivors = append(survivors, f)
 			}
@@ -421,27 +423,27 @@ func (m *acpLogManager) prune(now time.Time) {
 		sort.Slice(files, func(i, j int) bool { return files[i].mtime.After(files[j].mtime) })
 		surplus := len(files) - m.cfg.maxFiles
 		for i := len(files) - 1; i >= 0 && surplus > 0; i-- {
-			if m.hasOpenWriterForPath(files[i].path) {
-				continue
+			if m.removeFileIfNoOpenWriter(files[i].path) {
+				surplus--
 			}
-			m.removeFile(files[i].path)
-			surplus--
 		}
 	}
 }
 
-// hasOpenWriterForPath reports whether this process holds a writer for path.
-// Only this process's writers are visible; a second agentctl sharing the
-// directory is not protected.
-func (m *acpLogManager) hasOpenWriterForPath(path string) bool {
+// removeFileIfNoOpenWriter checks the process-local writer registry and
+// removes a candidate while holding the same lock used to register writers.
+// Only this process's writers are protected; rotated segments and another
+// agentctl sharing the directory are outside this registry.
+func (m *acpLogManager) removeFileIfNoOpenWriter(path string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, w := range m.writers {
 		if w.path == path {
-			return true
+			return false
 		}
 	}
-	return false
+	_ = os.Remove(path)
+	return true
 }
 
 // acpWriter is a single kept-open, line-buffered file handle with its own lock

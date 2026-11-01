@@ -32,8 +32,9 @@ The order puts the blocking defect first. Tasks 01 and 02 restore message delive
 Task 03 pins the rule that a restart starts no agent, and 04 and 05 correct the job count. Tasks 06 and 07 are independent cleanups.
 
 **Status: partial.** Tasks 01 to 04, 06, and 07 are delivered and verified. Task 05
-is blocked: the capture is recorded and the bridge frames are confirmed, but the
-pinned ACP SDK cannot represent `async_task_state_update`. As a result, job rows
+is blocked and its proposal ADR is rejected: the capture is recorded and the
+bridge frames are confirmed, but the pinned ACP SDK cannot represent
+`async_task_state_update`. As a result, job rows
 still stay `running` while a long-lived Claude agent remains alive and its detached
 shell finishes; they settle only when the owning process ends (Task 04). That
 user-visible gap is tracked by the not-yet-delivered
@@ -86,21 +87,27 @@ marks a pending drain. Startup gets no drain, and a regression test pins that.
 
 ### Background settlement
 
-`apps/backend/internal/orchestrator/event_handlers_agent.go` settles on the owned-teardown branch before the
-successor launches, `apps/backend/internal/orchestrator/reconcile_liveness.go` settles after reclaim, and startup
-settlement runs after lifecycle recovery if Task 04 confirms that ordering defect.
+`apps/backend/internal/orchestrator/event_handlers_agent.go` attempts settlement
+on the owned-teardown branch. The lifecycle owner settles in place before a
+successor launch when it holds the fence; otherwise a bounded service-owned
+worker waits for the fence and rechecks process liveness and execution identity.
+`apps/backend/internal/orchestrator/reconcile_liveness.go` settles after reclaim,
+and startup settlement runs after lifecycle recovery.
 
 ### Task lifecycle
 
 Blocked: the capture is recorded and confirms the bridge's `async_task_*` frames,
-but the pinned SDK cannot represent `async_task_state_update`. No capability is
-advertised; process-end settlement from Task 04 stays authoritative, and
-`AC-AGENTS-BACKGROUND-WORK-010.2` is not yet delivered. See Task 05's results.
+but the pinned SDK cannot represent `async_task_state_update`, and the capture
+shows a transcript/follow-up-turn change that needs a product decision. No
+capability is advertised; process-end settlement from Task 04 stays
+authoritative, and `AC-AGENTS-BACKGROUND-WORK-010.2` is not yet delivered. A
+new proposal needs SDK representation (or a safe raw-frame path) and a product
+decision on the task-notification follow-up turn. See Task 05's results.
 `acpdbg` gained `--air-capabilities` so the capture can advertise `asyncTasks`.
 
 | Provider | Capability shape | Behavior | Evidence | Fallback |
 | --- | --- | --- | --- | --- |
-| `claude-acp`, bridge advertises `asyncTasks` | Not adopted; capture recorded | No capability sent; rows settle from process-end evidence | Recorded 0.81.2 capture and SDK inspection in Task 05 | Process-end settlement |
+| `claude-acp`, bridge advertises `asyncTasks` | Rejected for this proposal | No capability sent; rows settle from process-end evidence | Recorded 0.81.2 capture and SDK inspection in Task 05 | Process-end settlement |
 | `claude-acp`, older bridge | No advertisement | Capability not sent | Existing suites | Process-end settlement |
 | Other ACP and Codex transports | Not applicable | Unchanged | Existing suites | Their existing evidence |
 
@@ -124,7 +131,8 @@ predicate removes debug settings from agent environments in `server/config` and
 | `AC-UI-MESSAGE-QUEUE-SEND-NOW-001.12` | `apps/backend/internal/orchestrator/queue_send_now_restore_drain_test.go` |
 | `AC-TASKS-RESUME-PROMPT-QUEUE-003.1` to `.3` | `apps/backend/internal/orchestrator/queue_restart_no_autostart_test.go` |
 | `AC-AGENTS-BACKGROUND-WORK-010.1` | `apps/backend/internal/orchestrator/background_work_settlement_paths_test.go` (with the existing `background_work_settlement_test.go`) |
-| `AC-AGENTS-BACKGROUND-WORK-010.2` to `.4` | Not delivered; see Task 05 and the blocked ADR. `.3` holds through process-end settlement. |
+| `AC-AGENTS-BACKGROUND-WORK-010.2` | Not delivered; see Task 05 and the rejected proposal ADR. |
+| `AC-AGENTS-BACKGROUND-WORK-010.3` and `.4` | Existing behavior remains unchanged because no task-lifecycle capability is advertised; process-end settlement remains authoritative. |
 | `AC-UI-CANCEL-TURN-PROGRESS-001.13` | `apps/backend/internal/orchestrator/cancel_idle_target_test.go` |
 | `AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-001.*` | `apps/backend/internal/agentctl/server/adapter/transport/shared/acpjanitor_test.go` |
 | `AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-002.*` | `apps/backend/internal/agentctl/server/config/config_debugenv_test.go`, `apps/backend/internal/agentctl/server/utility/acp_executor_debugenv_test.go`, `apps/backend/internal/common/launchwrapper/environment_test.go` |
@@ -181,6 +189,22 @@ E2E (managed host runner, `--shards 1`, rerun after the review fixes):
   reaches zero and the history chip remains. The resume is given a 90s WS budget
   because the default 30s budget is shorter than the agent-readiness window on a
   loaded host.
+
+PR fixup reruns on 2026-11-01:
+
+- Race-enabled orchestrator and message-queue tests covering background work,
+  idle reclaim, cancel, admission, profile-stop intent, and cancellation before
+  resume registration passed (`23.965s` and `1.127s`). The held-lifecycle-lock
+  and service-shutdown settlement regressions passed separately (`1.4s`).
+- Race-enabled ACP transport, shared log pruning, terminal environment
+  sanitization, and `acpdbg` capability-flag tests passed.
+- `bash scripts/lint-go-changed <changed Go files>` reported 0 issues.
+- The previously failing Git baseline-push leaf passed 10 race-enabled repeats.
+- Managed chromium rerun of queued follow-up, Quick Chat cancellation, and
+  turn-history conflict passed (5 tests). Mobile cancellation and mobile
+  process-end passed (2 tests); desktop process-end passed (1 test).
+- `pnpm run e2e:sleep-ratchet` passed. Specification validation passed all 425
+  decisions and 1872 specifications; specification lint passed all files.
 
 Task 05 (blocked): the 0.81.2 capture ran through
 `acpdbg prompt --mode auto --linger ... --air-capabilities asyncTasks` and

@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -13,12 +14,12 @@ import (
 // the host's session evidence away.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "kandev-acp-test-logs-")
-	if err == nil {
-		shared.SetDebugLogDirForTest(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create isolated ACP test log directory: %v\n", err)
+		os.Exit(1)
 	}
+	shared.SetDebugLogDirForTest(dir)
 	code := m.Run()
-	if err == nil {
-		_ = os.RemoveAll(dir)
-	}
+	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }

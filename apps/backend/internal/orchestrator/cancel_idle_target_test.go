@@ -79,7 +79,7 @@ func TestExplicitCancellationIdleTargetRefinements(t *testing.T) {
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					_ = svc.messageQueue.WithSessionAdmission(
+					_ = svc.messageQueue.WithPromptAdmission(
 						context.Background(), "session-idle", func(context.Context) error {
 							close(entered)
 							<-release
@@ -98,6 +98,18 @@ func TestExplicitCancellationIdleTargetRefinements(t *testing.T) {
 			name: "pending clarification",
 			setup: func(t *testing.T, _ *Service, repo *sqliterepo.Repository) {
 				seedPendingClarificationMessage(t, repo, "task-idle", "session-idle")
+			},
+		},
+		{
+			name: "open background work",
+			setup: func(_ *testing.T, svc *Service, _ *sqliterepo.Repository) {
+				svc.SetBackgroundWorkObserver(&settlingBackgroundWorkObserver{open: []string{"session-idle"}})
+			},
+		},
+		{
+			name: "in-flight steer outside prompt admission",
+			setup: func(_ *testing.T, svc *Service, _ *sqliterepo.Repository) {
+				svc.steerInFlight.Store("session-idle", struct{}{})
 			},
 		},
 	} {

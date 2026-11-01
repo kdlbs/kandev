@@ -1,23 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
-import { waitForAgentMessage } from "../../helpers/session";
+import { firstSessionId, waitForAgentMessage } from "../../helpers/session";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
-
-async function firstSessionId(apiClient: ApiClient, taskId: string): Promise<string> {
-  let sessionId = "";
-  await expect
-    .poll(
-      async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        sessionId = sessions[0]?.id ?? "";
-        return sessionId;
-      },
-      { message: "session row should be created", timeout: 30_000 },
-    )
-    .not.toBe("");
-  return sessionId;
-}
 
 /**
  * An agent-started turn (here, the follow-up to a provider notification) must
@@ -50,27 +34,34 @@ test.describe("queued message after an agent-started follow-up", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const sessionId = await firstSessionId(apiClient, task.id);
 
     // The prompt turn completes, then the agent starts its own follow-up.
-    await expect(testPage.getByText("Foreground response before the async follow-up.")).toBeVisible(
-      {
-        timeout: 30_000,
-      },
+    await waitForAgentMessage(
+      apiClient,
+      sessionId,
+      "Foreground response before the async follow-up.",
     );
-    await expect(testPage.getByText("Background follow-up started.")).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(
+      testPage.getByText("Foreground response before the async follow-up."),
+    ).toBeVisible();
+    await waitForAgentMessage(apiClient, sessionId, "Background follow-up started.");
+    await expect(testPage.getByText("Background follow-up started.")).toBeVisible();
 
     // Queue while that turn runs. Auto-run is on by default.
     await waitForComposerQueueMode(testPage);
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, 'e2e:message("queued follow-up delivered")');
     await testPage.getByTestId("submit-message-button").click();
-    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
-
-    const sessionId = await firstSessionId(apiClient, task.id);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
+    await expect
+      .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+        message: "the submitted follow-up should be present in the durable queue",
+      })
+      .toBeGreaterThan(0);
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible();
     await waitForAgentMessage(apiClient, sessionId, "queued follow-up delivered", 90_000);
-    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
     await session.waitForChatIdle({ timeout: 30_000 });
   });
 });

@@ -16,6 +16,7 @@ contract under `apps/backend/internal/agent/runtime/lifecycle/`.
 | Requirement | Design boundary |
 | --- | --- |
 | REQ-TASKS-SESSION-TURN-SETTLEMENT-001 | Callback lease, completion flow, and regression coverage below |
+| REQ-TASKS-SESSION-TURN-SETTLEMENT-002 | [Agent-started turn finalization](#agent-started-turn-finalization) |
 
 ## Callback lease
 

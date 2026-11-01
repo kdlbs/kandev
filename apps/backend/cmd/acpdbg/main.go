@@ -91,7 +91,8 @@ Shared flags:
 
 The JSONL file records every request, response, notification, and meta
 event in chronological order. See .claude/skills/acp-debug/SKILL.md for the
-schema and examples.`)
+schema and examples. Use --air-capabilities to advertise AIR extensions such
+as asyncTasks during a probe or agent-matrix run.`)
 }
 
 type sharedFlags struct {
@@ -438,12 +439,7 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 	runCtx, cancel := context.WithTimeout(ctx, shared.timeout)
 	defer cancel()
 
-	runner, err := acpdbg.NewRunner(runCtx, jsonlPath, acpdbg.RunConfig{
-		AgentID:       spec.ID,
-		Command:       spec.Command,
-		Workdir:       shared.workdir,
-		CaptureStderr: shared.stderr,
-	})
+	runner, err := acpdbg.NewRunner(runCtx, jsonlPath, probeRunConfig(shared, spec))
 	if err != nil {
 		entry.Error = err.Error()
 		entry.Status = classifyError(err.Error())
@@ -470,6 +466,16 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 	entry.AuthMethods = res.AuthMethods
 	entry.AuthMethodsCount = len(res.AuthMethods)
 	return entry
+}
+
+func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig {
+	return acpdbg.RunConfig{
+		AgentID:         spec.ID,
+		Command:         spec.Command,
+		Workdir:         shared.workdir,
+		CaptureStderr:   shared.stderr,
+		AIRCapabilities: splitCapabilities(shared.airCapabilities),
+	}
 }
 
 // --- helpers ---

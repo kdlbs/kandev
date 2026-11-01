@@ -85,9 +85,11 @@ inside the cancellation guard, before it invalidates resume attempts or creates 
 cancel turn. A session is idle only when all of these hold:
 
 - Its state is `WAITING_FOR_INPUT` or `IDLE`.
-- `peekActiveTurnID` finds no active turn.
-- It has no pending clarification, in-flight queued dispatch, in-flight prompt
-  admission, or resume attempt.
+- `peekActiveTurnID` finds no active turn, the in-memory active-turn entry is
+  empty, and no prompt turn is reserved.
+- It has no pending clarification, queued dispatch, prompt-only admission
+  (held or waiting), steer dispatch, open background work, or resume attempt.
+- If the background-work state cannot be read, the target remains non-idle.
 
 The operation then returns success, which clears progress through the existing
 finish path. Any other state keeps the existing cancellation behavior, including
