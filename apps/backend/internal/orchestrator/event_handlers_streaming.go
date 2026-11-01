@@ -2103,6 +2103,11 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	if !isTerminalSessionState(newState) {
 		return
 	}
+	if newState == models.TaskSessionStateFailed && s.resumeAttemptInFlight(sessionID) {
+		s.logger.Info("kept primary session after resume rollback",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return
+	}
 
 	// Check whether the stopped session is actually the primary
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
@@ -2122,8 +2127,9 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 
 	// Only an active session can inherit the role after a stop. The shared
 	// selector prefers the current step's profile and ranks a parked session
-	// last; a parked session remains eligible when no better active session exists.
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
+	// last, but excludes sessions awaiting recovery. With no healthy active
+	// candidate the stopped primary keeps the role for an operator decision.
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true, true)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",

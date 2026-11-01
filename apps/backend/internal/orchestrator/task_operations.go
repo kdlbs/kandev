@@ -6164,13 +6164,14 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 
 // promoteNextPrimaryAfterRemoval picks the best remaining session as primary
 // after a session is deleted. Any nonterminal session is eligible; the shared
-// selector prefers the current step's profile and ranks a parked session last.
+// selector prefers the current step's profile, then a parked session, and
+// retains a nonterminal session awaiting recovery as the final fallback.
 func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil || len(sessions) == 0 {
 		return
 	}
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false)
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false, false)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary after delete",
