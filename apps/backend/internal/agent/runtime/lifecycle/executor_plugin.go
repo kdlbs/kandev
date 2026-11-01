@@ -171,9 +171,13 @@ type pluginExecutorInventory struct {
 	HandshakeRejected      bool                                  `json:"handshake_rejected,omitempty"`
 	PublishPending         bool                                  `json:"publish_pending,omitempty"`
 	CleanupRequested       bool                                  `json:"cleanup_requested,omitempty"`
-	Revision               uint64                                `json:"revision"`
-	Generation             uint64                                `json:"generation"`
-	EnvironmentGeneration  int64                                 `json:"environment_generation"`
+	// AbandonReason marks a launch that can never become ready. It is
+	// checkpointed before the environment is failed, so a crash at any later
+	// step still ends in the environment failed and the resource destroyed.
+	AbandonReason         string `json:"abandon_reason,omitempty"`
+	Revision              uint64 `json:"revision"`
+	Generation            uint64 `json:"generation"`
+	EnvironmentGeneration int64  `json:"environment_generation"`
 }
 
 // credentialRecorded reports whether the host recorded an agentctl credential

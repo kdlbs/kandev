@@ -74,15 +74,34 @@ type pluginExecutorInventoryStoreFake struct {
 	// records the sessions whose creating environment was failed.
 	taskRepositories       []*models.TaskRepository
 	failedMaterializations []string
+	failScopes             []string
+	failErr                error
+	failNotOwned           bool
+	environment            *models.TaskEnvironment
+	// events orders the fail and destroy calls the tests observe.
+	events []string
 }
 
 func (f *pluginExecutorInventoryStoreFake) ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error) {
 	return f.taskRepositories, nil
 }
 
-func (f *pluginExecutorInventoryStoreFake) FailTaskEnvironmentMaterialization(_ context.Context, sessionID string) (bool, error) {
+func (f *pluginExecutorInventoryStoreFake) FailScopedTaskEnvironmentMaterialization(_ context.Context, sessionID, environmentID string, generation int64) (bool, error) {
 	f.failedMaterializations = append(f.failedMaterializations, sessionID)
-	return true, nil
+	f.failScopes = append(f.failScopes, fmt.Sprintf("%s@%d", environmentID, generation))
+	f.events = append(f.events, "fail")
+	if f.failErr != nil {
+		return false, f.failErr
+	}
+	return !f.failNotOwned, nil
+}
+
+func (f *pluginExecutorInventoryStoreFake) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	if f.environment == nil {
+		return nil, models.ErrExecutorRunningNotFound
+	}
+	copy := *f.environment
+	return &copy, nil
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {

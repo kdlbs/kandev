@@ -238,9 +238,15 @@ func (r *PluginRemoteExecutor) resumeUnderRecoveryClaim(ctx context.Context, rec
 }
 
 // PluginExecutorMaterializationFailer fails the creating environment a session
-// owns so a relaunch can elect a new one.
+// owns, but only when it is the given environment at the given ownership
+// generation, so a session re-pointed to a newer environment leaves it alone.
 type PluginExecutorMaterializationFailer interface {
-	FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error)
+	FailScopedTaskEnvironmentMaterialization(ctx context.Context, sessionID, environmentID string, generation int64) (bool, error)
+}
+
+// pluginExecutorEnvironmentReader reads an environment's stored status.
+type pluginExecutorEnvironmentReader interface {
+	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 }
 
 type pluginExecutorTaskRepositoryReader interface {
@@ -291,18 +297,56 @@ func (r *PluginRemoteExecutor) coreLaunchNeedsMaterialization(ctx context.Contex
 	return len(repos) > 0, nil
 }
 
-// abandonUnhealableLaunch ends a launch that can never become ready: it fails
-// the creating environment so a relaunch can elect a new one, then destroys the
-// resource, which removes the inventory row, so no later recovery tick retries.
-// The environment is failed first: if the destroy is unconfirmed the retained
-// cleanup_pending row is retried by the sweep, while a failure after the row
-// was removed would leave the environment creating with nothing to recover it.
+// launchToAbandon reports whether recovery must end this launch rather than
+// attach it, and why. A record carrying the abandon marker is always ended. A
+// record written before the marker existed, still publish-pending, is ended
+// when it is core-prepared and either the task has repositories or its
+// environment was already failed: its publication can then never succeed.
+func (r *PluginRemoteExecutor) launchToAbandon(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) (bool, string, error) {
+	if state.inventory.Phase == pluginExecutorPhaseAbsent {
+		return false, "", nil
+	}
+	if state.inventory.AbandonReason != "" {
+		return true, state.inventory.AbandonReason, nil
+	}
+	if !state.inventory.PublishPending || pluginProviderPreparesWorkspace(state.inventory) {
+		return false, "", nil
+	}
+	unmaterialized, err := r.coreLaunchNeedsMaterialization(ctx, record)
+	if err != nil {
+		return false, "", err
+	}
+	if unmaterialized {
+		return true, pluginExecutorCleanupReasonCoreUnmaterialized, nil
+	}
+	if reader, ok := r.inventoryStore.(pluginExecutorEnvironmentReader); ok {
+		env, err := reader.GetTaskEnvironment(ctx, state.inventory.EnvironmentID)
+		if err == nil && env != nil && env.Status == models.TaskEnvironmentStatusFailed {
+			return true, pluginExecutorCleanupReasonPublishRefused, nil
+		}
+	}
+	return false, "", nil
+}
+
+// abandonUnhealableLaunch ends a launch that can never become ready. It first
+// checkpoints the abandon marker, so any later crash or failure is finished by
+// the next recovery. It then fails the creating environment, only when the
+// session still owns this very environment and generation, and destroys the
+// resource, which settles the inventory row. The environment is failed before
+// the destroy: if the destroy removed the row and the fail then errored, the
+// environment would stay creating with nothing left to recover it.
 func (r *PluginRemoteExecutor) abandonUnhealableLaunch(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState, reason string) error {
 	failer, ok := r.inventoryStore.(PluginExecutorMaterializationFailer)
 	if !ok {
 		return errors.New("plugin executor environment failure is unavailable; recovery is deferred")
 	}
-	if _, err := failer.FailTaskEnvironmentMaterialization(ctx, record.SessionID); err != nil {
+	if state.inventory.AbandonReason == "" {
+		state.inventory.AbandonReason = reason
+		if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
+			return fmt.Errorf("plugin executor abandon marker was not recorded: %w", err)
+		}
+	}
+	if _, err := failer.FailScopedTaskEnvironmentMaterialization(ctx, record.SessionID, state.inventory.EnvironmentID, state.inventory.EnvironmentGeneration); err != nil {
 		return fmt.Errorf("plugin executor environment could not be failed: %w", err)
 	}
 	return r.destroyPluginExecutorRecord(ctx, record, state.inventory, state.resource, reason, state.profile)

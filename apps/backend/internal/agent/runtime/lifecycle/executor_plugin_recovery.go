@@ -39,6 +39,11 @@ func (r *PluginRemoteExecutor) recoverPluginExecutor(ctx context.Context, record
 		}
 		state.resource = resource
 	}
+	if abandon, reason, err := r.launchToAbandon(ctx, record, state); err != nil {
+		return nil, err
+	} else if abandon {
+		return nil, r.abandonUnhealableLaunch(ctx, record, state, reason)
+	}
 	if shouldCleanupRecoveredPluginExecutor(state, record) {
 		if state.resource == nil {
 			return nil, errors.New("plugin executor cleanup inventory has no resource handle")
@@ -216,6 +221,7 @@ func (r *PluginRemoteExecutor) attachRecoveredPluginExecutor(
 	if err := r.publishPendingReady(ctx, record, state); err != nil {
 		instance.Client.Close()
 		if errors.As(markUnhealablePublish(err, state.inventory), new(*unhealablePublishError)) {
+			// The marker is written before the environment is failed.
 			return nil, r.abandonUnhealableLaunch(ctx, record, state, pluginExecutorCleanupReasonPublishRefused)
 		}
 		return nil, err
