@@ -180,10 +180,10 @@ The page is primarily an explanation with recovery procedures.
 
 | Acceptance | Permanent test evidence planned |
 | --- | --- |
-| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.1 | `remote_recovery_disposition_test.go`: `TestRemoteRecoveryConfirmedAbsenceSettlesGuard`, `TestManagerStartSettlesConfirmedAbsentRemoteOwner`, and `TestDeferredRemoteRecoverySettlesConfirmedAbsentOwner` |
-| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2 | Same test file: `TestRemoteRecoveryAbsencePreservesDurableRecovery`. Real repository assertions keep uncertain submissions, blocks, queue claims, resume token, and workspace intact |
-| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.3 | `TestRemoteRecoveryAbsenceFencesChangedOwner`, `TestRemoteRecoveryAbsencePreservesUnknownSibling`, and `TestRemoteRecoveryAbsenceRacesStopAndShutdown`. Include mixed live/unknown/absent records |
-| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5 | `TestRemoteRecoveryAbsenceRetriesAfterPersistenceFailure` and `TestRemoteRecoveryAbsenceConvergesAfterRepair`. Include lost success response, another restart, and unchanged successor |
+| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.1 | `remote_recovery_disposition_test.go`: `TestRemoteRecoveryConfirmedAbsenceSettlesGuard`, `TestDeferredRemoteRecoveryRetriesUntilConfirmedAbsence`, and `TestDeferredRemoteRecoveryHandlesMissingExecutorRowWithoutReattachment` |
+| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.2 | `TestRemoteRecoveryConfirmedAbsenceSettlesGuard` preserves the executor resume token and workspace metadata. `internal/backendapp/remote_recovery_absence_integration_test.go`: `TestRemoteRecoveryAbsencePublicRecoveryActions` preserves uncertain submissions, open blocks, messages, and queue claims |
+| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.3 | `TestRemoteRecoveryAbsenceRejectsChangedRuntimeRow`, `TestRemoteRecoveryAbsenceRejectsChangedOwnerDuringFinalValidation`, `TestRemoteRecoveryAbsencePreservesUnknownSibling`, and `TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences` |
+| AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.5 | `TestRemoteRecoveryAbsenceRetriesAfterRepairFailure` and `TestRemoteRecoveryAbsenceConvergesAfterLostRepairResponse`. Include lost success response, another restart, and unchanged successor |
 | AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16/.21/.23/.24 | New `remote_recovery_absence_integration_test.go` in `internal/backendapp`: `TestRemoteRecoveryAbsencePublicRecoveryActions`. Compose actual lifecycle, adapter, repository, and orchestrator |
 
 Task 01 records expected RED before production changes. Task 02 proves API
@@ -192,7 +192,8 @@ and browser behavior. Mocks of `session.recover` responses do not prove the fix.
 ## E2E tests
 
 Extend `apps/web/e2e/tests/remote-docker/remote-docker-recovery.spec.ts` with
-`restart recovery finishes after confirmed remote owner loss`.
+`desktop Resume reaches recovery after the exact task container stops` and
+`phone Resume reaches recovery after the exact task container stops`.
 Use the real SSH-backed Docker daemon fixture and its disposable backend.
 Stop the owned backend process. Stop only the recorded task container. Restart
 the backend against the same database. A stopped exact container
@@ -242,7 +243,7 @@ Design evidence on 2026-11-01:
   synthetic lifecycle source trigger and every referenced contract.
 - Diff whitespace and untracked package inventory: passed.
 - Task 01 implementation and regressions: complete. Focused Remote Docker and
-  Sprites settlement passed; full lifecycle race suite passed (`187.707s`);
+  Sprites settlement passed; full lifecycle race suite passed (`182.920s`);
   executor-row CAS race passed (`1.542s`); changed Go lint passed with `0
   issues`; and `make -C apps/backend build` completed for all configured
   targets. Darwin arm64 reported only the expected unsigned-artifact warning.
@@ -256,8 +257,9 @@ Design evidence on 2026-11-01:
   Docker recovery cases, including desktop and phone exact-container loss.
   Existing native reattachment passed on desktop (2 tests) and phone (1 test).
   The worktree `.git` pointer is not available inside the runner container, so
-  these commands used host mode with existing assets while retaining the real
-  `containers` project and Docker executor. The loss fixture captured the
+  the container command used host mode with the managed runner rebuilding its
+  assets while retaining the real `containers` project and Docker executor.
+  The loss fixture captured the
   execution identity, joined the test-owned backend shutdown, stopped the exact
   task container, and only then copied and seeded the closed remote journal.
   Both viewport cases observed the stopped executor row with that same
@@ -266,7 +268,7 @@ Design evidence on 2026-11-01:
   the only allowed message addition. The uncertain submission remained
   `interrupted_unknown`; Resume moved the queue claim into the same pending
   queue item, which remained present after reload without dispatch.
-  `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/remote-docker/remote-docker-recovery.spec.ts -- --retries=0`,
+  `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/remote-docker/remote-docker-recovery.spec.ts -- --retries=0`,
   `pnpm e2e:run --host --no-build --project chromium tests/session/durable-reattachment.spec.ts -- --retries=0`,
   and `pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-durable-reattachment.spec.ts -- --retries=0`.
 - Task 02 web checks: typecheck passed with `NODE_OPTIONS=--max-old-space-size=8192`;

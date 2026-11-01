@@ -14,6 +14,7 @@ import {
 import { waitForAgentMessage, waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { watchWs } from "../../helpers/causal-waits";
 import { setupPage } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 
@@ -306,13 +307,20 @@ async function verifyRemoteLossRecoveryUI(
     true,
   );
 
+  const ws = watchWs(page);
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await expect
     .poll(() => readExecutorRunning(backend.tmpDir, sessionId))
     .toEqual({ status: "stopped", agent_execution_id: executionId });
-  await expect(session.recoveryRetryConnectionButton()).toBeVisible({ timeout: 90_000 });
+  await expect(session.recoveryRetryConnectionButton()).toBeVisible();
+  const retryResponse = ws.waitForResponse("session.recover", {
+    requestWhere: (payload) =>
+      payload.action === "retry_connection" &&
+      payload.task_id === task.id &&
+      payload.session_id === sessionId,
+  });
   if (phone) {
     const retryBox = await session.recoveryRetryConnectionButton().boundingBox();
     expect(retryBox?.height).toBeGreaterThanOrEqual(44);
@@ -320,9 +328,9 @@ async function verifyRemoteLossRecoveryUI(
   } else {
     await session.recoveryRetryConnectionButton().click();
   }
+  await retryResponse;
   await expect(page.getByTestId("delivery-recovery-result")).toHaveText(
     "Recovery is blocked. Resolve the recovery issue before retrying.",
-    { timeout: 30_000 },
   );
   expect(readRecovery(backend.tmpDir, interrupted.blockId, interrupted.submissionId)).toEqual({
     block: { state: "open", authorized_action: "" },

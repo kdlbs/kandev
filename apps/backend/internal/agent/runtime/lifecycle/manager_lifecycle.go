@@ -580,7 +580,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
 	for _, record := range records {
-		if recoveryErr != nil || record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
+		if record == nil || detailedOutcomes[record.SessionID] != RecoveryOutcomeNoMatchingInstance ||
 			!remoteRecoveryNoMatchProvesStopped(record.Runtime) {
 			continue
 		}
@@ -592,7 +592,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			continue
 		}
 		absenceCtx, cancelAbsence := m.remoteAttemptContext(ctx)
-		if err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, detailedOutcomes[record.SessionID]); err != nil {
+		if err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, true, detailedOutcomes[record.SessionID]); err != nil {
 			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
 				zap.String("session_id", record.SessionID), zap.Error(err))
 		}

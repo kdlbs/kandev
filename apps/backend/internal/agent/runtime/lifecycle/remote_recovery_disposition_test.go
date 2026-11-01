@@ -44,6 +44,31 @@ func (w *remoteRecoveryCASWriter) RepairExecutorRunningDeadIfCurrent(
 	return w.Repository.RepairExecutorRunningDeadIfCurrent(ctx, sessionID, executionID, updatedAt)
 }
 
+func (w *remoteRecoveryCASWriter) RepairExecutorRunningDeadIfOwnerCurrent(
+	ctx context.Context,
+	sessionID, executionID string,
+	updatedAt time.Time,
+	owner models.RemoteRecoveryOwnerLockIDs,
+	validateOwner func(context.Context) error,
+) error {
+	if w.repair != nil {
+		if err := validateOwner(ctx); err != nil {
+			return err
+		}
+		return w.repair(ctx, sessionID, executionID, updatedAt)
+	}
+	return w.Repository.RepairExecutorRunningDeadIfOwnerCurrent(ctx, sessionID, executionID, updatedAt, owner, validateOwner)
+}
+
+func (w *remoteRecoveryCASWriter) ConfirmExecutorRunningAbsentIfOwnerCurrent(
+	ctx context.Context,
+	sessionID string,
+	owner models.RemoteRecoveryOwnerLockIDs,
+	validateOwner func(context.Context) error,
+) error {
+	return w.Repository.ConfirmExecutorRunningAbsentIfOwnerCurrent(ctx, sessionID, owner, validateOwner)
+}
+
 func TestRemoteRecoveryConfirmedAbsenceSettlesGuard(t *testing.T) {
 	for _, runtime := range []agentruntime.Runtime{
 		agentruntime.RuntimeRemoteDocker,
@@ -56,10 +81,18 @@ func TestRemoteRecoveryConfirmedAbsenceSettlesGuard(t *testing.T) {
 				sessionID   = "session-confirmed-absence"
 				executionID = "execution-confirmed-absence"
 			)
+			workspaceID := "workspace-" + taskID
 			repo, _ := runOwnerTestRepository(t)
-			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-absence", Name: "Absence"}))
-			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "workspace-absence", Title: "Absence"}))
-			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, QueueIncarnationID: "incarnation-absence"}))
+			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Absence"}))
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Absence"}))
+			environmentID := "environment-" + taskID
+			require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: environmentID, TaskID: taskID, ExecutorType: string(runtime), ExecutorID: "executor-absence",
+				WorkspacePath: "/workspace/absence", Status: models.TaskEnvironmentStatusReady,
+			}))
+			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: sessionID, TaskID: taskID, QueueIncarnationID: "incarnation-absence", TaskEnvironmentID: environmentID,
+			}))
 			record := &models.ExecutorRunning{
 				ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
 				Runtime: runtime, Status: models.ExecutorRunningStatusRunning, Resumable: true,
@@ -103,7 +136,8 @@ func TestRemoteRecoveryConfirmedAbsenceSettlesGuard(t *testing.T) {
 }
 
 func TestDeferredRemoteRecoveryRetriesUntilConfirmedAbsence(t *testing.T) {
-	ctx := startup.WithReporter(context.Background(), startup.New(nil))
+	reporter := startup.New(nil)
+	ctx := startup.WithReporter(context.Background(), reporter)
 	repo, _ := runOwnerTestRepository(t)
 	row := seedRemoteAbsenceRecord(t, repo, agentruntime.RuntimeSprites, "deferred")
 	var calls atomic.Int32
@@ -127,6 +161,7 @@ func TestDeferredRemoteRecoveryRetriesUntilConfirmedAbsence(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, manager.Stop()) })
 
 	require.NoError(t, manager.StartDeferredRemoteRecovery(ctx))
+	require.Zero(t, calls.Load(), "the unactivated startup reporter must hold the background status worker")
 	manager.pollRemoteStatuses(ctx)
 	require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded,
 		"unknown evidence from the deferred first attempt must retain its guard")
@@ -137,6 +172,54 @@ func TestDeferredRemoteRecoveryRetriesUntilConfirmedAbsence(t *testing.T) {
 	current, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecutorRunningStatusStopped, current.Status)
+}
+
+func TestDeferredRemoteRecoveryHandlesMissingExecutorRowWithoutReattachment(t *testing.T) {
+	for _, providerReturnsInstance := range []bool{false, true} {
+		name := "confirmed absence releases guard"
+		if providerReturnsInstance {
+			name = "stale provider instance is discarded"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := startup.WithReporter(context.Background(), startup.New(nil))
+			repo, _ := runOwnerTestRepository(t)
+			row := seedRemoteAbsenceRecord(t, repo, agentruntime.RuntimeRemoteDocker, "missing-row-"+name)
+			backend := &task08DetailedRecoveryBackend{
+				MockExecutor: &MockExecutor{name: executor.NameRemoteDocker},
+				recoveryResult: func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+					if providerReturnsInstance {
+						return []*ExecutorInstance{{
+							RuntimeName: agentruntime.RuntimeRemoteDocker, SessionID: row.SessionID,
+							InstanceID: row.AgentExecutionID, TaskID: row.TaskID,
+						}}, map[string]RecoveryCandidateOutcome{row.SessionID: RecoveryOutcomeUnknown}, nil
+					}
+					return nil, map[string]RecoveryCandidateOutcome{row.SessionID: RecoveryOutcomeNoMatchingInstance}, nil
+				},
+			}
+			manager, _ := task08ManagerWithBackend(t, backend)
+			manager.SetExecutorRunningWriter(repo)
+			manager.workspaceInfoProvider = &task08RemoteSnapshotProvider{snapshots: map[string]*RemoteRecoverySnapshot{
+				row.SessionID: task08RemoteSnapshot(row),
+			}}
+			manager.SetPassthroughLookup(alwaysNotPassthrough)
+			manager.SetRecoveryDeadline(time.Second)
+			t.Cleanup(func() { require.NoError(t, manager.Stop()) })
+
+			require.NoError(t, manager.StartDeferredRemoteRecovery(ctx))
+			require.NoError(t, repo.DeleteExecutorRunningBySessionID(ctx, row.SessionID))
+			manager.pollRemoteStatuses(ctx)
+
+			_, tracked := manager.executionStore.GetBySessionID(row.SessionID)
+			require.False(t, tracked, "a stale provider result cannot be reattached without its executor row")
+			_, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+			require.ErrorIs(t, err, models.ErrExecutorRunningNotFound)
+			if providerReturnsInstance {
+				require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
+			} else {
+				require.NoError(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID))
+			}
+		})
+	}
 }
 
 func TestRemoteRecoveryAbsenceRequiresSupportedSuccessfulEvidence(t *testing.T) {
@@ -193,6 +276,33 @@ func TestRemoteRecoveryAbsenceRequiresSupportedSuccessfulEvidence(t *testing.T) 
 			require.Equal(t, models.ExecutorRunningStatusRunning, current.Status)
 		})
 	}
+}
+
+func TestManagerStartSettlesRemoteAbsenceDespiteUnrelatedRuntimeError(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := runOwnerTestRepository(t)
+	row := seedRemoteAbsenceRecord(t, repo, agentruntime.RuntimeRemoteDocker, "unrelated-runtime-error")
+	remote := remoteRecoveryNoMatchBackend(row)
+	manager, _ := task08ManagerWithBackend(t, remote)
+	manager.executorRegistry.Register(&task08DetailedRecoveryBackend{
+		MockExecutor: &MockExecutor{name: executor.NameStandalone},
+		recoveryResult: func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+			return nil, nil, errors.New("unrelated standalone enumeration failed")
+		},
+	})
+	manager.SetExecutorRunningWriter(repo)
+	manager.workspaceInfoProvider = &task08RemoteSnapshotProvider{snapshots: map[string]*RemoteRecoverySnapshot{
+		row.SessionID: task08RemoteSnapshot(row),
+	}}
+	manager.SetPassthroughLookup(alwaysNotPassthrough)
+	manager.SetRecoveryDeadline(time.Second)
+	t.Cleanup(func() { require.NoError(t, manager.Stop()) })
+
+	require.NoError(t, manager.Start(ctx))
+	require.NoError(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID))
+	current, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecutorRunningStatusStopped, current.Status)
 }
 
 func TestRemoteRecoveryAbsenceRetriesAfterRepairFailure(t *testing.T) {
@@ -321,7 +431,7 @@ func TestRemoteRecoveryAbsencePreservesTrackedSuccessor(t *testing.T) {
 	require.NoError(t, manager.executionStore.Add(successor))
 	attemptRecord, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
 	require.NoError(t, err)
-	require.NoError(t, manager.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, RecoveryOutcomeNoMatchingInstance))
+	require.NoError(t, manager.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, true, RecoveryOutcomeNoMatchingInstance))
 	manager.finishRemoteRecoveryAttempt(entry)
 
 	require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
@@ -363,11 +473,7 @@ func TestRemoteRecoveryAbsenceRejectsChangedRuntimeRow(t *testing.T) {
 			row := seedRemoteAbsenceRecord(t, repo, agentruntime.RuntimeRemoteDocker, "changed-"+name)
 			entered := make(chan struct{})
 			release := make(chan struct{})
-			var repairCalls atomic.Int32
-			writer := &remoteRecoveryCASWriter{Repository: repo, repair: func(ctx context.Context, sessionID, executionID string, updatedAt time.Time) error {
-				repairCalls.Add(1)
-				return repo.RepairExecutorRunningDeadIfCurrent(ctx, sessionID, executionID, updatedAt)
-			}}
+			writer := &remoteRecoveryCASWriter{Repository: repo}
 			backend := &task08DetailedRecoveryBackend{
 				MockExecutor: &MockExecutor{name: executor.NameRemoteDocker},
 				recoveryResult: func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
@@ -399,7 +505,6 @@ func TestRemoteRecoveryAbsenceRejectsChangedRuntimeRow(t *testing.T) {
 			require.NoError(t, <-startDone)
 
 			require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
-			require.Zero(t, repairCalls.Load(), "a row changed after provider evidence must never reach CAS repair")
 			current, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
 			require.NoError(t, err)
 			require.Equal(t, models.ExecutorRunningStatusRunning, current.Status)
@@ -408,6 +513,98 @@ func TestRemoteRecoveryAbsenceRejectsChangedRuntimeRow(t *testing.T) {
 			} else {
 				require.Equal(t, "resume-successor", current.ResumeToken)
 			}
+		})
+	}
+}
+
+func TestRemoteRecoveryAbsenceRejectsChangedOwnerDuringFinalValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		withDelivery   bool
+		changeSnapshot func(*RemoteRecoverySnapshot)
+	}{
+		{
+			name: "environment owner generation",
+			changeSnapshot: func(snapshot *RemoteRecoverySnapshot) {
+				snapshot.EnvironmentOwnershipGen++
+			},
+		},
+		{
+			name: "route state",
+			changeSnapshot: func(snapshot *RemoteRecoverySnapshot) {
+				snapshot.RouteState = "action_required"
+			},
+		},
+		{
+			name: "session state",
+			changeSnapshot: func(snapshot *RemoteRecoverySnapshot) {
+				snapshot.SessionState = models.TaskSessionStateRunning
+			},
+		},
+		{
+			name:         "delivery recovery revision",
+			withDelivery: true,
+			changeSnapshot: func(snapshot *RemoteRecoverySnapshot) {
+				snapshot.RecoveryRevision++
+			},
+		},
+		{
+			name:         "delivery pending state",
+			withDelivery: true,
+			changeSnapshot: func(snapshot *RemoteRecoverySnapshot) {
+				snapshot.RecoverableDeliveryPending = false
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, _ := runOwnerTestRepository(t)
+			row := seedRemoteAbsenceRecord(t, repo, agentruntime.RuntimeRemoteDocker, "changed-owner-final-validation-"+test.name)
+			initial := task08RemoteSnapshot(row)
+			if test.withDelivery {
+				initial.RecoverySourcePresent = true
+				initial.RecoverableDeliveryPending = true
+				initial.RecoveryExecutionID = row.AgentExecutionID
+				initial.RecoverySubmissionID = "submission-" + test.name
+				initial.RecoveryStreamID = "stream-" + test.name
+				initial.RecoveryIncarnationID = "incarnation-" + test.name
+				initial.RecoveryHarnessGeneration = 1
+				initial.RecoveryRevision = 1
+			}
+			provider := &task08RemoteSnapshotProvider{snapshots: map[string]*RemoteRecoverySnapshot{
+				row.SessionID: initial,
+			}}
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			backend := &task08DetailedRecoveryBackend{
+				MockExecutor: &MockExecutor{name: executor.NameRemoteDocker},
+				recoveryResult: func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+					close(entered)
+					<-release
+					return nil, map[string]RecoveryCandidateOutcome{row.SessionID: RecoveryOutcomeNoMatchingInstance}, nil
+				},
+			}
+			manager, _ := task08ManagerWithBackend(t, backend)
+			manager.SetExecutorRunningWriter(repo)
+			manager.workspaceInfoProvider = provider
+			manager.SetPassthroughLookup(alwaysNotPassthrough)
+			manager.SetRecoveryDeadline(time.Second)
+			t.Cleanup(func() { require.NoError(t, manager.Stop()) })
+			startDone := make(chan error, 1)
+			go func() { startDone <- manager.Start(ctx) }()
+			<-entered
+			changedOwner := *initial
+			test.changeSnapshot(&changedOwner)
+			provider.snapshots[row.SessionID] = &changedOwner
+			close(release)
+			require.NoError(t, <-startDone)
+
+			require.ErrorIs(t, manager.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
+			current, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+			require.NoError(t, err)
+			require.Equal(t, models.ExecutorRunningStatusRunning, current.Status,
+				"the owner-locked compare-and-set must reject a changed recovery snapshot")
 		})
 	}
 }
@@ -421,6 +618,7 @@ func TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences(t *testing.T) {
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			var repairCalls atomic.Int32
+			var backendCalls atomic.Int32
 			writer := &remoteRecoveryCASWriter{Repository: repo, repair: func(ctx context.Context, sessionID, executionID string, updatedAt time.Time) error {
 				repairCalls.Add(1)
 				return repo.RepairExecutorRunningDeadIfCurrent(ctx, sessionID, executionID, updatedAt)
@@ -428,6 +626,7 @@ func TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences(t *testing.T) {
 			backend := &task08DetailedRecoveryBackend{
 				MockExecutor: &MockExecutor{name: executor.NameSprites},
 				recoveryResult: func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+					backendCalls.Add(1)
 					close(entered)
 					<-release
 					return nil, map[string]RecoveryCandidateOutcome{row.SessionID: RecoveryOutcomeNoMatchingInstance}, nil
@@ -442,6 +641,7 @@ func TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences(t *testing.T) {
 			manager.SetRecoveryDeadline(time.Second)
 			t.Cleanup(func() { require.NoError(t, manager.Stop()) })
 			require.NoError(t, manager.StartDeferredRemoteRecovery(ctx))
+			require.Zero(t, backendCalls.Load(), "the unactivated startup reporter must hold background polling")
 			pollDone := make(chan struct{})
 			go func() {
 				manager.pollRemoteStatuses(ctx)
@@ -459,6 +659,7 @@ func TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences(t *testing.T) {
 			}
 			close(release)
 			<-pollDone
+			require.EqualValues(t, 1, backendCalls.Load(), "the manual poll must own the one provider attempt")
 			if attemptDone != nil {
 				<-attemptDone
 			}
@@ -475,13 +676,20 @@ func TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences(t *testing.T) {
 func seedRemoteAbsenceRecord(t *testing.T, repo *tasksqlite.Repository, runtime agentruntime.Runtime, suffix string) *models.ExecutorRunning {
 	t.Helper()
 	ctx := context.Background()
-	workspaceID := "workspace-absence-" + suffix
 	taskID := "task-absence-" + suffix
+	workspaceID := "workspace-" + taskID
 	sessionID := "session-absence-" + suffix
 	executionID := "execution-absence-" + suffix
+	environmentID := "environment-" + taskID
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: suffix}))
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: suffix}))
-	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, QueueIncarnationID: "incarnation-" + suffix}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, ExecutorType: remoteRecoveryExecutorType(runtime), ExecutorID: "executor-" + suffix,
+		WorkspacePath: "/workspace/" + suffix, Status: models.TaskEnvironmentStatusReady,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, QueueIncarnationID: "incarnation-" + suffix, TaskEnvironmentID: environmentID,
+	}))
 	record := &models.ExecutorRunning{
 		ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
 		Runtime: runtime, Status: models.ExecutorRunningStatusRunning, Resumable: true,
@@ -490,6 +698,21 @@ func seedRemoteAbsenceRecord(t *testing.T, repo *tasksqlite.Repository, runtime 
 	}
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, record))
 	return record
+}
+
+func remoteRecoveryExecutorType(runtime agentruntime.Runtime) string {
+	switch runtime {
+	case agentruntime.RuntimeRemoteDocker:
+		return string(models.ExecutorTypeRemoteDocker)
+	case agentruntime.RuntimeSprites:
+		return string(models.ExecutorTypeSprites)
+	case agentruntime.RuntimeSSH:
+		return string(models.ExecutorTypeSSH)
+	case agentruntime.RuntimeKubernetes:
+		return string(models.ExecutorTypeKubernetes)
+	default:
+		return string(models.ExecutorTypeLocal)
+	}
 }
 
 func remoteRecoveryExecutorName(runtime agentruntime.Runtime) executor.Name {

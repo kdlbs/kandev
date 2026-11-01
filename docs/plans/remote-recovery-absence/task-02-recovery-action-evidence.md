@@ -38,7 +38,8 @@ on desktop and phone, and record the supported recovery limits in public docs.
   the guard and recovery service cannot be mocked away.
 - `TestRemoteRecoveryAbsencePublicRecoveryActions` seeds an uncertain prompt
   and a separate uncertain queue dispatch. Exercise Resume, saved-context
-  continuation, Retry connection, and Stop through `session.recover`.
+  continuation, and Retry connection through `session.recover`. Stop uses the
+  public `session.stop` route.
   Assert each action's real success or evidence-based refusal. Missing
   native or journal evidence must not become success merely because the
   startup guard finished.
@@ -47,16 +48,17 @@ on desktop and phone, and record the supported recovery limits in public docs.
   queue claim identities, and unknown outcomes intact.
 - Retain unknown/live, archived, Office, automation, and changed-owner controls.
   A valid recovery request cannot bypass their own admission.
-- Extend `remote-docker-recovery.spec.ts` with the remote-loss scenario in
-  desktop and phone contexts under `containers`. Capture the original execution
+- Run the remote-loss scenario in desktop and phone contexts under
+  `containers`. Capture the original execution
   identity, stop and join the test-owned backend, stop the exact task container,
   and only then copy and seed its closed journal and disposable database.
   Restart the backend while the container remains stopped.
 - Use `testPage` and `SessionPage` to operate the visible Retry connection
-  action. Assert that the persisted executor row is stopped with the original
-  execution ID, then await the visible delivery-recovery result. Before an
-  explicit recovery action, verify the independent uncertain-delivery block
-  and queue claim remain intact.
+  action. Arm the gateway `session.recover` response wait before the click or
+  tap. Assert that the persisted executor row is stopped with the original
+  execution ID, then await the visible delivery-recovery result with the normal
+  UI assertion timeout. Before an explicit recovery action, verify the
+  independent uncertain-delivery block and queue claim remain intact.
 - Send public `session.recover` Resume and assert that it reaches recovery
   admission instead of returning `session_recovery_in_progress`. Preserve the
   original conversation, uncertain submission, and no-replay behavior. Allow
@@ -104,7 +106,7 @@ in a fresh worktree. Browser commands remain sequential and headless.
 bash scripts/lint-go-changed apps/backend/internal/backendapp/remote_recovery_absence_integration_test.go
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint e2e/tests/remote-docker/remote-docker-recovery.spec.ts)
-(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --no-build --project containers tests/remote-docker/remote-docker-recovery.spec.ts -- --retries=0)
+(cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --project containers tests/remote-docker/remote-docker-recovery.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/session/durable-reattachment.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-durable-reattachment.spec.ts -- --retries=0)
 node --test scripts/validate-public-docs.test.mjs
@@ -184,9 +186,9 @@ The `containers` project passed all four Remote Docker recovery cases: both
 existing restoration/lock cases and the new desktop and phone exact-container
 loss cases. The linked checkout's `.git` pointer cannot be resolved from the
 runner container, so the same `containers` Playwright project ran in host mode
-with the already-built assets; Docker was available and both new viewport cases
-executed. Existing native reattachment passed on desktop (2 tests) and phone
-(1 test). The loss fixture captured the execution identity, joined the owned
+with the managed runner rebuilding its required assets; Docker was available
+and both new viewport cases executed. Existing native reattachment passed on
+desktop (2 tests) and phone (1 test). The loss fixture captured the execution identity, joined the owned
 backend shutdown, stopped the exact container, then copied and seeded the
 closed journal and database before restarting the backend. Both viewport cases
 observed the stopped executor row with its original execution ID, awaited the
@@ -210,3 +212,11 @@ and `TestRemoteRecoveryAbsenceRespectsStopAndShutdownFences` passed 20
 repetitions under the Go race detector. Both use an unactivated startup reporter
 to keep background polling gated while tests drive controlled polls; no sleeps
 are used.
+
+After the review changes, the managed host command above rebuilt the E2E
+artifacts and passed all four selected container tests, including both desktop
+and phone confirmed-absence cases. Each Retry case awaited its correlated
+`session.recover` response before checking the visible result with the default
+assertion timeout. The runtime row retained the original execution identity,
+and explicit Resume passed through recovery admission while preserving the
+uncertain submission and pending queue item.

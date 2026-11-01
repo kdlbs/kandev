@@ -12,6 +12,7 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 	ctx context.Context,
 	entry *remoteRecoveryRetry,
 	attemptRecord *models.ExecutorRunning,
+	rowPresent bool,
 	outcome RecoveryCandidateOutcome,
 ) error {
 	if !remoteRecoveryAbsenceEligible(entry, outcome) {
@@ -23,23 +24,31 @@ func (m *Manager) settleRemoteRecoveryAbsence(
 	if err := validateRemoteRecoveryAbsenceAttempt(entry, attemptRecord); err != nil {
 		return err
 	}
-	reader, writer, err := remoteRecoveryAbsencePersistence(m.runningWriter)
+	writer, absentWriter, err := remoteRecoveryAbsencePersistence(m.runningWriter)
 	if err != nil {
 		return err
 	}
 	if !m.remoteRecoveryAbsenceDispositionAllowed(ctx, entry) {
 		return nil
 	}
-	if err := m.validateRemoteRecoveryAbsenceCurrentOwner(ctx, entry, attemptRecord, reader); err != nil {
-		return err
+	ownerLocks := remoteRecoveryOwnerLockIDs(entry.snapshot)
+	validateOwner := func(ownerCtx context.Context) error {
+		if !m.remoteRecoveryAbsenceDispositionAllowed(ownerCtx, entry) {
+			return errRemoteRecoveryFenced
+		}
+		return m.validateRemoteRecoveryAbsenceCurrentOwner(ownerCtx, entry, attemptRecord, rowPresent)
 	}
-	if !m.remoteRecoveryAbsenceDispositionAllowed(ctx, entry) {
-		return nil
-	}
-	if err := writer.RepairExecutorRunningDeadIfCurrent(
-		ctx, entry.record.SessionID, attemptRecord.AgentExecutionID, attemptRecord.UpdatedAt,
+	if rowPresent {
+		if err := writer.RepairExecutorRunningDeadIfOwnerCurrent(
+			ctx, entry.record.SessionID, attemptRecord.AgentExecutionID, attemptRecord.UpdatedAt,
+			ownerLocks, validateOwner,
+		); err != nil {
+			return fmt.Errorf("repair confirmed absent remote executor row: %w", err)
+		}
+	} else if err := absentWriter.ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx, entry.record.SessionID, ownerLocks, validateOwner,
 	); err != nil {
-		return fmt.Errorf("repair confirmed absent remote executor row: %w", err)
+		return fmt.Errorf("confirm absent remote executor row: %w", err)
 	}
 
 	m.completeRemoteRecoveryAbsence(entry, ctx)
@@ -58,22 +67,32 @@ func validateRemoteRecoveryAbsenceAttempt(entry *remoteRecoveryRetry, attemptRec
 	return nil
 }
 
-func remoteRecoveryAbsencePersistence(writer ExecutorRunningWriter) (executorRunningReader, executorRunningCASWriter, error) {
-	reader, hasReader := writer.(executorRunningReader)
-	casWriter, hasWriter := writer.(executorRunningCASWriter)
-	if !hasReader || !hasWriter {
-		return nil, nil, errors.New("remote recovery absence repair requires runtime row read and compare-and-set support")
+func remoteRecoveryAbsencePersistence(writer ExecutorRunningWriter) (executorRunningOwnerCASWriter, executorRunningOwnerAbsentWriter, error) {
+	casWriter, hasWriter := writer.(executorRunningOwnerCASWriter)
+	absentWriter, hasAbsentWriter := writer.(executorRunningOwnerAbsentWriter)
+	if !hasWriter || !hasAbsentWriter {
+		return nil, nil, errors.New("remote recovery absence repair requires owner-locked runtime row compare-and-set support")
 	}
-	return reader, casWriter, nil
+	return casWriter, absentWriter, nil
 }
 
 func (m *Manager) validateRemoteRecoveryAbsenceCurrentOwner(
 	ctx context.Context,
 	entry *remoteRecoveryRetry,
 	attemptRecord *models.ExecutorRunning,
-	reader executorRunningReader,
+	rowPresent bool,
 ) error {
-	owner, err := m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
+	var owner *RemoteRecoverySnapshot
+	var err error
+	if rowPresent {
+		owner, err = m.remoteRecoverySnapshot(ctx, entry.record.SessionID)
+	} else {
+		provider, ok := m.workspaceInfoProvider.(RemoteRecoveryAbsenceSnapshotProvider)
+		if !ok || provider == nil {
+			return errors.New("remote recovery absence owner snapshot provider is unavailable")
+		}
+		owner, err = provider.GetRemoteRecoveryAbsenceSnapshot(ctx, attemptRecord)
+	}
 	if err != nil {
 		return fmt.Errorf("re-read remote recovery owner before absence repair: %w", err)
 	}
@@ -86,14 +105,17 @@ func (m *Manager) validateRemoteRecoveryAbsenceCurrentOwner(
 		}
 		return errors.New("remote recovery owner is fenced from absence repair")
 	}
-	current, err := reader.GetExecutorRunningBySessionID(ctx, entry.record.SessionID)
-	if err != nil {
-		return fmt.Errorf("re-read executor row before remote absence repair: %w", err)
-	}
-	if !sameRemoteRecoveryRecordOwner(attemptRecord, current) || !current.UpdatedAt.Equal(attemptRecord.UpdatedAt) {
-		return errRemoteRecoveryFenced
-	}
 	return nil
+}
+
+func remoteRecoveryOwnerLockIDs(snapshot *RemoteRecoverySnapshot) models.RemoteRecoveryOwnerLockIDs {
+	if snapshot == nil {
+		return models.RemoteRecoveryOwnerLockIDs{}
+	}
+	return models.RemoteRecoveryOwnerLockIDs{
+		TaskID: snapshot.TaskID, SessionID: snapshot.SessionID, WorkspaceID: snapshot.TaskWorkspaceID,
+		EnvironmentID: snapshot.TaskEnvironmentID, EnvironmentOwnerTaskID: snapshot.EnvironmentOwnerTaskID,
+	}
 }
 
 func (m *Manager) completeRemoteRecoveryAbsence(entry *remoteRecoveryRetry, ctx context.Context) {

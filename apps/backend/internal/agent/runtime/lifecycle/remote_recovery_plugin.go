@@ -9,29 +9,30 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func (m *Manager) remoteRecoveryAttemptRecord(ctx context.Context, entry *remoteRecoveryRetry) (*models.ExecutorRunning, error) {
+func (m *Manager) remoteRecoveryAttemptRecord(ctx context.Context, entry *remoteRecoveryRetry) (*models.ExecutorRunning, bool, error) {
 	if entry == nil || entry.record == nil {
-		return nil, errors.New("remote recovery attempt record is unavailable")
+		return nil, false, errors.New("remote recovery attempt record is unavailable")
 	}
 	record := cloneRemoteRecoveryRecord(entry.record)
 	if record.Runtime == agentruntime.RuntimePluginRemote {
-		return m.currentPluginRemoteRecoveryAttemptRecord(ctx, record)
+		current, err := m.currentPluginRemoteRecoveryAttemptRecord(ctx, record)
+		return current, err == nil, err
 	}
 	reader, ok := m.runningWriter.(executorRunningReader)
 	if !ok {
-		return record, nil
+		return record, true, nil
 	}
 	current, err := reader.GetExecutorRunningBySessionID(ctx, record.SessionID)
 	if err != nil {
 		if errors.Is(err, models.ErrExecutorRunningNotFound) {
-			return record, nil
+			return record, false, nil
 		}
-		return nil, fmt.Errorf("read current remote recovery inventory: %w", err)
+		return nil, false, fmt.Errorf("read current remote recovery inventory: %w", err)
 	}
 	if !sameRemoteRecoveryRecordOwner(record, current) {
-		return nil, errors.New("remote recovery inventory owner changed")
+		return nil, false, errors.New("remote recovery inventory owner changed")
 	}
-	return cloneRemoteRecoveryRecord(current), nil
+	return cloneRemoteRecoveryRecord(current), true, nil
 }
 
 func sameRemoteRecoveryRecordOwner(expected, current *models.ExecutorRunning) bool {
