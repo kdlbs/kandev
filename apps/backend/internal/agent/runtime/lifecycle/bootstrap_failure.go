@@ -153,6 +153,8 @@ func isKnownBootstrapCauseCode(code string) bool {
 		models.AgentErrorCauseCodePermissionModeMismatch,
 		models.AgentErrorCauseCodeUnknown:
 		return true
+	case models.AgentErrorCauseCodeNativeStateMissing, models.AgentErrorCauseCodeNativeResumeUnsupported:
+		return true
 	default:
 		return false
 	}
@@ -179,6 +181,9 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		return existing
 	}
 	code := models.AgentErrorCauseCodeUnknown
+	if native := nativeRestoreBootstrapFailure(execution, err); native != nil {
+		return native
+	}
 	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
 	}
@@ -199,8 +204,25 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	}
 }
 
+func nativeRestoreBootstrapFailure(execution *AgentExecution, err error) *BootstrapFailure {
+	if errors.Is(err, errRemoteInitialPromptUncertain) {
+		return nil
+	}
+	var restore *RestoreRequiredError
+	if !errors.As(err, &restore) || (restore.RecoveryReason() != string(RestoreReasonNativeStateMissing) && restore.RecoveryReason() != string(RestoreReasonNativeResumeUnsupported)) {
+		return nil
+	}
+	notSent := true
+	return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: restore.RecoveryReason(),
+		Detail: bootstrapFailureDetail(restore.RecoveryReason()), PromptNotSent: &notSent, Cause: err}
+}
+
 func bootstrapFailureDetail(code string) string {
 	switch code {
+	case models.AgentErrorCauseCodeNativeStateMissing:
+		return "The native conversation could not be loaded. Its retained history is preserved."
+	case models.AgentErrorCauseCodeNativeResumeUnsupported:
+		return "The provider cannot resume this native conversation. Its retained history is preserved."
 	case models.AgentErrorCauseCodeAuthenticationRequired:
 		return "Agent authentication is required."
 	case models.AgentErrorCauseCodePermissionDenied:

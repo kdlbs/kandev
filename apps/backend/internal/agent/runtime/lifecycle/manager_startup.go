@@ -520,7 +520,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
 			return nil, err
 		}
-		return env, nil
+		return m.automaticHistoryEnvironment(env), nil
 	}
 	if req.EnvironmentResolutionRequired {
 		env, err := m.resolveStrictEnvironment(ctx, executionID, req, agentConfig, profileInfo)
@@ -530,7 +530,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
 			return nil, err
 		}
-		return env, nil
+		return m.automaticHistoryEnvironment(env), nil
 	}
 
 	env := make(map[string]string)
@@ -588,7 +588,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		return nil, err
 	}
 
-	return env, nil
+	return m.automaticHistoryEnvironment(env), nil
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {

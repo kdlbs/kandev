@@ -66,6 +66,11 @@ type ServiceConfig struct {
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
+
+	AutoStartPendingWork    bool
+	AutoContinueFromHistory bool
+	AutoRetryUnsentRequests bool
+
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -920,6 +925,7 @@ type Service struct {
 	silentRestoreStopped      bool
 	silentRestoreQueue        *restartRestoreQueue
 	silentRestoreOwnerContext silentRestoreOwnerContextResolver
+	automaticHistoryRetries   automaticHistoryBackoff
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,

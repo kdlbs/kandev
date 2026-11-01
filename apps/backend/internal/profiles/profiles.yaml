@@ -37,6 +37,18 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  KANDEV_FEATURES_AUTO_START_PENDING_WORK:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+  KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+  KANDEV_FEATURES_AUTO_RETRY_UNSENT_REQUESTS:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
   KANDEV_FEATURES_WORKSPACE_COLLABORATION:
     prod: "false"
     dev:  "false"
