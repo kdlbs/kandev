@@ -50,6 +50,7 @@ const state = {
   connection: { status: "disconnected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },
+  sidebarArchivedTasks: { itemsByWorkspaceId: {} },
   workflows: { items: [] },
   taskSessions: { items: { [SESSION]: { name: null, agent_profile_id: null } } },
   agentProfiles: { items: [] },
