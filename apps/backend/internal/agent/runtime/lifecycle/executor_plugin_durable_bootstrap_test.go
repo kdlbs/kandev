@@ -420,8 +420,15 @@ func TestProviderWithoutDurableBootstrapKeepsTheIncompleteBootstrapCleanup(t *te
 	require.Equal(t, -1, fixture.log.index("handshake:"+durableNonce))
 }
 
+// A provider-prepared environment keeps its resource when the publication is
+// refused. A core-prepared one ends instead; see
+// TestDurableResumeEndsACoreLaunchWhosePublicationIsRefusedForGood.
 func TestMismatchedPublicationAdoptsNothing(t *testing.T) {
 	fixture := newDurableRecoveryFixture(t, "provisioned")
+	inventory, err := decodePluginExecutorInventory(fixture.store.record.Metadata)
+	require.NoError(t, err)
+	inventory.WorkspacePreparation = pluginWorkspacePreparationProvider
+	fixture.store.record.Metadata = map[string]interface{}{MetadataKeyPluginExecutor: inventory}
 	fixture.store.publishErr = &models.PluginPublishMismatchError{Reason: models.PluginPublishReasonWorkspace}
 	instance, err := fixture.runtime.recoverPluginExecutor(context.Background(), fixture.store.record)
 	require.ErrorIs(t, err, models.ErrExecutorPublishMismatch)
