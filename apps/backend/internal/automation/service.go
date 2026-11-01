@@ -426,6 +426,23 @@ func (s *Service) TaskOriginLookup() TaskOriginLookup {
 	return s.taskOriginLookup
 }
 
+type automationParentAdmission interface {
+	ValidateAutomationParent(context.Context, string, string) error
+}
+
+// ValidateParentTask delegates saved and retry parent intent to canonical
+// task-creation admission, keeping the same-workspace rule in the task domain.
+func (s *Service) ValidateParentTask(ctx context.Context, workspaceID, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	admission, ok := s.taskOriginLookup.(automationParentAdmission)
+	if !ok {
+		return errors.New("automation: parent task validation is unavailable")
+	}
+	return admission.ValidateAutomationParent(ctx, workspaceID, parentID)
+}
+
 // SetRepositoryLookup wires the repository ownership validator for
 // repository bindings on create/update. This is a security control (prevents a
 // crafted request attaching another workspace's repository), so an unset
@@ -520,6 +537,9 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
 	}
+	if err := s.ValidateParentTask(ctx, req.WorkspaceID, req.ParentTaskID); err != nil {
+		return nil, err
+	}
 
 	maxRuns := req.MaxConcurrentRuns
 	if maxRuns <= 0 {
@@ -591,6 +611,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		Description:                      req.Description,
 		WorkflowID:                       req.WorkflowID,
 		WorkflowStepID:                   req.WorkflowStepID,
+		ParentTaskID:                     req.ParentTaskID,
 		AgentProfileID:                   req.AgentProfileID,
 		ExecutorProfileID:                req.ExecutorProfileID,
 		TaskMode:                         taskMode,
@@ -715,6 +736,17 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	}
 	if existing == nil {
 		return nil, ErrAutomationNotFound
+	}
+	parentID := existing.ParentTaskID
+	if req.ParentTaskID != nil {
+		parentID = *req.ParentTaskID
+	}
+	unchangedParent := parentID == existing.ParentTaskID
+	disabling := req.Enabled != nil && !*req.Enabled
+	if !disabling || !unchangedParent {
+		if err := s.ValidateParentTask(ctx, existing.WorkspaceID, parentID); err != nil {
+			return nil, err
+		}
 	}
 	profileID := existing.ExecutorProfileID
 	if req.ExecutorProfileID != nil {
@@ -2434,8 +2466,8 @@ func (s *Service) BindRunTask(ctx context.Context, runID, taskID, repositoryReas
 	return s.store.BindRunTask(ctx, runID, taskID, repositoryReason)
 }
 
-func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
-	return s.store.SetContinuationTaskID(ctx, automationID, taskID)
+func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string, binding ...ContinuationBinding) error {
+	return s.store.SetContinuationTaskID(ctx, automationID, taskID, binding...)
 }
 
 func (s *Service) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {

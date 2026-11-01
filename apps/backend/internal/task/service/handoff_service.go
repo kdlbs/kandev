@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
 	"sync"
 	"time"
 
@@ -690,6 +691,31 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 	return s.ListRelated(ctx, targetTaskID)
 }
 
+type automationRelationChildren interface {
+	ListAutomationChildrenForParent(context.Context, string) ([]*models.Task, error)
+}
+
+func (s *HandoffService) relatedChildren(ctx context.Context, taskID string) ([]*models.Task, error) {
+	children, err := s.tasks.ListChildren(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if reader, ok := s.tasks.(automationRelationChildren); ok {
+		runs, err := reader.ListAutomationChildrenForParent(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		children = append(children, runs...)
+		sort.SliceStable(children, func(i, j int) bool {
+			if children[i].CreatedAt.Equal(children[j].CreatedAt) {
+				return children[i].ID < children[j].ID
+			}
+			return children[i].CreatedAt.Before(children[j].CreatedAt)
+		})
+	}
+	return children, nil
+}
+
 // ListRelated returns the parent, children, siblings, blockers, and
 // blocked-by tasks for taskID. Document keys are populated for the task
 // itself plus every related task so an agent can shop for documents in
@@ -722,7 +748,7 @@ func (s *HandoffService) ListRelated(ctx context.Context, taskID string) (*Relat
 		}
 	}
 
-	children, err := s.tasks.ListChildren(ctx, taskID)
+	children, err := s.relatedChildren(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}

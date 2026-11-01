@@ -219,16 +219,20 @@ type Automation struct {
 	RepositoryMode                   RepositoryMode                  `json:"repository_mode" db:"repository_mode"`
 	WorkflowID                       string                          `json:"workflow_id" db:"workflow_id"`
 	WorkflowStepID                   string                          `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID                   string                          `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID                string                          `json:"executor_profile_id" db:"executor_profile_id"`
-	Prompt                           string                          `json:"prompt" db:"prompt"`
-	TaskTitleTemplate                string                          `json:"task_title_template" db:"task_title_template"`
-	Enabled                          bool                            `json:"enabled" db:"enabled"`
-	MaxConcurrentRuns                int                             `json:"max_concurrent_runs" db:"max_concurrent_runs"`
-	ContinuationPolicy               ContinuationPolicy              `json:"continuation_policy" db:"continuation_policy"`
-	RetryPolicy                      RetryPolicy                     `json:"retry_policy" db:"-"`
-	RetryPolicyJSON                  string                          `json:"-" db:"retry_policy"`
-	AutomationRevision               int64                           `json:"-" db:"automation_revision"`
+	// ParentTaskID optionally makes each firing's task a direct child of an
+	// existing task in the same workspace, so a coordinator can find it
+	// through task relations. Empty keeps the top-level behavior.
+	ParentTaskID       string             `json:"parent_task_id" db:"parent_task_id"`
+	AgentProfileID     string             `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID  string             `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt             string             `json:"prompt" db:"prompt"`
+	TaskTitleTemplate  string             `json:"task_title_template" db:"task_title_template"`
+	Enabled            bool               `json:"enabled" db:"enabled"`
+	MaxConcurrentRuns  int                `json:"max_concurrent_runs" db:"max_concurrent_runs"`
+	ContinuationPolicy ContinuationPolicy `json:"continuation_policy" db:"continuation_policy"`
+	RetryPolicy        RetryPolicy        `json:"retry_policy" db:"-"`
+	RetryPolicyJSON    string             `json:"-" db:"retry_policy"`
+	AutomationRevision int64              `json:"-" db:"automation_revision"`
 	// ContinuationTaskID is runtime state. It is intentionally omitted from
 	// the public automation JSON because the saved task is not portable
 	// configuration and may be deleted or replaced by the server.
@@ -259,6 +263,14 @@ type Automation struct {
 	// response compatibility projection for older clients.
 	Repositories  []AutomationRepository `json:"repositories" db:"-"`
 	RepositoryIDs []string               `json:"repository_ids" db:"-"`
+}
+
+// ContinuationBinding is the saved configuration and runtime binding a firing read.
+// It keeps an older firing from replacing a newer continuation selection.
+type ContinuationBinding struct {
+	ParentTaskID       string
+	AutomationRevision int64
+	ContinuationTaskID string
 }
 
 // AutomationTrigger is a single trigger attached to an automation.
@@ -613,6 +625,7 @@ type CreateAutomationRequest struct {
 	Description        string                          `json:"description"`
 	WorkflowID         string                          `json:"workflow_id"`
 	WorkflowStepID     string                          `json:"workflow_step_id"`
+	ParentTaskID       string                          `json:"parent_task_id"`
 	AgentProfileID     string                          `json:"agent_profile_id"`
 	ExecutorProfileID  string                          `json:"executor_profile_id"`
 	Repositories       []AutomationRepository          `json:"repositories,omitempty"`
@@ -642,6 +655,7 @@ type UpdateAutomationRequest struct {
 	Description       *string `json:"description,omitempty"`
 	WorkflowID        *string `json:"workflow_id,omitempty"`
 	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
+	ParentTaskID      *string `json:"parent_task_id,omitempty"`
 	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
 	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
 	// Repositories replaces the exact repository/base-branch list when non-nil.
