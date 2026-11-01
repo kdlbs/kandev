@@ -308,6 +308,7 @@
   "portableConfigBundleGeneric": "에이전트 구성 ({{id}})",
   "portableConfigBundleMockSettings": "모의 에이전트 설정 복사",
   "portableConfigBundleOpenCodeConfig": "OpenCode 구성 복사",
+  "portableConfigBundlePiConfig": "Pi 설정 및 모델 복사",
   "portableConfigFileMapping": "{{source}} → {{target}}",
   "portableConfigInfoCopyTiming": "Kandev는 새 프로비저닝이나 환경 재설정 중에만 선택한 파일을 변경 없이 복사합니다. 새 복사가 기존 대상 파일을 대체할 수 있습니다. 웜 재개는 기존 환경을 유지합니다.",
   "portableConfigInfoErrors": "없거나 읽을 수 없는 선택적 파일은 경고와 함께 건너뛰며 실행을 차단하지 않습니다. 파일에 비밀이나 환경 값이 포함될 수 있습니다.",
