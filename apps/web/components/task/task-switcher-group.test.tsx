@@ -5,6 +5,8 @@ import { ToastProvider } from "@/components/toast-provider";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { GroupHeader } from "./task-switcher-group";
 
+const COLOR_SWATCH_TEST_ID = "sidebar-group-color";
+
 afterEach(cleanup);
 
 it("announces collapse and preserves the continued-page count", () => {
@@ -53,6 +55,24 @@ it.each([
   expect(button.querySelectorAll("svg")).toHaveLength(1);
   expect(button.querySelector(".tabler-icon-chevron-down")).not.toBeNull();
   expect(screen.queryByTestId("sidebar-group-state")).toBeNull();
+  expect(screen.queryByTestId(COLOR_SWATCH_TEST_ID)).toBeNull();
+});
+
+it("renders a decorative facet color swatch and ignores unsafe or missing colors", () => {
+  const props = {
+    label: "Tag",
+    groupKey: "facet:tags",
+    count: 2,
+    isCollapsed: false,
+    onToggle: vi.fn(),
+  };
+  const view = render(<GroupHeader {...props} color="#123456" />);
+  const swatch = screen.getByTestId(COLOR_SWATCH_TEST_ID);
+  expect(swatch.getAttribute("aria-hidden")).toBe("true");
+  view.rerender(<GroupHeader {...props} color="url(https://example.com/color)" />);
+  expect(screen.queryByTestId(COLOR_SWATCH_TEST_ID)).toBeNull();
+  view.rerender(<GroupHeader {...props} />);
+  expect(screen.queryByTestId(COLOR_SWATCH_TEST_ID)).toBeNull();
 });
 
 it("keeps group inset configurable without changing descendant depth", () => {

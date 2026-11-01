@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { pluginTaskListFacetRegistrationKey, usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskListFacetRegistration } from "@/lib/plugins/registry";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
-import type { Task } from "@/lib/types/http";
 import { TASK_LIST_FACET_PREFIX } from "@/lib/tasks/tasks-list-options";
 
 export type ResolvedTaskListFacet = PluginTaskListFacetRegistration & { key: string };
 export type TaskFacetValues = Record<string, readonly TaskListFacetValue[]>;
 
-export function useTaskListFacets(tasks: Task[], workspaceId: string | null) {
+export function useTaskListFacets(tasks: readonly { id: string }[], workspaceId: string | null) {
   const registry = usePluginRegistry();
   const registrations = registry.getTaskListFacets();
   const registryVersion = registry.getVersion();
@@ -54,7 +53,7 @@ export function useTaskListFacets(tasks: Task[], workspaceId: string | null) {
 
 export function resolveTaskFacetValues(
   facets: ResolvedTaskListFacet[],
-  tasks: Task[],
+  tasks: readonly { id: string }[],
   workspaceId: string | null,
 ): TaskFacetValues {
   if (!workspaceId) return {};

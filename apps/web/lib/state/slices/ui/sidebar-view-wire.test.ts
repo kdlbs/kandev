@@ -35,6 +35,24 @@ const view: SidebarView = {
 };
 
 describe("sidebar view wire", () => {
+  it("round-trips facet selection and section collapse identities in views and drafts", () => {
+    const facetView: SidebarView = {
+      ...view,
+      group: "facet:com.example.tags:tags",
+      collapsedGroups: [JSON.stringify(["facet:com.example.tags:tags", "urgent"])],
+    };
+    expect(fromApiSidebarView(toApiSidebarView(facetView))).toEqual(facetView);
+    const draft: SidebarViewDraft = {
+      baseViewId: facetView.id,
+      filters: facetView.filters,
+      sort: facetView.sort,
+      group: facetView.group,
+      groupIndent: facetView.groupIndent,
+      taskRow: facetView.taskRow,
+    };
+    expect(fromApiSidebarDraft(toApiSidebarDraft(draft))).toEqual(draft);
+  });
+
   it("round-trips camelCase <-> snake_case", () => {
     const api = toApiSidebarView(view);
     expect(api.collapsed_groups).toEqual(view.collapsedGroups);
@@ -69,7 +87,9 @@ describe("sidebar view wire", () => {
     expect(api.filters[1].value).toEqual(["review", "in_progress"]);
     expect(api.filters[2].value).toBe("fix ");
   });
+});
 
+describe("sidebar task-row presentation wire", () => {
   it("round-trips the saved task-row presentation", () => {
     const taskRow: NonNullable<SidebarView["taskRow"]> = {
       detailsEnabled: true,
