@@ -30,11 +30,16 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 	if !legacyNativeRestartEvidenceMatches(latest, selected, block) || !sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) || *evidence.ControlIdentity != *latest.ControlIdentity {
 		return false, errors.New("legacy native restart evidence changed")
 	}
-	if err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID); err != nil {
+	resumeQueue, err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID, block.ID)
+	if err != nil {
 		return false, err
 	}
 	response, err := s.RecoverSession(ctx, session.TaskID, session.ID, "resume")
-	return err == nil && response != nil && response.Success, err
+	recovered := err == nil && response != nil && response.Success
+	if recovered {
+		resumeQueue()
+	}
+	return recovered, err
 }
 
 func legacyNativeRestartEvidenceMatches(evidence *agentruntime.DeliveryRecordEvidence, row *models.AgentDeliverySubmission, block *models.SessionRecoveryBlock) bool {

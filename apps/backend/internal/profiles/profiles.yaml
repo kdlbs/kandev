@@ -96,6 +96,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Resuming Auto-run after a silent restart restore is opt-in; by default a
+  # restored session's queue stays paused until a person re-enables it.
+  KANDEV_FEATURES_RESUME_QUEUE_AFTER_SILENT_RESTORE:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"
