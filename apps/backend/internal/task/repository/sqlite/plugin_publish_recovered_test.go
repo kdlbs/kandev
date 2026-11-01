@@ -31,6 +31,7 @@ func seedCreatingEnvironment(t *testing.T, repo *Repository, seed descriptorSeed
 	ready := descriptorFixture(1, "install-a", "ready", publishWorkspace, "worker-1")
 	envelope, _ := ready.Metadata["plugin_executor"].(map[string]interface{})
 	envelope["operation_id"], envelope["runtime_identity"] = publishOperationID, publishRuntimeID
+	envelope["workspace_preparation"] = "provider"
 	for key, value := range extra {
 		envelope[key] = value
 	}
@@ -122,6 +123,7 @@ func exercisePublishRefusesWhenTheEnvelopeIsNotReady(t *testing.T, repo *Reposit
 	provisioned := descriptorFixture(1, "install-a", "provisioned", publishWorkspace, "worker-1")
 	envelope, _ := provisioned.Metadata["plugin_executor"].(map[string]interface{})
 	envelope["operation_id"], envelope["runtime_identity"] = publishOperationID, publishRuntimeID
+	envelope["workspace_preparation"] = "provider"
 	if err := checkpointDescriptor(t, repo, provisioned, 1); err != nil {
 		t.Fatalf("provisioned: %v", err)
 	}

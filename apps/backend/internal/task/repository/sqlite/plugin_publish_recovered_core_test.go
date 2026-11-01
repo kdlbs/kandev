@@ -48,11 +48,61 @@ func TestPluginPublishProviderModeStillRefusesAnEmptyProjectionForARepoBackedTas
 	}
 }
 
-// A core-prepared workspace has no provider-recorded repository set: core wrote
-// the environment's repository rows itself, so the publication keeps them.
-func TestPluginPublishCorePreparedWorkspaceKeepsCoreRepositoryRows(t *testing.T) {
+var coreEnvelope = map[string]interface{}{"workspace_preparation": "core"}
+
+func publishCore(t *testing.T, repo *Repository, extra map[string]interface{}, mutate func(*models.PublishRecoveredTaskEnvironmentParams)) (bool, error) {
+	t.Helper()
+	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, extra)
+	claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
+	params := publishParams(claim, revision)
+	params.CorePreparedWorkspace, params.WorkspacePath = true, "/workspace"
+	if mutate != nil {
+		mutate(&params)
+	}
+	return repo.PublishRecoveredTaskEnvironment(context.Background(), params)
+}
+
+func requireMismatch(t *testing.T, err error, reason string) {
+	t.Helper()
+	var mismatch *models.PluginPublishMismatchError
+	if !errors.As(err, &mismatch) || mismatch.Reason != reason {
+		t.Fatalf("err = %v, want mismatch %q", err, reason)
+	}
+}
+
+// Core writes task_environment_repos only when it materializes the workspace,
+// which a recovery never does. A repo-backed task whose environment has no rows
+// must be refused, never published ready with an empty workspace.
+func TestPluginPublishCoreModeRefusesARepoBackedTaskWithNoEnvironmentRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, nil)
+	published, err := publishCore(t, repo, coreEnvelope, func(*models.PublishRecoveredTaskEnvironmentParams) { seedTaskRepository(t, repo) })
+	requireMismatch(t, err, models.PluginPublishReasonRepos)
+	if published {
+		t.Fatal("published a repo-backed environment with no repository rows")
+	}
+	if env := publishedEnvironment(t, repo); env.Status != models.TaskEnvironmentStatusCreating {
+		t.Fatalf("status = %q, want creating so cleanup and relaunch handle it", env.Status)
+	}
+	if ids := environmentRepoIDs(t, repo); len(ids) != 0 {
+		t.Fatalf("environment repos = %v, want none", ids)
+	}
+}
+
+func TestPluginPublishCoreModePublishesARepoLessTask(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	published, err := publishCore(t, repo, coreEnvelope, nil)
+	if err != nil || !published {
+		t.Fatalf("publish = %v, %v; want published", published, err)
+	}
+	if env := publishedEnvironment(t, repo); env.Status != models.TaskEnvironmentStatusReady {
+		t.Fatalf("status = %q, want ready", env.Status)
+	}
+}
+
+// Rows already on the environment (a prior materialization) are kept.
+func TestPluginPublishCoreModeKeepsRowsTheEnvironmentAlreadyHas(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, coreEnvelope)
 	seedTaskRepository(t, repo)
 	if err := repo.CreateTaskEnvironmentRepo(context.Background(), &models.TaskEnvironmentRepo{
 		TaskEnvironmentID: "environment-descriptor-1", RepositoryID: "repo-core-1", WorktreePath: publishWorkspace + "/core",
@@ -61,44 +111,81 @@ func TestPluginPublishCorePreparedWorkspaceKeepsCoreRepositoryRows(t *testing.T)
 	}
 	claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
 	params := publishParams(claim, revision)
-	params.CorePreparedWorkspace, params.WorkspacePath = true, publishWorkspace
-
+	params.CorePreparedWorkspace, params.WorkspacePath = true, "/workspace"
 	published, err := repo.PublishRecoveredTaskEnvironment(context.Background(), params)
 	if err != nil || !published {
 		t.Fatalf("publish = %v, %v; want published", published, err)
 	}
-	if env := publishedEnvironment(t, repo); env.Status != models.TaskEnvironmentStatusReady {
-		t.Fatalf("status = %q, want ready", env.Status)
-	}
 	if ids := environmentRepoIDs(t, repo); len(ids) != 1 || ids[0] != "repo-core-1" {
-		t.Fatalf("environment repos = %v, want core's row kept", ids)
+		t.Fatalf("environment repos = %v, want the existing row kept", ids)
 	}
 }
 
-// A core-prepared provider that declares no workspace_descriptor records none;
-// the publication then uses the fixed workspace path the host supplies.
-func TestPluginPublishCorePreparedWorkspaceWithoutADescriptorUsesTheHostPath(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, nil)
+func dropDescriptor(t *testing.T, repo *Repository) {
+	t.Helper()
 	if _, err := repo.db.ExecContext(context.Background(),
 		`UPDATE executors_running SET metadata = REPLACE(metadata, '"workspace_descriptor"', '"workspace_descriptor_x"') WHERE session_id = 'session-descriptor-1'`); err != nil {
 		t.Fatalf("drop descriptor: %v", err)
 	}
-	seedTaskRepository(t, repo)
+}
+
+// With no recorded descriptor the publication uses only the fixed /workspace
+// the provider contract names; any other caller path is refused.
+func TestPluginPublishCoreModeWithoutADescriptorRequiresTheFixedPath(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, coreEnvelope)
+	dropDescriptor(t, repo)
 	claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
 	params := publishParams(claim, revision)
-
+	params.CorePreparedWorkspace, params.WorkspacePath = true, "/etc"
 	_, err := repo.PublishRecoveredTaskEnvironment(context.Background(), params)
-	var mismatch *models.PluginPublishMismatchError
-	if !errors.As(err, &mismatch) || mismatch.Reason != models.PluginPublishReasonWorkspace {
-		t.Fatalf("provider mode err = %v, want the workspace mismatch", err)
-	}
-	params.CorePreparedWorkspace, params.WorkspacePath = true, "/workspace"
+	requireMismatch(t, err, models.PluginPublishReasonWorkspace)
+	params.WorkspacePath = "/workspace"
 	published, err := repo.PublishRecoveredTaskEnvironment(context.Background(), params)
 	if err != nil || !published {
-		t.Fatalf("core publish = %v, %v; want published", published, err)
+		t.Fatalf("publish = %v, %v; want published", published, err)
 	}
 	if env := publishedEnvironment(t, repo); env.WorkspacePath != "/workspace" {
-		t.Fatalf("workspace path = %q, want the host path", env.WorkspacePath)
+		t.Fatalf("workspace path = %q, want /workspace", env.WorkspacePath)
 	}
+}
+
+func TestPluginPublishProviderModeWithoutADescriptorIsRefused(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	revision := seedCreatingEnvironment(t, repo, seedDescriptorEnvironmentSQLite, nil)
+	dropDescriptor(t, repo)
+	claim := acquireClaimForDescriptorEnvironment(t, repo, publishOperationID+":recovery")
+	_, err := repo.PublishRecoveredTaskEnvironment(context.Background(), publishParams(claim, revision))
+	requireMismatch(t, err, models.PluginPublishReasonWorkspace)
+}
+
+// The caller's CorePreparedWorkspace flag is checked against the mode the
+// envelope recorded, so it cannot bypass the provider repository checks.
+func TestPluginPublishRefusesACorePreparedFlagThatDisagreesWithTheEnvelope(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	published, err := publishCore(t, repo, map[string]interface{}{"workspace_preparation": "provider"},
+		func(p *models.PublishRecoveredTaskEnvironmentParams) {
+			seedTaskRepository(t, repo)
+			p.Repos = []*models.TaskEnvironmentRepo{{RepositoryID: "wrong-repo"}}
+		})
+	requireMismatch(t, err, models.PluginPublishReasonWorkspace)
+	if published {
+		t.Fatal("published a provider envelope as core-prepared")
+	}
+}
+
+func TestPluginPublishRefusesAProviderFlagForACoreEnvelope(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	_, err := publishCore(t, repo, coreEnvelope, func(p *models.PublishRecoveredTaskEnvironmentParams) {
+		p.CorePreparedWorkspace = false
+	})
+	requireMismatch(t, err, models.PluginPublishReasonWorkspace)
+}
+
+func TestPluginPublishRefusesACoreFlagWhenTheEnvelopeRecordsRepositories(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	_, err := publishCore(t, repo, map[string]interface{}{
+		"workspace_preparation": "core", "repositories": []interface{}{map[string]interface{}{"id": "repo-core-1"}},
+	}, nil)
+	requireMismatch(t, err, models.PluginPublishReasonRepos)
 }
