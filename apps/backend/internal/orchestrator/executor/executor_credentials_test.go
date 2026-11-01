@@ -1030,13 +1030,17 @@ func TestInjectGitLabWorkspaceCredentialsAddsExactOriginHelperWithoutToken(t *te
 
 	exec.injectGitLabWorkspaceCredentials(context.Background(), req)
 
-	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.http://gitlab.internal:8080.helper" {
+	// Index 1 is the empty reset entry that clears system/global helpers; 2 is the token helper.
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.http://gitlab.internal:8080.helper" || req.Env["GIT_CONFIG_VALUE_1"] != "" {
+		t.Fatalf("credential helper reset = %q=%q", got, req.Env["GIT_CONFIG_VALUE_1"])
+	}
+	if got := req.Env["GIT_CONFIG_KEY_2"]; got != "credential.http://gitlab.internal:8080.helper" {
 		t.Fatalf("credential helper key = %q", got)
 	}
-	if got := req.Env["GIT_CONFIG_VALUE_1"]; got != gitLabCredentialHelper {
+	if got := req.Env["GIT_CONFIG_VALUE_2"]; got != gitLabCredentialHelper {
 		t.Fatalf("credential helper = %q", got)
 	}
-	if strings.Contains(req.Env["GIT_CONFIG_VALUE_1"], "glpat-secret") {
+	if strings.Contains(req.Env["GIT_CONFIG_VALUE_2"], "glpat-secret") {
 		t.Fatal("credential helper persisted the token")
 	}
 }
