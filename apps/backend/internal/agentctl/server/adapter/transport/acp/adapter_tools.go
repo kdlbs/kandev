@@ -27,8 +27,11 @@ type codexSubagentCorrelation struct {
 	emittedToolCallID string
 	parentToolCallID  string
 	payload           *streams.NormalizedPayload
-	terminalSeen      bool
-	lastSeen          uint64
+	// validatedSpawn records that this correlation came from an exact spawnAgent title.
+	validatedSpawn      bool
+	spawnSenderThreadID string
+	terminalSeen        bool
+	lastSeen            uint64
 }
 
 // convertToolCallContents converts ACP ToolCallContent items to our protocol-agnostic type.
@@ -139,8 +142,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		sessionID,
 		toolCallID,
 		normalizedPayload,
-		tc.Meta,
-		string(tc.Status),
+		tc,
 	)
 	if suppress {
 		return nil
@@ -185,16 +187,17 @@ func (a *Adapter) trackToolCallPayload(
 	sessionID string,
 	toolCallID string,
 	payload *streams.NormalizedPayload,
-	meta map[string]any,
-	status string,
+	call *acp.SessionUpdateToolCall,
 ) (*streams.NormalizedPayload, string, codexSubagentSignal, string, string, bool) {
 	eventType := streams.EventTypeToolCall
 	signal := codexSubagentSignalNone
+	meta := call.Meta
 	if a.agentID == codexAgentID {
-		signal = codexSubagentSignalFromMeta(meta)
+		meta = codexSubagentMetadata(meta, call.Title, call.RawInput)
+		signal = codexSubagentSignalFromFrame(meta, call.Title, call.RawInput)
 	}
 	if signal == codexSubagentSignalCollaboration && payload != nil && payload.SubagentTask() != nil && payload.SubagentTask().Status == "" {
-		fillCodexStatus(payload.SubagentTask(), status)
+		fillCodexStatus(payload.SubagentTask(), string(call.Status))
 	}
 
 	a.mu.Lock()
@@ -210,6 +213,7 @@ func (a *Adapter) trackToolCallPayload(
 		toolCallID,
 		payload,
 		codexSenderThreadID(meta),
+		signal == codexSubagentSignalCollaboration && call.Title == codexCollaborationSpawnAgent,
 	)
 	if !correlated {
 		return nil, "", signal, "", "", true
@@ -233,6 +237,7 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	toolCallID string,
 	candidate *streams.NormalizedPayload,
 	parentThreadID string,
+	validatedSpawn bool,
 ) (*codexSubagentCorrelation, bool, bool) {
 	if a.codexSubagentCorrelations == nil {
 		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
@@ -252,6 +257,10 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	key, correlation, found := a.findCodexSubagentCorrelationLocked(sessionID, toolCallID, childSessionID)
 	if found {
 		mergeCodexSubagentPayload(correlation.payload, candidate)
+		if validatedSpawn && !correlation.validatedSpawn {
+			correlation.validatedSpawn = true
+			correlation.spawnSenderThreadID = parentThreadID
+		}
 		a.touchCodexSubagentCorrelationLocked(correlation)
 		if childSessionID != "" && key.childSessionID == "" {
 			delete(a.codexSubagentCorrelations, key)
@@ -270,7 +279,11 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 		toolCallID:     toolCallID,
 		childSessionID: childSessionID,
 	}
-	correlation = &codexSubagentCorrelation{payload: cloneSubagentPayload(candidate)}
+	correlation = &codexSubagentCorrelation{
+		payload:             cloneSubagentPayload(candidate),
+		validatedSpawn:      validatedSpawn,
+		spawnSenderThreadID: parentThreadID,
+	}
 	if _, occupied := a.codexSubagentCorrelations[key]; occupied {
 		key.occurrence = a.nextCodexCorrelationOccurrenceLocked(key)
 	}
@@ -505,18 +518,31 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 	meta map[string]any,
 	title string,
 	rawInput any,
-) (*streams.NormalizedPayload, string, string, bool) {
+	titleWasOmitted bool,
+) (*streams.NormalizedPayload, string, string, string, bool) {
 	payload := a.activeToolCalls[wireToolCallID]
 	if a.agentID != codexAgentID {
-		return payload, wireToolCallID, "", false
+		return payload, wireToolCallID, "", "", false
 	}
-	signal := codexSubagentSignalFromMeta(meta)
+	signal := codexSubagentSignalFromFrame(meta, title, rawInput)
+	effectiveTitle := ""
+	if signal == codexSubagentSignalNone && titleWasOmitted {
+		inferredTitle, suppress := a.codexTitlelessSpawnUpdateTitleLocked(sessionID, wireToolCallID, meta, rawInput)
+		if suppress {
+			return nil, "", "", "", true
+		}
+		if inferredTitle != "" {
+			title = inferredTitle
+			effectiveTitle = inferredTitle
+			signal = codexSubagentSignalCollaboration
+		}
+	}
 	if signal == codexSubagentSignalNone {
-		return payload, wireToolCallID, "", false
+		return payload, wireToolCallID, "", "", false
 	}
 	frame, ok := parseCodexSubagentFrame(meta, title, rawInput)
 	if !ok {
-		return nil, "", "", true
+		return nil, "", "", "", true
 	}
 	_, correlation, found := a.findCodexSubagentCorrelationLocked(
 		sessionID,
@@ -529,11 +555,54 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 		// without a unique child identity, mutating the active wire entry would
 		// arbitrarily patch or complete the first sibling. Suppress the frame
 		// until it can be correlated coherently.
-		return nil, "", "", true
+		return nil, "", "", "", true
+	}
+	if effectiveTitle != "" && !correlation.validatedSpawn {
+		return nil, "", "", "", true
 	}
 	a.touchCodexSubagentCorrelationLocked(correlation)
 	a.pruneCodexCompletedCorrelationsLocked()
-	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID, false
+	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID, effectiveTitle, false
+}
+
+func (a *Adapter) codexTitlelessSpawnUpdateTitleLocked(
+	sessionID string,
+	wireToolCallID string,
+	meta map[string]any,
+	rawInput any,
+) (string, bool) {
+	if _, hasExplicitCodexMetadata := meta["codex"]; hasExplicitCodexMetadata {
+		return "", false
+	}
+	spawnMeta := codexSubagentMetadata(meta, codexCollaborationSpawnAgent, rawInput)
+	if codexSubagentSignalFromFrame(spawnMeta, "", rawInput) != codexSubagentSignalCollaboration {
+		return "", false
+	}
+	frame, ok := parseCodexSubagentFrame(spawnMeta, "", rawInput)
+	if !ok {
+		return "", false
+	}
+	_, correlation, found := a.findCodexSubagentCorrelationLocked(
+		sessionID,
+		wireToolCallID,
+		frame.result.ChildSessionID,
+	)
+	if found && correlation.validatedSpawn &&
+		codexSenderThreadID(spawnMeta) == correlation.spawnSenderThreadID &&
+		frame.prompt != "" && correlation.payload != nil && correlation.payload.SubagentTask() != nil &&
+		correlation.payload.SubagentTask().Prompt == frame.prompt {
+		return codexCollaborationSpawnAgent, false
+	}
+	return "", a.hasCodexValidatedSpawnLocked(sessionID, wireToolCallID)
+}
+
+func (a *Adapter) hasCodexValidatedSpawnLocked(sessionID, toolCallID string) bool {
+	for key, correlation := range a.codexSubagentCorrelations {
+		if key.sessionID == sessionID && key.toolCallID == toolCallID && correlation.validatedSpawn {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
@@ -652,12 +721,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if tcu.Title != nil {
 		updateTitle = *tcu.Title
 	}
-	payload, emittedToolCallID, codexParentToolCallID, suppressCodexUpdate := a.codexSubagentUpdateTargetLocked(
+	payload, emittedToolCallID, codexParentToolCallID, codexEnrichmentTitle, suppressCodexUpdate := a.codexSubagentUpdateTargetLocked(
 		sessionID,
 		toolCallID,
 		tcu.Meta,
 		updateTitle,
 		tcu.RawInput,
+		tcu.Title == nil,
 	)
 	if suppressCodexUpdate {
 		a.mu.Unlock()
@@ -669,7 +739,11 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)
 	}
 	if payload != nil && (tcu.Title != nil || tcu.Meta != nil || tcu.RawInput != nil || supplemental != nil) {
-		a.normalizer.EnrichFromToolCallUpdate(payload, tcu.Title, tcu.Meta, tcu.RawInput, supplemental)
+		enrichmentTitle := tcu.Title
+		if enrichmentTitle == nil && codexEnrichmentTitle != "" {
+			enrichmentTitle = &codexEnrichmentTitle
+		}
+		a.normalizer.EnrichFromToolCallUpdate(payload, enrichmentTitle, tcu.Meta, tcu.RawInput, supplemental)
 	}
 
 	isMonitorRegistration := false
