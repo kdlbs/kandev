@@ -49,6 +49,12 @@ func (s *Service) handleHandoffTaskStateChanged(ctx context.Context, event *bus.
 	if err != nil || data.TaskID == "" || !taskmodels.IsTerminalTaskState(v1.TaskState(data.NewState)) {
 		return nil
 	}
+	// Report a completion, not a re-observation of an already-terminal task:
+	// a state-change event with no transition (or no previous state) did not
+	// reach the terminal state and must not produce a report or a wake.
+	if data.OldState == "" || data.OldState == data.NewState {
+		return nil
+	}
 	source, err := s.handoffCompletionSource(ctx, data.TaskID, data.NewState)
 	if err != nil || source == nil {
 		return err
@@ -126,7 +132,9 @@ func parseHandoffCompletionSource(metadata map[string]interface{}) *HandoffCompl
 
 // handoffCompletionKey is stable across redeliveries of one delivery-task
 // transition, so the report comment and the wake run dedupe onto the same
-// identity instead of posting and waking twice.
+// identity instead of posting and waking twice. The key deliberately excludes
+// the current assignee: a redelivery after a reassignment must land on the
+// same run identity and dedupe rather than wake the new assignee again.
 func handoffCompletionKey(taskID, state string) string {
 	return RunReasonHandoffCompleted + ":" + taskID + ":" + state
 }
