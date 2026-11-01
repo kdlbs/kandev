@@ -52,8 +52,19 @@ func decodeSettings(raw []byte, found bool) (*Settings, error) {
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidPersisted, err)
 	}
+	if limits, present, err := storedGradeLimits(raw); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPersisted, err)
+	} else if present {
+		settings.GradeLimits = limits
+	}
 	if err := Validate(settings); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPersisted, err)
+	}
+	if settings.Policy == "" {
+		settings.Policy = PolicyAutomatic
+	}
+	if settings.GradeLimits == nil {
+		settings.GradeLimits = map[string]int{}
 	}
 	return &settings, nil
 }
@@ -70,6 +81,12 @@ func (s *Store) Save(ctx context.Context, settings Settings) error {
 }
 
 func encodeSettings(settings Settings) ([]byte, error) {
+	if settings.Policy == "" {
+		settings.Policy = PolicyAutomatic
+	}
+	if settings.GradeLimits == nil {
+		settings.GradeLimits = map[string]int{}
+	}
 	if err := Validate(settings); err != nil {
 		return nil, err
 	}

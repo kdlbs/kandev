@@ -2,6 +2,7 @@ package statussummary
 
 import (
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -82,6 +83,8 @@ func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
 	copy := *queue
 	if queue.Capacity != nil {
 		capacity := *queue.Capacity
+		capacity.GradeInUse = maps.Clone(queue.Capacity.GradeInUse)
+		capacity.GradeLimits = maps.Clone(queue.Capacity.GradeLimits)
 		copy.Capacity = &capacity
 	}
 	return &copy
@@ -105,8 +108,13 @@ func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
 	// ObservedAt describes when the controller sampled capacity. It is a
 	// response freshness detail, not queue identity, and must not create a new
 	// persisted projection on every refresh.
-	return left.Capacity.InUse == right.Capacity.InUse &&
-		left.Capacity.Limit == right.Capacity.Limit
+	return equalLaunchQueueCapacity(left.Capacity, right.Capacity)
+}
+
+func equalLaunchQueueCapacity(left, right *LaunchQueueCapacity) bool {
+	return left.InUse == right.InUse && left.Limit == right.Limit &&
+		left.Policy == right.Policy && left.NeedsConfiguration == right.NeedsConfiguration &&
+		maps.Equal(left.GradeInUse, right.GradeInUse) && maps.Equal(left.GradeLimits, right.GradeLimits)
 }
 
 func cloneTurnError(value *TurnErrorSummary) *TurnErrorSummary {

@@ -60,6 +60,10 @@ export type TaskStatusSummaryLaunchQueue = {
   reason: "session_capacity" | "ownership_unavailable" | "replay_error";
   retrying: boolean;
   capacity?: {
+    policy?: "automatic" | "all";
+    grade_in_use?: Record<string, number>;
+    grade_limits?: Record<string, number>;
+    needs_configuration?: boolean;
     in_use: number;
     limit: number;
     observed_at: string;

@@ -47,6 +47,7 @@ func originFromAutoStart(autoStart bool) launchOrigin {
 // session exists but before it ever reaches STARTING must still free the
 // slot, so release is gated on consumed, not on rebound.
 type seam1Reservation struct {
+	selection  *explicitWorkflowStartSelection
 	controller *sessionCeilingController
 	key        string
 	rebound    bool
@@ -66,14 +67,23 @@ type seam1Reservation struct {
 // operation rather than a release followed by an acquire (AC-6a). The local
 // key is updated to match, so a later release (if the launch never reaches
 // consume) still targets the reservation the controller is actually holding.
-func (r *seam1Reservation) rebindToSession(sessionID string) {
+func (r *seam1Reservation) rebindToSession(sessionID string, contexts ...context.Context) error {
 	if r == nil || r.controller == nil || r.rebound || sessionID == "" {
-		return
+		return nil
 	}
-	if r.controller.rebind(r.key, sessionID) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	rebound, err := r.controller.rebindAdmission(ctx, r.key, sessionID)
+	if err != nil {
+		return err
+	}
+	if rebound {
 		r.rebound = true
 		r.key = sessionID
 	}
+	return nil
 }
 
 // consume marks the reservation as belonging to a launch that actually
@@ -218,15 +228,28 @@ func seam1StartPayload(
 // calling reservation.rebindToSession once the session exists, and calling
 // reservation.consume once the launch actually succeeds.
 func (s *Service) admitOrDeferSeam1(
-	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{}, logicalProfiles ...string,
 ) (reservation *seam1Reservation, deferred bool, err error) {
+	profileID, _ := startPayload[metaKeyAgentProfileID].(string)
+	if len(logicalProfiles) > 0 {
+		profileID = logicalProfiles[0]
+	}
+	profileExplicit, _ := startPayload["profile_explicit"].(bool)
+	selection := &explicitWorkflowStartSelection{entryID: int64Field(startPayload, "workflow_entry_id")}
+	stepID, _ := startPayload[metaKeyWorkflowStepID].(string)
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
+		taskID:          taskID,
+		profileID:       profileID,
+		profileExplicit: profileExplicit, workflowStepID: stepID, startSelection: selection,
 		origin: origin,
 		seam:   "startTask",
 	})
+	return s.completeSeam1Admission(ctx, taskID, startPayload, decision, selection, origin)
+}
+
+func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, startPayload map[string]interface{}, decision admissionDecision, selection *explicitWorkflowStartSelection, origins ...launchOrigin) (*seam1Reservation, bool, error) {
 	if decision.admitted {
-		return &seam1Reservation{
+		return &seam1Reservation{selection: selection,
 			controller: s.sessionCeiling, key: decision.reservationKey,
 			manualOverride: decision.manualOverride, population: decision.population,
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
@@ -235,7 +258,7 @@ func (s *Service) admitOrDeferSeam1(
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,
-		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		decision.population, decision.populationKnown, decision.ceiling, ceilingAdmissionOrigin(origins...)); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
 		return nil, false, err

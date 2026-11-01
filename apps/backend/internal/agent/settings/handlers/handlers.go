@@ -555,6 +555,7 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
 	Name                    string                 `json:"name"`
 	Model                   string                 `json:"model"`
 	FallbackModel           string                 `json:"fallback_model,omitempty"`
@@ -584,8 +585,13 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 			return
 		}
+		if err := (dto.ProfileCreateRequest{AgentID: body.Name, Name: profile.Name, ExecutionGrade: profile.ExecutionGrade}).Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
 			Name:                    profile.Name,
+			ExecutionGrade:          profile.ExecutionGrade,
 			Model:                   profile.Model,
 			FallbackModel:           profile.FallbackModel,
 			AutoFallback:            profile.AutoFallback,

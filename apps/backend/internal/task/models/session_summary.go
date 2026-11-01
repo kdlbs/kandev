@@ -6,40 +6,42 @@ import "time"
 // navigation, status summaries, and compact session rows. It intentionally
 // excludes the full session metadata and configuration snapshots.
 type TaskSessionSummaryObservation struct {
-	ID                 string
-	TaskID             string
-	QueueIncarnationID string
-	Name               string
-	AgentExecutionID   string
-	ContainerID        string
-	AgentProfileID     string
-	AgentProfileName   string
-	ExecutionProfileID string
-	RouteGeneration    int64
-	RouteState         string
-	RouteReason        string
-	ExecutorID         string
-	ExecutorProfileID  string
-	ExecutorType       string
-	ExecutorName       string
-	EnvironmentID      string
-	RepositoryID       string
-	RepositoryPath     string
-	BaseBranch         string
-	BaseCommitSHA      string
-	WorkspacePath      string
-	State              TaskSessionState
-	ErrorMessage       string
-	Metadata           map[string]interface{}
-	StartedAt          time.Time
-	CompletedAt        *time.Time
-	UpdatedAt          time.Time
-	IsPrimary          bool
-	IsPassthrough      bool
-	ReviewStatus       ReviewStatus
-	TaskEnvironmentID  string
-	LastReadMessageID  string
-	Worktrees          []*TaskEnvironmentRepo
+	AdmittedExecutionGrade      string
+	AdmittedExecutionGradeKnown bool
+	ID                          string
+	TaskID                      string
+	QueueIncarnationID          string
+	Name                        string
+	AgentExecutionID            string
+	ContainerID                 string
+	AgentProfileID              string
+	AgentProfileName            string
+	ExecutionProfileID          string
+	RouteGeneration             int64
+	RouteState                  string
+	RouteReason                 string
+	ExecutorID                  string
+	ExecutorProfileID           string
+	ExecutorType                string
+	ExecutorName                string
+	EnvironmentID               string
+	RepositoryID                string
+	RepositoryPath              string
+	BaseBranch                  string
+	BaseCommitSHA               string
+	WorkspacePath               string
+	State                       TaskSessionState
+	ErrorMessage                string
+	Metadata                    map[string]interface{}
+	StartedAt                   time.Time
+	CompletedAt                 *time.Time
+	UpdatedAt                   time.Time
+	IsPrimary                   bool
+	IsPassthrough               bool
+	ReviewStatus                ReviewStatus
+	TaskEnvironmentID           string
+	LastReadMessageID           string
+	Worktrees                   []*TaskEnvironmentRepo
 }
 
 // ToTaskSession returns the bounded model fields represented by this
@@ -49,7 +51,9 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		return nil
 	}
 	session := &TaskSession{
-		ID: o.ID, TaskID: o.TaskID, QueueIncarnationID: o.QueueIncarnationID,
+		AdmittedExecutionGrade:      o.AdmittedExecutionGrade,
+		AdmittedExecutionGradeKnown: o.AdmittedExecutionGradeKnown,
+		ID:                          o.ID, TaskID: o.TaskID, QueueIncarnationID: o.QueueIncarnationID,
 		Name: o.Name, AgentExecutionID: o.AgentExecutionID, ContainerID: o.ContainerID,
 		AgentProfileID: o.AgentProfileID, ExecutionProfileID: o.ExecutionProfileID,
 		RouteGeneration: o.RouteGeneration, RouteState: o.RouteState, RouteReason: o.RouteReason,

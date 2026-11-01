@@ -79,6 +79,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
 
 	return &AgentProfileInfo{
+		ExecutionGrade:             profile.ExecutionGrade,
 		ProfileID:                  profile.ID,
 		ProfileName:                profile.Name,
 		AgentID:                    agent.ID,
