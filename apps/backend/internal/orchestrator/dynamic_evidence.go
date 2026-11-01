@@ -25,6 +25,8 @@ type promptAttemptEvidence struct {
 	promptGeneration uint64
 	evidenceKnown    bool
 	output           bool
+	// Only a normal empty completion may exclude reasoning from output.
+	nonReasoningOutput bool
 	// providerDiagnosticCode records an ACP agent-message diagnostic which is
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
@@ -261,6 +263,7 @@ func (s *Service) observePromptAttempt(
 		return
 	}
 	evidence.output = evidence.output || output
+	evidence.nonReasoningOutput = evidence.nonReasoningOutput || output
 	evidence.effect = evidence.effect || effect
 	if output {
 		// Any ordinary output makes the turn unsafe to replay. A provider
@@ -302,6 +305,7 @@ func (s *Service) observeProviderDiagnostic(
 	}
 	evidence.output = true
 	evidence.providerDiagnosticCode = classified.Code
+	evidence.nonReasoningOutput = true
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
 }
 
@@ -678,6 +682,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
 func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
+	evidence.nonReasoningOutput = true
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true

@@ -101,6 +101,53 @@ func TestUnclassifiedFallbackEvidenceAdmission(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7
+func TestNamedProviderFailureExactConsumerBoundary(t *testing.T) {
+	for _, message := range []string{
+		"Error: maximum context length is 8192 tokens",
+		"Error: The tool definitions or tool call payload were rejected (invalid_tools)",
+	} {
+		for _, tc := range []struct {
+			name   string
+			change func(*watcher.AgentEventData)
+		}{
+			{"complete pre-result", nil},
+			{"ordinary failure", func(d *watcher.AgentEventData) { d.DynamicRouteAttempt = false }},
+			{"unknown evidence", func(d *watcher.AgentEventData) { d.EvidenceKnown = false }},
+			{"output observed", func(d *watcher.AgentEventData) { d.OutputObserved = true }},
+			{"effect observed", func(d *watcher.AgentEventData) { d.EffectObserved = true }},
+			{"incomplete diagnostic", func(d *watcher.AgentEventData) { d.ProviderError.DiagnosticIdentityComplete = false }},
+			{"missing diagnostic source", func(d *watcher.AgentEventData) { d.ProviderError.Source = "" }},
+		} {
+			t.Run(message+"/"+tc.name, func(t *testing.T) {
+				data := watcher.AgentEventData{
+					TaskID: "context-task", SessionID: "context-session", OwnerKind: "task",
+					AgentID: "catalogue-provider", AgentExecutionID: "context-execution", PromptGeneration: 7,
+					DynamicRouteAttempt: true, EvidenceKnown: true, ErrorMessage: message,
+					ProviderError: &streams.ProviderError{
+						Source: streams.ProviderErrorSourceACPPrompt, ProviderID: "catalogue-provider",
+						Message: message, DiagnosticIdentityComplete: true, OccurredAt: time.Now().UTC(),
+					},
+				}
+				if tc.change != nil {
+					tc.change(&data)
+				}
+				got := classifyKanbanFailure(data)
+				want := routingerr.CodeAgentRuntime
+				if tc.change == nil {
+					want = routingerr.CodeUnknownProvider
+					if got.Class != routingerr.ClassUnclassified {
+						t.Fatalf("exact consumer class = %s", got.Class)
+					}
+				}
+				if got.Code != want || got.FallbackAllowed || got.AutoRetryable {
+					t.Fatalf("classification = %+v, want %s without global replay permission", got, want)
+				}
+			})
+		}
+	}
+}
+
 func TestPersistPendingDynamicRecoveryLeavesTurnForTerminalFailureCleanup(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
