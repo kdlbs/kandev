@@ -190,6 +190,12 @@ func validateWorkspacePreparation(prefix string, provider *ExecutorProvider) []e
 	default:
 		return []error{fmt.Errorf("%s.workspace_preparation must be %s or %s", prefix, WorkspacePreparationCore, WorkspacePreparationProvider)}
 	}
+	// Recovery republishes a durable bootstrap from the descriptor and the
+	// repository set the provider recorded; a core-prepared workspace has
+	// neither, so its recovery could never publish.
+	if declaresCapability(provider, "durable_bootstrap") && provider.WorkspacePreparation != WorkspacePreparationProvider {
+		return []error{fmt.Errorf("%s: durable_bootstrap requires workspace_preparation provider", prefix)}
+	}
 	return nil
 }
 
