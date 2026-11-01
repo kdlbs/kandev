@@ -64,6 +64,14 @@ export function selectTaskStatusSummary(
   return live.reduce((current, candidate) => pickFreshestStatusSummary(candidate, current), detail);
 }
 
+/** The backend's unread sessions; setting and open-task rules apply in the row. */
+export function statusSummaryUnreadSessionIds(
+  summary: TaskStatusSummary | null | undefined,
+): string[] | undefined {
+  const ids = summary?.unread_session_ids;
+  return ids && ids.length > 0 ? ids : undefined;
+}
+
 /**
  * Returns the current task-level error only when it has not already been
  * acknowledged or dismissed for the same session and stamp. Task-owned

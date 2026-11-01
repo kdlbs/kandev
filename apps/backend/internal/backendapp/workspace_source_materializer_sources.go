@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const remoteRepositorySchemeHTTP = "http"
+
 func (m *workspaceSourceMaterializer) materializeRemoteWorkspaceSources(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (*taskservice.WorkspaceSourceMaterializationResult, error) {
 	if m.remoteMaterializer == nil {
 		return nil, fmt.Errorf("remote workspace materializer is unavailable")
@@ -254,7 +256,7 @@ func remoteRepositoryLocator(repository *models.Repository) string {
 		return locator
 	}
 	parsed, err := url.Parse(locator)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != repoclone.ProtocolHTTPS && parsed.Scheme != remoteRepositorySchemeHTTP && parsed.Scheme != repoclone.ProtocolSSH && parsed.Scheme != "git") {
 		return ""
 	}
 	return locator

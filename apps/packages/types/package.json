@@ -6,6 +6,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./unread-message-visible-types.json": "./src/unread-message-visible-types.json",
     "./*": "./src/*.ts"
   }
 }

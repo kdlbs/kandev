@@ -102,6 +102,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ConfirmTaskArchive:                req.ConfirmTaskArchive,
 		PreventAutoStartAgentOnOpen:       req.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     req.UnreadDivider,
+		UnreadTaskDot:                     req.UnreadTaskDot,
+		UnreadTaskDotHideDelaySeconds:     req.UnreadTaskDotHideDelaySeconds,
 		AgentGeneratedTaskTitles:          req.AgentGeneratedTaskTitles,
 		PromptSuggestions:                 req.PromptSuggestions,
 		AutoFocusNewTasks:                 req.AutoFocusNewTasks,

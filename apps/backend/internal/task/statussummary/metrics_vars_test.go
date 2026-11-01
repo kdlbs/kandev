@@ -14,6 +14,8 @@ func TestStatusSummaryOperationalMetricsPublished(t *testing.T) {
 		"task_status_summary_cas_retries_total",
 		"task_status_summary_cas_exhaustions_total",
 		"task_status_summary_event_handler_failures_total",
+		"task_status_summary_unread_flips_total",
+		"task_status_summary_unread_load_failures_total",
 	} {
 		if expvar.Get(name) == nil {
 			t.Errorf("expvar %q is not published", name)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	activityChanged := applyTaskActivityEventLocked(state, eventType, data)
+	unreadChanged := applyUnreadEventLocked(state, eventType, data)
 	var sourceChanged bool
 	switch eventType {
 	case events.TaskCreated, events.TaskStateChanged:
@@ -67,7 +69,7 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.GitHubTaskPRUpdated:
 		sourceChanged = p.applyPREventLocked(state, data)
 	}
-	return activityChanged || sourceChanged
+	return activityChanged || unreadChanged || sourceChanged
 }
 
 func applyTaskActivityEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -337,6 +339,7 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -418,6 +421,7 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.prs = make(map[string]pullRequestObservation)
 	state.prBaseline = nil
 	state.prObserved = false
+	state.unreadObserved = false
 	applySummaryBaseline(state, current)
 	if err := p.restoreTaskActivity(ctx, taskID, state); err != nil {
 		return err
@@ -522,6 +526,7 @@ func (p *Projector) restoreSessionObservations(
 			isPrimary:           input.IsPrimary,
 			foregroundActivity:  input.ForegroundActivity,
 			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
+			unread:              unreadRanksFromState(input.Unread),
 		}
 		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
 		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
@@ -533,6 +538,7 @@ func (p *Projector) restoreSessionObservations(
 	state.sessions = sessions
 	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
+	state.unreadObserved = snapshot.UnreadObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true

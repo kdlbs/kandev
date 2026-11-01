@@ -39,6 +39,7 @@ import { TaskMoveErrorBanner } from "./task-move-error-banner";
 import { useMoveToStep } from "./task-session-sidebar-move";
 import { SidebarTaskPageContent } from "./sidebar-task-page-content";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
+import { useUnreadTaskDotDisplay } from "@/hooks/domains/sidebar/use-unread-task-dot-display";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
@@ -554,6 +555,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     retryWorkspaceContext,
     totalTaskCount: page.response?.total_tasks ?? displayTasks.length,
     selection,
+    ...useUnreadTaskDotDisplay(),
   });
   const listScrollRef = useRef<HTMLDivElement>(null);
   return (

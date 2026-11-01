@@ -92,6 +92,8 @@ export type TaskSwitcherItem = {
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  /** Raw backend unread sessions; the shared row applies setting and selection. */
+  unreadSessionIds?: string[];
 };
 
 export type TaskSwitcherProps = {
@@ -149,4 +151,10 @@ export type TaskSwitcherProps = {
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
+  /** The unread task dot setting; the shared row hides unread dots when false. */
+  unreadMessagesEnabled: boolean;
+  /** How long the open task keeps its unread dot after it is selected; 0 hides it at once. */
+  unreadDotHideDelayMs: number;
+  /** The open task's displayed session, which never keeps that task's dot. */
+  displayedSessionId: string | null;
 };

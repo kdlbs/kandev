@@ -9,6 +9,7 @@ import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
 import type { TaskPriority } from "@/lib/types/http";
 import { TaskContributionIcons } from "./task-contribution-icons";
 import { TaskPriorityIndicator } from "./task-priority-indicator";
+import { TaskUnreadDot } from "./task-unread-dot";
 
 export function TaskItemLeadingBadges({
   autopilot,
@@ -19,6 +20,7 @@ export function TaskItemLeadingBadges({
   showChangeRequestStatus = true,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
 }: {
   autopilot?: boolean;
   priority?: TaskPriority;
@@ -28,6 +30,7 @@ export function TaskItemLeadingBadges({
   showChangeRequestStatus?: boolean;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
 }) {
   return (
     <>
@@ -45,6 +48,7 @@ export function TaskItemLeadingBadges({
       ) : null}
       {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
       {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
+      {hasUnreadMessages && <TaskUnreadDot />}
     </>
   );
 }

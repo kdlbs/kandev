@@ -64,6 +64,8 @@ function makeUnloadedSettings(): UserSettingsState {
     confirmTaskArchive: true,
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
+    unreadTaskDot: false,
+    unreadTaskDotHideDelaySeconds: 2,
     agentGeneratedTaskTitles: false,
     promptSuggestions: false,
     autoFocusNewTasks: true,

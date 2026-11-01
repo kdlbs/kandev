@@ -1941,6 +1941,7 @@
   "taskDebug": "작업 디버그",
   "taskDetails": "작업 세부 정보",
   "taskHasAnAgentError": "작업에 에이전트 오류가 있습니다",
+  "taskHasUnreadMessages": "작업에 읽지 않은 메시지가 있습니다",
   "taskLinkCopied": "작업 링크를 복사했습니다",
   "taskName": "작업 이름",
   "taskNeedsRepositoryForSources": "소스를 추가하려면 이 작업에 리포지토리가 필요합니다.",

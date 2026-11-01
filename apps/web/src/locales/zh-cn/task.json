@@ -1885,6 +1885,7 @@
   "taskDebug": "任务调试",
   "taskDetails": "任务详情",
   "taskHasAnAgentError": "任务存在智能体错误",
+  "taskHasUnreadMessages": "任务有未读消息",
   "taskLinkCopied": "任务链接已复制",
   "taskName": "任务名称",
   "taskNeedsRepositoryForSources": "添加来源前，此任务需要一个仓库。",

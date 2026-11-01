@@ -46,6 +46,7 @@ vi.mock("./sleep-inhibition-settings", () => ({
 }));
 vi.mock("./todo-list-panel-settings", () => ({ TodoListPanelSettings: () => null }));
 vi.mock("./unread-divider-settings", () => ({ UnreadDividerSettings: () => null }));
+vi.mock("./unread-task-dot-settings", () => ({ UnreadTaskDotSettings: () => null }));
 vi.mock("./system/message-queue-settings", () => ({
   MessageQueueSettingsContent: () => <div data-testid="message-queue" />,
   useMessageQueueSettingsDraft: () => runtimeMocks.queue,

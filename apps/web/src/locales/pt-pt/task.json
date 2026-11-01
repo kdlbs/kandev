@@ -1886,6 +1886,7 @@
   "taskDebug": "Depuração da tarefa",
   "taskDetails": "Detalhes da tarefa",
   "taskHasAnAgentError": "A tarefa tem um erro de agente",
+  "taskHasUnreadMessages": "A tarefa tem mensagens não lidas",
   "taskLinkCopied": "Ligação da tarefa copiada",
   "taskName": "Nome da tarefa",
   "taskNeedsRepositoryForSources": "Esta tarefa precisa de um repositório antes de se poderem adicionar origens.",

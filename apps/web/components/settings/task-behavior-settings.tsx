@@ -17,6 +17,7 @@ import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { TurnChangedFilesSettings } from "@/components/settings/turn-changed-files-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
+import { UnreadTaskDotSettings } from "@/components/settings/unread-task-dot-settings";
 import {
   MessageQueueSettingsContent,
   useMessageQueueSettingsDraft,
@@ -125,6 +126,7 @@ export function TaskBehaviorSettings() {
           >
             <AgentTabCloseBehaviorSettings />
             <UnreadDividerSettings presentation="row" />
+            <UnreadTaskDotSettings />
             <TurnChangedFilesSettings />
             <AnchoredPromptBarSettings presentation="row" />
             <TodoListPanelSettings presentation="row" />

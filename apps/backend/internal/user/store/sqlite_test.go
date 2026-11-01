@@ -372,6 +372,62 @@ func TestScanUserSettingsUnreadDividerDefault(t *testing.T) {
 	}
 }
 
+// TestScanUserSettingsUnreadTaskDotDefault verifies unread_task_dot defaults to false
+// independently of unread_divider and honors explicit values.
+func TestScanUserSettingsUnreadTaskDotDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings disable the dot", raw: `{}`, want: false},
+		{name: "enabled divider leaves the dot disabled", raw: `{"unread_divider":true}`, want: false},
+		{name: "explicit false disables the dot", raw: `{"unread_task_dot":false}`, want: false},
+		{name: "explicit true enables the dot without the divider", raw: `{"unread_divider":false,"unread_task_dot":true}`, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.UnreadTaskDot != tt.want {
+				t.Fatalf("UnreadTaskDot = %v, want %v", settings.UnreadTaskDot, tt.want)
+			}
+		})
+	}
+}
+
+// TestScanUserSettingsUnreadTaskDotHideDelay verifies the hide delay defaults
+// to five seconds and that an out-of-range stored value falls back to it.
+func TestScanUserSettingsUnreadTaskDotHideDelay(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "missing delay uses the default", raw: `{}`, want: 2},
+		{name: "zero hides at once", raw: `{"unread_task_dot_hide_delay_seconds":0}`, want: 0},
+		{name: "maximum is kept", raw: `{"unread_task_dot_hide_delay_seconds":60}`, want: 60},
+		{name: "above maximum uses the default", raw: `{"unread_task_dot_hide_delay_seconds":61}`, want: 2},
+		{name: "negative uses the default", raw: `{"unread_task_dot_hide_delay_seconds":-1}`, want: 2},
+		{name: "non-integer uses the default", raw: `{"unread_task_dot_hide_delay_seconds":"7"}`, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.UnreadTaskDotHideDelaySeconds != tt.want {
+				t.Fatalf("UnreadTaskDotHideDelaySeconds = %d, want %d", settings.UnreadTaskDotHideDelaySeconds, tt.want)
+			}
+		})
+	}
+}
+
 // TestScanUserSettingsAgentGeneratedTaskTitlesDefault verifies agent_generated_task_titles defaults to true and honors explicit values.
 func TestScanUserSettingsAgentGeneratedTaskTitlesDefault(t *testing.T) {
 	tests := []struct {

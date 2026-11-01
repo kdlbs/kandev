@@ -75,6 +75,10 @@ type TaskStatusSummary struct {
 	// CompletionGate is a bounded task-owned progress projection. Detailed
 	// criterion descriptions and evidence remain available from the task API.
 	CompletionGate *CompletionGateSummary `json:"completion_gate,omitempty"`
+	// UnreadSessionIDs lists, sorted, the task's sessions that have an unread
+	// transcript-visible message. The task is unread when it is non-empty.
+	// Omitted when empty.
+	UnreadSessionIDs []string `json:"unread_session_ids,omitempty"`
 }
 
 // CompletionGateSummary keeps task-list transport bounded while exposing the
@@ -215,6 +219,9 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateLaunchQueue(s.LaunchQueue); err != nil {
 		return err
 	}
+	if err := validateUnreadSessionIDs(s.UnreadSessionIDs); err != nil {
+		return err
+	}
 	return validateCompletionGate(s.CompletionGate)
 }
 
@@ -238,6 +245,23 @@ func validateTurnError(value *TurnErrorSummary) error {
 		return err
 	}
 	return validateUTF8Bytes("turn error preview", value.Preview, MaxActiveErrorPreviewBytes)
+}
+
+// validateUnreadSessionIDs requires bounded, sorted, unique session IDs so the
+// canonical payload is stable for semantic equality.
+func validateUnreadSessionIDs(ids []string) error {
+	for i, id := range ids {
+		if id == "" {
+			return fmt.Errorf("unread session id cannot be empty")
+		}
+		if err := validateUTF8Bytes("unread session id", id, maxSessionIDBytes); err != nil {
+			return err
+		}
+		if i > 0 && ids[i-1] >= id {
+			return fmt.Errorf("unread session ids must be sorted and unique")
+		}
+	}
+	return nil
 }
 
 func validateCompletionGate(gate *CompletionGateSummary) error {
@@ -428,6 +452,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
 		CompletionGate:      s.CompletionGate,
+		UnreadSessionIDs:    s.UnreadSessionIDs,
 	})
 }
 
@@ -446,6 +471,7 @@ type semanticPayload struct {
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	UnreadSessionIDs    []string               `json:"unread_session_ids,omitempty"`
 }
 
 // TurnErrorSummaryFromMetadata projects the current task turn-error attention.

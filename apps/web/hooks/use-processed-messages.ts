@@ -24,6 +24,7 @@ import {
   buildToolCallIds,
   filterVisibleMessages,
   isSetupScriptMessage,
+  isFooterActionMessage,
 } from "./processed-message-filtering";
 
 export {
@@ -613,8 +614,7 @@ export function useProcessedMessages(
     const regular: Message[] = [];
     const footer: Message[] = [];
     for (const msg of allMessages) {
-      const meta = msg.metadata as Record<string, unknown> | undefined;
-      if (Array.isArray(meta?.actions) && !meta?.recovery_actions) {
+      if (isFooterActionMessage(msg)) {
         footer.push(msg);
       } else {
         regular.push(msg);

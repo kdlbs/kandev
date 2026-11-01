@@ -78,6 +78,9 @@ it("keeps group inset configurable without changing descendant depth", () => {
             groupIndent={groupIndent}
             activeTaskId={null}
             selectedTaskId={null}
+            unreadMessagesEnabled={false}
+            unreadDotHideDelayMs={0}
+            displayedSessionId={null}
             onSelectTask={vi.fn()}
           />
         </ToastProvider>

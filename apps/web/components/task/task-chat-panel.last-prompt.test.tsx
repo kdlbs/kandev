@@ -38,6 +38,7 @@ const panelState = {
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
   groupedItems: [{ type: "message", message: agent }] as RenderItem[],
+  messages: [agent] as Message[],
   allMessages: [agent] as Message[],
   footerActionMessages: [] as Message[],
   permissionsByToolCallId: new Map(),

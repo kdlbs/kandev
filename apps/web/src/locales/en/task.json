@@ -1965,6 +1965,7 @@
   "taskDebug": "Task Debug",
   "taskDetails": "Task details",
   "taskHasAnAgentError": "Task has an agent error",
+  "taskHasUnreadMessages": "Task has unread messages",
   "taskLinkCopied": "Task link copied",
   "taskName": "Task name",
   "taskNeedsRepositoryForSources": "This task needs a repository before sources can be added.",

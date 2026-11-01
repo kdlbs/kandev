@@ -342,8 +342,10 @@ func provideGateway(
 				return &activityAt, nil
 			},
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
-				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
+				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID, log)
 			},
+			LoadSessionUnreadState: taskRepo.ListSessionUnreadState,
+			UnreadRiseHold:         statussummary.DefaultUnreadRiseHold,
 			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
 				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
 			},
@@ -530,6 +532,7 @@ func loadTaskSessionObservations(
 	taskRepo *sqliterepo.Repository,
 	activityProvider taskStatusActivityProvider,
 	taskID string,
+	log *logger.Logger,
 ) (statussummary.SessionObservationSnapshot, error) {
 	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
 	if err != nil {
@@ -540,6 +543,8 @@ func loadTaskSessionObservations(
 		ActivityObserved: activityProvider != nil,
 		ErrorsObserved:   true,
 	}
+	unread, unreadObserved := loadTaskSessionUnreadState(ctx, taskRepo, sessions, taskID, log)
+	snapshot.UnreadObserved = unreadObserved
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
@@ -572,6 +577,10 @@ func loadTaskSessionObservations(
 				RecoveryActions:  lastError.RecoveryActions,
 				Causes:           lastError.Causes,
 			}
+		}
+		if state, ok := unread[session.ID]; ok {
+			stateCopy := state
+			input.Unread = &stateCopy
 		}
 		snapshot.Sessions = append(snapshot.Sessions, input)
 	}
@@ -607,6 +616,39 @@ func loadTaskTurnErrorObservation(
 		Observed: true,
 		Error:    statussummary.TurnErrorSummaryFromMetadata(task.Metadata),
 	}, nil
+}
+
+// loadTaskSessionUnreadState reads unread ranks for every session of the task;
+// a cursorless session reads from a zero cursor. A failed read degrades to
+// unobserved unread instead of failing the snapshot, so the stored unread
+// aggregate stays authoritative.
+func loadTaskSessionUnreadState(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	sessions []*models.TaskSession,
+	taskID string,
+	log *logger.Logger,
+) (map[string]statussummary.SessionUnreadState, bool) {
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			sessionIDs = append(sessionIDs, session.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		return nil, true
+	}
+	unread, err := taskRepo.ListSessionUnreadState(ctx, sessionIDs)
+	if err != nil {
+		statussummary.RecordUnreadLoadFailure()
+		if log != nil {
+			log.Warn("failed to load unread state for task status summary",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return nil, false
+	}
+	return unread, true
 }
 
 func loadTaskLaunchErrorObservation(

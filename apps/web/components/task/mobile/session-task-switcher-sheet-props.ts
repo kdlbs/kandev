@@ -17,6 +17,9 @@ export function buildMobileTaskSwitcherProps(
     showActivityTime: boolean;
     groupIndent: boolean;
     taskRowPresentation: TaskSwitcherProps["taskRowPresentation"];
+    unreadMessagesEnabled: boolean;
+    unreadDotHideDelayMs: number;
+    displayedSessionId: string | null;
   },
 ): TaskSwitcherProps {
   return {
@@ -33,6 +36,9 @@ export function buildMobileTaskSwitcherProps(
     showActivityTime: helpers.showActivityTime,
     groupIndent: helpers.groupIndent,
     taskRowPresentation: helpers.taskRowPresentation,
+    unreadMessagesEnabled: helpers.unreadMessagesEnabled,
+    unreadDotHideDelayMs: helpers.unreadDotHideDelayMs,
+    displayedSessionId: helpers.displayedSessionId,
     onToggleGroup: helpers.onToggleGroup,
     collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
     onToggleSubtasks: helpers.onToggleSubtasks,

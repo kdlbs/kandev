@@ -3,6 +3,7 @@ import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import { multiMessageScript } from "./seed-session-messages";
 import { waitForSessionDone } from "./session";
+import type { WsFrame, WsWatcher } from "./causal-waits";
 
 /** True only when element is actually scrolled into container's visible
  *  viewport. Unlike Playwright's toBeVisible(), which only checks CSS
@@ -68,4 +69,85 @@ export async function seedScrollTestConversation(
   await apiClient.forceSetSessionReadCursor(sessionId, cursorMessageId);
 
   return { taskId: task.id, sessionId, cursorMessageId, newestMessageId };
+}
+
+export const TASK_UNREAD_DOT_LABEL = "Task has unread messages";
+
+/** Arms a wait for the task status summary that lists `taskId` as unread.
+ *  Arm it before the action that makes the backend publish the summary. */
+export function waitForTaskUnreadSummary(ws: WsWatcher, taskId: string): Promise<WsFrame> {
+  return ws.waitForEvent("task.status_summary.updated", {
+    where: (payload) => {
+      const summary = payload.status_summary as { unread_session_ids?: string[] } | undefined;
+      return payload.task_id === taskId && (summary?.unread_session_ids?.length ?? 0) > 0;
+    },
+  });
+}
+
+export type UnreadDotTasks = {
+  navTitle: string;
+  targetTitle: string;
+  cursorlessTitle: string;
+  navTaskId: string;
+  navSessionId: string;
+  targetTaskId: string;
+  targetSessionId: string;
+  cursorlessSessionId: string;
+};
+
+/**
+ * Seeds three agent-less tasks for the task-row unread dot: a navigation task
+ * the spec opens, a target whose session has a read cursor at its tail, and a
+ * task whose session was never read (no cursor, so its agent output is
+ * unread). The cursor is force-set through the e2e route, which also moves the
+ * live task-status projection.
+ */
+export async function seedUnreadDotTasks(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  prefix: string,
+): Promise<UnreadDotTasks> {
+  const stepOptions = { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId };
+  const titles = {
+    navTitle: `${prefix} navigation`,
+    targetTitle: `${prefix} target`,
+    cursorlessTitle: `${prefix} never opened`,
+  };
+  const sessionFor = async (title: string) => {
+    const task = await apiClient.seedTask(seedData.workspaceId, title, stepOptions);
+    const session = await apiClient.seedTaskSession(task.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    return { taskId: task.task_id, sessionId: session.session_id };
+  };
+  const nav = await sessionFor(titles.navTitle);
+  const target = await sessionFor(titles.targetTitle);
+  const cursorless = await sessionFor(titles.cursorlessTitle);
+
+  const read = await apiClient.seedSessionMessage(target.sessionId, {
+    type: "message",
+    content: "already read",
+  });
+  await apiClient.forceSetSessionReadCursor(target.sessionId, read.messageId);
+  await apiClient.seedSessionMessage(cursorless.sessionId, {
+    type: "message",
+    content: "never read",
+  });
+
+  return {
+    ...titles,
+    navTaskId: nav.taskId,
+    navSessionId: nav.sessionId,
+    targetTaskId: target.taskId,
+    targetSessionId: target.sessionId,
+    cursorlessSessionId: cursorless.sessionId,
+  };
+}
+
+/** Row height in CSS pixels; the dot must never change it. */
+export async function rowHeight(row: Locator): Promise<number> {
+  const box = await row.boundingBox();
+  if (!box) throw new Error("expected a measurable task row");
+  return box.height;
 }

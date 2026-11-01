@@ -3910,13 +3910,13 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 //
 // The write is monotonic: it only advances the cursor when messageID is not
 // older than the currently persisted one, comparing each message's
-// (created_at, id) — created_at as the primary ordering (matches every
-// other transcript ordering in this codebase, e.g. ListMessages' `ORDER BY
-// created_at ASC`), with id as a deterministic tiebreaker for messages
-// created in the same instant. Portable across SQLite and Postgres — no
-// dialect branching needed, unlike the rowid-based approach this replaced
-// (SQLite's rowid pseudo-column doesn't exist on Postgres). This guards
-// against out-of-order delivery — e.g. two overlapping mark-read requests
+// (created_at, id), with created_at compared at microsecond precision through
+// dialect.NormalizedMicrosecond. This is the same key the unread derivation uses
+// (statussummary.UnreadRank), so the cursor never sits on a different side of a
+// message than the unread walk. Messages sharing a microsecond are ordered by id.
+// The guard compares through dialect.NormalizedMicrosecond on both drivers, so
+// it holds on SQLite and Postgres alike. It does not depend on rowid ordering.
+// This guards against out-of-order delivery — e.g. two overlapping mark-read requests
 // where the response for an older message is processed after a newer one —
 // silently regressing last_read_message_id and resurrecting the "New"
 // divider over transcript the user already read. A cursor referencing a
@@ -3924,6 +3924,9 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 // the guard never wedges: NOT EXISTS is satisfied and the update proceeds.
 func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error {
 	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	nmCur := dialect.NormalizedMicrosecond(driver, "cur.created_at")
+	nmIncoming := dialect.NormalizedMicrosecond(driver, "incoming.created_at")
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		   SET last_read_message_id = ?, updated_at = ?
@@ -3935,8 +3938,8 @@ func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id,
 		               WHERE cur.id = task_sessions.last_read_message_id
 		                 AND incoming.id = ?
 		                 AND (
-		                       cur.created_at > incoming.created_at
-		                       OR (cur.created_at = incoming.created_at AND cur.id > incoming.id)
+		                       `+nmCur+` > `+nmIncoming+`
+		                       OR (`+nmCur+` = `+nmIncoming+` AND cur.id > incoming.id)
 		                     )
 		            )
 		       )

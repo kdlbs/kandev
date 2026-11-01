@@ -2004,6 +2004,7 @@
   "taskDebug": "タスクデバッグ",
   "taskDetails": "タスク詳細",
   "taskHasAnAgentError": "タスクにエラーあり",
+  "taskHasUnreadMessages": "タスクに未読メッセージがあります",
   "taskLinkCopied": "タスクリンクをコピーしました",
   "taskName": "タスク名",
   "taskNeedsRepositoryForSources": "このタスクは、ソース追加前にリポジトリが必要。",
