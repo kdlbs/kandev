@@ -167,13 +167,13 @@ func TestRequiredPersistenceMiddlewareAllowsUsageReaderCleanupWhileUnavailable(t
 
 	router := gin.New()
 	router.Use(requiredPersistenceMiddleware(requiredstores.NewHealth(tracker, nil, nil)))
-	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/release-reader", func(c *gin.Context) {
+	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID"+e2eUsageHistoryReleaseReaderPath, func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/pause", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
-	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID/resume", func(c *gin.Context) {
+	router.POST(e2eUsageHistoryControlPathPrefix+":workspaceID"+e2eUsageHistoryResumePath, func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
 
@@ -181,11 +181,11 @@ func TestRequiredPersistenceMiddlewareAllowsUsageReaderCleanupWhileUnavailable(t
 		path string
 		want int
 	}{
-		{e2eUsageHistoryControlPathPrefix + "workspace/release-reader", http.StatusOK},
-		{e2eUsageHistoryControlPathPrefix + "workspace/resume", http.StatusOK},
+		{e2eUsageHistoryControlPathPrefix + "workspace" + e2eUsageHistoryReleaseReaderPath, http.StatusOK},
+		{e2eUsageHistoryControlPathPrefix + "workspace" + e2eUsageHistoryResumePath, http.StatusOK},
 		{e2eUsageHistoryControlPathPrefix + "workspace/pause", http.StatusServiceUnavailable},
-		{e2eUsageHistoryControlPathPrefix + "workspace/other/release-reader", http.StatusServiceUnavailable},
-		{e2eUsageHistoryControlPathPrefix + "workspace/other/resume", http.StatusServiceUnavailable},
+		{e2eUsageHistoryControlPathPrefix + "workspace/other" + e2eUsageHistoryReleaseReaderPath, http.StatusServiceUnavailable},
+		{e2eUsageHistoryControlPathPrefix + "workspace/other" + e2eUsageHistoryResumePath, http.StatusServiceUnavailable},
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.path, nil))

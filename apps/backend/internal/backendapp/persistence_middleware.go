@@ -38,7 +38,8 @@ func persistencePathExcluded(path string) bool {
 	}
 	if remainder, ok := strings.CutPrefix(path, e2eUsageHistoryControlPathPrefix); ok {
 		workspaceID, action, hasAction := strings.Cut(remainder, "/")
-		if hasAction && workspaceID != "" && (action == "release-reader" || action == "resume") {
+		controlPath := "/" + action
+		if hasAction && workspaceID != "" && (controlPath == e2eUsageHistoryReleaseReaderPath || controlPath == e2eUsageHistoryResumePath) {
 			return true
 		}
 	}

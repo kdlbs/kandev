@@ -28,6 +28,11 @@ type e2eUsageSourceAdoptionRunner interface {
 	BackfillUsageSourceAdoption(context.Context, int) (bool, error)
 }
 
+const (
+	e2eUsageHistoryResumePath        = "/resume"
+	e2eUsageHistoryReleaseReaderPath = "/release-reader"
+)
+
 // These controls drive the real durable projector. They never supply report
 // values, mint collector bindings, or bypass the request's workspace policy.
 func registerE2EUsageHistoryRoutes(router *gin.Engine, authorizer e2eUsageWorkspaceAuthorizer, repo any, pool *db.Pool, control *usageHistoryProjectionControl) {
@@ -42,7 +47,7 @@ func registerE2EUsageHistoryRoutes(router *gin.Engine, authorizer e2eUsageWorksp
 		}
 	})
 	api.POST("/pause", e2eUsageProjectionAction(control.pause))
-	api.POST("/resume", e2eUsageProjectionAction(control.resume))
+	api.POST(e2eUsageHistoryResumePath, e2eUsageProjectionAction(control.resume))
 	if rebuilder, ok := repo.(e2eUsageRebuilder); ok && pool != nil {
 		api.POST("/rebuild", e2eUsageHistoryRebuild(pool, rebuilder))
 	}
@@ -52,7 +57,7 @@ func registerE2EUsageHistoryRoutes(router *gin.Engine, authorizer e2eUsageWorksp
 		control.beforeStop = hold.close
 		control.mu.Unlock()
 		api.POST("/hold-reader", e2eUsageProjectionAction(hold.acquire))
-		api.POST("/release-reader", e2eUsageProjectionAction(hold.release))
+		api.POST(e2eUsageHistoryReleaseReaderPath, e2eUsageProjectionAction(hold.release))
 		if adopter, ok := repo.(e2eUsageSourceAdoptionRunner); ok {
 			api.POST("/adopt-legacy-session", e2eUsageLegacySourceAdoption(pool, adopter))
 		}
