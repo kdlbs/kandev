@@ -476,6 +476,10 @@ type Service struct {
 	// recovery sweep) can be gated to steps that actually auto-start an
 	// agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
 	workflowStepGetter shared.AssignmentStepGetter
+
+	// agentErrorVerdict defers a task run's terminal failure until the
+	// failed session's verdict is recorded. See agent_error_session_verdict.go.
+	agentErrorVerdict agentErrorVerdictState
 }
 
 // RoutineRunSyncer is the surface the office service needs from the

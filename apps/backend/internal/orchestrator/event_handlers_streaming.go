@@ -3221,7 +3221,8 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if state == v1.TaskStateInProgress && task != nil && task.IsFromOffice {
 		return nil
 	}
-	if state == v1.TaskStateInProgress && task != nil && task.State == v1.TaskStateCompleted {
+	if (state == v1.TaskStateInProgress || state == v1.TaskStateFailed) &&
+		task != nil && task.State == v1.TaskStateCompleted {
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -3493,7 +3494,8 @@ func (s *Service) reconcileCompleteEventRuntime(
 		return false
 	}
 	stopReason := extractStopReason(payload)
-	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
+	if !extractCompleteIsError(payload) && extractCompleteErrorMessage(payload) == "" &&
+		s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason, completionTurnID) {
 		return true
 	}
 	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
@@ -3692,7 +3694,7 @@ const stopReasonCancelled = "cancelled"
 
 // Returns true when handled as office (state→IDLE + StopAgent); stopReason "cancelled" returns false to keep the session promptable.
 func (s *Service) handleOfficeTurnComplete(
-	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string,
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason, completionTurnID string,
 ) bool {
 	if session == nil || session.AgentProfileID == "" {
 		return false
@@ -3703,10 +3705,43 @@ func (s *Service) handleOfficeTurnComplete(
 	}
 
 	if stopReason == stopReasonCancelled {
+		s.publishOfficeTurnSettlement(ctx, taskID, sessionID, session, completionTurnID)
 		s.logger.Info("office turn cancelled by user — skipping IDLE flip, deferring to cancel handler",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("stop_reason", stopReason))
+		return false
+	}
+
+	settlementSnapshot := *session
+	teardown := func() {
+		if s.teardownOfficeTurn(ctx, taskID, sessionID, session, completionTurnID) {
+			s.publishOfficeTurnSettlement(ctx, taskID, sessionID, &settlementSnapshot, completionTurnID)
+		}
+	}
+	// The relaunch that this teardown must not stop takes the executor's
+	// per-session launch/stop lock. Running the ownership decision and the
+	// teardown inside that same lock serializes them.
+	if s.executor != nil {
+		s.executor.WithSessionOwnership(sessionID, teardown)
+	} else {
+		teardown()
+	}
+	return true
+}
+
+// teardownOfficeTurn flips a completed Office turn's session to IDLE and stops
+// the execution that turn owned. It runs while the executor's per-session
+// launch/stop lock is held, so a successor relaunch cannot start between the
+// ownership read and the stop; a relaunch that already holds the lock is
+// observed here and keeps its execution.
+func (s *Service) teardownOfficeTurn(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, completionTurnID string,
+) bool {
+	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
+		return true
+	}
+	if session.AgentExecutionID != "" && s.agentManager == nil {
 		return false
 	}
 
@@ -3716,8 +3751,22 @@ func (s *Service) handleOfficeTurnComplete(
 		zap.String("agent_profile_id", session.AgentProfileID))
 
 	// State flip first so the workflow handler doesn't ping-pong on the
-	// AgentStopped → handleAgentCompleted path.
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, session)
+	// AgentStopped → handleAgentCompleted path. The flip is a compare-and-set
+	// against the completion snapshot's state: a successor that moved the
+	// session out of that state wins, and this stale completion stops here.
+	// An already-IDLE session is this turn's own earlier teardown, so the
+	// execution stop below still runs.
+	if _, changed := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, nil, session,
+	); !changed {
+		current, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || current == nil || current.State != models.TaskSessionStateIdle {
+			s.logger.Info("office turn complete — session moved on, skipping stale teardown",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return false
+		}
+	}
 
 	if s.agentManager != nil && session.AgentExecutionID != "" {
 		// Tears down the agent subprocess + executor backend + agentctl
@@ -3728,9 +3777,52 @@ func (s *Service) handleOfficeTurnComplete(
 				zap.String("session_id", sessionID),
 				zap.String("agent_execution_id", session.AgentExecutionID),
 				zap.Error(err))
+			return false
 		}
 	}
 	return true
+}
+
+// officeSessionRelaunchedSince reloads the session right before the Office
+// teardown. The teardown runs after a synchronous git-status capture, so the
+// session may already serve the next run on the same live execution; flipping
+// it IDLE and stopping that execution would fail the new run.
+func (s *Service) officeSessionRelaunchedSince(
+	ctx context.Context, taskID, sessionID string, snapshot *models.TaskSession, completionTurnID string,
+) bool {
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || current == nil {
+		return false
+	}
+	relaunched := current.State == models.TaskSessionStateStarting ||
+		(current.State == models.TaskSessionStateRunning && snapshot.State != models.TaskSessionStateRunning) ||
+		(current.AgentExecutionID != "" && snapshot.AgentExecutionID != "" &&
+			current.AgentExecutionID != snapshot.AgentExecutionID) ||
+		s.sessionTurnAdvancedSince(ctx, sessionID, completionTurnID)
+	if !relaunched {
+		return false
+	}
+	s.logger.Info("office turn complete — session relaunched, skipping stale teardown",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("snapshot_state", string(snapshot.State)),
+		zap.String("current_state", string(current.State)),
+		zap.String("snapshot_execution_id", snapshot.AgentExecutionID),
+		zap.String("current_execution_id", current.AgentExecutionID),
+		zap.String("completion_turn_id", completionTurnID))
+	return true
+}
+
+// sessionTurnAdvancedSince reports whether the session is running a turn other
+// than the one that just completed. A relaunched session reuses the same live
+// execution, so the execution id is unchanged; the new turn is the signal that
+// distinguishes it from the completing turn.
+func (s *Service) sessionTurnAdvancedSince(ctx context.Context, sessionID, completionTurnID string) bool {
+	if completionTurnID == "" {
+		return false
+	}
+	currentTurnID := s.currentTurnIDForSession(ctx, sessionID)
+	return currentTurnID != "" && currentTurnID != completionTurnID
 }
 
 // handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).

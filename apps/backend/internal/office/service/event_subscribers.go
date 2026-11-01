@@ -326,18 +326,17 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
 		{events.AgentReady, maybeAsync(s.handleAgentReady)},
 		{events.BuildPermissionRequestWildcardSubject(), maybeAsync(s.handleTasklessPermissionRequest)},
-		// AgentStopped fires when StopAgent is called (e.g. office
-		// fire-and-forget turn-complete teardown). Same handler — both
-		// signal "the agent is no longer running on this task and the
-		// claimed run should be finished so the next run for the
-		// same agent can be claimed". Without this, comments / status
-		// changes / mentions queue runs that never fire because the
-		// previous run stays in 'claimed' state forever.
-		{events.AgentStopped, maybeAsync(s.handleAgentCompleted)},
+		// AgentStopped settles a successful teardown only after the process
+		// has stopped; failed bootstrap cleanup keeps the failure outcome.
+		// Office turns without a stopping teardown confirm their own identity
+		// through OfficeTurnSettled instead of releasing at the early park.
+		{events.AgentStopped, maybeAsync(s.handleAgentStopped)},
 		{events.AgentFailed, maybeAsync(s.handleAgentFailed)},
 		{events.BuildSessionPromptUsageWildcardSubject(), maybeAsync(s.handlePromptUsage)},
 		{events.BuildAgentStreamWildcardSubject(), maybeAsync(s.handleAgentStreamUsage)},
 		{events.AgentTurnMessageSaved, maybeAsync(s.handleAgentTurnMessageSaved)},
+		{events.TaskSessionStateChanged, maybeAsync(s.handleTaskSessionStateChanged)},
+		{events.OfficeTurnSettled, maybeAsync(s.handleOfficeTurnSettled)},
 	}
 	for _, sub := range subs {
 		if _, err := eb.Subscribe(sub.subject, sub.handler); err != nil {
@@ -458,6 +457,34 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	return nil
 }
 
+// handleAgentStopped distinguishes successful teardown from failed bootstrap
+// cleanup. A failed process stop is not evidence that its Office run succeeded.
+func (s *Service) handleAgentStopped(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[AgentLifecycleData](event)
+	if err != nil || data == nil || data.SessionID == "" {
+		return s.handleAgentCompleted(ctx, event)
+	}
+	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, data.SessionID)
+	if err != nil {
+		return err
+	}
+	if state != taskSessionStateFailed {
+		return s.handleAgentCompleted(ctx, event)
+	}
+	run, err := s.resolveLifecycleRun(ctx, *data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if run.ClaimedAt != nil && !event.Timestamp.IsZero() && event.Timestamp.Before(*run.ClaimedAt) {
+		return nil
+	}
+	data.ErrorMessage = errorMessage
+	return s.failClaimedTaskRun(ctx, run, *data)
+}
+
 func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[AgentLifecycleData](event)
 	if err != nil {
@@ -482,6 +509,18 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
+	if lifecycleEventRunID(*data) == "" && s.hasPendingAgentFailure(data.SessionID) {
+		// A completion without an event run identity would resolve through
+		// the task-and-agent fallback, which cannot prove it belongs to the
+		// run that currently owns the reused session. While a failure is
+		// parked, completing the run that fallback happens to resolve would
+		// finish a successor before its own verdict. Leave it to that
+		// verdict (the state handler or the bounded re-check).
+		s.logger.Info("ignoring legacy completion while a session verdict is pending",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return nil
+	}
 	run, err := s.resolveTerminalLifecycleRun(ctx, *data)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A ceiling replay whose settlement write failed leaves the Office run
@@ -502,6 +541,10 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// A stale/duplicate completion still consumes only the parked
+			// failure that belongs to the completing run; another run's
+			// failure on the same reused session must survive.
+			s.dropPendingAgentFailure(data.SessionID, data.RunID)
 			if exactRunSessionEvent(data) {
 				return nil
 			}
@@ -517,6 +560,23 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
+	// A delayed legacy stop must not resolve through a successor's claim on
+	// the same persistent task/agent session.
+	if data.RunID == "" && run.ClaimedAt != nil && !event.Timestamp.IsZero() &&
+		event.Timestamp.Before(*run.ClaimedAt) {
+		return nil
+	}
+	// Only the event's own run identity may consume the parked failure. The
+	// task-and-agent fallback used for legacy events does not prove which run
+	// completed, so it leaves another run's parked failure in place.
+	s.dropPendingAgentFailure(data.SessionID, data.RunID)
+	return s.completeClaimedTaskRun(ctx, run, *data)
+}
+
+// completeClaimedTaskRun finishes a claimed task run whose agent turn ended
+// without error and applies the completion side effects once. It is shared
+// by the lifecycle completion events and the parked-session settlement.
+func (s *Service) completeClaimedTaskRun(ctx context.Context, run *runsmodels.Run, data AgentLifecycleData) error {
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -553,7 +613,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
-	s.recordRunOutputSummary(ctx, run, *data)
+	s.recordRunOutputSummary(ctx, run, data)
 	s.warnIfReviewDecisionMissing(ctx, run)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
@@ -906,6 +966,15 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
+	if s.deferAgentFailureUntilSessionVerdict(ctx, run, *data) {
+		return nil
+	}
+	return s.failClaimedTaskRun(ctx, run, *data)
+}
+
+// failClaimedTaskRun applies the terminal Office failure path to a claimed
+// task run and dispatches the workflow's on_agent_error trigger.
+func (s *Service) failClaimedTaskRun(ctx context.Context, run *runsmodels.Run, data AgentLifecycleData) error {
 	// Office failure path: terminal for every error except a classified-
 	// transient failure, which HandleAgentFailure itself retries a
 	// bounded number of times before it counts toward auto-pause
