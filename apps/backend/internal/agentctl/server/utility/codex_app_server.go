@@ -26,6 +26,11 @@ const (
 	codexNpmPrefixFlag        = "--prefix"
 )
 
+const (
+	codexSandboxReadOnly         = "read-only"
+	codexSandboxDangerFullAccess = "danger-full-access"
+)
+
 var codexPackageSpec = regexp.MustCompile(`^@openai/codex@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
 // CodexAppServerInferenceExecutor runs short utility prompts through the same
@@ -39,6 +44,16 @@ type CodexAppServerInferenceExecutor struct {
 // SetNodeLaunchWrapper installs the operator-owned wrapper for every launch.
 func (e *CodexAppServerInferenceExecutor) SetNodeLaunchWrapper(node launchwrapper.Node) {
 	e.node = node
+}
+
+// sandboxMode picks the Codex thread sandbox. Codex's macOS Seatbelt cannot
+// nest inside the node wrapper's sandbox, so under an enforced node policy the
+// outer sandbox is the boundary; every other launch stays read-only.
+func (e *CodexAppServerInferenceExecutor) sandboxMode() string {
+	if e.node.Enforced() {
+		return codexSandboxDangerFullAccess
+	}
+	return codexSandboxReadOnly
 }
 
 // diagnosticStderr hides wrapper-controlled stderr from responses and logs.
@@ -182,7 +197,7 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	var thread protocol.ThreadStartResponse
 	if err := client.Call(ctx, protocol.MethodThreadStart, protocol.ThreadStartParams{
 		Model: modelPtr, CWD: req.InferenceConfig.WorkDir, Ephemeral: &ephemeral,
-		ApprovalPolicy: "never", Sandbox: "read-only", Config: codexUtilityMCPConfig(req.MCPServers),
+		ApprovalPolicy: "never", Sandbox: e.sandboxMode(), Config: codexUtilityMCPConfig(req.MCPServers),
 	}, &thread); err != nil {
 		return &PromptResponse{Error: utilityUpstreamError(err, e.diagnosticStderr(stderr)), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
