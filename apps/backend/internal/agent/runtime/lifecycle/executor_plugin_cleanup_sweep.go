@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
@@ -28,6 +29,9 @@ type pluginExecutorCleanupSweep struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+	// handoffCursor and pendingCursor are where the next pass resumes in each
+	// list, so work that keeps failing cannot hold the batch.
+	handoffCursor, pendingCursor atomic.Int64
 }
 
 // StartCleanupSweep retries unfinished plugin resource cleanup until
@@ -91,35 +95,57 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read unrecorded plugin executors: %w", err)
 	}
+	records, recordsErr := r.inventoryStore.ListExecutorsRunningPluginRemote(ctx)
+	pending := cleanupPendingRecords(records)
+	// Rows that fail every pass must not hold the batch: cleanup_pending rows
+	// keep a reserved share, and each list resumes where the last pass stopped.
+	handoffBudget := pluginExecutorCleanupSweepBatch - min(len(pending), pluginExecutorCleanupSweepBatch/2)
 	var sweepErrors []error
-	budget := pluginExecutorCleanupSweepBatch
-	for _, handoff := range handoffs {
-		if budget == 0 || ctx.Err() != nil {
-			return errors.Join(append(sweepErrors, ctx.Err())...)
-		}
-		budget--
+	attempted := sweepRotated(ctx, &r.cleanupSweep.handoffCursor, handoffs, handoffBudget, func(handoff *models.UnrecordedPluginExecutor) {
 		if err := r.sweepHandoff(ctx, handoff); r.sweepFailure(err, handoff.ExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
+	})
+	if recordsErr != nil {
+		return errors.Join(append(sweepErrors, fmt.Errorf("read plugin executor cleanup inventory: %w", recordsErr))...)
 	}
-	records, err := r.inventoryStore.ListExecutorsRunningPluginRemote(ctx)
-	if err != nil {
-		return errors.Join(append(sweepErrors, fmt.Errorf("read plugin executor cleanup inventory: %w", err))...)
-	}
-	for _, record := range records {
-		if budget == 0 || ctx.Err() != nil {
-			break
-		}
-		environment, pending := cleanupPendingEnvironment(record)
-		if !pending {
-			continue
-		}
-		budget--
+	sweepRotated(ctx, &r.cleanupSweep.pendingCursor, pending, pluginExecutorCleanupSweepBatch-attempted, func(record *models.ExecutorRunning) {
+		environment, _ := cleanupPendingEnvironment(record)
 		if err := r.destroyPluginExecutorEnvironmentRecord(ctx, environment, record, nil); r.sweepFailure(err, record.AgentExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
+	})
+	if err := ctx.Err(); err != nil {
+		sweepErrors = append(sweepErrors, err)
 	}
 	return errors.Join(sweepErrors...)
+}
+
+func cleanupPendingRecords(records []*models.ExecutorRunning) []*models.ExecutorRunning {
+	pending := make([]*models.ExecutorRunning, 0, len(records))
+	for _, record := range records {
+		if _, owed := cleanupPendingEnvironment(record); owed {
+			pending = append(pending, record)
+		}
+	}
+	return pending
+}
+
+// sweepRotated visits at most budget items starting at the stored cursor and
+// advances the cursor past them, so the next pass starts with the items this
+// one did not reach. It returns how many items it visited.
+func sweepRotated[T any](ctx context.Context, cursor *atomic.Int64, items []T, budget int, visit func(T)) int {
+	if len(items) == 0 || budget <= 0 {
+		return 0
+	}
+	start := int(cursor.Load() % int64(len(items)))
+	visited := 0
+	for visited < min(budget, len(items)) && ctx.Err() == nil {
+		visit(items[(start+visited)%len(items)])
+		visited++
+	}
+	cursor.Store(int64((start + visited) % len(items)))
+	return visited
 }
 
 // sweepFailure reports whether err is a failure of the pass. A task cleanup
