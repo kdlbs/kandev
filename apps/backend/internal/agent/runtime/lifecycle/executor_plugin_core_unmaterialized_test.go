@@ -332,6 +332,7 @@ func TestPublishPendingRecordOfAReadyEnvironmentIsNeverAbandoned(t *testing.T) {
 func TestPublishPendingRecordWithAnUnreadableEnvironmentDefers(t *testing.T) {
 	fixture, destroys := legacyPublishPendingFixture(t)
 	fixture.store.taskRepositories = []*models.TaskRepository{{ID: "tr-1", TaskID: "task-plugin-recovery", RepositoryID: "repo-1"}}
+	fixture.store.environment = nil
 
 	_, err := fixture.recoverOne()
 	require.ErrorContains(t, err, "deferred")

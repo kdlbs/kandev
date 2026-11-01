@@ -291,6 +291,8 @@ func newDurableRecoveryFixture(t *testing.T, phase string) *durableRecoveryFixtu
 	fixture.store = &publisherStoreFake{pluginExecutorInventoryStoreFake: pluginExecutorInventoryStoreFake{
 		record:  record,
 		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateRunning},
+		// The environment a durable launch is still materializing.
+		environment: &models.TaskEnvironment{ID: "environment-plugin-recovery", Status: models.TaskEnvironmentStatusCreating},
 	}}
 	fixture.secrets = newRuntimeSecretsFake(fixture.log)
 	fixture.runtime = NewPluginRemoteExecutor(fixture.operations, newTestLogger())
