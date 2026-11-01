@@ -45,7 +45,7 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 	if _, exists := m.GetExecutionBySessionID(requested.SessionID); !exists {
 		remote, err := m.recoverSavedSSHDelivery(ctx, requested)
 		if remote && err != nil {
-			return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
+			return sshDeliveryRecoveryFailure(identity, err)
 		}
 	}
 	if execution, exists := m.GetExecutionBySessionID(requested.SessionID); exists {
@@ -69,7 +69,7 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 		}
 		if execution.RuntimeName == agentruntime.RuntimeSSH {
 			if err := m.reconnectSSHDelivery(ctx, execution); err != nil {
-				return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
+				return sshDeliveryRecoveryFailure(identity, err)
 			}
 			if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
 				return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch, "execution_identity_changed", ErrDeliveryOwnerMismatch)
@@ -78,6 +78,15 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 		return m.streamManager.ReconcileAgentDelivery(ctx, execution)
 	}
 	return m.recoverRetainedAgentDeliveryWithoutExecution(ctx, requested, identity)
+}
+
+// sshDeliveryRecoveryFailure keeps a proven owner conflict blocked instead of
+// reporting it as a retryable transport outage.
+func sshDeliveryRecoveryFailure(identity DeliveryReconciliationIdentity, err error) DeliveryReconciliationResult {
+	if errors.Is(err, ErrDeliveryOwnerMismatch) {
+		return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch, "execution_identity_changed", err)
+	}
+	return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
 }
 
 func (m *Manager) recoverRetainedAgentDeliveryWithoutExecution(

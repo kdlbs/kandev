@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -81,6 +82,17 @@ func sshDeliveryRecoveryFixture(t *testing.T) (*SSHExecutor, *models.ExecutorRun
 			if err := json.NewEncoder(w).Encode(agentctl.StatusResponse{AgentStatus: "running"}); err != nil {
 				t.Error(err)
 			}
+		case "/api/v1/workspace/stream":
+			conn, err := (&websocket.Upgrader{}).Upgrade(w, req, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
 		default:
 			http.NotFound(w, req)
 		}
@@ -116,6 +128,9 @@ func TestSSHLiveDeliveryRecoveryManagerReconcilesOriginalOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
 	instance := instances[0]
+	stale, err := instance.Client.StreamWorkspace(context.Background(), agentctl.WorkspaceStreamCallbacks{})
+	require.NoError(t, err)
+	t.Cleanup(func() { stale.Close(); stale.Wait() })
 	rt.mu.Lock()
 	old := rt.sessions[record.AgentExecutionID]
 	rt.mu.Unlock()
@@ -132,6 +147,7 @@ func TestSSHLiveDeliveryRecoveryManagerReconcilesOriginalOwner(t *testing.T) {
 	execution.metadata = cloneSSHMetadata(instance.Metadata)
 	execution.setMetadataValue(MetadataKeyAuthTokenSecret, "test-auth")
 	execution.setDeliverySubmissionID("prompt-ssh")
+	execution.SetWorkspaceStream(stale)
 	require.NoError(t, mgr.executionStore.Add(execution))
 	clock := newReconciliationTestClock()
 	mgr.streamManager.reconciliationNow = clock.Now
@@ -151,6 +167,8 @@ func TestSSHLiveDeliveryRecoveryManagerReconcilesOriginalOwner(t *testing.T) {
 	require.NotSame(t, instance.Client, current)
 	require.Equal(t, execution.ID, writer.running.AgentExecutionID)
 	require.Equal(t, "stream-ssh", execution.DeliveryStreamID)
+	require.Eventually(t, func() bool { ws := execution.GetWorkspaceStream(); return ws != nil && ws != stale },
+		5*time.Second, 10*time.Millisecond, "the workspace stream must follow the replacement transport")
 }
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16

@@ -52,7 +52,20 @@ func (m *Manager) reconnectSSHDelivery(ctx context.Context, execution *AgentExec
 	if !committed {
 		return ErrDeliveryOwnerMismatch
 	}
+	m.reconnectSSHWorkspaceStream(execution)
 	return m.persistExecutorRunningResult(ctx, execution)
+}
+
+func (m *Manager) reconnectSSHWorkspaceStream(execution *AgentExecution) {
+	// Reconciliation reattaches only the agent updates stream.
+	if m.streamManager != nil {
+		if stale := execution.GetWorkspaceStream(); stale != nil {
+			stale.Close()
+			stale.Wait()
+			execution.ClearWorkspaceStream(stale)
+		}
+		m.streamManager.ConnectWorkspaceStream(execution, nil)
+	}
 }
 
 func (m *Manager) recoverSavedSSHDelivery(ctx context.Context, requested AgentDeliveryRecoveryIdentity) (bool, error) {
