@@ -542,6 +542,21 @@ func (r *Repository) ReelectFailedTaskEnvironmentMaterialization(
 // when the session owns no creating environment, including when another
 // session took the claim over, so a former owner cannot change the row.
 func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error) {
+	return r.failTaskEnvironmentMaterialization(ctx, sessionID, "", 0)
+}
+
+// FailScopedTaskEnvironmentMaterialization is FailTaskEnvironmentMaterialization
+// limited to one environment at one ownership generation. A session that has
+// since been re-pointed to another environment, or an environment whose
+// generation moved on, is left untouched and reports false.
+func (r *Repository) FailScopedTaskEnvironmentMaterialization(ctx context.Context, sessionID, environmentID string, generation int64) (bool, error) {
+	if environmentID == "" || generation <= 0 {
+		return false, nil
+	}
+	return r.failTaskEnvironmentMaterialization(ctx, sessionID, environmentID, generation)
+}
+
+func (r *Repository) failTaskEnvironmentMaterialization(ctx context.Context, sessionID, onlyEnvironmentID string, onlyGeneration int64) (bool, error) {
 	if sessionID == "" {
 		return false, nil
 	}
@@ -561,6 +576,9 @@ func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, ses
 	if err != nil {
 		return false, fmt.Errorf("load owned task environment materialization: %w", err)
 	}
+	if onlyEnvironmentID != "" && environmentID != onlyEnvironmentID {
+		return false, nil
+	}
 	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
 		return false, err
 	}
@@ -571,8 +589,9 @@ func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, ses
 		UPDATE task_environments
 		SET status = ?, materialization_session_id = '', updated_at = ?
 		WHERE id = ? AND status = ? AND materialization_session_id = ?
+		  AND (? = 0 OR ownership_generation = ?)
 	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(),
-		environmentID, string(models.TaskEnvironmentStatusCreating), sessionID)
+		environmentID, string(models.TaskEnvironmentStatusCreating), sessionID, onlyGeneration, onlyGeneration)
 	if err != nil {
 		return false, fmt.Errorf("fail owned task environment materialization: %w", err)
 	}

@@ -247,10 +247,14 @@ type publisherStoreFake struct {
 	pluginExecutorInventoryStoreFake
 	published  []models.PublishRecoveredTaskEnvironmentParams
 	publishErr error
+	onPublish  func()
 }
 
 func (f *publisherStoreFake) PublishRecoveredTaskEnvironment(_ context.Context, params models.PublishRecoveredTaskEnvironmentParams) (bool, error) {
 	f.published = append(f.published, params)
+	if f.onPublish != nil {
+		f.onPublish()
+	}
 	return f.publishErr == nil, f.publishErr
 }
 

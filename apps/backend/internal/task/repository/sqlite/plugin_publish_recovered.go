@@ -38,6 +38,12 @@ type pluginPublishEnvelope struct {
 // that records no workspace descriptor.
 const pluginPublishCoreWorkspacePath = "/workspace"
 
+// The two workspace_preparation modes an envelope records.
+const (
+	pluginPublishPreparationCore     = "core"
+	pluginPublishPreparationProvider = "provider"
+)
+
 func publishMismatch(reason string) error { return &models.PluginPublishMismatchError{Reason: reason} }
 
 // PublishRecoveredTaskEnvironment flips a creating plugin environment to ready
@@ -254,8 +260,8 @@ func validatePublishEnvelope(envelope pluginPublishEnvelope, params models.Publi
 		return publishMismatch(models.PluginPublishReasonRuntime)
 	case envelope.Phase != pluginPhaseReady:
 		return publishMismatch(models.PluginPublishReasonPhase)
-	case envelope.WorkspacePreparation != "" && envelope.WorkspacePreparation != "core" && envelope.WorkspacePreparation != "provider",
-		(envelope.WorkspacePreparation == "provider") == params.CorePreparedWorkspace:
+	case envelope.WorkspacePreparation != "" && envelope.WorkspacePreparation != pluginPublishPreparationCore && envelope.WorkspacePreparation != pluginPublishPreparationProvider,
+		(envelope.WorkspacePreparation == pluginPublishPreparationProvider) == params.CorePreparedWorkspace:
 		return publishMismatch(models.PluginPublishReasonWorkspace)
 	case params.CorePreparedWorkspace && len(envelope.Repositories) > 0:
 		return publishMismatch(models.PluginPublishReasonRepos)
