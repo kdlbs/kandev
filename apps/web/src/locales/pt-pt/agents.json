@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "Diagnóstico",
   "runtimeDetectedLocalCLI": "CLI local detetada: {{path}}",
   "runtimeLocalCLIVersion": "CLI local: {{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "CLI local: {{name}}, versão desconhecida ({{reason}})"
+  "runtimeLocalCLIVersionUnknown": "CLI local: {{name}}, versão desconhecida ({{reason}})",
+  "dynamicPolicyUnclassified": "Avançar para o próximo candidato após falhas não classificadas repetidas",
+  "dynamicPolicyUnclassifiedHelp": "Recuperação opcional para falhas que o classificador não consegue colocar nas classes transitória ou grave. Mantém-se desligada por predefinição, pelo que as falhas não classificadas continuam a exigir recuperação manual. Só contam falhas verificadas do fornecedor, do arranque do processo ou de turnos vazios, sem saída nem efeitos. Um passo do fluxo de trabalho pode desativar a passagem ao candidato seguinte.",
+  "dynamicUnclassifiedApplyAll": "Aplicar a todos os candidatos",
+  "dynamicUnclassifiedApplyAllConfirmAction": "Aplicar a todos",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "Define a política de falhas não classificadas de cada candidato como ativada com limite 2. A ordem dos candidatos, os grupos de prioridade, as opções de modelo e as políticas transitória e grave mantêm-se.",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "Ativar o recurso de falhas não classificadas em todos os candidatos",
+  "dynamicUnclassifiedDescription": "Aplica-se quando uma falha não pode ser classificada como transitória ou grave, incluindo um turno sem saída produzida. Depois deste candidato falhar dessa forma o número de vezes seguidas definido pelo limite, o Kandev seleciona uma vez o próximo candidato. O esgotamento continua a exigir recuperação manual.",
+  "dynamicUnclassifiedErrors": "Falhas não classificadas",
+  "dynamicUnclassifiedSummaryOff": "Recurso de falhas não classificadas: desligado",
+  "dynamicUnclassifiedSummaryOn": "Recurso de falhas não classificadas: {{threshold}} seguidas",
+  "dynamicUnclassifiedSwitchDescription": "Conta as falhas não classificadas idênticas deste candidato e passa ao próximo candidato ao atingir o limite. Só contam falhas verificadas do fornecedor, do arranque do processo ou de turnos vazios, sem saída nem efeitos. Um passo do fluxo de trabalho pode desativar a passagem ao candidato seguinte.",
+  "dynamicUnclassifiedThreshold": "Falhas não classificadas seguidas",
+  "dynamicUnclassifiedThresholdValidation": "Introduza um limite entre 2 e 10."
 }

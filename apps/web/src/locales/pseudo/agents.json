@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "Ďĩàĝńōśţĩćś",
   "runtimeDetectedLocalCLI": "Ďēţēćţēď ĺōćàĺ ĆĹĨ: {{path}}",
   "runtimeLocalCLIVersion": "Ĺōćàĺ ĆĹĨ: {{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "Ĺōćàĺ ĆĹĨ: {{name}}, vēŕśĩōń ũńķńōŵń ({{reason}})"
+  "runtimeLocalCLIVersionUnknown": "Ĺōćàĺ ĆĹĨ: {{name}}, vēŕśĩōń ũńķńōŵń ({{reason}})",
+  "dynamicPolicyUnclassified": "Ƒàĺĺ ƀàćķ àƒţēŕ ŕēƥēàţēď ũńćĺàśśĩƒĩēď ƒàĩĺũŕēś",
+  "dynamicPolicyUnclassifiedHelp": "Ōƥţ-ĩń ŕēćōvēŕŷ ƒōŕ ƒàĩĺũŕēś ţĥàţ ţĥē ćĺàśśĩƒĩēŕ ćàńńōţ ƥĺàćē ĩń ţĥē ţŕàńśĩēńţ ōŕ ĥàŕď ćĺàśśēś. Ĩţ śţàŷś ōƒƒ ƀŷ ďēƒàũĺţ, śō ũńćĺàśśĩƒĩēď ƒàĩĺũŕēś ķēēƥ ŕēqũĩŕĩńĝ ḿàńũàĺ ŕēćōvēŕŷ. Ōńĺŷ vēŕĩƒĩēď ƥŕōvĩďēŕ, ƥŕōćēśś-śţàŕţ, ōŕ ēḿƥţŷ-ţũŕń ƒàĩĺũŕēś ŵĩţĥ ńō ōũţƥũţ ōŕ ēƒƒēćţś qũàĺĩƒŷ. À ŵōŕķƒĺōŵ śţēƥ ćàń ďĩśàƀĺē ƒàĺĺƀàćķ.",
+  "dynamicUnclassifiedApplyAll": "Àƥƥĺŷ ţō àĺĺ ćàńďĩďàţēś",
+  "dynamicUnclassifiedApplyAllConfirmAction": "Àƥƥĺŷ ţō àĺĺ",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "Śēţ ēàćĥ ćàńďĩďàţē'ś ũńćĺàśśĩƒĩēď ƥōĺĩćŷ ţō ēńàƀĺēď ŵĩţĥ à ţĥŕēśĥōĺď ōƒ 2. Ćàńďĩďàţē ōŕďēŕ, ƥŕĩōŕĩţŷ ĝŕōũƥś, ḿōďēĺ ōƥţĩōńś, àńď ţĥē ţŕàńśĩēńţ àńď ĥàŕď ƥōĺĩćĩēś śţàŷ ũńćĥàńĝēď.",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "Ēńàƀĺē ũńćĺàśśĩƒĩēď ƒàĺĺƀàćķ ƒōŕ ēvēŕŷ ćàńďĩďàţē",
+  "dynamicUnclassifiedDescription": "Àƥƥĺĩēś ŵĥēń à ƒàĩĺũŕē ćàńńōţ ƀē ćĺàśśĩƒĩēď àś ţŕàńśĩēńţ ōŕ ĥàŕď, ĩńćĺũďĩńĝ à ţũŕń ţĥàţ ƥŕōďũćēď ńō ōũţƥũţ. Àƒţēŕ ţĥĩś ćàńďĩďàţē ƒàĩĺś ţĥàţ ŵàŷ ţĥē ţĥŕēśĥōĺď ńũḿƀēŕ ōƒ ţĩḿēś ĩń à ŕōŵ, Ķàńďēv śēĺēćţś ţĥē ńēxţ ćàńďĩďàţē ōńćē. Ēxĥàũśţĩōń śţĩĺĺ ŕēqũĩŕēś ḿàńũàĺ ŕēćōvēŕŷ.",
+  "dynamicUnclassifiedErrors": "Ũńćĺàśśĩƒĩēď ƒàĩĺũŕēś",
+  "dynamicUnclassifiedSummaryOff": "Ũńćĺàśśĩƒĩēď ƒàĺĺƀàćķ: ōƒƒ",
+  "dynamicUnclassifiedSummaryOn": "Ũńćĺàśśĩƒĩēď ƒàĺĺƀàćķ: {{threshold}} ĩń à ŕōŵ",
+  "dynamicUnclassifiedSwitchDescription": "Ćōũńţ ĩďēńţĩćàĺ ũńćĺàśśĩƒĩēď ƒàĩĺũŕēś ƒōŕ ţĥĩś ćàńďĩďàţē àńď ḿōvē ţō ţĥē ńēxţ ćàńďĩďàţē àţ ţĥē ţĥŕēśĥōĺď. Ōńĺŷ vēŕĩƒĩēď ƥŕōvĩďēŕ, ƥŕōćēśś-śţàŕţ, ōŕ ēḿƥţŷ-ţũŕń ƒàĩĺũŕēś ŵĩţĥ ńō ōũţƥũţ ōŕ ēƒƒēćţś qũàĺĩƒŷ. À ŵōŕķƒĺōŵ śţēƥ ćàń ďĩśàƀĺē ƒàĺĺƀàćķ.",
+  "dynamicUnclassifiedThreshold": "Ćōńśēćũţĩvē ũńćĺàśśĩƒĩēď ƒàĩĺũŕēś",
+  "dynamicUnclassifiedThresholdValidation": "Ēńţēŕ à ţĥŕēśĥōĺď ƀēţŵēēń 2 àńď 10."
 }

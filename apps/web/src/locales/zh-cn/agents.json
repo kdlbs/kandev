@@ -488,5 +488,18 @@
   "runtimeDiagnostics": "诊断信息",
   "runtimeDetectedLocalCLI": "检测到本地 CLI：{{path}}",
   "runtimeLocalCLIVersion": "本地 CLI：{{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）"
+  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）",
+  "dynamicPolicyUnclassified": "连续出现未分类失败后切换到下一个候选",
+  "dynamicPolicyUnclassifiedHelp": "针对分类器无法归入暂时性或严重类别的失败的可选恢复方式。默认关闭，关闭时未分类失败仍需手动恢复。 仅统计已确认没有输出或副作用的提供商错误、进程启动失败或空回合结束。工作流步骤可以禁用候选项回退。",
+  "dynamicUnclassifiedApplyAll": "应用到所有候选",
+  "dynamicUnclassifiedApplyAllConfirmAction": "全部应用",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "将每个候选的未分类策略设为启用，阈值为 2。候选顺序、优先级分组、模型选项以及暂时性和严重策略保持不变。",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "为所有候选开启未分类回退",
+  "dynamicUnclassifiedDescription": "当失败无法归类为暂时性或严重错误时适用，包括没有产出任何输出的轮次。该候选以相同原因连续失败达到阈值次数后，Kandev 会切换一次到下一个候选。耗尽后仍需手动恢复。",
+  "dynamicUnclassifiedErrors": "未分类失败",
+  "dynamicUnclassifiedSummaryOff": "未分类回退：关闭",
+  "dynamicUnclassifiedSummaryOn": "未分类回退：连续 {{threshold}} 次",
+  "dynamicUnclassifiedSwitchDescription": "统计该候选拥有相同原因的未分类失败，达到阈值后转入下一个候选。 仅统计已确认没有输出或副作用的提供商错误、进程启动失败或空回合结束。工作流步骤可以禁用候选项回退。",
+  "dynamicUnclassifiedThreshold": "连续未分类失败次数",
+  "dynamicUnclassifiedThresholdValidation": "请输入 2 到 10 之间的阈值。"
 }
