@@ -96,7 +96,7 @@ func (r *Repository) publishRecoveredTx(ctx context.Context, tx *sqlx.Tx, params
 		return false, err
 	}
 	if params.CorePreparedWorkspace {
-		err = r.requireCorePublishRepos(ctx, tx, env.taskID, params.EnvironmentID)
+		err = r.requireCorePublishRepos(ctx, tx, env.taskID)
 	} else {
 		err = r.replacePublishRepos(ctx, tx, env.taskID, params)
 	}
@@ -137,18 +137,13 @@ func classifyPublishTarget(env pluginPublishEnvironment, descriptorPath, session
 	}
 }
 
-// requireCorePublishRepos keeps the repository rows the environment already
-// has. Core writes them only when it materializes the workspace, which a
-// recovery never does, so a repo-backed task whose environment has none is
-// refused and left to cleanup and relaunch rather than published empty.
-func (r *Repository) requireCorePublishRepos(ctx context.Context, tx *sqlx.Tx, taskID, environmentID string) error {
-	var existing int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_environment_repos WHERE task_environment_id = ?`), environmentID).Scan(&existing); err != nil {
-		return fmt.Errorf("count environment repos to publish: %w", err)
-	}
-	if existing > 0 {
-		return nil
-	}
+// requireCorePublishRepos refuses a repo-backed task whatever rows the
+// environment has. A core-prepared workspace is populated only when core
+// materializes its repositories through agentctl after the instance exists, and
+// a recovery never does that, so a published environment would have an empty
+// workspace. Rows left by an earlier materialization, tombstoned or partial,
+// say nothing about what is on disk now. Only a repo-less task may publish.
+func (r *Repository) requireCorePublishRepos(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	return r.requirePublishRepos(ctx, tx, taskID, nil)
 }
 
