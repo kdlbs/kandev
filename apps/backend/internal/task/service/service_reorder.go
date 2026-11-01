@@ -36,6 +36,10 @@ type reorderRepository interface {
 	ReorderStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string) ([]*models.Task, int64, error)
 }
 
+type childReorderRepository interface {
+	ReorderChildStepTasks(context.Context, string, string, []string, models.ChildTaskOrderScope) ([]*models.Task, int64, error)
+}
+
 // ReorderStepTasks rewrites stepID's named band to orderedTaskIDs
 // (REQ-TASKS-KANBAN-TASK-REORDERING-001). A caller authorized to move a task
 // in a workflow is authorized to reorder that workflow's steps
@@ -43,6 +47,16 @@ type reorderRepository interface {
 // returned result still carries the authoritative order the caller
 // reconciles to; on any other error the result is nil.
 func (s *Service) ReorderStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string) (*ReorderStepTasksResult, error) {
+	return s.reorderStepTasks(ctx, stepID, band, orderedTaskIDs, nil)
+}
+
+// ReorderChildStepTasks retains the ordinary reorder authorization and requires
+// the named children's parent/workspace relation at the transaction's writes.
+func (s *Service) ReorderChildStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string, scope models.ChildTaskOrderScope) (*ReorderStepTasksResult, error) {
+	return s.reorderStepTasks(ctx, stepID, band, orderedTaskIDs, &scope)
+}
+
+func (s *Service) reorderStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string, scope *models.ChildTaskOrderScope) (*ReorderStepTasksResult, error) {
 	if s.workflowStepGetter == nil {
 		return nil, fmt.Errorf("workflow step getter not configured")
 	}
@@ -53,12 +67,7 @@ func (s *Service) ReorderStepTasks(ctx context.Context, stepID, band string, ord
 	if err := s.authorizeWorkflowScope(ctx, step.WorkflowID, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
-	reorderer, ok := s.tasks.(reorderRepository)
-	if !ok {
-		return nil, fmt.Errorf("task repository does not support reordering")
-	}
-
-	tasks, revision, err := reorderer.ReorderStepTasks(ctx, stepID, band, orderedTaskIDs)
+	tasks, revision, err := s.persistStepReorder(ctx, stepID, band, orderedTaskIDs, scope)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrStepChanged) {
 			return &ReorderStepTasksResult{WorkflowStepID: stepID, Revision: revision, Tasks: tasks}, err
@@ -69,6 +78,21 @@ func (s *Service) ReorderStepTasks(ctx context.Context, stepID, band string, ord
 	result := &ReorderStepTasksResult{WorkflowStepID: stepID, Revision: revision, Tasks: tasks}
 	s.publishTaskReordered(ctx, stepID, band, revision, tasks)
 	return result, nil
+}
+
+func (s *Service) persistStepReorder(ctx context.Context, stepID, band string, orderedTaskIDs []string, scope *models.ChildTaskOrderScope) ([]*models.Task, int64, error) {
+	if scope != nil {
+		reorderer, ok := s.tasks.(childReorderRepository)
+		if !ok {
+			return nil, 0, fmt.Errorf("task repository does not support child reordering")
+		}
+		return reorderer.ReorderChildStepTasks(ctx, stepID, band, orderedTaskIDs, *scope)
+	}
+	reorderer, ok := s.tasks.(reorderRepository)
+	if !ok {
+		return nil, 0, fmt.Errorf("task repository does not support reordering")
+	}
+	return reorderer.ReorderStepTasks(ctx, stepID, band, orderedTaskIDs)
 }
 
 // publishTaskReordered emits task.reordered

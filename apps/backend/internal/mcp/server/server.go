@@ -1209,6 +1209,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "child-task-ordering", enabled: kanban, register: func(s *Server) { s.registerReorderChildTasksTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
