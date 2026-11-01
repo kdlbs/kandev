@@ -1150,7 +1150,9 @@ func (s *Service) startCreatedSession(
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
 		}
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) ||
+			errors.Is(err, executor.ErrSessionStateChangedBeforeStart) ||
+			isCreatedAutoStartContinuationSuperseded(ctx, err) {
 			if initialTurnCreated {
 				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 			}
@@ -1193,6 +1195,14 @@ func (s *Service) configureInitialPromptDispatch(
 	if prompt == "" && len(attachments) == 0 {
 		return nil
 	}
+	if admit := autoStartStepPromptAdmissionFromContext(ctx); admit != nil {
+		if err := admit(); err != nil {
+			if turnCreated {
+				s.completeTurnIfCurrent(ctx, sessionID, turnID)
+			}
+			return err
+		}
+	}
 	if options.beforeInitialPromptDispatch != nil {
 		if err := options.beforeInitialPromptDispatch(); err != nil {
 			if turnCreated {
@@ -1206,6 +1216,19 @@ func (s *Service) configureInitialPromptDispatch(
 	if options.beforeProviderAdmission != nil {
 		launchOptions.BeforeInitialPromptDispatch = func(_ context.Context, executionID, _ string, _ []v1.MessageAttachment) error {
 			return options.beforeProviderAdmission(executionID)
+		}
+	}
+	if admit := autoStartStepPromptAdmissionFromContext(ctx); admit != nil {
+		previous := launchOptions.BeforeInitialPromptDispatch
+		launchOptions.BeforeInitialPromptDispatch = func(admissionCtx context.Context, executionID, prompt string, attachments []v1.MessageAttachment) error {
+			if err := admit(); err != nil {
+				restoreAutoStartStepPromptHandoff(ctx)
+				return markPromptAdmissionRejected(err)
+			}
+			if previous != nil {
+				return previous(admissionCtx, executionID, prompt, attachments)
+			}
+			return nil
 		}
 	}
 	return nil
@@ -9151,6 +9174,10 @@ func (s *Service) handlePromptDispatchFailure(
 		} else {
 			promptErr = freshErr
 		}
+	}
+	if isCreatedAutoStartContinuationSuperseded(ctx, promptErr) {
+		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+		return nil, markPromptAdmissionRejected(promptErr)
 	}
 	if lifecyclePrompt {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)

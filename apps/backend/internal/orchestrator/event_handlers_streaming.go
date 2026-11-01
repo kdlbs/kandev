@@ -2649,10 +2649,11 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 		)
 	}
 	return fmt.Errorf(
-		"session %s state changed from %s to %s before full-row persistence",
+		"session %s state changed from %s to %s before full-row persistence: %w",
 		session.ID,
 		expected,
 		latest.State,
+		executor.ErrSessionStateChangedBeforeStart,
 	)
 }
 

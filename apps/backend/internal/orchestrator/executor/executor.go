@@ -255,6 +255,11 @@ var (
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded   = errors.New("session state superseded by terminal transition")
 	errSessionAdvancedToRunning = ErrSessionAdvancedToRunning
+	// ErrSessionStateChangedBeforeStart means another path moved the session
+	// to a different non-terminal state that owns no agent (CREATED or
+	// WAITING_FOR_INPUT) before this start persisted STARTING. The start did
+	// not run an agent and is not a launch failure.
+	ErrSessionStateChangedBeforeStart = errors.New("session state changed by another path before start persistence")
 	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
 	// found but could not load at least one registry-only orphan's row, so the
 	// task-scoped stop is not fully confirmed. Callers that already observed a
