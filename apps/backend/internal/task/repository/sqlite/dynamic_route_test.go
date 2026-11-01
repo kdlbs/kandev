@@ -433,26 +433,66 @@ func TestCircuitFailureCountSurvivesRealStoreRestore(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForSessionTests(t)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	registry := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitBackoffEscalation(true))
-	registry.OpenFailure("credential:roundtrip", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
-	registry.OpenFailure("credential:roundtrip", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now.Add(time.Minute)})
-	restored := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitBackoffEscalation(true))
+	registry := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repo),
+		dynamicruntime.WithCircuitClock(func() time.Time { return now }),
+	)
+	registry.OpenFailure("credential:open", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
+	registry.OpenFailure("credential:open", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now.Add(time.Minute)})
+	registry.OpenFailure("credential:closed", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
+	registry.Open("credential:zero", now.Add(time.Hour), routingerr.CodeRateLimited)
+
+	now = now.Add(7 * time.Minute)
+	lease, ok := registry.AcquireProbe("credential:closed", time.Minute)
+	if !ok {
+		t.Fatal("expired circuit did not admit its probe")
+	}
+	registry.ReleaseProbe(lease, true, time.Minute)
+
+	restored := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repo),
+		dynamicruntime.WithCircuitClock(func() time.Time { return now }),
+	)
 	if err := restored.Restore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	snapshots := restored.Snapshots()
-	if len(snapshots) != 1 || snapshots[0].Failures != 2 || !snapshots[0].Until.Equal(now.Add(6*time.Minute)) {
+	if len(snapshots) != 3 {
 		t.Fatalf("restored circuits: %+v", snapshots)
 	}
+	byKey := make(map[string]dynamicruntime.CircuitSnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		byKey[snapshot.Key] = snapshot
+	}
+	if got := byKey["credential:open"]; got.Failures != 2 || got.State != dynamicruntime.CircuitOpen || !got.Until.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("restored open circuit: %+v", got)
+	}
+	if got := byKey["credential:closed"]; got.Failures != 1 || got.State != dynamicruntime.CircuitClosed {
+		t.Fatalf("restored closed circuit: %+v", got)
+	}
+	if got := byKey["credential:zero"]; got.Failures != 0 || got.State != dynamicruntime.CircuitOpen || !got.Until.Equal(now.Add(53*time.Minute)) {
+		t.Fatalf("restored zero-count circuit: %+v", got)
+	}
 	snapshots[0].Failures = 99
-	if restored.Snapshots()[0].Failures != 2 {
+	if restored.Snapshots()[0].Failures == 99 {
 		t.Fatal("snapshot mutated live registry")
 	}
-	disabled := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo))
-	if err := disabled.Restore(ctx); err != nil {
-		t.Fatal(err)
+	restored.OpenFailure("credential:open", dynamicruntime.FailureOpen{
+		Code: routingerr.CodeRateLimited,
+		Now:  now,
+	})
+	restored.OpenFailure("credential:closed", dynamicruntime.FailureOpen{
+		Code: routingerr.CodeRateLimited,
+		Now:  now,
+	})
+	afterOpenFailure := make(map[string]dynamicruntime.CircuitSnapshot)
+	for _, snapshot := range restored.Snapshots() {
+		afterOpenFailure[snapshot.Key] = snapshot
 	}
-	if disabled.Snapshots()[0].Failures != 0 {
-		t.Fatal("disabled escalation restored failure count")
+	if got := afterOpenFailure["credential:open"]; got.Failures != 3 || !got.Until.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("next open failure did not continue restored ladder: %+v", got)
+	}
+	if got := afterOpenFailure["credential:closed"]; got.Failures != 2 || !got.Until.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("next closed failure did not continue restored ladder: %+v", got)
 	}
 }

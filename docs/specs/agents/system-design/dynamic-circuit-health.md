@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-CIRCUIT-HEALTH-001
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 owners:
   - cfl
 ---
@@ -48,10 +48,11 @@ Office consumes a structural suspension signal: timed waits requeue at the
 deadline without increasing retries, and holds park for operator action.
 Routed circuit deferrals do not consume the provider-attempt limit.
 
-The original `features.dynamicCircuitBackoffEscalation` option is constructed at
-startup and remains OFF in every shipped profile. Enabled escalation retains its
-existing bounded ladder and reset semantics. The additive `failure_count` column
-belongs to `dynamic_resource_circuits`; it introduces no new ledger. Snapshot
+The shared registry always applies the default policy in
+[dynamic circuit backoff](dynamic-circuit-backoff.md). The dynamic-agent gate
+controls execution and fixed-profile circuit mutations; it does not erase stored
+health. The `failure_count` column belongs to `dynamic_resource_circuits`; no
+new ledger or destructive migration is needed. Snapshot
 copies are collected under the registry mutex, sorted by resource key, and carry
 the known observation time. An unknown old timestamp remains absent. Existing
 pending durable-write handling and hold rollback remain in place.

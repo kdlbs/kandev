@@ -10,6 +10,11 @@ legacy_specs: []
 
 # Implementation Plan: Escalate circuit backoff for repeated failures
 
+This completed package records the earlier two-flag implementation. Its flag-specific
+choices and sibling work order are historical. The single-flag replacement is
+implemented in [dynamic circuit defaults](../dynamic-circuit-defaults/plan.md),
+which records the replacement policy and its verification separately.
+
 ## Overview
 
 A dynamic candidate circuit always opens for one fixed minute, so a candidate

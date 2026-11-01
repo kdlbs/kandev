@@ -6,12 +6,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
-// circuitBackoff is the fixed backoff of one open while escalation is
-// disabled, and the first rung of the escalation ladder.
+// circuitBackoff is the first rung of the circuit failure ladder.
 const circuitBackoff = time.Minute
 
 // circuitBackoffLadder is the backoff of each consecutive qualifying failure
-// of one resource while escalation is enabled. The last rung is the cap.
+// of one resource. The last rung is the cap.
 var circuitBackoffLadder = []time.Duration{
 	circuitBackoff,
 	5 * time.Minute,
@@ -47,19 +46,15 @@ type FailureOpen struct {
 	// backoff deadline wins.
 	ResetHint *time.Time
 	// ResetHintInferred marks a reset time Kandev derived without an explicit
-	// provider date. While escalation is enabled it is capped at
-	// maxInferredResetHint after Now.
+	// provider date. It is capped at maxInferredResetHint after Now.
 	ResetHintInferred bool
 }
 
-// OpenFailure opens key for one qualifying failure. Disabled escalation
-// applies the fixed backoff extended only by a later reset hint. Enabled
-// escalation advances the consecutive failure count and applies its ladder
-// rung; a failure that arrives while the same circuit is still open within its
+// OpenFailure opens key for one qualifying failure and applies its ladder rung.
+// A failure that arrives while the same circuit is still open within its
 // window belongs to the same incident and does not advance the count. A closed
-// circuit keeps its count until ResetFailures, so a failure after a
-// successful probe continues the ladder. An owner-release hold is never
-// replaced.
+// circuit keeps its count until ResetFailures, so a failure after a successful
+// probe continues the ladder. An owner-release hold is never replaced.
 func (r *CircuitRegistry) OpenFailure(key string, failure FailureOpen) {
 	if key == "" {
 		return
@@ -73,15 +68,6 @@ func (r *CircuitRegistry) OpenFailure(key string, failure FailureOpen) {
 	r.flushPendingLocked(key)
 	previous := r.circuits[key]
 	if previous.held() {
-		return
-	}
-	if !r.escalation {
-		until := now.Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
-			until = *failure.ResetHint
-		}
-		r.circuits[key] = circuit{state: CircuitOpen, until: until, code: failure.Code, updatedAt: now.UTC()}
-		_ = r.persistSnapshotLocked(key)
 		return
 	}
 	sameIncident := previous.state == CircuitOpen && previous.failures > 0 && now.Before(previous.until)
@@ -135,9 +121,4 @@ func (r *CircuitRegistry) ResetFailures(key string) bool {
 	r.circuits[key] = entry
 	_ = r.persistSnapshotLocked(key)
 	return true
-}
-
-// EscalationEnabled reports whether the registry tracks consecutive failures.
-func (r *CircuitRegistry) EscalationEnabled() bool {
-	return r != nil && r.escalation
 }

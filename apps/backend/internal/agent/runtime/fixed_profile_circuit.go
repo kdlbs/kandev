@@ -69,7 +69,7 @@ func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
 // concrete profile's shared resource after its owner confirms a clean turn.
 // It does not close a circuit, release a hold, or change a probe lease.
 func (r *ProfileExecutionResolver) ResetFixedProfileCircuitFailures(_ context.Context, resourceKey string) bool {
-	if r == nil || !r.Enabled() || r.engine == nil || !r.engine.Circuits().EscalationEnabled() {
+	if r == nil || !r.Enabled() || r.engine == nil {
 		return false
 	}
 	if resourceKey == "" {

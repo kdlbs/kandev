@@ -555,12 +555,6 @@ type FeaturesConfig struct {
 	// embedded profile until the complete feature is ready.
 	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
 
-	// DynamicCircuitBackoffEscalation lengthens the dynamic routing circuit
-	// backoff for repeated qualifying failures of one resource instead of
-	// re-probing it every minute. Disabled, every open uses the fixed backoff.
-	// Off in every embedded profile.
-	DynamicCircuitBackoffEscalation bool `mapstructure:"dynamic_circuit_backoff_escalation" json:"dynamicCircuitBackoffEscalation"`
-
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
 	// foreground handoff while background work remains live. It is off in every

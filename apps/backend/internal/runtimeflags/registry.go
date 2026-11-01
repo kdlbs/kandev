@@ -57,6 +57,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
 	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
+	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -205,36 +206,16 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles, using the default circuit backoff ladder.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Fixed profiles can wait on shared resource circuits; account holds require owner release. Enable on a controlled installation.",
+				"Shared resource circuits use a 1-minute to 4-hour backoff ladder, which can delay fixed profiles and dynamic candidates; a later provider reset time can extend it. Account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:    "features.dynamicCircuitBackoffEscalation",
-			EnvVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION",
-			Kind:   KindFeature,
-			Label:  "Dynamic circuit backoff escalation",
-			Description: "Lengthens shared resource circuit backoff for repeated provider failures " +
-				"from one minute up to four hours. Applies to dynamic candidates and fixed profiles.",
-			Stability: StabilityExperimental,
-			RiskLevel: RiskMedium,
-			RiskDescription: "Repeated failures can suspend the resource for up to four hours, or until a later provider reset time, " +
-				"even after recovery. When dynamic agent routing is enabled, fixed profiles wait without " +
-				"falling back to another candidate. Dynamic routes may use the next configured candidate or wait. " +
-				"A clean completed turn clears the failure count.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicCircuitBackoffEscalation },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicCircuitBackoffEscalation = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

@@ -260,8 +260,7 @@ func (r *ProfileExecutionResolver) ResetCircuitFailures(
 	sessionID, profileID, candidateID string,
 	generation int64,
 ) (bool, error) {
-	if r == nil || r.engine == nil || sessionID == "" || profileID == "" ||
-		!r.engine.Circuits().EscalationEnabled() {
+	if r == nil || !r.Enabled() || r.engine == nil || sessionID == "" || profileID == "" {
 		return false, nil
 	}
 	profile, err := r.loadDynamicProfile(ctx, profileID)

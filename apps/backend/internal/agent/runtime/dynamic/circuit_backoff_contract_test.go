@@ -9,7 +9,7 @@ import (
 
 func TestCircuitFailureLadderAndSameIncident(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	registry := NewCircuitRegistry(WithCircuitBackoffEscalation(true), WithCircuitClock(func() time.Time { return now }))
+	registry := NewCircuitRegistry(WithCircuitClock(func() time.Time { return now }))
 	key := "credential:test"
 	ladder := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 4 * time.Hour}
 	for i, delay := range ladder {
@@ -69,27 +69,26 @@ func TestCircuitSuspensionExpiryAndHold(t *testing.T) {
 	}
 }
 
-func TestCircuitResetHintAndDisabledBackoff(t *testing.T) {
+func TestCircuitResetHintsUseDefaultBackoffPolicy(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	hint := now.Add(48 * time.Hour)
 	for _, tc := range []struct {
-		name                 string
-		escalation, inferred bool
-		want                 time.Duration
+		name     string
+		inferred bool
+		want     time.Duration
 	}{
-		{"disabled retains provider hint", false, true, 48 * time.Hour},
-		{"inferred hint is bounded", true, true, 24 * time.Hour},
-		{"explicit hint is retained", true, false, 48 * time.Hour},
+		{"inferred hint is bounded", true, 24 * time.Hour},
+		{"explicit hint is retained", false, 48 * time.Hour},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			registry := NewCircuitRegistry(WithCircuitBackoffEscalation(tc.escalation))
+			registry := NewCircuitRegistry()
 			registry.OpenFailure("credential:hint", FailureOpen{Code: routingerr.CodeRateLimited, Now: now, ResetHint: &hint, ResetHintInferred: tc.inferred})
 			got := registry.Snapshots()[0]
 			if !got.Until.Equal(now.Add(tc.want)) {
 				t.Fatalf("deadline=%v want %v", got.Until, now.Add(tc.want))
 			}
-			if !tc.escalation && got.Failures != 0 {
-				t.Fatal("disabled escalation counted failure")
+			if got.Failures != 1 {
+				t.Fatalf("failure count=%d, want 1", got.Failures)
 			}
 		})
 	}

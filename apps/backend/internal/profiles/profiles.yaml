@@ -96,12 +96,6 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Original opt-in repeated circuit failure backoff; no rollout activation.
-  KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
-
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

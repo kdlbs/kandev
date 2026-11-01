@@ -406,9 +406,9 @@ concrete route. They do not change the logical author shown on earlier turns.
 - At the deadline, one worker acquires a half-open probe lease. Other tasks keep
   using alternatives or wait. Probe success closes the circuit, failure extends
   its backoff.
-- The backoff is a fixed minute, extended only by a later provider reset hint.
-  The opt-in escalation ladder is described in
-  [dynamic circuit backoff](dynamic-circuit-backoff.md).
+- Shared circuits use the default ladder and retained failure count described
+  in [dynamic circuit backoff](dynamic-circuit-backoff.md). The dynamic-agent
+  feature gate controls execution; there is no separate backoff toggle.
 - Recovery affects future route selection. A healthy active fallback session is
   not interrupted when an earlier candidate recovers.
 

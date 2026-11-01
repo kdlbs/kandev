@@ -23,3 +23,7 @@ control providers dashboard without importing an unrelated aggregate.
 The earlier mid-turn and backoff work packages describe original source work.
 Their historical checks are not validation of this current-main port. The
 current work order records the new integration checks and remaining limits.
+
+The [single-flag circuit defaults package](../dynamic-circuit-defaults/plan.md)
+removes the remaining backoff toggle. Its own work order records that change
+and its verification. This package's recorded validation results remain intact.

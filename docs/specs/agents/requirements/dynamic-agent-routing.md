@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-31
+updated: 2026-11-01
 owners:
   - cfl
 ---
@@ -39,8 +39,13 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.16:** When a queued dispatch fails because a WAITING_FOR_INPUT session whose route is still `starting` has no `executors_running` row, Kandev shall mark that route `action_required` with the orphaned-starting reason, keep the message queued, and stop automatic redelivery until a route action runs. It shall not change the session state. A session whose launch is still pending shall keep its existing retry.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23:** When a start would change the logical profile of a session whose durable route is already materialized for a different logical profile, Kandev shall refuse the start before writing the session and return a validation error. The session label, concrete profile, and route shall stay unchanged and no agent shall launch. A session without a materialized route keeps its first profile selection, and a route for the requested profile resumes normally. See the [guard package](../../../plans/materialized-route-profile-guard/plan.md).
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.19:** A qualifying classified failure that may not advance the route, because the attempt already produced output or effects, shall still open the shared circuit of the candidate that produced it, charged under the same generation and candidate rule as AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.10. The route's generation, candidate, and status and the failed turn's existing recovery surface shall stay unchanged and no successor shall launch; later selections shall skip the open circuit until it recovers. An unclassified failure, or a failure of a superseded generation or predecessor execution, shall open no circuit.
-- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20:** While the `features.dynamicCircuitBackoffEscalation` runtime flag is enabled, each consecutive qualifying failure of one circuit shall open it for 1, 5, 15, and 30 minutes, then 1, 2, and 4 hours, capped at 4 hours. A failure that arrives while the circuit is still open within its window shall belong to the same incident and shall not advance the count. A failed probe shall advance the count. A successful probe shall close the circuit but keep the count, so the next qualifying failure, including one reported mid-turn, continues the ladder; only a turn on that candidate that completes without a provider error shall reset the count to zero. A reset hint later than the ladder deadline shall win; a reset time Kandev inferred without an explicit provider date shall be capped at 24 hours, while an explicit provider reset time shall not be capped. An owner-release hold shall never be replaced. While the flag is disabled, every open shall use the fixed one-minute backoff extended only by a later reset hint, and persisted failure counts shall be ignored.
-- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.21:** The consecutive failure count shall persist with the durable circuit snapshot on SQLite and PostgreSQL, with deadlines stored in UTC, and a backend restart with the flag enabled shall restore it so the next failure continues the ladder. Upgrading an existing database shall add the count with a zero default without changing existing circuit rows.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.20:** Shared resource circuits shall use the default backoff ladder: 1, 5, 15, and 30 minutes, then 1, 2, and 4 hours. The ladder shall stop increasing at 4 hours. Failures inside one open window shall count as one incident. A failed probe shall advance the count. A successful probe shall close the circuit and retain its count. Only a clean completed turn shall reset the count. A successful launch alone shall not reset it. A later provider reset time shall extend the deadline. Inferred reset times shall be capped at 24 hours; explicit provider reset times shall remain authoritative. Timed failures shall never replace an owner-release hold.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.21:** Failure counts and UTC deadlines shall survive restarts on SQLite and PostgreSQL, including closed circuits with retained counts. Disabling or re-enabling dynamic agents shall not erase circuit history. Loading that history while dynamic agents are disabled shall not schedule work or mutate a circuit. Existing circuit rows without a failure count shall begin at zero. An upgrade shall preserve existing deadlines and holds.
+
+
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24:** `features.dynamicAgentRouting` shall be the sole release toggle for dynamic selection and fixed-profile circuit admission, failure charging, and completion resets. It shall remain off in prod, dev, and e2e profiles and require a restart. When it is off, fixed-profile dispatch shall retain its existing behavior and shall not charge or reset shared circuit counts. Candidate policies remain independent routing data, not additional feature toggles.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.25:** The retired `features.dynamicCircuitBackoffEscalation` key and `KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION` environment variable shall have no active effect. Old true and false values shall neither enable dynamic agents nor change their default backoff. Saved overrides shall be retained as inert data. The retired identities shall not be reused.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.26:** Feature discovery and Settings > System > Feature Toggles shall expose only the dynamic-agent release toggle for this capability. Desktop and phone shall expose the same remaining control, including its restart and environment-lock behavior. They shall expose no separate circuit-backoff switch.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 
@@ -74,5 +79,7 @@ Raw diagnostics, credentials, and prompts shall not appear in streak state or ro
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/dynamic-agent-routing-01.md), [part 2](../system-design/dynamic-agent-routing-02.md).
+
+Shared circuit defaults use [the circuit backoff design](../system-design/dynamic-circuit-backoff.md).
 
 The repeated-failure extension uses [its dedicated design](../system-design/dynamic-unclassified-fallback.md).
