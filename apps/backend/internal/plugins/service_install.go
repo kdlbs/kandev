@@ -451,6 +451,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 				return fmt.Errorf("plugins: uninstall aborted, could not detach managed conversation transcripts: %w", err)
 			}
 		}
+		if err := s.deletePluginChangeRequests(ctx, rec.InstallationID); err != nil {
+			s.reconcileAbortedUninstall(id, wasRunning)
+			return fmt.Errorf("plugins: uninstall aborted, could not purge plugin task change requests: %w", err)
+		}
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -546,4 +550,20 @@ func (s *Service) deletePluginAgentConversations(ctx context.Context, id string)
 	}
 	_, err := svc.DeleteAllForPlugin(ctx, id)
 	return err
+}
+
+// deletePluginChangeRequests removes every task change-request row the
+// plugin's installation reported, across every workspace. Fail-visible like
+// deletePluginAgentConversations: a retry is safe because nothing
+// destructive to the package or record has happened yet. A nil ledger (the
+// change-request store was never wired) is a no-op - a plugin that never
+// reported has nothing to clean up.
+func (s *Service) deletePluginChangeRequests(ctx context.Context, installationID string) error {
+	s.approvalEffectMu.Lock()
+	defer s.approvalEffectMu.Unlock()
+	ledger := s.changeRequestStoreDep()
+	if ledger == nil {
+		return nil
+	}
+	return ledger.DeleteByInstallation(ctx, installationID)
 }

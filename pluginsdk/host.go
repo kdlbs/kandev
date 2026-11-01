@@ -463,6 +463,10 @@ func (h *grpcHostClient) TaskCommands() ExactTaskCommandManager {
 	return grpcExactTaskCommandManager{client: h.client}
 }
 
+func (h *grpcHostClient) TaskChangeRequests() ExactTaskChangeRequestCommandManager {
+	return grpcExactTaskChangeRequestCommandManager{client: h.client}
+}
+
 func (h *grpcHostClient) TaskManagementClaims() ExactTaskManagementClaimCommandManager {
 	return grpcExactTaskManagementClaimCommandManager{client: h.client}
 }
@@ -877,6 +881,7 @@ func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	exactQueries, _ := impl.(ExactQueryHost)
 	automationHistory, _ := impl.(AutomationHistoryHost)
 	taskCommands, _ := impl.(ExactTaskCommandHost)
+	changeRequestCommands, _ := impl.(ExactTaskChangeRequestCommandHost)
 	claimCommands, _ := impl.(ExactTaskManagementClaimCommandHost)
 	completionGateCommands, _ := impl.(ExactTaskCompletionGateCommandHost)
 	workspaceAdminCommands, _ := impl.(ExactWorkspaceAdministrationHost)
@@ -885,7 +890,8 @@ func registerHostServer(s grpc.ServiceRegistrar, impl Host) {
 	interactionCommands, _ := impl.(ExactInteractionCommandHost)
 	pluginv1.RegisterHostServer(s, &grpcHostServer{
 		impl: impl, exact: exact, exactQueries: exactQueries, automationHistory: automationHistory,
-		taskCommands: taskCommands, claimCommands: claimCommands, completionGateCommands: completionGateCommands,
+		taskCommands: taskCommands, changeRequestCommands: changeRequestCommands,
+		claimCommands: claimCommands, completionGateCommands: completionGateCommands,
 		workspaceAdminCommands:       workspaceAdminCommands,
 		sourceIssueWritebackCommands: sourceIssueWritebackCommands,
 		executionCommands:            executionCommands, interactionCommands: interactionCommands,
@@ -899,6 +905,7 @@ type grpcHostServer struct {
 	exactQueries                 ExactQueryHost
 	automationHistory            AutomationHistoryHost
 	taskCommands                 ExactTaskCommandHost
+	changeRequestCommands        ExactTaskChangeRequestCommandHost
 	claimCommands                ExactTaskManagementClaimCommandHost
 	completionGateCommands       ExactTaskCompletionGateCommandHost
 	workspaceAdminCommands       ExactWorkspaceAdministrationHost
@@ -1323,6 +1330,43 @@ func (s *grpcHostServer) ResolveTaskDirectiveExact(ctx context.Context, req *plu
 		return nil, err
 	}
 	return &pluginv1.ResolveTaskDirectiveExactResponse{Result: commandResultToProto(result), Directive: taskDirectiveToProto(directive)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) ReportTaskChangeRequestExact(ctx context.Context, req *pluginv1.ReportTaskChangeRequestExactRequest) (*pluginv1.ReportTaskChangeRequestExactResponse, error) {
+	if s.changeRequestCommands == nil || s.changeRequestCommands.TaskChangeRequests() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task change requests are unavailable")
+	}
+	result, changeRequest, err := s.changeRequestCommands.TaskChangeRequests().Report(ctx, ExactTaskChangeRequestReport{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(), TaskID: req.GetTaskId(),
+		ProviderID: req.GetProviderId(), ProviderHost: req.GetProviderHost(), RepositoryID: req.GetRepositoryId(),
+		Number: req.GetNumber(), URL: req.GetUrl(), Title: req.GetTitle(), State: req.GetState(),
+		HeadBranch: req.GetHeadBranch(), BaseBranch: req.GetBaseBranch(),
+		CreatedAt: req.GetCreatedAt(), MergedAt: req.GetMergedAt(), ClosedAt: req.GetClosedAt(),
+		IdempotencyKey:   req.GetIdempotencyKey(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ReportTaskChangeRequestExactResponse{Result: commandResultToProto(result), ChangeRequest: taskChangeRequestToProto(changeRequest)}, nil
+}
+
+//nolint:dupl // Keep each generated request and response mapping explicit at the gRPC boundary.
+func (s *grpcHostServer) RemoveTaskChangeRequestExact(ctx context.Context, req *pluginv1.RemoveTaskChangeRequestExactRequest) (*pluginv1.RemoveTaskChangeRequestExactResponse, error) {
+	if s.changeRequestCommands == nil || s.changeRequestCommands.TaskChangeRequests() == nil {
+		return nil, status.Error(codes.Unimplemented, "exact task change requests are unavailable")
+	}
+	result, err := s.changeRequestCommands.TaskChangeRequests().Remove(ctx, ExactTaskChangeRequestRemove{
+		RequestID: req.GetRequestId(), WorkspaceID: req.GetWorkspaceId(),
+		ProviderID: req.GetProviderId(), RepositoryID: req.GetRepositoryId(), Number: req.GetNumber(),
+		IdempotencyKey:   req.GetIdempotencyKey(),
+		ApprovalRevision: req.GetApprovalRevision(), ManifestDigest: req.GetManifestDigest(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.RemoveTaskChangeRequestExactResponse{Result: commandResultToProto(result)}, nil
 }
 
 func (s *grpcHostServer) managedAgentConversations() (ManagedAgentConversationManager, error) {
