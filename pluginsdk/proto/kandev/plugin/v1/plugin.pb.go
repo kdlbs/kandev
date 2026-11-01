@@ -16958,9 +16958,12 @@ type ExecutorDrainReceipt struct {
 	ReceiptId       string                 `protobuf:"bytes,1,opt,name=receipt_id,json=receiptId,proto3" json:"receipt_id,omitempty"`
 	CleanupClaim    string                 `protobuf:"bytes,2,opt,name=cleanup_claim,json=cleanupClaim,proto3" json:"cleanup_claim,omitempty"`
 	RuntimeIdentity string                 `protobuf:"bytes,3,opt,name=runtime_identity,json=runtimeIdentity,proto3" json:"runtime_identity,omitempty"`
-	CompletedAt     string                 `protobuf:"bytes,4,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// completed_at is the RFC3339 time the runtime finished draining. It is empty
+	// on a receipt the host reuses for a repeated destroy under the same claim:
+	// the first drain's time is not persisted, and receipt_id identifies the drain.
+	CompletedAt   string `protobuf:"bytes,4,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecutorDrainReceipt) Reset() {
