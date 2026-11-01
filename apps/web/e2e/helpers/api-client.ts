@@ -3934,7 +3934,7 @@ export class ApiClient {
     workflowStepId: string;
     agentProfileId: string;
     executorProfileId?: string;
-    filter?: { teamKey?: string; projectIds?: string[] };
+    filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
     prompt?: string;
     enabled?: boolean;
     pollIntervalSeconds?: number;
@@ -3961,7 +3961,7 @@ export class ApiClient {
     lastError?: string;
     lastErrorAt?: string;
     prompt?: string;
-    filter?: { teamKey?: string; projectIds?: string[] };
+    filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
   } | null> {
     // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
     // walk the workspace list and find by id. Scoped by workspace_id so the
@@ -3974,10 +3974,20 @@ export class ApiClient {
         lastError?: string;
         lastErrorAt?: string;
         prompt?: string;
-        filter?: { teamKey?: string; projectIds?: string[] };
+        filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
       }>;
     }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
     return watches.find((w) => w.id === watchId) ?? null;
+  }
+
+  async triggerLinearIssueWatch(
+    workspaceId: string,
+    watchId: string,
+  ): Promise<{ newIssues: number }> {
+    return this.request(
+      "POST",
+      `/api/v1/linear/watches/issue/${encodeURIComponent(watchId)}/trigger?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
   }
 
   async deleteLinearIssueWatches(workspaceId: string): Promise<void> {
@@ -4589,6 +4599,8 @@ export type MockLinearIssue = {
   teamKey?: string;
   priority?: number;
   url?: string;
+  /** Issues that block this one; only blocker-aware watch searches see them. */
+  blockers?: Array<{ identifier: string; stateType: string }>;
 };
 
 // --- Sentry mock payload types ---
