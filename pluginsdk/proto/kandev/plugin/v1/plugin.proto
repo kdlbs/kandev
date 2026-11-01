@@ -2123,6 +2123,9 @@ message ExecutorDrainReceipt {
   string receipt_id = 1;
   string cleanup_claim = 2;
   string runtime_identity = 3;
+  // completed_at is the RFC3339 time the runtime finished draining. It is empty
+  // on a receipt the host reuses for a repeated destroy under the same claim:
+  // the first drain's time is not persisted, and receipt_id identifies the drain.
   string completed_at = 4;
 }
 
