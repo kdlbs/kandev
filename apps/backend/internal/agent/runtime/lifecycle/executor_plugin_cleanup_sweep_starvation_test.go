@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -115,5 +116,69 @@ func TestSweepRotationSurvivesRowsDisappearingBetweenPasses(t *testing.T) {
 		if !seen[item.ExecutionID] {
 			t.Fatalf("handoff %s was never visited after rows disappeared", item.ExecutionID)
 		}
+	}
+}
+
+// A handoff whose destroy is not confirmed is adopted into a cleanup_pending
+// row. That row must not be destroyed again in the same pass.
+func TestSweepRetriesAFailingHandoffOnceAPass(t *testing.T) {
+	runtime, operations, request, handoff, ctx := sweepRuntime(t, false)
+	destroys := 0
+	operations.beforeDestroy = func() { destroys++ }
+	environment := &models.TaskEnvironment{ID: handoff.EnvironmentID, TaskID: handoff.TaskID, OwnershipGeneration: 7}
+	if err := runtime.adoptUnrecordedPluginExecutor(ctx, environment, handoff); err != nil {
+		t.Fatalf("seed the inventory row: %v", err)
+	}
+	stored, err := runtime.currentPluginExecutorRecord(ctx, request.SessionID, request.InstanceID)
+	if err != nil {
+		t.Fatalf("read the inventory row: %v", err)
+	}
+	inventory, err := decodePluginExecutorInventory(stored.Metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.Phase = pluginExecutorPhaseCleanupPending
+	if err := runtime.checkpointPluginExecutorRecord(ctx, stored, inventory); err != nil {
+		t.Fatalf("seed the cleanup_pending row: %v", err)
+	}
+
+	if err := runtime.SweepPendingCleanup(ctx); err == nil {
+		t.Fatal("an unconfirmed destroy was reported as success")
+	}
+	if destroys != 1 {
+		t.Fatalf("destroys = %d, want one attempt in the pass", destroys)
+	}
+}
+
+// A failed read of a cleanup_pending row is a failure of the pass, not a
+// rotated execution to skip quietly.
+func TestSweepSurfacesAReadErrorOnACleanupPendingRow(t *testing.T) {
+	runtime, operations, store := sweepStarvationRuntime(t, 0)
+	store.getErr = errors.New("database is locked")
+
+	err := runtime.SweepPendingCleanup(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("SweepPendingCleanup() = %v, want the read error", err)
+	}
+	if operations.destroyRequest != nil {
+		t.Fatal("destroyed a row that could not be read")
+	}
+}
+
+// After the rows the last pass visited disappear, the next pass resumes at the
+// first still-failing row after them. An index cursor would skip the rows that
+// moved into the visited positions.
+func TestSweepResumesAtTheNextKeyWhenVisitedRowsDisappear(t *testing.T) {
+	runtime, _, store := sweepStarvationRuntime(t, 3*pluginExecutorCleanupSweepBatch)
+	visited := pluginExecutorCleanupSweepBatch - 1
+	if err := runtime.SweepPendingCleanup(context.Background()); err == nil {
+		t.Fatal("the first pass reported success")
+	}
+	store.unrecorded = store.unrecorded[visited:]
+
+	err := runtime.SweepPendingCleanup(context.Background())
+	next := fmt.Sprintf("execution-broken-%02d", visited)
+	if err == nil || !strings.Contains(err.Error(), next) {
+		t.Fatalf("second pass = %v, want it to resume at %s", err, next)
 	}
 }

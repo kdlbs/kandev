@@ -68,6 +68,8 @@ type pluginExecutorInventoryStoreFake struct {
 	onCheckpoint  func(*models.ExecutorRunning)
 	claimBusy     int
 	unrecorded    []*models.UnrecordedPluginExecutor
+	// getErr, when set, is what a read of the record fails with.
+	getErr error
 }
 
 func (f *pluginExecutorInventoryStoreFake) CheckpointPluginExecutorInventory(_ context.Context, record *models.ExecutorRunning) error {
@@ -188,6 +190,9 @@ func (f *pluginExecutorInventoryStoreFake) GetTaskSession(context.Context, strin
 }
 
 func (f *pluginExecutorInventoryStoreFake) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
 	if f.record == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}

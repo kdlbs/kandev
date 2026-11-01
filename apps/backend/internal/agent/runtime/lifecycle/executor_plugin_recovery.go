@@ -727,6 +727,9 @@ func (r *PluginRemoteExecutor) currentPluginExecutorRecord(ctx context.Context, 
 		return nil, errors.New("plugin executor inventory reader is unavailable")
 	}
 	record, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil, fmt.Errorf("read plugin executor inventory: %w", err)
+	}
 	if err != nil || record == nil || record.AgentExecutionID != executionID || record.Runtime != agentruntime.RuntimePluginRemote {
 		return nil, models.ErrExecutionRotated
 	}

@@ -104,7 +104,11 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 	// keep a reserved share, and each list resumes where the last pass stopped.
 	handoffBudget := pluginExecutorCleanupSweepBatch - min(len(pending), pluginExecutorCleanupSweepBatch/2)
 	var sweepErrors []error
+	// A handoff adopted into a cleanup_pending row was just destroyed or failed
+	// this pass, so its row is not retried in the same pass.
+	triedAsHandoff := map[string]bool{}
 	attempted := sweepRotated(ctx, &r.cleanupSweep, &r.cleanupSweep.handoffCursor, handoffs, handoffBudget, func(h *models.UnrecordedPluginExecutor) string { return h.ExecutionID }, func(handoff *models.UnrecordedPluginExecutor) {
+		triedAsHandoff[handoff.ExecutionID] = true
 		if err := r.sweepHandoff(ctx, handoff); r.sweepFailure(err, handoff.ExecutionID) {
 			sweepErrors = append(sweepErrors, err)
 		}
@@ -115,8 +119,15 @@ func (r *PluginRemoteExecutor) SweepPendingCleanup(ctx context.Context) error {
 	sweepRotated(ctx, &r.cleanupSweep, &r.cleanupSweep.pendingCursor, pending, pluginExecutorCleanupSweepBatch-attempted, func(rec *models.ExecutorRunning) string { return rec.AgentExecutionID }, func(listed *models.ExecutorRunning) {
 		// The listing predates the handoffs settled above, so re-read the row and
 		// skip one that is gone or no longer owes cleanup.
+		if triedAsHandoff[listed.AgentExecutionID] {
+			return
+		}
 		record, err := r.currentPluginExecutorRecord(ctx, listed.SessionID, listed.AgentExecutionID)
+		if errors.Is(err, models.ErrExecutionRotated) {
+			return
+		}
 		if err != nil {
+			sweepErrors = append(sweepErrors, err)
 			return
 		}
 		environment, owed := cleanupPendingEnvironment(record)
