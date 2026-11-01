@@ -829,6 +829,7 @@ const (
 	Host_SetState_FullMethodName                                   = "/kandev.plugin.v1.Host/SetState"
 	Host_DeleteState_FullMethodName                                = "/kandev.plugin.v1.Host/DeleteState"
 	Host_ListState_FullMethodName                                  = "/kandev.plugin.v1.Host/ListState"
+	Host_ListStateKeys_FullMethodName                              = "/kandev.plugin.v1.Host/ListStateKeys"
 	Host_RevealSecret_FullMethodName                               = "/kandev.plugin.v1.Host/RevealSecret"
 	Host_EmitEvent_FullMethodName                                  = "/kandev.plugin.v1.Host/EmitEvent"
 	Host_GetSecret_FullMethodName                                  = "/kandev.plugin.v1.Host/GetSecret"
@@ -850,6 +851,9 @@ const (
 	Host_ListRepositories_FullMethodName                           = "/kandev.plugin.v1.Host/ListRepositories"
 	Host_ListSessions_FullMethodName                               = "/kandev.plugin.v1.Host/ListSessions"
 	Host_ListSessionCodeStats_FullMethodName                       = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_ListSessionUsage_FullMethodName                           = "/kandev.plugin.v1.Host/ListSessionUsage"
+	Host_ListUsageCollectionTargetsV1_FullMethodName               = "/kandev.plugin.v1.Host/ListUsageCollectionTargetsV1"
+	Host_ReportUsageObservationsV1_FullMethodName                  = "/kandev.plugin.v1.Host/ReportUsageObservationsV1"
 	Host_ListMessages_FullMethodName                               = "/kandev.plugin.v1.Host/ListMessages"
 	Host_ListPendingInteractions_FullMethodName                    = "/kandev.plugin.v1.Host/ListPendingInteractions"
 	Host_GetInteraction_FullMethodName                             = "/kandev.plugin.v1.Host/GetInteraction"
@@ -975,6 +979,8 @@ type HostClient interface {
 	SetState(ctx context.Context, in *SetStateRequest, opts ...grpc.CallOption) (*SetStateResponse, error)
 	DeleteState(ctx context.Context, in *DeleteStateRequest, opts ...grpc.CallOption) (*DeleteStateResponse, error)
 	ListState(ctx context.Context, in *ListStateRequest, opts ...grpc.CallOption) (*ListStateResponse, error)
+	// Optional, capability `state`: bounded keys for the connected plugin only.
+	ListStateKeys(ctx context.Context, in *ListStateKeysRequest, opts ...grpc.CallOption) (*ListStateKeysResponse, error)
 	RevealSecret(ctx context.Context, in *RevealSecretRequest, opts ...grpc.CallOption) (*RevealSecretResponse, error)
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
 	// Plugin-scoped secret primitives — capability `secrets`, like
@@ -1015,6 +1021,14 @@ type HostClient interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	ListSessionCodeStats(ctx context.Context, in *ListSessionCodeStatsRequest, opts ...grpc.CallOption) (*ListSessionCodeStatsResponse, error)
+	// Source-aware token usage read — api_read:session_usage. Retained writes go
+	// through the versioned observation contract below.
+	ListSessionUsage(ctx context.Context, in *ListSessionUsageRequest, opts ...grpc.CallOption) (*ListSessionUsageResponse, error)
+	// Versioned retained-history contract. Subject bindings and collection
+	// snapshots are issued by the Host; callers cannot choose tenant, actor, or
+	// collector namespace values.
+	ListUsageCollectionTargetsV1(ctx context.Context, in *ListUsageCollectionTargetsV1Request, opts ...grpc.CallOption) (*ListUsageCollectionTargetsV1Response, error)
+	ReportUsageObservationsV1(ctx context.Context, in *ReportUsageObservationsV1Request, opts ...grpc.CallOption) (*ReportUsageObservationsV1Response, error)
 	// Conversation content — capability api_read:messages. Historical
 	// user/agent message content for a session or task, filterable by a time
 	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
@@ -1767,6 +1781,16 @@ func (c *hostClient) ListState(ctx context.Context, in *ListStateRequest, opts .
 	return out, nil
 }
 
+func (c *hostClient) ListStateKeys(ctx context.Context, in *ListStateKeysRequest, opts ...grpc.CallOption) (*ListStateKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListStateKeysResponse)
+	err := c.cc.Invoke(ctx, Host_ListStateKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) RevealSecret(ctx context.Context, in *RevealSecretRequest, opts ...grpc.CallOption) (*RevealSecretResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RevealSecretResponse)
@@ -1980,6 +2004,36 @@ func (c *hostClient) ListSessionCodeStats(ctx context.Context, in *ListSessionCo
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListSessionCodeStatsResponse)
 	err := c.cc.Invoke(ctx, Host_ListSessionCodeStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSessionUsage(ctx context.Context, in *ListSessionUsageRequest, opts ...grpc.CallOption) (*ListSessionUsageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionUsageResponse)
+	err := c.cc.Invoke(ctx, Host_ListSessionUsage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListUsageCollectionTargetsV1(ctx context.Context, in *ListUsageCollectionTargetsV1Request, opts ...grpc.CallOption) (*ListUsageCollectionTargetsV1Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUsageCollectionTargetsV1Response)
+	err := c.cc.Invoke(ctx, Host_ListUsageCollectionTargetsV1_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ReportUsageObservationsV1(ctx context.Context, in *ReportUsageObservationsV1Request, opts ...grpc.CallOption) (*ReportUsageObservationsV1Response, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportUsageObservationsV1Response)
+	err := c.cc.Invoke(ctx, Host_ReportUsageObservationsV1_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2262,6 +2316,8 @@ type HostServer interface {
 	SetState(context.Context, *SetStateRequest) (*SetStateResponse, error)
 	DeleteState(context.Context, *DeleteStateRequest) (*DeleteStateResponse, error)
 	ListState(context.Context, *ListStateRequest) (*ListStateResponse, error)
+	// Optional, capability `state`: bounded keys for the connected plugin only.
+	ListStateKeys(context.Context, *ListStateKeysRequest) (*ListStateKeysResponse, error)
 	RevealSecret(context.Context, *RevealSecretRequest) (*RevealSecretResponse, error)
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
 	// Plugin-scoped secret primitives — capability `secrets`, like
@@ -2302,6 +2358,14 @@ type HostServer interface {
 	// not the raw commit/snapshot rows, whose JSON schema churns.
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error)
+	// Source-aware token usage read — api_read:session_usage. Retained writes go
+	// through the versioned observation contract below.
+	ListSessionUsage(context.Context, *ListSessionUsageRequest) (*ListSessionUsageResponse, error)
+	// Versioned retained-history contract. Subject bindings and collection
+	// snapshots are issued by the Host; callers cannot choose tenant, actor, or
+	// collector namespace values.
+	ListUsageCollectionTargetsV1(context.Context, *ListUsageCollectionTargetsV1Request) (*ListUsageCollectionTargetsV1Response, error)
+	ReportUsageObservationsV1(context.Context, *ReportUsageObservationsV1Request) (*ReportUsageObservationsV1Response, error)
 	// Conversation content — capability api_read:messages. Historical
 	// user/agent message content for a session or task, filterable by a time
 	// range (e.g. "yesterday"). Content is sanitized: kandev-injected
@@ -2578,6 +2642,9 @@ func (UnimplementedHostServer) DeleteState(context.Context, *DeleteStateRequest)
 func (UnimplementedHostServer) ListState(context.Context, *ListStateRequest) (*ListStateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListState not implemented")
 }
+func (UnimplementedHostServer) ListStateKeys(context.Context, *ListStateKeysRequest) (*ListStateKeysResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListStateKeys not implemented")
+}
 func (UnimplementedHostServer) RevealSecret(context.Context, *RevealSecretRequest) (*RevealSecretResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevealSecret not implemented")
 }
@@ -2640,6 +2707,15 @@ func (UnimplementedHostServer) ListSessions(context.Context, *ListSessionsReques
 }
 func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSessionCodeStats not implemented")
+}
+func (UnimplementedHostServer) ListSessionUsage(context.Context, *ListSessionUsageRequest) (*ListSessionUsageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSessionUsage not implemented")
+}
+func (UnimplementedHostServer) ListUsageCollectionTargetsV1(context.Context, *ListUsageCollectionTargetsV1Request) (*ListUsageCollectionTargetsV1Response, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListUsageCollectionTargetsV1 not implemented")
+}
+func (UnimplementedHostServer) ReportUsageObservationsV1(context.Context, *ReportUsageObservationsV1Request) (*ReportUsageObservationsV1Response, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportUsageObservationsV1 not implemented")
 }
 func (UnimplementedHostServer) ListMessages(context.Context, *ListMessagesRequest) (*ListMessagesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListMessages not implemented")
@@ -3937,6 +4013,24 @@ func _Host_ListState_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListStateKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListStateKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListStateKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListStateKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListStateKeys(ctx, req.(*ListStateKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_RevealSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RevealSecretRequest)
 	if err := dec(in); err != nil {
@@ -4304,6 +4398,60 @@ func _Host_ListSessionCodeStats_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).ListSessionCodeStats(ctx, req.(*ListSessionCodeStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSessionUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSessionUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSessionUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSessionUsage(ctx, req.(*ListSessionUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListUsageCollectionTargetsV1_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUsageCollectionTargetsV1Request)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListUsageCollectionTargetsV1(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListUsageCollectionTargetsV1_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListUsageCollectionTargetsV1(ctx, req.(*ListUsageCollectionTargetsV1Request))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ReportUsageObservationsV1_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportUsageObservationsV1Request)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ReportUsageObservationsV1(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ReportUsageObservationsV1_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ReportUsageObservationsV1(ctx, req.(*ReportUsageObservationsV1Request))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -4894,6 +5042,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_ListState_Handler,
 		},
 		{
+			MethodName: "ListStateKeys",
+			Handler:    _Host_ListStateKeys_Handler,
+		},
+		{
 			MethodName: "RevealSecret",
 			Handler:    _Host_RevealSecret_Handler,
 		},
@@ -4972,6 +5124,18 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSessionCodeStats",
 			Handler:    _Host_ListSessionCodeStats_Handler,
+		},
+		{
+			MethodName: "ListSessionUsage",
+			Handler:    _Host_ListSessionUsage_Handler,
+		},
+		{
+			MethodName: "ListUsageCollectionTargetsV1",
+			Handler:    _Host_ListUsageCollectionTargetsV1_Handler,
+		},
+		{
+			MethodName: "ReportUsageObservationsV1",
+			Handler:    _Host_ReportUsageObservationsV1_Handler,
 		},
 		{
 			MethodName: "ListMessages",

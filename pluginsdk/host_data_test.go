@@ -17,21 +17,24 @@ import (
 type dataRecordingHost struct {
 	UnimplementedHostData
 
-	tasks         map[string]Task
-	taskList      []Task
-	taskPageInfo  *PageInfo
-	sessions      []Session
-	sessionPage   *PageInfo
-	codeStats     []SessionCodeStats
-	codeStatsPage *PageInfo
-	workspaces    []Workspace
-	workflows     []Workflow
-	workflowSteps []WorkflowStep
-	agentProfiles []AgentProfile
-	repositories  []Repository
-	messages      []Message
-	messagePage   *PageInfo
-	utilityText   string
+	tasks          map[string]Task
+	taskList       []Task
+	taskPageInfo   *PageInfo
+	sessions       []Session
+	sessionPage    *PageInfo
+	codeStats      []SessionCodeStats
+	codeStatsPage  *PageInfo
+	workspaces     []Workspace
+	workflows      []Workflow
+	workflowSteps  []WorkflowStep
+	agentProfiles  []AgentProfile
+	repositories   []Repository
+	messages       []Message
+	messagePage    *PageInfo
+	utilityText    string
+	canonicalUsage []SessionUsageMeasurement
+	canonicalPage  *PageInfo
+	canonicalRead  bool
 
 	lastTaskFilter     TaskFilter
 	lastSessionFilter  SessionFilter
@@ -85,6 +88,7 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
+func (h *dataRecordingHost) Usage() UsageReader      { return dataRecordingUsageReader{h} }
 func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string, options ...UtilityAgentOptions) (string, error) {
 	h.lastUtilityPrompt = prompt
 	h.lastUtilityOptions = append([]UtilityAgentOptions(nil), options...)
@@ -168,6 +172,13 @@ func (r dataRecordingRepositoryReader) List(_ context.Context, workspaceID strin
 }
 
 type dataRecordingMessageReader struct{ h *dataRecordingHost }
+
+type dataRecordingUsageReader struct{ h *dataRecordingHost }
+
+func (r dataRecordingUsageReader) ListCanonical(_ context.Context, _ SessionUsageFilter, _ Page) ([]SessionUsageMeasurement, *PageInfo, error) {
+	r.h.canonicalRead = true
+	return r.h.canonicalUsage, r.h.canonicalPage, nil
+}
 
 func (r dataRecordingMessageReader) List(_ context.Context, filter MessageFilter, _ Page) ([]Message, *PageInfo, error) {
 	r.h.lastMessageFilter = filter
@@ -337,6 +348,20 @@ func TestHostData_SessionsListAndCodeStats(t *testing.T) {
 	stats, _, err := host.Sessions().CodeStats(context.Background(), SessionFilter{TaskIDs: []string{"task-1"}}, Page{})
 	require.NoError(t, err)
 	require.Equal(t, impl.codeStats, stats)
+}
+
+func TestHostData_UsageCanonicalListUsesCanonicalReader(t *testing.T) {
+	impl := &dataRecordingHost{
+		canonicalUsage: []SessionUsageMeasurement{{SourceRecordID: "canonical"}},
+		canonicalPage:  &PageInfo{HasMore: false},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	canonical, canonicalPage, err := host.Usage().ListCanonical(context.Background(), SessionUsageFilter{}, Page{})
+	require.NoError(t, err)
+	require.Equal(t, impl.canonicalUsage, canonical)
+	require.Equal(t, impl.canonicalPage, canonicalPage)
+	require.True(t, impl.canonicalRead)
 }
 
 func TestHostData_Workspaces(t *testing.T) {

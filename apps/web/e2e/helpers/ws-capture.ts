@@ -197,7 +197,7 @@ export function attachMessageAddCapture(page: Page): { frames: MessageAddFrame[]
 }
 
 /** Keep the real gateway connection live while allowing tests to deliver server notifications. */
-export async function routeGatewayNotifications(page: Page) {
+export async function routeGatewayNotifications(page: Page, blockedNotifications: string[] = []) {
   const sockets: WebSocketRoute[] = [];
   const messageAdds: MessageAddFrame[] = [];
   let nextId = 1;
@@ -232,7 +232,22 @@ export async function routeGatewayNotifications(page: Page) {
       }
       if (forwarded.length > 0) server.send(forwarded.join("\n"));
     });
-    server.onMessage((message) => socket.send(message));
+    server.onMessage((message) => {
+      if (typeof message !== "string" || blockedNotifications.length === 0) {
+        socket.send(message);
+        return;
+      }
+      const forwarded = message.split("\n").filter((part) => {
+        try {
+          const frame = JSON.parse(part);
+          return frame.type !== "notification" || !blockedNotifications.includes(frame.action);
+        } catch {
+          return true;
+        }
+      });
+      const output = forwarded.join("\n");
+      if (output.trim()) socket.send(output);
+    });
   });
 
   return {

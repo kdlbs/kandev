@@ -39,6 +39,18 @@ function manifest(overrides: Partial<ShardManifest> = {}): ShardManifest {
   };
 }
 
+function unit(project: string, file: string) {
+  return {
+    id: `${project}:${file}`,
+    project,
+    file,
+    fileHash: "hash",
+    testCount: 1,
+    estimatedSeconds: 1,
+    classification: "profile" as const,
+  };
+}
+
 describe("planned shard runner", () => {
   it("rejects an invalid manifest before catalog validation", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-runner-"));
@@ -85,7 +97,7 @@ describe("planned shard runner", () => {
           index: 1,
           predictedSeconds: 4,
           files: ["tests/example.spec.ts"],
-          units: [],
+          units: [unit("chromium", "tests/example.spec.ts")],
         },
       ],
     });
@@ -103,7 +115,6 @@ describe("planned shard runner", () => {
         "e2e/playwright.config.ts",
         "--workers=1",
         "--project=chromium",
-        "--project=mobile-chrome",
         "tests/example.spec.ts",
       ],
       expect.objectContaining({
@@ -120,7 +131,7 @@ describe("planned shard runner", () => {
           index: 1,
           predictedSeconds: 1,
           files: ["tests/docker/example.spec.ts"],
-          units: [],
+          units: [unit("containers", "tests/docker/example.spec.ts")],
         },
       ],
     });

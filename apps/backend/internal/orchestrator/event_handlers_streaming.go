@@ -3878,6 +3878,7 @@ func (s *Service) publishPromptUsage(
 		Usage:          payload.Data.Usage,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 		TurnID:         turnID,
+		UsageBindingID: s.usageBindingIDForTurn(ctx, sessionID, turnID),
 		UsageEventID: usageEventIDFor(
 			sessionID, payload.ExecutionID, payload.Data.PromptGeneration,
 		),
@@ -3915,6 +3916,7 @@ func (s *Service) publishNativeUsageObservation(
 		UsageObservation: observation,
 		Timestamp:        time.Now().UTC().Format(time.RFC3339),
 		TurnID:           turnID,
+		UsageBindingID:   s.usageBindingIDForTurn(ctx, payload.SessionID, turnID),
 		UsageEventID:     nativeUsageEventIDFor(payload.SessionID, observation),
 	}
 	subject := events.BuildSessionPromptUsageSubject(payload.SessionID)
@@ -3925,6 +3927,17 @@ func (s *Service) publishNativeUsageObservation(
 			zap.String("provider_thread_id", observation.ProviderThreadID),
 			zap.Error(err))
 	}
+}
+
+func (s *Service) usageBindingIDForTurn(ctx context.Context, sessionID, turnID string) string {
+	if s.turnService == nil || sessionID == "" || turnID == "" {
+		return ""
+	}
+	turn, err := s.turnService.GetTurn(ctx, turnID)
+	if err != nil || turn == nil || turn.TaskSessionID != sessionID {
+		return ""
+	}
+	return turn.UsageBindingID
 }
 
 func nativeUsageObservationReady(s *Service, payload *lifecycle.AgentStreamEventPayload) bool {

@@ -164,16 +164,7 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 			return nil, nil, relationErr
 		}
 		if hasWorkspaceID {
-			approved := false
-			for _, relation := range projections {
-				if relation.table == table {
-					approved = true
-					break
-				}
-			}
-			if !approved {
-				count.unmappedOwner = true
-			}
+			count.unmappedOwner = !approvedTransferWorkspaceOwner(table, projections, counts)
 		}
 		counts = appendTransferRelationIfMissing(counts, count)
 	}
@@ -185,6 +176,20 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 		return counts[i].table < counts[j].table
 	})
 	return projections, counts, nil
+}
+
+func approvedTransferWorkspaceOwner(table string, projections, preserved []transferWorkspaceProjection) bool {
+	for _, relation := range projections {
+		if relation.table == table {
+			return true
+		}
+	}
+	for _, relation := range preserved {
+		if relation.table == table && relation.taskColumn == "task_id" && relation.workspaceOwnership == transferWorkspaceCaptured {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Repository) validateUnmappedTransferRelations(ctx context.Context, tx *sqlx.Tx, taskID string, relations []transferWorkspaceProjection) error {

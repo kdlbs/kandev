@@ -96,6 +96,9 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 | **Handoff**         | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
 | **Close Others**    | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
+Deleting a conversation preserves its accepted token and cost accounting.
+Workspace or organization deletion has separate [accounting erasure rules](usage-history.md#retained-accounting).
+
 Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
 
 Restart keeps the selected conversation open throughout the attempt. If you select another conversation
@@ -590,6 +593,14 @@ its own when the preference is off. When it is on, the plugin can also appear in
 the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under **Settings > Plugins >
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
+
+For workspace token and cost totals, open **Stats > Token Usage**.
+Its [retained accounting](usage-history.md) combines accepted native usage and external collector observations.
+Task archive, task or session deletion, and transcript or payload cleanup preserve that accounting.
+
+Usage details distinguish model provider, agent client, token and cost sources, and captured user attribution.
+Unknown and mixed users remain explicit after a conversation disappears.
+The guide explains source coverage, reported or estimated costs, calendar limits, and saved values during a rebuild.
 
 ## Render math in Markdown
 

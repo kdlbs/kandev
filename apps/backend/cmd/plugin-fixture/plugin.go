@@ -224,6 +224,8 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return p.invokeUtilityAgent(ctx, false)
 	case utilityPreferenceAction:
 		return p.invokeUtilityAgent(ctx, true)
+	case usageHistoryFixtureAction:
+		return p.usageHistoryFixture(ctx, req)
 	case "link-pull-request":
 		response["linked"] = true
 		response[fixtureTaskIDKey] = req.Context.TaskID

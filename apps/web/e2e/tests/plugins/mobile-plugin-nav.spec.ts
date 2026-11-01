@@ -116,9 +116,10 @@ test.describe("Mobile plugin navigation", () => {
     const navItem = testPage.getByTestId(`mobile-plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible();
     await expect(navItem).toHaveText(/Hello E2E/);
+    // Allow fractional browser rounding at the 44 CSS px boundary.
     await expect
       .poll(() => navItem.evaluate((element) => element.getBoundingClientRect().height))
-      .toBeGreaterThanOrEqual(44);
+      .toBeGreaterThanOrEqual(44 - 0.01);
 
     // Saved layouts own plugin destinations, so scroll the projected row into
     // view instead of the legacy plugin section that no longer renders it.

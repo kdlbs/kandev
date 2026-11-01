@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   createPromptErrorFixture,
@@ -100,6 +101,8 @@ test("phone: visible per-row task actions expose Dismiss turn error", async ({
     await trigger.tap();
     const dismiss = testPage.getByTestId("task-context-dismiss-turn-error");
     await expect(dismiss).toBeVisible();
+    const menu = dismiss.locator('xpath=ancestor::*[@data-slot="context-menu-content"]');
+    await waitForFiniteAnimations(menu);
     const box = await dismiss.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
     await dismiss.tap();

@@ -23,7 +23,7 @@ func BenchmarkStatsHTTPSerializationReference(b *testing.B) {
 	}
 	router := gin.New()
 	repo := &recordingRepo{}
-	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), log)
+	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), log, true)
 	paths := []string{
 		"/api/v1/workspaces/" + wsA + "/stats/global?range=month",
 		"/api/v1/workspaces/" + wsA + "/stats/tasks?range=month",

@@ -106,6 +106,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
 		{"task_session_background_work.capabilities", `ALTER TABLE task_session_background_work ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`},
+		{"task_session_turns.usage_binding_id", `ALTER TABLE task_session_turns ADD COLUMN usage_binding_id TEXT NOT NULL DEFAULT ''`},
+		{"task_sessions.usage_execution_binding_id", `ALTER TABLE task_sessions ADD COLUMN usage_execution_binding_id TEXT NOT NULL DEFAULT ''`},
+		{"task_usage_events.usage_binding_id", `ALTER TABLE task_usage_events ADD COLUMN usage_binding_id TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
@@ -1415,6 +1418,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
 			executor_actor_user_id TEXT NOT NULL DEFAULT '',
+			usage_execution_binding_id TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
@@ -1425,7 +1429,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
 			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''),
-			0, 0, 0, 0, executor_actor_user_id
+			0, 0, 0, 0, executor_actor_user_id, COALESCE(usage_execution_binding_id, '')
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
@@ -1668,6 +1672,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			base_commit_sha TEXT DEFAULT '',
 			task_environment_id TEXT DEFAULT '',
 			executor_actor_user_id TEXT NOT NULL DEFAULT '',
+			usage_execution_binding_id TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
@@ -1677,7 +1682,8 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
-			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''), executor_actor_user_id
+			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''), executor_actor_user_id,
+			COALESCE(usage_execution_binding_id, '')
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,

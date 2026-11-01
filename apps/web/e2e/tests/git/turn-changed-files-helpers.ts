@@ -130,6 +130,41 @@ export async function waitForTurnChangeFileContent(
   return content;
 }
 
+export async function waitForTurnChangeRepositoryContentComplete(
+  apiClient: ApiClient,
+  sessionId: string,
+  changeSetId: string,
+  repositoryChangeId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/task-sessions/${sessionId}/turn-changes?offset=0&limit=50`,
+        );
+        if (!response.ok) {
+          return { status: response.status, availability: "", contentComplete: false };
+        }
+        const history = (await response.json()) as TurnChangeHistoryResponse;
+        const repository = history.change_sets
+          ?.find((changeSet) => changeSet.id === changeSetId)
+          ?.repositories?.find((entry) => entry.id === repositoryChangeId);
+        return {
+          status: response.status,
+          availability: repository?.availability ?? "",
+          contentComplete: repository?.content_complete ?? false,
+        };
+      },
+      {
+        message:
+          "Turn change repository content should finish preservation before its source is removed",
+        timeout: 60_000,
+      },
+    )
+    .toMatchObject({ status: 200, availability: "ready", contentComplete: true });
+}
+
 export async function readTurnChangeHistory(apiClient: ApiClient, sessionId: string) {
   const response = await apiClient.rawRequest(
     "GET",

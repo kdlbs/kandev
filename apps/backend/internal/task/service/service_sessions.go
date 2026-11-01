@@ -75,6 +75,18 @@ func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*model
 	return s.sessions.ListTaskSessions(ctx, taskID)
 }
 
+// ListSessionsForPlugin returns sessions across tasks with the filters applied
+// before pagination when the repository supports the optimized query. The
+// fallback keeps lightweight repository adapters source compatible while the
+// production SQLite repository uses one SQL query for the full selection.
+func (s *Service) ListSessionsForPlugin(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error) {
+	optimized, ok := s.sessions.(repository.PluginSessionRepository)
+	if !ok {
+		return nil, errors.New("task repository does not support plugin session listing")
+	}
+	return optimized.ListTaskSessionsForPlugin(ctx, filter)
+}
+
 // GetTaskSession returns a single session by ID.
 //
 // Scoping authorizes off the row we just read rather than calling

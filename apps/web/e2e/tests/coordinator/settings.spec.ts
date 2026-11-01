@@ -29,6 +29,7 @@ test.describe("Coordinators settings tab", () => {
     backend,
   }) => {
     const releaseFeature = await enableCoordinatorFeature(backend, apiClient, seedData.workspaceId);
+    const otherWorkspace = await apiClient.createWorkspace(`AAA Coordinator Search ${Date.now()}`);
 
     try {
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/secrets`);
@@ -57,12 +58,18 @@ test.describe("Coordinators settings tab", () => {
         .and(
           sidebar.locator(`a[href="/settings/workspaces/${seedData.workspaceId}/coordinators"]`),
         );
+      await expect(
+        sidebar.locator(`a[href="/settings/workspaces/${otherWorkspace.id}/coordinators"]`),
+      ).toBeVisible();
+      await expect(result).toHaveCount(1);
+      await expect(result).toContainText("Coordinators");
       await expect(result).toBeVisible();
       await result.click();
       await expect(testPage).toHaveURL(
         new RegExp(`/settings/workspaces/${seedData.workspaceId}/coordinators$`),
       );
     } finally {
+      await apiClient.deleteWorkspace(otherWorkspace.id, otherWorkspace.name);
       await releaseFeature();
     }
   });

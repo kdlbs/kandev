@@ -307,6 +307,8 @@ export async function runWorkspaceStreamPromotion(options: {
     await page.goto(`/t/${task.id}`);
     const session = new SessionPage(page);
     await session.waitForLoad();
+    // A visible chat shell can precede selection of the prepared session.
+    await expect(session.activeChat().getByTestId("task-description-start-button")).toBeVisible();
     const workspaceExecutionId = await getWorkspaceOnlyExecutionId(apiClient, task.id, sessionId);
     await openWorkspacePanels(page, session, mobile);
     const promotedExecutionId = await startPreparedAgent(
