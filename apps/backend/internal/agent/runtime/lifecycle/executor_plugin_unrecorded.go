@@ -92,6 +92,10 @@ func (r *PluginRemoteExecutor) adoptUnrecordedPluginExecutor(ctx context.Context
 	return r.inventoryStore.CheckpointPluginExecutorInventory(ctx, &running)
 }
 
+// Limit: the profile is looked up with the recorded ownership generation. When
+// the environment's generation has since changed the loader refuses it, and this
+// check then leaves the resource as recorded. The handoff itself is the control
+// that keeps a secret out of the table; this only covers rows older than it.
 // withoutRevealedSecret returns the handoff's resource, cut down to what cleanup
 // needs when its state holds a secret of the recorded profile. A handoff written
 // by this build never does; the check keeps an older row from being copied into
