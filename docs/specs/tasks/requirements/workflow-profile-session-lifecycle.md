@@ -109,6 +109,7 @@ starts and ends, so repeated stages use the intended context.
   navigation, and no document-level horizontal overflow.
 
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14:** If destination validation rejects an automatic transition after a turn completes, the current conversation shall accept another message without cancellation. The workflow step and primary session shall remain unchanged. This recovery shall not stop a newer turn or reopen a terminal session. Desktop and phone shall receive the recovered session state through the existing update channel.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.15:** A replay of one accepted profile-switch entry shall not allocate another destination session after that entry has recorded an allocation, including when the recorded destination is failed, terminal, or has uncertain ownership. A distinct accepted entry may select a fresh destination according to its start setting. This requirement concerns destination allocation; it does not authorize startup or prompt replay.
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002: Explicit workflow session recipients
 

@@ -603,6 +603,7 @@ func TestSwitchSessionForStep_ReuseOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	commitProfileSwitchEntry(t, fixture, stepB.ID)
 
 	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB,
 		&wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
@@ -630,6 +631,7 @@ func TestSwitchSessionForStep_ReuseOnStartParkOnEndRoundTrip(t *testing.T) {
 
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
 	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	commitProfileSwitchEntry(t, fixture, stepA.ID)
 	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA,
 		&wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
 	)
@@ -694,6 +696,7 @@ func TestPrepareWorkflowStepSession_QAToPRDoesNotReuseSolRuntime(t *testing.T) {
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, prStep.ID)
 	prSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, prStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -742,6 +745,7 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOver
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, humanQAStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -808,6 +812,7 @@ func TestPrepareWorkflowStepSession_ExactProfileDoesNotPromoteParkedMismatchedRu
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -875,6 +880,7 @@ func TestPrepareWorkflowStepSession_FallbackProfileDoesNotReuseUnauthorizedRunti
 		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
 	}
 
+	commitProfileSwitchEntry(t, fixture, workStep.ID)
 	workSession, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, workStep, qaStep)
 	require.NoError(t, err)
 	require.True(t, switched)
@@ -891,6 +897,7 @@ func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
 	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	commitProfileSwitchEntry(t, fixture, stepB.ID)
 
 	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB,
 		&wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
@@ -904,6 +911,7 @@ func TestSwitchSessionForStep_NewOnStartParkOnEndRoundTrip(t *testing.T) {
 
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
 	stepA := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy, ProfileSessionEndPolicy: fixture.endPolicy}
+	commitProfileSwitchEntry(t, fixture, stepA.ID)
 	profileA, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", profileB, stepA,
 		&wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy},
 	)
@@ -1002,6 +1010,7 @@ func TestSwitchSessionForStep_UsesDestinationStartAndSourceEndIndependently(t *t
 				AgentProfileID: "profile-a", ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
 				ProfileSessionEndPolicy: tt.endPolicy,
 			}
+			commitProfileSwitchEntry(t, fixture, target.ID)
 
 			selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, target, source)
 			require.NoError(t, err)
@@ -1063,6 +1072,7 @@ func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *te
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	stepB := &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy}
+	commitProfileSwitchEntry(t, fixture, stepB.ID)
 
 	profileB, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, stepB, &wfmodels.WorkflowStep{
 		ID: "step-a", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy,
@@ -1087,6 +1097,7 @@ func TestSwitchSessionForStep_ParkOnEndRestoresQueueAfterReuseParkingFails(t *te
 
 	fixture.svc.repo = failParkIntentRepo{repoStore: fixture.repo, remover: fixture.repo, marker: fixture.repo}
 	fixture.stepGetter.workflowAgentProfileID = "profile-a"
+	commitProfileSwitchEntry(t, fixture, "step-a")
 	_, _, err = fixture.svc.prepareWorkflowStepSession(ctx, "t1", currentB, &wfmodels.WorkflowStep{
 		ID: "step-a", WorkflowID: "wf1", Position: 2, ProfileSessionStartPolicy: fixture.startPolicy,
 	}, &wfmodels.WorkflowStep{ID: "step-b", WorkflowID: "wf1", ProfileSessionEndPolicy: fixture.endPolicy})
@@ -1115,6 +1126,7 @@ func TestSwitchSessionForStep_ParkOnEndContinuesWhenRuntimeStopFails(t *testing.
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	fixture.agentMgr.stopAgentErr = errors.New("runtime teardown failed")
+	commitProfileSwitchEntry(t, fixture, "step-b")
 
 	selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, &wfmodels.WorkflowStep{
 		ID: "step-b", WorkflowID: "wf1", Position: 1, ProfileSessionStartPolicy: fixture.startPolicy,
