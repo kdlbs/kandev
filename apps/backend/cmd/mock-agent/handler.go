@@ -538,6 +538,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
 		emitAsyncSubagentLifecycle(e, cmd, false)
+	case strings.EqualFold(cmd, "/async-followup"):
+		emitAsyncFollowup(e)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}

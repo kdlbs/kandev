@@ -331,6 +331,9 @@ func (s *Service) StopAutomationRunDefinitively(ctx context.Context, taskID, ses
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	// The retry successor launches after this returns, so settle the stopped
+	// runtime's workloads here while the stop is still the latest process event.
+	s.settleBackgroundWorkAfterTeardown(ctx, sessionID, executionID)
 	if claimed {
 		s.completeExecutionTeardownClaim(sessionID, executionID, claim)
 	}

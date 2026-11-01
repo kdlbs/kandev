@@ -87,6 +87,14 @@ func (a *Adapter) maybeScheduleAsyncTurnComplete(event AgentEvent) {
 		(!isAsyncTurnContentEvent(event) && !isAsyncToolTerminal(event)) {
 		return
 	}
+	// A status-less tool update can reach this finalizer for a tool the adapter
+	// has already retired: Claude's PostToolUse hook publishes a metadata-only
+	// tool_call_update with no later terminal frame. It still counts as prompt
+	// content for turn attribution, but it must not create or extend an
+	// agent-started turn.
+	if event.Type == streams.EventTypeToolUpdate && event.ToolStatus == "" {
+		return
+	}
 	if a.currentPromptTurn() != nil {
 		return
 	}
@@ -144,11 +152,45 @@ func (f *asyncTurnFinalizer) trackTool(event AgentEvent) {
 	if (event.Type != streams.EventTypeToolCall && event.Type != streams.EventTypeToolUpdate) || event.ToolCallID == "" {
 		return
 	}
+	// Only evidence of foreground activity makes a tool active. A status-less
+	// update neither activates a tool nor retires one that is already tracked.
+	if event.Type == streams.EventTypeToolUpdate && event.ToolStatus == "" {
+		return
+	}
 	if isAsyncToolTerminal(event) || event.ParentToolCallID != "" || event.NormalizedPayload.IsActiveBackgroundWork() {
 		delete(f.activeTools, event.ToolCallID)
 		return
 	}
 	f.activeTools[event.ToolCallID] = struct{}{}
+}
+
+// noteAsyncTurnProviderBoundary applies the provider's explicit end-of-turn
+// boundary to an agent-started turn. A usage_update whose origin names a human
+// or task-notification turn arrives after that turn's last provider frame, so it
+// retires any tool the finalizer still believes is active and arms the ordinary
+// idle timer. A prompt-owned turn has its own completion path and is untouched.
+func (a *Adapter) noteAsyncTurnProviderBoundary(sessionID string) {
+	if sessionID == "" || a.currentPromptTurn() != nil {
+		return
+	}
+	delay := currentAsyncTurnCompleteIdle()
+	a.asyncTurnMu.Lock()
+	defer a.asyncTurnMu.Unlock()
+	finalizer := a.asyncTurnFinalizers[sessionID]
+	if finalizer == nil {
+		return
+	}
+	clear(finalizer.activeTools)
+	finalizer.seq++
+	seq := finalizer.seq
+	finalizer.promptEpoch = a.asyncTurnEpochs[sessionID]
+	promptEpoch := finalizer.promptEpoch
+	if finalizer.timer != nil {
+		finalizer.timer.Stop()
+	}
+	finalizer.timer = time.AfterFunc(delay, func() {
+		a.emitAsyncTurnComplete(sessionID, seq, promptEpoch)
+	})
 }
 
 func (a *Adapter) emitAsyncTurnComplete(sessionID string, seq uint64, promptEpoch uint64) {

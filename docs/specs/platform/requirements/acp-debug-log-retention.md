@@ -1,0 +1,58 @@
+---
+status: draft
+system: platform
+created: 2026-11-01
+owners:
+  - kandev
+---
+
+# ACP Debug Log Retention Requirements
+
+## Overview
+
+When ACP debug logging is on, maintainers use the per-session frame logs to
+diagnose agent sessions. The platform owns this contract because agentctl writes
+the logs for every agent and executor. Retention must not remove the evidence
+for a session that is still in use, and unrelated processes must not consume it.
+
+## Requirements
+
+### REQ-PLATFORM-ACP-DEBUG-LOG-RETENTION-001: Keep logs for sessions in use
+
+**Intent:** A debug log survives for as long as its session is writing to it.
+
+**User story:** As a maintainer, I want a live session's frames retained, so that
+I can diagnose it after it misbehaves.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-001.1:** When the log directory exceeds
+  its file-count limit, the system shall delete the oldest files that no open
+  writer holds and shall retain every file an open writer holds.
+- **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-001.2:** When the files held by open
+  writers alone exceed the limit, the system shall keep them and delete every
+  other file beyond the limit.
+
+### REQ-PLATFORM-ACP-DEBUG-LOG-RETENTION-002: Keep unrelated output out of the log directory
+
+**Intent:** Work an agent does in its own workspace does not displace Kandev's
+diagnostic logs.
+
+**User story:** As a maintainer running Kandev in debug mode, I want agents' own
+tools isolated from Kandev's debug settings, so that their output cannot displace
+session logs.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-002.1:** Agent subprocesses shall not
+  inherit Kandev's ACP debug logging settings through any ACP entry point. The
+  owning agentctl shall keep logging normally.
+- **AC-PLATFORM-ACP-DEBUG-LOG-RETENTION-002.2:** ACP adapter tests shall not write
+  to the host's real ACP log directory, even when debug logging is enabled in the
+  environment that runs them.
+
+## Out of scope
+
+- Changing the default file-count, age, or per-file size limits.
+- Retaining logs for a session with no open writer beyond those limits.
+- Changing whether debug logging is on in each profile.

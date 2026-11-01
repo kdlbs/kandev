@@ -191,6 +191,9 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 		return false
 	}
 	probedExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	// A live or uncertain probe keeps the work open: the process can still
+	// report completion, and a late report for an old execution must never
+	// settle a successor's work.
 	running, err := s.probeAgentRunning(ctx, sessionID)
 	if err != nil || running {
 		return false
@@ -206,6 +209,13 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 	if row == nil {
 		return true
 	}
+	// Startup reconciliation terminalizes a row whose runtime recovery found no
+	// owner and clears its local PID in the same write. The ended status is the
+	// surviving stop evidence: RowProcessLiveness answers Unknown once the PID is
+	// cleared, and a live successor would already have failed the probe above.
+	if executorRowHasEnded(row.Status) {
+		return true
+	}
 	// Stop evidence belongs to an execution; a retained successor still owns
 	// its work when a delayed completion arrives for the previous execution.
 	if stoppedExecutionID != "" && stoppedExecutionID == row.AgentExecutionID {
@@ -215,6 +225,21 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 		return true
 	}
 	return s.rowLiveness(row) == models.ProcessLivenessDead
+}
+
+// executorRowHasEnded reports whether the persisted row already records a
+// finished execution. The lifecycle manager clears LocalPID for exactly these
+// statuses, so the status is the stop evidence that survives startup
+// reconciliation.
+func executorRowHasEnded(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, stoppedExecutionID string) {
@@ -238,6 +263,27 @@ func (s *Service) settleBackgroundWorkAfterTeardown(ctx context.Context, session
 	release := s.acquireSessionLifecycleLock(sessionID)
 	defer release()
 	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+// settleBackgroundWorkWithoutWaiting is the lifecycle-event path. The publisher
+// of the stop event can be the goroutine that already holds the session
+// lifecycle lock (prompt-readiness replacement stops synchronously publish
+// agent.stopped), so this must never block. It tries the lock once; a holder
+// that ends a process settles in place, and any other holder gets a detached
+// settle after it releases. The stopped execution ID stays bound so a late
+// settle cannot read a successor's liveness as the stopped process being alive.
+func (s *Service) settleBackgroundWorkWithoutWaiting(ctx context.Context, sessionID, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if acquired {
+		defer release()
+		s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+		return
+	}
+	settleCtx := context.WithoutCancel(ctx)
+	go s.settleBackgroundWorkAfterTeardown(settleCtx, sessionID, stoppedExecutionID)
 }
 
 func (s *Service) settleBackgroundWorkLocked(ctx context.Context, sessionID string, stoppedExecutionID string) {

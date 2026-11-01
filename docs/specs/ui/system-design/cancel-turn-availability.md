@@ -77,6 +77,22 @@ ownership; tests must assert exactly one eligible cancellation entry, or zero
 when the foreground surface is ineligible. Never obtain the Quick Chat target
 from `tasks.activeSessionId`.
 
+## Cancel that arrives after the turn ends
+
+The control can be visible for a moment after the backend settles a turn, so the
+backend owns this race. `runExplicitCancellationOwned` checks for an idle target
+inside the cancellation guard, before it invalidates resume attempts or creates a
+cancel turn. A session is idle only when all of these hold:
+
+- Its state is `WAITING_FOR_INPUT` or `IDLE`.
+- `peekActiveTurnID` finds no active turn.
+- It has no pending clarification, in-flight queued dispatch, in-flight prompt
+  admission, or resume attempt.
+
+The operation then returns success, which clears progress through the existing
+finish path. Any other state keeps the existing cancellation behavior, including
+reconciliation of a missing or unresponsive execution for a `RUNNING` session.
+
 ## Compatibility and verification
 
 No protocol, persistence, runtime flag, or cancellation timeout changes.

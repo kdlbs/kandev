@@ -235,6 +235,11 @@ func (a *Adapter) handleACPUpdate(
 				n.Update.UsageUpdate.Meta,
 				promptGeneration,
 			)
+			// An origin-bearing usage frame is the provider's explicit
+			// end-of-turn boundary for an agent-started turn.
+			if lifecycleEvent != nil {
+				a.noteAsyncTurnProviderBoundary(sessionID)
+			}
 			// Generation zero identifies synthetic/legacy turns such as
 			// ScheduleWakeup. They cannot transfer human prompt ownership, but
 			// their foreground-idle activity event must still close the wakeup

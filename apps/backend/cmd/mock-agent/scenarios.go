@@ -73,6 +73,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"turn-title-rename-only":           scenarioTurnTitleRenameOnly,
 	"turn-title-rename-edit":           scenarioTurnTitleRenameEdit,
 	"turn-title-rename-switch":         scenarioTurnTitleRenameSwitch,
+	"async-followup":                   scenarioAsyncFollowup,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -129,6 +130,12 @@ func scenarioEmptyTurn(e *emitter) {
 // directive inside a backend-generated expansion block.
 func scenarioSavedPromptDelivery(e *emitter) {
 	e.text(savedPromptDeliveryResponse)
+}
+
+// scenarioAsyncFollowup runs the agent-started follow-up fixture that emits a
+// status-less tool update for an already finished tool.
+func scenarioAsyncFollowup(e *emitter) {
+	emitAsyncFollowup(e)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.

@@ -322,7 +322,9 @@ func TestAutoStartAgentCallback_CancellationBeforeResumeRegistration(t *testing.
 	}
 	_, err := (&autoStartAgentCallback{svc: svc}).Execute(ctx, busyParentAutoStartInput())
 	require.Error(t, err)
-	require.EqualValues(t, 1, manager.cancelAgentCalls.Load(), "the cancellation must finish between input admission and resume registration")
+	// The cancellation reaches a session with no live turn, so it must not touch
+	// the runtime; its projection revision is what fences the in-flight admission.
+	require.Zero(t, manager.cancelAgentCalls.Load(), "an idle target must not reach the runtime")
 	require.Zero(t, probe.bindings, "a stale workflow must not bind a runtime resume after cancellation acknowledgement")
 	require.Empty(t, manager.capturedPrompts)
 	_, active := svc.resumeAttemptStore().current(busyParentSessionID)

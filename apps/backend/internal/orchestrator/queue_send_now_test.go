@@ -223,6 +223,12 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	// Production dispatch registers the handoff before starting the worker;
 	// preserve that ownership precondition for this direct worker test.
 	svc.markQueuedDispatchInFlight("session-1", claimed.Dispatch.ID)
+	// This test covers restore bookkeeping, not delivery. A claimed entry
+	// resumes Auto-run, so pause it again: the restore-drain then leaves the
+	// restored entries pending instead of dispatching their FIFO head.
+	if err := svc.messageQueue.SetAutoRun(ctx, "session-1", false); err != nil {
+		t.Fatalf("pause Auto-run before the worker: %v", err)
+	}
 	svc.executeSendNowClaim(claimed)
 	if len(messageCreator.userMessages) != 1 {
 		t.Fatalf("replacement retry created %d user messages, want 1", len(messageCreator.userMessages))
@@ -236,8 +242,8 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 			t.Fatalf("restored source %q lost user_message_recorded marker: %#v", entry.ID, entry.Metadata)
 		}
 	}
-	if !svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
-		t.Fatal("restoring accepted Send Now claim reverted Auto-run")
+	if svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
+		t.Fatal("restoring accepted Send Now claim changed the paused Auto-run setting")
 	}
 }
 

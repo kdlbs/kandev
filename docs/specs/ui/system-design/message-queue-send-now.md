@@ -88,6 +88,21 @@ No schema, wire payload, feature toggle, provider selection, or new cancellation
 path is required. A dynamic session uses its existing concrete execution for
 cancellation and follows the existing runtime contract for the replacement.
 
+## Restored claims
+
+A session can become promptable while its Send Now claim is still held: the
+resume path publishes readiness before the claimed prompt fails. The readiness
+drain finds nothing to deliver, and no later event repeats it. Restoring a claim
+is therefore a delivery trigger. After `restoreSendNowClaimWithRetry` succeeds,
+`executeSendNowClaimWithContext` calls `markQueuedDispatchDrainPending`, and its
+existing deferred `drainQueuedDispatchIfPending` runs after the dispatch marker
+clears. A failed restore does not mark a drain.
+
+That drain is ordinary FIFO. It cannot re-enter Send Now, so a persistent failure
+follows the existing FIFO disposition instead of looping. Only a Send Now executing
+in the running backend marks a drain. A claim restored by startup recovery stays
+pending, because a backend restart starts no agent.
+
 ## Presentation and compatibility
 
 The Send Now transport request has a 35-second deadline: the existing

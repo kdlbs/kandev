@@ -102,6 +102,9 @@ type sharedFlags struct {
 	verbose bool
 	stderr  bool
 	exec    string
+	// airCapabilities lists AIR extension capabilities to advertise in the
+	// initialize clientCapabilities._meta block.
+	airCapabilities string
 }
 
 func registerShared(fs *flag.FlagSet) *sharedFlags {
@@ -113,6 +116,8 @@ func registerShared(fs *flag.FlagSet) *sharedFlags {
 	fs.BoolVar(&f.verbose, "verbose", false, "mirror frames to stderr")
 	fs.BoolVar(&f.stderr, "stderr", false, "capture child stderr into the JSONL")
 	fs.StringVar(&f.exec, "exec", "", "spawn an arbitrary command instead of a registered agent")
+	fs.StringVar(&f.airCapabilities, "air-capabilities", "",
+		"comma-separated AIR extension capabilities to advertise (e.g. asyncTasks)")
 	return f
 }
 
@@ -471,8 +476,9 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 
 func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.RunConfig, error) {
 	cfg := acpdbg.RunConfig{
-		Workdir:       shared.workdir,
-		CaptureStderr: shared.stderr,
+		Workdir:         shared.workdir,
+		CaptureStderr:   shared.stderr,
+		AIRCapabilities: splitCapabilities(shared.airCapabilities),
 	}
 	if shared.exec != "" {
 		parts := splitExec(shared.exec)
@@ -498,6 +504,16 @@ func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.R
 	cfg.AgentID = spec.ID
 	cfg.Command = spec.Command
 	return cfg, nil
+}
+
+func splitCapabilities(value string) []string {
+	var capabilities []string
+	for _, part := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			capabilities = append(capabilities, trimmed)
+		}
+	}
+	return capabilities
 }
 
 func resolveJSONLPath(shared *sharedFlags, agentID, op string) string {

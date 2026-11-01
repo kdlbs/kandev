@@ -359,6 +359,22 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 	return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, ownBudget, fn)
 }
 
+// SessionAdmissionActive reports whether sessionID's prompt admission gate is
+// held or has waiters. Cancellation uses it to recognize an in-flight dispatch
+// without blocking on the gate.
+func (s *Service) SessionAdmissionActive(sessionID string) bool {
+	if s == nil || sessionID == "" {
+		return false
+	}
+	s.admissionMu.Lock()
+	entry := s.admissions[sessionID]
+	s.admissionMu.Unlock()
+	if entry == nil {
+		return false
+	}
+	return entry.gate.active()
+}
+
 func (s *Service) withSessionAdmissionLock(
 	waitCtx context.Context,
 	callbackCtx context.Context,

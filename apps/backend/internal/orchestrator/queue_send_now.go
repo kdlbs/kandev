@@ -510,6 +510,12 @@ func (s *Service) executeSendNowClaimWithContext(
 		if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
 			s.logger.Error("failed to restore send-now queue claim",
 				zap.String("session_id", sessionID), zap.Error(err))
+		} else {
+			// A restore is a delivery trigger: the readiness drain may already
+			// have run while this claim was held, so nothing else would pick
+			// these entries up. The deferred drain below runs after the
+			// dispatch marker clears.
+			s.markQueuedDispatchDrainPending(sessionID)
 		}
 		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	}

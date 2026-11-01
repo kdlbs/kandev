@@ -31,11 +31,13 @@ When an agent is in a long-running turn, an urgent correction can sit in the que
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9:** A running turn started by ordinary FIFO delivery shall be interruptible by a new Send Now request after its prompt handoff completes. This applies to fixed and dynamic profiles, including Cursor. The selected pending entry runs once; the interrupted input is not restored or repeated, and other pending entries retain FIFO order.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.10:** A request that observes an older turn shall not cancel a newer successor. Overlapping cancellation requests remain conflicts. Late completion from an interrupted turn shall not settle the replacement or release its pending queue work.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.11:** Desktop and phone Send Now actions shall show the existing localized conflict feedback for a genuine handoff conflict and refresh the authoritative queue. They shall allow a later request after handoff without a page reload.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.12:** When an accepted Send Now cannot deliver its prompt and restores its entries, a promptable session with Auto-run ON shall deliver them through ordinary FIFO without another user action. Each entry shall run once, and a failed FIFO attempt shall not start another Send Now. Entries restored by recovery after a backend restart shall stay pending instead.
 
 ## Design and delivery
 
 - [System design](../system-design/message-queue-send-now.md)
 - [FIFO interruption repair package](../../../plans/queue-send-now-live-fifo/plan.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
 
 ## Migrated source detail
 

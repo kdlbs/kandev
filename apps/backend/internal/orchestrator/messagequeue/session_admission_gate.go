@@ -23,6 +23,14 @@ func newSessionAdmissionGate() *sessionAdmissionGate {
 	return &sessionAdmissionGate{}
 }
 
+// active reports whether the gate is held or has waiters, without blocking.
+// Callers use it to tell an in-flight dispatch from a settled session.
+func (g *sessionAdmissionGate) active() bool {
+	g.stateMu.Lock()
+	defer g.stateMu.Unlock()
+	return g.locked || len(g.waiters) > 0
+}
+
 func (g *sessionAdmissionGate) lock(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()

@@ -293,7 +293,11 @@ func (s *Service) stopParkedWorkflowProfileSession(ctx context.Context, sessionI
 		s.logger.Warn("failed to stop runtime for parked workflow profile session",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
+	// The parked runtime can no longer report completion. Settle without
+	// waiting: this call can run while another lifecycle owner holds the lock.
+	s.settleBackgroundWorkWithoutWaiting(ctx, sessionID, executionID)
 }
 
 // clearWorkflowParkingMarker removes only the current parking projection. The

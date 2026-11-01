@@ -413,13 +413,35 @@ func (m *acpLogManager) prune(now time.Time) {
 		files = survivors
 	}
 
-	// Count cap: keep only the newest maxFiles by mtime.
+	// Count cap: keep only the newest maxFiles by mtime. Files held by an open
+	// writer are never deletion candidates — they count toward the limit but
+	// survive it, so the directory can exceed the limit only by the number of
+	// live writers, which live sessions bound.
 	if m.cfg.maxFiles > 0 && len(files) > m.cfg.maxFiles {
 		sort.Slice(files, func(i, j int) bool { return files[i].mtime.After(files[j].mtime) })
-		for _, f := range files[m.cfg.maxFiles:] {
-			m.removeFile(f.path)
+		surplus := len(files) - m.cfg.maxFiles
+		for i := len(files) - 1; i >= 0 && surplus > 0; i-- {
+			if m.hasOpenWriterForPath(files[i].path) {
+				continue
+			}
+			m.removeFile(files[i].path)
+			surplus--
 		}
 	}
+}
+
+// hasOpenWriterForPath reports whether this process holds a writer for path.
+// Only this process's writers are visible; a second agentctl sharing the
+// directory is not protected.
+func (m *acpLogManager) hasOpenWriterForPath(path string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, w := range m.writers {
+		if w.path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // acpWriter is a single kept-open, line-buffered file handle with its own lock

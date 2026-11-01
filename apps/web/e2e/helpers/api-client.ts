@@ -2934,6 +2934,22 @@ export class ApiClient {
 
   // --- Session ---
 
+  /** Reads the authoritative background-work projection for a session. */
+  async listBackgroundWorkloads(sessionId: string): Promise<{
+    workloads: Array<{ work_id: string; title: string; state: string }>;
+  }> {
+    const response = await this.rawRequest(
+      "GET",
+      `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/background-work`,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `listBackgroundWorkloads failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    return response.json();
+  }
+
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;

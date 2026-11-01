@@ -126,6 +126,16 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
 - **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
 
+### REQ-AGENTS-BACKGROUND-WORK-010: Claude background shells do not stay running
+
+**Intent:** The background jobs count reflects work that is still running.
+
+- **AC-AGENTS-BACKGROUND-WORK-010.1:** When the agent process that owns a workload has ended, including through replacement, idle reclaim, or a backend restart, every non-terminal workload of that session shall become terminal with an unknown outcome. Verified liveness shall still be required before settlement.
+- **AC-AGENTS-BACKGROUND-WORK-010.2:** When the connected Claude bridge advertises background task lifecycle support, a detached shell shall settle from the lifecycle event that names its launch tool, retaining the reported outcome. The launch tool completing shall not settle it. **Not yet delivered:** the capture confirms the bridge frames, but the pinned ACP SDK cannot represent them; process-end settlement (`010.1`) applies until the SDK variant lands. See the [decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md).
+- **AC-AGENTS-BACKGROUND-WORK-010.3:** When that support is not advertised, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
+- **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
+- **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
+
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
 owns full provider continuity. The
 [Kandev plugin design](../system-design/opencode-kandev-plugin.md) owns the
@@ -143,6 +153,7 @@ Input is part of the shared contract, but Codex background stdin is unsupported
 unless independently proven for thread-owned commands in the pinned version.
 
 - [Design](../system-design/background-work.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
 - [Native Codex requirements](codex-app-server.md)
 - [Subagent invocation history](subagent-context-persistence.md)
 - [Existing subagent presentation](../../ui/requirements/subagent-observability.md)
