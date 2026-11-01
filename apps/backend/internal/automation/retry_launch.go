@@ -556,7 +556,7 @@ func (s *Service) dispatchRetryLaunch(ctx context.Context, run *AutomationRun, d
 	receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	var admissionWait RunDispatchDeferred
-	fixedResourceWait := errors.As(dispatchErr, &admissionWait) && admissionWait.DispatchDeferred() == "fixed_profile_suspended"
+	fixedResourceWait := errors.As(dispatchErr, &admissionWait) && admissionWait.DispatchDeferred() == DispatchDeferredFixedProfileSuspended
 	if errors.Is(dispatchErr, ErrRunDeferred) || fixedResourceWait {
 		if err := s.store.DeferRetryLaunch(receiptCtx, launch); err != nil {
 			return errors.Join(ErrRetryLaunchUncertain, err)

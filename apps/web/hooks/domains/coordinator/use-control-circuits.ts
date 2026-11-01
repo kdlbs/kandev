@@ -6,7 +6,6 @@ import { isRoutingCircuits, type RoutingCircuit } from "@/lib/control-ui/routing
 type CircuitRead = {
   owner: object;
   identity: string;
-  revision: object;
   status: "ready" | "denied" | "unsupported" | "error";
   data?: RoutingCircuit[];
   receivedAt?: string;
@@ -32,7 +31,6 @@ export function useControlRoutingCircuits(revision: CircuitRevision | undefined)
         return {
           owner: current.owner,
           identity: current.identity,
-          revision: current,
           status,
           ...(retained
             ? { data: previous.data, receivedAt: previous.receivedAt, stale: true }
@@ -47,7 +45,6 @@ export function useControlRoutingCircuits(revision: CircuitRevision | undefined)
           setRead({
             owner: current.owner,
             identity: current.identity,
-            revision: current,
             status: "ready",
             data: response.circuits,
             receivedAt: new Date().toISOString(),

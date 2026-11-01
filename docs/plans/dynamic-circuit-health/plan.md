@@ -1,8 +1,8 @@
 ---
 title: "Shared circuit admission and health readback"
-status: in-progress
+status: done
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 requirements:
   - REQ-AGENTS-DYNAMIC-CIRCUIT-HEALTH-001
 system_design:

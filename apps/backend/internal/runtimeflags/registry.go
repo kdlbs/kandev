@@ -205,11 +205,11 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+				"Fixed profiles can wait on shared resource circuits; account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
@@ -227,7 +227,7 @@ var registrations = []runtimeFlagRegistration{
 			Stability: StabilityExperimental,
 			RiskLevel: RiskMedium,
 			RiskDescription: "Repeated failures can suspend the resource for up to four hours, or until a later provider reset time, " +
-				"even after recovery. This also affects fixed profiles when Dynamic agent routing is off: they wait without " +
+				"even after recovery. When dynamic agent routing is enabled, fixed profiles wait without " +
 				"falling back to another candidate. Dynamic routes may use the next configured candidate or wait. " +
 				"A clean completed turn clears the failure count.",
 			RestartRequired: true,

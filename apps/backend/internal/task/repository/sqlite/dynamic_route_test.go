@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -425,5 +426,33 @@ func TestUtilityRouteStateIsTransient(t *testing.T) {
 	}
 	if len(attempts) != 0 {
 		t.Fatalf("utility route attempts = %#v", attempts)
+	}
+}
+
+func TestCircuitFailureCountSurvivesRealStoreRestore(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	registry := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitBackoffEscalation(true))
+	registry.OpenFailure("credential:roundtrip", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now})
+	registry.OpenFailure("credential:roundtrip", dynamicruntime.FailureOpen{Code: routingerr.CodeRateLimited, Now: now.Add(time.Minute)})
+	restored := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo), dynamicruntime.WithCircuitBackoffEscalation(true))
+	if err := restored.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := restored.Snapshots()
+	if len(snapshots) != 1 || snapshots[0].Failures != 2 || !snapshots[0].Until.Equal(now.Add(6*time.Minute)) {
+		t.Fatalf("restored circuits: %+v", snapshots)
+	}
+	snapshots[0].Failures = 99
+	if restored.Snapshots()[0].Failures != 2 {
+		t.Fatal("snapshot mutated live registry")
+	}
+	disabled := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitPersistence(repo))
+	if err := disabled.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Snapshots()[0].Failures != 0 {
+		t.Fatal("disabled escalation restored failure count")
 	}
 }

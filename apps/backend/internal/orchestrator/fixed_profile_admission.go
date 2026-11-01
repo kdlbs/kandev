@@ -9,6 +9,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -27,8 +28,13 @@ func (e *FixedProfileSuspendedError) Error() string {
 	return fmt.Sprintf("fixed profile %s suspended: %s", e.ExecutionProfileID, fixedProfileSuspensionMessage(e.Suspension))
 }
 
+// CircuitSuspendedUntil returns the retry deadline, or zero for an owner-release hold.
+func (e *FixedProfileSuspendedError) CircuitSuspendedUntil() time.Time { return e.Suspension.Until }
+
 // DispatchDeferred keeps an admitted automation run open before provider I/O.
-func (e *FixedProfileSuspendedError) DispatchDeferred() string { return "fixed_profile_suspended" }
+func (e *FixedProfileSuspendedError) DispatchDeferred() string {
+	return automation.DispatchDeferredFixedProfileSuspended
+}
 
 func isFixedProfileSuspendedError(err error) bool {
 	var suspended *FixedProfileSuspendedError

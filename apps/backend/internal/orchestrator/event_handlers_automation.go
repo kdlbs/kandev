@@ -1462,7 +1462,7 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		result, err := s.promptAutomationContinuation(ctx, task, session, prompt, runID, operation)
 		if err != nil {
 			restoreIfUncommitted()
-			if isFixedProfileSuspendedError(err) && s.retainFixedProfileAutomation(ctx, task, session, prompt, metadata, runID, action, reason) {
+			if isFixedProfileSuspendedError(err) && s.retainFixedProfileAutomation(ctx, task, session, prompt, metadata, runID, action, reason, false) {
 				return automation.RunDispatch{}, errors.Join(err, automation.ErrRunDeferred)
 			}
 			return automation.RunDispatch{}, err

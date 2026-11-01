@@ -17,7 +17,7 @@ func (r *ProfileExecutionResolver) resourceCircuitCandidate(
 	ctx context.Context,
 	executionProfileID string,
 ) (dynamic.Candidate, bool) {
-	if r == nil || r.engine == nil || r.profiles == nil || executionProfileID == "" {
+	if r == nil || !r.Enabled() || r.engine == nil || r.profiles == nil || executionProfileID == "" {
 		return dynamic.Candidate{}, false
 	}
 	profile, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
@@ -52,7 +52,7 @@ func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
 	if failure == nil {
 		return
 	}
-	if r == nil || r.engine == nil || executionProfileID == "" {
+	if r == nil || !r.Enabled() || r.engine == nil || executionProfileID == "" {
 		return
 	}
 	if resourceKey == "" && !routingerr.HoldsUntilRelease(failure.Code) {
@@ -69,7 +69,7 @@ func (r *ProfileExecutionResolver) RecordFixedProfileFailure(
 // concrete profile's shared resource after its owner confirms a clean turn.
 // It does not close a circuit, release a hold, or change a probe lease.
 func (r *ProfileExecutionResolver) ResetFixedProfileCircuitFailures(_ context.Context, resourceKey string) bool {
-	if r == nil || r.engine == nil || !r.engine.Circuits().EscalationEnabled() {
+	if r == nil || !r.Enabled() || r.engine == nil || !r.engine.Circuits().EscalationEnabled() {
 		return false
 	}
 	if resourceKey == "" {
@@ -101,7 +101,7 @@ func (r *ProfileExecutionResolver) FixedProfileSuspension(
 // CapturedFixedProfileSuspension checks the resource of a retained execution.
 // Unknown legacy resource identity must not be replaced with today's secret.
 func (r *ProfileExecutionResolver) CapturedFixedProfileSuspension(executionProfileID, resourceKey string, now time.Time) (dynamic.Suspension, bool) {
-	if r == nil || r.engine == nil || executionProfileID == "" {
+	if r == nil || !r.Enabled() || r.engine == nil || executionProfileID == "" {
 		return dynamic.Suspension{}, false
 	}
 	suspension, blocked := r.engine.CandidateSuspension(dynamic.Candidate{

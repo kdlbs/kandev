@@ -1,7 +1,7 @@
 ---
 id: "01-circuit-health"
 title: "Port the coherent circuit core and readback"
-status: in-progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -29,29 +29,29 @@ system_design:
 - Circuit-only API/validation/hook/card and the current providers dashboard;
   localized circuit copy in the existing catalogs.
 - Reuse source checks only for their unchanged scope. Check the new main
-  integration through narrowly selected existing cases and temporary overlays,
-  current feature contracts, and the adapted UI lifetime.
+  integration through permanent regression tests, current feature contracts,
+  and desktop/mobile browser checks.
 
 ## Boundaries
 
 No donor mutation, operating installation/settings change, provider call,
 automatic failover, new budget policy, model-order change, new permission model,
-whole-dashboard import, or permanent test/framework addition. Provider-policy
-limit read/display remains separate. Public integration is not part of local
-preparation.
+whole-dashboard import, or new test framework. Provider-policy
+limit read/display remains separate. Delivery uses a maintainer follow-up commit on the contributor branch.
 
 ## Validation and result
 
-The selected runtime circuit and current consumer cases passed using temporary
-overlays of the original tests. Separate feature-binding/profile contract cases
-passed; the earlier broad selector only compiled those two packages. Twelve
-unchanged circuit utility cases and ten adapted card/read-lifetime cases passed.
-Changed-module TypeScript, changed-file ESLint, localization, specification, and
-documentation-coverage checks passed. The full-web typecheck exceeded Node's
-default heap and is not a full-web pass or a proven baseline failure.
+Fixed-profile admission and failure charging reuse `features.dynamicAgentRouting`.
+No separate admission flag is added. Office defers suspended dispatches without
+using retries or provider-attempt allowance. Queue waits use a targeted query,
+release unknown verdicts, and clear their diagnostic under a revision guard.
+Expired open circuits display as available without a past next-attempt time.
 
-The first normal commit attempt reported zero Go lint issues but exceeded its
-unchanged five-minute budget and made no commit. A normal retry and the exact
-changed-snapshot review remain pending. Do not read the original source work
-packages' completed states as validation of this port. No hosted, PostgreSQL,
-provider-backed, operating, or full-suite pass is claimed.
+Permanent tests cover the backoff ladder, expiry and holds, durable failure
+counts, captured resource identity, fixed admission, queue retention and resume,
+Office deferral, read transport, validation, and hook ownership. The affected Go
+suites pass with `-race`; scoped Go lint passes. Web lint, full typecheck with an
+8 GiB Node heap, feature contracts, localization, and specification checks pass.
+The provider-circuit Playwright case passes on `chromium` and `mobile-chrome`
+against fresh backend and web builds. No PostgreSQL, real-provider, or full-suite
+pass is claimed.

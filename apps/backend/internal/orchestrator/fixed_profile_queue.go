@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -91,7 +92,13 @@ func (s *Service) resumeFixedProfileWaits(ctx context.Context) {
 	if s.messageQueue == nil || s.profileExecutionResolver == nil {
 		return
 	}
-	sessions, err := s.repo.ListActiveTaskSessions(ctx)
+	reader, ok := s.repo.(interface {
+		ListFixedProfileWaitSessions(context.Context) ([]*models.TaskSession, error)
+	})
+	if !ok {
+		return
+	}
+	sessions, err := reader.ListFixedProfileWaitSessions(ctx)
 	if err != nil {
 		return
 	}
@@ -104,7 +111,7 @@ func (s *Service) resumeFixedProfileWaits(ctx context.Context) {
 			continue
 		}
 		suspension, known := s.fixedProfileSuspensionForSession(ctx, session)
-		if !known || suspension.Blocked() {
+		if known && suspension.Blocked() {
 			continue
 		}
 		if owned, done := s.resumeFixedProfileAutomation(ctx, session); owned {
@@ -113,11 +120,39 @@ func (s *Service) resumeFixedProfileWaits(ctx context.Context) {
 			}
 			continue
 		}
+		if !s.clearFixedProfileQueueWait(ctx, session) {
+			continue
+		}
 		s.CheckQueueAdmissionReadiness(ctx, messagequeue.QueueSessionIdentity{
 			TaskID: session.TaskID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID,
 		})
-		s.clearFixedProfileWait(ctx, session.ID, wait)
 	}
+}
+
+// clearFixedProfileQueueWait clears only the observed wait and its error. A
+// newer session revision retains its state, metadata, and diagnostic.
+func (s *Service) clearFixedProfileQueueWait(ctx context.Context, session *models.TaskSession) bool {
+	updater, ok := s.repo.(interface {
+		UpdateTaskSessionIfCurrentSnapshot(context.Context, *models.TaskSession, models.TaskSessionState, time.Time, map[string]interface{}) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	updated := *session
+	updated.Metadata = cloneSessionMetadata(session.Metadata)
+	delete(updated.Metadata, fixedProfileWaitMetadataKey)
+	if strings.HasPrefix(updated.ErrorMessage, "resource suspended: scope=") {
+		updated.ErrorMessage = ""
+	}
+	changed, err := updater.UpdateTaskSessionIfCurrentSnapshot(ctx, &updated, session.State, session.UpdatedAt, updated.Metadata)
+	if err != nil {
+		s.logger.Warn("could not clear fixed-profile admission wait", zap.String("session_id", session.ID), zap.Error(err))
+		return false
+	}
+	if changed {
+		s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID, session.State, updated.State, updated.ErrorMessage, &updated.UpdatedAt, &updated)
+	}
+	return changed
 }
 
 func (s *Service) clearFixedProfileWait(ctx context.Context, sessionID string, wait interface{}) {

@@ -5,6 +5,7 @@ import {
   CIRCUIT_SCOPE_KEYS,
   CIRCUIT_STATE_KEYS,
   blockingCircuitCount,
+  isCircuitBlocking,
   shortCircuitId,
   sortCircuits,
   type RoutingCircuit,
@@ -20,7 +21,7 @@ const READ_STATUS_KEYS = {
 };
 
 /**
- * The dynamic router's own circuits, separate from the workspace routing health
+ * Shared provider resource circuits, separate from the workspace routing health
  * (`office_provider_health`) shown above: this table is installation-wide
  * because a credential circuit is shared by every workspace that uses it.
  */
@@ -87,15 +88,19 @@ function CircuitRow({ circuit }: { circuit: RoutingCircuit }) {
     circuit.code && Object.hasOwn(CIRCUIT_CODE_KEYS, circuit.code)
       ? CIRCUIT_CODE_KEYS[circuit.code]
       : "common:unknownError";
-  const due = circuit.state === "half_open" ? circuit.probe_until : circuit.until;
+  const blocking = isCircuitBlocking(circuit);
+  const stateKey =
+    circuit.state === "open" && !blocking
+      ? "sidebar:controlCircuits.state.available"
+      : CIRCUIT_STATE_KEYS[circuit.state];
+  const candidateDue = circuit.state === "half_open" ? circuit.probe_until : circuit.until;
+  const due = blocking ? candidateDue : undefined;
   return (
     <li
       className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm"
       data-testid="control-provider-circuit"
     >
-      <span className="rounded border px-1.5 py-0.5 text-[11px]">
-        {t(CIRCUIT_STATE_KEYS[circuit.state])}
-      </span>
+      <span className="rounded border px-1.5 py-0.5 text-[11px]">{t(stateKey)}</span>
       <span className="font-medium">
         {scope ? t(scope) : circuit.scope || t("sidebar:controlCircuits.scope.unknown")}
       </span>

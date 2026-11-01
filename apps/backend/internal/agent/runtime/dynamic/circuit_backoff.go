@@ -141,10 +141,3 @@ func (r *CircuitRegistry) ResetFailures(key string) bool {
 func (r *CircuitRegistry) EscalationEnabled() bool {
 	return r != nil && r.escalation
 }
-
-// Failures reports the consecutive qualifying failure count of key.
-func (r *CircuitRegistry) Failures(key string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.circuits[key].failures
-}

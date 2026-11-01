@@ -17,7 +17,7 @@ type fixedProfileWaitIdentityKey struct{}
 
 func (s *Service) retainFixedProfileAutomation(
 	ctx context.Context, task *models.Task, session *models.TaskSession, prompt string,
-	metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string, initialStart ...bool,
+	metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string, initialStart bool,
 ) bool {
 	if runID == "" || s.messageQueue == nil {
 		return false
@@ -32,7 +32,7 @@ func (s *Service) retainFixedProfileAutomation(
 		"action": string(action), "reason": reason,
 		"incarnation_id": identity.SessionIncarnationID, "since": time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if len(initialStart) > 0 && initialStart[0] {
+	if initialStart {
 		wait["initial_start"] = true
 	}
 	return s.repo.SetSessionMetadataKey(ctx, session.ID, fixedProfileAutomationWaitKey, wait) == nil

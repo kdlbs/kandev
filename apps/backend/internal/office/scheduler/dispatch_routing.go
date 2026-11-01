@@ -45,9 +45,10 @@ const (
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
 	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
+	RouteAttemptOutcomeDeferredCircuit       = models.RouteAttemptOutcomeDeferredCircuit
 )
 
-// MaxAttemptsPerRun caps the number of route_attempt rows a single run
+// MaxAttemptsPerRun caps provider attempts, excluding circuit deferrals. A single run
 // can accumulate. A pathological cycle (provider flapping, post-start
 // fallback racing with re-park) could otherwise append rows forever.
 // Once the cap is reached the dispatcher parks the run as
@@ -86,7 +87,13 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: list prior: %w", err)
 	}
-	if len(prior) >= MaxAttemptsPerRun {
+	attemptCount := 0
+	for _, attempt := range prior {
+		if attempt.Outcome != RouteAttemptOutcomeDeferredCircuit {
+			attemptCount++
+		}
+	}
+	if attemptCount >= MaxAttemptsPerRun {
 		if perr := ss.parkRunMaxAttempts(ctx, run, agent.WorkspaceID); perr != nil {
 			return false, false, perr
 		}
@@ -278,6 +285,15 @@ func (ss *SchedulerService) tryCandidates(
 			return false, nil, err
 		}
 		sessionID, launchErr := ss.launchCandidate(ctx, run, agent, candidate, candidateLaunch)
+		var circuitWait interface{ CircuitSuspendedUntil() time.Time }
+		if errors.As(launchErr, &circuitWait) {
+			now := time.Now().UTC()
+			attempt := models.RouteAttempt{RunID: run.ID, Seq: seq, Outcome: RouteAttemptOutcomeDeferredCircuit, FinishedAt: &now}
+			if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
+				return false, nil, err
+			}
+			return false, nil, launchErr
+		}
 		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
 			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
 		}
