@@ -2273,6 +2273,21 @@ func (s *Service) finishQueuedMessageExecution(
 		}
 		return
 	}
+	if errors.Is(err, ErrResumeAttemptCancelled) {
+		if userMessageRecorded {
+			markQueuedUserMessageRecorded(queuedMsg)
+		}
+		s.logger.Info("resume attempt cancelled before delivery; restoring queued message",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		if exactReservation {
+			s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
+		} else {
+			s.restoreQueuedMessage(ctx, queuedMsg)
+		}
+		return
+	}
 	if err != nil {
 		s.handleQueuedMessageExecutionError(
 			ctx, callerSessionID, queuedMsg, reservation, lifecyclePrompt, userMessageRecorded, err,
@@ -2353,11 +2368,11 @@ func (s *Service) handleQueuedMessageExecutionError(
 	}
 
 	// TODO: Implement dead letter queue for failed queued messages
-	// Currently, failed messages are lost. Consider:
+	// Currently, failed messages are dropped. Consider:
 	// 1. Retry mechanism with exponential backoff
 	// 2. Persist failed messages to database for manual recovery
 	// 3. Notification to user about failed queue execution
-	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+	s.logger.Warn("queued message execution failed - message dropped (no retry/dead letter queue)",
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Int("content_length", len(queuedMsg.Content)))

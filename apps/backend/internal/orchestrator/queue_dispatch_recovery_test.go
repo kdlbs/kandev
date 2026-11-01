@@ -250,3 +250,53 @@ func TestTransferredOrdinaryDispatchRestoresToDestinationAfterRestart(t *testing
 		t.Fatalf("destination queue after transfer recovery = %#v, want %s", status.Entries, source.ID)
 	}
 }
+
+// TestCancelledResumeLeftoverClaimRestoresAfterSessionRecovery pins the shutdown
+// boundary documented by REQ-TASKS-RESUME-PROMPT-QUEUE-003.1: when Stop reaches
+// the reserved-prompt callback teardown before the cancelled-resume restore
+// runs, the entry is not lost. Startup reconciliation parks the claim
+// (unknown_queue_dispatch_outcome) and an explicit session recovery returns the
+// original entry to its queue.
+func TestCancelledResumeLeftoverClaimRestoresAfterSessionRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-cancelled-resume", "session-cancelled-resume", "step-1")
+	queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = db.Close() })
+	source, err := queue.QueueMessage(
+		ctx, "session-cancelled-resume", "task-cancelled-resume", "cancelled resume prompt",
+		"", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserved, ok := queue.ReserveQueued(ctx, source.SessionID)
+	if !ok || reserved.ID != source.ID {
+		t.Fatalf("reserved = %#v, ok=%t", reserved, ok)
+	}
+	// The cancelled resume left the claim behind: the entry is reserved and no
+	// restore ran, exactly the Stop-race shape.
+	service := &Service{logger: testLogger(), repo: repo, messageQueue: queue}
+	if err := service.reconcilePendingQueueDispatchesOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := queue.GetStatus(ctx, source.SessionID); status.Count != 0 {
+		t.Fatalf("leftover cancelled-resume claim was restored before recovery: %#v", status.Entries)
+	}
+	block, err := service.GetOpenSessionRecoveryBlock(ctx, source.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block == nil || block.Reason != unknownQueueDispatchRecoveryReason {
+		t.Fatalf("recovery block = %#v, want %s", block, unknownQueueDispatchRecoveryReason)
+	}
+	// The operator completes explicit session recovery, which releases the
+	// parked claim and returns the entry to its queue.
+	if err := service.restorePendingQueueDispatchesForRecovery(ctx, source.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	status := queue.GetStatus(ctx, source.SessionID)
+	if len(status.Entries) != 1 || status.Entries[0].ID != source.ID {
+		t.Fatalf("queue after session recovery = %#v, want the original entry %s back", status.Entries, source.ID)
+	}
+}

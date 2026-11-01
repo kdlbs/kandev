@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-09
-updated: 2026-10-04
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -77,6 +77,33 @@ runtime ran out.
 - **AC-TASKS-RESUME-PROMPT-QUEUE-002.3:** A dispatch failure that is not a
   wait expiry or another existing retryable case shall keep its current
   disposition, so a permanent error cannot block the head of the queue.
+
+### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A cancelled resume keeps queued work
+
+**Intent:** Stopping or restarting Kandev while a queued prompt waits for its
+session to resume never drops the prompt. The entry returns to its session
+queue as soon as the cancelled resume is observed, or, when shutdown wins the
+race, is retained and returned to the queue when explicit session recovery
+completes.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** When dispatch of a reserved queued
+  entry fails because the resume attempt it waited on was cancelled, and no
+  part of the prompt reached the agent, Kandev shall return the entry to its
+  session queue with its identity, payload, and order unchanged and settle its
+  dispatch claim. A reservation for an exact session incarnation shall restore
+  onto that incarnation. While the backend is shutting down, if Stop reaches
+  the reserved-prompt callback teardown before the restore runs, the restore is
+  refused and the dispatch claim is retained; the existing startup
+  reconciliation then parks the session for explicit recovery and returns the
+  same entry to its queue when that recovery completes. The entry is not lost.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** The returned entry shall wait for the
+  next existing delivery trigger. Kandev shall not add a timer, retry loop, or
+  new resume attempt for it, and a cancelled resume after a delivery attempt
+  shall keep its current disposition.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** A dispatch failure that matches no
+  retained or retryable case shall be logged as dropped, not as lost.
 
 ## Compatibility and exclusions
 
