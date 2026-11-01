@@ -1915,16 +1915,6 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	userMessageRecorded := false
 	deliveryAttempted := false
-	if queuedMsg.IsDurablePlanComment() {
-		if err := s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments); err != nil {
-			s.finishQueuedMessageExecution(
-				promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
-				lifecyclePrompt, false, false, err,
-			)
-			return
-		}
-		userMessageRecorded = true
-	}
 
 	// Call promptTask with this entry's ID as a second ownership check. The
 	// worker already claimed the handoff before visible side effects; promptTask
@@ -2012,6 +2002,14 @@ func (s *Service) executeQueuedMessageWithReservation(
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		launchOriginAutomatic,
 		options)
+	var turnStartRestart *queuedTurnStartRestartError
+	if errors.As(err, &turnStartRestart) {
+		// The entry is back in a queue and nothing was recorded or prompted:
+		// release this worker's reservation, then let the owning queue drain it.
+		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+		s.finishQueuedTurnStartRestart(promptCtx, queuedMsg, turnStartRestart)
+		return
+	}
 	if err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
@@ -2078,7 +2076,18 @@ func (s *Service) queuedMessageAfterClaim(
 		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
 			return errLifecyclePromptReservationSuperseded
 		}
+		if err := s.applyQueuedTurnStartAfterClaim(ctx, identity, queuedMsg, lifecyclePrompt); err != nil {
+			return err
+		}
 		if queuedMsg.IsDurablePlanComment() {
+			// Record the transcript only after on_turn_start settled which
+			// session owns this delivery, matching the direct send path.
+			if err := s.recordQueuedUserMessage(ctx, queuedMsg, attachments); err != nil {
+				return err
+			}
+			if userMessageRecorded != nil {
+				*userMessageRecorded = true
+			}
 			return nil
 		}
 		if !alreadyRecorded {
@@ -2092,14 +2101,35 @@ func (s *Service) queuedMessageAfterClaim(
 				*userMessageRecorded = true
 			}
 		}
-		if session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID); err == nil &&
-			s.queuedSessionMatchesIdentity(session, identity) &&
-			!turnStartAlreadyProcessed(queuedMsg.Metadata) {
-			s.processOnTurnStartViaEngine(ctx, queuedMsg.TaskID, session)
-		}
 		s.armQueuedInitialCreatePromptPassthroughForLaunch(ctx, queuedMsg, identity)
 		return nil
 	}
+}
+
+// applyQueuedTurnStartAfterClaim runs on_turn_start for a claimed queued
+// entry while the synchronous after-claim callback still owns the session's
+// dispatch guard, so profile retirement must not acquire it again. When the
+// step can transition, the entry first returns to its queue and the dispatch
+// restarts from the session that owns the task afterwards.
+func (s *Service) applyQueuedTurnStartAfterClaim(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queuedMsg *messagequeue.QueuedMessage,
+	lifecyclePrompt bool,
+) error {
+	if turnStartAlreadyProcessed(queuedMsg.Metadata) {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
+	if err != nil || !s.queuedSessionMatchesIdentity(session, identity) {
+		return nil
+	}
+	if s.queuedTurnStartNeedsRequeue(ctx, queuedMsg, lifecyclePrompt) {
+		return s.requeueForQueuedTurnStart(ctx, identity, queuedMsg, session)
+	}
+	workflowCtx := withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+	s.processOnTurnStartViaEngine(workflowCtx, queuedMsg.TaskID, session)
+	return nil
 }
 
 func (s *Service) planCommentDeliveryBoundary(
@@ -2126,11 +2156,6 @@ func (s *Service) planCommentDeliveryBoundary(
 		}
 		queuedMsg.Metadata[messagequeue.MetadataDeliveryAttempted] = true
 		markQueuedUserMessageRecorded(queuedMsg)
-		if session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID); err == nil &&
-			s.queuedSessionMatchesIdentity(session, identity) &&
-			!turnStartAlreadyProcessed(queuedMsg.Metadata) {
-			s.processOnTurnStartViaEngine(ctx, queuedMsg.TaskID, session)
-		}
 		return nil
 	}
 }

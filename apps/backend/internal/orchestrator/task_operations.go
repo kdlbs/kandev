@@ -8913,7 +8913,8 @@ func (s *Service) acknowledgePromptClaim(
 	}
 	if err := afterClaim(); err != nil {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
-		if errors.Is(err, errLifecyclePromptReservationSuperseded) {
+		var turnStartRestart *queuedTurnStartRestartError
+		if errors.Is(err, errLifecyclePromptReservationSuperseded) || errors.As(err, &turnStartRestart) {
 			return err
 		}
 		return fmt.Errorf("%w: %v", errLifecyclePromptMessagePersistence, err)
