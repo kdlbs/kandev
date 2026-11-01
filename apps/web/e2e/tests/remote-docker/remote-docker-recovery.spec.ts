@@ -1,10 +1,22 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
+import { devices, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/remote-docker-test-base";
 import type { RemoteDockerSeedData } from "../../fixtures/remote-docker-test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import {
+  readRecovery,
+  seedInterruptedPrompt,
+  withDatabase,
+} from "../../helpers/interrupted-prompt-recovery";
 import { waitForAgentMessage, waitForLatestSessionDone } from "../../helpers/session";
+import { SessionPage } from "../../pages/session-page";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { watchWs } from "../../helpers/causal-waits";
+import { setupPage } from "../../fixtures/test-base";
+import type { BackendContext } from "../../fixtures/backend";
 
 /**
  * Same-session recovery on a Docker daemon reached over SSH.
@@ -43,6 +55,338 @@ function findRepositoryRoot(containerId: string): string {
 
 function journalPath(sessionId: string): string {
   return `/var/lib/kandev/agentctl-journals/${sessionId}/delivery.bbolt`;
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function seedUncertainQueueClaim(
+  tmpDir: string,
+  taskId: string,
+  sessionId: string,
+  incarnationId: string,
+) {
+  const entryId = `queue-uncertain-${randomUUID()}`;
+  const attemptId = `attempt-${randomUUID()}`;
+  const createdAt = new Date().toISOString();
+  const message = JSON.stringify({
+    id: entryId,
+    session_id: sessionId,
+    session_incarnation_id: incarnationId,
+    task_id: taskId,
+    position: 1,
+    content: "separate queued instruction",
+    model: "",
+    plan_mode: false,
+    attachments: [],
+    queued_at: createdAt,
+    queued_by: "user",
+  });
+  const claim = {
+    entry_id: entryId,
+    session_id: sessionId,
+    attempt_id: attemptId,
+    message_json: message,
+    accepted: 0,
+    protocol_mode: "legacy",
+    submission_id: "",
+    payload_hash: "",
+    created_at: createdAt,
+  };
+  withDatabase(tmpDir, (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS queue_dispatch_claims (
+        entry_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        attempt_id TEXT NOT NULL,
+        message_json TEXT NOT NULL,
+        accepted INTEGER NOT NULL DEFAULT 0,
+        protocol_mode TEXT NOT NULL DEFAULT 'legacy',
+        submission_id TEXT NOT NULL DEFAULT '',
+        payload_hash TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL
+      )
+    `);
+    db.prepare(
+      `
+      INSERT INTO queue_dispatch_claims
+        (entry_id, session_id, attempt_id, message_json, accepted, protocol_mode, submission_id, payload_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    ).run(
+      claim.entry_id,
+      claim.session_id,
+      claim.attempt_id,
+      claim.message_json,
+      claim.accepted,
+      claim.protocol_mode,
+      claim.submission_id,
+      claim.payload_hash,
+      claim.created_at,
+    );
+  });
+  return claim;
+}
+
+function readQueueClaim(tmpDir: string, entryId: string) {
+  return withDatabase(tmpDir, (db) =>
+    db
+      .prepare(
+        `SELECT entry_id, session_id, attempt_id, message_json, accepted, protocol_mode,
+                submission_id, payload_hash, created_at
+         FROM queue_dispatch_claims WHERE entry_id = ?`,
+      )
+      .get(entryId),
+  );
+}
+
+function readQueuedMessage(tmpDir: string, entryId: string) {
+  return withDatabase(tmpDir, (db) =>
+    db
+      .prepare(
+        "SELECT id, session_id, task_id, content, queued_by FROM queued_messages WHERE id = ?",
+      )
+      .get(entryId),
+  );
+}
+
+function readExecutorRunning(tmpDir: string, sessionId: string) {
+  return withDatabase(
+    tmpDir,
+    (db) =>
+      db
+        .prepare("SELECT status, agent_execution_id FROM executors_running WHERE session_id = ?")
+        .get(sessionId) as { status: string; agent_execution_id: string } | undefined,
+  );
+}
+
+function expectExplicitResumePreservedUncertainty(
+  tmpDir: string,
+  blockId: string,
+  submissionId: string,
+) {
+  const recovery = readRecovery(tmpDir, blockId, submissionId);
+  expect(recovery.submission).toEqual({ state: "interrupted_unknown" });
+  expect([
+    { state: "open", authorized_action: "" },
+    { state: "resolved", authorized_action: "resume" },
+  ]).toContainEqual(recovery.block);
+}
+
+type RecoveryWireOutcome = { type: "response" | "error"; payload: unknown };
+
+function isResumedAgentBootMessage(message: { type?: string; metadata?: Record<string, unknown> }) {
+  return (
+    message.type === "script_execution" &&
+    message.metadata?.script_type === "agent_boot" &&
+    message.metadata?.is_resuming === true
+  );
+}
+
+async function requestSessionResume(baseUrl: string, taskId: string, sessionId: string) {
+  const requestId = `e2e-resume-${randomUUID()}`;
+  const socket = new WebSocket(baseUrl.replace(/^http/, "ws") + "/ws");
+  return new Promise<RecoveryWireOutcome>((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.close();
+      reject(new Error("session.recover resume timed out"));
+    }, 90_000);
+    const finish = (outcome: RecoveryWireOutcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.close();
+      resolve(outcome);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.close();
+      reject(error);
+    };
+    socket.addEventListener("open", () => {
+      socket.send(
+        JSON.stringify({
+          id: requestId,
+          type: "request",
+          action: "session.recover",
+          payload: { task_id: taskId, session_id: sessionId, action: "resume" },
+          timestamp: new Date().toISOString(),
+        }),
+      );
+    });
+    socket.addEventListener("message", (event) => {
+      let frame: { id?: string; type?: string; payload?: unknown };
+      try {
+        frame = JSON.parse(String(event.data)) as typeof frame;
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      if (frame.id !== requestId) return;
+      if (frame.type === "response" || frame.type === "error") {
+        finish({ type: frame.type, payload: frame.payload });
+      } else {
+        fail(new Error(`unexpected session.recover response type: ${String(frame.type)}`));
+      }
+    });
+    socket.addEventListener("error", () => fail(new Error("session.recover websocket failed")));
+  });
+}
+
+async function seedRemoteLossAndRestart(
+  backend: BackendContext,
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  containerId: string,
+) {
+  const { session } = await apiClient.getTaskSession(sessionId);
+  const executionId = session.agent_execution_id;
+  expect(executionId, "the remote execution identity is missing").toBeTruthy();
+
+  const pid = backend.pid();
+  expect(pid, "the test-owned backend PID is unavailable").toBeTruthy();
+  process.kill(pid!, "SIGKILL");
+  await expect
+    .poll(() => processIsAlive(pid!), {
+      timeout: 30_000,
+      message: "Wait for the owned backend to stop",
+    })
+    .toBe(false);
+
+  execFileSync("docker", ["stop", "--time", "0", containerId]);
+  const localJournalDir = path.join(backend.tmpDir, ".kandev", "agentctl-journals", sessionId);
+  fs.mkdirSync(localJournalDir, { recursive: true });
+  const localJournal = path.join(localJournalDir, "delivery.bbolt");
+  execFileSync("docker", ["cp", `${containerId}:${journalPath(sessionId)}`, localJournal]);
+  const interrupted = seedInterruptedPrompt(backend.tmpDir, sessionId, executionId);
+  execFileSync("docker", ["cp", localJournal, `${containerId}:${journalPath(sessionId)}`]);
+  const queueClaim = seedUncertainQueueClaim(
+    backend.tmpDir,
+    taskId,
+    sessionId,
+    session.queue_incarnation_id,
+  );
+  await backend.restart();
+  return { interrupted, queueClaim, executionId };
+}
+
+async function verifyRemoteLossRecoveryUI(
+  page: Page,
+  apiClient: ApiClient,
+  backend: BackendContext,
+  seedData: RemoteDockerSeedData,
+  phone: boolean,
+) {
+  test.setTimeout(300_000);
+  const { task, sessionId, containerId } = await prepareRecoverableTask(
+    apiClient,
+    seedData,
+    phone ? "remote docker loss recovery phone" : "remote docker loss recovery desktop",
+  );
+  const beforeMessages = (await apiClient.listSessionMessages(sessionId)).messages;
+  const { interrupted, queueClaim, executionId } = await seedRemoteLossAndRestart(
+    backend,
+    apiClient,
+    task.id,
+    sessionId,
+    containerId,
+  );
+  expect(containerExists(containerId), "the test should retain the stopped task container").toBe(
+    true,
+  );
+
+  const ws = watchWs(page);
+  await page.goto(`/t/${task.id}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await expect
+    .poll(() => readExecutorRunning(backend.tmpDir, sessionId))
+    .toEqual({ status: "stopped", agent_execution_id: executionId });
+  await expect(session.recoveryRetryConnectionButton()).toBeVisible();
+  const retryResponse = ws.waitForResponse("session.recover", {
+    requestWhere: (payload) =>
+      payload.action === "retry_connection" &&
+      payload.task_id === task.id &&
+      payload.session_id === sessionId,
+  });
+  if (phone) {
+    const retryBox = await session.recoveryRetryConnectionButton().boundingBox();
+    expect(retryBox?.height).toBeGreaterThanOrEqual(44);
+    await session.recoveryRetryConnectionButton().tap();
+  } else {
+    await session.recoveryRetryConnectionButton().click();
+  }
+  await retryResponse;
+  await expect(page.getByTestId("delivery-recovery-result")).toHaveText(
+    "Recovery is blocked. Resolve the recovery issue before retrying.",
+  );
+  expect(readRecovery(backend.tmpDir, interrupted.blockId, interrupted.submissionId)).toEqual({
+    block: { state: "open", authorized_action: "" },
+    submission: { state: "interrupted_unknown" },
+  });
+  expect(readQueueClaim(backend.tmpDir, queueClaim.entry_id)).toEqual(queueClaim);
+
+  const resumeOutcome = await requestSessionResume(backend.baseUrl, task.id, sessionId);
+  expect(resumeOutcome.type).toBe("response");
+  expect(resumeOutcome.payload).toMatchObject({
+    session_id: sessionId,
+    agent_execution_id: expect.any(String),
+  });
+
+  const afterAttempt = (await apiClient.listSessionMessages(sessionId)).messages;
+  expect(afterAttempt.filter((message) => !isResumedAgentBootMessage(message))).toEqual(
+    beforeMessages,
+  );
+  expect(afterAttempt.filter(isResumedAgentBootMessage)).toHaveLength(1);
+  expect((await apiClient.getTaskSession(sessionId)).session.id).toBe(sessionId);
+  expectExplicitResumePreservedUncertainty(
+    backend.tmpDir,
+    interrupted.blockId,
+    interrupted.submissionId,
+  );
+  expect(readQueueClaim(backend.tmpDir, queueClaim.entry_id)).toBeUndefined();
+  expect(readQueuedMessage(backend.tmpDir, queueClaim.entry_id)).toMatchObject({
+    id: queueClaim.entry_id,
+    session_id: sessionId,
+    task_id: task.id,
+    content: "separate queued instruction",
+    queued_by: "user",
+  });
+
+  await page.reload();
+  await session.waitForLoad();
+  expect((await apiClient.getTaskSession(sessionId)).session.task_id).toBe(task.id);
+  const afterReloadMessages = (await apiClient.listSessionMessages(sessionId)).messages;
+  expect(afterReloadMessages.filter((message) => !isResumedAgentBootMessage(message))).toEqual(
+    beforeMessages,
+  );
+  expect(afterReloadMessages.filter(isResumedAgentBootMessage)).toHaveLength(1);
+  expectExplicitResumePreservedUncertainty(
+    backend.tmpDir,
+    interrupted.blockId,
+    interrupted.submissionId,
+  );
+  expect(readQueueClaim(backend.tmpDir, queueClaim.entry_id)).toBeUndefined();
+  expect(readQueuedMessage(backend.tmpDir, queueClaim.entry_id)).toMatchObject({
+    id: queueClaim.entry_id,
+    session_id: sessionId,
+    task_id: task.id,
+    content: "separate queued instruction",
+    queued_by: "user",
+  });
+  if (phone) await assertNoDocumentHorizontalOverflow(page, "phone remote loss recovery");
 }
 
 const journalLockReady = "/tmp/kandev-journal-lock-ready";
@@ -352,5 +696,37 @@ test.describe("remote docker executor — recoverable resume", () => {
         timeout: 90_000,
       })
       .toBe(false);
+  });
+});
+
+test.describe("remote docker confirmed absence recovery", () => {
+  test.describe.configure({ retries: 0 });
+
+  test("desktop Resume reaches recovery after the exact task container stops", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await verifyRemoteLossRecoveryUI(testPage, apiClient, backend, seedData, false);
+  });
+
+  test("phone Resume reaches recovery after the exact task container stops", async ({
+    browser,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const context = await browser.newContext({
+      ...devices["Pixel 5"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await verifyRemoteLossRecoveryUI(page, apiClient, backend, seedData, true);
+    } finally {
+      await context.close();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,6 +15,7 @@ import { ApiClient } from "../helpers/api-client";
 import { makeGitEnv } from "../helpers/git-helper";
 import { startHTTPGitFixture } from "../helpers/http-git-server";
 import { startRemoteDockerHost } from "../helpers/remote-docker";
+import { setupPage } from "./test-base";
 import { stopSSHServer, type SSHServerHandle } from "../helpers/ssh";
 import type { WorkflowStep } from "../../lib/types/http";
 
@@ -44,6 +45,20 @@ export const remoteDockerTest = backendFixture.extend<
   { testPage: Page; remoteDockerCleanup: void },
   { apiClient: ApiClient; seedData: RemoteDockerSeedData }
 >({
+  testPage: async ({ browser, backend }, use) => {
+    const context = await browser.newContext({
+      ...devices["Desktop Chrome"],
+      baseURL: backend.frontendUrl,
+    });
+    try {
+      const page = await context.newPage();
+      await setupPage(page, backend);
+      await use(page);
+    } finally {
+      await context.close();
+    }
+  },
+
   apiClient: [
     async ({ backend }, use) => {
       await use(new ApiClient(backend.baseUrl));
