@@ -631,6 +631,9 @@ If a settled session’s remote controller dies while its SSH connection still a
 
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
 Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
+
+For an interrupted ACP prompt, **Retry connection** restores SSH forwarding to the same verified remote controller before checking its saved output. It preserves the conversation and does not resend the interrupted instruction. Missing authentication, conflicting ownership, or unavailable saved evidence keeps recovery blocked. A local Stop after transport loss may leave the remote controller running; verify remote processes before cleanup.
+
 An unavailable connection stays pending for retry; recovery does not start a replacement controller.
 
 </details>

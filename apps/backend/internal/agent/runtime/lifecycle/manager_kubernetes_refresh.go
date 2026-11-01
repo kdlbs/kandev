@@ -161,15 +161,23 @@ func (m *Manager) commitTrackedRemoteRefresh(
 	}
 	published := false
 	execution.agentctlLifecycleMu.Lock()
+	previousURL := execution.AgentctlURL()
+	refresh.Instance.Client.SetTraceContext(execution.SessionTraceContext())
+	execution.publishAgentctlURL(refresh.Instance.Client.BaseURL())
+	// Drain workspace callbacks before Commit takes an executor-wide lock.
+	execution.agentctlSourceMu.Lock()
 	commitErr := refresh.Commit(func() {
-		refresh.Instance.Client.SetTraceContext(execution.SessionTraceContext())
-		execution.replaceAgentctlClient(refresh.Instance.Client)
+		execution.replaceAgentctlClientLocked(refresh.Instance.Client)
 		if newACPSessionID != "" {
 			execution.ACPSessionID = newACPSessionID
 			execution.setSessionInitialized(true)
 		}
 		published = true
 	})
+	if !published {
+		execution.publishAgentctlURL(previousURL)
+	}
+	execution.agentctlSourceMu.Unlock()
 	execution.agentctlLifecycleMu.Unlock()
 	if commitErr != nil && published {
 		return true, fmt.Errorf("remote refresh commit failed after publishing replacement: %w", commitErr)
