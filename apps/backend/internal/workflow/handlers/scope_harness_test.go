@@ -262,7 +262,7 @@ func setupScopedRouter(t *testing.T, logOverride ...*logger.Logger) *scopedHarne
 		{ID: "wf-a", WorkspaceID: "ws-a", Name: "A Flow"},
 		{ID: "wf-b", WorkspaceID: "ws-b", Name: "B Flow"},
 	}}
-	h.service.SetWorkflowProvider(provider)
+	h.setWorkflowProvider(provider)
 
 	owner := &scopedOwnership{
 		workflowWorkspace: map[string]string{"wf-a": "ws-a", "wf-b": "ws-b", "wf-b2": "ws-b"},

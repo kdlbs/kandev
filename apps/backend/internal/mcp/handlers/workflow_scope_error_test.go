@@ -31,10 +31,11 @@ func scopedMCPCtx() context.Context {
 // service whose task-domain checker answers with the supplied error.
 func setupScopedWorkflowHandlers(t *testing.T, checkerErr error) (*Handlers, string) {
 	t.Helper()
-	h, _, repo := setupImportHandlers(t)
+	h, provider, repo := setupImportHandlers(t)
 	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
 	h.workflowSvc.SetWorkflowAccessChecker(func(context.Context, string) error { return checkerErr })
 	h.workflowSvc.SetWorkspaceAccessChecker(func(context.Context, string) error { return checkerErr })
+	provider.ensureWorkflowRow("wf-other", "ws-1", "Other")
 
 	step := &wfmodels.WorkflowStep{WorkflowID: "wf-other", Name: "Backlog", Color: "#111111"}
 	require.NoError(t, h.workflowSvc.CreateStep(context.Background(), step))

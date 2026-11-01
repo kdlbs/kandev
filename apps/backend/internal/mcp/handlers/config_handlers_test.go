@@ -1129,6 +1129,9 @@ func TestDeferMoveTask_RejectsStepFromDifferentWorkflow(t *testing.T) {
 	seedRunningTask(t, repo, "ws-defer2", "wf-defer2", "task-defer2", "sess-defer2", "src-step2")
 
 	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-other", WorkspaceID: "ws-defer2", Name: "Other", CreatedAt: now, UpdatedAt: now,
+	}))
 	// source step (belongs to the task's workflow)
 	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
 		ID: "src-step2", WorkflowID: "wf-defer2", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now,

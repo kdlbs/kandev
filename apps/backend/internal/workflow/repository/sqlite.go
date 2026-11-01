@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -652,6 +653,35 @@ func (r *Repository) CreateStepWithDemotedStartStepsIfWorkflowUnchanged(
 	return r.createStepWithDemotedStartSteps(ctx, step, &expectedWorkflow)
 }
 
+// lockWorkflowRowForStepWrite serializes step creation with workflow deletion
+// on PostgreSQL. The task repository's delete paths take the same row lock
+// before deleting steps, so a step cannot be inserted between the step delete
+// and the workflow delete. SQLite serializes writers at transaction start, so
+// the plain read is enough there.
+func (r *Repository) lockWorkflowRowForStepWrite(
+	ctx context.Context, tx *sqlx.Tx, workflowID string, expectedWorkflow *time.Time,
+) error {
+	query := `SELECT updated_at FROM workflows WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var updatedAt time.Time
+	err := tx.QueryRowxContext(ctx, tx.Rebind(query), workflowID).Scan(&updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		if expectedWorkflow != nil {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		return fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, workflowID)
+	}
+	if err != nil {
+		return err
+	}
+	if expectedWorkflow != nil && !updatedAt.Equal(*expectedWorkflow) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	return nil
+}
+
 func (r *Repository) createStepWithDemotedStartSteps(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow *time.Time,
 ) ([]*models.WorkflowStep, error) {
@@ -678,6 +708,10 @@ func (r *Repository) createStepWithDemotedStartSteps(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if err := r.lockWorkflowRowForStepWrite(ctx, tx, step.WorkflowID, expectedWorkflow); err != nil {
+		return nil, err
+	}
 
 	var demoted []*models.WorkflowStep
 	if step.IsStartStep {
