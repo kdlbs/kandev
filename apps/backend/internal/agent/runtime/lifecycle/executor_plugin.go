@@ -1010,7 +1010,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		if err := checkpointPluginExecutor(cleanupCtx, req, inventory); err != nil {
 			r.logger.Warn("plugin executor launch cleanup is fenced and its retry information was not retained",
 				zap.String("execution_id", req.InstanceID), zap.Error(err))
-			return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
+			return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, retained, stage, cause)
 		}
 		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
 	}
@@ -1041,7 +1041,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 		inventory.Phase = pluginExecutorPhaseCleanupPending
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			if retainErr := checkpointPluginExecutor(cleanupCtx, req, inventory); retainErr != nil {
-				return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
+				return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, retained, stage, cause)
 			}
 			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
 		}

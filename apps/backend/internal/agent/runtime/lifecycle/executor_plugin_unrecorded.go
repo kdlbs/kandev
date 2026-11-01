@@ -26,6 +26,11 @@ func (r *PluginRemoteExecutor) handOffUnrecordedPluginExecutorResource(
 	stage string,
 	cause error,
 ) error {
+	// The table is the last writer of the resource, so a state that carries a
+	// revealed secret is cut down to what cleanup needs whatever the caller held.
+	if req.PluginExecutor != nil && rejectSecretInProviderState(req.PluginExecutor.Profile.SecretValues, resource) != nil {
+		resource = fixedSizePluginExecutorResource(resource)
+	}
 	inventory.Resource = resource
 	inventory.Phase = pluginExecutorPhaseCleanupPending
 	var recordErr error
@@ -79,11 +84,30 @@ func (r *PluginRemoteExecutor) adoptUnrecordedPluginExecutor(ctx context.Context
 		return err
 	}
 	inventory.Phase, inventory.Revision = pluginExecutorPhaseAllocating, 0
+	inventory.Resource = r.withoutRevealedSecret(ctx, item, inventory)
 	inventory.EnvironmentGeneration = environment.OwnershipGeneration
 	running := *item.Running
 	running.Metadata = map[string]interface{}{MetadataKeyPluginExecutor: inventory}
 	running.ExpectedPluginExecutorRevision = 0
 	return r.inventoryStore.CheckpointPluginExecutorInventory(ctx, &running)
+}
+
+// withoutRevealedSecret returns the handoff's resource, cut down to what cleanup
+// needs when its state holds a secret of the recorded profile. A handoff written
+// by this build never does; the check keeps an older row from being copied into
+// the inventory. An unavailable profile leaves the resource as recorded.
+func (r *PluginRemoteExecutor) withoutRevealedSecret(ctx context.Context, item *models.UnrecordedPluginExecutor, inventory pluginExecutorInventory) *pluginsdk.ExecutorResourceDescriptor {
+	if inventory.Resource == nil || r.profileLoader == nil {
+		return inventory.Resource
+	}
+	profile, err := r.profileLoader.ExecutorProviderProfileForRecovery(
+		ctx, inventory.ProfileID, item.TaskID, inventory.EnvironmentID, inventory.ProviderIdentity,
+		inventory.EnvironmentGeneration, inventory.ProfileConfig, inventory.SecretReferences,
+	)
+	if err != nil || profile == nil || rejectSecretInProviderState(profile.SecretValues, inventory.Resource) == nil {
+		return inventory.Resource
+	}
+	return fixedSizePluginExecutorResource(inventory.Resource)
 }
 
 // settleUnrecordedPluginExecutor forgets a handoff after its resource's destroy
