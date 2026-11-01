@@ -3,6 +3,7 @@ status: draft
 system: tasks
 requirements:
   - REQ-TASKS-SESSION-TURN-SETTLEMENT-001
+  - REQ-TASKS-SESSION-TURN-SETTLEMENT-002
 ---
 
 # Session turn settlement design
@@ -15,6 +16,7 @@ contract under `apps/backend/internal/agent/runtime/lifecycle/`.
 | Requirement | Design boundary |
 | --- | --- |
 | REQ-TASKS-SESSION-TURN-SETTLEMENT-001 | Callback lease, completion flow, and regression coverage below |
+| REQ-TASKS-SESSION-TURN-SETTLEMENT-002 | [Agent-started turn finalization](#agent-started-turn-finalization) |
 
 ## Callback lease
 
@@ -86,6 +88,28 @@ and subsequent prompt admission.
 Cover both Running and already-Ready synthetic completions. Retain stale
 startup, stale prompt, pending-dispatch, error, and foreground-idle cases.
 
+## Agent-started turn finalization
+
+`acp/adapter_async_complete.go` owns the idle finalizer for ACP updates that
+arrive with no prompt turn. It synthesizes the completion that
+`REQ-TASKS-SESSION-TURN-SETTLEMENT-001` then settles.
+
+`asyncTurnFinalizer.activeTools` holds only tools with evidence of foreground
+activity. A tool enters it only from an update with a non-empty status. A
+status-less update can reach the finalizer for a tool the adapter has already
+retired, because Claude's PostToolUse hook publishes a metadata-only
+`tool_call_update`. That update has no later terminal frame, so tracking it
+would suspend the idle timer permanently. It neither enters `activeTools` nor
+creates a finalizer. It also does not count as turn content, so it cannot
+synthesize a completion for a turn that never started.
+
+A `usage_update` whose `_claude/origin` identifies a human or task-notification
+turn is the provider's end-of-turn boundary. When no prompt turn owns the
+session, that boundary clears `activeTools` and arms the normal idle timer. The
+timer stays because trailing frames can follow the boundary. Silence alone still
+does not end a turn with an active foreground tool.
+
 ## Implementation plans
 
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).

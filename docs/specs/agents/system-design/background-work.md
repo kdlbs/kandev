@@ -8,6 +8,7 @@ requirements:
   - REQ-AGENTS-BACKGROUND-WORK-004
   - REQ-AGENTS-BACKGROUND-WORK-005
   - REQ-AGENTS-BACKGROUND-WORK-006
+  - REQ-AGENTS-BACKGROUND-WORK-010
 ---
 
 # Agent Background Work System Design
@@ -183,10 +184,31 @@ also includes open runs under terminal parents, so older partial settlements
 remain repairable. Delayed non-terminal observations cannot reopen terminal
 parents or runs, including runs first observed after their parent ended. Late
 terminal provider observations may still supply the actual outcome and exit code.
-A provider that never reports completion, such as Claude's detached shells today,
-therefore cannot leave rows running past verified process termination. Browser
+A provider that does not report completion, such as Claude's detached shells
+without lifecycle support, therefore cannot leave rows running past verified
+process termination. Browser
 disconnection alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
+
+Every path that ends the owning agent process attempts this settlement. That
+includes an owned teardown that replaces an execution, which passes the stopped
+execution ID before the successor launches, and `reclaimIdleSession`, which
+settles after its cleanup succeeds.
+
+Startup settlement follows lifecycle recovery and session reconciliation.
+Reconciliation may clear a recovered row's PID, making `RowProcessLiveness`
+unknown. Terminal row status alone does not prove process exit; after a verified
+no-process probe, it preserves stop evidence. Live or failed probes keep work
+open. Idle reclaim handles released runtimes without restart.
+
+An event handler never waits on the lifecycle lock because `agent.stopped` may
+be published by its owner. That owner settles before relaunch; otherwise a
+service-owned bounded worker waits with a cancellable context, and `Service.Stop`
+drains it. Before settlement, the worker rechecks process liveness and execution
+identity. A live successor remains open until verified process end.
+
+`background_complete` carries no tool identity and also follows Monitor-driven
+turns, so it updates only in-memory activity and never settles a durable row.
 
 Persist row updates before emitting `task_session.background_work.updated` through
 the existing authenticated session websocket delivery. Events carry full normalized
@@ -332,6 +354,7 @@ are the implementation authority. `analysis.md` is research context, not evidenc
 | Codex app-server | Typed paginated background list; native targeted terminate; child run events/interrupt; normalized existing child content | Schema and fake RPC round trips required; separately record live observations. Experimental RPCs require initialize experimentalApi. Unknown/unsupported methods disable only their capability. |
 | Codex command output | Handle owned `item/commandExecution/outputDelta` where available; reconcile final `aggregatedOutput` | Test stream/final overlap. Missing stream falls back to labelled snapshot output. Discovery alone cannot provide history. |
 | Codex background stdin | Not advertised initially | `command/exec/write` targets standalone client-created commands, not proven thread-owned background commands. No SIGINT/SIGTERM/SIGKILL selection or restart fallback. |
+| Claude bridge async tasks | Rejected; `010.2` remains undelivered | The capture carries terminal state and launch `toolCallId`, but the pinned SDK decodes `async_task_state_update` as an empty user message. Advertising adds a task-notification follow-up turn without a product decision. Reopen with SDK or safe raw-frame support and approved turn semantics. See [Decision](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md). |
 | ACP | Existing normalized subagent and detached-shell observations feed shared inspection | Existing adapter-specific recognizers retain authority. No standard ACP list/stop/write assumption; default actions unsupported. Test observation-only and unavailable data. |
 | Future Claude native | Same normalized contract required | Adapter implementation deferred. No fabricated capability or protocol-name switch now. |
 | Conformance fixture | All normalized capabilities, selective absence, unknown/reordered events | Proves shared routes/UI without claiming real-provider support. |

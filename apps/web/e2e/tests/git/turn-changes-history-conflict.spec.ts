@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { waitForAgentMessage } from "../../helpers/session";
 import {
   enableTurnChangedFiles,
   readTurnChangeHistory,
@@ -25,6 +26,7 @@ test.describe("turn change history conflict", () => {
       );
       await waitForTurnChangeCount(apiClient, sessionId, 1);
       await session.sendMessage("/e2e:turn-history-conflict");
+      await waitForAgentMessage(apiClient, sessionId, "turn-history-conflict complete");
       await expect(
         session.chat.getByText("turn-history-conflict complete", { exact: false }),
       ).toBeVisible();

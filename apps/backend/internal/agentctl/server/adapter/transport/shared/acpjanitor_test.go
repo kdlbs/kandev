@@ -162,3 +162,77 @@ func TestJanitor_StartStopIdempotent(t *testing.T) {
 	j.Start(context.Background())
 	j.Stop()
 }
+
+// TestACPPrune_CountCapRetainsOpenWriterFile pins that a live session's log is
+// never a deletion candidate, even when it is the oldest file in the directory.
+func TestACPPrune_CountCapRetainsOpenWriterFile(t *testing.T) {
+	dir := t.TempDir()
+	m := newACPLogManager(acpLogConfig{dir: dir, maxFiles: 2, maxFileBytes: 1 << 20, ringSize: 4})
+	defer m.closeAll()
+
+	m.writeNormalized(ProtocolACP, "acp", "open-session", testEvent("open-session"))
+	openPath := filepath.Join(dir, "normalized-acp-acp-open-session.jsonl")
+	old := time.Now().Add(-4 * time.Hour)
+	if err := os.Chtimes(openPath, old, old); err != nil {
+		t.Fatalf("chtimes open file: %v", err)
+	}
+	seed := []string{
+		"normalized-acp-x-old.jsonl",
+		"raw-acp-x-newer.jsonl",
+		"normalized-acp-x-newest.jsonl",
+	}
+	seedLogFiles(t, dir, seed)
+
+	m.prune(time.Now().Add(10 * time.Second))
+
+	if _, err := os.Stat(openPath); err != nil {
+		t.Fatalf("open writer's file was removed by the count cap: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, seed[0])); !os.IsNotExist(err) {
+		t.Errorf("oldest file without a writer should have been pruned")
+	}
+	if _, err := os.Stat(filepath.Join(dir, seed[2])); err != nil {
+		t.Errorf("newest file should survive: %v", err)
+	}
+	if got := countFiles(t, dir); got != 2 {
+		t.Errorf("files after prune = %d, want maxFiles (2)", got)
+	}
+}
+
+// TestACPPrune_CountCapOpenWritersAloneExceedLimit pins that open writers always
+// survive the count cap; every other file beyond the limit is still deleted.
+func TestACPPrune_CountCapOpenWritersAloneExceedLimit(t *testing.T) {
+	dir := t.TempDir()
+	m := newACPLogManager(acpLogConfig{dir: dir, maxFiles: 1, maxFileBytes: 1 << 20, ringSize: 4})
+	defer m.closeAll()
+
+	for _, session := range []string{"open-a", "open-b"} {
+		m.writeNormalized(ProtocolACP, "acp", session, testEvent(session))
+	}
+	closed := []string{"normalized-acp-x-closed-1.jsonl", "raw-acp-x-closed-2.jsonl"}
+	oldest := time.Now().Add(-3 * time.Hour)
+	for i, name := range closed {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		stamp := oldest.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatalf("chtimes %s: %v", name, err)
+		}
+	}
+
+	m.prune(time.Now())
+
+	for _, session := range []string{"open-a", "open-b"} {
+		path := filepath.Join(dir, "normalized-acp-acp-"+session+".jsonl")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("open writer's file %s was removed: %v", session, err)
+		}
+	}
+	for _, name := range closed {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("closed file %s should have been pruned", name)
+		}
+	}
+}

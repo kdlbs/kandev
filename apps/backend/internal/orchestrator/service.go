@@ -838,9 +838,15 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents             TaskEventPublisher
-	feederPulls            FeederPullReconciler
-	backgroundWorkObserver BackgroundWorkObserver
+	taskEvents                  TaskEventPublisher
+	feederPulls                 FeederPullReconciler
+	backgroundWorkObserver      BackgroundWorkObserver
+	backgroundWorkSettleMu      sync.Mutex
+	backgroundWorkSettleCtx     context.Context
+	backgroundWorkSettleCancel  context.CancelFunc
+	backgroundWorkSettleStopped bool
+	backgroundWorkSettleWorkers *sync.WaitGroup
+	backgroundWorkSettleDrain   chan struct{}
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -1859,6 +1865,7 @@ func NewService(
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	parkedLoopCtx, parkedLoopCancel := context.WithCancel(context.Background())
+	backgroundWorkSettleCtx, backgroundWorkSettleCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1893,6 +1900,9 @@ func NewService(
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
+		backgroundWorkSettleCtx:      backgroundWorkSettleCtx,
+		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
+		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
@@ -3417,6 +3427,9 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 
 func (s *Service) reconcileStartupState(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
+	if err := s.resetBackgroundWorkSettleWorkers(); err != nil {
+		return err
+	}
 	if err := s.resetSendNowWorkers(); err != nil {
 		return err
 	}
@@ -3631,6 +3644,7 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
+	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
 	s.stopOrphanReentryWorkers()
@@ -4339,7 +4353,7 @@ func (s *Service) withSessionPromptAdmission(
 	if s.messageQueue == nil {
 		return fn(ctx)
 	}
-	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+	return s.messageQueue.WithPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
 	})
 }

@@ -931,6 +931,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		ParentToolCallID:  parentToolCallID,
 		ToolTitle:         title,
 		ToolStatus:        status,
+		ToolStatusMissing: tcu.Status == nil,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 	}

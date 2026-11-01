@@ -294,6 +294,11 @@ func (s *Service) stopParkedWorkflowProfileSession(ctx context.Context, sessionI
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	// Liveness still gates settlement when StopAgent reports an error. Keep the
+	// bounded cleanup independent of the profile-switch request context.
+	settleCtx, cancel := backgroundWorkCleanupContext(ctx)
+	s.settleBackgroundWorkWithoutWaiting(settleCtx, sessionID, executionID)
+	cancel()
 }
 
 // clearWorkflowParkingMarker removes only the current parking projection. The

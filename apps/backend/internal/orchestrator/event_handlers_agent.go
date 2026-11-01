@@ -4621,6 +4621,7 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		s.settleBackgroundWorkWithoutWaiting(ctx, data.SessionID, data.AgentExecutionID)
 		return
 	}
 
@@ -4640,6 +4641,10 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
+		// This is the end of the process that owned the session's workloads.
+		// Settlement must never wait for the session lifecycle lock here: the
+		// stop publisher can be the goroutine that already holds it.
+		s.settleBackgroundWorkWithoutWaiting(context.WithoutCancel(ctx), data.SessionID, data.AgentExecutionID)
 		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 		return
 	}

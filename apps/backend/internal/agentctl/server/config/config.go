@@ -951,7 +951,8 @@ func CollectAgentEnvWithoutAdditional() []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, value := range os.Environ() {
 		if idx := strings.Index(value, "="); idx > 0 &&
-			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) {
+			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) &&
+			!launchwrapper.IsAgentDebugSetting(value[:idx]) {
 			env = append(env, value)
 		}
 	}
@@ -973,7 +974,8 @@ func collectAgentEnvWithError(additional map[string]string, instance bool) ([]st
 	for _, e := range os.Environ() {
 		if idx := strings.Index(e, "="); idx > 0 {
 			key := e[:idx]
-			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
+			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) &&
+				!launchwrapper.IsAgentDebugSetting(key) {
 				envMap[key] = e[idx+1:]
 			}
 		}
@@ -1000,6 +1002,15 @@ func collectAgentEnvWithError(additional map[string]string, instance bool) ([]st
 			envMap[githubauth.CredentialCLIShimDirEnv],
 			envMap[githubauth.CredentialCLIBashEnvEnv],
 		)
+	}
+
+	// Agent processes must never receive agentctl's ACP debug-log settings, not
+	// even through an explicit per-instance override: a nested tool would write
+	// its frames into the developer's real log directory.
+	for key := range envMap {
+		if launchwrapper.IsAgentDebugSetting(key) {
+			delete(envMap, key)
+		}
 	}
 
 	// Convert back to slice
