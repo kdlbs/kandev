@@ -129,6 +129,7 @@ func TestDurableResumeLeavesAProviderModePublishRefusalRetryable(t *testing.T) {
 var (
 	_ PluginExecutorMaterializationFailer = (*tasksqlite.Repository)(nil)
 	_ pluginExecutorTaskRepositoryReader  = (*tasksqlite.Repository)(nil)
+	_ pluginExecutorEnvironmentReader     = (*tasksqlite.Repository)(nil)
 )
 
 // recoverOne recovers the stored record and returns the error RecoverInstances
@@ -275,6 +276,7 @@ func TestLegacyPublishPendingRecordsThatCannotPublishAreAbandonedNotAttached(t *
 	for name, setup := range map[string]func(*durableRecoveryFixture){
 		"task has repositories": func(f *durableRecoveryFixture) {
 			f.store.taskRepositories = []*models.TaskRepository{{ID: "tr-1", TaskID: "task-plugin-recovery", RepositoryID: "repo-1"}}
+			f.store.environment = &models.TaskEnvironment{ID: "environment-plugin-recovery", Status: models.TaskEnvironmentStatusCreating}
 		},
 		"environment already failed": func(f *durableRecoveryFixture) {
 			f.store.environment = &models.TaskEnvironment{ID: "environment-plugin-recovery", Status: models.TaskEnvironmentStatusFailed}
@@ -297,6 +299,7 @@ func TestLegacyPublishPendingRecordsThatCannotPublishAreAbandonedNotAttached(t *
 // ever.
 func TestAttachWithPendingPublicationAbandonsACoreLaunchRefusedForGood(t *testing.T) {
 	fixture, destroys := legacyPublishPendingFixture(t)
+	fixture.store.environment = &models.TaskEnvironment{ID: "environment-plugin-recovery", Status: models.TaskEnvironmentStatusCreating}
 	fixture.store.publishErr = &models.PluginPublishMismatchError{Reason: models.PluginPublishReasonWorkspace}
 
 	instances, err := fixture.recover()
@@ -305,4 +308,53 @@ func TestAttachWithPendingPublicationAbandonsACoreLaunchRefusedForGood(t *testin
 	require.Equal(t, 1, *destroys)
 	require.Equal(t, "publish_refused", fixture.operations.destroyRequest.GetCleanupReason())
 	require.Equal(t, []string{"session-plugin-recovery"}, fixture.store.failedMaterializations)
+}
+
+// clearPublishPending only logs a failed write, so a published record can stay
+// ready and publish-pending. Its environment is ready: a live session's
+// resource must be neither failed nor destroyed.
+func TestPublishPendingRecordOfAReadyEnvironmentIsNeverAbandoned(t *testing.T) {
+	fixture, destroys := legacyPublishPendingFixture(t)
+	fixture.store.taskRepositories = []*models.TaskRepository{{ID: "tr-1", TaskID: "task-plugin-recovery", RepositoryID: "repo-1"}}
+	fixture.store.environment = &models.TaskEnvironment{ID: "environment-plugin-recovery", Status: models.TaskEnvironmentStatusReady}
+
+	instances, err := fixture.recoverOne()
+	require.NoError(t, err)
+	if instances != nil {
+		defer instances.Client.Close()
+	}
+	require.Zero(t, *destroys, "a live environment's resource was destroyed")
+	require.Empty(t, fixture.store.failedMaterializations)
+}
+
+// Without a readable environment status the legacy rule defers instead of
+// guessing.
+func TestPublishPendingRecordWithAnUnreadableEnvironmentDefers(t *testing.T) {
+	fixture, destroys := legacyPublishPendingFixture(t)
+	fixture.store.taskRepositories = []*models.TaskRepository{{ID: "tr-1", TaskID: "task-plugin-recovery", RepositoryID: "repo-1"}}
+
+	_, err := fixture.recoverOne()
+	require.ErrorContains(t, err, "deferred")
+	require.Zero(t, *destroys)
+	require.Empty(t, fixture.store.failedMaterializations)
+}
+
+// The marker alone drives the next tick: once the task no longer has
+// repositories the up-front rule would resume and publish, so only the stored
+// marker keeps the launch from becoming ready.
+func TestAbandonMarkerAloneEndsTheLaunchOnTheNextTick(t *testing.T) {
+	fixture, _ := repoBackedCoreFixture(t)
+	destroys := trackDestroys(fixture)
+	fixture.store.claimErr = errors.New("database is locked")
+	_, err := fixture.recoverOne()
+	require.Error(t, err)
+	require.Equal(t, "core_workspace_not_materialized", storedInventory(t, fixture).AbandonReason)
+
+	fixture.store.claimErr = nil
+	fixture.store.taskRepositories = nil
+	_, err = fixture.recoverOne()
+	require.NoError(t, err)
+	require.Equal(t, 1, *destroys)
+	require.Equal(t, "core_workspace_not_materialized", fixture.operations.destroyRequest.GetCleanupReason())
+	requireNeverAttached(t, fixture)
 }

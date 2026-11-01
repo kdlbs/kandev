@@ -299,9 +299,10 @@ func (r *PluginRemoteExecutor) coreLaunchNeedsMaterialization(ctx context.Contex
 
 // launchToAbandon reports whether recovery must end this launch rather than
 // attach it, and why. A record carrying the abandon marker is always ended. A
-// record written before the marker existed, still publish-pending, is ended
-// when it is core-prepared and either the task has repositories or its
-// environment was already failed: its publication can then never succeed.
+// record written before the marker existed, still publish-pending and
+// core-prepared, is ended when its environment is failed, or creating for a task
+// with repositories: its publication can then never succeed. A ready
+// environment is never abandoned.
 func (r *PluginRemoteExecutor) launchToAbandon(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) (bool, string, error) {
 	if state.inventory.Phase == pluginExecutorPhaseAbsent {
 		return false, "", nil
@@ -312,17 +313,27 @@ func (r *PluginRemoteExecutor) launchToAbandon(ctx context.Context, record *mode
 	if !state.inventory.PublishPending || pluginProviderPreparesWorkspace(state.inventory) {
 		return false, "", nil
 	}
-	unmaterialized, err := r.coreLaunchNeedsMaterialization(ctx, record)
-	if err != nil {
-		return false, "", err
+	// A published record can stay publish-pending when clearing the marker
+	// failed, so the environment decides: only a creating or failed environment
+	// can be abandoned, never a ready one. An unreadable status defers.
+	reader, ok := r.inventoryStore.(pluginExecutorEnvironmentReader)
+	if !ok {
+		return false, "", errors.New("plugin executor environment status is unavailable; recovery is deferred")
 	}
-	if unmaterialized {
-		return true, pluginExecutorCleanupReasonCoreUnmaterialized, nil
+	env, err := reader.GetTaskEnvironment(ctx, state.inventory.EnvironmentID)
+	if err != nil || env == nil {
+		return false, "", errors.New("plugin executor environment status could not be read; recovery is deferred")
 	}
-	if reader, ok := r.inventoryStore.(pluginExecutorEnvironmentReader); ok {
-		env, err := reader.GetTaskEnvironment(ctx, state.inventory.EnvironmentID)
-		if err == nil && env != nil && env.Status == models.TaskEnvironmentStatusFailed {
-			return true, pluginExecutorCleanupReasonPublishRefused, nil
+	switch env.Status {
+	case models.TaskEnvironmentStatusFailed:
+		return true, pluginExecutorCleanupReasonPublishRefused, nil
+	case models.TaskEnvironmentStatusCreating:
+		unmaterialized, err := r.coreLaunchNeedsMaterialization(ctx, record)
+		if err != nil {
+			return false, "", err
+		}
+		if unmaterialized {
+			return true, pluginExecutorCleanupReasonCoreUnmaterialized, nil
 		}
 	}
 	return false, "", nil

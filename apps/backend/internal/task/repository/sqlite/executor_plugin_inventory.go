@@ -374,14 +374,21 @@ func mergePluginExecutorInventoryMetadata(current, incoming map[string]interface
 	return merged, nil
 }
 
-// keepPluginCleanupRequested carries a recorded cleanup request across a
-// checkpoint that did not observe it; nothing clears the marker but deleting
-// the record.
+// keepPluginCleanupRequested carries a recorded cleanup request and abandon
+// marker across a checkpoint that did not observe them; nothing clears them but
+// deleting the record.
 func keepPluginCleanupRequested(current map[string]interface{}, incoming interface{}) interface{} {
 	stored, _ := current["plugin_executor"].(map[string]interface{})
 	next, ok := incoming.(map[string]interface{})
 	if requested, _ := stored["cleanup_requested"].(bool); requested && ok {
 		next["cleanup_requested"] = true
+	}
+	// The abandon marker is sticky for the same reason: a writer holding an
+	// older envelope must not clear the decision to end the launch.
+	if reason, _ := stored["abandon_reason"].(string); reason != "" && ok {
+		if existing, _ := next["abandon_reason"].(string); existing == "" {
+			next["abandon_reason"] = reason
+		}
 	}
 	return incoming
 }
