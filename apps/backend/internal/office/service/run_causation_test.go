@@ -14,6 +14,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -61,7 +63,7 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 
 	// Root cause: no causingRunID, so this roots a new causation chain.
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
-		models.ActorKindAgent, agent.ID, ""); err != nil {
+		runsmodels.ActorKindAgent, agent.ID, ""); err != nil {
 		t.Fatalf("queue root run: %v", err)
 	}
 	roots, err := repo.ListRuns(ctx, "ws-1")
@@ -82,7 +84,7 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 	// Caused run: names the root as its causing run, exactly what
 	// SpawnAgentRun does with runCtx.RunID.
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "spawn_agent_run", `{}`, "",
-		models.ActorKindAgent, agent.ID, rootRun.ID); err != nil {
+		runsmodels.ActorKindAgent, agent.ID, rootRun.ID); err != nil {
 		t.Fatalf("queue caused run: %v", err)
 	}
 
@@ -93,7 +95,7 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("want 2 runs, got %d", len(all))
 	}
-	var causedRun *models.Run
+	var causedRun *runsmodels.Run
 	for _, r := range all {
 		if r.ID != rootRun.ID {
 			causedRun = r

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-27
-updated: 2026-08-12
+updated: 2026-10-25
 owners:
   - kandev
 ---
@@ -42,3 +42,8 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   capacity in tasks and global session capacity in sessions. If WIP promotion
   exposes a global session limit, the displayed reason shall follow the current
   authoritative queue state. Changing one limit shall not bypass the other.
+
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10:** Pull-from guidance shall remain
+  readable after a tap on phone and coarse-pointer devices, with a dismissible
+  drawer and a touch target of at least 44 pixels. Desktop focus and hover shall
+  expose the same guidance without changing the selected feeder or draft.

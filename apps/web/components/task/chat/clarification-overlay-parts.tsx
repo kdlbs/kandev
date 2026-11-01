@@ -1,7 +1,7 @@
 "use client";
 
 import { IconCheck, IconCornerDownLeft, IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
-import { useLayoutEffect, useRef, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
@@ -103,6 +103,7 @@ export function ClarificationStepper({
 }
 
 type OptionListProps = {
+  renderOptionPreview?: (option: ClarificationOption) => ReactNode;
   options: ClarificationOption[];
   selectedOption: string | null;
   isSubmitting: boolean;
@@ -114,6 +115,7 @@ type OptionListProps = {
 };
 
 export function ClarificationOptions({
+  renderOptionPreview,
   options,
   selectedOption,
   isSubmitting,
@@ -124,7 +126,7 @@ export function ClarificationOptions({
     <div className="space-y-1.5">
       {options.map((option, idx) => {
         const isSelected = !customActive && selectedOption === option.option_id;
-        return (
+        const selection = (
           <button
             key={option.option_id}
             type="button"
@@ -168,6 +170,14 @@ export function ClarificationOptions({
             </span>
             {isSelected && <IconCheck className="h-3.5 w-3.5 text-blue-500 mt-1 flex-shrink-0" />}
           </button>
+        );
+        const preview = renderOptionPreview?.(option);
+        if (!preview) return selection;
+        return (
+          <div key={option.option_id} role="group" aria-label={option.label} className="space-y-2">
+            {selection}
+            <div className="ml-3 border-l-2 border-border pl-3">{preview}</div>
+          </div>
         );
       })}
     </div>

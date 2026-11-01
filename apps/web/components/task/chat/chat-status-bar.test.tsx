@@ -153,12 +153,11 @@ describe("chat status bar goal visibility", () => {
   it("places the goal after review status and before the queue chip", () => {
     renderStatus({ queueChip: <span data-testid="queue-chip" /> });
 
-    const row = screen.getByTestId("chat-status-bar");
-    const order = Array.from(row.children).map((child) => child.getAttribute("data-testid"));
-    expect(order.indexOf("registered-review-status")).toBeLessThan(
-      order.indexOf("agent-goal-chip"),
-    );
-    expect(order.indexOf("agent-goal-chip")).toBeLessThan(order.indexOf("queue-chip"));
+    const review = screen.getByTestId("registered-review-status");
+    const goal = screen.getByTestId("agent-goal-chip");
+    const queue = screen.getByTestId("queue-chip");
+    expect(review.compareDocumentPosition(goal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(goal.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("counts an active goal when deciding whether the row is needed", () => {
@@ -176,8 +175,8 @@ describe("chat status bar goal visibility", () => {
 });
 
 describe("conversation usage status control", () => {
-  // @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .4, .5
-  it("preserves action and utility instances when responsive order changes", () => {
+  // @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .4, .5, .6, .7
+  it("preserves status, action, and utility instances when responsive order changes", () => {
     const props: ComponentProps<typeof ChatStatusBar> = {
       todoItems: [],
       taskId: "task-1",
@@ -192,13 +191,18 @@ describe("conversation usage status control", () => {
     const { rerender } = render(<ChatStatusBar {...props} />);
     const proceed = screen.getByTestId("proceed-next-step");
     const usage = screen.getByTestId("conversation-usage-trigger");
+    const review = screen.getByTestId("registered-review-status");
     for (const isMobile of [true, false, true]) {
       viewport.isMobile = isMobile;
       rerender(<ChatStatusBar {...props} />);
       expect(screen.getByTestId("proceed-next-step")).toBe(proceed);
       expect(screen.getByTestId("conversation-usage-trigger")).toBe(usage);
+      expect(screen.getByTestId("registered-review-status")).toBe(review);
       const order = proceed.compareDocumentPosition(usage);
       expect(Boolean(order & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(isMobile);
+      expect(
+        Boolean(proceed.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(isMobile);
     }
   });
 

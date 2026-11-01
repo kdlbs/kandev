@@ -538,6 +538,9 @@ type LaunchAgentRequest struct {
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID             string
 	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// launch. It is lifecycle metadata, not runtime ownership identity.
+	CausingRunID string
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -606,6 +609,7 @@ type LaunchAgentRequest struct {
 	IsEphemeral           bool                // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath         string              // Optional host folder for repo-less tasks (overrides scratch fallback)
 	OriginalWorkspacePath string              // First agent-visible path used for native restore policy
+	WorkspaceLayout       string              // Persisted Worktree agent-root layout
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -660,7 +664,8 @@ type LaunchAgentRequest struct {
 	BranchSlug string
 	// BranchIdentitySlug is the stable branch key for top-level single-repo
 	// reuse. It may be non-empty when BranchSlug is empty to preserve a flat path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth and the legacy single-repo
@@ -675,7 +680,11 @@ type LaunchAgentRequest struct {
 	RouteOverride *RouteOverride
 }
 
-type WorkspaceFolderSpec struct{ Name, LocalPath string }
+type WorkspaceFolderSpec struct {
+	Name                  string
+	LocalPath             string
+	WorkspaceRelativePath string
+}
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
@@ -723,6 +732,9 @@ type RepoSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so the primary branch can keep the legacy flat path.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
@@ -755,6 +767,7 @@ const McpModeManagedConversation = "managed-conversation"
 type LaunchOptions struct {
 	AgentProfileID       string
 	OfficeAgentProfileID string
+	CausingRunID         string
 	ExecutorID           string
 	TurnID               string
 	// DeliverySubmissionID binds a persisted direct first message to the
@@ -767,7 +780,8 @@ type LaunchOptions struct {
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
 	// evidence to the execution that actually won admission.
-	OnExecutionAdmitted func(executionID string)
+	OnExecutionAdmitted   func(executionID string)
+	OnStartAttemptClaimed func(attemptID string)
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.
@@ -815,6 +829,7 @@ type LaunchContext struct {
 	ExecutorID           string
 	ExecutorProfileID    string
 	Priority             string
+	CausingRunID         string
 	Prompt               string
 	WorkflowStepID       string
 	PlanMode             bool
@@ -851,6 +866,7 @@ type LaunchAgentResponse struct {
 type RepoWorktreeResult struct {
 	TaskRepositoryID          string
 	RepositoryID              string
+	WorkspaceRelativePath     string
 	BranchSlug                string
 	WorktreeID                string
 	WorktreeBranch            string
@@ -1113,17 +1129,18 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
-	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
-	agentManager              AgentManagerClient
-	attachmentReader          AttachmentReader
-	repo                      executorStore
-	secretStore               secrets.SecretStore
-	shellPrefs                ShellPreferenceProvider
-	capabilities              ExecutorTypeCapabilities
-	gitlabCredentials         GitLabCredentialResolver
-	logger                    *logger.Logger
-	canvasesEnabled           bool
+	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	agentManager                  AgentManagerClient
+	attachmentReader              AttachmentReader
+	repo                          executorStore
+	secretStore                   secrets.SecretStore
+	shellPrefs                    ShellPreferenceProvider
+	capabilities                  ExecutorTypeCapabilities
+	gitlabCredentials             GitLabCredentialResolver
+	logger                        *logger.Logger
+	canvasesEnabled               bool
+	workspaceCollaborationEnabled bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1507,6 +1524,12 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose
+// the report-only delivery mode. Applied before any new session launch.
+func (e *Executor) SetWorkspaceCollaborationEnabled(enabled bool) {
+	e.workspaceCollaborationEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

@@ -22,6 +22,11 @@ func TestRegisteredIdentifiersMatchAC005_3(t *testing.T) {
 		StepMessageTimestampsBackfill: true,
 		StepSubagentContextBackfill:   true,
 		StepSessionsRecovery:          true,
+		StepQueueReconciliation:       true,
+		StepTurnReconciliation:        true,
+		StepRouteReconciliation:       true,
+		StepRuntimeInventory:          true,
+		StepTaskReconciliation:        true,
 	}
 
 	got := map[StepID]bool{}
@@ -119,7 +124,12 @@ func TestRegisteredStepsDeclarePhaseMatchesCallSite(t *testing.T) {
 		// SetPhase(RecoveringSessions) transition (not the later
 		// bindListeners closure in startGatewayAndServe, which runs after
 		// recovery has already completed).
-		StepSessionsRecovery: RecoveringSessions,
+		StepSessionsRecovery:    RecoveringSessions,
+		StepQueueReconciliation: RecoveringSessions,
+		StepTurnReconciliation:  RecoveringSessions,
+		StepRouteReconciliation: RecoveringSessions,
+		StepRuntimeInventory:    RecoveringSessions,
+		StepTaskReconciliation:  RecoveringSessions,
 	}
 
 	for _, spec := range Registry() {

@@ -10,10 +10,12 @@ import { ArchiveConfirmationSettings } from "@/components/settings/archive-confi
 import { CreationAutoFocusSettings } from "@/components/settings/creation-auto-focus-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { PreventAutoStartAgentSettings } from "@/components/settings/prevent-auto-start-agent-settings";
+import { PromptSuggestionSettings } from "@/components/settings/prompt-suggestion-settings";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
+import { TurnChangedFilesSettings } from "@/components/settings/turn-changed-files-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import {
   MessageQueueSettingsContent,
@@ -90,7 +92,7 @@ export function TaskBehaviorSettings() {
     ),
   }));
   return (
-    <div className="space-y-6" data-testid="task-behavior-settings">
+    <div className="w-full max-w-5xl space-y-6" data-testid="task-behavior-settings">
       <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
         <SettingsPageHeader
           title={t("settings:taskBehavior")}
@@ -123,8 +125,10 @@ export function TaskBehaviorSettings() {
           >
             <AgentTabCloseBehaviorSettings />
             <UnreadDividerSettings presentation="row" />
+            <TurnChangedFilesSettings />
             <AnchoredPromptBarSettings presentation="row" />
             <TodoListPanelSettings presentation="row" />
+            <PromptSuggestionSettings />
             <MessageTimeDisplaySettings />
           </SettingsGroup>
         </SettingsTabsPanel>

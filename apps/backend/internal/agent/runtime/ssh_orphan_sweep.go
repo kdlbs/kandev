@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/startup"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -54,6 +55,6 @@ func StartOrphanSweepScheduler(
 	acquireTaskFence func(taskID string) func(),
 ) *OrphanSweepScheduler {
 	scheduler := lifecycle.NewOrphanSweepScheduler(executors, tasks, intervalSeconds, log, acquireTaskFence)
-	scheduler.Start(ctx, eventBus)
+	startup.AfterReady(ctx, func() { scheduler.Start(ctx, eventBus) })
 	return &OrphanSweepScheduler{inner: scheduler}
 }

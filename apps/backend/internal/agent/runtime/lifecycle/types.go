@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -34,8 +35,16 @@ type AgentExecution struct {
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
+	successorGenerationOwner     atomic.Pointer[successorGenerationOwner]
 
 	ID string
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// execution. RunID remains reserved for run-owned runtime identity.
+	CausingRunID string
+	// TerminalCausingRunID keeps the launch cause on terminal events after
+	// CausingRunID is consumed by the first ready event. A new prompt replaces
+	// this value with its current launch cause.
+	TerminalCausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -63,14 +72,23 @@ type AgentExecution struct {
 	TaskID                          string
 	SessionID                       string
 	TaskEnvironmentID               string // Env owning this execution; sessions in the same task share one env
+	TurnChangeCheckouts             []TurnChangeCheckout
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
-	ExecutorType string
+	ExecutorType  string
+	RepositoryIDs []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
+	// CopilotSelectedPlugins carries the stable plugin identities from the
+	// authorized profile snapshot. Roots are resolved at each new process
+	// boundary and never persisted here.
+	CopilotSelectedPlugins []string
+	// ExecutionProfileID names the concrete CLI profile that owns this
+	// execution. Empty falls back to AgentProfileID for legacy sessions.
+	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID      string
@@ -101,6 +119,7 @@ type AgentExecution struct {
 	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec   `json:"-"`
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -152,6 +171,8 @@ type AgentExecution struct {
 	promptSettlementGeneration               uint64
 	promptSettlementAcknowledgedGeneration   uint64
 	promptSettlementWaiterReleasedGeneration uint64
+	turnChangeCaptureGeneration              uint64
+	turnChangeCaptureDone                    chan struct{}
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -209,8 +230,12 @@ type AgentExecution struct {
 	prepareProgressRecorder *prepareProgressRecorder
 
 	// agentctl client for this execution
-	agentctl                  *agentctl.Client
-	agentctlOverride          atomic.Pointer[agentctl.Client]
+	agentctl         *agentctl.Client
+	agentctlOverride atomic.Pointer[agentctl.Client]
+	// agentctlURLFallback is the URL a replacement or detach publishes before it
+	// takes agentctlSourceMu's write side, so a concurrent persistence read never
+	// reports an empty endpoint for an execution that still has one.
+	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
@@ -282,6 +307,12 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// attachedExistingCompute records that this attempt attached to runtime
+	// storage that already existed instead of allocating it. Recovery retention
+	// reads it so a reused workspace is not destroyed with the failed attempt.
+	// Conversation-resume intent is a separate fact and never authorizes or
+	// prevents destructive cleanup.
+	attachedExistingCompute bool
 	// suppressBootStatusMessage is set only for silent restart restore, where a
 	// boot status would otherwise create a synthetic completed transcript turn.
 	suppressBootStatusMessage bool
@@ -303,6 +334,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// lastAssistantMessageIDByGeneration outlives streaming correlation reset
+	// until the terminal turn-change record has persisted its reply anchor.
+	lastAssistantMessageIDByGeneration map[uint64]string
 	// responseAttemptMessageIDs preserves allocation order for assistant and
 	// thinking records created since the latest committed response boundary.
 	responseAttemptMessageIDs []string
@@ -421,6 +455,8 @@ type AgentExecution struct {
 	// promptLifecycleMu is held by workspace rebind waiting for readiness.
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
+	startupRecoveryCancelled bool // A stopped execution cannot start another replacement.
+	startupRecoveryCancel    context.CancelCauseFunc
 	// startupAttemptIDs preserves the recovery identity for each startup
 	// generation. The execution ID can be reused by managed-runtime repair, so
 	// callbacks must use their captured generation identity instead of the
@@ -724,6 +760,19 @@ func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Unlock()
 }
 
+// armAcceptedPromptActivity starts the silence interval at acceptance only when
+// the current generation has not already produced output.
+func (e *AgentExecution) armAcceptedPromptActivity() {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	if e.agentEventSincePrompt {
+		return
+	}
+	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
+	e.promptActivityEpoch++
+}
+
 // markRecoveredAgentActivity records output and advances the activity epoch
 // using the retained observation time, never the time of replay.
 func (e *AgentExecution) markRecoveredAgentActivity(at *time.Time) {
@@ -889,18 +938,37 @@ func (e *AgentExecution) recordExpectedWorkspaceRebindDisconnect(generation uint
 // beginStartupRecovery advances the startup generation exactly once. The
 // caller uses the returned generation when wiring the replacement streams.
 func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	return e.beginStartupRecoveryWithCancel(nil)
+}
+
+// beginStartupRecoveryWithCancel registers recovery cancellation with its execution owner.
+func (e *AgentExecution) beginStartupRecoveryWithCancel(cancel context.CancelCauseFunc) (uint64, bool) {
 	e.startupCallbackMu.Lock()
 	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
-	if e.startupRecoveryStarted {
+	if e.startupRecoveryStarted || e.startupRecoveryCancelled {
 		return e.startupAttemptGeneration, false
 	}
 	e.startupRecoveryStarted = true
+	e.startupRecoveryCancel = cancel
 	e.startupAttemptGeneration++
 	currentAttemptID := e.startupAttemptIDs[e.startupAttemptGeneration-1]
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, currentAttemptID)
 	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) cancelStartupRecovery() {
+	if e == nil {
+		return
+	}
+	e.startupLifecycleMu.Lock()
+	e.startupRecoveryCancelled = true
+	cancel := e.startupRecoveryCancel
+	e.startupLifecycleMu.Unlock()
+	if cancel != nil {
+		cancel(context.Canceled)
+	}
 }
 
 func (e *AgentExecution) recordStartupAttemptIDLocked(generation uint64, attemptID string) {
@@ -947,6 +1015,7 @@ func (e *AgentExecution) currentStartupAttemptID() string {
 func (e *AgentExecution) finishStartupRecovery() {
 	e.startupLifecycleMu.Lock()
 	e.startupRecoveryStarted = false
+	e.startupRecoveryCancel = nil
 	e.startupLifecycleMu.Unlock()
 }
 
@@ -1119,7 +1188,8 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 }
 
 // currentAgentCtlClient returns the unpinned client snapshot. Callers must
-// already hold agentctlLifecycleMu or be implementing the scoped lease.
+// already hold agentctlLifecycleMu, agentctlSourceMu (at least a TryRLock),
+// or be implementing the scoped lease.
 func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 	if ae == nil {
 		return nil
@@ -1165,12 +1235,24 @@ func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback f
 	return true
 }
 
+// publishAgentctlURL records the URL that reads must fall back to while a
+// client replacement or detach holds agentctlSourceMu's write side. Detach
+// retains the installed URL until the client is cleared, so persistence cannot
+// blank a still-installed endpoint while a workspace callback delays detach.
+func (ae *AgentExecution) publishAgentctlURL(url string) {
+	if ae == nil {
+		return
+	}
+	ae.agentctlURLFallback.Store(&url)
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
@@ -1184,10 +1266,16 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	url := ""
+	if client := ae.currentAgentCtlClient(); client != nil {
+		url = client.BaseURL()
+	}
+	ae.publishAgentctlURL(url)
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
+	ae.publishAgentctlURL("")
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.
@@ -1203,13 +1291,32 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // AgentctlURL returns the base URL of the agentctl HTTP server for this
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
+//
+// It never blocks and never takes the client lease. Persistence reads it under
+// the execution store lock, possibly from a caller that already holds a read
+// lease, and a terminal stop may be waiting for the lease's write side. The
+// base URL is immutable per client, so an atomic or try-locked snapshot is
+// enough. While a replacement or detach holds the source write side, the read
+// returns the URL that writer published before taking it, so a concurrent
+// persistence write never blanks a live endpoint.
 func (ae *AgentExecution) AgentctlURL() string {
-	client, release := ae.AcquireAgentCtlClient()
-	defer release()
-	if client == nil {
+	if ae == nil {
 		return ""
 	}
-	return client.BaseURL()
+	if client := ae.agentctlOverride.Load(); client != nil {
+		return client.BaseURL()
+	}
+	if !ae.agentctlSourceMu.TryRLock() {
+		if url := ae.agentctlURLFallback.Load(); url != nil {
+			return *url
+		}
+		return ""
+	}
+	defer ae.agentctlSourceMu.RUnlock()
+	if client := ae.currentAgentCtlClient(); client != nil {
+		return client.BaseURL()
+	}
+	return ""
 }
 
 // SetWorkspaceStream sets the unified workspace stream for this execution
@@ -1511,20 +1618,26 @@ type RepoLaunchSpec struct {
 	// BranchIdentitySlug is the stable branch key used for worktree reuse and
 	// persisted environment metadata. It may differ from BranchSlug when a
 	// primary branch keeps the flat legacy path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 }
 
 // WorkspaceFolderSpec is a durable host folder attachment projected into both
 // fresh launches and workspace-only resume construction.
 type WorkspaceFolderSpec struct {
-	Name      string
-	LocalPath string
+	Name                  string
+	LocalPath             string
+	WorkspaceRelativePath string
 }
 
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
 	RepositoryID            string
+	TaskRepositoryID        string
+	TaskEnvironmentRepoID   string
+	RepositorySubpath       string
+	RepositorySubpathKnown  bool
 	RepositoryPath          string
 	WorktreePath            string
 	WorktreeBranch          string
@@ -1546,6 +1659,7 @@ type WorkspaceRepositorySpec struct {
 	RemoteSyncHandled       bool
 	BranchSlug              string
 	BranchIdentitySlug      string
+	WorkspaceRelativePath   string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1583,6 +1697,9 @@ type LaunchRequest struct {
 	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID             string
 	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	// CausingRunID is carried separately from Owner.RunID because Office task
+	// sessions remain task-owned while a scheduler run initiates their launch.
+	CausingRunID string
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1614,6 +1731,7 @@ type LaunchRequest struct {
 	TaskDescription           string              // Task description to send via ACP prompt
 	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                       map[string]string   // Additional env vars
+	WorkspaceLayout           string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -1705,7 +1823,8 @@ type LaunchRequest struct {
 	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
 	// BranchIdentitySlug is the stable branch key used for single-repo reuse.
 	// It may be non-empty when BranchSlug is empty to preserve a flat path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth; the legacy single-repo top-level
@@ -1758,6 +1877,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CopyFiles:                  r.CopyFiles,
 		BranchSlug:                 r.BranchSlug,
 		BranchIdentitySlug:         r.BranchIdentitySlug,
+		WorkspaceRelativePath:      r.WorkspaceRelativePath,
 	}}
 }
 
@@ -1808,6 +1928,7 @@ type AgentProfileInfo struct {
 	CursorPluginsMCPEnabled bool
 	MCPSelectionMode        string
 	MCPSelectedServers      []string
+	CopilotSelectedPlugins  []string
 	NativeSessionResume     bool // Agent supports ACP session/load for resume
 	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
@@ -1857,6 +1978,13 @@ type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
 }
 
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
+}
+
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
 	DeliveryIncarnationID     string
@@ -1889,16 +2017,19 @@ type WorkspaceInfo struct {
 	// direct workspace entry point.
 	TaskArchived           bool
 	WorkspaceOwnerArchived bool
-	WorkspacePath          string // Path to the workspace/repository
-	WorkspaceFolders       []WorkspaceFolderSpec
-	WorkspaceRepositories  []WorkspaceRepositorySpec
-	TaskDirName            string
-	WorkspaceID            string
-	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID     string // Concrete CLI profile selected for this execution
-	ExecutorProfileID      string // Concrete executor profile selected for this execution
-	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
+	WorkspacePath          string // Path to the effective workspace root or repository
+	// WorkspaceLayout classifies WorkspacePath so repository-relative source
+	// destinations can be resolved after a restart. Empty is legacy data.
+	WorkspaceLayout       string
+	WorkspaceFolders      []WorkspaceFolderSpec
+	WorkspaceRepositories []WorkspaceRepositorySpec
+	TaskDirName           string
+	WorkspaceID           string
+	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	ExecutorProfileID     string // Concrete executor profile selected for this execution
+	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

@@ -101,6 +101,7 @@ type wsCreateTaskRequest struct {
 	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position               int                       `json:"position,omitempty"`
 	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
 	StartAgent             bool                      `json:"start_agent,omitempty"`
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
 	ExecutorID             string                    `json:"executor_id,omitempty"`
@@ -108,6 +109,7 @@ type wsCreateTaskRequest struct {
 	PlanMode               bool                      `json:"plan_mode,omitempty"`
 	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
 	ParentID               string                    `json:"parent_id,omitempty"`
+	InitialWorkspaceLayout string                    `json:"initial_workspace_layout,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -199,11 +201,13 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:                convertTaskRepositories(req.Repositories != nil, repos),
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
+		MCPServerIDs:                req.MCPServerIDs,
 		DeferredLaunch:              deferredLaunch,
 		RecordAgentProfileRecentUse: true,
 		PlanMode:                    req.PlanMode,
 		StartAgent:                  req.StartAgent,
 		ParentID:                    req.ParentID,
+		InitialWorkspaceLayout:      req.InitialWorkspaceLayout,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

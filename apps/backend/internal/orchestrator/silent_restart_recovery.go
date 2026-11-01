@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/startup"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,13 @@ func silentRestoreAttemptID(sessionID, incarnationID string, generation int64) s
 }
 
 func (s *Service) startSilentRestoreRecovery(parent context.Context) {
+	if parent == nil {
+		return
+	}
+	startup.AfterReady(parent, func() { s.startSilentRestoreRecoveryReady(parent) })
+}
+
+func (s *Service) startSilentRestoreRecoveryReady(parent context.Context) {
 	store, ok := s.repo.(taskrepo.SilentRestoreRepository)
 	if !ok || s.silentRestoreOwnerContext == nil || parent == nil {
 		return
@@ -81,7 +89,11 @@ func (s *Service) stopSilentRestoreRecovery() {
 	cancel := s.silentRestoreCancel
 	s.silentRestoreCancel = nil
 	s.silentRestoreWake = nil
+	queue := s.silentRestoreQueue
 	s.silentRestoreMu.Unlock()
+	if queue != nil {
+		queue.stop()
+	}
 	if cancel != nil {
 		cancel()
 		s.silentRestoreWorkers.Wait()
@@ -91,32 +103,40 @@ func (s *Service) stopSilentRestoreRecovery() {
 func (s *Service) resetSilentRestoreRecovery() {
 	s.silentRestoreMu.Lock()
 	s.silentRestoreStopped = false
+	s.silentRestoreQueue = nil
 	s.silentRestoreMu.Unlock()
 }
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
+	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
 		candidates, err := store.ListSilentRestoreCandidates(ctx, after, silentRestoreCandidateLimit)
 		if err != nil {
 			s.logger.Warn("could not list silent restart recovery candidates", zap.Error(err))
-			return
+			break
 		}
+		jobs := make([]*restartRestoreJob, 0, len(candidates))
 		for _, candidate := range candidates {
-			if ctx.Err() != nil {
-				return
-			}
-			opCtx, cancel := context.WithTimeout(ctx, silentRestoreOperationLimit)
-			err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
-			cancel()
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				s.logger.Debug("silent restart recovery candidate remains pending",
-					zap.String("session_id", candidate.SessionID), zap.Error(err))
-			}
+			jobs = append(jobs, queue.submit(candidate, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
+				err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					s.logger.Debug("silent restart recovery candidate remains pending", zap.String("session_id", candidate.SessionID), zap.Error(err))
+				}
+				return err
+			}))
 			after = candidate.SessionID
 		}
+		// Drain this bounded metadata page before retaining another backlog page.
+		for _, job := range jobs {
+			select {
+			case <-job.done:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if len(candidates) < silentRestoreCandidateLimit {
-			return
+			break
 		}
 	}
 }
@@ -265,7 +285,7 @@ func (s *Service) startSilentRestoreCandidate(
 		CandidateExecutionID: checkpoint.CandidateExecutionID,
 		OnExecutionAllocated: callback,
 	}
-	commitWhenReady := func(readyCtx context.Context, _ *resumeAttempt, execution *executor.TaskExecution) error {
+	commitWhenReady := func(readyCtx context.Context, startup *resumeAttempt, execution *executor.TaskExecution) error {
 		if execution == nil || execution.AgentExecutionID != checkpoint.CandidateExecutionID {
 			return errors.New("silent restart recovery resumed a different execution")
 		}
@@ -273,16 +293,23 @@ func (s *Service) startSilentRestoreCandidate(
 		if getErr != nil {
 			return getErr
 		}
-		return s.finishLaunchedSilentRestoreCandidateLocked(
+		if err := s.finishLaunchedSilentRestoreCandidateLocked(
 			readyCtx, store, attemptID, checkpoint, inputs, running,
-		)
+		); err != nil {
+			return err
+		}
+		if !s.resumeAttemptStore().markPromptReady(startup) {
+			return ErrResumeAttemptCancelled
+		}
+		return nil
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
+	ownedResumeCtx = context.WithValue(ownedResumeCtx, silentRestoreStartupContextKey{}, true)
 	execution, err := s.resumeTaskSessionWithContinuationAndReservation(
 		ownedResumeCtx, inputs.task.ID, inputs.session.ID, options, commitWhenReady, reservation,
 	)
 	if err != nil {
-		return err
+		return errors.Join(err, s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
@@ -638,12 +665,23 @@ func (s *Service) silentRestoreCandidateReady(
 	default:
 		return nil, false, nil
 	}
-	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
-		return nil, false, nil
-	}
 	nativeID := s.currentACPSessionID(inputs.session.ID)
 	if nativeID == "" || nativeID != checkpoint.SourceGeneration.NativeSessionID {
 		return nil, false, nil
+	}
+	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+		recoverer, supported := s.agentManager.(silentRestoreStreamRecoverer)
+		if !supported {
+			return nil, false, nil
+		}
+		if err := recoverer.RecoverSilentRestoreCandidateStream(
+			ownerCtx, inputs.session.ID, checkpoint.CandidateExecutionID, nativeID,
+		); err != nil {
+			return nil, false, err
+		}
+		if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+			return nil, false, nil
+		}
 	}
 	return ownerCtx, true, nil
 }
@@ -720,6 +758,13 @@ func (s *Service) markSilentRestoreCandidateDead(
 	if !ok || prober.RowLiveness(running) != models.ProcessLivenessDead {
 		return models.SilentRestoreCheckpoint{}, errors.New("candidate execution liveness is not proven dead")
 	}
+	return s.recordSilentRestoreCandidateDead(ctx, store, attemptID, expected, inputs)
+}
+
+func (s *Service) recordSilentRestoreCandidateDead(
+	ctx context.Context, store taskrepo.SilentRestoreRepository, attemptID string,
+	expected models.SilentRestoreCheckpoint, inputs *silentRestoreInputs,
+) (models.SilentRestoreCheckpoint, error) {
 	ownerCtx, err := s.revalidateSilentRestoreInputs(ctx, inputs, expected)
 	if err != nil {
 		return models.SilentRestoreCheckpoint{}, err

@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
@@ -17,6 +18,8 @@ import {
 } from "../../../lib/utils/message-preview";
 
 const INCIDENT_LOG_LINE_COUNT = 3_921;
+
+test.use({ trace: "retain-on-failure" });
 
 test.beforeEach(async ({ backend }) => {
   // This test asserts the queue UI. Pin the feature off so a steering-enabled
@@ -96,11 +99,13 @@ async function waitForStoredUserMessage(
     .toBe(true);
 }
 
-async function switchMobileTask(testPage: Page, title: string) {
+async function switchMobileTask(testPage: Page, taskId: string, title: string) {
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });
+  await waitForFiniteAnimations(sheet);
+  await expect(taskRow).toHaveAttribute("data-task-row-id", taskId);
   await taskRow.tap();
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
 }
@@ -153,12 +158,20 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
 
   const secondTitle = `Mobile switch target ${Date.now()}`;
   const secondTask = await createTask(apiClient, seedData, secondTitle);
-  await switchMobileTask(testPage, secondTitle);
+  if (!secondTask.session_id) throw new Error("switch target has no session_id");
+  await waitForSessionDone(
+    apiClient,
+    secondTask.id,
+    secondTask.session_id,
+    "Switch target should be idle before opening the picker",
+    30_000,
+  );
+  await switchMobileTask(testPage, secondTask.id, secondTitle);
   await expect(testPage).toHaveURL(new RegExp(`/t/${secondTask.id}`));
   session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await switchMobileTask(testPage, firstTitle);
+  await switchMobileTask(testPage, task.id, firstTitle);
   await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`));
   session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -209,7 +222,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     await apiClient.clearQueue(identity);
     await expect(chat.getByTestId("queue-chip")).not.toBeVisible({ timeout: 15_000 });
     await gate.release();
-    await expect(chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+    await expect(chat.getByText("Slow response complete", { exact: true })).toBeVisible({
       timeout: 90_000,
     });
     await session.waitForChatIdle({ timeout: 90_000 });

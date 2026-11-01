@@ -1,5 +1,13 @@
 import { StrictMode, type PropsWithChildren } from "react";
-import { act, cleanup, render, renderHook, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -59,6 +67,11 @@ const file: ReviewFile = {
   source: "uncommitted",
 };
 const key = reviewFileKey(file);
+const updateAction = "session.file_review.update";
+const otherPath = "other.ts";
+const otherHash = "other-hash";
+const stateAttribute = "data-state";
+const uncheckedState = "unchecked";
 let client: WebSocketClient | null;
 let previousClient: WebSocketClient | null;
 let sequence = 0;
@@ -124,23 +137,25 @@ function requestFor(id: string, action = "session.file_review.get") {
   return matches[0];
 }
 
-async function reply(id: string, reviewed: boolean, diffHash = hashDiff(file.diff)) {
+async function replyRows(id: string, rows: [string, boolean, string][]) {
   await act(async () => {
     DeferredSocket.current.settle(requestFor(id), {
-      reviews: [
-        {
-          id: `${id}-row`,
-          session_id: id,
-          file_path: key,
-          reviewed,
-          diff_hash: diffHash,
-          reviewed_at: null,
-          created_at: "2026-10-06T00:00:00Z",
-          updated_at: "2026-10-06T00:00:00Z",
-        },
-      ],
+      reviews: rows.map(([path, reviewed, diffHash]) => ({
+        id: `${id}-${path}`,
+        session_id: id,
+        file_path: path,
+        reviewed,
+        diff_hash: diffHash,
+        reviewed_at: null,
+        created_at: "2026-10-06T00:00:00Z",
+        updated_at: "2026-10-06T00:00:00Z",
+      })),
     });
   });
+}
+
+async function reply(id: string, reviewed: boolean, diffHash = hashDiff(file.diff)) {
+  await replyRows(id, [[key, reviewed, diffHash]]);
 }
 
 function reader(id: string | null) {
@@ -295,7 +310,7 @@ function registerCacheAndSharingTests() {
     act(() => one.result.current.markUnreviewed(key));
     expect(reviewed(two.result.current.reviews)).toEqual(new Set());
     await act(async () =>
-      DeferredSocket.current.settle(requestFor(alpha, "session.file_review.update"), {
+      DeferredSocket.current.settle(requestFor(alpha, updateAction), {
         success: true,
       }),
     );
@@ -328,7 +343,7 @@ function registerCurrentControls() {
     act(() => result.current.markReviewed(key, hashDiff(file.diff)));
     await act(async () =>
       DeferredSocket.current.settle(
-        requestFor(alpha, "session.file_review.update"),
+        requestFor(alpha, updateAction),
         { code: "failed", message: "Failed" },
         "error",
       ),
@@ -339,7 +354,7 @@ function registerCurrentControls() {
     await flush();
     await reply(beta, true);
     const pending = DeferredSocket.current.requests
-      .filter((request) => request.action === "session.file_review.update")
+      .filter((request) => request.action === updateAction)
       .at(-1)!;
     await act(async () =>
       DeferredSocket.current.settle(pending, { code: "failed", message: "Failed" }, "error"),
@@ -384,39 +399,167 @@ function registerCurrentControls() {
   });
 }
 
-function registerConsumerTest() {
-  it("keeps the real mounted Review dialog checkbox owned by Beta after late Alpha", async () => {
-    const alpha = session(),
-      beta = session();
-    const props = {
-      open: true,
-      onOpenChange: vi.fn(),
-      onSendComments: vi.fn(),
-      cumulativeDiff: null,
-      gitStatusFiles: { [file.path]: { ...file } },
-      useRepositoryKeys: false,
-    };
-    const mounted = render(
-      <VcsDialogsProvider sessionId={alpha}>
-        <ReviewDialog {...props} sessionId={alpha} />
-      </VcsDialogsProvider>,
-      { wrapper: Providers },
-    );
+function registerSnapshotReconciliationTests() {
+  // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.14
+  it.each(
+    ["mark", "unmark", "reset"].flatMap((action) =>
+      [false, true].map((acknowledged) => ({ action, acknowledged })),
+    ),
+  )(
+    "preserves $action intent (acknowledged: $acknowledged) while loading unrelated rows",
+    async ({ action, acknowledged }) => {
+      const id = session();
+      const current = reader(id),
+        peer = reader(id);
+      await flush();
+      expect(current.result.current.loading).toBe(true);
+      act(() => {
+        if (action === "mark") current.result.current.markReviewed(key, hashDiff(file.diff));
+        if (action === "unmark") current.result.current.markUnreviewed(key);
+        if (action === "reset") current.result.current.resetReviews();
+      });
+      const write = requestFor(
+        id,
+        `session.file_review.${action === "reset" ? "reset" : "update"}`,
+      );
+      if (acknowledged)
+        await act(async () => DeferredSocket.current.settle(write, { success: true }));
+      const assertIntent = () => {
+        expect(reviewed(current.result.current.reviews)).toEqual(
+          new Set(action === "mark" ? [key] : []),
+        );
+        expect(peer.result.current.reviews).toEqual(current.result.current.reviews);
+      };
+      assertIntent();
+      await replyRows(id, [
+        [key, action !== "mark", hashDiff(file.diff)],
+        [otherPath, true, otherHash],
+      ]);
+      assertIntent();
+      expect(current.result.current.loading).toBe(false);
+      expect(current.result.current.reviews.has(otherPath)).toBe(action !== "reset");
+      if (!acknowledged)
+        await act(async () => DeferredSocket.current.settle(write, { success: true }));
+      assertIntent();
+      current.unmount();
+      peer.unmount();
+    },
+  );
+}
+
+function registerSnapshotControls() {
+  it.each([true, false])(
+    "keeps single-mark rollback when failure precedes snapshot: %s",
+    async (failureFirst) => {
+      const id = session(),
+        current = reader(id);
+      await flush();
+      act(() => current.result.current.markReviewed(key, hashDiff(file.diff)));
+      const fail = async () =>
+        act(async () =>
+          DeferredSocket.current.settle(
+            requestFor(id, updateAction),
+            { code: "failed", message: "Failed" },
+            "error",
+          ),
+        );
+      if (failureFirst) await fail();
+      await replyRows(id, [
+        [key, false, ""],
+        [otherPath, true, otherHash],
+      ]);
+      if (!failureFirst) {
+        expect(reviewed(current.result.current.reviews)).toEqual(new Set([key]));
+        await fail();
+      }
+      expect(current.result.current.reviews.has(key)).toBe(false);
+      expect(current.result.current.reviews.get(otherPath)).toEqual({
+        reviewed: true,
+        diffHash: otherHash,
+      });
+      expect(current.result.current.loading).toBe(false);
+    },
+  );
+
+  it("accepts the initial snapshot unchanged without an intervening action", async () => {
+    const id = session(),
+      current = reader(id);
     await flush();
-    const dialog = screen.getByRole("dialog");
-    mounted.rerender(
-      <VcsDialogsProvider sessionId={beta}>
-        <ReviewDialog {...props} sessionId={beta} />
-      </VcsDialogsProvider>,
-    );
-    await flush();
-    await reply(beta, false);
-    const checkbox = () => within(screen.getByTestId("review-file-row")).getByRole("checkbox");
-    expect(checkbox().getAttribute("data-state")).toBe("unchecked");
-    await reply(alpha, true);
-    expect(screen.getByRole("dialog")).toBe(dialog);
-    expect(checkbox().getAttribute("data-state")).toBe("unchecked");
+    await reply(id, true);
+    expect(reviewed(current.result.current.reviews)).toEqual(new Set([key]));
+    expect(current.result.current.loading).toBe(false);
   });
+
+  it("preserves shared intent after the initiating reader retires", async () => {
+    const id = session(),
+      initial = reader(id),
+      peer = reader(id);
+    await flush();
+    act(() => peer.result.current.markReviewed(key, hashDiff(file.diff)));
+    initial.unmount();
+    await act(async () =>
+      DeferredSocket.current.settle(requestFor(id, updateAction), {
+        success: true,
+      }),
+    );
+    await replyRows(id, [[otherPath, true, otherHash]]);
+    expect(reviewed(peer.result.current.reviews)).toEqual(new Set([key]));
+    expect(peer.result.current.reviews.has(otherPath)).toBe(true);
+    requestFor(id);
+  });
+}
+
+function registerConsumerTest() {
+  it.each(["session-switch", "local-mark"])(
+    "keeps the real Review checkbox after %s then an older GET",
+    async (schedule) => {
+      const alpha = session(),
+        beta = session();
+      const props = {
+        open: true,
+        onOpenChange: vi.fn(),
+        onSendComments: vi.fn(),
+        cumulativeDiff: null,
+        gitStatusFiles: { [file.path]: { ...file } },
+        useRepositoryKeys: false,
+      };
+      const mounted = render(
+        <VcsDialogsProvider sessionId={alpha}>
+          <ReviewDialog {...props} sessionId={alpha} />
+        </VcsDialogsProvider>,
+        { wrapper: Providers },
+      );
+      await flush();
+      const dialog = screen.getByRole("dialog");
+      if (schedule === "local-mark") {
+        const checkbox = within(screen.getByTestId("review-file-row")).getByRole("checkbox");
+        expect(checkbox.getAttribute(stateAttribute)).toBe(uncheckedState);
+        fireEvent.click(checkbox);
+        await act(async () =>
+          DeferredSocket.current.settle(requestFor(alpha, updateAction), {
+            success: true,
+          }),
+        );
+        expect(checkbox.getAttribute(stateAttribute)).toBe("checked");
+        await replyRows(alpha, []);
+        expect(screen.getByRole("dialog")).toBe(dialog);
+        expect(checkbox.getAttribute(stateAttribute)).toBe("checked");
+        return;
+      }
+      mounted.rerender(
+        <VcsDialogsProvider sessionId={beta}>
+          <ReviewDialog {...props} sessionId={beta} />
+        </VcsDialogsProvider>,
+      );
+      await flush();
+      await reply(beta, false);
+      const checkbox = () => within(screen.getByTestId("review-file-row")).getByRole("checkbox");
+      expect(checkbox().getAttribute(stateAttribute)).toBe(uncheckedState);
+      await reply(alpha, true);
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect(checkbox().getAttribute(stateAttribute)).toBe(uncheckedState);
+    },
+  );
 }
 
 describe("session file review reader ownership", () => {
@@ -449,6 +592,8 @@ describe("session file review reader ownership", () => {
     registerDeferredTests();
     registerCacheAndSharingTests();
     registerCurrentControls();
+    registerSnapshotReconciliationTests();
+    registerSnapshotControls();
     registerConsumerTest();
   });
 });

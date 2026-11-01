@@ -81,6 +81,41 @@ func TestInitialPromptPreviewPersistsOnlyInPreparedSession(t *testing.T) {
 	require.Equal(t, "kept", reloaded.Metadata["unrelated"])
 }
 
+func TestInitialPromptSubmissionPersistsDuringDeferredPrepare(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}))
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Task"}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	attachments := []v1.MessageAttachment{{
+		Type: "resource", Data: "dGVzdA==", Name: "trace.txt", MimeType: "text/plain", DeliveryMode: "path",
+	}}
+	submission, err := models.NewInitialPromptSubmission("submitted text", false, attachments)
+	require.NoError(t, err)
+
+	response, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:                  "task1",
+		AgentProfileID:          "profile1",
+		Intent:                  IntentPrepare,
+		DeferredStart:           true,
+		InitialPromptSubmission: submission,
+		InitialPromptPreview:    models.NewInitialPromptPreview("submitted text", attachments),
+	})
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, response.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCreated, session.State)
+	stored, found, err := models.LoadInitialPromptSubmission(session.Metadata)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, models.InitialPromptSubmissionPending, stored.State)
+	require.Equal(t, "submitted text", stored.Content)
+	require.Equal(t, 1, stored.InlineAttachmentCount)
+	require.Empty(t, stored.Attachments, "inline data must not be retained in session metadata")
+}
+
 // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.8
 // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.10
 func TestInitialPromptPreviewPersistsThroughPassthroughPrepareUpgrade(t *testing.T) {

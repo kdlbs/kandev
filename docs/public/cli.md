@@ -196,7 +196,14 @@ kandev service <action> [service options]
 | `--verbose`, `-v`            | Show backend info output.                                                                                                                           |
 | `--debug`                    | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
 | `--version`, `-V`            | Print the native runtime version.                                                                                                                   |
+| `--json`                     | With `--version` or `-V`, print build identity as JSON.                                                                                            |
 | `--help`, `-h`, `help`       | Print help.                                                                                                                                         |
+
+Use `kandev --version --json` to print one JSON object: `version` matches plain
+`--version`, `commit` identifies the source revision, and `build_time` is the
+build timestamp. An unstamped build uses `dev` for an empty version and
+`unknown` for missing commit or build time stamps. This command does not start
+Kandev.
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
@@ -252,9 +259,15 @@ The native CLI can install and manage a systemd user/system unit on Linux or a l
 kandev service install
 kandev service status
 kandev service logs --follow
+kandev service logs --lines 1000
+kandev service logs -n 0 --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`.
+
+For `service logs`, use `--lines N`, `--lines=N`, or `-n N` to select a decimal count from 0 to 1000000. The default is 200; `-n 0 --follow` follows new output without history. On macOS, the count applies separately to the output and error log files.
+
+On macOS, a user service can opt into non-interactive Bash or Zsh login initialization with `--shell bash`, `--shell zsh`, or an absolute shell path. New installs keep direct startup by default. An existing selection survives reinstall without the flag and supported Apply updates; pass `--shell=none` to reset it. This option is not available for system services. See [Run as a service](run-as-a-service.md#optional-macos-login-initialization) for startup-file behavior and recovery.
 
 </details>
 
@@ -266,12 +279,13 @@ command for the same file the backend uses (`--home-dir`, `database.path`,
 normal launcher):
 
 ```text
-kandev maintenance database [--execute] [--compact]
+kandev maintenance database [--execute] [--compact] [--json]
     [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 ```
 
 | Option                      | Meaning                                                                                                                                                    |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--json`                    | Print one machine-readable JSON outcome to stdout. The default remains a read-only dry run.                                                           |
 | `--execute`                 | Perform retention deletes. Without it, the command is a read-only dry run (the default).                                                                   |
 | `--compact`                 | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
 | `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`).                                                                   |
@@ -297,6 +311,49 @@ A legacy-schema dry run does not migrate the database.
 Delivery samples default to at most 200 candidates, even without `--candidate-limit`.
 They are not exact database-wide totals.
 Retired-session evidence shares the candidate row budget across its sampled tables.
+
+**JSON output.** Use `--json` to read the same bounded report in a script:
+
+```bash
+set -o pipefail
+kandev maintenance database --json | jq '.report.total_candidate_rows'
+```
+
+The output is one JSON object followed by a newline. `mode` is `dry_run` or
+`execute`. `report` contains `generated_at` (UTC RFC3339),
+`database_size_bytes`, `candidates`, `delivery_retention`,
+`total_candidate_rows`, and `total_estimated_bytes`. The three `candidates`
+keys are `duplicate_git_snapshots`, `obsolete_plan_revisions`, and
+`orphaned_message_payloads`. Each group has integer `rows` and
+`estimated_bytes` and boolean `sample_limit_reached`.
+
+`delivery_retention` has boolean `available` and string `unavailable_reason`
+(empty when available; otherwise `schema_unavailable` or `format_unsupported`).
+When available, its `candidates` contains groups
+`projected_delivery_payloads`, `settled_delivery_prompts`,
+`retired_delivery_event_receipts`, `retired_delivery_session_evidence`, and
+`orphaned_delivery_identities` with the same fields; otherwise `candidates` is
+omitted. Totals sum the reported groups, including bounded samples, and are not
+necessarily database-wide counts. Estimated bytes are row-content estimates,
+not promised disk savings.
+
+An executed outcome adds `execution` with `backup_path`, `partial`, and the
+counts `deleted_git_snapshots`, `deleted_plan_revisions`,
+`deleted_message_payloads`, `deleted_delivery_event_payloads`,
+`deleted_settled_delivery_prompts`, `retired_delivery_event_receipts`,
+`purged_retired_delivery_rows`, `delivery_orphan_jobs_scheduled`, and
+`delivery_retirement_jobs_completed`. A successful compaction adds
+`compaction` with `size_before_bytes`, `size_after_bytes`, and
+`rollback_path`; otherwise that section is omitted. All byte sizes are bytes,
+counts are integers, and omitted sections are not null. Future fields may be
+added; scripts should ignore unknown fields.
+
+`partial` indicates that bounded maintenance work may remain: any candidate
+sample limit, pending delivery work, or a delivery execution error can set it.
+It is not a general success indicator. Check the exit status: if an error
+occurs after work commits, stdout still reports the committed outcome, stderr
+reports the failure, and the exit status is 1. A failure before an outcome may leave stdout empty. A failed stdout
+write can leave incomplete JSON and also produces a nonzero exit.
 
 **Execute.** `--execute` requires exclusive access to the database: it takes
 the same ownership lock a live backend takes at boot, so it refuses to run

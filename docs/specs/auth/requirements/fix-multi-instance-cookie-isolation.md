@@ -96,6 +96,7 @@ cookies being the shared state.
 - **AC-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001.6:** **GIVEN** the same pair, **WHEN** the user selects a workspace in B, **THEN** A's next boot resolves A's own workspace selection, not B's workspace id.
 - **AC-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001.7:** **GIVEN** an instance upgraded from a version that wrote the unprefixed workspace cookie, **WHEN** the instance boots, **THEN** the legacy value is honored when it names one of the instance's own workspaces.
 - **AC-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001.8:** **GIVEN** an instance upgraded from a version that wrote the unprefixed session cookie, **WHEN** the user loads the instance, **THEN** the user is asked to sign in once (the legacy token is not accepted), and the new scoped cookie is used afterwards.
+- **AC-AUTH-FIX-MULTI-INSTANCE-COOKIE-ISOLATION-001.9:** Malformed percent-encoded workspace-selection cookie values are unusable candidates and never abort browser bootstrap. Scoped reads may fall back to a valid legacy selection; otherwise existing validated Office, saved-settings, and first-workspace fallbacks apply. Valid UTF-8 decoding, empty/missing behavior, last matching cookie precedence, port isolation, and one-time validated legacy promotion remain unchanged. No unrelated or legacy cookies are cleared.
 
 ## System design
 

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sync/singleflight"
+	"io"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/hostcli"
@@ -82,6 +84,13 @@ type Controller struct {
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
 	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
+	copilotPluginRunnerImpl     copilotplugins.Runner
+	copilotPluginCache          *copilotPluginDiscoveryCache
+	copilotPluginMu             sync.Mutex
+	copilotPluginGenerations    map[string]uint64
+	copilotPluginGeneration     uint64
+	copilotPluginKey            []byte
+	copilotPluginRandom         io.Reader
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
@@ -111,6 +120,13 @@ type Controller struct {
 	hostCLIModels     map[string]hostCLIModelEntry
 	hostCLIGeneration map[string]uint64
 	hostCLISlots      chan struct{}
+}
+
+// SetCopilotPluginRunner installs the bounded native inventory runner used by
+// profile plugin discovery. Tests inject a fake so no Copilot installation is
+// required.
+func (c *Controller) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	c.copilotPluginRunnerImpl = runner
 }
 
 // SetDynamicAgentRoutingEnabled applies the authoritative runtime flag to the

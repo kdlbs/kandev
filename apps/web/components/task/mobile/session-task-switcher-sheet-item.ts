@@ -5,7 +5,7 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
+import { statusSummaryRowErrorPreview, statusSummaryTurnError } from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
@@ -88,12 +88,19 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
     prInfo: taskPRInfoFromSummary(summary),
-    agentErrorMessage: statusSummaryActiveErrorPreview(
+    agentErrorMessage: statusSummaryRowErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,
       ctx.dismissedAgentErrors,
     ),
+    turnError: sheetTurnError(summary),
   };
+}
+
+function sheetTurnError(summary: Parameters<typeof statusSummaryTurnError>[0]) {
+  const value = statusSummaryTurnError(summary);
+  if (!value) return null;
+  return { stamp: value.stamp, preview: value.preview, sessionId: value.session_id };
 }
 
 export function toSheetItem(

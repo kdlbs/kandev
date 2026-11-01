@@ -27,6 +27,8 @@ import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 import { resolveNewSessionProfileSelection } from "./new-session-profile-selection";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { NewSessionAdvancedSettings } from "./new-session-advanced-settings";
+import { useNewSessionMCPSelection } from "./new-session-mcp";
 import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
@@ -327,6 +329,7 @@ function SessionFormHeader({
 
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
+  portalContainer,
   taskId,
   workspaceId,
   currentProfileId,
@@ -352,6 +355,7 @@ function NewSessionForm({
   groupId?: string;
   handoff?: HandoffPreset;
   onClose: () => void;
+  portalContainer: HTMLElement | null;
 }) {
   const { t } = useTranslation();
   const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
@@ -373,6 +377,20 @@ function NewSessionForm({
     currentProfileId,
     handoff,
   });
+  const taskRepositories = useAppStore(
+    (state) => state.kanban.tasks.find((entry) => entry.id === taskId)?.repositories,
+  );
+  const taskRepositoryIds = useMemo(
+    () => [...new Set((taskRepositories ?? []).map((repository) => repository.repository_id))],
+    [taskRepositories],
+  );
+  const mcp = useNewSessionMCPSelection({
+    workspaceId,
+    taskId,
+    profileId: profileSelection.selectedProfileId,
+    repositoryIds: taskRepositoryIds,
+  });
+  const { selectedIds: mcpServerIds, setSelectedIds: setMcpServerIds } = mcp;
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
     useSessionPromptController(promptRef, taskId);
   const handleContextChange = useSessionContextChange({
@@ -394,6 +412,7 @@ function NewSessionForm({
     initialPrompt,
     agentProfiles,
     groupId,
+    mcpServerIds,
     onClose,
     toast,
     setActiveSession,
@@ -463,6 +482,16 @@ function NewSessionForm({
         pendingResult={pendingResult}
         onApply={applyPending}
         onCopy={copyPending}
+      />
+      <NewSessionAdvancedSettings
+        portalContainer={portalContainer}
+        workspaceId={workspaceId}
+        definitions={mcp.definitions}
+        definitionsLoading={mcp.definitionsLoading}
+        selectedIds={mcpServerIds}
+        onSelectedIdsChange={setMcpServerIds}
+        inherited={mcp.inherited}
+        disabled={isBusyState}
       />
       <DialogFooter>
         <Button
@@ -542,6 +571,7 @@ export function NewSessionDialog({
     sessionProfileId,
   } = useNewSessionDialogState(taskId);
   const executorProfile = useTaskExecutorProfile(taskId, open);
+  const [portalContainer, setPortalContainer] = useState<HTMLDivElement | null>(null);
   const handoffLabel = handoffProfileLabel(agentProfiles, handoff);
   const formKey = handoff
     ? `${taskId}-${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
@@ -549,7 +579,7 @@ export function NewSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="min-w-0 overflow-hidden sm:max-w-[520px]">
+      <DialogContent ref={setPortalContainer} className="min-w-0 sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             {handoffLabel ? (
@@ -568,6 +598,7 @@ export function NewSessionDialog({
           </DialogTitle>
         </DialogHeader>
         <NewSessionForm
+          portalContainer={portalContainer}
           key={formKey}
           taskId={taskId}
           workspaceId={workspaceId ?? resolvedWorkspaceId}

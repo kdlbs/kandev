@@ -17,7 +17,7 @@ pages retain their existing routes and behavior.
 
 | Acceptance criteria | Design section |
 | --- | --- |
-| AC-EXECUTORS-PROFILE-EDITOR-001.1, .2, .7 | Components and navigation |
+| AC-EXECUTORS-PROFILE-EDITOR-001.1, .2, .7, .28 | Components and navigation |
 | AC-EXECUTORS-PROFILE-EDITOR-001.3, .4 | Bookmark compatibility |
 | AC-EXECUTORS-PROFILE-EDITOR-001.5 | State and permissions |
 | AC-EXECUTORS-PROFILE-EDITOR-001.6 | Phone composition |
@@ -30,18 +30,20 @@ pages retain their existing routes and behavior.
 
 ## Components and navigation
 
-`apps/web/app/settings/executors/[profileId]/page.tsx` remains the single
-editor implementation. Its `ProfileEditPage` resolves profile ownership from
-the hydrated executor store. Its existing section components determine which
-controls apply to the executor type.
-
-`executorProfileSettingsPath` in
-`apps/web/lib/settings/executor-settings-routes.ts` takes only `profileId` and
-returns `/settings/executors/${encodeURIComponent(profileId)}`. Profile
-navigation does not depend on executor type. Connection helpers remain separate.
-
+`ProfileEditPage` at `apps/web/app/settings/executors/[profileId]/page.tsx`
+resolves ownership from the hydrated store and selects type-specific controls.
 Hub, settings tree, profile list, task disclosure, discovery, creation and
-credential links use this helper; discovery retains its fragments.
+credential links use `executorProfileSettingsPath(profileId)` from
+`apps/web/lib/settings/executor-settings-routes.ts`, yielding the encoded
+`/settings/executors/:profileId` route independent of executor type. Discovery
+retains fragments; connection helpers remain separate.
+
+Hub and legacy detail share `ExecutorProfilesCard`. A native, focus-visible
+button, named by profile and badge, opens via `onOpen` on Enter, Space, click
+or touch. Sibling delete keeps its refresh path and precedes the right chevron.
+Padding and chevron also open. Phone targets are 44px minimum without
+overlap; desktop delete is 28px. Retain truncation, state and scroll;
+no drawer or copy.
 
 ## Bookmark compatibility
 
@@ -80,19 +82,13 @@ settings shell continues to own unsaved-change prompts and discard behavior.
 
 ## Phone composition
 
-The existing settings index and executor hub provide direct phone navigation.
-`mobile-settings-sidebar.spec.ts` confirms that phones do not expose the desktop
-settings sidebar. No new menu or drawer is required.
-
-The canonical editor (`mobile-executor-profile-spacing.spec.ts`) reuses the
-curated `components/kanban-with-preview.tsx` direct-navigation pattern for a
-primary destination with a long form.
-
-The settings content region remains the single page scroll owner. Cards retain
-their existing vertical rhythm. The shared floating save control remains the
-primary action and retains safe-area clearance. Touch controls retain their
-existing phone sizing. Phone tests cover navigation, editing, save, reload,
-bookmark recovery, and zero horizontal document overflow.
+The settings index and hub provide direct phone navigation without the desktop
+sidebar or a new drawer (`mobile-settings-sidebar.spec.ts`). The canonical
+editor (`mobile-executor-profile-spacing.spec.ts`) follows the curated
+`components/kanban-with-preview.tsx` direct-navigation pattern. Settings content
+remains the single scroll owner; card rhythm, touch sizing, and the floating
+save control's safe-area clearance remain. Phone tests cover navigation,
+editing, save, reload, bookmark recovery, and no horizontal document overflow.
 
 ## Verification boundaries
 
@@ -531,3 +527,4 @@ those surfaces. Public executor instructions and screenshots remain accurate.
 - [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)
 - [Preserve choices during connection refresh](../../../plans/executor-connection-catalogue-preservation/plan.md)
 - [Preserve live executors during profile-card refresh](../../../plans/executor-profile-card-refresh-preservation/plan.md)
+- [Profile-card keyboard access](../../../plans/executor-profile-card-keyboard-navigation/plan.md)

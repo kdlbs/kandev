@@ -22,6 +22,8 @@ import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-
 import type { MessageAction } from "@/components/task/chat/types";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { useTranslation } from "react-i18next";
+import { GridSpinner } from "@/components/grid-spinner";
 
 export const ACTION_ICON_MAP: Record<string, ElementType> = {
   archive: IconArchive,
@@ -119,6 +121,7 @@ type ActionButtonVisualProps = {
   onClick: () => void;
   labelOverride?: string;
   destructive?: boolean;
+  cancelling?: boolean;
 };
 
 function ActionButtonVisual({
@@ -128,7 +131,9 @@ function ActionButtonVisual({
   onClick,
   labelOverride,
   destructive = false,
+  cancelling = false,
 }: ActionButtonVisualProps): ReactElement {
+  const { t } = useTranslation();
   const Icon = action.icon ? ACTION_ICON_MAP[action.icon] : null;
   const sizingClassName = controlSizingClassName(
     compact ? "compact" : "standard",
@@ -150,7 +155,11 @@ function ActionButtonVisual({
       onClick={onClick}
       data-testid={action.test_id}
     >
-      {Icon && <Icon className="h-3 w-3" />}
+      {cancelling ? (
+        <GridSpinner ariaLabel={t("task:cancelling")} />
+      ) : (
+        Icon && <Icon className="h-3 w-3" />
+      )}
       {labelOverride ?? action.label}
     </Button>
   );
@@ -167,9 +176,28 @@ function StandardActionButton({
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const taskId = messageTaskId || activeTaskId;
   const archiveAndSwitch = useArchiveAndSwitchTask();
+  const store = useAppStoreApi();
+  const params = action.params as
+    | { method?: string; payload?: { session_id?: unknown } }
+    | undefined;
+  const cancelSessionId =
+    params?.method === "agent.cancel" && typeof params.payload?.session_id === "string"
+      ? params.payload.session_id
+      : undefined;
+  const cancellationPending = useAppStore((s) =>
+    Boolean(
+      cancelSessionId &&
+      (s.taskSessions.items[cancelSessionId]?.cancellation_pending ||
+        s.chatInput.cancellingBySessionId[cancelSessionId]),
+    ),
+  );
 
   const execute = useCallback(async () => {
-    if (state === "busy") return;
+    if (state === "busy" || cancellationPending) return;
+    if (cancelSessionId) {
+      if (store.getState().chatInput.cancellingBySessionId[cancelSessionId]) return;
+      store.getState().setCancelTurnPending(cancelSessionId, true);
+    }
     setState("busy");
     try {
       await executeStandardAction(action, taskId, archiveAndSwitch, onCompleted);
@@ -177,16 +205,27 @@ function StandardActionButton({
     } catch {
       setState("error");
       setTimeout(() => setState("idle"), 3000);
+    } finally {
+      if (cancelSessionId) store.getState().setCancelTurnPending(cancelSessionId, false);
     }
-  }, [action, state, taskId, archiveAndSwitch, onCompleted]);
+  }, [
+    action,
+    state,
+    taskId,
+    archiveAndSwitch,
+    onCompleted,
+    cancelSessionId,
+    cancellationPending,
+    store,
+  ]);
 
   // Once a ws_request has been fired, hide this button: it's no longer
   // actionable. If the recovery succeeds the whole ActionMessage unmounts via
   // isSessionActive; if it fails, a newer status/error message renders fresh
   // buttons, so this stale one would just confuse the user.
-  if (state === "done" && action.type === "ws_request") return null;
+  if (state === "done" && action.type === "ws_request" && !cancellationPending) return null;
 
-  const disabled = state === "busy" || state === "done";
+  const disabled = state === "busy" || state === "done" || cancellationPending;
   const isDestructive = action.variant === "destructive";
 
   const button = (
@@ -197,6 +236,7 @@ function StandardActionButton({
       onClick={execute}
       labelOverride={labelOverride}
       destructive={isDestructive}
+      cancelling={Boolean(cancelSessionId) && (state === "busy" || cancellationPending)}
     />
   );
 
@@ -237,9 +277,15 @@ function DeleteActionButton({
     async ({
       cascade,
       discardWorktreeChanges,
+      confirmationId,
+      workspaceCleanup,
+      allowUnverifiedWorkspaceChanges,
     }: {
       cascade: boolean;
       discardWorktreeChanges: boolean;
+      confirmationId?: string;
+      workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
     }) => {
       if (!taskId || state === "busy") return;
       setState("busy");
@@ -248,7 +294,14 @@ function DeleteActionButton({
           "delete",
           {
             taskId,
-            mutate: () => deleteTaskById(taskId, { cascade, discardWorktreeChanges }),
+            mutate: () =>
+              deleteTaskById(taskId, {
+                cascade,
+                discardWorktreeChanges,
+                confirmationId,
+                workspaceCleanup,
+                allowUnverifiedWorkspaceChanges,
+              }),
           },
           { cascade },
         );

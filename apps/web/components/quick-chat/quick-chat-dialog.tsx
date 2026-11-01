@@ -133,6 +133,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
         agent_profile_id: selectedAgentId || undefined,
         ...(agentGeneratedTaskTitles ? { auto_title: true } : {}),
       });
+      if (!response.session_id) throw new Error(t("chat:unknownError"));
       const effectiveProfileId = response.agent_profile_id ?? (selectedAgentId || undefined);
       recordQuickChatProfileUse(response.session_id, effectiveProfileId, (record) =>
         applyAgentProfileRecentUse("quick_chat", record),

@@ -33,7 +33,7 @@ export function PreviewSessionTabMenu({
   onShareRequested: (sessionId: string) => void;
   onHandoff: (sessionId: string, profileId: string) => void;
 }) {
-  const { setPrimary, stop, resume, remove } = useSessionActions({
+  const { setPrimary, stop, resume, remove, restart, isRestarting } = useSessionActions({
     sessionId: session.id,
     taskId,
     onDeleted: () => onSessionRemoved(session.id),
@@ -46,7 +46,13 @@ export function PreviewSessionTabMenu({
       canShare={shareableSessionStateClient(session.state)}
       taskId={taskId}
       sessionId={session.id}
-      actions={{ handleSetPrimary: setPrimary, handleStop: stop, handleResume: resume }}
+      actions={{
+        handleSetPrimary: setPrimary,
+        handleStop: stop,
+        handleResume: resume,
+        handleRestart: restart,
+        isRestarting,
+      }}
       onDelete={(event) => onRequestDelete(session.id, event, () => remove({ feedback: "toast" }))}
       onShare={() => onShareRequested(session.id)}
       onHandoffProfile={(profileId) => onHandoff(session.id, profileId)}

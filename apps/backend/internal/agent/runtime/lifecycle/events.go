@@ -75,14 +75,18 @@ func (p *EventPublisher) publishAgentEventWithTerminalEvent(
 		return
 	}
 	payload := newAgentEventPayloadWithTurnIDAndEvidence(execution, terminal.TurnID, evidence)
-	copyDeliveryTerminalIdentity(&payload, terminal)
+	copyDeliveryTerminalIdentity(&payload, terminal, execution)
 	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
 		payload.AttemptID = attemptID
 	}
 	_ = p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
-func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.AgentEvent) {
+func copyDeliveryTerminalIdentity(
+	payload *AgentEventPayload,
+	terminal *streams.AgentEvent,
+	execution *AgentExecution,
+) {
 	if payload == nil || terminal == nil {
 		return
 	}
@@ -91,6 +95,7 @@ func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.
 	payload.DeliveryHarnessGeneration = terminal.DeliveryHarnessGeneration
 	payload.DeliverySequence = terminal.DeliverySequence
 	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
+	copyTerminalStorageIdentity(payload, terminal, execution)
 	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
 	if isError, _ := terminal.Data["is_error"].(bool); isError {
 		payload.DeliveryOutcome = string(models.DeliverySubmissionFailed)
@@ -100,9 +105,8 @@ func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
-// neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, and activityEpoch lets the consumer revalidate that
-// classification before applying a terminal transition.
+// Acceptance and output are independent. The activity epoch lets the consumer
+// reject a stale snapshot before writing an advisory notice.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -111,6 +115,7 @@ func (p *EventPublisher) PublishAgentStalled(
 	stalledFor time.Duration,
 	activityEpoch uint64,
 	neverStarted bool,
+	accepted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -124,6 +129,8 @@ func (p *EventPublisher) PublishAgentStalled(
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,
+		PromptAccepted:   accepted,
+		OutputObserved:   !neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID
@@ -191,6 +198,8 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
 		RunID:                  execution.RunID,
+		CausingRunID:           execution.CausingRunID,
+		TerminalCausingRunID:   execution.TerminalCausingRunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
 		TaskID:                 execution.TaskID,
@@ -444,64 +453,67 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 
 func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
 	return &AgentStreamEventData{
-		Type:                        event.Type,
-		ACPSessionID:                event.SessionID,
-		OperationID:                 event.OperationID,
-		ProtocolMessageID:           event.ProtocolMessageID,
-		Text:                        event.Text,
-		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
-		ToolCallID:                  event.ToolCallID,
-		ParentToolCallID:            event.ParentToolCallID,
-		PendingID:                   event.PendingID,
-		RequestID:                   event.RequestID,
-		ToolName:                    event.ToolName,
-		ToolTitle:                   event.ToolTitle,
-		ToolStatus:                  event.ToolStatus,
-		Error:                       event.Error,
-		PromptFailureDisposition:    event.PromptFailureDisposition,
-		ProviderError:               event.ProviderError,
-		SessionStatus:               event.SessionStatus,
-		SessionSettingsPolicy:       event.SessionSettingsPolicy,
-		SessionSettingsGeneration:   event.SessionSettingsGeneration,
-		PromptGeneration:            event.PromptGeneration,
-		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
-		TurnID:                      event.TurnID,
-		Data:                        event.Data,
-		CanonicalProjection:         event.CanonicalProjection,
-		MessageID:                   event.CanonicalMessageID,
-		IsAppend:                    event.CanonicalMessageAppend,
-		MessageType:                 canonicalMessageType(event),
-		Normalized:                  event.NormalizedPayload,
-		AvailableCommands:           event.AvailableCommands,
-		ToolCallContents:            event.ToolCallContents,
-		ContentBlocks:               event.ContentBlocks,
-		Role:                        event.Role,
-		CurrentModeID:               event.CurrentModeID,
-		RequestedModeID:             event.RequestedModeID,
-		AvailableModes:              event.AvailableModes,
-		SupportsImage:               event.SupportsImage,
-		SupportsAudio:               event.SupportsAudio,
-		SupportsEmbeddedContext:     event.SupportsEmbeddedContext,
-		SupportsPromptQueueing:      event.SupportsPromptQueueing,
-		AuthMethods:                 event.AuthMethods,
-		CurrentModelID:              event.CurrentModelID,
-		FallbackModel:               event.FallbackModel,
-		ModelSelectionWarning:       event.ModelSelectionWarning,
-		SessionModels:               event.SessionModels,
-		ConfigOptions:               event.ConfigOptions,
-		ConfigBaselineCandidate:     event.ConfigBaselineCandidate,
-		OriginalConfigCandidate:     event.OriginalConfigCandidate,
-		SessionTitle:                event.SessionTitle,
-		SessionUpdatedAt:            event.SessionUpdatedAt,
-		SessionMeta:                 event.SessionMeta,
-		Usage:                       event.Usage,
-		UsageObservation:            event.UsageObservation,
-		PlanEntries:                 event.PlanEntries,
-		PlanContent:                 event.PlanContent,
-		MCPAttachment:               event.MCPAttachment,
-		MCPAttachmentAttempt:        event.MCPAttachmentAttempt,
-		BackgroundWork:              event.BackgroundWork,
-		BackgroundWorkOutput:        event.BackgroundWorkOutput,
+		Type:                             event.Type,
+		ACPSessionID:                     event.SessionID,
+		OperationID:                      event.OperationID,
+		ProtocolMessageID:                event.ProtocolMessageID,
+		Text:                             event.Text,
+		ProviderDiagnosticCandidate:      event.ProviderDiagnosticCandidate,
+		ToolCallID:                       event.ToolCallID,
+		ParentToolCallID:                 event.ParentToolCallID,
+		PendingID:                        event.PendingID,
+		RequestID:                        event.RequestID,
+		ToolName:                         event.ToolName,
+		ToolTitle:                        event.ToolTitle,
+		ToolStatus:                       event.ToolStatus,
+		Error:                            event.Error,
+		PromptFailureDisposition:         event.PromptFailureDisposition,
+		ProviderError:                    event.ProviderError,
+		SessionStatus:                    event.SessionStatus,
+		SessionSettingsPolicy:            event.SessionSettingsPolicy,
+		SessionSettingsGeneration:        event.SessionSettingsGeneration,
+		PromptGeneration:                 event.PromptGeneration,
+		RetractedMessageIDs:              append([]string(nil), event.RetractedMessageIDs...),
+		TurnID:                           event.TurnID,
+		Data:                             event.Data,
+		CanonicalProjection:              event.CanonicalProjection,
+		ShellOutputHasContent:            event.ShellOutputHasContent,
+		MessageID:                        event.CanonicalMessageID,
+		IsAppend:                         event.CanonicalMessageAppend,
+		MessageType:                      canonicalMessageType(event),
+		Normalized:                       event.NormalizedPayload,
+		AvailableCommands:                event.AvailableCommands,
+		ToolCallContents:                 event.ToolCallContents,
+		ContentBlocks:                    event.ContentBlocks,
+		Role:                             event.Role,
+		CurrentModeID:                    event.CurrentModeID,
+		RequestedModeID:                  event.RequestedModeID,
+		AvailableModes:                   event.AvailableModes,
+		SupportsImage:                    event.SupportsImage,
+		SupportsAudio:                    event.SupportsAudio,
+		SupportsEmbeddedContext:          event.SupportsEmbeddedContext,
+		SupportsPromptQueueing:           event.SupportsPromptQueueing,
+		SupportsPromptSuggestions:        event.SupportsPromptSuggestions,
+		NativePromptSuggestionsSupported: event.NativePromptSuggestionsSupported,
+		AuthMethods:                      event.AuthMethods,
+		CurrentModelID:                   event.CurrentModelID,
+		FallbackModel:                    event.FallbackModel,
+		ModelSelectionWarning:            event.ModelSelectionWarning,
+		SessionModels:                    event.SessionModels,
+		ConfigOptions:                    event.ConfigOptions,
+		ConfigBaselineCandidate:          event.ConfigBaselineCandidate,
+		OriginalConfigCandidate:          event.OriginalConfigCandidate,
+		SessionTitle:                     event.SessionTitle,
+		SessionUpdatedAt:                 event.SessionUpdatedAt,
+		SessionMeta:                      event.SessionMeta,
+		Usage:                            event.Usage,
+		UsageObservation:                 event.UsageObservation,
+		PlanEntries:                      event.PlanEntries,
+		PlanContent:                      event.PlanContent,
+		MCPAttachment:                    event.MCPAttachment,
+		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		BackgroundWork:                   event.BackgroundWork,
+		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
 }
 
@@ -719,6 +731,14 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 
+		AgentExecutionID: execution.ID,
+		OwnerKind:        executionOwnerKind(execution),
+		WorkspaceID:      execution.WorkspaceID,
+		RunID:            execution.RunID,
+		RunSessionID:     execution.RunSessionID,
+		RunAttempt:       execution.RunAttempt,
+		AgentProfileID:   execution.officeProfileID(),
+
 		AutoApprovedOptionID:   event.AutoApprovedOptionID,
 		AutoApprovalPending:    event.AutoApprovalPending,
 		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
@@ -726,7 +746,9 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
-	subject := events.BuildPermissionRequestSubject(execution.SessionID)
+	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(
+		payload.OwnerKind, execution.SessionID, execution.RunSessionID,
+	))
 
 	const maxAttempts = 3
 	var publishErr error

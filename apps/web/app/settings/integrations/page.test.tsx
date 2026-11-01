@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Component, IntegrationSettingsActionProps } from "@kandev/plugin-sdk";
+import type { Component, IntegrationSettingsActionProps } from "@kdlbs/plugin-sdk";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { IntegrationsIndexPage } from "@/components/integrations/integrations-index-page";
 import { pluginRegistry } from "@/lib/plugins/registry";

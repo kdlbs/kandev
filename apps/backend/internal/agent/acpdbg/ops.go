@@ -226,17 +226,7 @@ func sessionLoadParams(sessionID, workdir string) map[string]any {
 // --- JSON-RPC helpers ---
 
 func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
-	req, _ := r.Framer().NewRequest("initialize", map[string]any{
-		"protocolVersion": 1,
-		"clientInfo": map[string]any{
-			"name":    "acpdbg",
-			"version": "0.1.0",
-		},
-		"clientCapabilities": map[string]any{
-			"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
-			"terminal": false,
-		},
-	})
+	req, _ := r.Framer().NewRequest("initialize", initializeParams(r.cfg.AIRCapabilities))
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
@@ -245,6 +235,34 @@ func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
 		return nil, fmt.Errorf("%v", errMap["message"])
 	}
 	return resp, nil
+}
+
+// initializeParams builds the initialize payload. AIRCapabilities advertises
+// the AIR extension block a debug run needs to observe extension-gated
+// behavior (for example asyncTasks).
+func initializeParams(airCapabilities []string) map[string]any {
+	capabilities := map[string]any{
+		"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
+		"terminal": false,
+	}
+	if len(airCapabilities) > 0 {
+		capabilities["_meta"] = map[string]any{
+			"jetbrains": map[string]any{
+				"air": map[string]any{
+					"version":      1,
+					"capabilities": airCapabilities,
+				},
+			},
+		}
+	}
+	return map[string]any{
+		"protocolVersion": 1,
+		"clientInfo": map[string]any{
+			"name":    "acpdbg",
+			"version": "0.1.0",
+		},
+		"clientCapabilities": capabilities,
+	}
 }
 
 func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {

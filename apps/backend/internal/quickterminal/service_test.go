@@ -40,24 +40,41 @@ func serviceManager(t *testing.T) *loginpty.Manager {
 	return loginpty.NewManager(log, nil)
 }
 
-func TestListMarksAConnectingDescriptorWithoutPTYAsUnavailable(t *testing.T) {
+func TestListKeepsAConnectingDescriptorUntilPTYBinding(t *testing.T) {
 	repo := serviceRepository(t)
+	mgr := serviceManager(t)
+	t.Cleanup(func() { _ = mgr.StopAll() })
 	ctx := context.Background()
 	tabID := "11111111-1111-4111-8111-111111111111"
 	if _, err := repo.Create(ctx, store.DefaultUserID, "workspace-1", tabID); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	svc := NewService(repo, nil, nil)
+	svc := NewService(repo, mgr, nil)
 	tabs, err := svc.List(ctx, "workspace-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(tabs) != 1 || tabs[0].Status != "exited" || tabs[0].Error == "" {
-		t.Fatalf("tabs = %#v, want unavailable exited descriptor", tabs)
+	if len(tabs) != 1 || tabs[0].Status != models.StatusConnecting || tabs[0].Error != "" {
+		t.Fatalf("tabs = %#v, want connecting descriptor without error", tabs)
 	}
 	if tabs[0].SessionID != nil {
 		t.Fatalf("session id = %v, want nil", tabs[0].SessionID)
+	}
+
+	sess, err := mgr.StartWithKey(loginpty.HostShellAgentID+":"+tabID, loginpty.HostShellAgentID, []string{"sh", "-c", "sleep 1"}, 80, 24)
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if err := svc.BindHostShellSession(ctx, tabID, sess.ID); err != nil {
+		t.Fatalf("BindHostShellSession after list: %v", err)
+	}
+	stored, err := repo.Get(ctx, store.DefaultUserID, tabID)
+	if err != nil {
+		t.Fatalf("get bound tab: %v", err)
+	}
+	if stored.Status != models.StatusRunning || stored.SessionID == nil || *stored.SessionID != sess.ID {
+		t.Fatalf("bound tab = %#v, want running session %s", stored, sess.ID)
 	}
 }
 

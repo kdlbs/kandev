@@ -130,9 +130,16 @@ func (r *ExecutorRegistry) RecoverAll(ctx context.Context, records []*models.Exe
 
 // RecoverAllDetailed recovers instances and aggregates candidate-level outcomes across backends.
 func (r *ExecutorRegistry) RecoverAllDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+	return r.recoverDetailed(ctx, records, false)
+}
+
+func (r *ExecutorRegistry) recoverDetailed(ctx context.Context, records []*models.ExecutorRunning, localOnly bool) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
 	r.mu.RLock()
 	backends := make(map[executor.Name]ExecutorBackend, len(r.backends))
 	for name, rt := range r.backends {
+		if localOnly && name != executor.NameStandalone {
+			continue
+		}
 		backends[name] = rt
 	}
 	r.mu.RUnlock()

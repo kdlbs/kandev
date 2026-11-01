@@ -78,7 +78,22 @@ runtime ran out.
   wait expiry or another existing retryable case shall keep its current
   disposition, so a permanent error cannot block the head of the queue.
 
-### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A cancelled resume keeps queued work
+### REQ-TASKS-RESUME-PROMPT-QUEUE-003: A restart starts no agent
+
+**Intent:** Restarting Kandev never starts agent work on its own. Queued work
+stays safe until a user returns to the task.
+
+#### Acceptance criteria
+
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** After a backend restart, pending queued
+  messages shall not start or resume any agent, regardless of Auto-run.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** Across the restart, those messages shall
+  stay pending with their identity, payload, order, and Auto-run setting unchanged.
+- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** When a user opens the task and the
+  session resumes and becomes ready, Auto-run ON shall deliver eligible queued
+  work under existing queue policy, and each message shall be delivered once.
+
+### REQ-TASKS-RESUME-PROMPT-QUEUE-004: A cancelled resume keeps queued work
 
 **Intent:** Stopping or restarting Kandev while a queued prompt waits for its
 session to resume never drops the prompt. The entry returns to its session
@@ -88,7 +103,7 @@ completes.
 
 #### Acceptance criteria
 
-- **AC-TASKS-RESUME-PROMPT-QUEUE-003.1:** When dispatch of a reserved queued
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.1:** When dispatch of a reserved queued
   entry fails because the resume attempt it waited on was cancelled, and no
   part of the prompt reached the agent, Kandev shall return the entry to its
   session queue with its identity, payload, and order unchanged and settle its
@@ -98,11 +113,11 @@ completes.
   refused and the dispatch claim is retained; the existing startup
   reconciliation then parks the session for explicit recovery and returns the
   same entry to its queue when that recovery completes. The entry is not lost.
-- **AC-TASKS-RESUME-PROMPT-QUEUE-003.2:** The returned entry shall wait for the
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.2:** The returned entry shall wait for the
   next existing delivery trigger. Kandev shall not add a timer, retry loop, or
   new resume attempt for it, and a cancelled resume after a delivery attempt
   shall keep its current disposition.
-- **AC-TASKS-RESUME-PROMPT-QUEUE-003.3:** A dispatch failure that matches no
+- **AC-TASKS-RESUME-PROMPT-QUEUE-004.3:** A dispatch failure that matches no
   retained or retryable case shall be logged as dropped, not as lost.
 
 ## Compatibility and exclusions

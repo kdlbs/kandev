@@ -68,6 +68,16 @@ export function linkToTasks(workspaceId?: string): string {
   return workspaceId ? `/tasks?workspace=${workspaceId}` : "/tasks";
 }
 
+export function linkToArchivedTasks(workspaceId: string): string {
+  const params = new URLSearchParams({
+    workspace: workspaceId,
+    archive: "archived",
+    workflow: "all",
+    repository: "all",
+  });
+  return `/tasks?${params.toString()}`;
+}
+
 /**
  * The Threads deck: every live agent conversation side by side. `taskId` asks
  * the deck to scroll that task's column into view on arrival, which is how a

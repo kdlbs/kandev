@@ -5,7 +5,24 @@
       "playwright": {
         "config": ["e2e/playwright.config.ts"],
         "entry": ["e2e/**/*.@(spec|test).?(c|m)[jt]s?(x)", "e2e/global-setup.ts"]
-      }
+      },
+      "entry": [
+        "src/main.tsx",
+        "scripts/check-new-code-i18n.mjs",
+        "scripts/check-guard-allowlist.mjs",
+        "scripts/write-e2e-plugin-identity.mjs"
+      ]
+    },
+    ".": {
+      "ignoreDependencies": ["@commitlint/cli", "@playwright/cli"],
+      "entry": [
+        "backend/cmd/plugin-fixture/fixture-package/ui/bundle.js",
+        "backend/internal/agentctl/server/api/scripts/inspector.js",
+        "backend/internal/mcp/canvasskill/files/scaffold/{appearance,script}.js"
+      ]
+    },
+    "packages/theme": {
+      "ignoreDependencies": ["@tailwindcss/postcss"]
     }
   }
 }

@@ -93,6 +93,27 @@ after journal classification or retirement resumes from retained proof. A single
 does not abort other sessions. Startup and replacement triggers must share bounded ownership
 and cancellation rather than start competing restore workers.
 
+Successor setup events wait within the bounded restore operation instead of
+using a shorter independent event deadline. The execution retains the launch
+owner through native startup and the SQL generation commit. Owner cancellation
+releases a pending wait. A final authoritative read handles cancellation
+immediately after a successful commit. Receipt, projection, and acknowledgement
+remain prohibited before committed generation authority.
+
+On native startup failure, the restore owner also owns cleanup after cancellation.
+It revalidates the pinned checkpoint, workspace owner, and execution identity
+under the session locks. A ready candidate remains available for commit retry.
+Otherwise lifecycle stops the exact failed runtime and calls the durable
+checkpoint writer before removing inventory. A failed SQL commit can disconnect a candidate stream when its launch owner ends.
+A later pass verifies the same execution and initialized native identity, binds
+the new attempt only after the old owner ends, and reconnects before checking
+readiness. A complete, unacknowledged setup prefix without submissions can replay
+from zero while its predecessor generation remains pinned; receipt still waits
+for the successor commit. A failed stop or checkpoint keeps
+the inventory. Confirmed termination advances `candidate_launching` to
+`candidate_dead`, so a later pass can rotate safely even after a crash during
+cleanup. An absent execution row without that proof remains blocked.
+
 When a recovery snapshot exists, both automatic restoration and successful explicit native Resume must commit a newer
 `restored` recovery revision with the matching recovery-block resolution. Keep the original
 recovery identity as historical evidence, and preserve its submission's unknown outcome.

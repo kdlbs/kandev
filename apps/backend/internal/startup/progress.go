@@ -44,12 +44,13 @@ func (p Phase) Label() string {
 }
 
 type Snapshot struct {
-	Phase          Phase         `json:"phase"`
-	Boot           int64         `json:"boot"`
-	Seq            uint64        `json:"seq"`
-	ElapsedMS      int64         `json:"elapsed_ms"`
-	PhaseElapsedMS int64         `json:"phase_elapsed_ms"`
-	Step           *StepSnapshot `json:"step,omitempty"`
+	Phase          Phase                   `json:"phase"`
+	Boot           int64                   `json:"boot"`
+	Seq            uint64                  `json:"seq"`
+	ElapsedMS      int64                   `json:"elapsed_ms"`
+	PhaseElapsedMS int64                   `json:"phase_elapsed_ms"`
+	Step           *StepSnapshot           `json:"step,omitempty"`
+	CompletedSteps []CompletedStepSnapshot `json:"completed_steps,omitempty"`
 }
 
 type Reporter struct {
@@ -57,6 +58,14 @@ type Reporter struct {
 	started, phaseStarted time.Time
 	phase                 Phase
 	log                   *logger.Logger
+	activations           []func() error
+	activated             bool
+	activationComplete    bool
+	activationDone        chan struct{}
+	activationErr         error
+	readyAt               time.Time
+	readyElapsedMS        int64
+	completedSteps        []CompletedStepSnapshot
 
 	boot               int64
 	seq                uint64
@@ -69,7 +78,7 @@ type contextKey struct{}
 
 func New(log *logger.Logger) *Reporter {
 	now := time.Now()
-	return &Reporter{started: now, phaseStarted: now, phase: OpeningDatabase, log: log, boot: newBoot()}
+	return &Reporter{started: now, phaseStarted: now, phase: OpeningDatabase, log: log, boot: newBoot(), activationDone: make(chan struct{})}
 }
 
 // newBoot draws a positive, non-guessable, per-process identifier below 2^53
@@ -102,6 +111,9 @@ func (r *Reporter) Snapshot() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
+	if !r.readyAt.IsZero() {
+		now = r.readyAt
+	}
 	snap := Snapshot{
 		Phase:          r.phase,
 		Boot:           r.boot,
@@ -112,19 +124,31 @@ func (r *Reporter) Snapshot() Snapshot {
 	if r.active != nil {
 		snap.Step = r.active.snapshot(now)
 	}
+	if !r.readyAt.IsZero() {
+		snap.ElapsedMS = r.readyElapsedMS
+	}
+	snap.CompletedSteps = append([]CompletedStepSnapshot(nil), r.completedSteps...)
 	return snap
 }
 func (r *Reporter) Set(phase Phase) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.phase == phase {
+	if r.phase == phase || r.phase == Ready {
 		return
 	}
 	if r.log != nil {
 		r.log.Info("Startup phase completed", zap.String("phase", string(r.phase)), zap.Duration("duration", time.Since(r.phaseStarted)), zap.Duration("elapsed", time.Since(r.started)))
 	}
+	if r.active != nil && r.active.spec.Phase != phase {
+		r.endActiveLocked(false)
+		r.seq++
+	}
 	r.phase = phase
 	r.phaseStarted = time.Now()
+	if phase == Ready {
+		r.readyAt = r.phaseStarted
+		r.readyElapsedMS = r.readyAt.Sub(r.started).Milliseconds()
+	}
 	if r.log != nil {
 		r.log.Info("Startup phase started", zap.String("phase", string(phase)), zap.Duration("elapsed", time.Since(r.started)))
 	}

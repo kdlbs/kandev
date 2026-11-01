@@ -113,7 +113,7 @@ func assertCancelledResumeRestored(
 }
 
 // TestCancelledResumeRestoresOrdinaryQueuedMessage pins
-// AC-TASKS-RESUME-PROMPT-QUEUE-003.1: a queued message whose dispatch ends with
+// AC-TASKS-RESUME-PROMPT-QUEUE-004.1: a queued message whose dispatch ends with
 // ErrResumeAttemptCancelled before anything reached the agent goes back to the
 // queue instead of being left claimed and logged as dropped.
 func TestCancelledResumeRestoresOrdinaryQueuedMessage(t *testing.T) {
@@ -140,7 +140,7 @@ func TestCancelledResumeRestoresOrdinaryQueuedMessage(t *testing.T) {
 }
 
 // TestCancelledResumeRestoresExactReservation pins the exact-session half of
-// AC-TASKS-RESUME-PROMPT-QUEUE-003.1: a dispatch that carries the session
+// AC-TASKS-RESUME-PROMPT-QUEUE-004.1: a dispatch that carries the session
 // incarnation restores onto that same incarnation, and the entry can be
 // reserved again by the next delivery trigger.
 func TestCancelledResumeRestoresExactReservation(t *testing.T) {

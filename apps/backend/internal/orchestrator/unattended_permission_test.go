@@ -175,7 +175,7 @@ func TestHandlePermissionRequestCallsUnattendedHandlerOnlyAfterMessageStored(t *
 	if got := run(t, &mockMessageCreator{}, base); len(got) != 1 || got[0] != (call{"task-1", "session-1", "pending-1", "turn-9"}) {
 		t.Fatalf("stored request: calls = %+v", got)
 	}
-	failing := &mockMessageCreator{permissionMessageCreateFn: func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error) {
+	failing := &mockMessageCreator{permissionMessageCreateFn: func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, models.PermissionRequestMessageOptions) (string, error) {
 		return "", errors.New("db down")
 	}}
 	if got := run(t, failing, base); len(got) != 0 {

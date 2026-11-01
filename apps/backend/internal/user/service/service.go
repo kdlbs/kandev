@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/lsp/installer"
@@ -44,6 +45,19 @@ type Service struct {
 	defaultUser            string
 }
 
+type TurnChangedFilesPolicyResolutionKind = turnchanges.PolicyResolutionKind
+
+const (
+	TurnChangedFilesPolicyAuthenticatedUser = turnchanges.PolicyAuthenticatedUser
+	TurnChangedFilesPolicyDefaultUser       = turnchanges.PolicyDefaultUser
+	TurnChangedFilesPolicySyntheticDefault  = turnchanges.PolicySyntheticDefault
+	TurnChangedFilesPolicyReadFailed        = turnchanges.PolicyReadFailed
+)
+
+// TurnChangedFilesCapturePolicy records the saved setting that governs one
+// admitted turn. It contains the settings identity, not a presumed human actor.
+type TurnChangedFilesCapturePolicy = turnchanges.CapturePolicy
+
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch
 	SidebarLayoutState                *models.SidebarLayoutPatch
@@ -65,6 +79,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
+	PromptSuggestions                 *bool
 	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
@@ -73,6 +88,7 @@ type UpdateUserSettingsRequest struct {
 	ShowTranscriptAutoScrollControl   *bool
 	ShowTodoListPanel                 *bool
 	ShowTodoListPanelOnlyWhenNotEmpty *bool
+	ShowTurnChangedFiles              *bool
 	ShowReleaseNotification           *bool
 	ReleaseNotesLastSeenVersion       *string
 	LspAutoStartLanguages             *[]string
@@ -156,6 +172,30 @@ func (s *Service) settingsUserID(ctx context.Context) string {
 	return identity.UserID
 }
 
+// ResolveTurnChangedFilesCapturePolicy reads the effective settings user once
+// so callers can persist this decision with the admitted turn. On failure it
+// returns a disabled policy and the read error; callers must still dispatch.
+func (s *Service) ResolveTurnChangedFilesCapturePolicy(ctx context.Context) (TurnChangedFilesCapturePolicy, error) {
+	userID := s.settingsUserID(ctx)
+	kind := TurnChangedFilesPolicyDefaultUser
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		if identity.Synthetic {
+			kind = TurnChangedFilesPolicySyntheticDefault
+		} else if identity.UserID != "" {
+			kind = TurnChangedFilesPolicyAuthenticatedUser
+		}
+	}
+	policy := TurnChangedFilesCapturePolicy{SettingsUserID: userID, ResolutionKind: kind}
+	settings, err := s.repo.GetUserSettings(ctx, userID)
+	if err != nil {
+		policy.ResolutionKind = TurnChangedFilesPolicyReadFailed
+		return policy, err
+	}
+	policy.Enabled = settings.ShowTurnChangedFiles
+	policy.Revision = settings.Revision
+	return policy, nil
+}
+
 // GetCurrentUser returns the current (or default) user, mapping a missing
 // row to ErrUserNotFound.
 func (s *Service) GetCurrentUser(ctx context.Context) (*models.User, error) {
@@ -191,6 +231,13 @@ func (s *Service) GetDefaultUtilitySettings(ctx context.Context) (agentID, model
 		return "", "", err
 	}
 	return settings.DefaultUtilityAgentID, settings.DefaultUtilityModel, nil
+}
+
+// PromptSuggestionsEnabled reports whether the user opted in to next-prompt
+// suggestions. A settings read failure leaves suggestions off.
+func (s *Service) PromptSuggestionsEnabled(ctx context.Context) bool {
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+	return err == nil && settings != nil && settings.PromptSuggestions
 }
 
 // GetDefaultUtilityAgentProfileID returns the profile used by new built-in utility actions.
@@ -406,6 +453,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.ShowTurnChangedFiles != nil {
+		settings.ShowTurnChangedFiles = *req.ShowTurnChangedFiles
+	}
 	if req.JiraDefaultViewID != nil {
 		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
 	}
@@ -701,6 +751,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.PromptSuggestions != nil {
+		settings.PromptSuggestions = *req.PromptSuggestions
 	}
 	if req.AutoFocusNewTasks != nil {
 		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
@@ -1203,6 +1256,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
@@ -1211,6 +1265,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
 		"show_todo_list_panel":                     settings.ShowTodoListPanel,
 		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_turn_changed_files":                  settings.ShowTurnChangedFiles,
 		"show_release_notification":                settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":                 settings.LspAutoStartLanguages,

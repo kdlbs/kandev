@@ -229,3 +229,10 @@ next cycle.
 - Agent identity and runtime profiles, owned by the agent system.
 - Executor runtime environments, owned by the executor system.
 - Frontend settings presentation, owned by the UI system.
+
+## Incremental shell delivery extension
+
+[Incremental shell delivery](incremental-shell-delivery.md) defines the
+lifetime write-volume and compatibility contract. It supplements the active
+250 ms snapshot criteria rather than claiming those criteria already bound
+bytes for hours-long sparse streams.

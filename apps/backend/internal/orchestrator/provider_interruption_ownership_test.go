@@ -29,13 +29,7 @@ func dispatchContinuationFixture(t *testing.T) (*Service, *mockAgentManager, *tr
 func installContinuationRestoreFixture(t *testing.T, svc *Service) *mockAgentManager {
 	t.Helper()
 	mgr := svc.agentManager.(*mockAgentManager)
-	if svc.turnService == nil {
-		repo := svc.repo.(*sqliterepo.Repository)
-		svc.turnService = taskservice.NewService(taskservice.Repos{
-			Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo,
-			GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo,
-		}, &recordingEventBus{}, testLogger(), taskservice.RepositoryDiscoveryConfig{})
-	}
+	installInterruptionTurnService(t, svc)
 	mgr.isAgentRunning = true
 	mgr.currentPromptExecutionID = "replacement-1"
 	mgr.currentPromptGeneration.Store(7)
@@ -58,11 +52,46 @@ func installContinuationRestoreFixture(t *testing.T, svc *Service) *mockAgentMan
 	return mgr
 }
 
+func installInterruptionTurnService(t *testing.T, svc *Service) {
+	t.Helper()
+	if svc.turnService != nil {
+		return
+	}
+	repo := svc.repo.(*sqliterepo.Repository)
+	svc.turnService = taskservice.NewService(taskservice.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo,
+		GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo,
+	}, &recordingEventBus{}, testLogger(), taskservice.RepositoryDiscoveryConfig{})
+}
+
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-002.3
 func TestInterruptionContinuationOwnershipCancelAcceptedTurn(t *testing.T) {
 	svc, mgr, _ := dispatchContinuationFixture(t)
 	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
 	require.Equal(t, int32(1), mgr.cancelAgentCalls.Load(), "Cancel must stop the accepted continuation at the provider")
+}
+
+func TestInterruptionContinuationCancelPersistsRecoveryAfterEpisodeRetires(t *testing.T) {
+	svc, mgr, _ := dispatchContinuationFixture(t)
+	messages := svc.messageCreator.(*mockMessageCreator)
+	mgr.cancelAgentFunc = func(_ context.Context, sessionID string) error {
+		svc.resetTransientRetry(sessionID)
+		return nil
+	}
+
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+	_, owned := svc.transientRetries.Load("s1")
+	require.False(t, owned)
+	require.Condition(t, func() bool {
+		messages.mu.Lock()
+		defer messages.mu.Unlock()
+		for _, message := range messages.sessionMessages {
+			if message.metadata["recovery_disposition"] == "cancelled" && message.metadata["recovery_mode"] == recoveryModeContinue {
+				return true
+			}
+		}
+		return false
+	}, "accepted continuation cancellation must persist a recoverable cancelled status")
 }
 
 func TestInterruptionContinuationOwnershipOrdinaryStopRetiresEpisode(t *testing.T) {

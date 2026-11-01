@@ -1,0 +1,93 @@
+{
+  "commit": "cd502a858b41f32d6ad51c0e50db832717b4cb7b",
+  "tasks": {
+    "local": {
+      "task_id": "50270941-f33c-460b-9f57-63366f49cc20",
+      "environment": {
+        "id": "434b75f3-c366-4814-9695-f1fefa5d9909",
+        "status": "ready",
+        "executor_type": "local",
+        "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/research-workspace",
+        "repos": null
+      },
+      "persisted_sources": {
+        "repositories": [
+          {
+            "id": "552a949d-e8c6-4f1e-8299-7c4980742c08",
+            "task_id": "50270941-f33c-460b-9f57-63366f49cc20",
+            "repository_id": "038f0b1c-9260-42a2-b411-29d65077ef37",
+            "base_branch": "main",
+            "position": 1,
+            "created_at": "2026-10-09T14:17:54.159576993Z",
+            "updated_at": "2026-10-09T14:17:54.159576993Z"
+          }
+        ],
+        "workspace_folders": [
+          {
+            "id": "21f0df42-7076-405a-8ac9-7e2938c77141",
+            "task_id": "50270941-f33c-460b-9f57-63366f49cc20",
+            "local_path": "/tmp/kandev-e2e-0-pDDyV2/qa-sources/reference-notes",
+            "display_name": "reference-notes",
+            "workspace_relative_path": "kandev/reference-notes",
+            "position": 0,
+            "created_at": "2026-10-09T14:17:22.785486173Z",
+            "updated_at": "2026-10-09T14:17:22.785486173Z"
+          }
+        ]
+      },
+      "files": ["existing.txt"],
+      "sessions": [
+        {
+          "id": "5b8ebc9f-f5a3-47d3-bb15-3a5d213f3556",
+          "state": "WAITING_FOR_INPUT",
+          "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/research-workspace"
+        }
+      ],
+      "database_environment": {
+        "id": "434b75f3-c366-4814-9695-f1fefa5d9909",
+        "status": "ready",
+        "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/research-workspace",
+        "task_dir_name": ""
+      }
+    },
+    "scratch": {
+      "task_id": "6aa3ced7-9140-4fc8-8af0-6ec84ff64797",
+      "environment": {
+        "id": "75b9f519-875e-4a05-9575-fe78787af2d6",
+        "status": "ready",
+        "executor_type": "local",
+        "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/.kandev/tasks/1ed0e71a-db9e-4e65-a9c5-9ad8d7faf63d/6aa3ced7-9140-4fc8-8af0-6ec84ff64797",
+        "repos": null
+      },
+      "persisted_sources": {
+        "repositories": [
+          {
+            "id": "43cb4ed0-3c79-4a33-88c1-7ba6ead282ee",
+            "task_id": "6aa3ced7-9140-4fc8-8af0-6ec84ff64797",
+            "repository_id": "038f0b1c-9260-42a2-b411-29d65077ef37",
+            "workspace_relative_path": "kandev/E2E-Repo",
+            "base_branch": "main",
+            "position": 0,
+            "created_at": "2026-10-09T14:19:13.824405044Z",
+            "updated_at": "2026-10-09T14:19:13.824405044Z"
+          }
+        ],
+        "workspace_folders": null
+      },
+      "files": [".kandev-workspace.json", "E2E-Repo", ".gitkeep", ".git"],
+      "sessions": [
+        {
+          "id": "0f8204f1-3d09-4b13-8aff-9d3da1c62630",
+          "state": "WAITING_FOR_INPUT",
+          "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/.kandev/tasks/1ed0e71a-db9e-4e65-a9c5-9ad8d7faf63d/6aa3ced7-9140-4fc8-8af0-6ec84ff64797"
+        }
+      ],
+      "database_environment": {
+        "id": "75b9f519-875e-4a05-9575-fe78787af2d6",
+        "status": "ready",
+        "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/.kandev/tasks/1ed0e71a-db9e-4e65-a9c5-9ad8d7faf63d/6aa3ced7-9140-4fc8-8af0-6ec84ff64797",
+        "task_dir_name": ""
+      }
+    }
+  }
+}

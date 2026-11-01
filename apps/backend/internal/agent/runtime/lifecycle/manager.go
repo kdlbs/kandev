@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -49,9 +50,17 @@ type Manager struct {
 	ownerAdmission        OwnerAdmission
 	worktreeMgr           *worktree.Manager
 	mcpProvider           McpConfigProvider
+	mcpResolver           MCPResolutionProvider
+	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
 	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
 	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
-	logger                *logger.Logger
+	// copilotPlugins is the bounded native inventory runner. Tests inject a
+	// fake so plugin resolution never requires an installed Copilot runtime.
+	copilotPlugins copilotplugins.Runner
+	// passthroughRunnerOverride is a test seam for the interactive process
+	// boundary. Production always resolves the executor-backed runner.
+	passthroughRunnerOverride executionPassthroughRunner
+	logger                    *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -82,6 +91,7 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider          WorkspaceInfoProvider
 	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+	turnChangeCaptureHandler       TurnChangeCaptureHandler
 
 	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
 	taskRuntimeFences taskRuntimeOwnershipFences
@@ -119,6 +129,10 @@ type Manager struct {
 	// is contacted, and consulted by Launch to refuse a concurrent request
 	// for a session that might still be re-tracking. Always non-nil.
 	recoveryGuard *RecoveryGuard
+
+	// runtimeStorage holds the latest owner-verified advisory capacity per
+	// session. It is runtime-only and never persisted.
+	runtimeStorage *runtimeStorageProbeState
 
 	// retrackedSessionsMu guards retrackedSessions.
 	retrackedSessionsMu sync.RWMutex
@@ -228,6 +242,7 @@ type Manager struct {
 	remoteContributionPreflightTimeout time.Duration
 	stopCh                             chan struct{}
 	stopOnce                           sync.Once
+	turnChangeRetryMu                  sync.Mutex
 	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
@@ -252,6 +267,9 @@ type Manager struct {
 	// every workspace can be seeded at agentctl-ready time, not just full
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
+
+	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
+	promptSuggestionsPreference PromptSuggestionsPreference
 
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
@@ -339,6 +357,12 @@ func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPComm
 	m.cursorNativeMCPRunner = runner
 }
 
+// SetCopilotPluginRunner installs the bounded runner used to resolve Copilot
+// plugin directories for new local processes. Production uses the exec runner.
+func (m *Manager) SetCopilotPluginRunner(runner copilotplugins.Runner) {
+	m.copilotPlugins = runner
+}
+
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
 // Task launches keep their existing task/session admission when no owner gate
 // is configured.
@@ -361,6 +385,18 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -509,6 +545,7 @@ func NewManager(
 		skillDeployer:                  NoopSkillDeployer(),
 		remediateNpxCache:              routingerr.RemediateNpxCache,
 		recoveryGuard:                  NewRecoveryGuard(),
+		runtimeStorage:                 newRuntimeStorageProbeState(),
 		retrackedSessions:              make(map[string]struct{}),
 		standaloneOwnSessions:          make(map[string]struct{}),
 		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
@@ -537,12 +574,16 @@ func NewManager(
 		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
 	}
 	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
+	mgr.streamManager.onRuntimeStorageProbe = mgr.applyRuntimeStorageProbe
+	mgr.streamManager.onRuntimeStoragePressure = mgr.applyRuntimeStoragePressure
+	mgr.streamManager.onRuntimeStorageDetached = mgr.retireRuntimeStorageObservation
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
 	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
+	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -553,6 +594,13 @@ func NewManager(
 	return mgr
 }
 
+// SetTurnChangeCaptureHandler installs the task-owned immutable interval
+// coordinator. Set this during backend composition before runtime prompts are
+// accepted.
+func (m *Manager) SetTurnChangeCaptureHandler(handler TurnChangeCaptureHandler) {
+	m.turnChangeCaptureHandler = handler
+}
+
 func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 	execution, exists := m.executionStore.Get(failure.ExecutionID)
 	if !exists {
@@ -561,6 +609,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 			zap.Uint64("prompt_generation", failure.PromptGeneration))
 		return
 	}
+	storage, _ := agentctl.StorageDiagnosticFromError(failure.Err)
 	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
@@ -568,6 +617,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		// fallback is permitted; replacing it with a generic label makes a 529
 		// indistinguishable from a local delivery failure.
 		Error:            routingerr.Sanitize(failure.Err.Error()),
+		Storage:          storage,
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,

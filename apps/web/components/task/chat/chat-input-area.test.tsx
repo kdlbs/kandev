@@ -21,6 +21,9 @@ const mockState = {
   office: { tasks: { items: [] } },
 };
 
+vi.mock("@/components/task/chat/use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({ promptSuggestion: null }),
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
   useAppStoreApi: () => ({ getState: () => mockState }),

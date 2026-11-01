@@ -122,6 +122,7 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 	}
 	destinationName, err = installMaterializedAttachment(dir, tmpPath, destinationName)
 	if err != nil {
+		s.logger.Error("install agent attachment", zap.Error(err))
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusInternalServerError, "attachment storage unavailable")
 	}
 	return materializedAttachmentResponse{Name: destinationName, SizeBytes: n}, nil
@@ -177,6 +178,8 @@ func safeAttachmentPath(root string, components ...string) (string, error) {
 	return path, nil
 }
 
+var linkMaterializedAttachment = os.Link
+
 func installMaterializedAttachment(dir, tmpPath, name string) (string, error) {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
@@ -189,7 +192,7 @@ func installMaterializedAttachment(dir, tmpPath, name string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := os.Link(tmpPath, candidatePath); err != nil {
+		if err := linkOrCopyMaterializedAttachment(tmpPath, candidatePath); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
@@ -202,4 +205,49 @@ func installMaterializedAttachment(dir, tmpPath, name string) (string, error) {
 		return candidate, nil
 	}
 	return "", fmt.Errorf("no available attachment destination")
+}
+
+func linkOrCopyMaterializedAttachment(source, destination string) error {
+	linkErr := linkMaterializedAttachment(source, destination)
+	if linkErr == nil || errors.Is(linkErr, os.ErrExist) {
+		return linkErr
+	}
+	if err := copyMaterializedAttachment(source, destination); err != nil {
+		// A collision from exclusive creation still belongs to the naming retry loop.
+		if errors.Is(err, os.ErrExist) {
+			return err
+		}
+		return fmt.Errorf("link or copy attachment: %w", errors.Join(linkErr, err))
+	}
+	return nil
+}
+
+func copyMaterializedAttachment(source, destination string) error {
+	src, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	// Exclusive creation neither overwrites a file nor follows an existing symlink.
+	dst, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := writeMaterializedAttachment(dst, src, info.Size()); err != nil {
+		return errors.Join(err, os.Remove(destination))
+	}
+	return nil
+}
+
+func writeMaterializedAttachment(dst io.WriteCloser, src io.Reader, size int64) error {
+	n, copyErr := io.Copy(dst, io.LimitReader(src, models.MaxMessageAttachmentBytes+1))
+	closeErr := dst.Close()
+	if copyErr == nil && (n != size || n > models.MaxMessageAttachmentBytes) {
+		copyErr = fmt.Errorf("attachment copy size mismatch: copied %d, expected %d", n, size)
+	}
+	return errors.Join(copyErr, closeErr)
 }

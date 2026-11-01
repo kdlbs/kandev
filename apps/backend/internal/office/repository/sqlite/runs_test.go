@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -17,7 +19,7 @@ func TestClaimNextEligibleRun_Basic(t *testing.T) {
 	ctx := context.Background()
 	seedAgentProfile(t, repo.Writer(), "a1", "ws1")
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -45,7 +47,7 @@ func TestClaimNextEligibleRun_SkipsBusyAgent(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a claimed run (agent at capacity).
-	claimed := &models.Run{
+	claimed := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -57,7 +59,7 @@ func TestClaimNextEligibleRun_SkipsBusyAgent(t *testing.T) {
 	}
 
 	// Create a queued run for same agent.
-	queued := &models.Run{
+	queued := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        "{}",
@@ -82,7 +84,7 @@ func TestClaimNextEligibleRun_PicksNextEligible(t *testing.T) {
 	seedAgentProfile(t, repo.Writer(), "a2", "ws2")
 
 	// a1 is at capacity (has a claimed run).
-	atCap := &models.Run{
+	atCap := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -94,7 +96,7 @@ func TestClaimNextEligibleRun_PicksNextEligible(t *testing.T) {
 	}
 
 	// a1 has a queued run.
-	a1Queued := &models.Run{
+	a1Queued := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        "{}",
@@ -106,7 +108,7 @@ func TestClaimNextEligibleRun_PicksNextEligible(t *testing.T) {
 	}
 
 	// a2 has a queued run.
-	a2Queued := &models.Run{
+	a2Queued := &runsmodels.Run{
 		AgentProfileID: "a2",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -134,7 +136,7 @@ func TestClaimNextEligibleRun_ClaimsPausedAgent(t *testing.T) {
 	ctx := context.Background()
 	seedAgentProfile(t, repo.Writer(), "paused-agent-1", "ws1")
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "paused-agent-1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -170,7 +172,7 @@ func TestCoalesceRun(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"t1"}`,
@@ -202,7 +204,7 @@ func TestCheckIdempotencyKey(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -235,7 +237,7 @@ func TestCleanExpired(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -272,7 +274,7 @@ func TestClaimNextEligibleRun_ClaimsWithoutCooldownCheck(t *testing.T) {
 	ctx := context.Background()
 	seedAgentProfile(t, repo.Writer(), "cooldown-agent-1", "ws1")
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "cooldown-agent-1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -309,7 +311,7 @@ func TestClaimNextEligibleRun_AllowsAgentPastCooldown(t *testing.T) {
 		t.Fatalf("update finished: %v", err)
 	}
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a-cd2",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -334,7 +336,7 @@ func TestClaimNextEligibleRun_SkipsScheduledRetryInFuture(t *testing.T) {
 	ctx := context.Background()
 
 	future := time.Now().UTC().Add(10 * time.Minute)
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID:   "a-retry",
 		Reason:           "task_assigned",
 		Payload:          "{}",
@@ -358,7 +360,7 @@ func TestScheduleRetry_ResetsToQueued(t *testing.T) {
 	ctx := context.Background()
 	seedAgentProfile(t, repo.Writer(), "a-sr", "ws1")
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a-sr",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -393,7 +395,7 @@ func TestScheduleRetry_PreservesRunPayloadForResume(t *testing.T) {
 	ctx := context.Background()
 	seedAgentProfile(t, repo.Writer(), "a-resume", "ws1")
 	payload := `{"task_id":"task-1","session_id":"session-1"}`
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a-resume",
 		Reason:         "task_assigned",
 		Payload:        payload,
@@ -435,7 +437,7 @@ func TestRecoverStale(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	req := &models.Run{
+	req := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -471,7 +473,7 @@ func TestGetRunsByCommentIDs_MapsLatestRunPerComment(t *testing.T) {
 	ctx := context.Background()
 
 	// Comment cm-A: a single finished run.
-	runA := &models.Run{
+	runA := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"t1","comment_id":"cm-A"}`,
@@ -487,7 +489,7 @@ func TestGetRunsByCommentIDs_MapsLatestRunPerComment(t *testing.T) {
 	// doesn't write error_message (the column is populated by the
 	// failure-handler path); use the test-only setter to land the
 	// fixture value.
-	runB := &models.Run{
+	runB := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"t1","comment_id":"cm-B"}`,
@@ -525,7 +527,7 @@ func TestGetRunsByCommentIDs_MapsSaltedCommentKeysByPayload(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task","comment_id":"cm-X"}`,
@@ -536,7 +538,7 @@ func TestGetRunsByCommentIDs_MapsSaltedCommentKeysByPayload(t *testing.T) {
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	nilKeyRun := &models.Run{
+	nilKeyRun := &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"target-task","comment_id":"cm-nil-key"}`,

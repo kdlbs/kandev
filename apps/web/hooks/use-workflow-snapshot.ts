@@ -96,7 +96,8 @@ function reconcileFetchedOverview(
 ): boolean {
   if (!readId || !nextState.kanban) return true;
   const state = store.getState();
-  const tasks = reconcileTaskOverviewRead(state.taskOverview, nextState.kanban.tasks, readId, true);
+  const incoming = nextState.kanban.tasks;
+  const tasks = reconcileTaskOverviewRead(state.taskOverview, incoming, readId, true);
   if (!tasks) return false;
   const workflowId = snapshot.workflow.id;
   nextState.kanban.tasks = tasks.filter(
@@ -118,7 +119,7 @@ function reconcileFetchedOverview(
       },
     },
   };
-  state.finishTaskOverviewRead(readId);
+  state.finishTaskOverviewRead(readId, incoming);
   return true;
 }
 

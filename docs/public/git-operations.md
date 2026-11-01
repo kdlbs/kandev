@@ -9,6 +9,11 @@ Kandev runs Git commands in the selected repository workspace for a task session
 
 Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, provider-appropriate pull-request or merge-request creation, **Rebase**, and **Merge** when a Git-capable session is selected.
 
+When a damaged workspace prevents a change check during task deletion, you can
+acknowledge the unknown changes and delete the task. Physical cleanup remains
+subject to ownership and Git identity checks. See
+[delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 ## Quick path
 
 1. Inspect the selected repository in **Changes**.
@@ -82,6 +87,8 @@ the pull-request target. Before launch, Kandev prepares one exact fork remote fo
 and configures Git to use it for pushes. Run ordinary **Push** or `git push`; do not rename `origin`
 or replace it with a fork. The PR workflow uses the canonical repository and an explicit
 `<fork-owner>:<branch>` head. Other tasks keep the normal `origin` push behavior.
+
+When its recorded checkout identity is complete, changing only the comparison base of an existing Worktree task, such as retargeting a stacked pull request to `main`, keeps its current checkout available for Resume and additional sessions. Incomplete identity evidence uses the existing guarded recovery flow. Kandev retains the checkout's recorded identity while using the updated base for comparisons. An explicit checkout-branch selection still requires the matching checkout.
 
 ### Compare a fork pull request
 
@@ -408,12 +415,18 @@ resolve the interrupted operation, and verify before restarting.
 
 After restart, resume the affected session or retry archive or confirmed delete
 through the normal task controls. Check the resulting cleanup job separately.
-**Metadata verification does not mean cleanup completed.** Borrowed workspaces
-remain protected, and dirty-file, branch, commit, ownership, and deletion-consent
-checks still apply. An archived borrower session can continue to protect a
-shared checkout. A cascade delete can report pending cleanup after deleting the
-task rows. Inspect the durable cleanup jobs and workspace-group status separately;
-a completed task cleanup job does not clear an older group cleanup error.
+**Metadata verification does not mean cleanup completed.** Dirty-file, branch,
+commit, ownership, and deletion-consent checks still apply. A borrowed workspace
+stays protected while the borrower can still use it: a live borrower, or one
+whose runtime stop failed, holds a shared checkout. Archiving the borrower
+releases that hold once its session is terminal and no runtime remains. Releasing
+the hold removes nothing while the owner is live. When the owner's archived
+worktree is reclaimed, the shared checkout and any uncommitted borrower files in
+it are removed. If the owner was archived first, reclaim runs on the next 24-hour
+recheck or after a backend restart. A cascade delete can report pending cleanup
+after deleting the task rows. Inspect the durable cleanup jobs and workspace-group
+status separately; a completed task cleanup job does not clear an older group
+cleanup error.
 
 ### Named branch policies
 
@@ -463,12 +476,19 @@ branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch 
 before the title call is preserved as well. Multi-repository tasks apply these rules independently to
 each repository, and a Git or snapshot persistence failure does not undo the accepted title.
 
+Kandev verifies the recorded generated branch at the Git boundary before it renames anything. The
+change comparison for the turn that accepted the title keeps its original interval across that
+verified rename. A rename-only turn therefore stays a zero-file result, and local edits keep their
+captured files and historical content. A manual or external branch switch is not a verified rename,
+so its history remains unavailable. If the `agentctl` process is replaced after the start receipt
+and before the end receipt, history is also unavailable for that turn.
+
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
 ### Deleting a task with local worktree changes
 
-Task deletion checks every owned worktree before it changes the task or starts
-cleanup. If Git reports tracked or untracked changes, deletion stops and the
+Normal task deletion checks every owned worktree before it changes the task or
+starts cleanup. If Git reports tracked or untracked changes, deletion stops and the
 task remains visible. The confirmation dialog lists the affected worktrees and
 requires an explicit choice to permanently discard those changes before a
 retry.
@@ -479,6 +499,11 @@ shared-reference, and branch-safety checks. A branch with unique commits is
 preserved. If the checkout becomes dirty after admission, cleanup preserves the
 checkout and records a terminal failure instead of retrying the destructive
 operation automatically.
+
+To remove the task while preserving its files and branches, select **Keep
+workspace files**. This option also works when workspace inspection fails. See
+[Delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked)
+for the recovery steps and retention limits.
 
 ## Everyday operations
 
@@ -532,6 +557,10 @@ polling is paused. These actions do not wait for the background interval.
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
 
+Turn changed-files cards show the repository interval for one agent turn. Kandev captures the start and end in the executor. Local turns read the exact accepted objects from the surviving common Git directory; disposable and remote turns transfer missing objects into Kandev-owned storage before cleanup. A removed worktree or disposable executor does not change the historical view.
+
+Kandev does not rebuild an earlier diff from the current `HEAD` or working tree. Later edits, commits, and branch changes do not alter that turn's summary. History compaction keeps the turn summary and shows that the historical diff expired when it removes owned checkpoint refs. Backend-owned archive objects are reclaimed only after every retained reference releases them; user branches are never force-cleaned. See [Tasks and Workflows](tasks-and-workflows.md#show-changed-files-after-a-turn) for the user preference and navigation steps.
+
 The Changes toolbar shows a spinner while Git status or inline commit details load.
 If a read fails, it shows a warning and retries automatically with increasing
 delays. The panel keeps the last available file and history data visible while
@@ -546,6 +575,11 @@ Two similarly named actions have very different semantics:
 Do not reset or amend commits already consumed by other users unless you intend to rewrite and force-push the branch. Kandev hides some revert/reset actions for commits it knows are pushed, but that UI guard is not a repository policy or API authorization boundary.
 
 ## Create a pull request or merge request
+
+Submitting closes the creation dialog immediately. If you reopen it while an earlier
+request finishes, that result keeps its original task and repository association
+and preserves your new title, description, and draft choice. A partial failure
+reopens the original form for retry only when you have not replaced that form.
 
 For an ordinary task, **Create PR** first runs:
 

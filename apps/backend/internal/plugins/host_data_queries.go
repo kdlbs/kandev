@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // ── Fetch/filter/sort helpers (v1 scoping: ADR 0043(a) "global-with-hook") ─

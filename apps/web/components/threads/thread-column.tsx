@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type HTMLAttributes,
+  type MutableRefObject,
   type RefObject,
 } from "react";
 import { IconArrowsMaximize } from "@tabler/icons-react";
@@ -117,6 +118,18 @@ function useScrollWhenFocused(isFocused: boolean, layoutKey: string) {
     });
   }, [isFocused, layoutKey]);
   return ref;
+}
+
+function useRequestedSessionSync(
+  requestedSessionId: string | null,
+  requestedSessionRef: MutableRefObject<string | null>,
+  onRequestedSessionChange: (sessionId: string) => void,
+) {
+  useEffect(() => {
+    if (requestedSessionRef.current === requestedSessionId) return;
+    requestedSessionRef.current = requestedSessionId;
+    if (requestedSessionId) onRequestedSessionChange(requestedSessionId);
+  }, [onRequestedSessionChange, requestedSessionId, requestedSessionRef]);
 }
 
 function ThreadSessionMembership({
@@ -297,6 +310,7 @@ function ThreadColumnHeader({
 }
 
 function ThreadColumnBody({
+  bodyRef,
   taskId,
   isPreloaded,
   isDetailActive,
@@ -309,6 +323,7 @@ function ThreadColumnBody({
   onRequestedSessionResolved,
   onInvalidRequestedSession,
 }: {
+  bodyRef: RefObject<HTMLDivElement | null>;
   taskId: string;
   isPreloaded: boolean;
   isDetailActive: boolean;
@@ -322,7 +337,7 @@ function ThreadColumnBody({
   onInvalidRequestedSession?: (taskId: string, sessionId: string) => void;
 }) {
   return (
-    <div className="min-h-0 min-w-0 flex-1">
+    <div ref={bodyRef} className="min-h-0 min-w-0 flex-1">
       {isPreloaded && (
         <ThreadSessionMembership
           taskId={taskId}
@@ -378,6 +393,20 @@ function useThreadComposerInteraction(
   return { disclosure, bindings };
 }
 
+function useThreadBodyDisclosure(
+  disclosure: ReturnType<typeof useThreadComposerInteraction>["disclosure"],
+) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  return {
+    bodyRef,
+    value: {
+      ...disclosure,
+      clarificationAllocationRef: bodyRef,
+      clarificationReservedHeightPx: 80,
+    },
+  };
+}
+
 export function ThreadColumn({
   thread,
   autoHideComposer = false,
@@ -410,14 +439,11 @@ export function ThreadColumn({
     session: statusSession,
   });
 
-  useEffect(() => {
-    if (requestedSessionRef.current === requestedSessionId) return;
-    requestedSessionRef.current = requestedSessionId;
-    if (requestedSessionId) {
-      setSelectedSessionId(requestedSessionId);
-      setRequestedSessionResolved(false);
-    }
-  }, [requestedSessionId]);
+  const handleRequestedSessionChange = useCallback((sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setRequestedSessionResolved(false);
+  }, []);
+  useRequestedSessionSync(requestedSessionId, requestedSessionRef, handleRequestedSessionChange);
 
   const handleSelectSession = useCallback((sessionId: string | null) => {
     setSelectedSessionId(sessionId);
@@ -442,9 +468,10 @@ export function ThreadColumn({
     },
     [focusRef, onColumnRef, thread.taskId],
   );
+  const { bodyRef, value: disclosureContext } = useThreadBodyDisclosure(composer.disclosure);
 
   return (
-    <ComposerDisclosureContext value={composer.disclosure}>
+    <ComposerDisclosureContext value={disclosureContext}>
       <section
         {...composer.bindings}
         ref={setColumnRef}
@@ -452,20 +479,6 @@ export function ThreadColumn({
         data-testid={`thread-column-${thread.taskId}`}
         data-focused={isFocused ? "true" : undefined}
         aria-label={t("threads:columnLabel", { title: thread.title })}
-        // Phone: one column fills the viewport and snaps, so the deck is paged
-        // instead of pinch-scrolled.
-        //
-        // Desktop: columns share the width rather than taking a fixed slice, so
-        // two threads fill the board instead of leaving it mostly empty. The min
-        // width is the floor they stop shrinking at, which is what turns a busy
-        // deck into a horizontal scroll rather than a row of slivers.
-        //
-        // Two marks, deliberately different properties so they can coexist
-        // without fighting over one ring colour:
-        //   ring    — where the caret is. A composer's own border tracks agent
-        //             state, not focus, so in a deck of composers nothing else
-        //             says where typing would land.
-        //   outline — the column a deep link asked for.
         className="flex h-full min-h-0 min-w-0 w-full shrink-0 snap-start flex-col overflow-hidden bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-[-2px] data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink md:rounded-lg md:border md:data-[focused=true]:outline-offset-2"
       >
         <ThreadColumnHeader
@@ -478,6 +491,7 @@ export function ThreadColumn({
           onOpenTask={onOpenTask}
         />
         <ThreadColumnBody
+          bodyRef={bodyRef}
           taskId={thread.taskId}
           isPreloaded={isPreloaded}
           isDetailActive={isDetailActive}

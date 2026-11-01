@@ -279,6 +279,45 @@ func TestWorktreePreparer_SingleRepoProjectsBranchMetadata(t *testing.T) {
 	}
 }
 
+func TestWorktreePreparer_MultiRepo_UsesTaskRootForParentLayoutAndPreservesDestinations(t *testing.T) {
+	repoA := initBareGitRepo(t, "nested-frontend")
+	repoB := initBareGitRepo(t, "nested-backend")
+
+	preparer, _ := newPreparerForTest(t)
+	req := &EnvPrepareRequest{
+		TaskID:          "task-multi-parent",
+		SessionID:       "sess-multi-parent",
+		TaskTitle:       "Parent Layout Task",
+		ExecutorType:    executor.NameStandalone,
+		TaskDirName:     "parent-layout-task_aaa",
+		WorkspaceLayout: "task_root",
+		Repositories: []RepoPrepareSpec{
+			{RepositoryID: "repo-front", RepositoryPath: repoA, RepoName: "frontend", BaseBranch: "main", WorkspaceRelativePath: "frontend"},
+			{RepositoryID: "repo-back", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "main", WorkspaceRelativePath: "frontend/kandev/backend"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("prepare failed: %s", res.ErrorMessage)
+	}
+	if len(res.Worktrees) != 2 {
+		t.Fatalf("worktrees = %d, want two", len(res.Worktrees))
+	}
+	if res.WorkspacePath != filepath.Dir(res.Worktrees[0].WorktreePath) {
+		t.Fatalf("workspace path = %q, want task root %q", res.WorkspacePath, filepath.Dir(res.Worktrees[0].WorktreePath))
+	}
+	if res.Worktrees[0].WorkspaceRelativePath != "frontend" || res.Worktrees[1].WorkspaceRelativePath != "frontend/kandev/backend" {
+		t.Fatalf("worktree destinations = %+v", res.Worktrees)
+	}
+	if res.Worktrees[1].WorktreePath != filepath.Join(res.WorkspacePath, "frontend", "kandev", "backend") {
+		t.Fatalf("nested worktree path = %q, want under task root %q", res.Worktrees[1].WorktreePath, res.WorkspacePath)
+	}
+}
+
 func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	repoA := initBareGitRepo(t, "good")
 	// repoB is intentionally a non-git directory to force the second create to fail.
@@ -320,6 +359,9 @@ func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	for _, wt := range all {
 		if wt.Status == worktree.StatusActive {
 			t.Errorf("expected no active worktrees after rollback; found %s in %s", wt.ID, wt.Path)
+		}
+		if _, statErr := os.Stat(wt.Path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("newly-created worktree path %q remains after rollback: stat error = %v", wt.Path, statErr)
 		}
 	}
 }
@@ -489,45 +531,73 @@ func TestWorktreePreparer_MultiRepo_RollbackKeepsReusedWorktrees(t *testing.T) {
 }
 
 func TestWorktreePreparer_MultiRepo_RollbackRemovesWorktreeCreatedForStaleReuseID(t *testing.T) {
-	repoNew := initBareGitRepo(t, "stale-new")
-	repoBad := t.TempDir()
+	for _, test := range []struct {
+		name     string
+		recreate bool
+	}{
+		{name: "stale reuse ID"},
+		{name: "missing registered checkout", recreate: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repoNew := initBareGitRepo(t, "stale-new")
+			repoBad := t.TempDir()
 
-	preparer, mgr := newPreparerForTest(t)
-	req := &EnvPrepareRequest{
-		TaskID:       "task-stale-reuse-fail",
-		SessionID:    "sess-stale-reuse-fail",
-		TaskTitle:    "Stale Reuse Then Fail",
-		ExecutorType: executor.NameStandalone,
-		TaskDirName:  "stale-reuse-fail_ddd",
-		Repositories: []RepoPrepareSpec{
-			{
-				RepositoryID:   "repo-new",
-				RepositoryPath: repoNew,
-				RepoName:       "stale-new",
-				BaseBranch:     "main",
-				WorktreeID:     "wt-stale",
-			},
-			{RepositoryID: "repo-bad", RepositoryPath: repoBad, RepoName: "bad", BaseBranch: "main"},
-		},
+			preparer, mgr := newPreparerForTest(t)
+			req := &EnvPrepareRequest{
+				TaskID:       "task-stale-reuse-fail",
+				SessionID:    "sess-stale-reuse-fail",
+				TaskTitle:    "Stale Reuse Then Fail",
+				ExecutorType: executor.NameStandalone,
+				TaskDirName:  "stale-reuse-fail_ddd",
+				Repositories: []RepoPrepareSpec{
+					{
+						RepositoryID:   "repo-new",
+						RepositoryPath: repoNew,
+						RepoName:       "stale-new",
+						BaseBranch:     "main",
+						WorktreeID:     "wt-stale",
+					},
+					{RepositoryID: "repo-bad", RepositoryPath: repoBad, RepoName: "bad", BaseBranch: "main"},
+				},
+			}
+
+			var recreatedPath string
+			if test.recreate {
+				req.Repositories[0].WorktreeID = ""
+				seed, _, _, _, err := preparer.prepareOneRepo(context.Background(), req, req.Repositories[0], 0, 2, nil, nil)
+				if err != nil || seed == nil {
+					t.Fatalf("seed registered checkout: result=%+v error=%v", seed, err)
+				}
+				recreatedPath = seed.Path
+				runGitForPreparerTest(t, repoNew, "worktree", "remove", recreatedPath)
+			}
+
+			res, err := preparer.Prepare(context.Background(), req, nil)
+			if err != nil {
+				t.Fatalf("prepare returned hard error: %v", err)
+			}
+			if res.Success {
+				t.Fatal("expected failure when final repo is not a git repo")
+			}
+
+			all, err := mgr.GetAllByTaskID(context.Background(), "task-stale-reuse-fail")
+			if err != nil {
+				t.Fatalf("list worktrees: %v", err)
+			}
+			for _, wt := range all {
+				if wt.Status == worktree.StatusActive {
+					t.Fatalf("worktree %s should have been rolled back after stale reuse ID created it", wt.ID)
+				}
+			}
+			if recreatedPath != "" {
+				if _, err := os.Stat(recreatedPath); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("recreated checkout remains after rollback: %v", err)
+				}
+			}
+
+		})
 	}
 
-	res, err := preparer.Prepare(context.Background(), req, nil)
-	if err != nil {
-		t.Fatalf("prepare returned hard error: %v", err)
-	}
-	if res.Success {
-		t.Fatal("expected failure when final repo is not a git repo")
-	}
-
-	all, err := mgr.GetAllByTaskID(context.Background(), "task-stale-reuse-fail")
-	if err != nil {
-		t.Fatalf("list worktrees: %v", err)
-	}
-	for _, wt := range all {
-		if wt.Status == worktree.StatusActive {
-			t.Fatalf("worktree %s should have been rolled back after stale reuse ID created it", wt.ID)
-		}
-	}
 }
 
 // TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask

@@ -1,3 +1,4 @@
+import { githubOrigin } from "@/lib/github/host";
 import { ApiError } from "@/lib/api/client";
 import type {
   GitHubAppManifestOwnerType,
@@ -140,11 +141,18 @@ export function appRegistrationError(error: unknown) {
   return error.body as GitHubAppRegistrationErrorBody;
 }
 
-export function githubAppSettingsURL(ownerType: GitHubAppOwnerType, owner: string, slug: string) {
-  if (!owner || !slug) return "https://github.com/settings/apps";
+export function githubAppSettingsURL(
+  ownerType: GitHubAppOwnerType,
+  owner: string,
+  slug: string,
+  host = "github.com",
+) {
+  const origin = githubOrigin(host);
+  if (!origin) return "";
+  if (!owner || !slug) return `${origin}/settings/apps`;
   return ownerType === "Organization"
-    ? `https://github.com/organizations/${encodeURIComponent(owner)}/settings/apps/${encodeURIComponent(slug)}`
-    : `https://github.com/settings/apps/${encodeURIComponent(slug)}`;
+    ? `${origin}/organizations/${encodeURIComponent(owner)}/settings/apps/${encodeURIComponent(slug)}`
+    : `${origin}/settings/apps/${encodeURIComponent(slug)}`;
 }
 
 export const defaultVisibility: GitHubAppVisibility = "private";

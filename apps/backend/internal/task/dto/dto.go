@@ -198,6 +198,7 @@ type EnvironmentDTO struct {
 type TaskDTO struct {
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
+	InitialWorkspaceLayout      string                         `json:"initial_workspace_layout,omitempty"`
 	WorkflowID                  string                         `json:"workflow_id"`
 	WorkflowStepID              string                         `json:"workflow_step_id"`
 	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
@@ -295,6 +296,9 @@ type TaskDTO struct {
 	// idempotency (docs/specs/tasks/requirements/external-id-idempotency.md). Omitted
 	// when the task holds none.
 	ExternalID string `json:"external_id,omitempty"`
+	// QuickChatCreationID is the exact retry token carried by lifecycle
+	// projections for an internally keyed Quick Chat creation.
+	QuickChatCreationID string `json:"quick_chat_creation_id,omitempty"`
 	// IsFromOffice is the authoritative "this task is owned by office"
 	// flag. Computed by the task repo at read time as
 	// (project_id != '' OR workflow_id == workspace.office_workflow_id).
@@ -339,6 +343,7 @@ type TaskRepositoryDTO struct {
 	ID                            string                            `json:"id"`
 	TaskID                        string                            `json:"task_id"`
 	RepositoryID                  string                            `json:"repository_id"`
+	WorkspaceRelativePath         string                            `json:"workspace_relative_path,omitempty"`
 	BaseBranch                    string                            `json:"base_branch"`
 	CheckoutBranch                string                            `json:"checkout_branch,omitempty"`
 	BranchPolicyID                string                            `json:"branch_policy_id,omitempty"`
@@ -354,13 +359,14 @@ type TaskRepositoryDTO struct {
 
 // TaskWorkspaceFolderDTO is the API projection of a durable non-Git source.
 type TaskWorkspaceFolderDTO struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	LocalPath   string    `json:"local_path"`
-	DisplayName string    `json:"display_name"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"task_id"`
+	LocalPath             string    `json:"local_path"`
+	DisplayName           string    `json:"display_name"`
+	WorkspaceRelativePath string    `json:"workspace_relative_path,omitempty"`
+	Position              int       `json:"position"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // WorkspaceRecoveryDTO contains only the path-free public progress projection.
@@ -468,6 +474,9 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering is true when a send right now would be delivered into the
 	// still-generating turn (mid-turn steering) rather than blocked/queued.
 	// Derived live at serialization from the connected agent's negotiated
@@ -650,6 +659,9 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// RuntimeStorageHealth mirrors the lifecycle-owned advisory capacity
+	// projection. It is never persisted and stays absent for older sources.
+	RuntimeStorageHealth *RuntimeStorageHealthDTO `json:"runtime_storage_health,omitempty"`
 	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
@@ -1124,6 +1136,7 @@ func FromTaskWithSessionInfo(
 			ID:                            repo.ID,
 			TaskID:                        repo.TaskID,
 			RepositoryID:                  repo.RepositoryID,
+			WorkspaceRelativePath:         repo.WorkspaceRelativePath,
 			BaseBranch:                    repo.BaseBranch,
 			CheckoutBranch:                repo.CheckoutBranch,
 			BranchPolicyID:                repo.BranchPolicyID,
@@ -1140,19 +1153,21 @@ func FromTaskWithSessionInfo(
 	var workspaceFolders []TaskWorkspaceFolderDTO
 	for _, folder := range task.WorkspaceFolders {
 		workspaceFolders = append(workspaceFolders, TaskWorkspaceFolderDTO{
-			ID:          folder.ID,
-			TaskID:      folder.TaskID,
-			LocalPath:   folder.LocalPath,
-			DisplayName: folder.DisplayName,
-			Position:    folder.Position,
-			CreatedAt:   folder.CreatedAt,
-			UpdatedAt:   folder.UpdatedAt,
+			ID:                    folder.ID,
+			TaskID:                folder.TaskID,
+			LocalPath:             folder.LocalPath,
+			DisplayName:           folder.DisplayName,
+			WorkspaceRelativePath: folder.WorkspaceRelativePath,
+			Position:              folder.Position,
+			CreatedAt:             folder.CreatedAt,
+			UpdatedAt:             folder.UpdatedAt,
 		})
 	}
 
 	return TaskDTO{
 		ID:                          task.ID,
 		WorkspaceID:                 task.WorkspaceID,
+		InitialWorkspaceLayout:      task.InitialWorkspaceLayout,
 		WorkflowID:                  task.WorkflowID,
 		WorkflowStepID:              task.WorkflowStepID,
 		WorkflowAgentOverrides:      workflowAgentOverrides,
@@ -1204,6 +1219,7 @@ func FromTaskWithSessionInfo(
 		Labels:                 task.Labels,
 		Identifier:             task.Identifier,
 		ExternalID:             task.ExternalID,
+		QuickChatCreationID:    service.QuickChatCreationIDFromExternalID(task.ExternalID),
 		IsFromOffice:           task.IsFromOffice,
 	}
 }
@@ -1687,13 +1703,22 @@ func FromTurn(turn *models.Turn) TurnDTO {
 		completedAt = &formatted
 	}
 
+	metadata := make(map[string]interface{}, len(turn.Metadata))
+	for key, value := range turn.Metadata {
+		if key != models.TurnMetaKeyTurnChangeActorUserID && key != models.TurnMetaKeyTurnChangeSyntheticActor {
+			metadata[key] = value
+		}
+	}
+	if len(metadata) == 0 {
+		metadata = nil
+	}
 	return TurnDTO{
 		ID:          turn.ID,
 		SessionID:   turn.TaskSessionID,
 		TaskID:      turn.TaskID,
 		StartedAt:   turn.StartedAt.UTC().Format(turnTimestampLayout),
 		CompletedAt: completedAt,
-		Metadata:    turn.Metadata,
+		Metadata:    metadata,
 		CreatedAt:   turn.CreatedAt.UTC().Format(turnTimestampLayout),
 		UpdatedAt:   turn.UpdatedAt.UTC().Format(turnTimestampLayout),
 	}

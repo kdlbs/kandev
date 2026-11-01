@@ -1,23 +1,11 @@
 "use client";
 
-import { type ReactNode, useEffect } from "react";
-import { useTheme } from "@/components/theme/app-theme";
-import { WorkerPoolContextProvider, useWorkerPool } from "@pierre/diffs/react";
+import { type ReactNode } from "react";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { PIERRE_THEME } from "@/lib/theme/colors";
 
 const workerFactory = () =>
   new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), { type: "module" });
-
-function ThemeSync() {
-  const { resolvedTheme } = useTheme();
-  const pool = useWorkerPool();
-  useEffect(() => {
-    pool?.setRenderOptions({
-      theme: resolvedTheme === "dark" ? PIERRE_THEME.dark : PIERRE_THEME.light,
-    });
-  }, [pool, resolvedTheme]);
-  return null;
-}
 
 export function DiffWorkerPoolProvider({ children }: { children: ReactNode }) {
   return (
@@ -29,11 +17,11 @@ export function DiffWorkerPoolProvider({ children }: { children: ReactNode }) {
         // initialization on cold CI/Docker starts (can take >60s), causing diff views to
         // remain empty until all imports complete.
         langs: [],
-        theme: PIERRE_THEME.dark,
+        // Each viewer selects its color scheme from the same dual-theme tokens.
+        theme: PIERRE_THEME,
         lineDiffType: "word",
       }}
     >
-      <ThemeSync />
       {children}
     </WorkerPoolContextProvider>
   );

@@ -29,6 +29,8 @@ import {
 } from "./clarification-overlay-parts";
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
+import { QuestionImages } from "./question-images";
+import { useClarificationDraft } from "./clarification-draft-context";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -37,6 +39,7 @@ type ClarificationInputOverlayProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   keyboardShortcutsEnabled?: boolean;
+  previewsEnabled?: boolean;
   /** True when the session no longer has a live clarification waiter. */
   agentDisconnected?: boolean;
   // Called when the user presses Escape. Unlike Skip, this must not answer or
@@ -45,6 +48,10 @@ type ClarificationInputOverlayProps = {
   onDismiss: () => void;
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
+  onExpandPanel?: () => void;
+  onResetPanel?: () => void;
+  canExpandPanel?: boolean;
+  canResetPanel?: boolean;
   collapseContentId?: string;
   // Additive: reports every settled submission outcome, distinct from
   // onResolved's narrower "this caller's own answer landed" signal. The
@@ -81,21 +88,6 @@ function readSingleQuestionMeta(message: Message | null | undefined): SingleQues
 function resolveQuestionMessages(messages: readonly Message[] | null | undefined): Message[] {
   if (messages && messages.length > 0) return [...messages];
   return [];
-}
-
-function useResetOverlayStateOnBundleChange(
-  pendingId: string | null,
-  setCustomDrafts: (drafts: Record<string, string>) => void,
-  setActiveIndex: (index: number) => void,
-) {
-  useEffect(() => {
-    // The hook resets its answer and retry state when a new pending bundle
-    // replaces the current one. Drafts and carousel navigation are overlay-
-    // local state, so they need the same lifecycle fence as well. Question IDs
-    // can repeat across bundles, which makes an ID-only draft key unsafe.
-    setCustomDrafts({});
-    setActiveIndex(0);
-  }, [pendingId, setCustomDrafts, setActiveIndex]);
 }
 
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
@@ -136,6 +128,8 @@ function computeAllAnswered(
 }
 
 type CardProps = {
+  previewsEnabled: boolean;
+  onInspectionChange: (open: boolean) => void;
   meta: SingleQuestionMeta;
   index: number;
   total: number;
@@ -199,12 +193,32 @@ function ClarificationCard(props: CardProps) {
       >
         {question.prompt}
       </ClarificationMarkdown>
+      <QuestionImages
+        pendingId={metadata.pending_id}
+        questionId={meta.questionId}
+        sessionId={meta.message.session_id}
+        images={question.images}
+        enabled={props.previewsEnabled}
+        onInspectionChange={props.onInspectionChange}
+      />
       <ClarificationOptions
         options={question.options}
         selectedOption={selectedOption}
         isSubmitting={isSubmitting}
         customActive={customActive}
         onSelectOption={onSelectOption}
+        renderOptionPreview={(option) =>
+          option.images?.length ? (
+            <QuestionImages
+              pendingId={metadata.pending_id}
+              questionId={meta.questionId}
+              sessionId={meta.message.session_id}
+              images={option.images}
+              enabled={props.previewsEnabled}
+              onInspectionChange={props.onInspectionChange}
+            />
+          ) : null
+        }
       />
       {showAgentDisconnected && (
         <div
@@ -401,6 +415,8 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
 }
 
 type CarouselBodyProps = {
+  previewsEnabled: boolean;
+  onInspectionChange: (open: boolean) => void;
   sortedMessages: Message[];
   meta: SingleQuestionMeta | null;
   group: ReturnType<typeof useClarificationGroup>;
@@ -541,6 +557,8 @@ function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
   };
 }
 function ClarificationCarouselBody({
+  previewsEnabled,
+  onInspectionChange,
   sortedMessages,
   meta,
   group,
@@ -590,6 +608,8 @@ function ClarificationCarouselBody({
   return (
     <>
       <ClarificationCard
+        previewsEnabled={previewsEnabled}
+        onInspectionChange={onInspectionChange}
         meta={meta}
         index={activeIndex}
         total={total}
@@ -641,13 +661,19 @@ export function ClarificationInputOverlay({
   initialAnswers,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
+  previewsEnabled = true,
   agentDisconnected = false,
   onDismiss,
   onCollapse,
+  onExpandPanel,
+  onResetPanel,
+  canExpandPanel,
+  canResetPanel,
   collapseContentId,
   lateAnswerState,
 }: ClarificationInputOverlayProps) {
   const { t } = useTranslation();
+  const [inspectingImage, setInspectingImage] = useState(false);
   const lateMode = mode === "late";
   const sortedMessages = useMemo(
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
@@ -668,12 +694,18 @@ export function ClarificationInputOverlay({
     group.lateAnswerState === "sending" ||
     effectiveLateStatus === "sending";
   const lateInteraction = lateMode || group.lateAnswerState !== "idle";
-  const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
-  const [rawActiveIndex, setActiveIndex] = useState(0);
-  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
+  const draftKey = group.pendingId
+    ? JSON.stringify([sortedMessages[0]?.session_id, group.pendingId, mode])
+    : null;
+  const { customDrafts, setCustomDrafts, rawActiveIndex, setActiveIndex, savedAnswers } =
+    useClarificationDraft(
+      draftKey,
+      group.answers,
+      group.submitState === "ok" || group.submitState === "expired",
+    );
   const restoredAnswers = lateMode
     ? (lateAnswerState?.snapshot?.answers ?? initialAnswers)
-    : initialAnswers;
+    : (initialAnswers ?? savedAnswers);
   const initialAnswersKey = JSON.stringify(restoredAnswers ?? []);
   useEffect(() => {
     if (!restoredAnswers || restoredAnswers.length === 0) return;
@@ -743,6 +775,7 @@ export function ClarificationInputOverlay({
   // that would actually handle Escape never mounted in the first place.
   const armedEventRef = useEscapeGuardRegistration(
     keyboardShortcutsEnabled &&
+      !inspectingImage &&
       !isSubmitting &&
       group.submitState !== "expired" &&
       group.lateAnswerState !== "sent" &&
@@ -806,6 +839,10 @@ export function ClarificationInputOverlay({
         lateMode={lateInteraction}
         onLateClose={onDismiss}
         onCollapse={onCollapse}
+        onExpandPanel={onExpandPanel}
+        onResetPanel={onResetPanel}
+        canExpandPanel={canExpandPanel}
+        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
       />
       {group.submitState === "error" && (
@@ -817,14 +854,13 @@ export function ClarificationInputOverlay({
           <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
         )}
       {sharedContext && (
-        <div
-          data-testid="clarification-context"
-          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap text-[13px]"
-        >
-          {sharedContext}
+        <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
+          <ClarificationMarkdown variant="context">{sharedContext}</ClarificationMarkdown>
         </div>
       )}
       <ClarificationCarouselBody
+        previewsEnabled={previewsEnabled}
+        onInspectionChange={setInspectingImage}
         sortedMessages={sortedMessages}
         meta={meta}
         group={group}
@@ -837,7 +873,7 @@ export function ClarificationInputOverlay({
         agentDisconnected={agentDisconnected}
         shortcutScopeRef={shortcutScopeRef}
         armedEventRef={armedEventRef}
-        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled && !inspectingImage}
         onSubmit={handleSubmit}
         submitAnswers={submitAnswers}
         autoSubmitSingleQuestion={!lateInteraction}

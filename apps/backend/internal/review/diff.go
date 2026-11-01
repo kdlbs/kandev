@@ -9,6 +9,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -110,7 +111,9 @@ func CollectChanges(ctx context.Context, src ChangeSource, sessionID, repository
 	// A missing or failed cumulative diff is not fatal: uncommitted work alone
 	// is still reviewable, and a repo-less or freshly-branched task legitimately
 	// has no committed range.
-	if committed, cumErr := src.CommittedFiles(ctx, sessionID); cumErr == nil {
+	if committed, cumErr := src.CommittedFiles(ctx, sessionID); errors.Is(cumErr, ErrWorkspaceUnavailable) {
+		return nil, fmt.Errorf("%w: read committed comparison: %w", ErrWorkspaceUnavailable, cumErr)
+	} else if cumErr == nil {
 		addRawFiles(byKey, committed, sourceCommitted)
 	}
 

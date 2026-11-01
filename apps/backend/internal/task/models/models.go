@@ -849,6 +849,14 @@ const TurnMetaKeyWorkflowStepTransitionIDAtStart = "workflow_step_transition_id_
 // turn authority, so every current-turn resolution site excludes it.
 const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
+// TurnMetaKeyTurnChangeActorUserID preserves the initiating settings identity
+// for an admitted turn whose prompt is dispatched from a detached goroutine.
+const TurnMetaKeyTurnChangeActorUserID = "turn_change_actor_user_id"
+
+// TurnMetaKeyTurnChangeSyntheticActor preserves the single-user settings
+// authority when an admitted turn is dispatched asynchronously.
+const TurnMetaKeyTurnChangeSyntheticActor = "turn_change_synthetic_actor"
+
 // TurnMetaKeyErrorTerminated marks a turn that ended in a recoverable agent
 // failure. The failure's recovery/error entry is the turn's outcome, so a turn
 // carrying this marker reports had_output=true at completion even though a
@@ -1151,6 +1159,10 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 // attempt identity.
 const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
+// SessionMetaKeyQuickChatStartAttemptID identifies the request-level owner of
+// a deferred Quick Chat start until its accepted lifecycle transition settles.
+const SessionMetaKeyQuickChatStartAttemptID = "quick_chat_start_attempt_id"
+
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
 const SessionMetaKeyLastAgentError = "last_agent_error"
@@ -1294,6 +1306,12 @@ func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
 				cause.PromptNotSent = &promptNotSent
 			}
 		}
+		if value, ok := fields["storage"]; ok {
+			var storage AgentErrorStorage
+			if json.Unmarshal(value, &storage) == nil {
+				cause.Storage = &storage
+			}
+		}
 		causes = append(causes, cause)
 	}
 	return causes
@@ -1353,12 +1371,13 @@ const (
 // that the orchestrator should consume to drive a workflow step transition.
 // See ADR 0015 for the lifecycle (set → read → clear).
 type PendingStepCompletionSignal struct {
-	StepID     string    `json:"step_id"`
-	Source     string    `json:"source"`
-	Summary    string    `json:"summary"`
-	Handoff    string    `json:"handoff,omitempty"`
-	Blockers   string    `json:"blockers,omitempty"`
-	SignaledAt time.Time `json:"signaled_at"`
+	WorkflowStepTransitionID *int64    `json:"workflow_step_transition_id,omitempty"`
+	StepID                   string    `json:"step_id"`
+	Source                   string    `json:"source"`
+	Summary                  string    `json:"summary"`
+	Handoff                  string    `json:"handoff,omitempty"`
+	Blockers                 string    `json:"blockers,omitempty"`
+	SignaledAt               time.Time `json:"signaled_at"`
 }
 
 // LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
@@ -1478,7 +1497,7 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 	}
 	switch v := raw.(type) {
 	case PendingStepCompletionSignal:
-		return v, true
+		return v, v.StepID != "" && (v.WorkflowStepTransitionID == nil || *v.WorkflowStepTransitionID >= 0)
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
 			StepID:   StringFromAny(v["step_id"]),
@@ -1486,6 +1505,13 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 			Summary:  StringFromAny(v["summary"]),
 			Handoff:  StringFromAny(v["handoff"]),
 			Blockers: StringFromAny(v["blockers"]),
+		}
+		if raw, present := v["workflow_step_transition_id"]; present {
+			entry, valid := WorkflowEntryIDFromAny(raw)
+			if !valid {
+				return PendingStepCompletionSignal{}, false
+			}
+			out.WorkflowStepTransitionID = &entry
 		}
 		if ts, ok := v["signaled_at"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
@@ -1532,10 +1558,11 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
-	ID             string `json:"id"`
-	WorkspaceID    string `json:"workspace_id"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
+	ID                     string `json:"id"`
+	WorkspaceID            string `json:"workspace_id"`
+	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
+	WorkflowID             string `json:"workflow_id"`
+	WorkflowStepID         string `json:"workflow_step_id"`
 	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
 	// create choice into fixed step bindings. It is nil for ordinary tasks.
 	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
@@ -1619,6 +1646,21 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+
+	// CreationAttachmentClaim carries the authenticated file-backed set that
+	// must be claimed in the same transaction as this task row. It is internal
+	// insertion input: public metadata can never populate it.
+	CreationAttachmentClaim *TaskCreationAttachmentClaim `json:"-"`
+}
+
+// TaskCreationAttachmentClaim is the ordered, authenticated creation
+// attachment set admitted with a task insert. Only identity, ownership, and
+// order live here; canonical metadata and bytes stay in the attachment
+// registry.
+type TaskCreationAttachmentClaim struct {
+	OwnerID     string
+	WorkspaceID string
+	IDs         []string
 }
 
 const (
@@ -1922,6 +1964,7 @@ type TaskRepository struct {
 	ID                            string                 `json:"id"`
 	TaskID                        string                 `json:"task_id"`
 	RepositoryID                  string                 `json:"repository_id"`
+	WorkspaceRelativePath         string                 `json:"workspace_relative_path,omitempty"`
 	BaseBranch                    string                 `json:"base_branch"`
 	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
 	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
@@ -1938,24 +1981,29 @@ type TaskRepository struct {
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
 type TaskWorkspaceFolder struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	LocalPath   string    `json:"local_path"`
-	DisplayName string    `json:"display_name"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"task_id"`
+	LocalPath             string    `json:"local_path"`
+	DisplayName           string    `json:"display_name"`
+	WorkspaceRelativePath string    `json:"workspace_relative_path,omitempty"`
+	Position              int       `json:"position"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // WorkspaceSourceBatch identifies exactly the durable rows created by one
 // attachment operation, so a later materialization failure can compensate
 // without touching pre-existing sources.
 type WorkspaceSourceBatch struct {
-	TaskID                    string                            `json:"task_id"`
-	Sources                   []WorkspaceSource                 `json:"sources,omitempty"`
-	RepositoryUpdates         []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
-	ExpectedParentID          string                            `json:"-"`
-	ExpectedParentWorkspaceID string                            `json:"-"`
+	TaskID            string                            `json:"task_id"`
+	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	// RepositoryPlacement is server-validated operation state. It is present
+	// only for the explicit repository-only attachment flow.
+	RepositoryPlacement       string `json:"repository_placement,omitempty"`
+	PreviewRevision           string `json:"-"`
+	ExpectedParentID          string `json:"-"`
+	ExpectedParentWorkspaceID string `json:"-"`
 }
 
 // WorkspaceSourceRepositoryUpdate records a legacy association branch derived
@@ -2065,6 +2113,50 @@ type PermissionDecision struct {
 	Source     string `json:"source"`
 }
 
+// PermissionPresentation controls how a permission request appears in chat.
+// It is presentation data only: live agentctl requests remain the authority
+// for whether a request can be answered. An absent or unknown stored value
+// retains the legacy interactive behavior.
+type PermissionPresentation string
+
+const (
+	// PermissionPresentationAutomatic marks a request the backend is resolving
+	// automatically. Chat shows the ordinary tool progress, never input controls.
+	PermissionPresentationAutomatic PermissionPresentation = "automatic"
+	// PermissionPresentationInteractive marks a request that needs a person.
+	PermissionPresentationInteractive PermissionPresentation = "interactive"
+	// PermissionPresentationUnavailable marks a decision whose delivery is
+	// uncertain or failed. Chat shows non-actionable feedback.
+	PermissionPresentationUnavailable PermissionPresentation = "unavailable"
+)
+
+// PermissionPresentationMetadataKey is the message metadata field that carries
+// PermissionPresentation. Readers treat an absent or unknown value as legacy
+// interactive behavior.
+const PermissionPresentationMetadataKey = "permission_presentation"
+
+// PermissionRequestMessageOptions carries everything the initial permission
+// transcript row must persist before publication.
+type PermissionRequestMessageOptions struct {
+	// Decision marks an already-resolved automatic decision for older events.
+	Decision *PermissionDecision
+	// Presentation controls whether chat renders this row as an input request.
+	Presentation PermissionPresentation
+}
+
+// PermissionPresentationUpdate changes one exact permission row's presentation.
+// RequirePresentation and RequireUnclaimed constrain the conditional update so
+// a concurrent resolver or replacement cannot be overwritten.
+type PermissionPresentationUpdate struct {
+	TaskID              string
+	SessionID           string
+	RequestID           string
+	PendingID           string
+	Presentation        PermissionPresentation
+	RequirePresentation PermissionPresentation
+	RequireUnclaimed    bool
+}
+
 type PermissionResolutionActorKind string
 
 const (
@@ -2136,6 +2228,10 @@ type PermissionResolutionClaimRequest struct {
 	TaskID    string
 	SessionID string
 	Audit     PermissionResolutionAudit
+	// AutomaticOnly restricts the claim to a row that is still automatic (or
+	// predates presentation metadata). The automatic resolver uses it so a row
+	// already promoted to a person's fallback cannot be claimed automatically.
+	AutomaticOnly bool
 }
 
 type PermissionResolutionClaimResult struct {
@@ -2594,8 +2690,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 
 // WorktreesAPI maps the session's environment repository rows to the legacy
 // session-worktree API shape. The wire contract is stable: the frontend reads
-// id, worktree_id, repository_id, branch_slug, position, worktree_path, and
-// worktree_branch from each entry, and worktree_path/worktree_branch are
+// id, worktree_id, repository_id, branch_slug, workspace_relative_path,
+// position, worktree_path, and worktree_branch from each entry, and
+// worktree_path/worktree_branch are
 // mirrored onto the session for backward compatibility.
 func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 	if len(s.Worktrees) == 0 {
@@ -2616,6 +2713,9 @@ func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 		}
 		if repo.BranchSlug != "" {
 			entry["branch_slug"] = repo.BranchSlug
+		}
+		if repo.WorkspaceRelativePath != "" {
+			entry["workspace_relative_path"] = repo.WorkspaceRelativePath
 		}
 		if repo.WorktreePath != "" {
 			entry["worktree_path"] = repo.WorktreePath
@@ -3026,8 +3126,9 @@ type TaskEnvironment struct {
 	// WorkspacePath points at the agent workspace root (the task root when
 	// TaskDirName is set, otherwise the single repo's worktree path).
 	// Physical worktree identity lives on Repos, never on the environment row.
-	WorkspacePath string `json:"workspace_path,omitempty"`
-	ContainerID   string `json:"container_id,omitempty"`
+	WorkspacePath   string `json:"workspace_path,omitempty"`
+	WorkspaceLayout string `json:"workspace_layout,omitempty"`
+	ContainerID     string `json:"container_id,omitempty"`
 	// ContainerBootstrapNonceSecretID is an environment-scoped encrypted secret
 	// reference used only to establish a new agentctl control connection to an
 	// already-owned Docker container. It is deliberately not exposed in API
@@ -3072,6 +3173,7 @@ type TaskEnvironmentRepo struct {
 	ID                        string     `json:"id"`
 	TaskEnvironmentID         string     `json:"task_environment_id"`
 	RepositoryID              string     `json:"repository_id"`
+	WorkspaceRelativePath     string     `json:"workspace_relative_path,omitempty"`
 	BranchSlug                string     `json:"branch_slug,omitempty"`
 	WorktreeID                string     `json:"worktree_id,omitempty"`
 	WorktreePath              string     `json:"worktree_path,omitempty"`
@@ -3180,6 +3282,9 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 		createdAtField:        te.CreatedAt,
 		"updated_at":          te.UpdatedAt,
 	}
+	if te.WorkspaceLayout != "" {
+		result["workspace_layout"] = te.WorkspaceLayout
+	}
 	// agent_execution_id is no longer carried on TaskEnvironment — see executors_running.
 	if te.ControlPort != 0 {
 		result["control_port"] = te.ControlPort
@@ -3212,6 +3317,9 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 		"position":            r.Position,
 		createdAtField:        r.CreatedAt,
 		"updated_at":          r.UpdatedAt,
+	}
+	if r.WorkspaceRelativePath != "" {
+		out["workspace_relative_path"] = r.WorkspaceRelativePath
 	}
 	if r.WorktreeID != "" {
 		out["worktree_id"] = r.WorktreeID
@@ -3619,36 +3727,38 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
-			ID:              repo.ID,
-			TaskID:          repo.TaskID,
-			RepositoryID:    repo.RepositoryID,
-			BaseBranch:      repo.BaseBranch,
-			Position:        repo.Position,
-			Metadata:        repo.Metadata,
-			CreatedAt:       repo.CreatedAt,
-			UpdatedAt:       repo.UpdatedAt,
+			CheckoutOptions:       PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:                    repo.ID,
+			TaskID:                repo.TaskID,
+			RepositoryID:          repo.RepositoryID,
+			BaseBranch:            repo.BaseBranch,
+			WorkspaceRelativePath: repo.WorkspaceRelativePath,
+			Position:              repo.Position,
+			Metadata:              repo.Metadata,
+			CreatedAt:             repo.CreatedAt,
+			UpdatedAt:             repo.UpdatedAt,
 		})
 	}
 
 	result := &v1.Task{
-		ID:                t.ID,
-		WorkspaceID:       t.WorkspaceID,
-		WorkflowID:        t.WorkflowID,
-		Title:             t.Title,
-		Description:       t.Description,
-		State:             t.State,
-		Priority:          t.Priority,
-		Repositories:      repositories,
-		CreatedAt:         t.CreatedAt,
-		UpdatedAt:         t.UpdatedAt,
-		Metadata:          PublicTaskMetadata(t.Metadata),
-		Interrupted:       t.Metadata[MetaKeyInterruptedAt] != nil,
-		AutoStartFailed:   t.Metadata[MetaKeyAutoStartFailed] != nil,
-		WorkspaceOrphaned: WorkspaceOrphaned(t.Metadata),
-		IsEphemeral:       t.IsEphemeral,
-		ParentID:          t.ParentID,
-		Autopilot:         t.Autopilot,
+		ID:                     t.ID,
+		WorkspaceID:            t.WorkspaceID,
+		InitialWorkspaceLayout: t.InitialWorkspaceLayout,
+		WorkflowID:             t.WorkflowID,
+		Title:                  t.Title,
+		Description:            t.Description,
+		State:                  t.State,
+		Priority:               t.Priority,
+		Repositories:           repositories,
+		CreatedAt:              t.CreatedAt,
+		UpdatedAt:              t.UpdatedAt,
+		Metadata:               PublicTaskMetadata(t.Metadata),
+		Interrupted:            t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed:        t.Metadata[MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned:      WorkspaceOrphaned(t.Metadata),
+		IsEphemeral:            t.IsEphemeral,
+		ParentID:               t.ParentID,
+		Autopilot:              t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

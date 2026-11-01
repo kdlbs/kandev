@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 var errProfileContextChanged = errors.New("profile discovery context changed during probe; retry")
@@ -85,11 +86,27 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	if !m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
 		return ProfileCapabilityResult{}, errProfileContextChanged
 	}
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, req.Context, inst.workDir, command.Args())
+	if err != nil {
+		status := profileCopilotPluginStatus(err)
+		caps := AgentCapabilities{
+			AgentType: inst.agentType, Status: status,
+			Error: err.Error(), LastCheckedAt: time.Now(),
+		}
+		return ProfileCapabilityResult{
+			Capabilities: caps, ContextRevision: revision,
+			ReasonCode: profileCopilotPluginReasonCode(inst.agentType, status, err),
+		}, nil
+	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
 	probeReq.InferenceConfig.Env = cloneStringMap(req.Context.Env)
-	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.Context.CLIFlags...)
-	probeReq.InferenceConfig.CommandPrefix = append([]string(nil), req.Context.CommandPrefix...)
+	cliFlags := req.Context.CLIFlags
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
+	probeReq.InferenceConfig.CLIFlags = append([]string(nil), cliFlags...)
+	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.Context.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)
@@ -206,14 +223,29 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	if !m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
 		return ModelConfigResolution{}, errProfileContextChanged
 	}
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, *req.ProfileContext, inst.workDir, command.Args())
+	if err != nil {
+		status := profileCopilotPluginStatus(err)
+		resolution := ModelConfigResolution{
+			AgentType: inst.agentType, Model: req.Model,
+			Status: status, Error: err.Error(),
+			ContextRevision: revision,
+			ReasonCode:      profileCopilotPluginReasonCode(inst.agentType, status, err),
+		}
+		return resolution, nil
+	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
 	probeReq.InferenceConfig.Env = cloneStringMap(req.ProfileContext.Env)
-	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.ProfileContext.CLIFlags...)
-	probeReq.InferenceConfig.CommandPrefix = append([]string(nil), req.ProfileContext.CommandPrefix...)
+	cliFlags := req.ProfileContext.CLIFlags
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
+	probeReq.InferenceConfig.CLIFlags = append([]string(nil), cliFlags...)
+	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.ProfileContext.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)

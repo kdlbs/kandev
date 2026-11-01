@@ -69,6 +69,13 @@ func (r *Repository) RunAgentDeliveryRetentionBatch(
 	options = normalizeAgentDeliveryRetentionOptions(options)
 	workCtx, cancel := context.WithTimeout(ctx, options.WorkTimeout)
 	defer cancel()
+	return r.runAgentDeliveryRetentionBatch(workCtx, options)
+}
+
+func (r *Repository) runAgentDeliveryRetentionBatch(
+	workCtx context.Context,
+	options models.AgentDeliveryRetentionBatchOptions,
+) (models.AgentDeliveryRetentionBatchResult, error) {
 	if err := workCtx.Err(); err != nil {
 		return models.AgentDeliveryRetentionBatchResult{}, err
 	}
@@ -130,6 +137,9 @@ func (r *Repository) RunAgentDeliveryRetentionBatch(
 		return models.AgentDeliveryRetentionBatchResult{}, err
 	}
 	result.DiscoveryAdvanced = agentDeliveryDiscoveryAdvanced(progress, candidates, prompts, wrapped)
+	result.DiscoveryBefore = agentDeliveryDiscoveryVector(progress)
+	next := nextAgentDeliveryRetentionProgress(progress, candidates, prompts, wrapped, promptWrapped)
+	result.DiscoveryAfter = agentDeliveryDiscoveryVector(next)
 	return result, nil
 }
 
@@ -339,13 +349,7 @@ func (r *Repository) writeAgentDeliveryRetentionProgress(
 	promptWrapped bool,
 	nextPhase string,
 ) error {
-	progress := previous
-	advanceAgentDeliveryEventRetentionProgress(&progress, candidates, wrapped)
-	if len(prompts) > 0 {
-		progress.lastSubmissionID = prompts[len(prompts)-1].submissionID
-	} else if promptWrapped {
-		progress.lastSubmissionID = ""
-	}
+	progress := nextAgentDeliveryRetentionProgress(previous, candidates, prompts, wrapped, promptWrapped)
 	if err := r.failAgentDeliveryRetention("before_progress"); err != nil {
 		return err
 	}

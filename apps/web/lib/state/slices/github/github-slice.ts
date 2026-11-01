@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { GitHubSlice, GitHubSliceState, TaskPRScope } from "./types";
 import type { GitHubPRDiscoveryHealth, GitHubPRDiscoveryHealthUpdate } from "@/lib/types/github";
 
@@ -37,9 +38,7 @@ function shouldApplyTaskCIAutomationOptions(
   return incomingUpdatedAt > currentUpdatedAt;
 }
 
-type ImmerSet = Parameters<
-  StateCreator<GitHubSlice, [["zustand/immer", never]], [], GitHubSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<GitHubSlice>>[0];
 
 function createGitHubStatusActions(
   set: ImmerSet,
@@ -466,12 +465,7 @@ function createRateLimitActions(
   };
 }
 
-export const createGitHubSlice: StateCreator<
-  GitHubSlice,
-  [["zustand/immer", never]],
-  [],
-  GitHubSlice
-> = (set) => ({
+export const createGitHubSlice: SliceCreator<GitHubSlice> = (set) => ({
   ...defaultGitHubState,
   ...createGitHubStatusActions(set),
   ...createGitHubAppRegistrationActions(set),

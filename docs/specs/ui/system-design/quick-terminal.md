@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-10-04
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -348,21 +348,24 @@ legacy singleton login surface retains its existing behavior and authorization c
 | Connecting | Host-shell start succeeds | Store the returned session ID, attach its stream, and mark the tab running. |
 | Running | Chat/terminal tab switch or dialog dismissal | Detach the rendered terminal; keep the backend PTY and tab descriptor alive. |
 | Detached | Tab selected or terminal launcher used | Reattach to the same session and replay available buffered output. |
-| Running or detached | Quiet or long-running work | The session has no idle or hard timeout; it stays running across tab switches, dialog dismissal, and page reloads until closed, exited, or the backend stops. |
+| Running or detached | Quiet or long-running work | No timeout; it persists through tab switches, dismissal, and reload until closed, exited, or shutdown. |
 | Running or detached | PTY exits | Mark the tab exited when observed; retain it for inspection. |
-| Connecting, running, exited, or error | Terminal tab close | Stop the session when one exists, remove the tab, select the nearest remaining same-workspace tab, or close the dialog when none remains. |
+| Connecting, running, exited, or error | Terminal tab close | Stop any session, remove the tab, select the nearest same-workspace tab, or close the dialog. |
+
+The current client's connecting state remains authoritative until a session ID is attached. A
+resync started earlier cannot mark that local start unavailable.
 
 ## Permissions
 
-Quick terminals retain the existing host-shell permissions and environment of the Kandev backend
-process. Workspace association controls descriptor ownership and frontend visibility; it does not
-sandbox the shell or grant access to a task worktree. Existing API authentication, WebSocket origin
-checks, and Agents-page authorization behavior remain unchanged.
+Quick terminals use the backend process's existing host-shell permissions and environment. Workspace
+association scopes descriptor ownership and frontend visibility; it does not sandbox the shell or
+grant access to a task worktree. API authentication, WebSocket origin checks, and Agents-page
+authorization remain unchanged.
 
 ## Failure modes
 
-- A failed start or stream leaves the terminal tab visible with its existing error presentation and
-  a usable close action. It does not activate or stop sibling tabs.
+- Start or stream errors keep the terminal tab, its error presentation, and the close action. They do
+  not affect sibling tabs.
 - Closing a terminal tab while its start request is pending removes the tab and stops the session if
   that request later succeeds. Development StrictMode replay uses the stable client ID and cannot
   create or stop a sibling session.

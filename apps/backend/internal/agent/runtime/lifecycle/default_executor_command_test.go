@@ -60,6 +60,9 @@ func TestPromoteWorkspaceExecutionUsesResolvedStandaloneForNativeOpenCode(t *tes
 				ID: "workspace-execution", TaskID: "task-1", SessionID: "session-1",
 				RuntimeName: agentruntime.RuntimeStandalone, WorkspacePath: t.TempDir(),
 			}
+			if err := m.executionStore.Add(execution); err != nil {
+				t.Fatal(err)
+			}
 			req := &LaunchRequest{
 				TaskID: execution.TaskID, SessionID: execution.SessionID,
 				AgentProfileID: agents.OpenCodeACPAgentID, ExecutorType: requested,

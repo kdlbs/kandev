@@ -465,6 +465,23 @@ func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
 	return err
 }
 
+// GetLatestTurnBySessionID returns the last turn ListTurnsBySession would list
+// for the session, or nil when the session has no turns.
+func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		LIMIT 1
+	`, turnHistoryPredicate(r.ro.DriverName(), "turn_row"))
+	turn, err := scanTurnRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
@@ -940,12 +957,12 @@ func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
 			id, task_id, executor_type, executor_id, executor_profile_id,
-			control_port, status, materialization_session_id, workspace_path,
+			control_port, status, materialization_session_id, workspace_path, workspace_layout,
 			container_id, sandbox_id, task_dir_name, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
 		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
-		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.WorkspaceLayout, candidate.ContainerID,
 		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
 		return fmt.Errorf("create workspace binding: %w", err)
 	}
@@ -3743,7 +3760,7 @@ func removeSessionMetadataKeyIfStateQuery(driver string) string {
 }
 
 // SetSessionACPSessionID mirrors the agent's ACP session id into the session's
-// "acp" metadata map as a single atomic UPDATE. json_patch merges the sub-key,
+// "acp" metadata map as a single atomic UPDATE. Each dialect merges the sub-key,
 // so keys session_info already wrote (title, ...) survive without a
 // read-modify-write round trip. The write only happens while the session's
 // executors_running row still holds acpSessionID as its resume token — i.e.
@@ -3756,17 +3773,34 @@ func (r *Repository) SetSessionACPSessionID(ctx context.Context, sessionID, acpS
 		return false, fmt.Errorf("failed to serialize metadata patch: %w", err)
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE task_sessions
 		SET metadata = json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json(?)),
 		    updated_at = ?
 		WHERE id = ?
-		  AND json_extract(metadata, '$.acp.session_id') IS NOT ?
+		  AND json_extract(` + sqliteMetadataObject + `, '$.acp.session_id') IS NOT ?
 		  AND EXISTS (
 			SELECT 1 FROM executors_running er
 			WHERE er.session_id = task_sessions.id AND er.resume_token = ?
 		  )
-	`), string(patch), now, sessionID, acpSessionID, acpSessionID)
+	`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(` + postgresMetadataObject + `, '{acp}',
+				(CASE WHEN jsonb_typeof((` + postgresMetadataObject + `)->'acp') = 'object'
+					THEN (` + postgresMetadataObject + `)->'acp' ELSE '{}'::jsonb END)
+				|| (?::jsonb->'acp'), true)::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND (` + postgresMetadataObject + `)#>>'{acp,session_id}' IS DISTINCT FROM ?
+			  AND EXISTS (
+				SELECT 1 FROM executors_running er
+				WHERE er.session_id = task_sessions.id AND er.resume_token = ?
+			  )
+		`
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(patch), now, sessionID, acpSessionID, acpSessionID)
 	if err != nil {
 		return false, err
 	}
@@ -4572,6 +4606,9 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return nil, err
 	}
+	if err := r.StageTurnHistoryCleanupForSession(ctx, tx, session.ID); err != nil {
+		return nil, err
+	}
 	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
 	if err != nil {
 		return nil, err
@@ -4707,7 +4744,7 @@ func (r *Repository) purgePromptSequencesForSessionsTx(ctx context.Context, tx *
 // in session-scoped worktree queries.
 const envRepoSelectCols = `
 	ter.id, ter.task_environment_id, ter.repository_id,
-	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+	COALESCE(ter.workspace_relative_path, ''), COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
 	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
 	COALESCE(ter.worktree_branch_owner, 'unknown'), COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
@@ -4722,7 +4759,7 @@ func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 	row := &models.TaskEnvironmentRepo{}
 	var compactedAt, mergedAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
-		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
+		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.WorkspaceRelativePath, &row.BranchSlug,
 		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 		&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
 		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.Position,
@@ -4909,7 +4946,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 		var compactedAt, mergedAt, deletedAt sql.NullTime
 		row := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
-			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.WorkspaceRelativePath, &row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 			&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
 			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,

@@ -98,7 +98,7 @@ func (m *Manager) stopAbsentRemoteOwner(
 	if force || shouldRunExecutorCleanup(reason) {
 		instance := persistedRemoteStopInstance(ctx, m, entry.record, reason)
 		instance.AgentStopFailed = true
-		if err := backend.StopInstance(ctx, instance, force); err != nil {
+		if err := m.stopWorkspaceRuntime(ctx, backend, instance, force); err != nil {
 			return false, fmt.Errorf("clean up exact absent remote agent resource: %w", err)
 		}
 	}
@@ -150,7 +150,7 @@ func (m *Manager) stopAttachedRemoteOwner(
 		}
 		ri.Metadata = metadata
 	}
-	if err := backend.StopInstance(ctx, ri, force); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, ri, force); err != nil {
 		m.discardRemoteRecoveryInstance(ri)
 		return false, fmt.Errorf("stop exact remote runtime execution %q: %w", entry.record.AgentExecutionID, err)
 	}

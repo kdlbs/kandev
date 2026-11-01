@@ -260,3 +260,18 @@ func TestNewBootstrapHandlerKeepsJSONForNonGETMethod(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want JSON for a non-GET method", got)
 	}
 }
+
+func TestStartupPageRendersCompletedAndInterruptedTiming(t *testing.T) {
+	snap := startup.Snapshot{Phase: startup.RecoveringSessions, CompletedSteps: []startup.CompletedStepSnapshot{
+		{ID: startup.StepQueueReconciliation, LabelKey: "startup.step.queue_reconciliation", ActivationSeq: 1, Phase: startup.RecoveringSessions, ElapsedMS: 82, Completed: true},
+		{ID: startup.StepRouteReconciliation, LabelKey: "startup.step.route_reconciliation", ActivationSeq: 2, Phase: startup.RecoveringSessions, ElapsedMS: 1200, Completed: false},
+	}}
+	recorder := httptest.NewRecorder()
+	writeStartupPage(recorder, httptest.NewRequest("GET", "/", nil), snap)
+	html := recorder.Body.String()
+	for _, want := range []string{"startup-timings", "Queued messages", "82 milliseconds", "Timing incomplete"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("startup page omitted %q", want)
+		}
+	}
+}

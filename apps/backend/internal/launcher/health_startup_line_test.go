@@ -3,7 +3,9 @@ package launcher
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -272,4 +274,50 @@ func TestWaitForReadyReprintsOnSeqChangeWithoutPhaseChange(t *testing.T) {
 	if lines != 2 {
 		t.Fatalf("stderr output = %q, want exactly 2 progress lines (initial + seq change), got %d", output, lines)
 	}
+}
+
+func TestStartupHistoryFitsBoundedLauncherProbe(t *testing.T) {
+	var largest startup.StepSpec
+	// Independent longest fields bound every registered combination.
+	for _, spec := range startup.Registry() {
+		if len(spec.ID) > len(largest.ID) {
+			largest.ID = spec.ID
+		}
+		if len(spec.LabelKey) > len(largest.LabelKey) {
+			largest.LabelKey = spec.LabelKey
+		}
+		if len(spec.Phase) > len(largest.Phase) {
+			largest.Phase = spec.Phase
+		}
+		if len(spec.Unit) > len(largest.Unit) {
+			largest.Unit = spec.Unit
+		}
+	}
+	maxInt := int64(math.MaxInt64)
+	maxRate := math.MaxFloat64
+	snap := startup.Snapshot{Phase: startup.RecoveringSessions, Boot: 9007199254740991, Seq: math.MaxUint64, ElapsedMS: maxInt, PhaseElapsedMS: maxInt,
+		Step: &startup.StepSnapshot{ID: largest.ID, LabelKey: largest.LabelKey, Measure: startup.MeasureCounted, Unit: largest.Unit, ElapsedMS: maxInt, Done: &maxInt, Total: &maxInt, RatePerSecond: &maxRate, ETAMS: &maxInt, SinceAdvanceMS: &maxInt, Stalled: true}}
+	for range 32 {
+		snap.CompletedSteps = append(snap.CompletedSteps, startup.CompletedStepSnapshot{ID: largest.ID, LabelKey: largest.LabelKey, ActivationSeq: math.MaxUint64, Phase: largest.Phase, ElapsedMS: maxInt, Completed: false})
+	}
+	payload, err := json.Marshal(map[string]any{"service": "kandev", "version": "development", "status": "starting", "startup": snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) >= 32768 {
+		t.Fatalf("maximum registry-based readiness payload is %d bytes", len(payload))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+	_, got := probeReadyStatus(t.Context(), server.URL)
+	if len(got.CompletedSteps) != 32 || got.Step == nil || got.Step.ID != largest.ID {
+		t.Fatalf("bounded startup payload was truncated: %#v", got)
+	}
+	if line := formatStartupLine(snap); !strings.Contains(line, "interrupted") {
+		t.Fatalf("completed timing missing from launcher: %s", line)
+	}
+	t.Logf("maximum registry-based readiness payload: %d bytes (reader limit 32768)", len(payload))
 }

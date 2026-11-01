@@ -6,14 +6,17 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"go.uber.org/zap"
 )
 
 type httpTaskDeletePreflightRequest struct {
-	TaskIDs                []string `json:"task_ids"`
-	Cascade                bool     `json:"cascade"`
-	DiscardWorktreeChanges bool     `json:"discard_worktree_changes"`
+	AllowUnverifiedWorkspaceChanges bool                        `json:"allow_unverified_workspace_changes"`
+	WorkspaceCleanup                models.WorkspaceCleanupMode `json:"workspace_cleanup"`
+	TaskIDs                         []string                    `json:"task_ids"`
+	Cascade                         bool                        `json:"cascade"`
+	DiscardWorktreeChanges          bool                        `json:"discard_worktree_changes"`
 }
 
 // httpTaskDeletePreflight returns a no-store, read-only cleanup consent
@@ -28,7 +31,7 @@ func (h *TaskHandlers) httpTaskDeletePreflight(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task delete preflight request"})
 		return
 	}
-	result, err := h.service.TaskDeletePreflight(c.Request.Context(), body.TaskIDs, body.Cascade, body.DiscardWorktreeChanges)
+	result, err := h.service.TaskDeletePreflightWithOptions(c.Request.Context(), body.TaskIDs, body.Cascade, service.DeleteTaskOptions{DiscardWorktreeChanges: body.DiscardWorktreeChanges, WorkspaceCleanup: body.WorkspaceCleanup, AllowUnverifiedWorkspaceChanges: body.AllowUnverifiedWorkspaceChanges})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTaskDeletePreflightInvalid):

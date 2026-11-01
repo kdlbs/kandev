@@ -121,7 +121,7 @@ func TestReviewCleanupMetrics(t *testing.T) {
 			}
 		})
 	}
-	classLabels := []string{reviewCleanupMetricClassAuth, "config", "transient", "rate_limit", reviewCleanupMetricClassOther}
+	classLabels := []string{reviewCleanupMetricClassAuth, "config", "transient", reviewCleanupMetricClassRateLimit, reviewCleanupMetricClassOther}
 	var outcomeKeys = make(map[string]bool)
 	for _, scope := range []string{"workspace", "record"} {
 		for _, class := range classLabels {
@@ -164,6 +164,9 @@ func TestIncTaskPROutcomeSyncRecordsOnExpvarMap(t *testing.T) {
 func TestOutcomeExpvarMapsPublishedAtKnownNames(t *testing.T) {
 	expected := []string{
 		"github_task_pr_outcome_syncs_total",
+		"github_provider_response_classifications_total",
+		"github_rate_limit_background_deferrals_total",
+		"github_rate_limit_secondary_recoveries_total",
 		"github_pr_watch_active",
 		"github_pr_watch_searching",
 		"github_pr_watch_duplicates",
@@ -178,6 +181,37 @@ func TestOutcomeExpvarMapsPublishedAtKnownNames(t *testing.T) {
 		if expvar.Get(name) == nil {
 			t.Errorf("expvar %q not published — /debug/vars consumers will miss it", name)
 		}
+	}
+}
+
+func TestGitHubRateCoordinationCounters(t *testing.T) {
+	classificationLabel := outcomeMetricLabel(
+		"kind", string(FailureSecondaryRateLimit),
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceRetryAfter),
+	)
+	classificationBefore := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel)
+	incGitHubResponseClassification(FailureSecondaryRateLimit, ResourceCore, RetrySourceRetryAfter)
+	if delta := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel) - classificationBefore; delta != 1 {
+		t.Fatalf("classification counter delta = %d, want 1", delta)
+	}
+
+	deferralLabel := outcomeMetricLabel("resource", string(ResourceGraphQL), "reason", rateLimitBlockPrimaryReserve)
+	deferralBefore := readOutcomeCounter(t, githubBackgroundDeferralsTotal, deferralLabel)
+	incGitHubBackgroundDeferral(ResourceGraphQL, rateLimitBlockPrimaryReserve)
+	if delta := readOutcomeCounter(t, githubBackgroundDeferralsTotal, deferralLabel) - deferralBefore; delta != 1 {
+		t.Fatalf("deferral counter delta = %d, want 1", delta)
+	}
+
+	recoveryLabel := outcomeMetricLabel(
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceConservativeFallback),
+		"early", "true",
+	)
+	recoveryBefore := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel)
+	incGitHubSecondaryRecovery(ResourceCore, RetrySourceConservativeFallback, true)
+	if delta := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel) - recoveryBefore; delta != 1 {
+		t.Fatalf("recovery counter delta = %d, want 1", delta)
 	}
 }
 

@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import {
   readRichOutputAnimationsEnabled,
   writeRichOutputAnimationsEnabled,
@@ -10,7 +11,7 @@ export function loadRichOutputMotionState(): RichOutputMotionState {
   return { enabled, savedEnabled: enabled };
 }
 
-type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+type ImmerSet = Parameters<SliceCreator<UISlice>>[0];
 
 export function buildRichOutputMotionActions(set: ImmerSet) {
   return {

@@ -52,6 +52,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
+    promptSuggestions: false,
     autoFocusNewTasks: true,
     agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
@@ -61,6 +62,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
+    showTurnChangedFiles: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -293,6 +295,7 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    promptSuggestions: s.prompt_suggestions ?? current.promptSuggestions,
     autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
     agentTabCloseBehavior: mapDefined(
       s.agent_tab_close_behavior,
@@ -320,6 +323,7 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
     showTodoListPanelOnlyWhenNotEmpty:
       s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
+    showTurnChangedFiles: s.show_turn_changed_files ?? current.showTurnChangedFiles,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,

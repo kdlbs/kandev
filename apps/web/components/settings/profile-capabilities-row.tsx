@@ -38,6 +38,7 @@ type CapabilitiesRowProps = {
   currentModelId: string | undefined;
   currentModeId: string | undefined;
   status: ModelConfig["status"];
+  reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
   disableUnverifiedModels: boolean;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -48,6 +49,7 @@ type CapabilitiesRowProps = {
   modelConfig: ModelConfig;
   configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
+  configReasonCode?: string;
   configError: string | null;
   configIsLoading: boolean;
   onRetryConfig: () => Promise<void>;
@@ -68,6 +70,7 @@ function StatusOrAuthMessage({
   isLoading,
   onRefresh,
   error,
+  reasonCode,
   discoveryState,
 }: {
   agentName: string;
@@ -75,6 +78,7 @@ function StatusOrAuthMessage({
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   error: string | null;
+  reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
 }) {
   if (status === "auth_required" || status === "not_installed") {
@@ -89,7 +93,7 @@ function StatusOrAuthMessage({
       />
     );
   }
-  return <CapabilityStatusMessage status={discoveryState} />;
+  return <CapabilityStatusMessage status={discoveryState} reasonCode={reasonCode} />;
 }
 
 type ModelAndModePickersProps = {
@@ -202,6 +206,7 @@ function CapabilitiesRowContent({
   currentModelId,
   currentModeId,
   status,
+  reasonCode,
   discoveryState,
   onChange,
   isCompact,
@@ -211,6 +216,7 @@ function CapabilitiesRowContent({
   modelConfig,
   configOptions,
   configStatus,
+  configReasonCode,
   configError,
   configIsLoading,
   onRetryConfig,
@@ -240,7 +246,7 @@ function CapabilitiesRowContent({
         supportsDynamicModels={modelConfig.supports_dynamic_models}
         isLoading={isLoading}
         onRefresh={onRefresh}
-        error={error}
+        error={status === "unsupported" && reasonCode === "policy_unverified" ? null : error}
         showRefresh={showRefresh}
         labelCls={labelCls}
         gapCls={gapCls}
@@ -248,6 +254,7 @@ function CapabilitiesRowContent({
       <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
         status={configStatus}
+        reasonCode={configReasonCode}
         error={configError}
         isLoading={configIsLoading}
         onRetry={onRetryConfig}
@@ -262,6 +269,7 @@ function CapabilitiesRowContent({
         isLoading={isLoading}
         onRefresh={onRefresh}
         error={error}
+        reasonCode={reasonCode}
         discoveryState={discoveryState}
       />
     </div>
@@ -307,6 +315,7 @@ export function ProfileCapabilitiesSection({
       currentModelId={capabilities.currentModelId}
       currentModeId={capabilities.currentModeId}
       status={capabilities.status}
+      reasonCode={capabilities.reasonCode}
       discoveryState={discoveryState}
       disableUnverifiedModels={discoveryState !== "ready"}
       agentName={agentName}
@@ -318,6 +327,7 @@ export function ProfileCapabilitiesSection({
       modelConfig={modelConfig}
       configOptions={configOptions}
       configStatus={configStatus}
+      configReasonCode={result.configReasonCode}
       configError={configError}
       configIsLoading={configIsLoading}
       onRetryConfig={refreshModelConfig}

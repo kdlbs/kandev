@@ -199,7 +199,7 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	}
 	if err := client.ConfigureAgent(
 		ctx, execution.AgentCommand, execution.AgentArgs, env,
-		execution.ContinueCommand, execution.ContinueArgs,
+		execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper,
 	); err != nil {
 		return "", fmt.Errorf("configure agent after Kubernetes restart: %w", err)
 	}

@@ -11,16 +11,13 @@ import (
 	"go.uber.org/zap"
 )
 
-func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, agent agents.Agent, profile *AgentProfileInfo) ([]string, error) {
+func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, agent agents.Agent, profile *AgentProfileInfo, operation *preparedMCPOperation) (preparedPassthroughMCP, error) {
 	runner := &remotePassthroughRunner{execution: execution}
 	snapshot, err := runner.snapshot(ctx)
 	if err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
-	servers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agent)
-	if err != nil {
-		return nil, err
-	}
+	servers := operation.servers
 	resolved := []types.McpServer{{Name: kandevMCPServerName, Type: string(mcpconfig.ServerTypeHTTP), URL: snapshot.MCPURL}}
 	for _, server := range servers {
 		if server.Name != kandevMCPServerName {
@@ -31,7 +28,7 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 		TempConfigPath: snapshot.ConfigPath, WorkspaceDir: snapshot.WorkspacePath, Unix: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("build remote passthrough MCP config: %w", err)
+		return preparedPassthroughMCP{}, fmt.Errorf("build remote passthrough MCP config: %w", err)
 	}
 	files := make([]passthroughconfig.File, 0, len(artifacts.Files))
 	for _, file := range artifacts.Files {
@@ -39,21 +36,22 @@ func (m *Manager) applySSHPassthroughMCP(ctx context.Context, execution *AgentEx
 	}
 	client, release, err := runner.client()
 	if err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	defer release()
 	generation := snapshot.Generation + 1
 	if err := client.PreparePassthrough(ctx, types.PassthroughPrepareRequest{Generation: generation, Files: files}); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	execution.remotePassthroughMu.Lock()
 	execution.remotePassthrough.preparedGeneration = generation
 	execution.remotePassthroughMu.Unlock()
 	if err := m.updateRemotePassthroughRecord(ctx, execution, func(record *remotePassthroughRecord) { record.PreparedGeneration = generation }); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	setPassthroughMCPEnv(execution, artifacts.Env)
-	return artifacts.Args, nil
+	operation.servers = resolved
+	return preparedPassthroughMCP{args: artifacts.Args, operation: operation}, nil
 }
 
 func (m *Manager) cleanupSSHPassthroughConfig(ctx context.Context, execution *AgentExecution) {

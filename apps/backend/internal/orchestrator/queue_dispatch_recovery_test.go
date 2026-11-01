@@ -252,7 +252,7 @@ func TestTransferredOrdinaryDispatchRestoresToDestinationAfterRestart(t *testing
 }
 
 // TestCancelledResumeLeftoverClaimRestoresAfterSessionRecovery pins the shutdown
-// boundary documented by REQ-TASKS-RESUME-PROMPT-QUEUE-003.1: when Stop reaches
+// boundary documented by REQ-TASKS-RESUME-PROMPT-QUEUE-004.1: when Stop reaches
 // the reserved-prompt callback teardown before the cancelled-resume restore
 // runs, the entry is not lost. Startup reconciliation parks the claim
 // (unknown_queue_dispatch_outcome) and an explicit session recovery returns the

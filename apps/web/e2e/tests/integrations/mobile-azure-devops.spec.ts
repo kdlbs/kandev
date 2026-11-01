@@ -1,4 +1,8 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { Route } from "@playwright/test";
+import { SessionPage } from "../../pages/session-page";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
 const MOCK_STATE = {
   authenticated: true,
@@ -122,6 +126,102 @@ const MOCK_STATE = {
     },
   },
 };
+
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.7
+test("composer PR links keep phone targets reachable and desktop sizing compact", async ({
+  apiClient,
+  seedData,
+  testPage,
+  desktopTestPage,
+}, testInfo) => {
+  const repository = await apiClient.getRepository(seedData.repositoryId);
+  const capture = new PrAssetCapture(testPage, testInfo.file, { captureKey: testInfo.title });
+  try {
+    await apiClient.mockAzureDevOpsSeed(MOCK_STATE);
+    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
+      organizationUrl: "https://dev.azure.com/acme",
+      pat: "azure-test-pat",
+    });
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "azure_devops",
+      provider_repo_id: "azure-repo-1",
+      provider_host: "dev.azure.com/acme",
+      provider_owner: "project-1",
+      provider_name: "azure-repo-1",
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Azure composer target",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.associateAzureDevOpsTaskPR(
+      seedData.workspaceId,
+      task.id,
+      seedData.repositoryId,
+      42,
+    );
+    const url = MOCK_STATE.pullRequests[0].webUrl;
+    for (const page of [testPage, desktopTestPage]) {
+      await page.setViewportSize({ width: 320, height: 851 });
+      await page.goto(`/t/${task.id}`);
+      const session = new SessionPage(page);
+      await session.waitForLoad();
+      await expect(session.activeChat()).toContainText(
+        "This is a simple mock response for e2e testing.",
+      );
+      const chip = session.chatStatusBar().getByRole("link", { name: /PR 42/ });
+      await expect(chip).toBeVisible();
+      await expect
+        .poll(async () => {
+          const box = await chip.boundingBox();
+          return box ? Math.min(box.width, box.height) : 0;
+        })
+        .toBeGreaterThanOrEqual(44);
+      expect(
+        await chip.evaluate((link) => {
+          const box = link.getBoundingClientRect();
+          return link.contains(
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+          );
+        }),
+      ).toBe(true);
+      await page
+        .context()
+        .route(url, (route) => route.fulfill({ body: "Mock Azure pull request" }));
+      const opened = page.waitForEvent("popup");
+      if (page === testPage) await chip.tap();
+      else await chip.click();
+      const popup = await opened;
+      await expect(popup).toHaveURL(url);
+      await popup.close();
+      await page.mouse.move(0, 0);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("tooltip")).toBeHidden();
+      await waitForFiniteAnimations(session.chatStatusBar());
+      if (page === testPage) {
+        await capture.screenshot("mobile-azure-composer-target", {
+          caption: "Azure DevOps composer PR link keeps a 44px target on a 320px phone",
+        });
+      } else {
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await expect.poll(async () => (await chip.boundingBox())?.height ?? 100).toBeLessThan(44);
+        await capture.screenshot("desktop-azure-composer-target", {
+          page,
+          caption: "Azure DevOps composer PR link retains compact desktop sizing",
+        });
+      }
+    }
+    capture.flush();
+  } finally {
+    await apiClient.updateRepository(seedData.repositoryId, repository);
+  }
+});
 
 test("mobile settings explain PAT scopes and link to the organization token page", async ({
   seedData,
@@ -248,17 +348,53 @@ test("mobile board opens a focused column editor without horizontal overflow", a
   await expect(testPage.getByTestId("azure-work-item-detail-comments")).toContainText(
     "Discussion from Azure",
   );
-  await testPage.getByTestId("azure-work-item-assign-current-user").click();
+  const assign = testPage.getByTestId("azure-work-item-assign-current-user");
+  await assign.click();
+  await expect(assign).toBeEnabled();
   await testPage.getByTestId("azure-work-item-column").click();
   await testPage.getByRole("option", { name: "Active" }).click();
   await testPage.getByTestId("azure-work-item-column-done").click();
   await testPage.getByRole("option", { name: "Done" }).click();
-  await testPage.getByRole("button", { name: "Move" }).click();
-  await testPage.getByTestId("azure-work-item-detail-close").click();
-  await testPage.getByTestId("azure-board-column-picker").click();
-  await testPage.getByTestId("azure-board-column-option-active").click();
-  await expect(testPage.getByText("Handle token rotation")).toBeVisible();
-
+  let releaseMove!: () => void;
+  let observeMove!: () => void;
+  const heldMove = new Promise<void>((resolve) => {
+    releaseMove = resolve;
+  });
+  const moveReached = new Promise<void>((resolve) => {
+    observeMove = resolve;
+  });
+  const movePattern = "**/azure-devops/boards/*/work-items/101?**";
+  const holdMove = async (route: Route) => {
+    if (route.request().method() !== "PATCH") {
+      await route.fallback();
+      return;
+    }
+    const response = await route.fetch();
+    observeMove();
+    await heldMove;
+    await route.fulfill({ response });
+  };
+  await testPage.route(movePattern, holdMove);
+  const moveResponse = testPage.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.endsWith("/work-items/101"),
+  );
+  try {
+    await testPage.getByRole("button", { name: "Move" }).click();
+    await moveReached;
+    await testPage.getByTestId("azure-work-item-detail-close").click();
+    await expect(testPage.getByTestId("azure-work-item-detail")).toHaveCount(0);
+    releaseMove();
+    expect((await moveResponse).ok()).toBe(true);
+    await testPage.getByTestId("azure-board-column-picker").click();
+    await testPage.getByTestId("azure-board-column-option-active").click();
+    await expect(testPage.getByText("Handle token rotation")).toBeVisible();
+    await expect(testPage.getByTestId("azure-work-item-detail")).toHaveCount(0);
+  } finally {
+    releaseMove();
+    await testPage.unroute(movePattern, holdMove);
+  }
   await testPage.getByTestId("azure-devops-work-items-mode").click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();
   await testPage.getByTestId("azure-devops-search-button-mobile").click();

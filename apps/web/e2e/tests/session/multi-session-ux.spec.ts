@@ -541,8 +541,8 @@ test.describe("Multi-session UX", () => {
     );
     const session1Id = sorted[0].id;
 
-    // Right-click on session #1 tab → Delete → Confirm
-    const tab1 = session.sessionTabByText("1");
+    // Use the captured identity for both the action and removal assertion.
+    const tab1 = session.sessionTabBySessionId(session1Id);
     await expect(tab1).toBeVisible({ timeout: 10_000 });
     await tab1.click({ button: "right" });
 

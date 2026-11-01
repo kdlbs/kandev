@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-24
-updated: 2026-09-10
+updated: 2026-10-16
 owners:
   - kandev
 ---
@@ -170,8 +170,11 @@ repository resources, so that I can understand the consequence before acting.
   worktree or branch will be deleted.
 
 Consent inspection, clean-workspace suppression, and failure recovery follow
-[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md),
-`AC-TASKS-RUNTIME-CLEANUP-001.14` through `.17`.
+[normal task deletion](../../tasks/system-design/dirty-worktree-deletion.md).
+The explicit keep-files alternative follows
+[task deletion recovery](../../tasks/requirements/task-delete-recovery.md),
+`REQ-TASKS-DELETE-RECOVERY-001`. The task system owns that choice and its
+outcome. It reuses this document's presentation contract.
 
 ## Out of scope
 

@@ -304,13 +304,7 @@ func (s *Server) getSharedPromptHandler() server.ToolHandlerFunc {
 // --- Executor config tools ---
 
 func (s *Server) registerConfigExecutorTools() {
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_executors_kandev",
-			"List all executors.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
-	)
+	s.registerListExecutorsTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_executor_profiles_kandev",
 			mcp.WithDescription("List all profiles for an executor."),
@@ -353,6 +347,19 @@ func (s *Server) registerConfigExecutorTools() {
 	)
 }
 
+func (s *Server) registerListExecutorsTool() {
+	listTool := mcp.NewToolWithRawSchema("list_executors_kandev",
+		"List every executor available to the authenticated caller, including custom executor IDs, with its visible profiles. Use a returned profile ID as executor_profile_id in create_task_kandev. Visibility does not grant authority to launch later; task creation and executor admission check current ownership.",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	// NewToolWithRawSchema does not accept option functions, so set annotations directly.
+	listTool.Annotations.ReadOnlyHint = mcp.ToBoolPtr(true)
+	s.mcpServer.AddTool(
+		listTool,
+		s.wrapHandler("list_executors_kandev", s.listExecutorsHandler()),
+	)
+}
+
 // --- Task config tools ---
 
 func (s *Server) registerConfigTaskTools() {
@@ -383,6 +390,9 @@ func (s *Server) registerConfigTaskTools() {
 			mcp.WithIdempotentHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
+			mcp.WithBoolean("discard_worktree_changes", mcp.Description("Allow removal of local workspace changes.")),
+			mcp.WithBoolean("allow_unverified_workspace_changes", mcp.Description("Acknowledge that workspace changes cannot be checked. Requires discard_worktree_changes=true and workspace_cleanup=delete. Task removal succeeds independently of pending physical cleanup.")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
 	)
@@ -752,7 +762,10 @@ func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		payload := map[string]string{"task_id": taskID}
+		payload := map[string]any{"task_id": taskID, "discard_worktree_changes": req.GetBool("discard_worktree_changes", false), "allow_unverified_workspace_changes": req.GetBool("allow_unverified_workspace_changes", false)}
+		if mode := req.GetString("workspace_cleanup", ""); mode != "" {
+			payload["workspace_cleanup"] = mode
+		}
 		return s.forwardToBackend(ctx, ws.ActionMCPDeleteTask, payload)
 	}
 }

@@ -30,6 +30,25 @@ Startup sources are read once and later sources override earlier ones. Web setti
 
 Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
 
+## Startup progress and restored conversations
+
+Kandev finishes database initialization and local housekeeping before activating
+background schedulers, integrations, and conversation restoration. While startup
+is in progress, the browser startup page and restart dialog show the current
+operation, its elapsed time, and recent startup timings. Incomplete timing records
+are marked explicitly. The total startup time stops at readiness.
+
+Remote executors that cannot be reached remain pending for that session while
+Kandev becomes ready. Restoring independent conversations uses up to two slots;
+the visible selected conversation gets priority for the next available slot.
+Restoration keeps the original conversation and does not send an instruction or
+release queued messages. An interrupted instruction can retain an unknown outcome.
+
+The launcher also reports startup progress. `/ready` includes an optional bounded
+`startup.completed_steps` history for the current backend process. It contains
+step identifiers, labels, elapsed milliseconds, activation sequence numbers, and
+completion flags. History resets on the next backend start.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -84,6 +103,12 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 
 When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
 
+### Notifications
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webhookAllowPrivateNetworks` | `KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Allows webhook providers to send to private or local destinations. This setting applies to the backend process. Keep it disabled unless the destination needs it. Restart the backend after a change. |
+
 ### Database
 
 | YAML key            | Environment variable       | Default                 | Current behavior                                                          |
@@ -98,8 +123,19 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 | `database.sslMode`  | `KANDEV_DATABASE_SSLMODE`  | `disable`               | `disable`, `require`, `verify-ca`, or `verify-full`.                      |
 | `database.maxConns` | `KANDEV_DATABASE_MAXCONNS` | `25`                    | PostgreSQL maximum pool size.                                             |
 | `database.minConns` | `KANDEV_DATABASE_MINCONNS` | `5`                     | PostgreSQL minimum pool size.                                             |
+| `database.sqliteReaderConns` | `KANDEV_SQLITE_READER_CONNS` | `4` | SQLite read-only pool size. Startup-only; accepts `1`-`64` and sets both maximum open and idle readers. Invalid values fail startup when SQLite is selected. Ignored for PostgreSQL and does not reject PostgreSQL startup. |
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
+
+`database.sqliteReaderConns` is an opt-in startup override for installations where concurrent interactive reads exhaust the default four-connection SQLite read pool. It changes only the read-only pool size and requires a restart. It does not change the single-writer connection, database health probing, or PostgreSQL pool sizing. Invalid values reject a SQLite startup; a PostgreSQL selection is not rejected by this SQLite-only setting.
+
+Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
+Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
+application database role cannot install extensions, a database administrator can
+run `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;` in the Kandev
+database, then restart Kandev. Missing text-index support disables conversation
+search while task metadata search remains available. History is indexed after
+startup; the index uses additional disk space.
 
 `database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
@@ -217,6 +253,8 @@ Environment values override YAML. These values do not configure the agentctl jou
 `interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
 
 `batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+If a batch exceeds its SQL deadline, subsequent attempts halve that cleanup phase's candidate ceiling, down to one. Other phases keep their limits. A new worker starts from the configured ceilings. Deadline failures still use retry backoff; this adjustment does not change retention eligibility, byte limits or transaction deadlines.
 
 Automatic cleanup preserves canonical history and unresolved recovery evidence.
 Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
@@ -337,6 +375,22 @@ for example a systemd drop-in for `kandev.service` (`systemctl --user edit
 kandev.service`) or the container environment. The supervisor manifest at
 `~/.kandev/supervisor/launch.json` is generated by the launcher on every
 launch and is not an environment configuration source.
+
+### Web Push
+
+Web Push uses a VAPID contact address and accepts browser push endpoints from
+known push services. Use these settings only when you operate the Kandev
+backend.
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webPushSubject` | `KANDEV_WEBPUSH_SUBJECT` | `mailto:admin@localhost.invalid` | Contact address sent to the push service. Use a `mailto:` or `https:` URL. A plain email address becomes a `mailto:` URL. |
+| `notifications.webPushAllowedHosts` | `KANDEV_WEBPUSH_ALLOWED_HOSTS` | empty | Comma-separated DNS suffixes for a self-hosted push service. Kandev also allows the standard Google, Mozilla, Apple, and Windows push hosts. |
+
+Only add a host suffix for a push service that you operate and trust. Users
+with accounts can register endpoints under each configured suffix. Do not add
+private application hosts or broad domains. This setting controls where the
+backend can send push requests.
 
 ### Logging
 
@@ -459,6 +513,9 @@ server:
   webInternalUrl: ""
   webTitlePrefix: ""
 
+notifications:
+  webhookAllowPrivateNetworks: false
+
 database:
   driver: "sqlite"
   path: ""
@@ -575,6 +632,9 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.canvases`              | `KANDEV_FEATURES_CANVASES`                | off                | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk.                                                                                                                                                                                                                                                                                                                     |
 | `features.needsYouInbox`         | `KANDEV_FEATURES_NEEDS_YOU_INBOX`         | off                | Inbox for clarification questions and failed tasks in the active workspace. The Failed tab shows a bounded list with its own count.                                                                                                                                                                                                                                                                            |
 | `features.agentSurvival`         | `KANDEV_FEATURES_AGENT_SURVIVAL`          | off                | Experimental. Lets the `agentctl` control server and its running agents outlive a backend restart or upgrade, for the `local_pc` and worktree executors only. The restarted backend takes the surviving server over and reconnects to the sessions still running on it. **Unavailable on Windows**, where surviving the backend means giving up the Job Object that guarantees agent processes are cleaned up. |
+| `features.agentBackgroundWork`   | `KANDEV_FEATURES_AGENT_BACKGROUND_WORK`   | on                 | Shared background-work inspection chip, summary, detail views, and retained history for supported providers. On by default in `prod`, `dev`, and `e2e`; the toggle remains an operator off switch that also gates the read and action endpoints. Provider jobs stay observation-only when the runtime advertises no controls. |
+| `features.opencodePlugin`        | `KANDEV_FEATURES_OPENCODE_PLUGIN`         | off                | Supplies the Kandev integration plugin to supported OpenCode v2 2.2.0 task launches so native shell terminal outcomes can settle existing jobs. Off in `prod`, `dev`, and `e2e`; restart required. V1, unsupported versions, and conflicting inline configuration keep ordinary ACP behavior. Requires `features.agentBackgroundWork` for shell observations. |
+| `features.workspaceCollaboration` | `KANDEV_FEATURES_WORKSPACE_COLLABORATION` | off | Experimental. Narrows verified conversation callers by workspace and independent read, report, prompt, and control grants, intersecting native permissions. Off in `prod`, `dev`, and `e2e`; restart required. With the flag off, native APIs keep their existing behavior and saved grants are retained. |
 | `debug.devMode`                  | `KANDEV_DEBUG_DEV_MODE`                   | off                | High-risk diagnostic endpoints and ACP frame logging.                                                                                                                                                                                                                                                                                                                                                          |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -601,6 +661,13 @@ for the experimental user workflow.
 development and E2E profiles. Restart Kandev after changing it because the
 backend registers the Inbox routes at startup. With the flag off, the Inbox
 routes, boot count, sidebar entry, and page are unavailable.
+
+`features.workspaceCollaboration` is off in the `prod`, `dev`, and `e2e`
+profiles and requires a restart. When enabled, conversation callers are limited
+to their own workspace plus explicit grants that a native workspace manager sets
+on the task. Read, report, prompt, and control are independent and never widen
+native permissions. Turning the flag off restores native behavior without
+deleting saved grants.
 
 For a risky release feature that has not graduated, keep the flag off in the
 shipped profiles, enable it only on a selected install through an admin override
@@ -713,6 +780,7 @@ no public YAML key:
   `KANDEV_FEATURES_AUTH`,
   `KANDEV_FEATURES_MULTI_TENANCY`,
   `KANDEV_FEATURES_NEEDS_YOU_INBOX`,
+  `KANDEV_FEATURES_WORKSPACE_COLLABORATION`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,

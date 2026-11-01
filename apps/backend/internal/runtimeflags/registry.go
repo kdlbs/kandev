@@ -78,6 +78,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.workspaceCollaboration",
+			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
+			Kind:            KindFeature,
+			Label:           "Workspace collaboration",
+			Description:     "Applies workspace grants to native conversation APIs and verified plugin Host callbacks. Disabling restores native permissions and retains saved grants.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Plugin domain callbacks require the current SDK handler context. Unidentified or expired callbacks and grant lookup errors fail closed. Disabling explicitly restores native permissions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,
@@ -231,6 +247,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.opencodePlugin",
+			EnvVar:          "KANDEV_FEATURES_OPENCODE_PLUGIN",
+			Kind:            KindFeature,
+			Label:           "OpenCode integration plugin",
+			Description:     "Supplies the Kandev integration plugin to supported OpenCode v2 task launches so native background shell outcomes can settle existing jobs.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "The plugin observes native shell terminal facts through a private loopback callback. Enable it only for OpenCode v2 2.2.0 sessions; unsupported versions keep ordinary ACP behavior.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OpenCodePlugin },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OpenCodePlugin = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

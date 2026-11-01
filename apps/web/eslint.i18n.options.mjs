@@ -35,7 +35,7 @@ export const noLiteralStringOptions = {
     exclude: [
       "^\\s*$",
       "^[^A-Za-z]*$",
-      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Sprites\\.dev)$",
+      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Webhook|Sprites\\.dev)$",
       "^(ACP|MCP|SSH|URL|ID|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|JQL)$",
       // Units, version prefixes, and keyboard glyphs — not translatable
       // copy; these show up as fragments beside an interpolated value.
@@ -1955,7 +1955,6 @@ export const i18nGuardFiles = [
   // migration record and the `lint:i18n` preview scope, no longer the bound.
   "app/actions/agents.ts",
   "app/demo/messages/demo-messages-data.ts",
-  "app/layout.tsx",
   "app/stats/stats-data.tsx",
   "app/stats/stats-utils.ts",
   "app/tasks/rich-task-row-details.ts",

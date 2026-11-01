@@ -1,15 +1,7 @@
 "use client";
 
 import type { WorkflowMovePreviewTarget } from "./workflow-move-preview-footer";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconMessageCircle,
   IconMessageDots,
@@ -58,13 +50,13 @@ function isEditableElement(element: Element | null) {
   );
 }
 
-function usePassthroughComposerShortcut({
-  focusShortcut,
-  setComposerOpen,
-}: {
-  focusShortcut: KeyboardShortcut;
-  setComposerOpen: Dispatch<SetStateAction<boolean>>;
-}) {
+function usePassthroughComposer(focusShortcut: KeyboardShortcut) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
+  useEffect(() => {
+    if (!composerOpen) return;
+    requestAnimationFrame(() => chatInputRef.current?.focusInput());
+  }, [composerOpen]);
   useKeyboardShortcut(
     focusShortcut,
     useCallback(() => {
@@ -77,6 +69,7 @@ function usePassthroughComposerShortcut({
     }, [setComposerOpen]),
     { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
   );
+  return { composerOpen, setComposerOpen, chatInputRef };
 }
 
 function usePassthroughSendHandler(
@@ -144,15 +137,14 @@ function ActivePassthroughToolbar({
   sessionId: string | null | undefined;
   taskId: string | null;
 }) {
-  const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
-  const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
 
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
   );
   const keyboardShortcuts = useAppStore((state) => state.userSettings?.keyboardShortcuts);
   const focusShortcut = getShortcut("FOCUS_PASSTHROUGH_INPUT", keyboardShortcuts);
+  const { composerOpen, setComposerOpen, chatInputRef } = usePassthroughComposer(focusShortcut);
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
@@ -194,17 +186,15 @@ function ActivePassthroughToolbar({
   });
   const { isSending, handleSendMessage } = usePassthroughSendHandler(sendPassthroughMessage);
 
-  useEffect(() => {
-    if (!composerOpen) return;
-    requestAnimationFrame(() => chatInputRef.current?.focusInput());
-  }, [composerOpen]);
-
-  usePassthroughComposerShortcut({ focusShortcut, setComposerOpen });
-
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
-        <AgentTerminalInput sessionId={sessionId} mobile={isMobile} touch={!finePointer} />
+        <AgentTerminalInput
+          sessionId={sessionId}
+          mobile={isMobile}
+          touch={!finePointer}
+          showControls={!composerOpen && !commentsOpen}
+        />
       </div>
 
       {commentsOpen && pendingCount > 0 && (

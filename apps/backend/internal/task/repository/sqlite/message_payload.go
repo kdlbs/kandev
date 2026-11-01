@@ -135,6 +135,9 @@ func (r *Repository) putMessagePayload(ctx context.Context, digest string, paylo
 // already have resolved and authorized message (see httpGetShellOutput,
 // which fetches by ID under the requesting session).
 func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *models.Message) (err error) {
+	if message != nil && message.Metadata[shellOutputStorageKey] != nil {
+		return r.rehydrateShellOutputChunks(ctx, message)
+	}
 	if message == nil || message.PayloadDigest == "" {
 		return nil
 	}

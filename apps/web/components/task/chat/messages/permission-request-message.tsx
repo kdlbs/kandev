@@ -5,12 +5,7 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { PermissionActionRow } from "./permission-action-row";
 import { summarizePermissionAction } from "./permission-action-summary";
-import {
-  parsePermission,
-  resolvePermissionAvailability,
-  usePermissionResponseHandlers,
-  type PermissionRequestMetadata,
-} from "./use-permission-handlers";
+import { useResolvedPermission, type PermissionRequestMetadata } from "./use-permission-handlers";
 import { t } from "@/lib/i18n";
 
 function getPermissionStatusBadge(status: PermissionRequestMetadata["status"]) {
@@ -47,31 +42,31 @@ type PermissionRequestMessageProps = {
 };
 
 export function PermissionRequestMessage({ comment }: PermissionRequestMessageProps) {
-  const { permissionMetadata, permissionStatus, isPermissionPending } = parsePermission(comment);
   const {
+    permissionMetadata,
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
+    permissionPresentation,
     isResponding,
-    isUnavailable,
     handleApprove,
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
     offeredChoices,
     handleOfferedChoice,
-  } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage: comment,
-  });
+  } = useResolvedPermission(comment);
+  if (permissionPresentation === "automatic") return null;
 
-  const {
-    permissionStatus: effectivePermissionStatus,
-    isPermissionPending: effectivePermissionPending,
-  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
   const statusBadge = getPermissionStatusBadge(effectivePermissionStatus);
   const titleText = comment.content || t("task:permissionRequired");
   const detailSummary = summarizePermissionAction(permissionMetadata?.action_details, titleText);
 
   return (
-    <div className="w-full">
+    <div
+      className="w-full"
+      data-testid="permission-request-message"
+      data-permission-presentation={permissionPresentation}
+    >
       <div className="flex items-start gap-3 w-full">
         <div className="flex-shrink-0 mt-0.5">
           <IconAlertTriangle

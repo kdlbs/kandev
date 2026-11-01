@@ -16,6 +16,11 @@ requirements:
 Platform owns the startup snapshot, so this design extends the existing
 `internal/startup` reporter rather than adding a second progress channel.
 
+The [startup housekeeping extension](startup-housekeeping.md) adds named
+local preparation steps and bounded completed-activation timings to this same
+reporter and its surfaces. Its registry table extends the seven entries below;
+the [combined plan](../../../plans/startup-housekeeping/plan.md) owns that delivery.
+
 What the reporter reaches today, verified rather than assumed:
 
 - It is created and put into the startup context at

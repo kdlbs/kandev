@@ -26,7 +26,16 @@ func TestDurablePromptTurnBindingPersistsBeforeProviderDispatch(t *testing.T) {
 		persisted = buildRunningFromExecution(current, nil)
 		return nil
 	}
+	captured := false
+	sm.turnChangeAdmitted = func(_ context.Context, current *AgentExecution, generation uint64) error {
+		require.NotNil(t, persisted, "persist durable ownership before capturing a turn")
+		require.Equal(t, "turn-initial", current.promptTurnIDSnapshot())
+		require.NotZero(t, generation)
+		captured = true
+		return nil
+	}
 	sm.beforePromptDispatchHook = func() {
+		require.True(t, captured, "capture the admitted turn before provider dispatch")
 		require.NotNil(t, persisted)
 		encoded, err := json.Marshal(persisted.Metadata)
 		require.NoError(t, err)
@@ -50,6 +59,10 @@ func TestDurablePromptTurnBindingWriteFailurePreventsProviderDispatch(t *testing
 	execution.setPromptTurnID("turn-initial")
 	writeErr := errors.New("runtime owner write failed")
 	sm.persistPromptTurnBinding = func(context.Context, *AgentExecution) error { return writeErr }
+	sm.turnChangeAdmitted = func(context.Context, *AgentExecution, uint64) error {
+		t.Fatal("a failed durable owner write must prevent turn capture")
+		return nil
+	}
 	reached := false
 	sm.beforePromptDispatchHook = func() { reached = true }
 	id := initialPromptDeliverySubmissionID(execution)

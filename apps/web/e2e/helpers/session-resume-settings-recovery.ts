@@ -461,7 +461,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     ).toBeVisible();
     await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-    const disclosure = session.activeChat().getByTestId("provider-restored-resume-disclosure");
+    const disclosure = startupRecoveryCard.getByTestId("provider-restored-resume-disclosure");
     await expect(disclosure).toBeVisible();
     await expect(disclosure).toContainText("mode/model");
     await assertNoDocumentHorizontalOverflow(page, "provider-restored resume disclosure");
@@ -574,7 +574,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       timeout: 60_000,
     });
     await expect(recoveryCard.getByRole("heading")).toHaveText(
-      /^(Saved model unavailable|Session startup needs attention)$/,
+      /^(Saved model unavailable|The agent could not start)$/,
     );
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.activeChat().getByTestId("provider-restored-resume-success")).toHaveCount(

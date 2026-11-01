@@ -62,7 +62,19 @@ docker pull ghcr.io/kdlbs/kandev:X.Y.Z-universal
 
 Replace `X.Y.Z` with a real release. `latest` moves on release. `universal` moves on release and is also rebuilt from the current `latest` base each Monday by the repository's scheduled workflow; dated `universal-weekly-YYYYMMDD` tags identify those rebuilds. Release-versioned universal tags remain unchanged.
 
-The repository root `Dockerfile` is release packaging, not a source-build Dockerfile. The release workflow first builds a native bundle for each architecture, prepares a build context containing `bundle/` plus `docker-entrypoint.sh`, builds the amd64 and arm64 images separately, and joins their digests into the published manifest. A plain `docker build .` from a checkout fails because `bundle/` is intentionally absent.
+The repository root `Dockerfile` packages prebuilt release artifacts. A plain `docker build .` from a checkout fails because `bundle/` is intentionally absent.
+
+Use a full Linux release archive for the target architecture: `kandev-linux-x64-full.tar.gz` for amd64 or `kandev-linux-arm64-full.tar.gz` for arm64. Current standard archives omit remote helpers required by the Dockerfile.
+
+Releases before the standard/full split use `kandev-linux-x64.tar.gz` or `kandev-linux-arm64.tar.gz` for the full bundle. Those older archives already include the remote helpers.
+
+The [release workflow](../../.github/workflows/release.yml) prepares each build context with these steps:
+
+1. Create `ctx/bundle/`. Extract the matching full archive there with `tar -xzf <archive> --strip-components=1 -C ctx/bundle` to remove its top-level directory.
+2. Copy `docker-entrypoint.sh` from the matching source release into `ctx/`.
+3. Use that release's root `Dockerfile` to build: `docker build -f Dockerfile -t kandev:dev ./ctx`. Build on the target architecture, or configure Docker's `--platform` and emulation accordingly.
+
+The release workflow builds amd64 and arm64 images separately, then joins their digests into the published manifest.
 
 For extra OS tools, derive from a pinned published image so the release bundle and entrypoint stay intact:
 

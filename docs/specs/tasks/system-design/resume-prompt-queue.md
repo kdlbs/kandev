@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-001
   - REQ-TASKS-RESUME-PROMPT-QUEUE-002
   - REQ-TASKS-RESUME-PROMPT-QUEUE-003
+  - REQ-TASKS-RESUME-PROMPT-QUEUE-004
 ---
 
 # Resume Prompt Queue System Design
@@ -22,11 +23,12 @@ the current queue storage, session incarnation, and agent readiness events.
 | `001.7`, `001.8` | Failure and identity |
 | `001.10`, `001.11` | Workflow transitions during resume |
 | `002.1`, `002.2`, `002.3` | Expired runtime waits |
-| `003.1`, `003.2`, `003.3` | Cancelled resume attempts |
+| `004.1`, `004.2`, `004.3` | Cancelled resume attempts |
 
 Criterion suffixes `001.*` refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001` and
-`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`, and `003.*` to
-`AC-TASKS-RESUME-PROMPT-QUEUE-003`.
+`002.*` to `AC-TASKS-RESUME-PROMPT-QUEUE-002`, `003.*` to
+`AC-TASKS-RESUME-PROMPT-QUEUE-003`, and `004.*` to
+`AC-TASKS-RESUME-PROMPT-QUEUE-004`.
 
 ## Current behavior
 
@@ -241,8 +243,8 @@ recorded-user-message marker and restores the entry, through
 `restoreQueuedMessageForSession` for an exact reservation and
 `restoreQueuedMessage` otherwise. The restore settles the claim, so nothing is
 left for the startup reconciler. A delivery attempt still settles through the
-existing acknowledgement first (`003.2`). The dropped branch now says the
-message was dropped rather than lost (`003.3`).
+existing acknowledgement first (`004.2`). The dropped branch now says the
+message was dropped rather than lost (`004.3`).
 
 The restore runs on the reservation's recovery owner. If `Stop` reaches
 `stopReservedPromptCallbacks` before the restore is launched, the restore is
@@ -252,6 +254,14 @@ reconciliation parks the session for explicit recovery with the
 immediately, and the entry returns to its queue when the operator completes
 that recovery (`restorePendingQueueDispatchesForRecovery`). The entry is not
 lost across the shutdown boundary.
+
+## Backend restart
+
+Lazy recovery leaves an idle session without a runtime until a user returns to
+it, and that is the required behavior. Backend startup performs no queue drain.
+Startup paths may restore or repair queue state, but they never start or resume
+an agent to deliver it. Delivery resumes through the existing path: opening the
+task resumes the session, and its readiness transition drains the queue.
 
 ## Responsive behavior
 

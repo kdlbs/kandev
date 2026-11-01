@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -80,6 +80,7 @@ type repoInfo struct {
 	PRBase                     *models.PRBase
 	QualifiedPRBase            *models.PRBase
 	Position                   int
+	WorkspaceRelativePath      string
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
 	PullBeforeWorktree         bool
@@ -186,6 +187,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		CheckoutBranch:          tr.CheckoutBranch,
 		PRNumber:                prNumberFromMetadata(tr.Metadata),
 		Position:                tr.Position,
+		WorkspaceRelativePath:   tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -442,12 +444,31 @@ func validPRBaseIdentity(
 	if checkoutBranch != "" && target.HeadBranch != checkoutBranch {
 		return false, prBaseMismatchHeadBranch
 	}
+	attachedRepository = normalizePRBaseHeadAlias(base, attachedRepository)
+	headRepository = normalizePRBaseHeadAlias(base, headRepository)
+	if expected != nil {
+		copy := *expected
+		copy.HeadRepository = normalizePRBaseHeadAlias(base, copy.HeadRepository)
+		expected = &copy
+	}
 	if expected != nil || contribution {
 		return validBoundPRBaseIdentity(target, expected, attachedRepository, hasAttachedRepository,
 			headRepository, hasHeadRepository, contribution)
 	}
 	return validUnboundPRBaseIdentity(target, checkoutBranch, attachedRepository, hasAttachedRepository,
 		headRepository, hasHeadRepository)
+}
+
+// normalizePRBaseHeadAlias recognizes only the alias pair returned for this live
+// head repository. Stored identities and unrelated repository IDs stay intact.
+func normalizePRBaseHeadAlias(base models.PRBase, repository models.ComparisonTargetRepository) models.ComparisonTargetRepository {
+	head := base.Target.HeadRepository
+	if base.HeadRepositoryNodeID != "" && head.ProviderID != "" &&
+		repository.ProviderID == base.HeadRepositoryNodeID &&
+		strings.EqualFold(repository.Host, head.Host) && strings.EqualFold(repository.Path, head.Path) {
+		repository.ProviderID = head.ProviderID
+	}
+	return repository
 }
 
 func validBoundPRBaseIdentity(
@@ -521,7 +542,8 @@ func githubComparisonRepositoryFromRepository(repo *models.Repository) (models.C
 }
 
 func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepository) (models.ComparisonTargetRepository, bool) {
-	if !isGitHubComparisonHost(repository.Host) {
+	host, err := githubhost.Parse(strings.TrimSpace(repository.Host))
+	if err != nil {
 		return models.ComparisonTargetRepository{}, false
 	}
 	parts := strings.Split(strings.Trim(strings.TrimSpace(repository.Path), "/"), "/")
@@ -529,27 +551,10 @@ func normalizeGitHubComparisonRepository(repository models.ComparisonTargetRepos
 		return models.ComparisonTargetRepository{}, false
 	}
 	owner, name := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-	repository.Host = defaultGitHubHost
+	repository.Host = host.String()
 	repository.Path = owner + "/" + name
-	repository.RemoteURL = fmt.Sprintf("https://%s/%s/%s.git", defaultGitHubHost, owner, name)
+	repository.RemoteURL = fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, name)
 	return repository, true
-}
-
-func isGitHubComparisonHost(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.User != nil || parsed.Port() != "" ||
-		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return false
-	}
-	return (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "http")) &&
-		strings.EqualFold(parsed.Hostname(), defaultGitHubHost)
 }
 
 func hasProviderRepositoryIdentity(repo *models.Repository) bool {
@@ -661,13 +666,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		return repoclone.RemoteRefStateUnknown, fmt.Errorf("refresh repository before worktree: %w", err)
 	}
 	return repoclone.RemoteRefStateHasRefs, nil
-}
-
-func (e *Executor) refreshAzureDevOpsRepositoryForSession(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) error {
-	_, err := e.refreshAzureDevOpsRepositoryForSessionWithState(ctx, repo, cloneURL)
-	return err
 }
 
 func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
@@ -899,28 +897,26 @@ func gitHubCheckoutOriginURL(
 // repositories. Authentication and clone-url construction deliberately remain
 // inside Executor so callers never receive credentials or construct git calls.
 func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
-	return e.EnsureRepositoryClonedForSession(ctx, "", "", repo)
-}
-
-// EnsureRepositoryClonedForSession materializes a provider repository with
-// exact task/session scope for plugin credential resolution.
-func (e *Executor) EnsureRepositoryClonedForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository,
-) (string, error) {
 	if repo == nil {
 		return "", errors.New("repository is required")
 	}
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
-	path, err := e.ensureRepoClonedForSession(ctx, taskID, sessionID, repo)
-	if err != nil {
-		return "", err
-	}
-	if path != "" {
+	path, err := e.ensureRepoClonedForSession(ctx, "", "", repo)
+	if err == nil && path != "" {
 		repo.LocalPath = path
 	}
-	return path, nil
+	return path, err
+}
+
+// EnsureRepositoryClonedForSession materializes a provider repository with
+// exact task/session scope for plugin credential resolution.
+func (e *Executor) EnsureRepositoryClonedForSession(ctx context.Context, taskID, sessionID string, repo *models.Repository) (string, error) {
+	if repo == nil {
+		return "", errors.New("repository is required")
+	}
+	return e.materializeHostAttachment(ctx, taskID, sessionID, repo)
 }
 
 // backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
@@ -1434,7 +1430,20 @@ func (e *Executor) resumeSession(
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
-			if startAgent {
+			if startAgent && resumeInitialState == models.TaskSessionStateWaitingForInput &&
+				e.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+				// A recovered idle runtime has no new boot event to clear our STARTING claim.
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					if errors.Is(rollbackErr, ErrSessionStateSuperseded) {
+						// A newer owner preserves the duplicate-runtime classification.
+						return nil, errors.Join(ErrExecutionAlreadyRunning, rollbackErr)
+					}
+					return nil, rollbackErr
+				}
+			} else if startAgent {
 				// The live process owns this session's active lifecycle. Keep the
 				// STARTING projection for that process to reconcile instead of
 				// marking it FAILED as if this duplicate launch had failed.
@@ -2110,6 +2119,7 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		WorkspaceLayout:              task.InitialWorkspaceLayout,
 		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
@@ -2350,23 +2360,13 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	for _, folder := range folders {
 		if folder != nil {
 			req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
-				Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				Name:                  folder.DisplayName,
+				LocalPath:             folder.LocalPath,
+				WorkspaceRelativePath: folder.WorkspaceRelativePath,
 			})
 		}
 	}
 	return nil
-}
-
-func (e *Executor) configureResumeGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	session *models.TaskSession,
-	repositories []*repoInfo,
-	beforeCredentialLease func() error,
-) error {
-	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
-		ctx, req, session, repositories, beforeCredentialLease, nil, true,
-	)
 }
 
 func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(
@@ -2644,8 +2644,14 @@ func (e *Executor) applyResumeRepoConfig(
 	// is the only other writer of req.BaseBranch outside the worktree path, and it
 	// skips clone-URL setup entirely once reuse is required. Local executors are
 	// excluded so LocalPreparer keeps using the current on-disk branch.
-	if baseBranch != "" && e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType) {
+	requiresCloneURL := e.capabilities != nil && e.capabilities.RequiresCloneURL(req.ExecutorType)
+	if baseBranch != "" && requiresCloneURL {
 		req.BaseBranch = baseBranch
+	}
+	// Clone-URL resumes carry checkout-branch identity without requesting
+	// another checkout.
+	if req.WorkspaceReuseRequired && req.BranchIdentitySlug == "" && requiresCloneURL {
+		req.BranchIdentitySlug = resumeCheckoutBranchIdentity(repositoryID, allRepos)
 	}
 
 	var repository *models.Repository
@@ -2676,6 +2682,8 @@ func (e *Executor) applyResumeRepoConfig(
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
 		if info != nil && info.RepositoryID == repositoryID {
+			req.TaskRepositoryID = info.TaskRepositoryID
+			req.WorkspaceRelativePath = info.WorkspaceRelativePath
 			req.ContributionDestination = info.ContributionDestination
 			break
 		}
@@ -2715,6 +2723,26 @@ func resolveResumeRepoIDAndBranch(session *models.TaskSession, allRepos []*repoI
 		repositoryID = allRepos[0].RepositoryID
 	}
 	return repositoryID, session.BaseBranch
+}
+
+// resumeCheckoutBranchIdentity returns the sanitized checkout-branch slug of
+// the single task-repository row for repositoryID, or "" when the row has no
+// checkout branch or the repository is attached more than once (ambiguous).
+func resumeCheckoutBranchIdentity(repositoryID string, repos []*repoInfo) string {
+	var match *repoInfo
+	for _, info := range repos {
+		if info == nil || info.RepositoryID != repositoryID {
+			continue
+		}
+		if match != nil {
+			return ""
+		}
+		match = info
+	}
+	if match == nil || strings.TrimSpace(match.CheckoutBranch) == "" {
+		return ""
+	}
+	return worktree.SanitizeBranchSlug(match.CheckoutBranch)
 }
 
 // resolveResumeBaseBranch prefers the current task-repository row when a
@@ -2845,6 +2873,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
 		req.TaskRepositoryID = primaryTaskRepo.ID
+		req.WorkspaceRelativePath = primaryTaskRepo.WorkspaceRelativePath
 	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch

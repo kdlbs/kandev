@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 const (
@@ -93,7 +95,7 @@ func validateContributionDestinationRepository(label string, repository Contribu
 	if err := validateRemoteContributionRepository(repository); err != nil {
 		return fmt.Errorf("contribution destination %s: %w", label, err)
 	}
-	if !strings.EqualFold(repository.Host, "github.com") {
+	if _, err := githubhost.Parse(repository.Host); err != nil {
 		return fmt.Errorf("contribution destination %s host %q is not GitHub", label, repository.Host)
 	}
 	parts := strings.Split(repository.Path, "/")

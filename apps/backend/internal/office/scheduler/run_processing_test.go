@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -21,10 +23,10 @@ import (
 )
 
 func seedRunForProcessing(t *testing.T, repo interface {
-	CreateRun(ctx context.Context, req *models.Run) error
-}, agentID, reason string) *models.Run {
+	CreateRun(ctx context.Context, req *runsmodels.Run) error
+}, agentID, reason string) *runsmodels.Run {
 	t.Helper()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: agentID,
 		Reason:         reason,
@@ -113,7 +115,7 @@ func TestSchedulerService_ClaimNextRun_ReturnsQueuedRun(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	queued := &models.Run{
+	queued := &runsmodels.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: testAgentID,
 		Reason:         scheduler.RunReasonTaskAssigned,

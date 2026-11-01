@@ -234,16 +234,32 @@ describe("reconcileQuickTerminalTabs", () => {
     expect(after.lastTerminalTabIdByWorkspace[OTHER_WS]).toBe(foreign.tabId);
   });
 
-  it("keeps an in-flight local start when resync observes its unbound descriptor", () => {
-    const pending = terminal("pending", { sessionId: null, status: "connecting" });
-    const before = state([], { terminalTabs: [pending] });
+  it("keeps a locally starting terminal when resync observes an unbound or unavailable descriptor", () => {
+    const pending = terminal("pending", { sessionId: null, status: "connecting", sequence: 3 });
+    const before = state([], {
+      terminalTabs: [pending],
+      activeKind: "terminal",
+      activeTerminalTabId: pending.tabId,
+    });
+    const unbound = terminal("pending", {
+      sessionId: null,
+      status: "connecting",
+      sequence: 3,
+    });
     const unavailable = terminal("pending", {
       sessionId: null,
       status: "exited",
       error: "terminal session unavailable",
+      sequence: 3,
     });
 
-    expect(reconcileQuickTerminalTabs(before, WS, [unavailable]).terminalTabs).toEqual([pending]);
+    const unboundResult = reconcileQuickTerminalTabs(before, WS, [unbound]);
+    expect(unboundResult.terminalTabs).toEqual([pending]);
+
+    const unavailableResult = reconcileQuickTerminalTabs(before, WS, [unavailable]);
+    expect(unavailableResult.terminalTabs).toEqual([pending]);
+    expect(unavailableResult.activeTerminalTabId).toBe(pending.tabId);
+
     // A bound session, or a descriptor restored without a local start, remains authoritative.
     const running = terminal("pending");
     expect(reconcileQuickTerminalTabs(before, WS, [running]).terminalTabs).toEqual([running]);

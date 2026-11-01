@@ -19,6 +19,7 @@ export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-be
 export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
   chatMotion: "setting-chat-motion",
+  imagePreviewDefaults: "setting-image-preview-defaults",
   richOutputMotion: "setting-rich-output-motion",
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
@@ -41,11 +42,13 @@ export const GENERAL_SETTINGS_TARGETS = {
   keyboardShortcuts: "setting-keyboard-shortcuts",
   agentTaskProfile: "setting-agent-task-profile",
   agentGeneratedTitles: "setting-agent-generated-task-titles",
+  promptSuggestions: "setting-prompt-suggestions",
   agentTabCloseBehavior: "setting-agent-tab-close-behavior",
   archiveConfirmation: "setting-archive-confirmation",
   creationAutoFocus: "setting-creation-auto-focus",
   preventAutoStartOnOpen: "setting-prevent-auto-start-on-open",
   unreadMessages: "setting-unread-messages",
+  turnChangedFiles: "setting-turn-changed-files",
   transcriptNavigation: "setting-transcript-navigation",
   messageQueue: "setting-message-queue",
   sessionCapacity: "setting-session-capacity",
@@ -64,7 +67,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.sidebarHover,
-    order: 24,
+    order: 26,
   },
   {
     id: "appearance-sidebar-hover-delay",
@@ -75,7 +78,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.sidebarHoverDelay,
-    order: 25,
+    order: 27,
   },
 
   {
@@ -117,7 +120,18 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.chatMotion,
-    order: 12,
+    order: 13,
+  },
+  {
+    id: "appearance-image-preview-defaults",
+    kind: "control",
+    labelKey: "settings:showImagePreviewsByDefault",
+    aliasesKey: "settings:showImagePreviewsByDefaultDescription",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.imagePreviewDefaults,
+    order: 14,
   },
   {
     id: "appearance-settings-menu",
@@ -128,7 +142,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.settingsMenuMode,
-    order: 13,
+    order: 15,
   },
   {
     id: "appearance-startup-page",
@@ -139,7 +153,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.startupPage,
-    order: 14,
+    order: 16,
   },
   {
     id: "appearance-display-language",
@@ -150,7 +164,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.displayLanguage,
-    order: 15,
+    order: 17,
   },
   {
     id: "appearance-status-bar",
@@ -161,7 +175,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.appStatusBar,
-    order: 16,
+    order: 18,
   },
   {
     id: "appearance-changes-panel-layout",
@@ -171,7 +185,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.changesPanelLayout,
-    order: 17,
+    order: 19,
   },
   {
     id: "appearance-resource-metrics",
@@ -182,7 +196,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.resourceMetrics,
-    order: 18,
+    order: 20,
   },
   {
     id: "preferences-layouts",
@@ -190,7 +204,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     labelKey: "settings:layouts",
     groupId: "preferences",
     href: LAYOUTS_SETTINGS_HREF,
-    order: 20,
+    order: 22,
   },
   {
     id: "layouts-profiles",
@@ -201,7 +215,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: LAYOUTS_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.layoutProfiles,
-    order: 21,
+    order: 23,
   },
   {
     id: "layouts-sidebar",
@@ -210,7 +224,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     parentId: "preferences-layouts",
     groupId: "preferences",
     href: SIDEBAR_LAYOUT_TAB_HREF,
-    order: 22,
+    order: 24,
   },
   {
     id: "layouts-sidebar-fast-actions",
@@ -220,7 +234,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: SIDEBAR_LAYOUT_TAB_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.sidebarFastActions,
-    order: 23,
+    order: 25,
   },
   {
     id: "layouts-sidebar-new-task-style",
@@ -230,7 +244,7 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: SIDEBAR_LAYOUT_TAB_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.sidebarNewTaskStyle,
-    order: 24,
+    order: 26,
   },
   {
     id: TERMINAL_EDITORS_ID,
@@ -405,6 +419,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 62,
   },
   {
+    id: "task-actions-prompt-suggestions",
+    kind: "control",
+    labelKey: "settings:promptSuggestions",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.promptSuggestions,
+    order: 62.2,
+  },
+  {
     id: "task-actions-agent-tab-close-behavior",
     kind: "control",
     labelKey: "settings:agentTabCloseButton",
@@ -454,6 +478,17 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.unreadMessages,
     order: 65,
+  },
+  {
+    id: "task-behavior-turn-changed-files",
+    kind: "control",
+    labelKey: "settings:showTurnChangedFiles",
+    aliasesKey: "settings:showTurnChangedFilesDescription",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.turnChangedFiles,
+    order: 65.25,
   },
   {
     id: "task-actions-transcript-navigation",

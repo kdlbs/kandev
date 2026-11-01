@@ -161,6 +161,7 @@ type UserSettings struct {
 	PreventAutoStartAgentOnOpen       bool                              `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                              `json:"unread_divider"`
 	AgentGeneratedTaskTitles          bool                              `json:"agent_generated_task_titles"`
+	PromptSuggestions                 bool                              `json:"prompt_suggestions"`
 	AutoFocusNewTasks                 bool                              `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
@@ -169,6 +170,7 @@ type UserSettings struct {
 	ShowTranscriptAutoScrollControl   bool                              `json:"show_transcript_auto_scroll_control"`
 	ShowTodoListPanel                 bool                              `json:"show_todo_list_panel"`
 	ShowTodoListPanelOnlyWhenNotEmpty bool                              `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowTurnChangedFiles              bool                              `json:"show_turn_changed_files"`
 	ShowReleaseNotification           bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`

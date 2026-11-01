@@ -333,6 +333,25 @@ function sendSessionFocus(
   }
 }
 
+function prioritizeVisibleRestart(
+  requested: { current: string | null },
+  key: string,
+  session: SessionLike,
+  taskId: string,
+  sessionId: string,
+): void {
+  if (
+    requested.current === key ||
+    document.visibilityState !== "visible" ||
+    !session?.session_recovery_blocks?.some(
+      (block) => block.consumer_reference === "agent_delivery",
+    )
+  )
+    return;
+  requested.current = key;
+  sendSessionFocus(getWebSocketClient(), taskId, sessionId);
+}
+
 type ResumeActionParams = {
   status: SessionStatus;
   taskId: string;
@@ -579,6 +598,7 @@ function useSessionResetAndCheck({
   const requestGenerationRef = useRef(0);
   const startupRecoveryInFlightRef = useRef(new Map<string, Promise<void>>());
   const focusRequestInFlightRef = useRef(false);
+  const restartPriorityRequestRef = useRef<string | null>(null);
   const lastFocusRequestAtRef = useRef(0);
   const [committedRequest, setCommittedRequest] = useState<SessionRequestIdentity>({
     key: requestKey,
@@ -619,12 +639,19 @@ function useSessionResetAndCheck({
       !sessionId ||
       connectionStatus !== "connected" ||
       taskArchiveState !== false ||
-      preventAutoResume ||
-      hasAttemptedResume.current
+      preventAutoResume
     )
       return;
-    hasAttemptedResume.current = true;
     const capturedRequest = activeRequestRef.current;
+    prioritizeVisibleRestart(
+      restartPriorityRequestRef,
+      JSON.stringify([capturedRequest.key, capturedRequest.generation]),
+      session,
+      taskId,
+      sessionId,
+    );
+    if (hasAttemptedResume.current) return;
+    hasAttemptedResume.current = true;
     const guardedSetters = buildGuardedSetters(activeRequestRef, capturedRequest, setters);
     const canContinue = () => isCurrentRequest(activeRequestRef.current, capturedRequest);
     const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
@@ -688,6 +715,13 @@ function useSessionResetAndCheck({
       focusRequestInFlightRef.current = true;
       try {
         const recoveryKey = JSON.stringify([capturedRequest.key, capturedRequest.generation]);
+        prioritizeVisibleRestart(
+          restartPriorityRequestRef,
+          recoveryKey,
+          session,
+          taskId,
+          sessionId,
+        );
         const startupRecovery = startupRecoveryInFlightRef.current.get(recoveryKey);
         if (startupRecovery) {
           await startupRecovery;
