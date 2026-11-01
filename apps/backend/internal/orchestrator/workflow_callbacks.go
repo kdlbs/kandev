@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -425,9 +426,9 @@ func isPromptRejectedAsBusy(err error) bool {
 // runCodeReviewCallback starts a native code-review pass over the task's changed
 // files when it enters the step.
 //
-// A review failure never blocks the transition: the run row records the reason
-// and the Review panel surfaces it, but a task must not get stuck in a step
-// because no reviewer was configured or the provider was down. That is why this
+// A review failure never blocks the transition: a launched run records its
+// reason, while an empty diff produces a passive task notice. A task must not
+// get stuck because no reviewer was configured or the provider was down. This
 // logs and returns nil instead of propagating the error.
 type runCodeReviewCallback struct {
 	svc *Service
@@ -447,6 +448,9 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		EntryID:        in.EntryID,
 	})
 	if err != nil {
+		if errors.Is(err, review.ErrNoChanges) {
+			c.svc.recordWorkflowReviewNoChanges(ctx, in, err)
+		}
 		c.svc.logger.Warn("workflow step code review did not start",
 			zap.String("task_id", in.State.TaskID),
 			zap.String("workflow_step_id", in.Step.ID),

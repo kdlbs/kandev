@@ -307,6 +307,19 @@ func (s *Service) RollbackReservedTurn(
 	return true, nil
 }
 
+// Only a newly created lifecycle turn without message references is removable.
+func (s *Service) rollbackRejectedLifecycleTurn(ctx context.Context, message *models.Message, req *CreateMessageRequest) {
+	if !req.CompletedTurn || req.TurnID != "" || message.TurnID == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := s.RollbackReservedTurn(cleanupCtx, message.TaskSessionID, message.TurnID); err != nil {
+		s.logger.Warn("failed to roll back rejected lifecycle turn",
+			zap.String("turn_id", message.TurnID), zap.Error(err))
+	}
+}
+
 // createCompletedTurn persists a synthetic turn that is never observable as
 // active. It is used for lifecycle messages that must belong to a turn without
 // making an idle task appear to have an active agent turn.

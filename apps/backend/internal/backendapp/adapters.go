@@ -1813,6 +1813,25 @@ func (a *messageCreatorAdapter) CreateLifecycleSessionMessage(
 	return err
 }
 
+// CreateLifecycleSessionMessageIdempotent keeps a replayed workflow notice in
+// one completed lifecycle turn without starting or reusing a foreground turn.
+func (a *messageCreatorAdapter) CreateLifecycleSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
 // CreateSessionMessageIdempotent persists a lifecycle/status message with a
 // deterministic ID so a replayed failure event cannot add another transcript
 // entry for the same failure stamp.
