@@ -143,7 +143,7 @@ func pluginExecutorStatusFromInventory(inventory pluginExecutorInventory, now ti
 	case pluginExecutorPhaseExpired:
 		status.State = pluginExecutorPhaseExpired
 		status.Reason = pluginExecutorPhaseExpired
-	case pluginExecutorPhaseCleanupPending:
+	case pluginExecutorPhaseCleanupPending, pluginExecutorPhaseCleanupProgress:
 		status.State = pluginExecutorPhaseCleanupPending
 		status.Reason = pluginExecutorPhaseCleanupPending
 	case pluginExecutorPhaseReady, pluginExecutorPhaseProvisioned:

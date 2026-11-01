@@ -114,3 +114,30 @@ func TestAdoptingAHandoffDropsASecretFromItsState(t *testing.T) {
 		t.Fatalf("adopted inventory = %q, want a stored row without the secret", stored)
 	}
 }
+
+// Whichever gate refuses the response first, a revealed secret in the state must
+// not reach any inventory checkpoint. Here the descriptor is invalid too, so the
+// launch fails before the secret gate would have run in its old position.
+func TestSecretInStateNeverReachesACheckpointWhenTheDescriptorIsInvalid(t *testing.T) {
+	resource := secretBearingResource()
+	resource.StateVersion = 99
+	harness := newWorkspaceLaunchHarness(t, testPluginExecutorLaunchProvider(), resource)
+
+	if _, err := harness.runtime.CreateInstance(context.Background(), harness.request); err == nil {
+		t.Fatal("a launch with an invalid descriptor succeeded")
+	}
+	sawResource := false
+	for _, checkpoint := range harness.checkpoints {
+		encoded, err := json.Marshal(checkpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), leakedProfileSecret) {
+			t.Fatalf("a checkpoint carries a revealed profile secret: %s", encoded)
+		}
+		sawResource = sawResource || checkpoint.Resource.GetResourceHandle() == "opaque-resource"
+	}
+	if !sawResource {
+		t.Fatal("no checkpoint kept the resource handle for cleanup")
+	}
+}
