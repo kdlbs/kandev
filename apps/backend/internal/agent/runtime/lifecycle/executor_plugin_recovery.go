@@ -83,7 +83,7 @@ func (r *PluginRemoteExecutor) loadPluginExecutorRecoveryState(ctx context.Conte
 		inventory: inventory, profile: profile, resource: inventory.Resource, snapshot: snapshot,
 		operationContext: pluginExecutorRequestContextForRecord(record, inventory, *profile),
 		wasAllocating:    inventory.Phase == pluginExecutorPhaseAllocating,
-		cleanupPending:   inventory.Phase == pluginExecutorPhaseCleanupPending,
+		cleanupPending:   pluginExecutorCleanupOwed(inventory.Phase),
 	}, nil
 }
 
@@ -146,7 +146,7 @@ func (r *PluginRemoteExecutor) acceptRecoveredPluginExecutorResource(
 	if err != nil {
 		return nil, false, err
 	}
-	if state.inventory.Phase != pluginExecutorPhaseCleanupPending {
+	if !pluginExecutorCleanupOwed(state.inventory.Phase) {
 		state.inventory.Phase = pluginExecutorPhaseProvisioned
 	}
 	if err := r.checkpointPluginExecutorRecord(ctx, record, state.inventory); err != nil {
@@ -236,9 +236,17 @@ func pluginExecutorRecordedCredentialsReadable(record *models.ExecutorRunning) e
 
 var errPluginExecutorCredentialUnreadable = errors.New("plugin executor agentctl credential is recorded but could not be read; recovery is deferred")
 
+// pluginExecutorCleanupOwed reports whether a stored phase means the resource
+// is to be destroyed. cleanup_progress is a provider's checkpoint under a
+// cleanup claim; the claim died with the process that held it, so the cleanup
+// resumes under a new one and the destroy is idempotent.
+func pluginExecutorCleanupOwed(phase string) bool {
+	return phase == pluginExecutorPhaseCleanupPending || phase == pluginExecutorPhaseCleanupProgress
+}
+
 func pluginExecutorPhaseCanAttach(phase string) bool {
 	switch phase {
-	case pluginExecutorPhaseArtifactStaging, pluginExecutorPhaseBootstrapping, pluginExecutorPhaseProvisioned, pluginExecutorPhaseReady:
+	case pluginExecutorPhaseRecoveryProgress, pluginExecutorPhaseArtifactStaging, pluginExecutorPhaseBootstrapping, pluginExecutorPhaseProvisioned, pluginExecutorPhaseReady:
 		return true
 	default:
 		return false
@@ -676,7 +684,7 @@ func (r *PluginRemoteExecutor) recordRecoveredCleanupResource(
 	if err != nil {
 		return nil, false, err
 	}
-	if inventory.Phase != pluginExecutorPhaseCleanupPending {
+	if !pluginExecutorCleanupOwed(inventory.Phase) {
 		inventory.Phase = pluginExecutorPhaseProvisioned
 	}
 	if err := r.checkpointPluginExecutorRecord(ctx, record, inventory); err != nil {
