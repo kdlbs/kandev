@@ -109,20 +109,21 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var status string
+	var retiredAt sql.NullTime
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path, workspace_layout,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
-			created_at, updated_at
+			retired_at, created_at, updated_at
 		FROM task_environments WHERE id = ?
 	`), id).Scan(
 		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath, &env.WorkspaceLayout,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
-		&env.CreatedAt, &env.UpdatedAt,
+		&retiredAt, &env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
@@ -131,6 +132,9 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 		return nil, err
 	}
 	env.Status = models.TaskEnvironmentStatus(status)
+	if retiredAt.Valid {
+		env.RetiredAt = &retiredAt.Time
+	}
 
 	repos, err := r.ListTaskEnvironmentRepos(ctx, env.ID)
 	if err != nil {
@@ -145,20 +149,21 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var status string
+	var retiredAt sql.NullTime
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 			control_port, status, materialization_session_id,
 			workspace_path, workspace_layout,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
-			created_at, updated_at
-		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
+			retired_at, created_at, updated_at
+		FROM task_environments WHERE task_id = ? AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1
 	`), taskID).Scan(
 		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath, &env.WorkspaceLayout,
 		&env.ContainerID, &env.ContainerBootstrapNonceSecretID, &env.ContainerControlAuthTokenSecretID, &env.SandboxID, &env.TaskDirName,
-		&env.CreatedAt, &env.UpdatedAt,
+		&retiredAt, &env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil // No environment yet — not an error
@@ -167,6 +172,9 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 		return nil, err
 	}
 	env.Status = models.TaskEnvironmentStatus(status)
+	if retiredAt.Valid {
+		env.RetiredAt = &retiredAt.Time
+	}
 
 	repos, err := r.ListTaskEnvironmentRepos(ctx, env.ID)
 	if err != nil {
@@ -418,7 +426,7 @@ const reelectTaskEnvironmentMaterializationSQL = `
 		container_id = '', container_bootstrap_nonce_secret_id = '',
 		container_control_auth_token_secret_id = '', sandbox_id = '',
 		updated_at = ?
-	WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	WHERE id = ? AND retired_at IS NULL AND status = ? AND COALESCE(materialization_session_id, '') = ?
 	  AND COALESCE(workspace_path, '') = ''
 	  AND COALESCE(container_id, '') = ''
 	  AND COALESCE(sandbox_id, '') = ''

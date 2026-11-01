@@ -700,18 +700,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		return err
 	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ? AND retired_at IS NULL
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if candidate.ID == "" {
-			candidate.ID = uuid.New().String()
-		}
-		candidate.Status = models.TaskEnvironmentStatusCreating
-		candidate.MaterializationSessionID = session.ID
-		candidate.CreatedAt = r.nowUTC()
-		candidate.UpdatedAt = candidate.CreatedAt
-		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		if err := r.reserveInitialWorkspaceEnvironmentTx(ctx, tx, candidate, session.ID); err != nil {
 			return err
 		}
 		session.TaskEnvironmentID = candidate.ID
@@ -735,10 +728,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusFailed:
-		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID); err != nil {
+		selected, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, envID, session.ID, candidate)
+		if err != nil {
 			return err
 		}
-		session.TaskEnvironmentID = envID
+		session.TaskEnvironmentID = selected
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
