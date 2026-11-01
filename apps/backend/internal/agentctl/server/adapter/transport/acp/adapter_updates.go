@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	acpAssistantRole                    = "assistant"
 	acpUserRole                         = "user"
 	availableCommandKindSkill           = "skill"
 	codexPlanCommandName                = "plan"
@@ -488,7 +489,7 @@ func (a *Adapter) convertACPContentNotification(
 		return a.convertMessageChunkWithProtocolID(
 			sessionID,
 			u.AgentMessageChunk.Content,
-			"assistant",
+			acpAssistantRole,
 			derefStr(u.AgentMessageChunk.MessageId),
 		), true
 
@@ -803,7 +804,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// own assistant text. Parse those out into proper Monitor events and
 		// strip them from the chat text. Assistant role only — genuine user
 		// messages don't carry these.
-		if role == "assistant" {
+		if role == acpAssistantRole {
 			cleaned := a.routeMonitorEvents(sessionID, text)
 			monitorTextRemoved := cleaned != text
 			text = cleaned
@@ -820,7 +821,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
-		event.ProviderDiagnosticCandidate = role == "assistant" &&
+		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}

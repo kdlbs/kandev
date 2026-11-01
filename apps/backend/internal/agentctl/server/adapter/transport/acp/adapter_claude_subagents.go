@@ -304,7 +304,7 @@ func (a *Adapter) completeClaudeSubagentSettlementsLocked(
 			continue
 		}
 		subagent := record.payload.SubagentTask()
-		subagent.Status = "completed"
+		subagent.Status = toolStatusCompleted
 		if candidate.report != "" {
 			subagent.ResultText = candidate.report
 		}
@@ -387,12 +387,12 @@ func claudeSubagentAssistantText(data []byte) string {
 				} `json:"content"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal(lines[index], &entry); err != nil || entry.Type != "assistant" {
+		if err := json.Unmarshal(lines[index], &entry); err != nil || entry.Type != acpAssistantRole {
 			continue
 		}
 		var textBlocks []string
 		for _, block := range entry.Message.Content {
-			if block.Type == "text" && block.Text != "" {
+			if block.Type == contentTypeText && block.Text != "" {
 				textBlocks = append(textBlocks, block.Text)
 			}
 		}
