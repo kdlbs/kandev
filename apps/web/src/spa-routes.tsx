@@ -12,7 +12,7 @@ import { AzureDevOpsPageClient } from "@/app/azure-devops/azure-devops-page-clie
 import { JiraPageClient } from "@/app/jira/jira-page-client";
 import { LinearPageClient } from "@/app/linear/linear-page-client";
 import { StatsPageClient } from "@/app/stats/stats-page-client";
-import { TokenUsagePageClient } from "@/app/stats/token-usage-page-client";
+import { TokenUsageRoute } from "@/app/stats/token-usage-route";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
 import { TasksWorkspaceError } from "@/app/tasks/tasks-workspace-error";
@@ -629,11 +629,7 @@ function ExternalDataRoute({
       );
     case "tokenUsage":
       return (
-        <TokenUsagePageClient
-          workspaceId={workspaceId}
-          activeRange={route.range}
-          initialError={null}
-        />
+        <TokenUsageRoute workspaceId={workspaceId} activeRange={route.range} initialError={null} />
       );
     case "runs":
       // The flat feed is demoted to a lens over the list, not deleted: with

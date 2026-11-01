@@ -312,7 +312,7 @@ func (f *usageBenchFixture) validateReadiness(t testing.TB) {
 	}
 	var complete int
 	usageBenchMust(t, f.database.Get(&complete, `SELECT COUNT(*) FROM usage_history_migration_state WHERE complete=1`))
-	if complete != len(usageHistoryMigrationSources) {
+	if complete != len(usageHistoryMigrationSources)+1 {
 		t.Fatal("fixture retention migration is incomplete")
 	}
 }

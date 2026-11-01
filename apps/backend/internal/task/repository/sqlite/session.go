@@ -134,7 +134,7 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
 	}
-	if r.usageHistoryRetainer != nil {
+	if r.usageHistoryRetainer != nil && r.usageHistoryIsEnabled() {
 		tx, ok := execer.(*sqlx.Tx)
 		if !ok {
 			return fmt.Errorf("retained turn binding requires the turn transaction")
@@ -4670,7 +4670,7 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	}
 	usagePreserved := false
 	usageDeleted := false
-	if r.usageHistoryLifecycle != nil {
+	if r.usageHistoryLifecycle != nil && r.usageHistoryIsEnabled() {
 		if err := r.usageHistoryLifecycle.PreserveSessionUsage(ctx, session.TaskID, session.ID, session.QueueIncarnationID); err != nil {
 			return nil, fmt.Errorf("preserve task session usage before pruning: %w", err)
 		}

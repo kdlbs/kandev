@@ -55,24 +55,29 @@ func NewStatsHandlers(
 	}
 }
 
+// RegisterStatsRoutes registers the retained Token Usage route only when the
+// usage history release toggle is on.
 func RegisterStatsRoutes(
 	router *gin.Engine,
 	repo repository.Repository,
 	authorizer WorkspaceAuthorizer,
 	log *logger.Logger,
+	tokenUsage bool,
 ) {
 	handlers := NewStatsHandlers(repo, authorizer, log)
-	handlers.registerHTTP(router)
+	handlers.registerHTTP(router, tokenUsage)
 }
 
-func (h *StatsHandlers) registerHTTP(router *gin.Engine) {
+func (h *StatsHandlers) registerHTTP(router *gin.Engine, tokenUsage bool) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces/:id/stats/global", h.httpGetGlobalStats)
 	api.GET("/workspaces/:id/stats/tasks", h.httpGetTaskStats)
 	api.GET("/workspaces/:id/stats/daily-activity", h.httpGetDailyActivity)
 	api.GET("/workspaces/:id/stats/completed-activity", h.httpGetCompletedActivity)
 	api.GET("/workspaces/:id/stats/model-usage", h.httpGetModelUsage)
-	api.GET("/workspaces/:id/stats/token-usage", h.httpGetTokenUsage)
+	if tokenUsage {
+		api.GET("/workspaces/:id/stats/token-usage", h.httpGetTokenUsage)
+	}
 	api.GET("/workspaces/:id/stats/repositories", h.httpGetRepositoryStats)
 	api.GET("/workspaces/:id/stats/git", h.httpGetGitStats)
 }
@@ -179,14 +184,7 @@ func (h *StatsHandlers) httpGetTokenUsage(c *gin.Context) {
 	}
 	usageRepo, ok := h.repo.(repository.UsageRepository)
 	if !ok {
-		// Older repository implementations can still serve the established
-		// stats routes. An empty report keeps this additive route compatible
-		// during staged upgrades and gives the page a normal empty state.
-		if _, err := h.repo.GetGlobalStats(c.Request.Context(), workspaceID, nil); err != nil {
-			h.fail(c, workspaceID, "token usage", err)
-			return
-		}
-		c.JSON(http.StatusOK, &models.TokenUsageReport{Rows: []models.TokenUsageRow{}})
+		h.fail(c, workspaceID, "token usage", errors.New("analytics usage repository is not configured"))
 		return
 	}
 	var end *time.Time

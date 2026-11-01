@@ -135,7 +135,7 @@ func TestUsageHistorySelectionLegacyIndexCatchupIsDurable(t *testing.T) {
 	item := usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
 	other := item
 	other.SourceRecordID = "second-legacy-record"
-	result, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{item, other})
+	result, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{item, other})
 	require.NoError(t, err)
 	_, err = repo.db.Exec(`UPDATE session_usage_measurements SET selection_partition = '', selection_coverage = ''`)
 	require.NoError(t, err)
@@ -223,4 +223,34 @@ func TestUsageHistorySelectionOversizedEquivalenceGroupReturnsPreparing(t *testi
 	require.Empty(t, rows)
 	require.Equal(t, "preparing", state.Status)
 	require.True(t, state.Pending)
+}
+
+// @covers AC-COSTS-USAGE-HISTORY-004.6
+func TestUsageSnapshotRetentionKeepsOnePerSourceAndScope(t *testing.T) {
+	repo, api := historyContractFixture(t)
+	_, err := repo.db.Exec(`INSERT INTO task_sessions (id,task_id,agent_profile_id,started_at,updated_at,metadata)
+		VALUES ('session-2','task-1','agent','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','{"acp":{"session_id":"transcript-2"}}')`)
+	require.NoError(t, err)
+	captureFixtureSessionBirth(t, repo, "task-1", "session-2")
+	var first pluginsdk.UsageCollectionTargetPageV1
+	for range 10 {
+		first, err = api.ListUsageCollectionTargets(t.Context(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1", Limit: 1})
+		require.NoError(t, err)
+		if !first.Preparing {
+			break
+		}
+	}
+	require.False(t, first.Preparing)
+	require.True(t, first.HasMore)
+	second, err := api.ListUsageCollectionTargets(t.Context(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{
+		WorkspaceID: "ws-1", SnapshotID: first.SnapshotID, Cursor: first.NextCursor, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, second.Targets, 1)
+	require.Equal(t, first.SnapshotID, second.SnapshotID)
+	_, err = api.ListUsageCollectionTargets(t.Context(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1", Limit: 1})
+	require.NoError(t, err)
+	var snapshots int
+	require.NoError(t, repo.db.Get(&snapshots, `SELECT COUNT(*) FROM usage_collection_snapshots WHERE source = 'plugin:collector-a'`))
+	require.Equal(t, 1, snapshots)
 }

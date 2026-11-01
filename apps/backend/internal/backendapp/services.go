@@ -681,7 +681,9 @@ func initPluginsWiring(
 		taskSvc.SetExecutorProviderCatalog(pluginsSvc)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsSvc, taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 		pluginsSvc.SetWorkspaceAdminWriter(pluginsWorkspaceAdminAdapter{tasks: taskSvc, workflows: workflowSvc, agents: agentSettingsController})
-		pluginsSvc.SetUsageSource(analyticsSvc)
+		if cfg.Features.UsageHistory {
+			pluginsSvc.SetUsageSource(analyticsSvc)
+		}
 		// Wire the managed agent conversation service for the agent_conversation
 		// Host capability. Wired here (not at boot time in main.go) because the
 		// task service, shared repository, agent settings repository, and

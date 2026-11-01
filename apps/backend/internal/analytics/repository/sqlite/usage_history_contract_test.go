@@ -36,6 +36,7 @@ func historyContractFixtureInOrg(t *testing.T, org string) (*Repository, retaine
 	repo, err := NewWithDB(database, database)
 	require.NoError(t, err)
 	captureFixtureSessionBirth(t, repo, "task-1", "session-1")
+	completeUsageSourceAdoptionForTest(t, repo)
 	api, ok := any(repo).(retainedUsageAPI)
 	require.True(t, ok, "repository must implement the retained observation contract")
 	return repo, api
@@ -65,6 +66,7 @@ func historyRetainedContractFixture(t *testing.T) (*Repository, retainedUsageAPI
 	require.NoError(t, tasks.CreateWorkspace(t.Context(), &taskmodels.Workspace{ID: "ws-1", Name: "Usage"}))
 	require.NoError(t, tasks.CreateTask(t.Context(), &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Title: "Task", CreatedAt: created, UpdatedAt: created}))
 	require.NoError(t, tasks.CreateTaskSession(t.Context(), &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", StartedAt: created}))
+	completeUsageSourceAdoptionForTest(t, repo)
 	return repo, repo
 }
 
@@ -204,9 +206,6 @@ func TestUsageHistoryContractSnapshotSurvivesAdditionDeletionAndResume(t *testin
 	require.NoError(t, err)
 	_, err = repo.db.Exec(`INSERT INTO task_sessions (id, task_id, agent_profile_id, started_at, updated_at) VALUES ('session-0', 'task-1', 'agent', ?, ?)`, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
 	require.NoError(t, err)
-	newSnapshot, err := api.ListUsageCollectionTargets(context.Background(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1"})
-	require.NoError(t, err)
-	require.Greater(t, newSnapshot.SnapshotUpperBound, first.SnapshotUpperBound)
 	seen := map[string]bool{first.Targets[0].TaskID + ":" + *first.Targets[0].SessionID: true}
 	cursor := first.NextCursor
 	for cursor != "" {
@@ -229,7 +228,12 @@ func TestUsageHistoryContractSnapshotSurvivesAdditionDeletionAndResume(t *testin
 		cursor = page.NextCursor
 	}
 	require.Len(t, seen, 3)
-	_, err = api.ListUsageCollectionTargets(context.Background(), "other-collector", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1", SnapshotID: first.SnapshotID})
+	newSnapshot, err := api.ListUsageCollectionTargets(context.Background(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1"})
+	require.NoError(t, err)
+	require.Greater(t, newSnapshot.SnapshotUpperBound, first.SnapshotUpperBound)
+	_, err = api.ListUsageCollectionTargets(context.Background(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1", SnapshotID: first.SnapshotID})
+	require.ErrorIs(t, err, ErrUsageNotVisible, "a newer same-source snapshot replaces the older retained snapshot")
+	_, err = api.ListUsageCollectionTargets(context.Background(), "other-collector", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1", SnapshotID: newSnapshot.SnapshotID})
 	require.ErrorIs(t, err, ErrUsageNotVisible)
 }
 
@@ -392,7 +396,7 @@ func TestUsageHistoryContractLegacyDTOCanBeExplicitlySuperseded(t *testing.T) {
 	require.NoError(t, err)
 	legacy := usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
 	legacy.Source = "plugin:collector-a"
-	old, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{legacy})
+	old, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{legacy})
 	require.NoError(t, err)
 	item := contractObservation(t, page.Targets[0].SubjectBinding, "new-contract-item", 1, "corrected-model", 23)
 	item.SupersedesItemID = &old[0].Measurement.ID
@@ -403,7 +407,7 @@ func TestUsageHistoryContractLegacyDTOCanBeExplicitlySuperseded(t *testing.T) {
 	require.Equal(t, 1, retired)
 	legacy.Revision++
 	legacy.PayloadDigest = "later-legacy-poll"
-	again, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{legacy})
+	again, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{legacy})
 	require.NoError(t, err)
 	require.Equal(t, models.UsageWriteConflict, again[0].Status)
 }

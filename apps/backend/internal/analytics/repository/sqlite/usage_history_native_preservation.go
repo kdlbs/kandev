@@ -46,6 +46,9 @@ func (r *Repository) preserveNativeUsageRowTx(ctx context.Context, tx *sqlx.Tx, 
 }
 
 func (r *Repository) requireNativeUsagePreservedTx(ctx context.Context, tx *sqlx.Tx, target usagePreservationTarget) error {
+	if !r.usageHistoryIsEnabled() {
+		return nil
+	}
 	query := `SELECT e.usage_event_id FROM task_usage_events e WHERE e.task_id = ?` +
 		sessionPredicateFor("e.session_id", target.SessionID) + ` AND NOT EXISTS (` + retainedNativePreservationCopy + `) LIMIT 1`
 	args := []any{target.TaskID}

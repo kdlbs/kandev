@@ -201,14 +201,7 @@ func fixtureUsageTokens(values map[string]string) (*pluginsdk.UsageTokenAmountsV
 
 func readFixtureUsage(ctx context.Context, reader pluginsdk.UsageReader, workspace string, input fixtureUsageInput) (any, error) {
 	input.Filter.WorkspaceID = workspace
-	var rows []pluginsdk.SessionUsageMeasurement
-	var info *pluginsdk.PageInfo
-	var err error
-	if input.Operation == "canonical" {
-		rows, info, err = reader.ListCanonical(ctx, input.Filter, input.Page)
-	} else {
-		rows, info, err = reader.List(ctx, input.Filter, input.Page)
-	}
+	rows, info, err := reader.ListCanonical(ctx, input.Filter, input.Page)
 	return struct {
 		Rows []pluginsdk.SessionUsageMeasurement `json:"rows"`
 		Page *pluginsdk.PageInfo                 `json:"page_info"`

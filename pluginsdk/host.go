@@ -1992,14 +1992,6 @@ func (unimplementedSessionReader) CodeStats(context.Context, SessionFilter, Page
 
 type unimplementedUsageReader struct{}
 
-func (unimplementedUsageReader) UpsertBatch(context.Context, string, []SessionUsageMeasurement) ([]SessionUsageWriteResult, error) {
-	return nil, errUnimplementedHostData("session_usage")
-}
-
-func (unimplementedUsageReader) List(context.Context, SessionUsageFilter, Page) ([]SessionUsageMeasurement, *PageInfo, error) {
-	return nil, nil, errUnimplementedHostData("session_usage")
-}
-
 func (unimplementedUsageReader) ListCanonical(context.Context, SessionUsageFilter, Page) ([]SessionUsageMeasurement, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("session_usage")
 }

@@ -15,7 +15,8 @@ type Repository struct {
 	// database revision predicate below remains authoritative for multiple
 	// processes, while this lock avoids SQLite write races and makes the
 	// read/compare/write result deterministic for in-process callers.
-	usageWriteMu sync.Mutex
+	usageWriteMu            sync.Mutex
+	usageHistoryEnabledFlag *bool
 }
 
 // NewWithDB creates a new analytics repository with existing database connections.
@@ -29,6 +30,16 @@ func NewWithDB(writer, reader *sqlx.DB) (*Repository, error) {
 		return nil, err
 	}
 	return repo, nil
+}
+
+// SetUsageHistoryEnabled lets completion detach retained links while the
+// release toggle is off, when the ledger has no retained copy to verify.
+func (r *Repository) SetUsageHistoryEnabled(enabled bool) {
+	r.usageHistoryEnabledFlag = &enabled
+}
+
+func (r *Repository) usageHistoryIsEnabled() bool {
+	return r.usageHistoryEnabledFlag == nil || *r.usageHistoryEnabledFlag
 }
 
 // Close is a no-op because this repository does not own the database connection.

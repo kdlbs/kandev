@@ -25,7 +25,7 @@ func legacySegmentPair(t *testing.T, repo *Repository, providerSplit bool) ([]mo
 		row.PayloadDigest = "old-dto-" + model
 		input = append(input, row)
 	}
-	writes, err := repo.UpsertSessionUsage(t.Context(), input)
+	writes, err := repo.upsertSessionUsageFixture(t.Context(), input)
 	require.NoError(t, err)
 	require.Len(t, writes, 2)
 	for _, write := range writes {

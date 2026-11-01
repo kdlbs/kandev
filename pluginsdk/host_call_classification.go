@@ -37,7 +37,6 @@ var hostCallCallerExempt = map[string]struct{}{
 	pluginv1.Host_ListStateKeys_FullMethodName: {},
 	// Usage collection is authenticated by plugin identity and session_usage
 	// capabilities, so collectors can run without a foreground caller.
-	pluginv1.Host_UpsertSessionUsage_FullMethodName:           {},
 	pluginv1.Host_ListSessionUsage_FullMethodName:             {},
 	pluginv1.Host_ListUsageCollectionTargetsV1_FullMethodName: {},
 	pluginv1.Host_ReportUsageObservationsV1_FullMethodName:    {},

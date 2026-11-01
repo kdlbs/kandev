@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	usageModels "github.com/kandev/kandev/internal/analytics/models"
 )
 
 const preservationPageFailure = "usage preservation injected failure"
@@ -158,13 +156,7 @@ func (f *preservationPageFixture) assertAdmissionFenced(t *testing.T) {
 	ctx := context.Background()
 	err := f.tasks.CreateTaskUsageEvent(ctx, newTestUsageEvent("preservation-fenced-native", preservationPageTask, preservationPageSession))
 	require.ErrorContains(t, err, "usage writes are fenced")
-	_, err = f.analytics.UpsertSessionUsage(ctx, []usageModels.SessionUsageMeasurement{{
-		WorkspaceID: "ws-1", TaskID: preservationPageTask, SessionID: preservationPageSession,
-		Source: preservationLegacySource, SourceRecordID: "preservation-fenced-external", UsageIdentity: "fenced-work",
-		Model: "exact-model", Provider: "provider", Revision: 1, PayloadDigest: "fenced-digest",
-		ObservedAt:  time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC),
-		InputTokens: usageModels.Int64(9), TotalTokens: usageModels.Int64(9),
-	}})
+	err = reportExternalUsageWithBinding(ctx, f.analytics, "preservation", f.binding, "preservation-fenced-external", "exact-model", 9, time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC))
 	require.ErrorContains(t, err, "usage writes are fenced")
 	var rows int
 	require.NoError(t, f.db.Get(&rows, `SELECT COUNT(*) FROM task_usage_events WHERE usage_event_id = 'preservation-fenced-native'`))

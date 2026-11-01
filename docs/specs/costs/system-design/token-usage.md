@@ -107,8 +107,8 @@ It does not retroactively reinterpret historical ledger categories.
 
 ### Host surface
 
-Add `Host.Usage()` with `UpsertBatch` and `ListSessionUsage` accessors.
-Wire methods are `UpsertSessionUsage` and `ListSessionUsage`.
+Add `Host.Usage()` with a `ListCanonical` accessor over the `ListSessionUsage` wire method.
+Writes use the versioned [retained usage contract](usage-history.md).
 Capabilities are `api_write:session_usage` and `api_read:session_usage` under the shipped v1 model.
 These new methods do not claim to implement the proposed exact-operation Host protocol.
 

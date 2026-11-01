@@ -45,6 +45,7 @@ type preservationPageFixture struct {
 	nativeKeys   []int64
 	externalKeys map[string][]string
 	expected     map[string]map[string]preservationPageAmount
+	binding      string
 }
 
 func TestUsageHistoryTaskDeletePreservationPages(t *testing.T) {
@@ -119,6 +120,10 @@ func newPreservationPageFixture(t *testing.T, postgres, prune bool) *preservatio
 	fixture.session, err = fixture.tasks.GetTaskSession(ctx, preservationPageSession)
 	require.NoError(t, err)
 	fixture.seedLegacyRows(t)
+	ensureRetainedUsageMigration(t, fixture.db)
+	binding, err := retainedUsageBinding(ctx, fixture.analytics, "ws-1", preservationPageSession, "preservation")
+	require.NoError(t, err)
+	fixture.binding = binding
 	return fixture
 }
 

@@ -96,7 +96,7 @@ func TestUsageHistoryMultiModelLegacyCumulativeMigration(t *testing.T) {
 				}
 				input = append(input, row)
 			}
-			result, err := repo.UpsertSessionUsage(t.Context(), input)
+			result, err := repo.upsertSessionUsageFixture(t.Context(), input)
 			require.NoError(t, err)
 			require.Len(t, result, 2)
 			for _, row := range result {

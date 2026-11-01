@@ -24,12 +24,14 @@ Expand storage first, preserve deletion safely, then migrate source selection, s
 
 The user accepted retention after archive/deletion, the three query improvements, generic collectors, and org/user attribution.
 The assumption check reuses those decisions. Mixed or unknown attribution remains explicit.
-Engineering choices retain the existing native ledger and org erasure contract, without adding a new permission or release flag.
+Engineering choices retain the existing native ledger and org erasure contract, without adding a new permission. The later release package adds `features.usageHistory` as a restart-required gate for admission, the worker, reads, and Host APIs; erasure and live-link detachment stay unconditional.
 There is no new product decision that blocks decomposition.
 
 Source baseline: core `9aecf156c65e7522a43f2a1c8310737179c25d70`, plugin `127bc4a6e98f9121c216135b71c5e17aa8832cf1`.
 These commits are investigation evidence, not a promise that their open PRs are merge-ready.
 Reconcile intervening main changes before implementation, without discarding user edits.
+
+Raw CI, query, and benchmark receipts were removed from the current PR revision to keep its review payload small. The 636 files (35,255,620 bytes) remain readable at [the last commit containing raw evidence](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence). The results below retain their outcomes, including failed and incomplete gates.
 
 Execution started after rebasing onto main `a33ff4139ad`.
 That revision extracts the Go SDK into root `pluginsdk/`, module `github.com/kdlbs/kandev/pluginsdk`.
@@ -224,7 +226,7 @@ At current HEAD `6a4`, the integration control records an SDK race pass for thre
 The first analytics attempt did not export the PostgreSQL DSN. Required PostgreSQL cases failed, and optional cases skipped, so that attempt is invalid.
 The corrected run used an exported, isolated PostgreSQL 18.6 DSN and passed all seven analytics packages.
 It recorded 463 passing tests and subtests, with zero failures and zero skips. Three packages had tests, and four had no tests.
-Receipt: [integrated source verification](evidence/usage-history-integrated-20261030/verification.json), including the analytics event log and SDK race log.
+Receipt: [integrated source verification](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-integrated-20261030/verification.json), including the analytics event log and SDK race log.
 
 | Task | Current status | Evidence or open gates |
 | --- | --- | --- |
@@ -261,9 +263,9 @@ SQLite and PostgreSQL passed exact result parity for native events, coarse inter
 The proof includes two distinct native events at one point. SQLite normal and race scan proofs passed.
 Focused repair and oversized-resume cases passed normally on both engines. Focused race passed on SQLite, and scoped lint and vet passed.
 The PostgreSQL coarse case read 53 rows after the fix, versus 52 before. Buffer use fell from 26 to 20.
-Per-query results are in [the C4 overlap proof](evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/README.md).
+Per-query results are in [the C4 overlap proof](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C4-overlap-fix-20261030T2216Z/README.md).
 
-Temporary profiling touched nine test-only files. The patch is archived at `evidence/usage-history-luna-C4-construction-diagnosis-20261030T2040Z/diagnostic-instrumentation.patch`.
+Temporary profiling touched nine test-only files. The patch is archived at `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C4-construction-diagnosis-20261030T2040Z/diagnostic-instrumentation.patch`.
 The original seven committed harness files were restored byte-for-byte.
 Two untracked profiling tests were archived. The preservation record is `/tmp/usage-history-C4-diagnostic-source-preservation.json`, and its patch check passed.
 The tagged package compile with the restored harness and scan proof passed without running tests. Receipt: `/tmp/usage-history-C4-restored-harness-compile-final.log`.
@@ -284,7 +286,7 @@ The interrupted C4 receipt remains unchanged. It is incomplete and is not a curr
 The C2 SQLite attempt also ended at its deadline with zero samples. Its scaled `seedRecent` control expected 2,010 external rows and recorded 2,013.
 The C4 dense plan fixture had 50,001 facts and 100,002 contributions. Of those facts, 401 came from real admission; the remaining rows were plan-only.
 The bounded query recorded 200 fact visits and 400 contribution visits on each engine.
-The C2 receipts remain in `evidence/usage-history-luna-C2-20261030T1032Z/` and `evidence/usage-history-luna-C2-20261030T1211Z/`.
+The C2 receipts remain in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1032Z/` and `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C2-20261030T1211Z/`.
 
 At this prepublication checkpoint, the new core and plugin source remain unpushed. Public core and plugin heads are `9aecf156c65e7522a43f2a1c8310737179c25d70` and `127bc4a6e98f9121c216135b71c5e17aa8832cf1`.
 The parent plans to publish reviewed core after integrated checks, so CI can run alongside the remaining manual gates.
@@ -390,9 +392,9 @@ The design and work orders now specify those boundaries and regression scenarios
 
 ### CI and cost-point correction
 
-The functional PostgreSQL fixtures now use the existing optional-DSN helper in SQLite-only jobs. Required PostgreSQL jobs still execute the same assertions. Functional projection cases accept the supported PostgreSQL 16 baseline; the separate PostgreSQL 18 performance gate is unchanged. Both setup failures were reproduced before the correction. The focused SQLite run passed 39 test results, with 20 PostgreSQL skips. PostgreSQL 16.14 passed 43 results under race detection with no skips. Evidence is in `evidence/usage-history-ci-fixtures-20261030/`.
+The functional PostgreSQL fixtures now use the existing optional-DSN helper in SQLite-only jobs. Required PostgreSQL jobs still execute the same assertions. Functional projection cases accept the supported PostgreSQL 16 baseline; the separate PostgreSQL 18 performance gate is unchanged. Both setup failures were reproduced before the correction. The focused SQLite run passed 39 test results, with 20 PostgreSQL skips. PostgreSQL 16.14 passed 43 results under race detection with no skips. Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-fixtures-20261030/`.
 
-PostgreSQL timestamp precision collapsed a point's one-nanosecond interval, so a matching reported price was discarded. The selector now recognizes equality for explicit point coverage. Ending interval boundaries remain exclusive. Matching and unrelated prices, unknown and measured-zero costs, partial coverage, currency and actor cases pass normal and race checks on SQLite and PostgreSQL 18.6. Evidence is in `evidence/usage-history-cost-point-20261030/`. The retained projection is new in this PR, so released databases need no repair migration.
+PostgreSQL timestamp precision collapsed a point's one-nanosecond interval, so a matching reported price was discarded. The selector now recognizes equality for explicit point coverage. Ending interval boundaries remain exclusive. Matching and unrelated prices, unknown and measured-zero costs, partial coverage, currency and actor cases pass normal and race checks on SQLite and PostgreSQL 18.6. Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-cost-point-20261030/`. The retained projection is new in this PR, so released databases need no repair migration.
 
 These focused passes do not close delivery. The current CI artifact audit found three browser flakes after retry. Their root causes, fresh remote checks, installed-plugin flows and both complete performance gates remain open.
 
@@ -401,7 +403,7 @@ These focused passes do not close delivery. The current CI artifact audit found 
 
 The exact-head retry audit found three flaky tests despite successful E2E jobs. The Git fixture now pauses the active content source atomically and verifies HTTP 404 before restore and HTTP 200 after restore. The history deadline fixture waits for required persistence and publication to recover before UI Retry; it preserves both error cards and saved values until then. The mobile initial-load fixture waits for all three workload rows to persist before navigation. No product UI or timeout changed.
 
-Reviewed local checks use one worker and zero retries. The Git case passed six runs across fixture iterations. History coverage passed five focused repetitions, all five desktop cases, the affected phone case and a final focused assertion check. The mobile case passed six repetitions and its two-case predecessor sequence. Evidence is in `evidence/usage-history-ci-browser-fixup-20261031/`. The mobile failed attempt has no trace, so its exact event ordering remains unknown. The fix preserves initial snapshot coverage and does not claim to repair a production subscription gap. Fresh full CI and its no-flake audit remain required.
+Reviewed local checks use one worker and zero retries. The Git case passed six runs across fixture iterations. History coverage passed five focused repetitions, all five desktop cases, the affected phone case and a final focused assertion check. The mobile case passed six repetitions and its two-case predecessor sequence. Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-browser-fixup-20261031/`. The mobile failed attempt has no trace, so its exact event ordering remains unknown. The fix preserves initial snapshot coverage and does not claim to repair a production subscription gap. Fresh full CI and its no-flake audit remain required.
 
 ### Browser follow-up verification
 
@@ -418,7 +420,7 @@ The original phone test failed four of five local runs.
 
 Reviewed browser runs passed with zero retries, including the Office predecessor sequence and twelve phone cases.
 The helper unit tests passed all six cases.
-Evidence is in `evidence/usage-history-ci-browser-followup-20261031/`.
+Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-browser-followup-20261031/`.
 These corrections change test fixtures only; production code and test deadlines remain unchanged.
 Fresh CI, a zero-flake artifact audit, and both full performance gates remain required.
 
@@ -432,7 +434,7 @@ Existing scrolling, zoom, touch, download, focus, and timeout assertions remain.
 
 The reviewed patches passed 19 browser cases with zero retries: five Threads repetitions, four ordered Threads variants, and ten mobile repetitions.
 The eight baseline repetitions also passed, so local runs do not establish either failure's cause or a reduced flake rate.
-Evidence is in `evidence/usage-history-ci-focus-fixup-20261031/`.
+Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-focus-fixup-20261031/`.
 Fresh exact-head CI and a zero-flake artifact audit remain required.
 
 ### Full-scale query failure
@@ -456,7 +458,7 @@ This is a fixture measurement, not a general storage prediction.
 
 PostgreSQL was not run after this failure.
 Normal cleanup removed the temporary database; the logs, 27 scenario receipts, comparisons, and resource observations remain.
-Evidence is in `evidence/usage-history-luna-C8-full-normal-20261031T0122Z/`.
+Evidence is in `https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C8-full-normal-20261031T0122Z/`.
 
 ### Focused query correction (2026-10-31)
 
@@ -474,7 +476,7 @@ Lint and vet passed.
 The full normal SQLite and PostgreSQL gates remain pending after this correction.
 Each gate still requires one million native observations, 100,000 external observations, and ten samples.
 The fixture, oracle, and report deadline remain unchanged.
-Evidence is in [the focused query packet](evidence/usage-history-luna-C9-query-fix-20261031/README.md).
+Evidence is in [the focused query packet](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C9-query-fix-20261031/README.md).
 
 ### Current CI checkpoint (2026-10-31)
 
@@ -488,7 +490,7 @@ The parent reviewed all five CI corrections and integrated them into the primary
 The browser corrections passed 40 local cases with retries disabled.
 The process package preserved 2,251 test and subtest outcomes and reduced its local race runtime from 445.135 to 328.130 seconds.
 The resolver correction also passed repeated normal and race checks.
-Evidence is in [the CI follow-up packet](evidence/usage-history-ci-followup-20261031/README.md).
+Evidence is in [the CI follow-up packet](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-followup-20261031/README.md).
 
 Both PRs remain conflict-free against the observed main commits.
 Final delivery still requires normal hooks, a current backend build, both full performance gates, green CI, and zero flaky verdicts.
@@ -501,7 +503,7 @@ B26, B27 and B28 prepared reviewed spec corrections for submission, retry-notice
 B29 verified three unmodified baseline cases, 15 focused repetitions and 14 ordered cases with zero retries.
 The local baselines passed, so the CI failure causes remain inferred.
 A fresh zero-flake CI audit remains required after the next push.
-See [the audit and browser verification packet](evidence/usage-history-ci-followup-20261031/run-41174963429/README.md).
+See [the audit and browser verification packet](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-followup-20261031/run-41174963429/README.md).
 
 The second normal full-scale SQLite run exited 1 after 3,490.834 seconds.
 Three monthly views exceeded the existing deadline: New York, Kathmandu and Lisbon.
@@ -509,7 +511,7 @@ The run retained 29 ten-sample scenario receipts and four recent-history compari
 Native and deleted-task reporting completed at full scale.
 PostgreSQL was not started after the SQLite failure.
 The parent verified the complete receipt inventory and source frame.
-See [the failed C10 gate](evidence/usage-history-luna-C10-full-normal-20261031T060630Z/README.md).
+See [the failed C10 gate](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C10-full-normal-20261031T060630Z/README.md).
 
 C11 replaces the large month-edge OR expression with indexed probes driven by the existing UTC calendar.
 Its negative control fails against the old production query on the unchanged fixture.
@@ -517,7 +519,7 @@ The corrected query has zero unbounded point-index visits in the focused monthly
 Monthly correctness, scan plans, MaxInt64 and index replay passed on SQLite and PostgreSQL 18.6.
 The monthly race suite, lint and vet also passed.
 All 17 benchmark files remain unchanged.
-See [the C11 correction and review](evidence/usage-history-luna-C11-query-fix-20261031/README.md).
+See [the C11 correction and review](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C11-query-fix-20261031/README.md).
 
 Both normal full-scale database gates remain required from the next immutable source.
 Keep their original fixtures, independent oracle, ten samples, complete scenarios and report deadline.
@@ -525,10 +527,10 @@ No full performance pass is claimed.
 
 ### Current delivery checkpoint (2026-10-31, not final)
 
-C12 passed the unchanged full SQLite gate: 32 scenarios, ten samples each, plus the recent-history comparison. PostgreSQL18.6 passed 28 scenarios and failed the three non-UTC five-year views and deleted-task report. Its [full evidence packet](evidence/usage-history-luna-C12-full-normal-20261031T073420Z/README.md) preserves all four failures.
+C12 passed the unchanged full SQLite gate: 32 scenarios, ten samples each, plus the recent-history comparison. PostgreSQL18.6 passed 28 scenarios and failed the three non-UTC five-year views and deleted-task report. Its [full evidence packet](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C12-full-normal-20261031T073420Z/README.md) preserves all four failures.
 
-C14 and C15 add PostgreSQL-only indexed month-edge probes and selected-subject/work matching. Focused oracle, plan, boundary, amount, ownership, undated, race, lint and vet checks passed. A 128-session regression reads 2-3 selected applied rows instead of all 2,050. [C15 evidence](evidence/usage-history-luna-C15-query-fix-20261031/README.md) also records the unchanged SQLite source path. The full PostgreSQL gate remains pending.
+C14 and C15 add PostgreSQL-only indexed month-edge probes and selected-subject/work matching. Focused oracle, plan, boundary, amount, ownership, undated, race, lint and vet checks passed. A 128-session regression reads 2-3 selected applied rows instead of all 2,050. [C15 evidence](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-luna-C15-query-fix-20261031/README.md) also records the unchanged SQLite source path. The full PostgreSQL gate remains pending.
 
-The backend fixture correction passed 25 normal and ten race executions. The stale-message deletion correction passed its old-source negative control and 90 existing unit tests. Typecheck and the patched Vite build passed. All 52 managed OpenCode, mobile and Docker executions passed with zero retries, failures or skips. The [B41 packet](evidence/usage-history-ci-followup-20261031/run-41181339261/B41-verification/manifest.json) records the exact cases and unchanged artifacts/screenshots.
+The backend fixture correction passed 25 normal and ten race executions. The stale-message deletion correction passed its old-source negative control and 90 existing unit tests. Typecheck and the patched Vite build passed. All 52 managed OpenCode, mobile and Docker executions passed with zero retries, failures or skips. The [B41 packet](https://github.com/kdlbs/kandev/tree/a0d13b9de8248f8ea8af8130e0dc7609ba030c0f/docs/plans/usage-history/evidence/usage-history-ci-followup-20261031/run-41181339261/B41-verification/manifest.json) records the exact cases and unchanged artifacts/screenshots.
 
 Normal commit hooks, the coordinated backend build, public pushes, current-head green CI and a complete zero-FLAKY audit remain required. No deadline, fixture, oracle or gate waiver is used.

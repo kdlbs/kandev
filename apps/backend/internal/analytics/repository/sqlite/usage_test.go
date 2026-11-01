@@ -93,7 +93,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	observed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	measurement := usageFixtureMeasurement(observed)
 
-	results, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{measurement})
+	results, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{measurement})
 	if err != nil {
 		t.Fatalf("first upsert failed: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 		t.Fatalf("first status = %q, want applied", got)
 	}
 
-	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{measurement})
+	results, err = repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{measurement})
 	if err != nil {
 		t.Fatalf("repeated upsert failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	older.PayloadDigest = "digest-9"
 	older.InputTokens = models.Int64(999)
 	older.TotalTokens = models.Int64(1000)
-	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{older})
+	results, err = repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{older})
 	if err != nil {
 		t.Fatalf("older upsert failed: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	conflict.PayloadDigest = "different-payload"
 	conflict.InputTokens = models.Int64(999)
 	conflict.TotalTokens = models.Int64(1000)
-	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{conflict})
+	results, err = repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{conflict})
 	if err != nil {
 		t.Fatalf("conflicting upsert failed: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSessionUsageUpsertIsIdempotentAndAllowsNewerCorrections(t *testing.T) {
 	correction.PayloadDigest = "digest-11"
 	correction.InputTokens = models.Int64(12)
 	correction.TotalTokens = models.Int64(23)
-	results, err = repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{correction})
+	results, err = repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{correction})
 	if err != nil {
 		t.Fatalf("correction upsert failed: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestSessionUsagePreservesUnknownAndZeroValues(t *testing.T) {
 			zero.Turns = models.Int64(0)
 			zero.CostBasis = models.UsageCostBasisUnknown
 			zero.CostSubcents = models.Int64(0)
-			if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{known, zero}); err != nil {
+			if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{known, zero}); err != nil {
 				t.Fatalf("upsert with nullable values failed: %v", err)
 			}
 
@@ -250,7 +250,7 @@ func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
 	base.CacheWriteTokens = models.Int64(0)
 	base.ReasoningTokens = models.Int64(0)
 	base.CostSubcents = models.Int64(1000)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{base}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{base}); err != nil {
 		t.Fatalf("lifetime upsert failed: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestSessionUsagePrefersDatedBucketsOverLifetimeSnapshot(t *testing.T) {
 	dayTwo.TotalTokens = models.Int64(60)
 	dayTwo.Turns = models.Int64(1)
 	dayTwo.CostSubcents = models.Int64(600)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{dayOne, dayTwo}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{dayOne, dayTwo}); err != nil {
 		t.Fatalf("dated upsert failed: %v", err)
 	}
 
@@ -316,7 +316,7 @@ func TestSessionUsageKeepsLifetimeWhenDatedImportIsPartial(t *testing.T) {
 	base.InputTokens = models.Int64(100)
 	base.TotalTokens = models.Int64(100)
 	base.CostSubcents = models.Int64(1000)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{base}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{base}); err != nil {
 		t.Fatalf("lifetime upsert failed: %v", err)
 	}
 	day := base
@@ -327,7 +327,7 @@ func TestSessionUsageKeepsLifetimeWhenDatedImportIsPartial(t *testing.T) {
 	day.InputTokens = models.Int64(20)
 	day.TotalTokens = models.Int64(20)
 	day.CostSubcents = models.Int64(200)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{day}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{day}); err != nil {
 		t.Fatalf("partial dated upsert failed: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestSessionUsageDatedRowsKeepLifetimeSummaryWhenImportIsPartial(t *testing.
 	base.ReasoningTokens = models.Int64(0)
 	base.TotalTokens = models.Int64(100)
 	base.CostSubcents = models.Int64(1000)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{base}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{base}); err != nil {
 		t.Fatalf("lifetime upsert failed: %v", err)
 	}
 	day := base
@@ -377,7 +377,7 @@ func TestSessionUsageDatedRowsKeepLifetimeSummaryWhenImportIsPartial(t *testing.
 	day.TotalTokens = models.Int64(20)
 	day.Turns = models.Int64(1)
 	day.CostSubcents = models.Int64(200)
-	if _, err := repo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{day}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(ctx, []models.SessionUsageMeasurement{day}); err != nil {
 		t.Fatalf("dated upsert failed: %v", err)
 	}
 
@@ -404,7 +404,7 @@ func TestSessionUsageDoesNotPlaceLifetimeOnlyDataOnDatedAxis(t *testing.T) {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
 	measurement := usageFixtureMeasurement(time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC))
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
 		t.Fatalf("lifetime upsert failed: %v", err)
 	}
 
@@ -449,7 +449,7 @@ func TestSessionUsageMarksMonthlyRowsPartialWhenRangeClipsCalendarMonth(t *testi
 	feb.PayloadDigest = "dated-feb-digest"
 	feb.ObservedAt = time.Date(2026, 2, 5, 12, 0, 0, 0, time.UTC)
 	feb.CollectedAt = feb.ObservedAt
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{jan, feb}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{jan, feb}); err != nil {
 		t.Fatalf("dated usage upsert failed: %v", err)
 	}
 
@@ -513,7 +513,7 @@ func TestSessionUsageDerivesBucketIdentityForExplicitIntervals(t *testing.T) {
 	measurement.CoverageStart = &start
 	measurement.CoverageEnd = &end
 	measurement.CoverageKey = ""
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
 		t.Fatalf("interval upsert failed: %v", err)
 	}
 
@@ -538,12 +538,12 @@ func TestSessionUsageRejectsCrossWorkspaceAndSessionOwnership(t *testing.T) {
 	}
 	measurement := usageFixtureMeasurement(time.Now().UTC())
 	measurement.WorkspaceID = "ws-other"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); !errors.Is(err, ErrInvalidSessionUsage) {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); !errors.Is(err, ErrInvalidSessionUsage) {
 		t.Fatalf("workspace mismatch error = %v, want ErrInvalidSessionUsage", err)
 	}
 	measurement = usageFixtureMeasurement(time.Now().UTC())
 	measurement.SessionID = "missing-session"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); !errors.Is(err, ErrInvalidSessionUsage) {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); !errors.Is(err, ErrInvalidSessionUsage) {
 		t.Fatalf("session mismatch error = %v, want ErrInvalidSessionUsage", err)
 	}
 	var count int
@@ -570,10 +570,10 @@ func TestSessionUsageIdentityIsScopedByWorkspace(t *testing.T) {
 	second.TaskID = "task-2"
 	second.SessionID = "session-2"
 	second.TranscriptID = "transcript-2"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{first}); err != nil {
 		t.Fatalf("first workspace upsert failed: %v", err)
 	}
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{second}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{second}); err != nil {
 		t.Fatalf("second workspace upsert failed: %v", err)
 	}
 
@@ -607,7 +607,7 @@ func TestSessionUsageMarksOverlappingSourcesIncomplete(t *testing.T) {
 	other.PayloadDigest = "digest-other"
 	other.CostBasis = models.UsageCostBasisUnknown
 	other.CostSubcents = nil
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{base, other}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{base, other}); err != nil {
 		t.Fatalf("overlapping source upsert failed: %v", err)
 	}
 
@@ -652,7 +652,7 @@ func TestSessionUsageKeepsProviderRowsSeparateAndComputesRate(t *testing.T) {
 	second.SessionID = seedExtraUsageSession(t, dbConn)
 	second.Provider = "provider-b"
 	second.PayloadDigest = "digest-2"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
 		t.Fatalf("provider rows upsert failed: %v", err)
 	}
 
@@ -698,7 +698,7 @@ func TestSessionUsageKeepsDisjointExternalCoverageAlongsideNativeLedger(t *testi
 	dayThree.CoverageKey = "2026-01-03"
 	dayThree.SourceDate = "2026-01-03"
 	dayThree.CostSubcents = models.Int64(300)
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{dayTwo, dayThree}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{dayTwo, dayThree}); err != nil {
 		t.Fatalf("external dated upsert failed: %v", err)
 	}
 
@@ -799,7 +799,7 @@ func TestSessionUsageUsesEquivalentNativeCoverageWithoutDoubleCounting(t *testin
 	coverageEnd := now.Add(time.Nanosecond)
 	external.CoverageEnd = &coverageEnd
 	external.PayloadDigest = "external-day-digest"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("external day upsert failed: %v", err)
 	}
 
@@ -846,7 +846,7 @@ func TestSessionUsageMergesCostCorrectionWithoutReplacingNativeTokens(t *testing
 	correction.CoverageStart = &start
 	end := start.Add(time.Nanosecond)
 	correction.CoverageEnd = &end
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{correction}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{correction}); err != nil {
 		t.Fatalf("cost correction upsert failed: %v", err)
 	}
 
@@ -889,7 +889,7 @@ func TestSessionUsageKeepsPrunedTranscriptIdentitiesSeparate(t *testing.T) {
 	second.PayloadDigest = "digest-b"
 	second.InputTokens = models.Int64(7)
 	second.TotalTokens = models.Int64(7)
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
 		t.Fatalf("pruned transcript upsert failed: %v", err)
 	}
 
@@ -923,7 +923,7 @@ func TestSessionUsageResolvesOverlappingRowsWithDifferentCoverageKeys(t *testing
 	second.UsageIdentity = "interval-b"
 	second.CoverageKey = "bucket-b"
 	second.PayloadDigest = "overlap-b-digest"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{first, second}); err != nil {
 		t.Fatalf("overlap upsert failed: %v", err)
 	}
 
@@ -949,7 +949,7 @@ func TestSessionUsageRejectsCategoriesLargerThanTotal(t *testing.T) {
 	measurement := usageFixtureMeasurement(time.Now().UTC())
 	measurement.TotalTokens = models.Int64(10)
 	measurement.InputTokens = models.Int64(20)
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err == nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err == nil {
 		t.Fatal("upsert accepted token categories larger than total")
 	}
 }
@@ -984,7 +984,7 @@ func TestSessionUsageUsesCompleteEquivalentNativeIntervalCoverage(t *testing.T) 
 	external.CostSubcents = models.Int64(300)
 	external.CoverageStart = &start
 	external.CoverageEnd = &end
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("external interval upsert failed: %v", err)
 	}
 
@@ -1037,7 +1037,7 @@ func TestSessionUsageUsesNativeCoverageWhenExternalCandidateIsPartial(t *testing
 	external.Coverage = models.UsageCoveragePartial
 	external.CoverageStart = &start
 	external.CoverageEnd = &end
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("partial external interval upsert failed: %v", err)
 	}
 
@@ -1083,7 +1083,7 @@ func TestSessionUsageMatchesUnknownProviderToKnownNativeCoverage(t *testing.T) {
 	external.CostSubcents = models.Int64(100)
 	external.CoverageStart = &start
 	external.CoverageEnd = &end
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("unknown-provider external upsert failed: %v", err)
 	}
 
@@ -1121,7 +1121,7 @@ func TestSessionUsageKeepsLifetimeWhenNativeCoverageIsOnlyPartial(t *testing.T) 
 	external.ReasoningTokens = models.Int64(0)
 	external.TotalTokens = models.Int64(100)
 	external.CostSubcents = models.Int64(500)
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("external lifetime upsert failed: %v", err)
 	}
 
@@ -1174,7 +1174,7 @@ func TestSessionUsageKeepsExternalDayWhenOneNativeEventOnlyPartiallyCoversIt(t *
 	external.TotalTokens = models.Int64(100)
 	external.CostSubcents = models.Int64(500)
 	external.PayloadDigest = "external-day-digest"
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{external}); err != nil {
 		t.Fatalf("external day upsert failed: %v", err)
 	}
 
@@ -1209,7 +1209,7 @@ func TestSessionUsageReportsHistoryMetadataOutsideSelectedRange(t *testing.T) {
 	measurement.SourceTimezone = "UTC"
 	measurement.CoverageKey = "2026-01-02"
 	measurement.CollectedAt = collected
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
 		t.Fatalf("dated usage upsert failed: %v", err)
 	}
 
@@ -1278,7 +1278,7 @@ func TestSessionUsageReportsLifetimeFreshnessForDatedView(t *testing.T) {
 	measurement.UsageIdentity = "lifetime:transcript-lifetime"
 	measurement.SourceRecordID = "lifetime-only"
 	measurement.CollectedAt = collected
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
 		t.Fatalf("lifetime usage upsert failed: %v", err)
 	}
 
@@ -1309,7 +1309,7 @@ func TestSessionUsagePreservesHistoryAfterTaskDeletion(t *testing.T) {
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
 	measurement := usageFixtureMeasurement(time.Now().UTC())
-	if _, err := repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
+	if _, err := repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{measurement}); err != nil {
 		t.Fatalf("usage upsert failed: %v", err)
 	}
 

@@ -24,6 +24,7 @@ type Repository struct {
 	log                     *logger.Logger
 	usageHistoryRetainer    usagehistory.Retainer
 	usageHistoryLifecycle   usagehistory.Lifecycle
+	usageHistoryEnabledFlag *bool
 	migrate                 *db.MigrateLogger
 	queuePurgeMu            sync.RWMutex
 	clarificationAdmission  clarificationReadAdmission

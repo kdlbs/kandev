@@ -163,7 +163,7 @@ func (r *Repository) insertUsageEventAndRollup(ctx context.Context, event *model
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if r.usageHistoryLifecycle != nil {
+	if r.usageHistoryLifecycle != nil && r.usageHistoryIsEnabled() {
 		admissionSessionID := ""
 		if event.SessionID != "" {
 			var ownerTaskID string
@@ -205,7 +205,7 @@ func (r *Repository) insertUsageEventAndRollup(ctx context.Context, event *model
 			return err
 		}
 	}
-	if r.usageHistoryRetainer != nil {
+	if r.usageHistoryRetainer != nil && r.usageHistoryIsEnabled() {
 		if err := r.usageHistoryRetainer.RetainNativeUsageTx(ctx, tx, nativeUsageFromTaskEvent(event)); err != nil {
 			return fmt.Errorf("retain native task usage event: %w", err)
 		}

@@ -17,6 +17,8 @@ var _ usagehistory.Migrator = (*Repository)(nil)
 
 var usageHistoryMigrationSources = []string{usageSourceNative, "measurements", "buckets"}
 
+const usageHistoryDisabledMarkerKey = "usage-history-disabled"
+
 // BackfillUsageHistory commits at most limit source rows in one transaction.
 // Its high-water and keyset cursor advance atomically with retained copies so
 // startup can safely resume after any process or database interruption.
@@ -26,6 +28,22 @@ func (r *Repository) BackfillUsageHistory(ctx context.Context, limit int) (bool,
 	}
 	if limit > usageHistoryBatchLimit {
 		limit = usageHistoryBatchLimit
+	}
+	resuming, err := r.usageHistoryResumePending(ctx)
+	if err != nil {
+		return false, err
+	}
+	if resuming {
+		// Sessions written while the toggle was off have no collection
+		// evidence, so adoption must finish before their native events can be
+		// retained. The marker keeps this order across restarts.
+		done, err := r.BackfillUsageSourceAdoption(ctx, limit)
+		if err != nil || !done {
+			return false, err
+		}
+		if err := r.clearUsageHistoryResumeMarker(ctx); err != nil {
+			return false, err
+		}
 	}
 	for _, source := range usageHistoryMigrationSources {
 		done, err := r.backfillUsageHistorySourcePage(ctx, source, limit)
@@ -40,7 +58,11 @@ func (r *Repository) BackfillUsageHistory(ctx context.Context, limit int) (bool,
 	if err != nil || !done {
 		return done, err
 	}
-	return r.repairNativeUsageAccountingBatch(ctx, limit)
+	done, err = r.repairNativeUsageAccountingBatch(ctx, limit)
+	if err != nil || !done {
+		return done, err
+	}
+	return r.BackfillUsageSourceAdoption(ctx, limit)
 }
 
 func (r *Repository) backfillUsageHistorySourcePage(ctx context.Context, source string, limit int) (bool, error) {
@@ -292,5 +314,97 @@ func (r *Repository) recordUsageMigrationGapTx(ctx context.Context, tx *sqlx.Tx,
 		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_key, record_key) DO UPDATE SET
 		reason = excluded.reason, detected_at = excluded.detected_at`),
 		source, recordKey, taskID, workspaceID, organizationID, reason, time.Now().UTC())
+	return err
+}
+
+// ReopenUsageHistoryAfterDisabledPeriod records that native events and
+// sessions created while the release toggle was off still need processing.
+// The marker survives restarts so an enabled boot can lift the native
+// high-water mark over events written after this process started.
+// The native cursor keeps its position and moves its high-water mark forward;
+// adoption restarts so sessions below the previous cursor are reconsidered.
+// Calling it repeatedly while the toggle stays off is safe.
+func (r *Repository) ReopenUsageHistoryAfterDisabledPeriod(ctx context.Context) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_history_migration_state
+		(source_key, high_water, last_key, complete, updated_at) VALUES (?, '', '', 0, ?)
+		ON CONFLICT(source_key) DO UPDATE SET last_key = '', complete = 0, updated_at = excluded.updated_at`),
+		usageSourceAdoptionKey, now)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_history_migration_state
+		(source_key, high_water, last_key, complete, updated_at) VALUES (?, '', '', 1, ?)
+		ON CONFLICT(source_key) DO UPDATE SET complete = 1, updated_at = excluded.updated_at`),
+		usageHistoryDisabledMarkerKey, now)
+	if err != nil {
+		return err
+	}
+	var high int64
+	if err := tx.QueryRowxContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM task_usage_events`).Scan(&high); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_history_migration_state
+		(source_key, high_water, last_key, complete, updated_at) VALUES (?, ?, '', 0, ?)
+		ON CONFLICT(source_key) DO UPDATE SET high_water = excluded.high_water, complete = 0, updated_at = excluded.updated_at`),
+		usageSourceNative, strconv.FormatInt(high, 10), now)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ResumeUsageHistoryAfterDisabledPeriod refreshes the native high-water mark
+// and adoption cursor once the toggle is enabled again. The marker is removed
+// so ordinary enabled boots keep their completed cursors.
+func (r *Repository) ResumeUsageHistoryAfterDisabledPeriod(ctx context.Context) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var marked int
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT complete FROM usage_history_migration_state
+		WHERE source_key = ?`), usageHistoryDisabledMarkerKey).Scan(&marked); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return tx.Commit()
+		}
+		return err
+	}
+	now := time.Now().UTC()
+	var high int64
+	if err := tx.QueryRowxContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM task_usage_events`).Scan(&high); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_history_migration_state
+		(source_key, high_water, last_key, complete, updated_at) VALUES (?, ?, '', 0, ?)
+		ON CONFLICT(source_key) DO UPDATE SET high_water = excluded.high_water, complete = 0, updated_at = excluded.updated_at`),
+		usageSourceNative, strconv.FormatInt(high, 10), now)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_history_migration_state
+		(source_key, high_water, last_key, complete, updated_at) VALUES (?, '', '', 0, ?)
+		ON CONFLICT(source_key) DO UPDATE SET last_key = '', complete = 0, updated_at = excluded.updated_at`),
+		usageSourceAdoptionKey, now)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) usageHistoryResumePending(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.db.GetContext(ctx, &exists, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM usage_history_migration_state WHERE source_key = ?)`), usageHistoryDisabledMarkerKey)
+	return exists, err
+}
+
+func (r *Repository) clearUsageHistoryResumeMarker(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM usage_history_migration_state WHERE source_key = ?`), usageHistoryDisabledMarkerKey)
 	return err
 }

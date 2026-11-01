@@ -213,7 +213,7 @@ func (r *Repository) CompleteTaskUsageTx(ctx context.Context, tx *sqlx.Tx, taskI
 	if err := r.detachUsageLinksTx(ctx, tx, taskID, "", ""); err != nil {
 		return err
 	}
-	return r.markUsagePreservationDeletedTx(ctx, tx, fenceID)
+	return r.finalizeUsagePreservationTx(ctx, tx, fenceID)
 }
 
 func (r *Repository) CompleteSessionUsageTx(ctx context.Context, tx *sqlx.Tx, taskID, sessionID, incarnationID string) error {
@@ -231,7 +231,7 @@ func (r *Repository) CompleteSessionUsageTx(ctx context.Context, tx *sqlx.Tx, ta
 	if err := r.detachUsageLinksTx(ctx, tx, taskID, sessionID, incarnationID); err != nil {
 		return err
 	}
-	return r.markUsagePreservationDeletedTx(ctx, tx, fenceID)
+	return r.finalizeUsagePreservationTx(ctx, tx, fenceID)
 }
 
 func (r *Repository) detachUsageLinksTx(ctx context.Context, tx *sqlx.Tx, taskID, sessionID, sessionIncarnationID string) error {
@@ -247,6 +247,15 @@ func (r *Repository) detachUsageLinksTx(ctx context.Context, tx *sqlx.Tx, taskID
 	}
 	_, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
+}
+
+func (r *Repository) finalizeUsagePreservationTx(ctx context.Context, tx *sqlx.Tx, fenceID string) error {
+	if !r.usageHistoryIsEnabled() {
+		_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE usage_preservation_fences SET state = ?, updated_at = ? WHERE fence_id = ?`),
+			usagePreservationDone, time.Now().UTC(), fenceID)
+		return err
+	}
+	return r.markUsagePreservationDeletedTx(ctx, tx, fenceID)
 }
 
 func (r *Repository) markUsagePreservationDeletedTx(ctx context.Context, tx *sqlx.Tx, fenceID string) error {

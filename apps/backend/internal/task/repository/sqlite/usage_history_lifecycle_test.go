@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	usageModels "github.com/kandev/kandev/internal/analytics/models"
 	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -21,6 +20,7 @@ func TestUsageHistoryTaskDeleteBackfillsLegacyAndDetachesLinks(t *testing.T) {
 		t.Fatalf("initialize analytics schema: %v", err)
 	}
 	repo.SetUsageHistoryRetainer(analyticsRepo)
+	ensureRetainedUsageMigration(t, repo.db)
 	createUsageEventsTestTask(t, repo, "task-history-delete")
 	createUsageEventsTestSession(t, repo, "session-history-delete", "task-history-delete")
 	insertUsageEventRow(t, repo, "legacy-delete-event", "task-history-delete", "session-history-delete")
@@ -150,19 +150,12 @@ func TestUsageHistoryTaskIDReuseKeepsPriorIncarnation(t *testing.T) {
 		t.Fatalf("seed first task incarnation: %v", err)
 	}
 	createUsageEventsTestSession(t, repo, "session-history-first", taskID)
-	first, err := analyticsRepo.UpsertSessionUsage(ctx, []usageModels.SessionUsageMeasurement{{
-		WorkspaceID: "ws-1", TaskID: taskID, SessionID: "session-history-first",
-		Source: "plugin:reuse", SourceRecordID: "reuse-first", UsageIdentity: "first-work",
-		Model: "model", Provider: "provider", Revision: 1, PayloadDigest: "first-digest",
-		ObservedAt: firstTaskCreatedAt.Add(time.Minute), CollectedAt: firstTaskCreatedAt.Add(time.Minute),
-		InputTokens: usageModels.Int64(11), TotalTokens: usageModels.Int64(11),
-	}})
-	if err != nil {
+	if err := reportExternalUsage(ctx, analyticsRepo, "ws-1", "session-history-first", "reuse", "reuse-first", "model", 11, firstTaskCreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("write usage for first task incarnation: %v", err)
 	}
-	firstMeasurement := first[0].Measurement
-	if firstMeasurement == nil || firstMeasurement.SubjectID == "" {
-		t.Fatalf("first retained measurement = %+v, want a captured subject", firstMeasurement)
+	var firstSubjectID string
+	if err := repo.db.Get(&firstSubjectID, `SELECT subject_id FROM usage_subjects WHERE session_id = 'session-history-first'`); err != nil || firstSubjectID == "" {
+		t.Fatalf("first retained subject = %q, want a captured subject", firstSubjectID)
 	}
 
 	if err := repo.DeleteTask(ctx, taskID); err != nil {
@@ -182,18 +175,12 @@ func TestUsageHistoryTaskIDReuseKeepsPriorIncarnation(t *testing.T) {
 		t.Fatalf("seed second task incarnation: %v", err)
 	}
 	createUsageEventsTestSession(t, repo, "session-history-second", taskID)
-	second, err := analyticsRepo.UpsertSessionUsage(ctx, []usageModels.SessionUsageMeasurement{{
-		WorkspaceID: "ws-1", TaskID: taskID, SessionID: "session-history-second",
-		Source: "plugin:reuse", SourceRecordID: "reuse-second", UsageIdentity: "second-work",
-		Model: "model", Provider: "provider", Revision: 1, PayloadDigest: "second-digest",
-		ObservedAt: secondTaskCreatedAt.Add(time.Minute), CollectedAt: secondTaskCreatedAt.Add(time.Minute),
-		InputTokens: usageModels.Int64(17), TotalTokens: usageModels.Int64(17),
-	}})
-	if err != nil {
+	if err := reportExternalUsage(ctx, analyticsRepo, "ws-1", "session-history-second", "reuse", "reuse-second", "model", 17, secondTaskCreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("write usage for reused task id: %v", err)
 	}
-	if second[0].Measurement == nil || second[0].Measurement.SubjectID == firstMeasurement.SubjectID {
-		t.Fatalf("second task subject = %+v, want a new incarnation separate from %q", second[0].Measurement, firstMeasurement.SubjectID)
+	var secondSubjectID string
+	if err := repo.db.Get(&secondSubjectID, `SELECT subject_id FROM usage_subjects WHERE session_id = 'session-history-second'`); err != nil || secondSubjectID == "" || secondSubjectID == firstSubjectID {
+		t.Fatalf("second task subject = %q, want a new incarnation separate from %q", secondSubjectID, firstSubjectID)
 	}
 
 	var retained struct {

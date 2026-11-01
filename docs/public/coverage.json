@@ -9,12 +9,14 @@
       "sources": [
         "apps/backend/internal/analytics/repository/sqlite/usage_history_report.go",
         "apps/backend/internal/analytics/repository/sqlite/usage_history_report_source.go",
+        "apps/backend/internal/analytics/repository/sqlite/usage_history_source_adoption.go",
         "apps/backend/internal/analytics/models/usage_report.go",
         "apps/web/app/stats/token-usage-page-client.tsx"
       ],
       "tests": [
         "apps/backend/internal/analytics/repository/sqlite/usage_history_queries_test.go",
         "apps/backend/internal/analytics/repository/sqlite/usage_history_reporting_postgres_test.go",
+        "apps/backend/internal/analytics/repository/sqlite/usage_history_source_adoption_test.go",
         "apps/web/app/stats/token-usage-history.test.tsx",
         "apps/web/e2e/tests/layout/stats-usage-history.spec.ts",
         "apps/web/e2e/tests/layout/mobile-stats-usage-history.spec.ts"

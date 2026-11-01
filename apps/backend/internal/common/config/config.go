@@ -617,6 +617,11 @@ type FeaturesConfig struct {
 	// OpenCodePlugin supplies the Kandev integration plugin to supported
 	// OpenCode v2 launches. Off in every shipped profile and restart-required.
 	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
+
+	// UsageHistory enables retained token and cost history: native admission,
+	// preservation, the migration worker, Host reads, and the Token Usage
+	// surface. Erasure and task/session completion remain active when it is off.
+	UsageHistory bool `mapstructure:"usage_history" json:"usageHistory"`
 }
 
 // LoggingConfig holds logging configuration.

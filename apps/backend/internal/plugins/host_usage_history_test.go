@@ -2,13 +2,16 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"math"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/analytics"
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
+	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/db"
@@ -45,6 +48,7 @@ func TestUsageHistoryHostRetainedWireAdmissionCanonicalAndDeletion(t *testing.T)
 	host := dialPluginHostOverWire(t, fixture.host)
 	history, ok := pluginsdk.HostUsageHistory(host)
 	require.True(t, ok)
+	finishHostUsageMigration(t, analytics)
 	page, err := history.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "history-ws"})
 	require.NoError(t, err)
 	require.Len(t, page.Targets, 1)
@@ -114,6 +118,18 @@ func TestUsageHistoryHostRetainedWireAdmissionCanonicalAndDeletion(t *testing.T)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
+func finishHostUsageMigration(t *testing.T, repo *analyticssqlite.Repository) {
+	t.Helper()
+	for range 2000 {
+		done, err := repo.BackfillUsageHistory(context.Background(), 200)
+		require.NoError(t, err)
+		if done {
+			return
+		}
+	}
+	t.Fatal("usage history migration did not finish")
+}
+
 func finishHostHistoryProjection(t *testing.T, repo *analyticssqlite.Repository) {
 	t.Helper()
 	migrated := false
@@ -141,9 +157,6 @@ type pendingUsageProjectionSource struct{}
 func (pendingUsageProjectionSource) UpsertPluginSessionUsage(context.Context, string, string, []analyticsmodels.SessionUsageMeasurement) ([]analyticsmodels.SessionUsageUpsertResult, error) {
 	return nil, nil
 }
-func (pendingUsageProjectionSource) ListPluginSessionUsageMeasurements(context.Context, string, analyticsmodels.SessionUsageFilter) ([]analyticsmodels.SessionUsageMeasurement, error) {
-	return nil, nil
-}
 func (pendingUsageProjectionSource) ListCanonicalSessionUsageMeasurements(context.Context, analyticsmodels.SessionUsageFilter) ([]analyticsmodels.SessionUsageMeasurement, error) {
 	return nil, nil
 }
@@ -166,4 +179,71 @@ func TestUsageHistoryHostEmptyCanonicalPagePreservesProjectionState(t *testing.T
 	require.True(t, ok)
 	_, err = history.ListTargets(context.Background(), pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1"})
 	require.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
+type usageErrorSource struct {
+	err error
+}
+
+func (s usageErrorSource) ListCanonicalSessionUsageMeasurements(context.Context, analyticsmodels.SessionUsageFilter) ([]analyticsmodels.SessionUsageMeasurement, error) {
+	return nil, s.err
+}
+
+func (s usageErrorSource) ListUsageCollectionTargets(context.Context, string, pluginsdk.UsageCollectionTargetQueryV1) (pluginsdk.UsageCollectionTargetPageV1, error) {
+	return pluginsdk.UsageCollectionTargetPageV1{}, s.err
+}
+
+func (s usageErrorSource) ReportUsageObservations(context.Context, string, pluginsdk.UsageObservationBatchV1) (pluginsdk.UsageObservationBatchResultV1, error) {
+	return pluginsdk.UsageObservationBatchResultV1{}, s.err
+}
+
+// @covers AC-COSTS-USAGE-HISTORY-002.5
+func TestUsageHostErrorsArePublicOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		code    codes.Code
+		message string
+	}{
+		{name: "task not found", err: analyticsrepository.ErrUsageNotVisible, code: codes.NotFound, message: "usage target not found"},
+		{name: "storage failure", err: errors.New("disk secret /tmp/internal"), code: codes.Unavailable, message: "retained usage is unavailable"},
+		{name: "projection changed", err: analytics.ErrUsageProjectionChanged, code: codes.FailedPrecondition, message: "usage publication changed; restart the saved query"},
+		{name: "deadline", err: context.DeadlineExceeded, code: codes.DeadlineExceeded, message: "usage request timed out"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newTestDataHost(manifest.Capabilities{APIRead: []string{"session_usage"}, APIWrite: []string{"session_usage"}})
+			fixture.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-a"}}
+			fixture.host.pluginID = "fixture-plugin"
+			fixture.host.usageDep = func() sessionUsageSource { return usageErrorSource{err: tc.err} }
+			host := dialPluginHostOverWire(t, fixture.host)
+			history, ok := pluginsdk.HostUsageHistory(host)
+			require.True(t, ok)
+			ctx := context.Background()
+			calls := map[string]error{
+				"canonical": func() error {
+					_, _, err := host.Usage().ListCanonical(ctx, pluginsdk.SessionUsageFilter{WorkspaceID: "ws-a"}, pluginsdk.Page{})
+					return err
+				}(),
+				"targets": func() error {
+					_, err := history.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-a"})
+					return err
+				}(),
+				"report": func() error {
+					_, err := history.Report(ctx, pluginsdk.UsageObservationBatchV1{SchemaVersion: 1, Observations: []pluginsdk.UsageObservationV1{{ItemID: "item"}}})
+					return err
+				}(),
+			}
+			for path, err := range calls {
+				require.Error(t, err, path)
+				require.Equal(t, tc.code, status.Code(err), path)
+				require.Equal(t, tc.message, status.Convert(err).Message(), path)
+				require.NotContains(t, status.Convert(err).Message(), "disk secret", path)
+			}
+			// A foreign workspace is rejected before the source can answer.
+			_, err := history.ListTargets(ctx, pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-foreign"})
+			require.Equal(t, codes.NotFound, status.Code(err))
+			require.Equal(t, "usage target not found", status.Convert(err).Message())
+		})
+	}
 }

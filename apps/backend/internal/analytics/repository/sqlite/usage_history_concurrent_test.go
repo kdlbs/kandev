@@ -49,6 +49,7 @@ func runHistoryConcurrentContract(t *testing.T, postgres bool) {
 	require.NoError(t, tasks.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "concurrent-ws", Name: "Concurrent", OrgID: "retained-org"}))
 	require.NoError(t, tasks.CreateTask(ctx, &taskmodels.Task{ID: "concurrent-task", WorkspaceID: "concurrent-ws", Title: "Concurrent"}))
 	require.NoError(t, tasks.CreateTaskSession(ctx, &taskmodels.TaskSession{ID: "concurrent-session", TaskID: "concurrent-task", StartedAt: started, Metadata: map[string]any{"acp": map[string]any{"session_id": "external-thread"}}}))
+	completeExternalUsageMigration(t, first)
 	page, err := first.ListUsageCollectionTargets(ctx, "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "concurrent-ws"})
 	require.NoError(t, err)
 	require.Len(t, page.Targets, 1)

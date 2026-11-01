@@ -93,7 +93,7 @@ func TestUsageHistoryExternalOwnershipAndIntegerNormalization(t *testing.T) {
 					ObservedAt: now, CollectedAt: now.Add(3 * time.Hour), InputTokens: models.Int64(3), TotalTokens: models.Int64(3),
 				},
 			}
-			results, err := repo.UpsertSessionUsage(context.Background(), measurements)
+			results, err := repo.upsertSessionUsageFixture(context.Background(), measurements)
 			if err != nil {
 				t.Fatalf("UpsertSessionUsage: %v", err)
 			}
@@ -140,7 +140,7 @@ func TestUsageHistoryExternalOwnershipAndIntegerNormalization(t *testing.T) {
 			if dirty != 2 {
 				t.Fatalf("dirty partition count = %d, want 2 for distinct token-semantics partitions", dirty)
 			}
-			_, err = repo.UpsertSessionUsage(context.Background(), []models.SessionUsageMeasurement{{
+			_, err = repo.upsertSessionUsageFixture(context.Background(), []models.SessionUsageMeasurement{{
 				WorkspaceID: "usage-ws", TaskID: "usage-task", Source: "native", SourceRecordID: "forged-native",
 				UsageIdentity: "forged", ObservedAt: now,
 			}})

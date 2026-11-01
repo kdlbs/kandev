@@ -1,9 +1,0 @@
-
- RUN  v4.1.11 /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
-
-
- Test Files  4 passed (4)
-      Tests  90 passed (90)
-   Start at  09:38:27
-   Duration  1.85s (transform 393ms, setup 314ms, import 407ms, tests 74ms, environment 715ms)
-

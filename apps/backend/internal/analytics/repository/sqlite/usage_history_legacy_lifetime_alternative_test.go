@@ -74,7 +74,7 @@ func legacyLifetimePartialNativeFixture(t *testing.T, postgres bool, copies int)
 		inputs = append(inputs, row)
 	}
 	for offset := 0; offset < len(inputs); offset += 200 {
-		result, err := repo.UpsertSessionUsage(t.Context(), inputs[offset:min(offset+200, len(inputs))])
+		result, err := repo.upsertSessionUsageFixture(t.Context(), inputs[offset:min(offset+200, len(inputs))])
 		require.NoError(t, err)
 		for _, item := range result {
 			require.Equal(t, models.UsageWriteApplied, item.Status)

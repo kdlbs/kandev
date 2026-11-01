@@ -5,6 +5,7 @@ import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useTranslation } from "react-i18next";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { RANGE_KEYS, type RangeKey } from "./stats-utils";
+import { useOptionalAppStore } from "@/components/state-provider";
 
 export const RANGE_LABEL_KEYS: Record<RangeKey, string> = {
   week: "stats:rangeLastWeek",
@@ -21,6 +22,7 @@ export function StatsNavigation({ className }: StatsNavigationProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const usageHistoryEnabled = useOptionalAppStore((state) => state.features.usageHistory, false);
   const activeSection = pathname === "/stats/token-usage" ? "token-usage" : "overview";
 
   const navigate = (section: string) => {
@@ -40,12 +42,14 @@ export function StatsNavigation({ className }: StatsNavigationProps) {
         <TabsTrigger value="overview" className="h-11 cursor-pointer px-3 text-xs md:h-6 md:px-2">
           {t("stats:overview")}
         </TabsTrigger>
-        <TabsTrigger
-          value="token-usage"
-          className="h-11 cursor-pointer px-3 text-xs md:h-6 md:px-2"
-        >
-          {t("stats:tokenUsage")}
-        </TabsTrigger>
+        {usageHistoryEnabled ? (
+          <TabsTrigger
+            value="token-usage"
+            className="h-11 cursor-pointer px-3 text-xs md:h-6 md:px-2"
+          >
+            {t("stats:tokenUsage")}
+          </TabsTrigger>
+        ) : null}
       </TabsList>
     </Tabs>
   );

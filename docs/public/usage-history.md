@@ -9,6 +9,41 @@ description: "Understand workspace usage totals, retained accounting, attributio
 The date range and provider filter apply to the summary, breakdown, and **Copy Stats** totals.
 Table pages change the visible rows. They do not limit those totals.
 
+## Enabling retained usage
+
+Retained usage history is controlled by the `features.usageHistory` release toggle
+(`KANDEV_FEATURES_USAGE_HISTORY`). It is off in shipped production and development profiles
+and on in the end-to-end profile. Enabling or disabling it requires a restart.
+
+When it is off, Kandev does not start the retained-history worker, accept new retained rows,
+serve the Token Usage route, or expose the retained usage Host APIs.
+Rows retained before it was turned off stay readable in the database, but the Token Usage page
+and new collection are unavailable.
+Task deletion still detaches live links, and workspace or organization deletion still erases retained rows.
+
+Existing sessions with a recorded transcript ID become available to the Session Cost plugin's
+historical import after the one-time adoption migration. Forked sessions, sessions with a
+transcript shared across scopes, transferred tasks, and sessions without a transcript ID stay
+ineligible, so their transcript totals are never attributed to the workspace.
+
+## Importing existing session history
+
+> [!EXPERIMENTAL]
+> Historical import requires the Session Cost plugin and enabled retained usage history. It is not
+> available by default in the shipped production profile.
+
+Install the Session Cost plugin and enable **Collect statistics** in its settings. Open
+**Settings > Plugins > Session Cost**, select a workspace, and choose **Import historical usage**.
+The plugin reads the local tokscale history for eligible sessions in that workspace. It imports
+all-time totals first, then fills in daily history for known session dates. The settings card shows
+the current step, progress, and counts. You can leave the page while an import runs. Imports for
+other workspaces wait in a queue, and an interrupted import resumes after the plugin restarts.
+
+The import can read only transcripts that still exist on the machine running tokscale. It does not
+rebuild deleted history or read remote transcripts. Sessions without a local transcript and
+sessions that cannot be attributed safely are skipped. Their existing retained values remain
+available.
+
 ## Retained accounting
 
 Kandev saves accepted native agent usage and external collector observations separately from the task conversation.

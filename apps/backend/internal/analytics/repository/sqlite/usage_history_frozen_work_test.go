@@ -20,7 +20,7 @@ func TestUsageHistoryLegacyFrozenTranscriptSurvivesLaterContext(t *testing.T) {
 	first := usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))
 	first.Source, first.TranscriptID, first.SourceRecordID = "plugin:legacy-frozen", "frozen-A", "record-A"
 	first.InputTokens, first.TotalTokens, first.CostSubcents = models.Int64(100), models.Int64(100), models.Int64(100)
-	writes, err := repo.UpsertSessionUsage(t.Context(), []models.SessionUsageMeasurement{first})
+	writes, err := repo.upsertSessionUsageFixture(t.Context(), []models.SessionUsageMeasurement{first})
 	require.NoError(t, err)
 	require.Len(t, writes, 1)
 	oldID := writes[0].Measurement.ID
@@ -32,7 +32,7 @@ func TestUsageHistoryLegacyFrozenTranscriptSurvivesLaterContext(t *testing.T) {
 	second := first
 	second.TranscriptID, second.SourceRecordID, second.Model = "current-B", "record-B", "Opus"
 	second.InputTokens, second.TotalTokens, second.CostSubcents = models.Int64(200), models.Int64(200), models.Int64(200)
-	writes, err = repo.UpsertSessionUsage(t.Context(), []models.SessionUsageMeasurement{second})
+	writes, err = repo.upsertSessionUsageFixture(t.Context(), []models.SessionUsageMeasurement{second})
 	require.NoError(t, err)
 	newWork := frozenWorkKey(t, repo, usageMeasurementsTable, writes[0].Measurement.ID)
 	require.NotEqual(t, oldWork, newWork)

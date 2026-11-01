@@ -1,6 +1,0 @@
-scenario,samples,p50_ms,p95_ms,p99_ms,sqlite_nvisit,query_process_peak_rss_bytes,sqlite_native_baseline_bytes,sqlite_native_peak_bytes,source_file
-five_years/UTC,10,3943.885711,4009.241737,4009.241737,5348698,46960640,2507768,7340440,usage-history-worker4-bench-sqlite-one_year-five_years-UTC.json
-recent/America/New_York,10,1308.574916,1518.906364,1518.906364,2532940,55246848,2507768,12085144,usage-history-worker4-bench-sqlite-one_year-recent-America-New_York.json
-recent/Asia/Kathmandu,10,1824.517712,1847.031023,1847.031023,2538315,51138560,2507768,12085096,usage-history-worker4-bench-sqlite-one_year-recent-Asia-Kathmandu.json
-recent/Europe/Lisbon,10,1791.891225,1900.565638,1900.565638,2538321,55513088,2507768,12075456,usage-history-worker4-bench-sqlite-one_year-recent-Europe-Lisbon.json
-recent/UTC,10,520.276279,528.269354,528.269354,2070842,43261952,2507768,4086512,usage-history-worker4-bench-sqlite-one_year-recent-UTC.json

@@ -39,6 +39,7 @@ func currentTargetDatabaseFixture(t *testing.T, postgres bool) (*Repository, *ta
 	require.NoError(t, err)
 	tasks.SetUsageHistoryRetainer(repo)
 	require.NoError(t, tasks.CreateWorkspace(t.Context(), &taskmodels.Workspace{ID: "ws-1", Name: "Point", OrgID: "org-a"}))
+	completeUsageSourceAdoptionForTest(t, repo)
 	createCurrentTargetSession(t, tasks, "task-1", "session-1", "transcript-1")
 	return repo, tasks
 }

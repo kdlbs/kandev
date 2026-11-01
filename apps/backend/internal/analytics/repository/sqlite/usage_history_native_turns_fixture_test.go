@@ -129,7 +129,7 @@ func (f nativeTurnsFixture) addHostTurns(t *testing.T) {
 	t.Helper()
 	require.NoError(t, f.tasks.CreateTask(t.Context(), &taskmodels.Task{ID: "host-turns-task", WorkspaceID: nativeTurnsWorkspace, Title: "Host turns"}))
 	require.NoError(t, f.tasks.CreateTaskSession(t.Context(), &taskmodels.TaskSession{ID: "host-turns-session", TaskID: "host-turns-task"}))
-	_, err := f.repo.UpsertSessionUsage(t.Context(), []models.SessionUsageMeasurement{{
+	_, err := f.repo.upsertSessionUsageFixture(t.Context(), []models.SessionUsageMeasurement{{
 		WorkspaceID: nativeTurnsWorkspace, TaskID: "host-turns-task", SessionID: "host-turns-session",
 		Source: nativeTurnsHostSource, SourceRecordID: "host-turns", UsageIdentity: "host-turns", Model: "host-model", Provider: "host-provider",
 		InputTokens: models.Int64(70), TotalTokens: models.Int64(70), ReasoningTokens: models.Int64(0), Turns: models.Int64(7), Revision: 1, PayloadDigest: "host-turns-digest",

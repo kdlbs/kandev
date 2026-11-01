@@ -121,6 +121,10 @@ func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS executors_running (
+		session_id TEXT PRIMARY KEY,
+		resume_token TEXT NOT NULL DEFAULT ''
+	);
 	CREATE TABLE IF NOT EXISTS task_session_turns (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,

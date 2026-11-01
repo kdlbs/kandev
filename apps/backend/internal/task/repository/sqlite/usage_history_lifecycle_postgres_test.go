@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/analytics/models"
 	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
@@ -24,6 +23,7 @@ func TestUsageHistoryPostgresTaskDeletePreservesLegacySources(t *testing.T) {
 		t.Fatalf("initialize analytics schema: %v", err)
 	}
 	taskRepo.SetUsageHistoryRetainer(analyticsRepo)
+	ensureRetainedUsageMigration(t, db)
 	if err := taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "usage-lifecycle-pg-ws", Name: "Usage lifecycle", OrgID: "usage-lifecycle-pg-org"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -85,6 +85,7 @@ func TestUsageHistoryPostgresCapturedOrgErasureAfterWorkspaceTransfer(t *testing
 		t.Fatalf("initialize analytics schema: %v", err)
 	}
 	taskRepo.SetUsageHistoryRetainer(analyticsRepo)
+	ensureRetainedUsageMigration(t, db)
 	if err := taskRepo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "usage-erase-pg-ws", Name: "Usage erasure", OrgID: "usage-erase-pg-old-org"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -98,13 +99,7 @@ func TestUsageHistoryPostgresCapturedOrgErasureAfterWorkspaceTransfer(t *testing
 	if err := taskRepo.CreateTaskUsageEvent(ctx, event); err != nil {
 		t.Fatalf("create native source event: %v", err)
 	}
-	if _, err := analyticsRepo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{{
-		WorkspaceID: "usage-erase-pg-ws", TaskID: "usage-erase-pg-task", SessionID: "usage-erase-pg-session",
-		Source: "plugin:usage-erase", SourceRecordID: "usage-erase-pg-external", UsageIdentity: "external-work",
-		Model: "model", Provider: "provider", Revision: 1, PayloadDigest: "digest",
-		ObservedAt: time.Now().UTC(), CollectedAt: time.Now().UTC(),
-		InputTokens: models.Int64(19), TotalTokens: models.Int64(19),
-	}}); err != nil {
+	if err := reportExternalUsage(ctx, analyticsRepo, "usage-erase-pg-ws", "usage-erase-pg-session", "usage-erase", "usage-erase-pg-external", "model", 19, time.Now().UTC()); err != nil {
 		t.Fatalf("create external retained source: %v", err)
 	}
 	var capturedScopeID string

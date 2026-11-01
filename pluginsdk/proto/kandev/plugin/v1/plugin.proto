@@ -192,10 +192,8 @@ service Host {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
 
-  // Source-aware token usage — api_read:session_usage and
-  // api_write:session_usage. The source namespace is assigned by Kandev from
-  // the connected plugin identity; plugins cannot impersonate another source.
-  rpc UpsertSessionUsage(UpsertSessionUsageRequest) returns (UpsertSessionUsageResponse);
+  // Source-aware token usage read — api_read:session_usage. Retained writes go
+  // through the versioned observation contract below.
   rpc ListSessionUsage(ListSessionUsageRequest) returns (ListSessionUsageResponse);
   // Versioned retained-history contract. Subject bindings and collection
   // snapshots are issued by the Host; callers cannot choose tenant, actor, or
@@ -2177,22 +2175,6 @@ message SessionUsageMeasurement {
   // False preserves older-row semantics: nullable amounts remain unknown.
   bool token_metric_absent = 35;
   bool cost_metric_absent = 36;
-}
-message UpsertSessionUsageRequest {
-  string workspace_id = 1;
-  repeated SessionUsageMeasurement measurements = 2;
-}
-message SessionUsageWriteResult {
-  string source_record_id = 1;
-  string usage_identity = 2;
-  string model = 3;
-  string provider = 4;
-  string status = 5;
-  SessionUsageMeasurement measurement = 6;
-  string error = 7;
-}
-message UpsertSessionUsageResponse {
-  repeated SessionUsageWriteResult results = 1;
 }
 message SessionUsageFilter {
   string workspace_id = 1;

@@ -15,7 +15,7 @@ func TestUsageHistoryTransferredTranscriptRejectsLegacyDTO(t *testing.T) {
 	repo, _ := historyContractFixtureInOrg(t, "org-a")
 	_, err := repo.db.Exec(`UPDATE workspaces SET org_id='org-b' WHERE id='ws-1'`)
 	require.NoError(t, err)
-	_, err = repo.UpsertSessionUsage(t.Context(), []models.SessionUsageMeasurement{usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))})
+	_, err = repo.upsertSessionUsageFixture(t.Context(), []models.SessionUsageMeasurement{usageFixtureMeasurement(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC))})
 	require.Error(t, err, "the compatibility mapper must enforce the same source-scope boundary")
 	var count int
 	require.NoError(t, repo.db.Get(&count, `SELECT COUNT(*) FROM session_usage_measurements`))

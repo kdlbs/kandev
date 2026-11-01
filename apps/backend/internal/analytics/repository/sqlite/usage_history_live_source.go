@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/db"
 )
 
 // usageLiveTranscriptExpression is also used by the schema owner for the
@@ -24,31 +23,21 @@ func (r *Repository) usageLiveSourceCrossesScopeTx(ctx context.Context, tx *sqlx
 	if err := tx.GetContext(ctx, &organization, r.db.Rebind(`SELECT organization_id FROM usage_scopes WHERE scope_id = ?`), target.ScopeID); err != nil {
 		return false, err
 	}
-	has, err := db.ColumnExistsContext(ctx, tx, "task_sessions", "metadata")
-	if err != nil {
+	var foreign bool
+	query := `SELECT EXISTS(SELECT 1 FROM task_sessions ts JOIN tasks t ON t.id=ts.task_id JOIN workspaces w ON w.id=t.workspace_id
+		WHERE ` + usageLiveTranscriptExpression(r.db.DriverName(), "ts.metadata") + ` = ? AND (w.id <> ? OR COALESCE(w.org_id,'') <> ?))`
+	if err := tx.GetContext(ctx, &foreign, r.db.Rebind(query), target.ExternalSessionID, target.WorkspaceID, organization); err != nil {
 		return false, err
 	}
-	if has {
-		var foreign bool
-		query := `SELECT EXISTS(SELECT 1 FROM task_sessions ts JOIN tasks t ON t.id=ts.task_id JOIN workspaces w ON w.id=t.workspace_id
-			WHERE ` + usageLiveTranscriptExpression(r.db.DriverName(), "ts.metadata") + ` = ? AND (w.id <> ? OR COALESCE(w.org_id,'') <> ?))`
-		if err := tx.GetContext(ctx, &foreign, r.db.Rebind(query), target.ExternalSessionID, target.WorkspaceID, organization); err != nil {
-			return false, err
-		}
-		if foreign {
-			return true, nil
-		}
+	if foreign {
+		return true, nil
 	}
 	return r.usageRunningSourceCrossesScopeTx(ctx, tx, target, organization)
 }
 
 func (r *Repository) usageRunningSourceCrossesScopeTx(ctx context.Context, tx *sqlx.Tx, target retainedTarget, organization string) (bool, error) {
-	has, err := db.TableExistsContext(ctx, tx, "executors_running")
-	if err != nil || !has {
-		return false, err
-	}
 	var foreign bool
-	err = tx.GetContext(ctx, &foreign, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM executors_running e
+	err := tx.GetContext(ctx, &foreign, r.db.Rebind(`SELECT EXISTS(SELECT 1 FROM executors_running e
 		JOIN task_sessions ts ON ts.id=e.session_id JOIN tasks t ON t.id=ts.task_id JOIN workspaces w ON w.id=t.workspace_id
 		WHERE e.resume_token = ? AND (w.id <> ? OR COALESCE(w.org_id,'') <> ?))`), target.ExternalSessionID, target.WorkspaceID, organization)
 	return foreign, err

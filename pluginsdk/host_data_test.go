@@ -177,14 +177,6 @@ type dataRecordingMessageReader struct{ h *dataRecordingHost }
 
 type dataRecordingUsageReader struct{ h *dataRecordingHost }
 
-func (r dataRecordingUsageReader) UpsertBatch(context.Context, string, []SessionUsageMeasurement) ([]SessionUsageWriteResult, error) {
-	return nil, nil
-}
-
-func (r dataRecordingUsageReader) List(_ context.Context, _ SessionUsageFilter, _ Page) ([]SessionUsageMeasurement, *PageInfo, error) {
-	return r.h.usage, r.h.usagePage, nil
-}
-
 func (r dataRecordingUsageReader) ListCanonical(_ context.Context, _ SessionUsageFilter, _ Page) ([]SessionUsageMeasurement, *PageInfo, error) {
 	r.h.canonicalRead = true
 	return r.h.canonicalUsage, r.h.canonicalPage, nil
@@ -362,18 +354,10 @@ func TestHostData_SessionsListAndCodeStats(t *testing.T) {
 
 func TestHostData_UsageCanonicalListUsesCanonicalReader(t *testing.T) {
 	impl := &dataRecordingHost{
-		usage:          []SessionUsageMeasurement{{SourceRecordID: "raw"}},
-		usagePage:      &PageInfo{HasMore: true, NextCursor: "raw-next"},
 		canonicalUsage: []SessionUsageMeasurement{{SourceRecordID: "canonical"}},
 		canonicalPage:  &PageInfo{HasMore: false},
 	}
 	host := dialHostOverBufconn(t, impl)
-
-	raw, rawPage, err := host.Usage().List(context.Background(), SessionUsageFilter{}, Page{})
-	require.NoError(t, err)
-	require.Equal(t, impl.usage, raw)
-	require.Equal(t, impl.usagePage, rawPage)
-	require.False(t, impl.canonicalRead)
 
 	canonical, canonicalPage, err := host.Usage().ListCanonical(context.Background(), SessionUsageFilter{}, Page{})
 	require.NoError(t, err)

@@ -20,7 +20,7 @@ func newStatsRouterWithRepo(t *testing.T, repo repository.Repository) *gin.Engin
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), authzTestLogger(t))
+	RegisterStatsRoutes(router, repo, newOwnerAuthorizer(), authzTestLogger(t), true)
 	return router
 }
 

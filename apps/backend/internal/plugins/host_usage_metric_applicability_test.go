@@ -69,6 +69,7 @@ func checkCanonicalMetricApplicability(t *testing.T, segmented bool) {
 	metricApplicabilityNative(t, repo, database)
 	history, ok := pluginsdk.HostUsageHistory(host)
 	require.True(t, ok)
+	finishHostUsageMigration(t, repo)
 	page, err := history.ListTargets(t.Context(), pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "metric-ws", CurrentTarget: &pluginsdk.UsageCollectionCurrentTargetQueryV1{SessionID: "metric-session"}})
 	require.NoError(t, err)
 	require.Len(t, page.Targets, 1)
@@ -139,6 +140,7 @@ func TestUsageHistoryHostUnknownTokenObjectRemainsApplicable(t *testing.T) {
 	repo, host, _ := metricApplicabilityHost(t)
 	history, ok := pluginsdk.HostUsageHistory(host)
 	require.True(t, ok)
+	finishHostUsageMigration(t, repo)
 	page, err := history.ListTargets(t.Context(), pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "metric-ws", CurrentTarget: &pluginsdk.UsageCollectionCurrentTargetQueryV1{SessionID: "metric-session"}})
 	require.NoError(t, err)
 	require.Len(t, page.Targets, 1)
@@ -202,35 +204,5 @@ func TestUsageHistoryHostUnknownLifetimeTokensPreserveKnownPoint(t *testing.T) {
 			}
 			require.Equal(t, want, total)
 		})
-	}
-}
-
-func TestUsageHistoryHostIgnoresInputMetricApplicability(t *testing.T) {
-	_, host, _ := metricApplicabilityHost(t)
-	for _, zero := range []bool{false, true} {
-		item := pluginsdk.SessionUsageMeasurement{TaskID: "metric-task", SessionID: "metric-session", TranscriptID: "metric-thread", SourceRecordID: "unknown", UsageIdentity: "unknown", Model: "unknown", SourceVersion: "old-dto", Revision: 1, PayloadDigest: "unknown", TokenMetricAbsent: true, CostMetricAbsent: true}
-		if zero {
-			item.SourceRecordID, item.UsageIdentity, item.Model, item.PayloadDigest = "zero", "zero", "zero", "zero"
-			item.InputTokens, item.TotalTokens, item.CostSubcents = analyticsmodels.Int64(0), analyticsmodels.Int64(0), analyticsmodels.Int64(0)
-			item.Currency, item.CostBasis, item.CostCoverage, item.Coverage = "USD", "reported", "complete", "complete"
-		}
-		results, err := host.Usage().UpsertBatch(t.Context(), "metric-ws", []pluginsdk.SessionUsageMeasurement{item})
-		require.NoError(t, err)
-		require.Len(t, results, 1)
-		require.Equal(t, "applied", results[0].Status)
-		rows, _, err := host.Usage().List(t.Context(), pluginsdk.SessionUsageFilter{WorkspaceID: "metric-ws", Model: item.Model}, pluginsdk.Page{})
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		require.False(t, rows[0].TokenMetricAbsent)
-		require.False(t, rows[0].CostMetricAbsent)
-		if zero {
-			require.NotNil(t, rows[0].TotalTokens)
-			require.NotNil(t, rows[0].CostSubcents)
-			require.Zero(t, *rows[0].TotalTokens)
-			require.Zero(t, *rows[0].CostSubcents)
-		} else {
-			require.Nil(t, rows[0].TotalTokens)
-			require.Nil(t, rows[0].CostSubcents)
-		}
 	}
 }

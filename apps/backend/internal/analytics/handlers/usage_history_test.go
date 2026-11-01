@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/kandev/kandev/internal/analytics"
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/analytics/repository"
@@ -44,4 +46,23 @@ func TestUsageHistoryErasedScopeDiscardsSavedClientValues(t *testing.T) {
 	response := doGet(t, router, "/api/v1/workspaces/"+wsA+"/stats/token-usage")
 	require.Equal(t, http.StatusNotFound, response.Code, "erased and inaccessible retained scopes must use the client cache-clearing response")
 	require.JSONEq(t, `{"error":"workspace not found"}`, response.Body.String())
+}
+
+// @covers AC-COSTS-USAGE-HISTORY-006.5
+func TestUsageHistoryMissingRepositoryCapabilityReturnsError(t *testing.T) {
+	router := newStatsRouterWithRepo(t, &recordingRepo{})
+	response := doGet(t, router, "/api/v1/workspaces/"+wsA+"/stats/token-usage")
+	require.Equal(t, http.StatusInternalServerError, response.Code,
+		"a repository without the retained usage capability must not report an authoritative empty report")
+}
+
+// @covers AC-COSTS-USAGE-HISTORY-007.8
+func TestUsageHistoryRouteAbsentWhenToggleOff(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterStatsRoutes(router, &recordingRepo{}, newOwnerAuthorizer(), authzTestLogger(t), false)
+	response := doGet(t, router, "/api/v1/workspaces/"+wsA+"/stats/token-usage")
+	require.Equal(t, http.StatusNotFound, response.Code)
+	response = doGet(t, router, "/api/v1/workspaces/"+wsA+"/stats/global")
+	require.Equal(t, http.StatusOK, response.Code)
 }

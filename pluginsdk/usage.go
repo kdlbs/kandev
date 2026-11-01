@@ -50,16 +50,6 @@ type SessionUsageMeasurement struct {
 	CostMetricAbsent  bool
 }
 
-type SessionUsageWriteResult struct {
-	SourceRecordID string
-	UsageIdentity  string
-	Model          string
-	Provider       string
-	Status         string
-	Measurement    *SessionUsageMeasurement
-	Error          string
-}
-
 type SessionUsageFilter struct {
 	WorkspaceID    string
 	SessionIDs     []string
@@ -79,14 +69,9 @@ type SessionUsageFilter struct {
 }
 
 type UsageReader interface {
-	UpsertBatch(ctx context.Context, workspaceID string, measurements []SessionUsageMeasurement) ([]SessionUsageWriteResult, error)
-	// List returns observations owned by the connected plugin. The host derives
-	// the source namespace from the plugin identity; callers cannot widen it
-	// through the filter.
-	List(ctx context.Context, filter SessionUsageFilter, page Page) ([]SessionUsageMeasurement, *PageInfo, error)
 	// ListCanonical returns the host-selected value for each coverage unit. It
-	// is a separate read because its result can include native and other-source
-	// observations while writes remain source-owned.
+	// can include native and other-source observations; writes go through the
+	// retained observation contract.
 	ListCanonical(ctx context.Context, filter SessionUsageFilter, page Page) ([]SessionUsageMeasurement, *PageInfo, error)
 }
 

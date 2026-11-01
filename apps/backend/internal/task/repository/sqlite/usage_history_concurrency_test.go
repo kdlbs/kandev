@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/analytics/models"
 	analyticssqlite "github.com/kandev/kandev/internal/analytics/repository/sqlite"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -25,8 +24,13 @@ func TestUsageHistoryDeleteSerializesNativeAndExternalAdmission(t *testing.T) {
 				t.Fatalf("initialize analytics repository: %v", err)
 			}
 			repo.SetUsageHistoryRetainer(analyticsRepo)
+			ensureRetainedUsageMigration(t, repo.db)
 			createUsageEventsTestTask(t, repo, "task-delete-write-race")
 			createUsageEventsTestSession(t, repo, "session-delete-write-race", "task-delete-write-race")
+			externalBinding, bindingErr := retainedUsageBinding(ctx, analyticsRepo, "ws-1", "session-delete-write-race", "race")
+			if bindingErr != nil {
+				t.Fatalf("prepare external retained binding: %v", bindingErr)
+			}
 
 			start := make(chan struct{})
 			ready := make(chan struct{}, 2)
@@ -41,13 +45,7 @@ func TestUsageHistoryDeleteSerializesNativeAndExternalAdmission(t *testing.T) {
 					writeErr = repo.CreateTaskUsageEvent(ctx, newTestUsageEvent("race-native-event", "task-delete-write-race", "session-delete-write-race"))
 					return
 				}
-				_, writeErr = analyticsRepo.UpsertSessionUsage(ctx, []models.SessionUsageMeasurement{{
-					WorkspaceID: "ws-1", TaskID: "task-delete-write-race", SessionID: "session-delete-write-race",
-					Source: "plugin:race", SourceRecordID: "race-external-record", UsageIdentity: "race-work",
-					Model: "model-race", Provider: "provider-race", Revision: 1, PayloadDigest: "race-payload",
-					ObservedAt: time.Now().UTC(), CollectedAt: time.Now().UTC(),
-					InputTokens: models.Int64(12), TotalTokens: models.Int64(12),
-				}})
+				writeErr = reportExternalUsageWithBinding(ctx, analyticsRepo, "race", externalBinding, "race-external-record", "model-race", 12, time.Now().UTC())
 			}()
 			go func() {
 				defer wait.Done()

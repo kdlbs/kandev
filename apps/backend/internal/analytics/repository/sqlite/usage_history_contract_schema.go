@@ -22,7 +22,7 @@ func (r *Repository) ensureUsageContractSchema(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS usage_legacy_adoptions (scope_id TEXT NOT NULL, workspace_id TEXT NOT NULL, task_id TEXT NOT NULL, task_created_at TIMESTAMP NOT NULL, session_id TEXT NOT NULL, native_upper_bound BIGINT NOT NULL, PRIMARY KEY(task_id,task_created_at,session_id))`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_legacy_adoption_scope ON usage_legacy_adoptions(scope_id,task_id,native_upper_bound)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_work_pending ON usage_scopes(work_pending, scope_id)`,
-		`CREATE TABLE IF NOT EXISTS usage_collection_contexts (context_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, workspace_id TEXT NOT NULL, trusted INTEGER NOT NULL, mixed INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS usage_collection_contexts (context_id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, workspace_id TEXT NOT NULL, trusted INTEGER NOT NULL, mixed INTEGER NOT NULL, evidence TEXT NOT NULL DEFAULT 'creation')`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_collection_context_scope ON usage_collection_contexts(scope_id)`,
 		`CREATE TABLE IF NOT EXISTS usage_collection_preparation (scope_id TEXT PRIMARY KEY, last_key TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS usage_work_identities (scope_id TEXT NOT NULL, subject_id TEXT NOT NULL, scheme TEXT NOT NULL, authority TEXT NOT NULL, external_id TEXT NOT NULL, event_id TEXT NOT NULL, PRIMARY KEY(scope_id, subject_id, scheme, authority, external_id))`,
@@ -53,6 +53,9 @@ func (r *Repository) ensureUsageContractSchema(ctx context.Context) error {
 			return fmt.Errorf("usage contract schema: %w", err)
 		}
 	}
+	if err := r.ensureUsageCollectionContextEvidence(ctx); err != nil {
+		return err
+	}
 	if _, err := r.db.ExecContext(ctx, `ALTER TABLE usage_collection_bindings ADD COLUMN source_scope_status TEXT NOT NULL DEFAULT 'unknown'`); err != nil && !db.IsDuplicateColumnError(err) {
 		return err
 	}
@@ -69,6 +72,13 @@ func (r *Repository) ensureUsageContractSchema(ctx context.Context) error {
 		return err
 	}
 	return r.ensureUsageCurrentTargetSchema(ctx)
+}
+
+func (r *Repository) ensureUsageCollectionContextEvidence(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `ALTER TABLE usage_collection_contexts ADD COLUMN evidence TEXT NOT NULL DEFAULT 'creation'`); err != nil && !db.IsDuplicateColumnError(err) {
+		return err
+	}
+	return nil
 }
 
 func (r *Repository) ensureUsageContractSourceSchema(ctx context.Context) error {

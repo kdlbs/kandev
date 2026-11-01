@@ -112,6 +112,13 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, fmt.Errorf("analytics store does not provide transactional usage retention")
 	}
 	taskRepoImpl.SetUsageHistoryRetainer(retainer)
+	taskRepoImpl.SetUsageHistoryEnabled(cfg.Features.UsageHistory)
+	if toggler, ok := analyticsRepo.(interface{ SetUsageHistoryEnabled(bool) }); ok {
+		toggler.SetUsageHistoryEnabled(cfg.Features.UsageHistory)
+	}
+	if err := reconcileUsageHistoryToggle(ctx, cfg.Features.UsageHistory, analyticsRepo); err != nil {
+		return nil, nil, nil, err
+	}
 	cleanups = append(cleanups, cleanup)
 	if err := checkStartupContext(ctx, "agent settings repository"); err != nil {
 		return nil, nil, nil, err
@@ -232,7 +239,7 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, err
 	}
 	initialized = true
-	if projector, ok := analyticsRepo.(analyticsservice.UsageProjectionBatchStore); ok {
+	if projector, ok := analyticsRepo.(analyticsservice.UsageProjectionBatchStore); ok && cfg.Features.UsageHistory {
 		control := newUsageHistoryProjection(ctx, projector, log)
 		repos.UsageHistoryStop = control.stop
 		repos.usageHistoryControl = control
@@ -243,6 +250,32 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	startup.BeginStep(ctx, startup.StepStoresServices)
 	startup.SetTotal(ctx, startup.StepStoresServices, int64(tracker.SweepTotal(startup.StepStoresServices)))
 	return pool, repos, cleanups, nil
+}
+
+func reconcileUsageHistoryToggle(ctx context.Context, enabled bool, analyticsRepo analyticsrepository.Repository) error {
+	if enabled {
+		resumer, ok := analyticsRepo.(interface {
+			ResumeUsageHistoryAfterDisabledPeriod(context.Context) error
+		})
+		if !ok {
+			return nil
+		}
+		return wrapUsageHistoryToggleError("resume", resumer.ResumeUsageHistoryAfterDisabledPeriod(ctx))
+	}
+	reopener, ok := analyticsRepo.(interface {
+		ReopenUsageHistoryAfterDisabledPeriod(context.Context) error
+	})
+	if !ok {
+		return nil
+	}
+	return wrapUsageHistoryToggleError("reopen", reopener.ReopenUsageHistoryAfterDisabledPeriod(ctx))
+}
+
+func wrapUsageHistoryToggleError(action string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s usage history after disabled period: %w", action, err)
 }
 
 func checkStartupContext(ctx context.Context, stage string) error {

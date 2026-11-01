@@ -55,11 +55,17 @@ func (r *Repository) refreshUsageSourceContextTx(ctx context.Context, tx *sqlx.T
 		return "", err
 	}
 	key := sourceContextKey(target)
-	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_collection_contexts (context_id,scope_id,workspace_id,trusted,mixed)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT(context_id) DO UPDATE SET
+	evidence := ""
+	if created {
+		evidence = "creation"
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_collection_contexts (context_id,scope_id,workspace_id,trusted,mixed,evidence)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(context_id) DO UPDATE SET
 		mixed = CASE WHEN usage_collection_contexts.mixed = 1 OR usage_collection_contexts.scope_id <> excluded.scope_id OR excluded.mixed = 1 THEN 1 ELSE 0 END,
-		trusted = CASE WHEN usage_collection_contexts.trusted = 1 OR excluded.trusted = 1 THEN 1 ELSE 0 END, scope_id = excluded.scope_id`),
-		key, target.ScopeID, target.WorkspaceID, boolInt(created), boolInt(unsafe))
+		trusted = CASE WHEN usage_collection_contexts.trusted = 1 OR excluded.trusted = 1 THEN 1 ELSE 0 END,
+		evidence = CASE WHEN usage_collection_contexts.trusted = 0 AND excluded.trusted = 1 THEN excluded.evidence ELSE usage_collection_contexts.evidence END,
+		scope_id = excluded.scope_id`),
+		key, target.ScopeID, target.WorkspaceID, boolInt(created), boolInt(unsafe), evidence)
 	if err != nil {
 		return "", err
 	}
@@ -90,21 +96,14 @@ func (r *Repository) admitUsageSourceContextTx(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-func (r *Repository) admitLegacyUsageSourceTx(ctx context.Context, tx *sqlx.Tx, m *models.SessionUsageMeasurement) error {
-	if m.SessionID == "" {
-		return nil
-	}
-	var target retainedTarget
-	if err := tx.GetContext(ctx, &target, r.db.Rebind(`SELECT * FROM usage_collection_bindings WHERE subject_id = ? ORDER BY sequence DESC LIMIT 1`), m.SubjectID); err != nil {
-		return err
-	}
-	if err := r.admitUsageSourceContextTx(ctx, tx, target, ""); err != nil {
-		return err
-	}
-	return r.deriveExternalUsageAttributionTx(ctx, tx, target, "", m)
-}
-
 func (r *Repository) prepareUsageCollectionTargetsTx(ctx context.Context, tx *sqlx.Tx, scope, workspace string, limit int) (bool, error) {
+	adopted, err := r.usageSourceAdoptionCompleteTx(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if !adopted {
+		return false, nil
+	}
 	var org string
 	if err := tx.GetContext(ctx, &org, r.db.Rebind(`SELECT COALESCE(org_id,'') FROM workspaces WHERE id = ?`), workspace); err != nil {
 		return false, err
@@ -112,7 +111,7 @@ func (r *Repository) prepareUsageCollectionTargetsTx(ctx context.Context, tx *sq
 	if err := ensureUsageScopeTx(ctx, tx, r.db, scope, workspace, org, time.Now().UTC()); err != nil {
 		return false, err
 	}
-	_, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_collection_preparation (scope_id,last_key) VALUES (?, '') ON CONFLICT(scope_id) DO NOTHING`), scope)
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_collection_preparation (scope_id,last_key) VALUES (?, '') ON CONFLICT(scope_id) DO NOTHING`), scope)
 	if err != nil {
 		return false, err
 	}

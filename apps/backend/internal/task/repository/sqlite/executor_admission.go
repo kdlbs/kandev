@@ -39,7 +39,7 @@ func (r *Repository) AdmitExecutorUse(ctx context.Context, executorID, profileID
 		}
 		query := "UPDATE task_sessions SET executor_actor_user_id = ? WHERE id = ?"
 		args := []any{actorID, sessionID}
-		if r.usageHistoryRetainer != nil {
+		if r.usageHistoryRetainer != nil && r.usageHistoryIsEnabled() {
 			query = "UPDATE task_sessions SET executor_actor_user_id = ?, usage_execution_binding_id = ? WHERE id = ?"
 			args = []any{actorID, bindingID, sessionID}
 		}

@@ -73,6 +73,7 @@ func newProjectionDatabaseFixture(t *testing.T, postgres bool) projectionDatabas
 	require.NoError(t, tasks.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "projection-ws", Name: "Projection", OrgID: "captured-org"}))
 	require.NoError(t, tasks.CreateTask(ctx, &taskmodels.Task{ID: "projection-task", WorkspaceID: "projection-ws", Title: "Projection"}))
 	require.NoError(t, tasks.CreateTaskSession(ctx, &taskmodels.TaskSession{ID: "projection-session", TaskID: "projection-task", StartedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)}))
+	completeExternalUsageMigration(t, first)
 	targets, err := first.ListUsageCollectionTargets(ctx, "collector", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "projection-ws"})
 	require.NoError(t, err)
 	model := "model"

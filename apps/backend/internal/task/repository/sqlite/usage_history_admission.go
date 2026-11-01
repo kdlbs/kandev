@@ -40,7 +40,21 @@ func (r *Repository) SetUsageHistoryRetainer(retainer usagehistory.Retainer) {
 	r.usageHistoryLifecycle, _ = retainer.(usagehistory.Lifecycle)
 }
 
+// SetUsageHistoryEnabled controls retained admission and preservation without
+// detaching the lifecycle, because erasure and completion must keep working
+// while the release toggle is off.
+func (r *Repository) SetUsageHistoryEnabled(enabled bool) {
+	r.usageHistoryEnabledFlag = &enabled
+}
+
+func (r *Repository) usageHistoryIsEnabled() bool {
+	return r.usageHistoryEnabledFlag == nil || *r.usageHistoryEnabledFlag
+}
+
 func (r *Repository) captureUsageCollectionSessionTx(ctx context.Context, exec taskSessionExecutor, taskID, sessionID string) error {
+	if !r.usageHistoryIsEnabled() {
+		return nil
+	}
 	writer, ok := r.usageHistoryRetainer.(usagehistory.CollectionSessionWriter)
 	if !ok {
 		return nil
@@ -63,7 +77,7 @@ func (r *Repository) ResetWorkspaceUsageHistory(ctx context.Context, workspaceID
 }
 
 func (r *Repository) bindTurnUsageTx(ctx context.Context, tx *sqlx.Tx, turn *models.Turn) error {
-	if r.usageHistoryRetainer == nil {
+	if r.usageHistoryRetainer == nil || !r.usageHistoryIsEnabled() {
 		return nil
 	}
 	scope, err := r.readUsageAdmissionScopeTx(ctx, tx, turn.TaskID, turn.TaskSessionID)
@@ -83,7 +97,7 @@ func (r *Repository) admitExecutionUsageTx(
 	tx *sqlx.Tx,
 	sessionID, actorID string,
 ) (string, error) {
-	if r.usageHistoryRetainer == nil || sessionID == "" {
+	if r.usageHistoryRetainer == nil || !r.usageHistoryIsEnabled() || sessionID == "" {
 		return "", nil
 	}
 	var taskID string

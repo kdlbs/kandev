@@ -120,6 +120,9 @@ The accepted product direction does not imply that its implementation is complet
 - **AC-COSTS-USAGE-HISTORY-007.5:** Desktop and phone views shall expose the same retained amounts, coverage, and attribution states through existing accessible controls.
 - **AC-COSTS-USAGE-HISTORY-007.6:** Missing pre-migration history shall remain a disclosed gap. Migration shall not claim recovery of unavailable transcripts or deleted records.
 - **AC-COSTS-USAGE-HISTORY-007.7:** An interrupted rollout shall retain accepted observations. Reverting reads shall not delete the new durable history.
+- **AC-COSTS-USAGE-HISTORY-007.8:** When the usage history release toggle is off, Kandev shall accept no new retained usage, run no retained usage background work, and keep the statistics page and retained Host APIs unavailable.
+- **AC-COSTS-USAGE-HISTORY-007.9:** When the toggle is turned off after use, already accepted history shall stay stored, and explicit workspace and organization erasure shall still remove it.
+- **AC-COSTS-USAGE-HISTORY-007.10:** When the toggle is turned on again, retained usage shall resume without duplicates, and usage deleted while it was off shall remain a disclosed gap.
 
 ## Out of scope
 
@@ -131,3 +134,4 @@ The accepted product direction does not imply that its implementation is complet
 
 - [Retained Usage History package](../../../plans/usage-history/plan.md)
 - [System design](../system-design/usage-history.md)
+- [Usage History Import package](../../../plans/usage-history-import/plan.md)

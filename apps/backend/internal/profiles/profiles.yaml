@@ -96,6 +96,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Retained token and cost history. Off in production and dev until a real
+  # install exercises the import; on in e2e because the retained usage suites
+  # depend on it.
+  KANDEV_FEATURES_USAGE_HISTORY:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

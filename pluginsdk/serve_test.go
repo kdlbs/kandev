@@ -451,7 +451,6 @@ func TestHostCallContextClassifiesCapabilityVersusConversationCalls(t *testing.T
 		pluginv1.Host_ListManagedAgentConversationsExact_FullMethodName,
 		pluginv1.Host_GetState_FullMethodName,
 		pluginv1.Host_ListStateKeys_FullMethodName,
-		pluginv1.Host_UpsertSessionUsage_FullMethodName,
 		pluginv1.Host_ListSessionUsage_FullMethodName,
 		pluginv1.Host_ListUsageCollectionTargetsV1_FullMethodName,
 		pluginv1.Host_ReportUsageObservationsV1_FullMethodName,

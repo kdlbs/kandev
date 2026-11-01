@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -30,10 +29,7 @@ func usageCanonicalQueryKey(filter pluginsdk.SessionUsageFilter) (string, error)
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func decodeUsagePageCursor(cursor, query string, canonical bool) (int, string, error) {
-	if !canonical {
-		return pageOffset(cursor), "", nil
-	}
+func decodeUsagePageCursor(cursor, query string) (int, string, error) {
 	if cursor == "" {
 		return 0, "", nil
 	}
@@ -49,10 +45,7 @@ func decodeUsagePageCursor(cursor, query string, canonical bool) (int, string, e
 	return value.Offset, value.Generation, nil
 }
 
-func encodeUsagePageCursor(offset int, generation, query string, canonical bool) (string, error) {
-	if !canonical {
-		return strconv.Itoa(offset), nil
-	}
+func encodeUsagePageCursor(offset int, generation, query string) (string, error) {
 	if generation == "" {
 		return "", status.Error(codes.FailedPrecondition, "saved usage publication is unavailable")
 	}

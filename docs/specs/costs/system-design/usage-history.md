@@ -26,7 +26,8 @@ The [Token Usage design](token-usage.md) remains the collection and presentation
 This design replaces its live-task storage dependency and archive-wide read-time reconciliation.
 Existing task ledger APIs and session rollups keep their original arithmetic and task-scoped lifetime.
 Existing explicit workspace and organization erasure remains authoritative.
-This package adds no org-wide visibility right or new release flag.
+This package adds no org-wide visibility right. `features.usageHistory` gates admission, the worker, reads, and Host APIs; erasure and live-link detachment stay unconditional (AC-007.8 to .10).
+While the toggle is off, new sessions have no creation evidence and new native events have no retained copy. An off-mode boot marks the adoption cursor incomplete, records a durable disabled-period marker, and moves the native cursor's high-water mark forward. The next enabled boot refreshes that high-water mark again, runs adoption before native migration, then clears the marker. This makes the off-period gap recoverable and idempotent on restart. Only usage deleted before it could be retained remains an irreversible gap (AC-007.10).
 
 ## Requirement mapping
 
@@ -134,6 +135,7 @@ Workspace cost can remain known while per-user cost remains unavailable.
 
 Capture aggregate-source scope evidence at session creation, independently of discovery metadata.
 Discovery cannot manufacture creation evidence from the current workspace owner.
+[One-time adoption](usage-history-import.md) is the only other trust path.
 Only explicit `SourceScopeStatus=eligible` permits aggregate collection. Mixed, unknown, and absent status fail closed.
 Transfers, copied contexts, and erased-source guards can withhold source context or reject an aggregate even with a fresh binding.
 A prior discovery actor snapshot does not authorize attribution of a later cumulative aggregate.

@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/usagehistory"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -195,18 +194,10 @@ func (r *Repository) captureCollectionTargetTx(ctx context.Context, tx *sqlx.Tx,
 }
 
 func (r *Repository) captureTargetSessionTx(ctx context.Context, tx *sqlx.Tx, v *retainedTarget) error {
-	metadata := "'{}'"
-	has, err := db.ColumnExistsContext(ctx, tx, "task_sessions", "metadata")
-	if err != nil {
-		return err
-	}
-	if has {
-		metadata = "COALESCE(ts.metadata, '{}')"
-	}
 	var start, end sql.NullString
 	var raw string
 	var taskCreated time.Time
-	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT CAST(ts.started_at AS TEXT), CAST(ts.completed_at AS TEXT), `+metadata+`, t.created_at
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT CAST(ts.started_at AS TEXT), CAST(ts.completed_at AS TEXT), COALESCE(ts.metadata, '{}'), t.created_at
 		FROM task_sessions ts JOIN tasks t ON t.id = ts.task_id WHERE ts.id = ? AND ts.task_id = ?`), v.SessionID, v.TaskID).Scan(&start, &end, &raw, &taskCreated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -236,15 +227,9 @@ func (r *Repository) captureTargetSessionTx(ctx context.Context, tx *sqlx.Tx, v 
 		v.Forked = content.ForkSource != ""
 	}
 	if v.ExternalSessionID == "" {
-		exists, err := db.TableExistsContext(ctx, tx, "executors_running")
-		if err != nil {
+		err = tx.GetContext(ctx, &v.ExternalSessionID, r.db.Rebind(`SELECT COALESCE(resume_token, '') FROM executors_running WHERE session_id = ? LIMIT 1`), v.SessionID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
-		}
-		if exists {
-			err = tx.GetContext(ctx, &v.ExternalSessionID, r.db.Rebind(`SELECT COALESCE(resume_token, '') FROM executors_running WHERE session_id = ? LIMIT 1`), v.SessionID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
 		}
 	}
 	return nil
@@ -400,6 +385,9 @@ func (r *Repository) loadUsageTargetSnapshotTx(ctx context.Context, tx *sqlx.Tx,
 			return err
 		}
 		_, err = tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO usage_collection_snapshots (snapshot_id, source, workspace_id, scope_id, upper_bound) VALUES (?, ?, ?, ?, ?)`), page.SnapshotID, source, workspace, scope, page.SnapshotUpperBound)
+		if err == nil {
+			_, err = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM usage_collection_snapshots WHERE source = ? AND scope_id = ? AND snapshot_id <> ?`), source, scope, page.SnapshotID)
+		}
 	} else {
 		err = tx.GetContext(ctx, &page.SnapshotUpperBound, r.db.Rebind(`SELECT upper_bound FROM usage_collection_snapshots WHERE snapshot_id = ? AND source = ? AND workspace_id = ? AND scope_id = ?`), page.SnapshotID, source, workspace, scope)
 	}

@@ -1,4 +1,0 @@
-ok  	github.com/kdlbs/kandev/pluginsdk	3.051s
-ok  	github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check	1.013s
-ok  	github.com/kdlbs/kandev/pluginsdk/internal/compatibility	1.849s
-?   	github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1	[no test files]

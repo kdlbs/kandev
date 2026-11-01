@@ -1,8 +1,0 @@
-
-> @kandev/web@0.1.0 e2e:run /root/.kandev/tasks/on-the-stats-page-al_nybnw3z6/kandev/apps/web
-> e2e/scripts/run-e2e.sh --host --no-build --project mobile-chrome -- e2e/tests/task/mobile-plan-download.spec.ts --grep 'keeps the download control touch-sized on a coarse-pointer workbench' --workers\=1 --retries\=0 --list --output\=/tmp/usage-history-B17/mobile-discovery-results
-
-[36m[e2e][0m mode=host  shards=1  project=mobile-chrome  strict=1  workers=1
-Listing tests:
-  [mobile-chrome] › task/mobile-plan-download.spec.ts:21:5 › keeps the download control touch-sized on a coarse-pointer workbench
-Total: 1 test in 1 file

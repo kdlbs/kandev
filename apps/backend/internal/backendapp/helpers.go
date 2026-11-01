@@ -1808,7 +1808,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		processHandlers.SetTerminalService(p.services.Terminal)
 	}
 	taskhandlers.RegisterWorkspaceFileRoutes(p.router, processHandlers)
-	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log)
+	analyticshandlers.RegisterStatsRoutes(p.router, p.analyticsRepo, p.taskSvc, p.log, p.features.UsageHistory)
 	agenthandlers.RegisterShellRoutes(p.router, p.lifecycleMgr, p.log)
 	if p.services.Share != nil {
 		p.services.Share.RegisterRoutes(p.router)

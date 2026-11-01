@@ -3800,7 +3800,7 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, claim *managed.DeleteClaim) (string, error) {
 	usagePreserved := false
 	usageDeleted := false
-	if r.usageHistoryLifecycle != nil {
+	if r.usageHistoryLifecycle != nil && r.usageHistoryIsEnabled() {
 		if err := r.usageHistoryLifecycle.PreserveTaskUsage(ctx, id); err != nil {
 			return "", fmt.Errorf("preserve task usage before deletion: %w", err)
 		}
