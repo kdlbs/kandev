@@ -9,6 +9,7 @@ import {
   expectOpenCodeRetainedRefusal,
   readOpenCodeCapacityTrace,
 } from "../../helpers/opencode-capacity-retry";
+import { watchWs } from "../../helpers/causal-waits";
 import { advanceCapacityRetries, waitForCapacityRetry } from "../../helpers/capacity-retry-clock";
 import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
@@ -82,12 +83,30 @@ test("desktop preserves the episode when the OpenCode continuation fails without
     { initialPrompt: "/opencode-capacity-completed-tools:100" },
   );
   try {
+    const ws = watchWs(testPage);
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await expectOpenCodeCapacityNotice(session);
 
-    await driveOpenCodeCapacityRetries(backend, apiClient, fixture.sessionId, 1, 11);
+    await driveOpenCodeCapacityRetries(backend, apiClient, fixture.sessionId, 1, 10);
+    const finalRetryNotice = await waitForCapacityRetry(apiClient, fixture.sessionId, 11);
+    const retryNoticeRemoved = ws.waitForEvent("session.conversation.changed", {
+      where: (payload) =>
+        payload.session_id === fixture.sessionId &&
+        Array.isArray(payload.operations) &&
+        payload.operations.some((operation) => {
+          if (!operation || typeof operation !== "object") return false;
+          const change = operation as Record<string, unknown>;
+          return (
+            change.kind === "remove" &&
+            change.entity === "message" &&
+            change.id === finalRetryNotice!.id
+          );
+        }),
+    });
+    await advanceCapacityRetries(backend, Number(finalRetryNotice!.metadata?.retry_in_seconds) + 1);
+    await retryNoticeRemoved;
     const failure = await expectOpenCodeRetainedRefusal(apiClient, fixture.sessionId, "exhausted");
     expect(failure.metadata?.attempts_started).toBe(11);
     await pollUntil(
