@@ -60,7 +60,7 @@ Decision: [Use json-render for native agent rich output](../../../decisions/2026
 ## Catalog and dependencies
 
 Pin `@json-render/core` and `@json-render/react` to 0.21.0 for the initial
-implementation, with a direct compatible Zod 4 dependency (4.3.6). The published
+implementation, with a direct compatible Zod 4 dependency (4.6.6). The published
 React peer range is `^19.2.3`, matching this worktree's React 19.2.3. Changing these pins requires rerunning the catalog,
 schema, and full-consumer compatibility tests. Library versions are not public
 catalog versions.
