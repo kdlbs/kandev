@@ -122,6 +122,7 @@ const (
 // Error is the classifier's normalized output. It wraps stderr/stdout in
 // RawExcerpt after sanitization + truncation.
 type Error struct {
+	Keyword          *KeywordDecision
 	Code             Code
 	Class            Class
 	CatalogueVersion string
@@ -164,6 +165,7 @@ func (e *Error) ShouldShortRetry() bool {
 
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
+	KeywordContext            KeywordContext
 	Phase                     Phase
 	ProviderID                string
 	ExitCode                  *int
@@ -262,6 +264,9 @@ func classify(in Input) *Error {
 			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e := classifyKeywordContext(in, excerpt); e != nil {
 		return applyInvariants(e)
 	}
 	e := classifyByPhase(in, excerpt)

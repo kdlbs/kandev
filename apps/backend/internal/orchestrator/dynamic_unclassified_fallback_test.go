@@ -21,6 +21,85 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+func TestKeywordObservationHistoryBoundaries(t *testing.T) {
+	svc := &Service{config: ServiceConfig{ProviderKeywordContext: true}}
+	data := watcher.AgentEventData{SessionID: "keyword-session", AgentExecutionID: "execution", PromptGeneration: 1,
+		ExecutionProfileID: "candidate", ProviderError: &streams.ProviderError{Message: "Error: capacity busy"}}
+	c := routingerr.KeywordContext{PathID: "path", ModelID: "model"}
+	svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+	for repeat := 0; repeat < 2; repeat++ {
+		if got := svc.observeKeywordFailure(data, c, "capacity"); got.ConsecutiveFailures != 1 {
+			t.Fatalf("duplicate event incremented count: %+v", got)
+		}
+	}
+	data.PromptGeneration = 2
+	svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+	if got := svc.observeKeywordFailure(data, c, "capacity"); got.ConsecutiveFailures != 2 {
+		t.Fatalf("next attempt lost consecutive history: %+v", got)
+	}
+	stale := data
+	stale.PromptGeneration = 1
+	if got := svc.observeKeywordFailure(stale, c, "capacity"); got.ConsecutiveFailures != 0 {
+		t.Fatal("stale generation changed observation context")
+	}
+	data.PromptGeneration = 3
+	svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true)
+	if got := svc.observeKeywordFailure(data, c, "limit"); got.ConsecutiveFailures != 1 {
+		t.Fatal("different semantic group inherited capacity streak")
+	}
+	data.ExecutionProfileID, c.PathID = "other-candidate", "other-path"
+	for generation := uint64(4); generation <= 25; generation++ {
+		data.PromptGeneration = generation
+		svc.beginPromptAttempt(data.SessionID, data.AgentExecutionID, generation, true)
+		got := svc.observeKeywordFailure(data, c, "capacity")
+		if generation == 4 && (got.ConsecutiveFailures != 1 || got.OtherPaths != 1 || got.OtherModels != 0) {
+			t.Fatalf("cross-path observation conflated with repeated candidate: %+v", got)
+		}
+	}
+	attempt, _ := svc.promptAttemptForSession(data.SessionID)
+	if len(attempt.keywordHistory) != 16 {
+		t.Fatalf("history length=%d, want bounded16", len(attempt.keywordHistory))
+	}
+	copyHistory := svc.previousKeywordHistory(data.SessionID)
+	copyHistory[0].candidate = "mutated"
+	if attempt.keywordHistory[0].candidate == "mutated" {
+		t.Fatal("history snapshot aliases live attempt")
+	}
+	attempt.effect = true
+	if got := svc.previousKeywordHistory(data.SessionID); got != nil {
+		t.Fatal("effectful attempt retained replay observation history")
+	}
+	attempt.effect, svc.config.ProviderKeywordContext = false, false
+	if got := svc.previousKeywordHistory(data.SessionID); got != nil {
+		t.Fatal("OFF retained keyword history")
+	}
+}
+
+func TestConsecutiveKeywordCountIdentityBoundaries(t *testing.T) {
+	current := keywordObservation{group: "capacity", candidate: "candidate", text: "diagnostic", path: "path", model: "model"}
+	for _, change := range []string{"group", "candidate", "text", "path", "model"} {
+		previous := current
+		switch change {
+		case "group":
+			previous.group = "limit"
+		case "candidate":
+			previous.candidate = "other"
+		case "text":
+			previous.text = "other"
+		case "path":
+			previous.path = "other"
+		case "model":
+			previous.model = "other"
+		}
+		if got := consecutiveKeywordCount([]keywordObservation{current, previous, current}, current); got != 1 {
+			t.Fatalf("%s boundary retained older nonconsecutive failures: %d", change, got)
+		}
+	}
+	if got := consecutiveKeywordCount(nil, current); got != 0 {
+		t.Fatalf("empty history count=%d", got)
+	}
+}
+
 func TestUnclassifiedFallbackEvidenceAdmission(t *testing.T) {
 	ctx := context.Background()
 	const (

@@ -130,7 +130,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID, d.service.config.ProviderKeywordContext)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
@@ -874,6 +874,8 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	if !eligible {
 		return dynamicFailureRouteResult{}
 	}
+	data.ExecutionProfileID = session.ExecutionProfileID
+	classified = s.refineKeywordFailure(ctx, data, classified)
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {

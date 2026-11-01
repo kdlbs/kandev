@@ -5,6 +5,7 @@ updated: 2026-10-28
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
 ---
 
 # Provider Error Signature Classification System Design
@@ -23,6 +24,7 @@ the established higher-priority signals and sanitized excerpt contract.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
 
@@ -30,6 +32,11 @@ the established higher-priority signals and sanitized excerpt contract.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+
+With the extension enabled, the terminal stream consumer selects known rules by
+`AgentType`, retaining the legacy `AgentID` fallback when type is absent. OFF
+preserves the current base attribution. Execution identity, generation,
+output and effect fences are preserved.
 
 ## Inputs that carry prose
 
@@ -113,6 +120,79 @@ Do not fabricate recorded protocol provenance or expose raw error Data.
 Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+## Opt-in unmatched diagnostic prefilter
+
+Requirement 002 adds `features.providerKeywordContext`, off in every profile
+and restart-required. Configuration/registry/profile/frontend feature bindings
+share that identity and `KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT`.
+
+Existing injection, typed status, managed-runtime, provider-specific,
+provider-neutral and runtime-environment checks retain their order. Only an
+unmatched diagnostic reaches `prefilter.go`, before the phase default. Within
+the prefilter, structured status precedes keyword groups and context. Typed
+statuses already recognized by the existing classifier never get reclassified.
+The 400 request/context distinction authorizes no circuit or replay permission.
+
+`keyword_groups.go` owns the semantic vocabulary. Separator normalization and
+bounded stem matching count distinct terms, not occurrences. Single terms and
+ties retain low confidence. Unresolved ACCOUNT or GONE evidence also retains
+ambiguity when a different group wins by term count; one such term cannot
+authorize a stop, hold or automatic retry. Error envelopes, source completeness and current
+invocation evidence remain separate from semantic confidence. A keyword match
+cannot turn a quoted success into a terminal provider failure.
+
+`KeywordContext` is optional trusted input with unknown zero values.
+`KeywordDecision` carries group, suspension scope, backoff and default action.
+The orchestrator retains the existing diagnostic-correlation rules. New
+unmarked assistant text remains output; the new terminal classifier cannot
+clear that safety fence. Its existing prompt-attempt record
+holds at most sixteen observations. Attempt identities deduplicate results;
+successful output/effects clear continuity and the existing evidence lifecycle
+owns cleanup. No service, persistent log, fingerprint algorithm or periodic task
+is introduced.
+
+Account context comes from the current session's actual executor and runtime
+environment, not the profile family or backend login alone. Session-aware
+profile loading keeps that binding consistent in the conductor and classifier.
+The existing registered-agent billing detector is reused only when a local
+launch demonstrably uses the backend's unchanged default credential home.
+Different or unknown homes, remote executors, custom launch/provider overrides,
+and incomplete bindings stay unknown without consulting that detector. No new
+credential-file reader, account registry or identity algorithm is added.
+Known same-account profiles still share the existing credential binding.
+Candidate `KeywordAccountID`
+uses that same identity without changing the ordinary `BindingKey` used by
+known-rule failures. Missing bindings remain isolated. Dynamic circuits reuse
+the existing registry and probe leases. Path/model keys isolate unrelated
+models; a missing model stays candidate-scoped. Proven paid-account limits
+use a separate opt-in account key. Reset hints retain their
+deadline, and timed capacity/limit backoff progresses through 5, 15 and 30
+minutes. A model-qualified structured 404 holds only that model key; changing
+the configured model selects a different key. The registry's existing owner
+`ReleaseHold` operation can close a held key; no release API is added.
+Disabled candidates ignore keyword metadata when choosing defaults and circuit
+durations, retaining the legacy circuit behavior.
+
+Saved candidate policy overrides defaults. Unknown failures and empty
+completions retain their existing per-candidate unclassified policy and
+threshold. No confidence level bypasses replay, continuation, task ownership,
+cancellation, settlement or generation fences.
+
+The returned mid-turn action is a classification recommendation only. Existing
+continuation admission is unchanged; generic post-output retry or candidate
+continuation is not implemented by this extension.
+
+The minimal future catalog seam is the existing deterministic classifier:
+known rules stay before `classifyKeywordContext`; loading and export remain
+separate work. No loader or new rule DSL is implemented.
+
+Typed process-start and ACP-initialization failures may separate their own
+matching lifecycle wrapper after the original classification remains unknown.
+Both the complete wrapped diagnostic and the inner diagnostic remain bounded.
+The inner message still needs its error envelope and passes quote/negation
+guards. Untyped workspace/executor failures cannot use this path, and OFF and
+already classified failures keep their previous behavior.
 
 ## OpenCode admission refusal
 

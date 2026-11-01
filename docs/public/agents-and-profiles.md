@@ -710,6 +710,22 @@ and the current per-boot interlock. Bearer credentials are rejected on this
 settings route. The interlock is an accidental-mutation guard, not an
 authentication credential; see [Scope agent profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions).
 
+#### Provider keyword and context classification
+
+> [!EXPERIMENTAL]
+> Provider keyword and context classification is disabled in all shipped profiles.
+> Enable `features.providerKeywordContext` under **Settings > System > Feature
+> Toggles** and restart Kandev to use it with dynamic routing.
+
+This classifier recognizes unmatched provider diagnostics using structural
+signals and keyword combinations. Existing typed errors,
+known signatures, candidate policies and output/tool safety checks still take
+precedence. New assistant text remains output unless the existing diagnostic
+correlation accepts it; this toggle does not authorize replay after effects.
+Explicit reset hints control suspension expiry. Model-scoped failures do not
+suspend unrelated models. Account-wide limits require a proven current launch
+credential binding; unknown bindings retain narrower scope.
+
 ### Host probes and executor model catalogs
 
 The model list shown while editing a profile comes from a host probe. It is an

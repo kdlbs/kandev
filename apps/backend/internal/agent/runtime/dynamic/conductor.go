@@ -114,7 +114,7 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -147,7 +147,7 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -201,7 +201,7 @@ func (c *Conductor) RouteAfterFailure(
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -229,7 +229,7 @@ func (c *Conductor) RouteAfterUnclassifiedFailure(
 			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
 		)
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
@@ -776,4 +776,13 @@ func boundedTailN(value string, limit int) string {
 		value = value[cut:]
 	}
 	return strings.ToValidUTF8(value, "")
+}
+
+func (c *Conductor) loadProfile(ctx context.Context, sessionID, profileID string) (Profile, error) {
+	if loader, ok := c.profiles.(interface {
+		LoadDynamicProfileForSession(context.Context, string, string) (Profile, error)
+	}); ok {
+		return loader.LoadDynamicProfileForSession(ctx, sessionID, profileID)
+	}
+	return c.profiles.LoadDynamicProfile(ctx, profileID)
 }

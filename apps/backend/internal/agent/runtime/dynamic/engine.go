@@ -65,7 +65,7 @@ type Engine struct {
 	states      map[string]RouteState
 	persistence Persistence
 	loader      StateLoader
-	probes      map[string]ProbeLease
+	probes      map[string][]ProbeLease
 	logger      *zap.Logger
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
@@ -79,7 +79,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		now:         time.Now,
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
-		probes:      make(map[string]ProbeLease),
+		probes:      make(map[string][]ProbeLease),
 		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 	}
@@ -249,17 +249,7 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
 		return false
 	}
-	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
-		return true
-	}
-	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
-	if !ok {
-		return false
-	}
-	// The caller owns the generation fencing. The conductor releases this
-	// lease after the concrete launch result is known.
-	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-	return true
+	return e.acquireCandidateProbes(candidate, sessionID, generation, now)
 }
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
@@ -421,6 +411,9 @@ func (e *Engine) ApplyFailureContext(
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
 	}
 	action := e.ActionFor(profile, currentCandidateID, failure.Code)
+	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
+		action = keywordDefaultAction(candidate, failure, action)
+	}
 	switch action {
 	case ActionRetrySame:
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
@@ -1348,13 +1341,15 @@ func (e *Engine) ReleaseProbe(decision RouteDecision, success bool) {
 	}
 	e.mu.Lock()
 	key := probeKey(decision.SessionID, decision.Generation, decision.ExecutionProfileID)
-	lease, ok := e.probes[key]
+	leases, ok := e.probes[key]
 	if ok {
 		delete(e.probes, key)
 	}
 	e.mu.Unlock()
 	if ok {
-		e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		for _, lease := range leases {
+			e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+		}
 	}
 }
 
@@ -1381,11 +1376,12 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		until := e.now().Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
-			until = *failure.ResetHint
+		failure = keywordFailureForCandidate(candidate, failure)
+		if failure.Keyword != nil && failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
+			return
 		}
-		e.circuits.Open(candidate.BindingKey, until, failure.Code)
+		until := keywordCircuitUntil(candidate, failure, e.now())
+		e.circuits.Open(keywordCircuitKey(candidate, failure), until, failure.Code)
 		return
 	}
 }
