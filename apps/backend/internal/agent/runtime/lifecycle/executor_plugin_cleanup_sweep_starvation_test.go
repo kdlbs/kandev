@@ -63,3 +63,57 @@ func TestSweepRotatesThroughFailingHandoffs(t *testing.T) {
 		t.Fatal("the sweep never reached the last handoff behind a failing backlog")
 	}
 }
+
+// A handoff and a cleanup_pending row can name the same execution. The sweep
+// lists the rows before it settles the handoff, so it must not destroy the
+// resource a second time from that stale listing.
+func TestSweepDestroysAHandoffAndItsCleanupPendingRowOnce(t *testing.T) {
+	runtime, operations, request, handoff, ctx := sweepRuntime(t, true)
+	destroys := 0
+	operations.beforeDestroy = func() { destroys++ }
+	environment := &models.TaskEnvironment{ID: handoff.EnvironmentID, TaskID: handoff.TaskID, OwnershipGeneration: 7}
+	if err := runtime.adoptUnrecordedPluginExecutor(ctx, environment, handoff); err != nil {
+		t.Fatalf("seed the inventory row: %v", err)
+	}
+	stored, err := runtime.currentPluginExecutorRecord(ctx, request.SessionID, request.InstanceID)
+	if err != nil {
+		t.Fatalf("read the inventory row: %v", err)
+	}
+	inventory, err := decodePluginExecutorInventory(stored.Metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.Phase = pluginExecutorPhaseCleanupPending
+	if err := runtime.checkpointPluginExecutorRecord(ctx, stored, inventory); err != nil {
+		t.Fatalf("seed the cleanup_pending row: %v", err)
+	}
+
+	if err := runtime.SweepPendingCleanup(ctx); err != nil {
+		t.Fatalf("SweepPendingCleanup() = %v, want no error", err)
+	}
+	if destroys != 1 {
+		t.Fatalf("destroys = %d, want exactly one", destroys)
+	}
+}
+
+// Rows that settle or vanish between passes must not make the rotation skip the
+// ones still failing.
+func TestSweepRotationSurvivesRowsDisappearingBetweenPasses(t *testing.T) {
+	runtime, _, store := sweepStarvationRuntime(t, 3*pluginExecutorCleanupSweepBatch)
+	seen := map[string]bool{}
+	for pass := 0; pass < 8; pass++ {
+		err := runtime.SweepPendingCleanup(context.Background())
+		for _, item := range store.unrecorded {
+			seen[item.ExecutionID] = seen[item.ExecutionID] || err != nil && strings.Contains(err.Error(), item.ExecutionID)
+		}
+		if pass == 0 && len(store.unrecorded) > 4 {
+			// The rows the first pass just visited disappear; the list shrinks and shifts.
+			store.unrecorded = store.unrecorded[pluginExecutorCleanupSweepBatch/2:]
+		}
+	}
+	for _, item := range store.unrecorded {
+		if !seen[item.ExecutionID] {
+			t.Fatalf("handoff %s was never visited after rows disappeared", item.ExecutionID)
+		}
+	}
+}
