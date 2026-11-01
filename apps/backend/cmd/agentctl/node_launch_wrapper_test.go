@@ -127,3 +127,28 @@ func TestApplyNodeAllocDirIsInertWithoutTheToken(t *testing.T) {
 	require.Equal(t, "relative-and-unused", cfg.NodeLaunchWrapper.AllocDir, "kept for launch, which ignores it")
 	require.Error(t, applyNodeAllocDir(&config.Config{}, "/some/dir"), "a value with no wrapper is a misconfiguration")
 }
+
+// The flag pair only reaches the per-instance config as an enforced policy
+// when the wrapper is both required and loaded.
+func TestNodePolicyEnforcedOnlyWhenRequiredAndLoaded(t *testing.T) {
+	path, wrapper := nodeWrapperFile(t, 0o600)
+	previous := loadNodeLaunchWrapperFile
+	t.Cleanup(func() { loadNodeLaunchWrapperFile = previous })
+	loadNodeLaunchWrapperFile = func(string, int) (launchwrapper.Spec, error) {
+		return launchwrapper.Spec{Version: launchwrapper.Version, Source: launchwrapper.SourceNode, Argv: []string{wrapper, "--"}}, nil
+	}
+
+	required := &config.Config{}
+	require.NoError(t, applyNodeLaunchWrapper(required, path, true, -1))
+	require.True(t, required.NewInstanceConfig(0, nil).NodeLaunchWrapper.Enforced())
+
+	optional := &config.Config{}
+	require.NoError(t, applyNodeLaunchWrapper(optional, path, false, -1))
+	require.False(t, optional.NewInstanceConfig(0, nil).NodeLaunchWrapper.Enforced(), "a loaded but optional wrapper is not enforced")
+
+	refused := &config.Config{}
+	require.Error(t, applyNodeLaunchWrapper(refused, "", true, -1), "required without a file refuses to start")
+	require.False(t, refused.NewInstanceConfig(0, nil).NodeLaunchWrapper.Enforced())
+
+	require.False(t, (&config.Config{}).NewInstanceConfig(0, nil).NodeLaunchWrapper.Enforced())
+}

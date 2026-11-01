@@ -2026,6 +2026,7 @@ func (m *Manager) buildAdapterConfig() error {
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		OuterSandboxEnforced:       m.cfg.NodeLaunchWrapper.Enforced(),
 	}
 
 	// Configure one-shot mode when a continue command is provided.

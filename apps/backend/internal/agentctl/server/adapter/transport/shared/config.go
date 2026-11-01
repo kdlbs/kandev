@@ -75,6 +75,12 @@ type Config struct {
 	// agent against an OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
 
+	// OuterSandboxEnforced reports that agentctl runs the agent inside an
+	// enforced node launch wrapper, so the outer sandbox is the boundary. An
+	// agent whose own sandbox cannot nest inside it (Codex on macOS Seatbelt)
+	// may then drop that inner sandbox. It must be false in every other case.
+	OuterSandboxEnforced bool
+
 	// PromptSuggestions asks an agent with native next-prompt suggestions to
 	// emit them. Only dialects that support native suggestions act on it.
 	PromptSuggestions bool
