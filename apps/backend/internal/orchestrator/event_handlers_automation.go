@@ -1296,7 +1296,7 @@ func (s *Service) dispatchAutomationRun(
 	} else if errors.Is(err, automation.ErrRunDeferred) {
 		// The run stays open and owns its task; the ceiling sweep replays the
 		// queued start, so the task and the queued record must both remain.
-		s.logger.Info("automation run start queued by the session ceiling",
+		s.logger.Info("automation run dispatch deferred before provider admission",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
 			zap.String("task_id", taskID), zap.String("run_id", runID))
 		return true
@@ -1306,8 +1306,8 @@ func (s *Service) dispatchAutomationRun(
 			return true
 		}
 
-		if isSessionRecoveryRequiredError(err) {
-			s.logger.Info("parked automation run for explicit session recovery",
+		if isSessionRecoveryRequiredError(err) || isFixedProfileSuspendedError(err) {
+			s.logger.Info("parked automation run before further dispatch",
 				zap.String("operation", operation), zap.String("automation_id", automationID),
 				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 			return true
@@ -1462,6 +1462,9 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		result, err := s.promptAutomationContinuation(ctx, task, session, prompt, runID, operation)
 		if err != nil {
 			restoreIfUncommitted()
+			if isFixedProfileSuspendedError(err) && s.retainFixedProfileAutomation(ctx, task, session, prompt, metadata, runID, action, reason, false) {
+				return automation.RunDispatch{}, errors.Join(err, automation.ErrRunDeferred)
+			}
 			return automation.RunDispatch{}, err
 		}
 		return result, nil
@@ -1490,8 +1493,8 @@ func (s *Service) handleAutomationContinuationDispatchError(
 	runID string,
 	err error,
 ) {
-	if isSessionRecoveryRequiredError(err) {
-		s.logger.Info("parked automation continuation for explicit session recovery",
+	if isSessionRecoveryRequiredError(err) || isFixedProfileSuspendedError(err) {
+		s.logger.Info("parked automation continuation before further dispatch",
 			zap.String("automation_id", a.ID), zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID), zap.Error(err))
 		return
@@ -1529,8 +1532,13 @@ func (s *Service) promptAutomationContinuation(
 
 	var acceptanceErr error
 	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
-		beforeProviderAdmission: func() error { return s.retryContinuationAdmission(ctx, session.ID) },
-		disableDispatchRetry:    launch != nil,
+		beforeProviderAdmission: func() error {
+			if err := s.validateFixedProfileWaitIdentity(ctx, session.ID); err != nil {
+				return err
+			}
+			return s.retryContinuationAdmission(ctx, session.ID)
+		},
+		disableDispatchRetry: launch != nil,
 		deliverySubmissionID: func() string {
 			if launch != nil {
 				return launch.SubmissionID
@@ -1676,6 +1684,9 @@ func (s *Service) autoStartAutomationTaskForRun(
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
 		dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 		if err != nil {
+			if s.retainFixedProfileAutomationStart(ctx, a, task, runID, action, reason, err) {
+				return automation.RunDispatch{}, errors.Join(err, automation.ErrRunDeferred)
+			}
 			return automation.RunDispatch{}, err
 		}
 		if operation != nil && operation.State == retryOperationCommittedState {
@@ -1690,8 +1701,9 @@ func (s *Service) autoStartAutomationTaskForRun(
 
 	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 	if err != nil {
-		if isSessionRecoveryRequiredError(err) {
-			s.logger.Info("parked automation task for explicit session recovery",
+		s.retainFixedProfileAutomationStart(ctx, a, task, runID, action, reason, err)
+		if isSessionRecoveryRequiredError(err) || isFixedProfileSuspendedError(err) {
+			s.logger.Info("parked automation task before further dispatch",
 				zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.Error(err))
 			return false
 		}

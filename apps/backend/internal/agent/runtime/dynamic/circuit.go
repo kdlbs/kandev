@@ -2,6 +2,7 @@ package dynamic
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -40,6 +41,13 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
+	// failures counts consecutive qualifying failures. Only a turn that
+	// completes without a provider error resets it; a successful probe closes
+	// the circuit but keeps the count.
+	failures int
+	// updatedAt is when this circuit last changed. It travels with the durable
+	// row so a read surface can say how fresh its observation is.
+	updatedAt time.Time
 }
 
 // held reports whether the circuit stays open until an owner release: it has
@@ -56,6 +64,11 @@ type CircuitSnapshot struct {
 	Until      time.Time
 	Code       routingerr.Code
 	ProbeUntil time.Time
+	// Failures is the consecutive qualifying failure count.
+	Failures int
+	// UpdatedAt is when the circuit last changed. Zero means the persisted row
+	// predates this field or the caller did not supply one.
+	UpdatedAt time.Time
 }
 
 // CircuitPersistence stores shared resource health across backend restarts.
@@ -122,10 +135,15 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, snapshot := range snapshots {
-		r.circuits[snapshot.Key] = circuit{
+		entry := circuit{
 			state: snapshot.State, until: snapshot.Until,
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
+			updatedAt: snapshot.UpdatedAt,
 		}
+		if snapshot.Failures > 0 {
+			entry.failures = snapshot.Failures
+		}
+		r.circuits[snapshot.Key] = entry
 	}
 	return nil
 }
@@ -141,7 +159,7 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 		// A timed suspension never replaces an owner-release hold.
 		return
 	}
-	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code}
+	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, updatedAt: r.now().UTC()}
 	_ = r.persistSnapshotLocked(key)
 }
 
@@ -161,12 +179,14 @@ func (r *CircuitRegistry) Hold(key string, code routingerr.Code) (bool, error) {
 	defer r.mu.Unlock()
 	r.flushPendingLocked(key)
 	established := false
-	if r.circuits[key].held() {
+	if entry := r.circuits[key]; entry.held() {
 		if _, unsaved := r.pending[key]; !unsaved {
 			return false, nil
 		}
+		entry.updatedAt = r.now().UTC()
+		r.circuits[key] = entry
 	} else {
-		r.circuits[key] = circuit{state: CircuitOpen, code: code}
+		r.circuits[key] = circuit{state: CircuitOpen, code: code, updatedAt: r.now().UTC()}
 		established = true
 	}
 	return established, r.persistSnapshotLocked(key)
@@ -187,7 +207,7 @@ func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
 		return false, nil
 	}
 	r.flushPendingLocked(key)
-	r.circuits[key] = circuit{state: CircuitClosed}
+	r.circuits[key] = circuit{state: CircuitClosed, updatedAt: r.now().UTC()}
 	if err := r.persistSnapshotLocked(key); err != nil {
 		r.circuits[key] = entry
 		return false, err
@@ -218,6 +238,47 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	return entry.state == CircuitOpen && !entry.until.IsZero()
 }
 
+// ActiveSuspension reports the circuit refusing a new dispatch on key at now.
+// A held circuit has no reset instant. A half-open circuit blocks only while
+// its probe lease is live; once that lease expires the entry falls back to its
+// reset instant, which a probe acquisition has already passed. A timed circuit
+// blocks only before its reset instant. Unlike IsOpen it never stays blocking
+// after expiry, because a fixed-profile dispatch acquires no probe lease. The
+// second result is false when nothing blocks the key.
+func (r *CircuitRegistry) ActiveSuspension(key string, now time.Time) (CircuitSnapshot, bool) {
+	if key == "" {
+		return CircuitSnapshot{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed {
+		return CircuitSnapshot{}, false
+	}
+	if !entry.blocksFixedDispatchAt(now) {
+		return CircuitSnapshot{}, false
+	}
+	return CircuitSnapshot{
+		Key: key, State: entry.state, Until: entry.until,
+		Code: entry.code, ProbeUntil: entry.probeUntil,
+	}, true
+}
+
+// blocksFixedDispatchAt reports whether a circuit still refuses a dispatch that
+// acquires no probe lease. A hold is unbounded. A half-open entry blocks only
+// while a live probe owns it; an expired probe defers to the reset instant, so
+// a probe lease restored after a restart can never wedge the profile forever.
+// Anything else blocks until its reset instant.
+func (c circuit) blocksFixedDispatchAt(now time.Time) bool {
+	if c.held() {
+		return true
+	}
+	if c.state == CircuitHalfOpen {
+		return now.Before(c.probeUntil) || now.Before(c.until)
+	}
+	return now.Before(c.until)
+}
+
 type ProbeLease struct {
 	Key       string
 	ExpiresAt time.Time
@@ -238,6 +299,7 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	lease := ProbeLease{Key: key, ExpiresAt: now.Add(duration)}
 	entry.state = CircuitHalfOpen
 	entry.probeUntil = lease.ExpiresAt
+	entry.updatedAt = now.UTC()
 	r.circuits[key] = entry
 	_ = r.persistSnapshotLocked(key)
 	return lease, true
@@ -254,17 +316,62 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 		return
 	}
 	r.flushPendingLocked(lease.Key)
+	now := r.now()
 	entry.probeUntil = time.Time{}
 	if success {
+		// The failure count survives a successful probe: only a turn that
+		// completes without a provider error clears it (ResetFailures).
 		entry.state = CircuitClosed
 		entry.until = time.Time{}
 		entry.code = ""
 	} else {
 		entry.state = CircuitOpen
-		entry.until = r.now().Add(backoff)
+		entry.until = now.Add(backoff)
+		entry.failures++
+		if escalated := now.Add(escalatedBackoff(entry.failures)); escalated.After(entry.until) {
+			entry.until = escalated
+		}
 	}
+	entry.updatedAt = now.UTC()
 	r.circuits[lease.Key] = entry
 	_ = r.persistSnapshotLocked(lease.Key)
+}
+
+// Snapshots reports every circuit the router is still acting on: open,
+// half-open, held, and closed circuits that retain a failure count. Closed
+// circuits without strikes are history rather than a current block, matching
+// the persisted LoadCircuits filter. The result is a copy sorted by key, so a
+// read surface cannot modify registry state.
+func (r *CircuitRegistry) Snapshots() []CircuitSnapshot {
+	if r == nil {
+		return []CircuitSnapshot{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	keys := make([]string, 0, len(r.circuits))
+	for key, entry := range r.circuits {
+		if entry.state == CircuitClosed && entry.failures == 0 {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	snapshots := make([]CircuitSnapshot, 0, len(keys))
+	for _, key := range keys {
+		snapshots = append(snapshots, circuitSnapshot(key, r.circuits[key]))
+	}
+	return snapshots
+}
+
+// circuitSnapshot builds the representation of one in-memory circuit. A zero
+// UpdatedAt means the row predates the field; readers report it as unknown and
+// persistence stamps it at write time.
+func circuitSnapshot(key string, entry circuit) CircuitSnapshot {
+	return CircuitSnapshot{
+		Key: key, State: entry.state, Until: entry.until,
+		Code: entry.code, ProbeUntil: entry.probeUntil, Failures: entry.failures,
+		UpdatedAt: entry.updatedAt,
+	}
 }
 
 // pendingFlushBudget bounds how many other pending keys a single mutation
@@ -310,10 +417,11 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	if !ok {
 		return nil
 	}
-	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
-		Key: key, State: entry.state, Until: entry.until,
-		Code: entry.code, ProbeUntil: entry.probeUntil,
-	})
+	snapshot := circuitSnapshot(key, entry)
+	if snapshot.UpdatedAt.IsZero() {
+		snapshot.UpdatedAt = r.now().UTC()
+	}
+	err := r.persist.SaveCircuit(context.Background(), snapshot)
 	if err != nil {
 		_, alreadyPending := r.pending[key]
 		r.pending[key] = struct{}{}

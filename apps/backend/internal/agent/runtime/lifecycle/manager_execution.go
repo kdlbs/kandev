@@ -1116,6 +1116,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	for key, value := range info.Metadata {
 		metadata[key] = value
 	}
+	captureResourceCircuitIdentity(metadata, executionID, profileInfo)
 	delete(metadata, managedGoCacheMetadataKey)
 	m.seedExecutionBaseBranches(ctx, taskID, executionID, metadata)
 	if envPreparation.managedGoCachePath != "" {

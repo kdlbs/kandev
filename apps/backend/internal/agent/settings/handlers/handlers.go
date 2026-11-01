@@ -188,6 +188,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/routing/circuits", h.httpListRoutingCircuits)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

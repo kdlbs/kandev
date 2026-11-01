@@ -46,6 +46,7 @@ type AgentEventData struct {
 	AgentID                   string                                `json:"agent_id,omitempty"`
 	AgentProfileID            string                                `json:"agent_profile_id"`
 	ExecutionProfileID        string                                `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey        string                                `json:"resource_circuit_key,omitempty"`
 	TurnID                    string                                `json:"turn_id,omitempty"`
 	DeliveryStreamID          string                                `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                `json:"delivery_incarnation_id,omitempty"`

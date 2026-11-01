@@ -713,6 +713,9 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	if services.DynamicProfileResolver != nil {
+		lifecycleMgr.SetResourceCircuitKeyResolver(services.DynamicProfileResolver.ResourceCircuitKeyForProfile)
+	}
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -878,6 +881,7 @@ func startAgentInfrastructure(
 	})
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,

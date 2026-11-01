@@ -4,10 +4,11 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-06
+updated: 2026-10-20
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing System Design Part 1
 
 ## Purpose and boundaries
@@ -16,9 +17,9 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| Requirement                                                                      | Design section                                                                |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                                           | [Migrated source detail](#migrated-source-detail)                             |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9`) | [Standalone settings save publication](#standalone-settings-save-publication) |
 
 ## Standalone settings save publication
@@ -366,9 +367,9 @@ parameters.
 The frontend applies route and capability changes by generation. It discards
 late events from a previous downstream session, inserts a localized system row
 for the structured reason, and replaces rather than merges provider-specific
-  controls. The tab and message composer remain mounted. Route-change rows are
-  durable and appear after reload. The current controls describe the active
-  concrete route. They do not change the logical author shown on earlier turns.
+controls. The tab and message composer remain mounted. Route-change rows are
+durable and appear after reload. The current controls describe the active
+concrete route. They do not change the logical author shown on earlier turns.
 
 ### Shared health and probing
 
@@ -405,6 +406,9 @@ for the structured reason, and replaces rather than merges provider-specific
 - At the deadline, one worker acquires a half-open probe lease. Other tasks keep
   using alternatives or wait. Probe success closes the circuit, failure extends
   its backoff.
+- Shared circuits use the default ladder and retained failure count described
+  in [dynamic circuit backoff](dynamic-circuit-backoff.md). The dynamic-agent
+  feature gate controls execution; there is no separate backoff toggle.
 - Recovery affects future route selection. A healthy active fallback session is
   not interrupted when an earlier candidate recovers.
 

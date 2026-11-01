@@ -296,7 +296,11 @@ func (c *Conductor) launchWithFallback(
 			}
 			return DownstreamExecution{}, current, fallbackErr
 		}
-		if !shouldFallback || attempt+1 >= maxAttempts {
+		if !shouldFallback {
+			c.recordUnroutedLaunchFailure(ctx, request.SessionID, profile, current, err)
+			return DownstreamExecution{}, current, err
+		}
+		if attempt+1 >= maxAttempts {
 			return DownstreamExecution{}, current, err
 		}
 		classified := classifiedLaunchFailure(err)
@@ -358,6 +362,31 @@ func classifiedLaunchFailure(err error) *routingerr.Error {
 		return classified
 	}
 	return nil
+}
+
+// recordUnroutedLaunchFailure charges a classified failure the policy does not
+// route to the candidate's shared resource circuit. A quota failure configured
+// as stop still means the account is exhausted, so later selections must skip
+// it until the provider reset instead of retrying the same account on the next
+// run. RecordFailureCircuit keeps the generation fence: an attempt the route
+// already left opens nothing.
+func (c *Conductor) recordUnroutedLaunchFailure(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	decision RouteDecision,
+	launchErr error,
+) {
+	if c == nil || c.engine == nil {
+		return
+	}
+	classified := classifiedLaunchFailure(launchErr)
+	if classified == nil {
+		return
+	}
+	_, _ = c.engine.RecordFailureCircuit(
+		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified,
+	)
 }
 
 // continuationWithFailure records a classified launch failure on the

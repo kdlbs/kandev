@@ -75,6 +75,7 @@ var (
 type Controller struct {
 	repo                        store.Repository
 	accountBlockReleaser        AccountBlockReleaser
+	routingCircuitReader        RoutingCircuitReader
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
 	sessionChecker              SessionChecker
