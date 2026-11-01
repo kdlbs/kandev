@@ -1714,7 +1714,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	if launchMode != dynamicRelaunchLaunchModePrompt {
 		targetState = models.TaskSessionStateCreated
 	}
-	if !s.resetDynamicRelaunchSession(ctx, data.SessionID, targetState) {
+	if !s.resetDynamicRelaunchSessionForRecovery(ctx, data.SessionID, targetState, session.RouteGeneration, origin == launchOriginManual) {
 		return nil, nil, capturedPrompt{}, launchMode, false
 	}
 	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
@@ -1739,10 +1739,9 @@ func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecu
 	return false
 }
 
-func (s *Service) resetDynamicRelaunchSession(
-	ctx context.Context,
-	sessionID string,
-	targetState models.TaskSessionState,
+func (s *Service) resetDynamicRelaunchSessionForRecovery(
+	ctx context.Context, sessionID string, targetState models.TaskSessionState,
+	expectedGeneration int64, allowFailed bool,
 ) bool {
 	// Reload immediately before the reset: StopExecution is I/O and a
 	// coordinator stop can commit a terminal state while it runs. A stale
@@ -1753,7 +1752,12 @@ func (s *Service) resetDynamicRelaunchSession(
 	if err != nil || preResetState == nil {
 		return false
 	}
-	if isTerminalSessionState(preResetState.State) {
+	if expectedGeneration > 0 && preResetState.RouteGeneration != expectedGeneration {
+		return false
+	}
+	manualFailedRetry := allowFailed && preResetState.State == models.TaskSessionStateFailed &&
+		targetState == models.TaskSessionStateWaitingForInput
+	if isTerminalSessionState(preResetState.State) && !manualFailedRetry {
 		return false
 	}
 	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
