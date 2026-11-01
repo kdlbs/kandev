@@ -20,10 +20,13 @@ func TestSpawnSessionToolDescribesEffectiveAgentProfile(t *testing.T) {
 	assert.NotContains(t, description, "pair of hands")
 	assert.NotContains(t, description, "parallelizable piece")
 	assert.Contains(t, description, "agent_profile_id")
-	assert.Contains(t, description, "workflow step may override")
+	assert.Contains(t, description, "distinct session")
+	assert.Contains(t, description, "resolved profile takes precedence over workflow session routing")
+	assert.NotContains(t, description, "workflow step may override")
 	assert.Contains(t, description, "Returns {task_id, session_id, state, agent_profile_id}")
 
 	profileProperty, ok := toolInputProperties(t, s, "spawn_session_kandev")["agent_profile_id"].(map[string]interface{})
 	require.True(t, ok, "agent_profile_id input must be described")
-	assert.Contains(t, profileProperty["description"], "workflow launch profile may override it")
+	assert.Contains(t, profileProperty["description"], "takes precedence over workflow profiles")
+	assert.Contains(t, profileProperty["description"], "target task")
 }

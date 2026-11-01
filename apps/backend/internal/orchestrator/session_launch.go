@@ -189,6 +189,10 @@ type LaunchSessionRequest struct {
 	SessionID             string                        `json:"session_id,omitempty"`
 	SessionSettingsPolicy executor.ResumeSettingsPolicy `json:"-"`
 	AgentProfileID        string                        `json:"agent_profile_id,omitempty"`
+	// Explicit MCP spawn intent also sets ProfileExplicit, even for an empty
+	// profile. Workflow session-target routing is bypassed; normal empty-profile
+	// defaults still apply.
+	//
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
@@ -247,6 +251,9 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// PreserveWorkflowBinding keeps an additional MCP session from replacing
+	// the workflow's source conversation. Only trusted server callers set it.
+	PreserveWorkflowBinding bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -966,10 +973,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{
-			ProfileExplicit:      req.ProfileExplicit,
-			SpawnOrigin:          req.SpawnOrigin,
-			MCPServerIDs:         req.MCPServerIDs,
-			reusePreparedPrimary: req.reusePreparedPrimary,
+			ProfileExplicit:         req.ProfileExplicit,
+			SpawnOrigin:             req.SpawnOrigin,
+			MCPServerIDs:            req.MCPServerIDs,
+			reusePreparedPrimary:    req.reusePreparedPrimary,
+			PreserveWorkflowBinding: req.PreserveWorkflowBinding,
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
