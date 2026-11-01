@@ -84,14 +84,29 @@ func (r *Repository) publishRecoveredTx(ctx context.Context, tx *sqlx.Tx, params
 	if err != nil {
 		return false, err
 	}
-	already, err := classifyPublishTarget(env, envelope.Descriptor.Path, params.SessionID)
+	path := publishWorkspacePath(envelope, params)
+	already, err := classifyPublishTarget(env, path, params.SessionID)
 	if err != nil || already {
 		return false, err
 	}
-	if err := r.replacePublishRepos(ctx, tx, env.taskID, params); err != nil {
-		return false, err
+	if !params.CorePreparedWorkspace {
+		if err := r.replacePublishRepos(ctx, tx, env.taskID, params); err != nil {
+			return false, err
+		}
 	}
-	return true, r.casPublishReady(ctx, tx, params, env, envelope.Descriptor.Path)
+	return true, r.casPublishReady(ctx, tx, params, env, path)
+}
+
+// publishWorkspacePath is the recorded descriptor path, or for a core-prepared
+// workspace without one the host's own path.
+func publishWorkspacePath(envelope pluginPublishEnvelope, params models.PublishRecoveredTaskEnvironmentParams) string {
+	if envelope.Descriptor != nil && envelope.Descriptor.Path != "" {
+		return envelope.Descriptor.Path
+	}
+	if params.CorePreparedWorkspace {
+		return params.WorkspacePath
+	}
+	return ""
 }
 
 // classifyPublishTarget reports whether the environment is already published
@@ -220,9 +235,9 @@ func validatePublishEnvelope(envelope pluginPublishEnvelope, params models.Publi
 		return publishMismatch(models.PluginPublishReasonRuntime)
 	case envelope.Phase != pluginPhaseReady:
 		return publishMismatch(models.PluginPublishReasonPhase)
-	case envelope.Descriptor == nil || envelope.Descriptor.Path == "":
+	case publishWorkspacePath(envelope, params) == "":
 		return publishMismatch(models.PluginPublishReasonWorkspace)
-	case !publishReposMatch(envelope, params.Repos):
+	case !params.CorePreparedWorkspace && !publishReposMatch(envelope, params.Repos):
 		return publishMismatch(models.PluginPublishReasonRepos)
 	case envelope.Revision != params.ExpectedRevision:
 		return publishMismatch(models.PluginPublishReasonRevision)

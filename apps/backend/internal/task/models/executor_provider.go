@@ -277,4 +277,12 @@ type PublishRecoveredTaskEnvironmentParams struct {
 	ExpectedRevision uint64
 	// Repos is the repository projection that replaces the environment's rows.
 	Repos []*TaskEnvironmentRepo
+	// CorePreparedWorkspace marks an environment whose workspace and repository
+	// rows core itself wrote (workspace_preparation: core). The provider records
+	// no repository set to verify, so the publication keeps core's rows, and when
+	// the provider recorded no workspace descriptor it uses WorkspacePath.
+	CorePreparedWorkspace bool
+	// WorkspacePath is the workspace path the host uses when the envelope records
+	// no descriptor; it is read only for a CorePreparedWorkspace.
+	WorkspacePath string
 }
