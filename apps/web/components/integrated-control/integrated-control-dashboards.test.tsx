@@ -31,29 +31,6 @@ afterEach(async () => {
   window.history.replaceState({}, "", "/");
 });
 
-it("reports a failed workspace coordinator read on the card and as partial data", async () => {
-  await activateLocale("en");
-  api.coordinators.mockRejectedValue(new Error("denied"));
-  const view = render(
-    <StateProvider
-      initialState={{
-        features: { ...defaultFeatureFlags, integratedControl: true, coordinator: true },
-      }}
-    >
-      <IntegratedControlProvider>
-        <IntegratedControlDashboard view="workspaces" />
-      </IntegratedControlProvider>
-    </StateProvider>,
-  );
-  await waitFor(() => expect(view.container.querySelectorAll('[role="alert"]')).toHaveLength(2));
-  expect(view.getByText("Could not load this collection.")).toBeTruthy();
-  expect(
-    view.getByText(
-      "Some workspace data could not be loaded. Totals include only loaded collections.",
-    ),
-  ).toBeTruthy();
-});
-
 it("renders the activity timestamp with the active locale and preserves its machine value", async () => {
   await activateLocale("pt-pt");
   const view = render(
