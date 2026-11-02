@@ -10,11 +10,16 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/filelock"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	"github.com/kandev/kandev/internal/common/opencode"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
-const openCodeCredentialStoreLockNamespace = "opencode-credential-stores"
+const (
+	openCodeCredentialStoreLockNamespace = "opencode-credential-stores"
+	openCodeCredentialPreferOfflineArg   = "--prefer-offline"
+	openCodeCredentialPreferOnlineArg    = "--prefer-online"
+)
 
 // OpenCodeCredentialStatus returns only readiness, never credential data.
 func (m *Manager) OpenCodeCredentialStatus(parent context.Context) (state string, err error) {
@@ -63,7 +68,7 @@ func (m *Manager) OpenCodeCredentialStatus(parent context.Context) (state string
 }
 
 func (m *Manager) inspectOpenCodeCredentials(ctx context.Context, args []string, dir string) (string, error) {
-	data, _, err := m.runManagedCommandInput(ctx, tools.CommandSpec{Path: args[0], Args: args[1:], Dir: dir}, nil)
+	data, err := m.runOpenCodeCredentialReadCommand(ctx, args, dir)
 	var entries []struct {
 		ID string `json:"id"`
 	}
@@ -126,6 +131,7 @@ func (m *Manager) ImportOpenCodeCredentials(ctx context.Context, data []byte) (e
 	if err != nil || ready {
 		return err
 	}
+	// Import mutates the credential store. Do not replay it after an ambiguous failure.
 	_, _, err = m.runManagedCommandInput(ctx, tools.CommandSpec{Path: args[0], Args: args[1:], Dir: dir}, data)
 	if err != nil {
 		return errors.New("OpenCode credential import failed")
@@ -212,12 +218,87 @@ func (m *Manager) openCodeCredentialStorePath(ctx context.Context) (string, erro
 	if err != nil {
 		return "", err
 	}
-	data, _, err := m.runManagedCommandInput(ctx, tools.CommandSpec{Path: args[0], Args: args[1:], Dir: m.cfg.WorkDir}, nil)
+	data, err := m.runOpenCodeCredentialReadCommand(ctx, args, m.cfg.WorkDir)
 	path := strings.TrimSpace(string(data))
 	if err != nil || len(data) >= managedCommandOutputLimit || !filepath.IsAbs(path) || strings.ContainsAny(path, "\r\n\x00") {
 		return "", errors.New("could not resolve durable OpenCode credential store")
 	}
 	return path, nil
+}
+
+func (m *Manager) runOpenCodeCredentialReadCommand(ctx context.Context, args []string, dir string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("OpenCode credential command is empty")
+	}
+	spec := tools.CommandSpec{Path: args[0], Args: args[1:], Dir: dir}
+	stdout, _, err := runOpenCodeCredentialReadCommandWithRetry(
+		ctx, m.cfg.OpenCodeRuntime, spec,
+		func(ctx context.Context, spec tools.CommandSpec) ([]byte, []byte, error) {
+			return m.runManagedCommandInput(ctx, spec, nil)
+		},
+	)
+	return stdout, err
+}
+
+type openCodeCredentialCommandRunner func(context.Context, tools.CommandSpec) ([]byte, []byte, error)
+
+func runOpenCodeCredentialReadCommandWithRetry(
+	ctx context.Context,
+	runtime opencode.Runtime,
+	spec tools.CommandSpec,
+	run openCodeCredentialCommandRunner,
+) ([]byte, []byte, error) {
+	stdout, stderr, err := run(ctx, spec)
+	if err == nil || ctx.Err() != nil {
+		return stdout, stderr, err
+	}
+	retrySpec, ok := openCodeCredentialOnlineRetrySpec(runtime, spec, stderr)
+	if !ok {
+		return stdout, stderr, err
+	}
+	return run(ctx, retrySpec)
+}
+
+func openCodeCredentialOnlineRetrySpec(
+	runtime opencode.Runtime,
+	spec tools.CommandSpec,
+	stderr []byte,
+) (tools.CommandSpec, bool) {
+	diagnostic := string(stderr)
+	packageSpec := opencode.PackageV2 + "@" + runtime.Version
+	summary := npmresolution.AnalyzeManagedStartupDiagnostics(diagnostic)
+	if !summary.Complete || summary.UnclassifiedCode || len(summary.Codes) != 1 {
+		return tools.CommandSpec{}, false
+	}
+	switch summary.Codes[0] {
+	case "ETARGET":
+		if !npmresolution.MatchesExactPackage(diagnostic, packageSpec) ||
+			npmresolution.MatchesReleaseAgePolicy(diagnostic, packageSpec) {
+			return tools.CommandSpec{}, false
+		}
+	default:
+		if !npmresolution.IsTransientManagedStartupCode(summary.Codes[0]) {
+			return tools.CommandSpec{}, false
+		}
+	}
+
+	args := append([]string(nil), spec.Args...)
+	preferenceIndex := -1
+	for i, arg := range args {
+		if arg != openCodeCredentialPreferOfflineArg {
+			continue
+		}
+		if preferenceIndex >= 0 {
+			return tools.CommandSpec{}, false
+		}
+		preferenceIndex = i
+	}
+	if preferenceIndex < 0 {
+		return tools.CommandSpec{}, false
+	}
+	args[preferenceIndex] = openCodeCredentialPreferOnlineArg
+	spec.Args = args
+	return spec, true
 }
 
 func openCodePendingMarker(storePath string) string {
