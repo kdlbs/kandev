@@ -34,6 +34,12 @@ function formatTools(count: number): string {
   return t("task:toolCount", { count });
 }
 
+function addResumeChip(chips: SubagentMetaChip[], resumeCount: number | undefined): void {
+  if (typeof resumeCount !== "number" || resumeCount <= 0) return;
+  const resumed = t("task:subagentResumed", { resumeCount: formatNumber(resumeCount) });
+  chips.push({ id: "resume", label: resumed, value: resumed });
+}
+
 /**
  * Turns a SubagentTaskPayload into an ordered list of display chips. Different
  * agents populate different subsets (Claude: tokens/duration/tool_use_count;
@@ -56,6 +62,7 @@ export function subagentMetaChips(
   if (payload.is_async || payload.status === "async_launched") {
     chips.push({ id: "background", label: t("task:background"), value: t("task:background") });
   }
+  addResumeChip(chips, payload.resume_count);
   if (typeof payload.duration_ms === "number" && payload.duration_ms > 0) {
     chips.push({
       id: "duration",

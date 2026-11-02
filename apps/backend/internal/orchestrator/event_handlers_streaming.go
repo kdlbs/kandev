@@ -1086,6 +1086,11 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			// Only the original async-launch result attests a new child.
+			// Settlement and resume updates describe its card, not liveness.
+			if isSubagentPresentationUpdate(payload) {
+				return
+			}
 			kind := backgroundWorkKind(payload.Data.Normalized)
 			// Only attest the parked projection for a workload whose provider
 			// can confirm later liveness on this connection. An identified but
@@ -1206,6 +1211,25 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// subagentStatusAsyncLaunched is the subagent status carried only by the
+// original launch result of a detached Claude subagent.
+const subagentStatusAsyncLaunched = "async_launched"
+
+// isSubagentPresentationUpdate reports whether a terminal tool update only
+// re-presents a detached subagent card (settlement or resume) rather than
+// attesting its launch. Such updates must not record or publish background
+// work, because they carry no tool title and describe an existing child.
+func isSubagentPresentationUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	if !isTerminalToolStatus(payload.Data.ToolStatus) || !normalizedIsDetachedLaunch(payload.Data.Normalized) {
+		return false
+	}
+	if backgroundWorkKind(payload.Data.Normalized) != streams.BackgroundWorkKindSubagent {
+		return false
+	}
+	subagent := payload.Data.Normalized.SubagentTask()
+	return subagent == nil || subagent.Status != subagentStatusAsyncLaunched
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call

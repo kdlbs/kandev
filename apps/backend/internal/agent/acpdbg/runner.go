@@ -30,6 +30,8 @@ type RunConfig struct {
 	// CaptureStderr controls whether child stderr lines are recorded into
 	// the JSONL. Default: false (written to our stderr as plain lines).
 	CaptureStderr bool
+	// ClientCapabilities adds protocol client capabilities to initialize.
+	ClientCapabilities map[string]any
 	// AIRCapabilities advertises the named AIR extension capabilities in the
 	// initialize clientCapabilities._meta. Empty keeps the historical
 	// capabilities with no AIR block.

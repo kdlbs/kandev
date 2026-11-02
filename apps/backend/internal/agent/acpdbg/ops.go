@@ -43,6 +43,7 @@ type ProbeResult struct {
 	SessionID       string
 	MCPHTTP         bool
 	MCPSSE          bool
+	modelConfigID   string
 }
 
 // MCPProbeResult describes what was delivered to an agent separately from
@@ -108,7 +109,7 @@ func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
 
 // PromptOptions configures the Prompt operation.
 type PromptOptions struct {
-	Model  string // if non-empty, set via session/set_model (or unstable variant)
+	Model  string // if non-empty, set through a model config option or the legacy method
 	Mode   string // if non-empty, set via session/set_mode
 	Prompt string // required — text body of the session/prompt request
 	// Linger, when > 0, keeps the session open after session/prompt returns
@@ -151,8 +152,8 @@ func Prompt(ctx context.Context, r *Runner, opts PromptOptions) (*PromptResult, 
 	}
 
 	if opts.Model != "" {
-		if err := sendSetModel(ctx, r, probe.SessionID, opts.Model); err != nil {
-			return nil, fmt.Errorf("session/set_model: %w", err)
+		if err := sendModelSelection(ctx, r, probe.SessionID, opts.Model, probe.modelConfigID); err != nil {
+			return nil, fmt.Errorf("model selection: %w", err)
 		}
 	}
 	if opts.Mode != "" {
@@ -226,7 +227,7 @@ func sessionLoadParams(sessionID, workdir string) map[string]any {
 // --- JSON-RPC helpers ---
 
 func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
-	req, _ := r.Framer().NewRequest("initialize", initializeParams(r.cfg.AIRCapabilities))
+	req, _ := r.Framer().NewRequest("initialize", initializeParams(r.cfg.ClientCapabilities, r.cfg.AIRCapabilities))
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, err
@@ -237,23 +238,25 @@ func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
 	return resp, nil
 }
 
-// initializeParams builds the initialize payload. AIRCapabilities advertises
-// the AIR extension block a debug run needs to observe extension-gated
-// behavior (for example asyncTasks).
-func initializeParams(airCapabilities []string) map[string]any {
+// initializeParams merges custom and AIR capabilities with the baseline client
+// capabilities used by the debugger.
+func initializeParams(clientCapabilities map[string]any, airCapabilities []string) map[string]any {
 	capabilities := map[string]any{
 		"fs":       map[string]any{"readTextFile": false, "writeTextFile": false},
 		"terminal": false,
 	}
+	capabilities = mergeCapabilityObjects(capabilities, clientCapabilities)
 	if len(airCapabilities) > 0 {
-		capabilities["_meta"] = map[string]any{
-			"jetbrains": map[string]any{
-				"air": map[string]any{
-					"version":      1,
-					"capabilities": airCapabilities,
+		capabilities = mergeCapabilityObjects(capabilities, map[string]any{
+			"_meta": map[string]any{
+				"jetbrains": map[string]any{
+					"air": map[string]any{
+						"version":      1,
+						"capabilities": airCapabilities,
+					},
 				},
 			},
-		}
+		})
 	}
 	return map[string]any{
 		"protocolVersion": 1,
@@ -262,6 +265,40 @@ func initializeParams(airCapabilities []string) map[string]any {
 			"version": "0.1.0",
 		},
 		"clientCapabilities": capabilities,
+	}
+}
+
+func mergeCapabilityObjects(base, override map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = cloneCapabilityValue(value)
+	}
+	for key, value := range override {
+		baseObject, baseIsObject := merged[key].(map[string]any)
+		overrideObject, overrideIsObject := value.(map[string]any)
+		if baseIsObject && overrideIsObject {
+			merged[key] = mergeCapabilityObjects(baseObject, overrideObject)
+			continue
+		}
+		merged[key] = cloneCapabilityValue(value)
+	}
+	return merged
+}
+
+func cloneCapabilityValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return mergeCapabilityObjects(nil, typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneCapabilityValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
 	}
 }
 
@@ -294,6 +331,38 @@ func sendSetModel(ctx context.Context, r *Runner, sessionID, modelID string) err
 		return err
 	}
 	if errMap, ok := resp["error"].(map[string]any); ok {
+		return fmt.Errorf("%v", errMap["message"])
+	}
+	return nil
+}
+
+var errACPMethodNotFound = errors.New("ACP method not found")
+
+func sendModelSelection(ctx context.Context, r *Runner, sessionID, modelID, configID string) error {
+	if configID != "" {
+		if err := sendSetConfigOption(ctx, r, sessionID, configID, modelID); err == nil {
+			return nil
+		} else if !errors.Is(err, errACPMethodNotFound) {
+			return err
+		}
+	}
+	return sendSetModel(ctx, r, sessionID, modelID)
+}
+
+func sendSetConfigOption(ctx context.Context, r *Runner, sessionID, configID, value string) error {
+	req, _ := r.Framer().NewRequest("session/set_config_option", map[string]any{
+		"sessionId": sessionID,
+		"configId":  configID,
+		"value":     value,
+	})
+	resp, err := r.Request(ctx, req)
+	if err != nil {
+		return err
+	}
+	if errMap, ok := resp["error"].(map[string]any); ok {
+		if code, ok := errMap["code"].(float64); ok && int(code) == -32601 {
+			return errACPMethodNotFound
+		}
 		return fmt.Errorf("%v", errMap["message"])
 	}
 	return nil
@@ -484,6 +553,7 @@ func parseInitResult(initResult map[string]any, out *ProbeResult) {
 
 func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 	out.SessionID, _ = newResult["sessionId"].(string)
+	out.modelConfigID = extractModelConfigOptionID(newResult)
 	if models, ok := newResult["models"].(map[string]any); ok {
 		out.CurrentModelID, _ = models["currentModelId"].(string)
 		if avail, ok := models["availableModels"].([]any); ok {
@@ -500,6 +570,23 @@ func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 	} else {
 		out.CurrentModeID, out.Modes = extractSelectConfigOption(newResult, "mode")
 	}
+}
+
+func extractModelConfigOptionID(newResult map[string]any) string {
+	options, ok := newResult["configOptions"].([]any)
+	if !ok {
+		return ""
+	}
+	for _, item := range options {
+		option, ok := item.(map[string]any)
+		if !ok || option["type"] != "select" || option["category"] != "model" {
+			continue
+		}
+		if id, ok := option["id"].(string); ok && id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 func extractSelectConfigOption(newResult map[string]any, category string) (string, []string) {
