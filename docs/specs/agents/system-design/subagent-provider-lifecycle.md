@@ -103,6 +103,8 @@ readable non-empty report replaces the existing result; a missing report preserv
 
 - `filepath.Base(outputFile)` must equal `<agentId>.output`, so the agent-reported path can only
   name that subagent's file. Symlinks are followed, as the provider's task file is one.
+  Only regular files are read, and each read is abandoned after 2 seconds so a stalled
+  path cannot delay settlement.
 - Read at most the final 256 KiB, parse JSON lines from the end, and take the text blocks of
   the last `type: "assistant"` entry.
 - The file format is private to Claude. Any read or parse failure leaves `ResultText` empty and

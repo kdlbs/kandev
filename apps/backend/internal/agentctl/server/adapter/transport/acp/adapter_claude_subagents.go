@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -16,6 +17,11 @@ import (
 )
 
 const maxClaudeSubagentOutputBytes = 256 << 10
+
+// claudeSubagentReportReadTimeout bounds one report read so a stalled path
+// cannot delay settlement or prompt completion. A read that misses the
+// deadline is abandoned and its goroutine finishes on its own.
+const claudeSubagentReportReadTimeout = 2 * time.Second
 
 const claudeSubagentRunningStatus = "running"
 
@@ -344,13 +350,34 @@ func readClaudeSubagentReport(agentID, outputFile string, canReadOutputFile bool
 	if !canReadOutputFile || agentID == "" || filepath.Base(outputFile) != agentID+".output" {
 		return ""
 	}
+	result := make(chan string, 1)
+	go func() { result <- readClaudeSubagentRegularFile(outputFile) }()
+	timer := time.NewTimer(claudeSubagentReportReadTimeout)
+	defer timer.Stop()
+	select {
+	case report := <-result:
+		return report
+	case <-timer.C:
+		return ""
+	}
+}
+
+// readClaudeSubagentRegularFile reads only regular files. Stat follows
+// symlinks, which the provider's task file relies on. Non-regular paths such as
+// FIFOs, devices, and directories are rejected before open, and the opened
+// descriptor is checked again to close the swap window.
+func readClaudeSubagentRegularFile(outputFile string) string {
+	pathInfo, err := os.Stat(outputFile)
+	if err != nil || !pathInfo.Mode().IsRegular() {
+		return ""
+	}
 	file, err := os.Open(outputFile)
 	if err != nil {
 		return ""
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
-	if err != nil {
+	if err != nil || !info.Mode().IsRegular() {
 		return ""
 	}
 	start := info.Size() - int64(maxClaudeSubagentOutputBytes)
