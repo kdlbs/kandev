@@ -1519,6 +1519,7 @@ type SandboxAuditVerificationV2 struct {
 	ExpectedKeyFingerprint string                 `protobuf:"bytes,9,opt,name=expected_key_fingerprint,json=expectedKeyFingerprint,proto3" json:"expected_key_fingerprint,omitempty"`
 	LedgerState            string                 `protobuf:"bytes,10,opt,name=ledger_state,json=ledgerState,proto3" json:"ledger_state,omitempty"`
 	TrustRevision          string                 `protobuf:"bytes,11,opt,name=trust_revision,json=trustRevision,proto3" json:"trust_revision,omitempty"`
+	SignerKeyFingerprint   string                 `protobuf:"bytes,12,opt,name=signer_key_fingerprint,json=signerKeyFingerprint,proto3" json:"signer_key_fingerprint,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -1626,6 +1627,13 @@ func (x *SandboxAuditVerificationV2) GetLedgerState() string {
 func (x *SandboxAuditVerificationV2) GetTrustRevision() string {
 	if x != nil {
 		return x.TrustRevision
+	}
+	return ""
+}
+
+func (x *SandboxAuditVerificationV2) GetSignerKeyFingerprint() string {
+	if x != nil {
+		return x.SignerKeyFingerprint
 	}
 	return ""
 }
@@ -1917,7 +1925,7 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"reasonCode\"\\\n" +
 	"\x17SandboxReportCoverageV2\x12%\n" +
 	"\x0eoperation_kind\x18\x01 \x01(\tR\roperationKind\x12\x1a\n" +
-	"\bcoverage\x18\x02 \x01(\tR\bcoverage\"\xc8\x03\n" +
+	"\bcoverage\x18\x02 \x01(\tR\bcoverage\"\xfe\x03\n" +
 	"\x1aSandboxAuditVerificationV2\x12.\n" +
 	"\x13artifact_set_digest\x18\x01 \x01(\tR\x11artifactSetDigest\x12)\n" +
 	"\x10verifier_version\x18\x02 \x01(\tR\x0fverifierVersion\x12\x1d\n" +
@@ -1934,7 +1942,8 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"\x18expected_key_fingerprint\x18\t \x01(\tR\x16expectedKeyFingerprint\x12!\n" +
 	"\fledger_state\x18\n" +
 	" \x01(\tR\vledgerState\x12%\n" +
-	"\x0etrust_revision\x18\v \x01(\tR\rtrustRevision\"\xab\x03\n" +
+	"\x0etrust_revision\x18\v \x01(\tR\rtrustRevision\x124\n" +
+	"\x16signer_key_fingerprint\x18\f \x01(\tR\x14signerKeyFingerprint\"\xab\x03\n" +
 	"\x0fSandboxReportV2\x12=\n" +
 	"\x06events\x18\x01 \x03(\v2%.kandev.plugin.v1.SandboxAuditEventV2R\x06events\x12E\n" +
 	"\bcoverage\x18\x02 \x03(\v2).kandev.plugin.v1.SandboxReportCoverageV2R\bcoverage\x12\x1c\n" +

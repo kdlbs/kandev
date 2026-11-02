@@ -57,7 +57,10 @@ func validateSandboxVerificationV2(req *pluginsdk.ReadSandboxReportRequest, repo
 	if req.ChunkV2 == nil || !req.ChunkV2.Final || result.ArtifactSetDigest != req.ChunkV2.ArtifactSetDigest || !validSandboxText(result.VerifierVersion, 128) || !validSandboxText(result.SessionId, 256) || !sandboxDigestV2(result.EventRoot) || !slices.Contains([]string{sandboxV2Unchecked, sandboxV2Valid, sandboxIntegrityInvalid}, result.ChainState) || result.Finalization != report.Finalization {
 		return errSandboxProviderReply
 	}
-	if !slices.Contains([]string{sandboxV2Unsigned, sandboxV2Untrusted, sandboxV2Verified, sandboxIntegrityInvalid, sandboxV2Unsupported}, result.SignatureState) || !slices.Contains([]string{sandboxV2Unavailable, sandboxV2Valid, sandboxIntegrityInvalid}, result.LedgerState) {
+	if !validSandboxVerificationBindingV2(req, report) {
+		return errSandboxProviderReply
+	}
+	if !slices.Contains([]string{sandboxV2Unchecked, sandboxV2Unsigned, sandboxV2Untrusted, sandboxV2Verified, sandboxIntegrityInvalid, sandboxV2Unsupported}, result.SignatureState) || !slices.Contains([]string{sandboxV2Unavailable, sandboxV2Valid, sandboxIntegrityInvalid}, result.LedgerState) {
 		return errSandboxProviderReply
 	}
 	if result.SignatureState == sandboxV2Verified && !validSandboxVerificationTrustV2(req.TrustV2, result, report.Finalization) {
@@ -103,7 +106,27 @@ func validSandboxReportHeaderV2(value *pluginsdk.SandboxReportV2) bool {
 }
 
 func validSandboxVerificationTrustV2(trust *pluginsdk.SandboxAuditTrustV2, result *pluginsdk.SandboxAuditVerificationV2, finalization string) bool {
-	return validSandboxTrustV2(trust) && trust.ExpectedKeyFingerprint == result.ExpectedKeyFingerprint && trust.TrustRevision == result.TrustRevision && result.ChainState == sandboxV2Valid && finalization == sandboxFinalizationFinal
+	return validSandboxTrustV2(trust) && trust.ExpectedKeyFingerprint == result.ExpectedKeyFingerprint && trust.TrustRevision == result.TrustRevision && (result.SignerKeyFingerprint == "" || result.SignerKeyFingerprint == trust.ExpectedKeyFingerprint) && result.ChainState == sandboxV2Valid && finalization == sandboxFinalizationFinal
+}
+
+func validSandboxVerificationBindingV2(req *pluginsdk.ReadSandboxReportRequest, report *pluginsdk.SandboxReportV2) bool {
+	chunk, result := req.ChunkV2, report.Verification
+	if result.ChainState != report.Integrity || chunk.SourceCount > 0 && chunk.SourceIndex+1 != chunk.SourceCount || chunk.ProviderSessionId != "" && result.SessionId != chunk.ProviderSessionId {
+		return false
+	}
+	if result.SignerKeyFingerprint != "" && !sandboxDigestV2(result.SignerKeyFingerprint) {
+		return false
+	}
+	if !req.VerifyAuditV2 {
+		return true
+	}
+	if result.SignatureState == sandboxV2Verified && result.SignerKeyFingerprint == "" {
+		return false
+	}
+	if req.TrustV2 == nil {
+		return result.ExpectedKeyFingerprint == "" && result.TrustRevision == ""
+	}
+	return result.ExpectedKeyFingerprint == req.TrustV2.ExpectedKeyFingerprint && result.TrustRevision == req.TrustV2.TrustRevision
 }
 
 func validSandboxRevisionAdditionsV2(req *pluginsdk.ProposeSandboxRevisionRequest, result *pluginsdk.ProposeSandboxRevisionResponse) bool {

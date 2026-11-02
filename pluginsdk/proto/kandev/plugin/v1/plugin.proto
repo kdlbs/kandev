@@ -302,6 +302,9 @@ message SandboxDenialRecord {
 message ReadSandboxReportRequest {
   SandboxAuditChunkV2 chunk_v2 = 100;
   SandboxAuditTrustV2 trust_v2 = 101;
+  // Requests verification without requiring an expected signer key.
+  // Ordinary report collection leaves this false and omits trust_v2.
+  bool verify_audit_v2 = 102;
   SandboxRequestContext context = 1;
   SandboxPolicySnapshot policy = 2;
   bytes audit = 3;

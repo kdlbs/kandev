@@ -172,6 +172,7 @@ message SandboxAuditVerificationV2 {
   string expected_key_fingerprint = 9;
   string ledger_state = 10;
   string trust_revision = 11;
+  string signer_key_fingerprint = 12;
 }
 
 message SandboxReportV2 {

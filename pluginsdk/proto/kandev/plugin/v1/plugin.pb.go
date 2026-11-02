@@ -2611,9 +2611,12 @@ func (x *SandboxDenialRecord) GetAttemptId() string {
 }
 
 type ReadSandboxReportRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkV2       *SandboxAuditChunkV2   `protobuf:"bytes,100,opt,name=chunk_v2,json=chunkV2,proto3" json:"chunk_v2,omitempty"`
-	TrustV2       *SandboxAuditTrustV2   `protobuf:"bytes,101,opt,name=trust_v2,json=trustV2,proto3" json:"trust_v2,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	ChunkV2 *SandboxAuditChunkV2   `protobuf:"bytes,100,opt,name=chunk_v2,json=chunkV2,proto3" json:"chunk_v2,omitempty"`
+	TrustV2 *SandboxAuditTrustV2   `protobuf:"bytes,101,opt,name=trust_v2,json=trustV2,proto3" json:"trust_v2,omitempty"`
+	// Requests verification without requiring an expected signer key.
+	// Ordinary report collection leaves this false and omits trust_v2.
+	VerifyAuditV2 bool                   `protobuf:"varint,102,opt,name=verify_audit_v2,json=verifyAuditV2,proto3" json:"verify_audit_v2,omitempty"`
 	Context       *SandboxRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Policy        *SandboxPolicySnapshot `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
 	Audit         []byte                 `protobuf:"bytes,3,opt,name=audit,proto3" json:"audit,omitempty"`
@@ -2664,6 +2667,13 @@ func (x *ReadSandboxReportRequest) GetTrustV2() *SandboxAuditTrustV2 {
 		return x.TrustV2
 	}
 	return nil
+}
+
+func (x *ReadSandboxReportRequest) GetVerifyAuditV2() bool {
+	if x != nil {
+		return x.VerifyAuditV2
+	}
+	return false
 }
 
 func (x *ReadSandboxReportRequest) GetContext() *SandboxRequestContext {
@@ -27704,10 +27714,11 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x13occurred_at_unix_ms\x18\x04 \x01(\x03R\x10occurredAtUnixMs\x12#\n" +
 	"\rpolicy_digest\x18\x05 \x01(\tR\fpolicyDigest\x12\x1d\n" +
 	"\n" +
-	"attempt_id\x18\x06 \x01(\tR\tattemptId\"\xd0\x02\n" +
+	"attempt_id\x18\x06 \x01(\tR\tattemptId\"\xf8\x02\n" +
 	"\x18ReadSandboxReportRequest\x12@\n" +
 	"\bchunk_v2\x18d \x01(\v2%.kandev.plugin.v1.SandboxAuditChunkV2R\achunkV2\x12@\n" +
-	"\btrust_v2\x18e \x01(\v2%.kandev.plugin.v1.SandboxAuditTrustV2R\atrustV2\x12A\n" +
+	"\btrust_v2\x18e \x01(\v2%.kandev.plugin.v1.SandboxAuditTrustV2R\atrustV2\x12&\n" +
+	"\x0fverify_audit_v2\x18f \x01(\bR\rverifyAuditV2\x12A\n" +
 	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.SandboxRequestContextR\acontext\x12?\n" +
 	"\x06policy\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxPolicySnapshotR\x06policy\x12\x14\n" +
 	"\x05audit\x18\x03 \x01(\fR\x05audit\x12\x16\n" +

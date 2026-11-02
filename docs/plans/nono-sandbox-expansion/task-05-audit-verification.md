@@ -1,7 +1,7 @@
 ---
 id: "05-audit-verification"
 title: "Verify finalized audit artifacts against explicit trust"
-status: pending
+status: in_progress
 wave: 5
 depends_on: 
   - "04-typed-reports"
@@ -116,3 +116,12 @@ never start verification. Final private artifact retention must precede runtime
 cleanup. Preserve its binding separately from an earlier normalized report if
 the last read fails. Cleanup must not depend on a successful provider RPC.
 These are implementation details within the approved verification boundary.
+
+The first implementation checkpoint adds the explicit SDK action and observed
+signer field, host response binding checks, and private artifact storage/read
+primitives. Focused RED/GREEN tests cover another session or signer, untrusted
+and interrupted results, post-cleanup reads, changed content, symlinks, extra
+files, changed manifests, and idempotent storage. Runtime retention wiring,
+operator trust and job persistence, native provider verification, and the
+desktop/phone action remain in progress. This checkpoint does not complete
+Task 05 or permit a trusted-audit claim.

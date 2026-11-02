@@ -63,6 +63,10 @@ A non-exact report event can retain a bounded partial identity for inspection. I
 
 A final verification result includes verified input digests, verifier/schema version, final event root, session binding, coverage, ledger result when supplied, signature result, and expected-key fingerprint. Core compares these with the captured input before persistence. Unsupported algorithms and missing required fields fail verification. Missing optional signatures are unsigned. Never claim trusted signing from the artifact's own public key alone.
 
+`verify_audit_v2` requests verification explicitly. Ordinary collection leaves it false and omits `trust_v2`. Verification can omit an expected key to report unsigned or untrusted artifacts. If core supplies trust, every chunk carries the same public key, expected fingerprint, and immutable trust revision. The final result carries the observed signer fingerprint separately. A trusted result requires a final valid chain, the captured provider session, the last source, and matching observed and expected fingerprints. Existing major 2 clients that use the original optional trust field retain their wire compatibility.
+
+Core retains finalized bytes before removing runtime files. A private archive binds the captured attempt context and artifact-set digest. It uses indexed internal filenames, bounded private metadata, synced files, and atomic publication. A later verification checks that binding and all content digests, then freezes a new private read. Closing a read preserves the archive. Provider interpretation and cryptographic verification do not control runtime cleanup.
+
 Private signing keys, callback credentials, and provider login material are excluded from RPC data. Public projections use host allowlists. Signature verification does not assert current confinement.
 
 ## Dedicated Nono consumer

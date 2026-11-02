@@ -52,3 +52,16 @@ func TestAuditEventsUseClosedReasonCodesInsteadOfRawErrors(t *testing.T) {
 	require.NotNil(t, field)
 	require.Equal(t, protoreflect.FieldNumber(11), field.Number())
 }
+
+func TestAuditVerificationCanBeRequestedWithoutAnExpectedSigner(t *testing.T) {
+	field := (&ReadSandboxReportRequest{}).ProtoReflect().Descriptor().Fields().ByName("verify_audit_v2")
+	require.NotNil(t, field, "ordinary report reads must be separate from explicit verification")
+	require.Equal(t, protoreflect.FieldNumber(102), field.Number())
+	require.Equal(t, protoreflect.BoolKind, field.Kind())
+}
+
+func TestAuditVerificationKeepsTheObservedSignerSeparateFromOperatorTrust(t *testing.T) {
+	field := (&SandboxAuditVerificationV2{}).ProtoReflect().Descriptor().Fields().ByName("signer_key_fingerprint")
+	require.NotNil(t, field)
+	require.Equal(t, protoreflect.FieldNumber(12), field.Number())
+}

@@ -26,6 +26,9 @@ func validSandboxV2Request(request proto.Message) bool {
 }
 
 func validSandboxReportRequestV2(value *pluginsdk.ReadSandboxReportRequest) bool {
+	if value.VerifyAuditV2 && (value.ChunkV2 == nil || value.ChunkV2.SourceCount == 0) {
+		return false
+	}
 	if value.ChunkV2 != nil && (len(value.Audit) != 0 || value.Cursor != "" || !validSandboxChunkV2(value.ChunkV2)) {
 		return false
 	}
