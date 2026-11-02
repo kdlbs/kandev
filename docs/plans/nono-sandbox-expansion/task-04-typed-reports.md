@@ -1,7 +1,7 @@
 ---
 id: "04-typed-reports"
 title: "Expose network and command audit reports"
-status: pending
+status: in_progress
 wave: 4
 depends_on: 
   - "03-runtime-facts"
@@ -100,4 +100,12 @@ Nono proxy events can be finalized later than live capability events. A valid ch
 
 ## Results
 
-Pending.
+In progress. The first contract/storage milestone adds:
+
+- Separate report-schema negotiation, session/source-bound chunks, and closed reason codes in the standalone SDK. Existing field numbers and major 1 behavior remain unchanged.
+- A core-owned frozen archive reader with 32-file/32 MiB collection limits, 256 KiB chunks, deterministic source ordering, append-prefix and file-birth checks, and private cleanup. Finalization metadata uses the generic major 2 `audit_final` declaration.
+- Host validation for partial inspection-only identities, exact source binding, empty existing files, and the unchanged complete-operation checks used by approvals and policy grants.
+
+RED/GREEN receipts: `/tmp/nono-audit-source-schema-red.log`, `/tmp/nono-report-capability-red.log`, `/tmp/nono-audit-reason-schema-red.log`, `/tmp/nono-audit-archive-red.log`, `/tmp/nono-audit-alias-red.log`, `/tmp/nono-final-artifact-declaration-red.log`, `/tmp/nono-chunk-binding-red.log`, and `/tmp/nono-partial-audit-red.log`. Current common-sandbox, full packaged-plugin/fixture, SDK, and targeted plugin race tests pass. The existing actual Nono package launch/ownership scenario also passes. Generated protobuf files are deterministic, scoped Go lint reports zero issues, and specification/public-doc checks pass. The archive implementation requires Linux statx birth identity and fails closed when that support is unavailable.
+
+The Nono streaming parser, typed report persistence/projection, permitted/denied real-runtime samples, report filters/details, and desktop/phone acceptance remain pending. This milestone does not advertise a new Nono approval class or completed audit verification.

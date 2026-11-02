@@ -56,6 +56,10 @@ func validSandboxText(value string, limit int) bool {
 }
 
 func validateSandboxDescription(value *pluginsdk.SandboxProviderDescription) error {
+	return validateSandboxDescriptionForProtocol(value, 1)
+}
+
+func validateSandboxDescriptionForProtocol(value *pluginsdk.SandboxProviderDescription, major uint32) error {
 	if value == nil || !validSandboxText(value.DisplayName, 100) ||
 		!validSandboxText(value.ProviderVersion, 64) || !validSandboxText(value.RuntimeVersion, 64) {
 		return errSandboxProviderReply
@@ -66,7 +70,7 @@ func validateSandboxDescription(value *pluginsdk.SandboxProviderDescription) err
 	if value.ApprovalWire != nil && !validSandboxApprovalWire(value.ApprovalWire) {
 		return errSandboxProviderReply
 	}
-	if err := validateSandboxRuntimeSources(value.RuntimeSources); err != nil {
+	if err := validateSandboxRuntimeSourcesForProtocol(value.RuntimeSources, major); err != nil {
 		return err
 	}
 	return validateSandboxDescriptionLists(value)

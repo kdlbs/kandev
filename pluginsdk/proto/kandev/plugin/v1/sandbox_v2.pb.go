@@ -951,6 +951,7 @@ type SandboxCapabilitiesV2 struct {
 	NetworkMode              string                 `protobuf:"bytes,4,opt,name=network_mode,json=networkMode,proto3" json:"network_mode,omitempty"`
 	ObservationSchemas       []string               `protobuf:"bytes,5,rep,name=observation_schemas,json=observationSchemas,proto3" json:"observation_schemas,omitempty"`
 	AuditVerificationFormats []string               `protobuf:"bytes,6,rep,name=audit_verification_formats,json=auditVerificationFormats,proto3" json:"audit_verification_formats,omitempty"`
+	ReportSchemas            []string               `protobuf:"bytes,7,rep,name=report_schemas,json=reportSchemas,proto3" json:"report_schemas,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -1023,6 +1024,13 @@ func (x *SandboxCapabilitiesV2) GetObservationSchemas() []string {
 func (x *SandboxCapabilitiesV2) GetAuditVerificationFormats() []string {
 	if x != nil {
 		return x.AuditVerificationFormats
+	}
+	return nil
+}
+
+func (x *SandboxCapabilitiesV2) GetReportSchemas() []string {
+	if x != nil {
+		return x.ReportSchemas
 	}
 	return nil
 }
@@ -1121,17 +1129,24 @@ func (x *SandboxRuntimeObservationV2) GetLimitations() []string {
 }
 
 type SandboxAuditChunkV2 struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	OperationHandle   string                 `protobuf:"bytes,1,opt,name=operation_handle,json=operationHandle,proto3" json:"operation_handle,omitempty"`
-	ArtifactSetDigest string                 `protobuf:"bytes,2,opt,name=artifact_set_digest,json=artifactSetDigest,proto3" json:"artifact_set_digest,omitempty"`
-	SourceId          string                 `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
-	Sequence          uint64                 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	Content           []byte                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
-	Final             bool                   `protobuf:"varint,6,opt,name=final,proto3" json:"final,omitempty"`
-	TotalBytes        uint64                 `protobuf:"varint,7,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
-	SourceDigest      string                 `protobuf:"bytes,8,opt,name=source_digest,json=sourceDigest,proto3" json:"source_digest,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Source order and identity bind a bounded multi-file read to one captured session.
+	// final ends this source. The last source has source_index + 1 == source_count.
+	SourceSchema       string `protobuf:"bytes,9,opt,name=source_schema,json=sourceSchema,proto3" json:"source_schema,omitempty"`
+	SourceRelativePath string `protobuf:"bytes,10,opt,name=source_relative_path,json=sourceRelativePath,proto3" json:"source_relative_path,omitempty"`
+	ProviderSessionId  string `protobuf:"bytes,11,opt,name=provider_session_id,json=providerSessionId,proto3" json:"provider_session_id,omitempty"`
+	SourceIndex        uint32 `protobuf:"varint,12,opt,name=source_index,json=sourceIndex,proto3" json:"source_index,omitempty"`
+	SourceCount        uint32 `protobuf:"varint,13,opt,name=source_count,json=sourceCount,proto3" json:"source_count,omitempty"`
+	OperationHandle    string `protobuf:"bytes,1,opt,name=operation_handle,json=operationHandle,proto3" json:"operation_handle,omitempty"`
+	ArtifactSetDigest  string `protobuf:"bytes,2,opt,name=artifact_set_digest,json=artifactSetDigest,proto3" json:"artifact_set_digest,omitempty"`
+	SourceId           string `protobuf:"bytes,3,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	Sequence           uint64 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Content            []byte `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	Final              bool   `protobuf:"varint,6,opt,name=final,proto3" json:"final,omitempty"`
+	TotalBytes         uint64 `protobuf:"varint,7,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	SourceDigest       string `protobuf:"bytes,8,opt,name=source_digest,json=sourceDigest,proto3" json:"source_digest,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SandboxAuditChunkV2) Reset() {
@@ -1162,6 +1177,41 @@ func (x *SandboxAuditChunkV2) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SandboxAuditChunkV2.ProtoReflect.Descriptor instead.
 func (*SandboxAuditChunkV2) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SandboxAuditChunkV2) GetSourceSchema() string {
+	if x != nil {
+		return x.SourceSchema
+	}
+	return ""
+}
+
+func (x *SandboxAuditChunkV2) GetSourceRelativePath() string {
+	if x != nil {
+		return x.SourceRelativePath
+	}
+	return ""
+}
+
+func (x *SandboxAuditChunkV2) GetProviderSessionId() string {
+	if x != nil {
+		return x.ProviderSessionId
+	}
+	return ""
+}
+
+func (x *SandboxAuditChunkV2) GetSourceIndex() uint32 {
+	if x != nil {
+		return x.SourceIndex
+	}
+	return 0
+}
+
+func (x *SandboxAuditChunkV2) GetSourceCount() uint32 {
+	if x != nil {
+		return x.SourceCount
+	}
+	return 0
 }
 
 func (x *SandboxAuditChunkV2) GetOperationHandle() string {
@@ -1292,6 +1342,7 @@ type SandboxAuditEventV2 struct {
 	AttemptId        string                 `protobuf:"bytes,8,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
 	Generation       uint64                 `protobuf:"varint,9,opt,name=generation,proto3" json:"generation,omitempty"`
 	ExactTarget      bool                   `protobuf:"varint,10,opt,name=exact_target,json=exactTarget,proto3" json:"exact_target,omitempty"`
+	ReasonCode       string                 `protobuf:"bytes,11,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1394,6 +1445,13 @@ func (x *SandboxAuditEventV2) GetExactTarget() bool {
 		return x.ExactTarget
 	}
 	return false
+}
+
+func (x *SandboxAuditEventV2) GetReasonCode() string {
+	if x != nil {
+		return x.ReasonCode
+	}
+	return ""
 }
 
 type SandboxReportCoverageV2 struct {
@@ -1799,7 +1857,7 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12B\n" +
 	"\toperation\x18\x02 \x01(\v2$.kandev.plugin.v1.SandboxOperationV2R\toperation\x12>\n" +
 	"\x05actor\x18\x03 \x01(\v2(.kandev.plugin.v1.SandboxApprovalActorV2R\x05actor\x12/\n" +
-	"\x13supported_decisions\x18\x04 \x03(\tR\x12supportedDecisions\"\x9a\x02\n" +
+	"\x13supported_decisions\x18\x04 \x03(\tR\x12supportedDecisions\"\xc1\x02\n" +
 	"\x15SandboxCapabilitiesV2\x12%\n" +
 	"\x0epolicy_schemas\x18\x01 \x03(\rR\rpolicySchemas\x12'\n" +
 	"\x0foperation_kinds\x18\x02 \x03(\tR\x0eoperationKinds\x12\x1f\n" +
@@ -1807,7 +1865,8 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"actorKinds\x12!\n" +
 	"\fnetwork_mode\x18\x04 \x01(\tR\vnetworkMode\x12/\n" +
 	"\x13observation_schemas\x18\x05 \x03(\tR\x12observationSchemas\x12<\n" +
-	"\x1aaudit_verification_formats\x18\x06 \x03(\tR\x18auditVerificationFormats\"\x81\x03\n" +
+	"\x1aaudit_verification_formats\x18\x06 \x03(\tR\x18auditVerificationFormats\x12%\n" +
+	"\x0ereport_schemas\x18\a \x03(\tR\rreportSchemas\"\x81\x03\n" +
 	"\x1bSandboxRuntimeObservationV2\x12\x1b\n" +
 	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12-\n" +
 	"\x13observed_at_unix_ms\x18\x02 \x01(\x03R\x10observedAtUnixMs\x12\x1a\n" +
@@ -1818,8 +1877,14 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"\vlimitations\x18\a \x03(\tR\vlimitationsB\x0f\n" +
 	"\r_landlock_abiB\x13\n" +
 	"\x11_execute_enforcedB\x1b\n" +
-	"\x19_command_mediation_active\"\x9f\x02\n" +
-	"\x13SandboxAuditChunkV2\x12)\n" +
+	"\x19_command_mediation_active\"\xec\x03\n" +
+	"\x13SandboxAuditChunkV2\x12#\n" +
+	"\rsource_schema\x18\t \x01(\tR\fsourceSchema\x120\n" +
+	"\x14source_relative_path\x18\n" +
+	" \x01(\tR\x12sourceRelativePath\x12.\n" +
+	"\x13provider_session_id\x18\v \x01(\tR\x11providerSessionId\x12!\n" +
+	"\fsource_index\x18\f \x01(\rR\vsourceIndex\x12!\n" +
+	"\fsource_count\x18\r \x01(\rR\vsourceCount\x12)\n" +
 	"\x10operation_handle\x18\x01 \x01(\tR\x0foperationHandle\x12.\n" +
 	"\x13artifact_set_digest\x18\x02 \x01(\tR\x11artifactSetDigest\x12\x1b\n" +
 	"\tsource_id\x18\x03 \x01(\tR\bsourceId\x12\x1a\n" +
@@ -1832,7 +1897,7 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"\x13SandboxAuditTrustV2\x125\n" +
 	"\x17expected_public_key_pem\x18\x01 \x01(\fR\x14expectedPublicKeyPem\x128\n" +
 	"\x18expected_key_fingerprint\x18\x02 \x01(\tR\x16expectedKeyFingerprint\x12%\n" +
-	"\x0etrust_revision\x18\x03 \x01(\tR\rtrustRevision\"\x81\x03\n" +
+	"\x0etrust_revision\x18\x03 \x01(\tR\rtrustRevision\"\xa2\x03\n" +
 	"\x13SandboxAuditEventV2\x12\x1b\n" +
 	"\trecord_id\x18\x01 \x01(\tR\brecordId\x12B\n" +
 	"\toperation\x18\x02 \x01(\v2$.kandev.plugin.v1.SandboxOperationV2R\toperation\x12\x1a\n" +
@@ -1847,7 +1912,9 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"generation\x18\t \x01(\x04R\n" +
 	"generation\x12!\n" +
 	"\fexact_target\x18\n" +
-	" \x01(\bR\vexactTarget\"\\\n" +
+	" \x01(\bR\vexactTarget\x12\x1f\n" +
+	"\vreason_code\x18\v \x01(\tR\n" +
+	"reasonCode\"\\\n" +
 	"\x17SandboxReportCoverageV2\x12%\n" +
 	"\x0eoperation_kind\x18\x01 \x01(\tR\roperationKind\x12\x1a\n" +
 	"\bcoverage\x18\x02 \x01(\tR\bcoverage\"\xc8\x03\n" +

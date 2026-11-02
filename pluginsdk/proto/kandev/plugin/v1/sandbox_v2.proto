@@ -103,6 +103,7 @@ message SandboxCapabilitiesV2 {
   string network_mode = 4;
   repeated string observation_schemas = 5;
   repeated string audit_verification_formats = 6;
+  repeated string report_schemas = 7;
 }
 
 // Runtime assertions are observations, not current-policy attestation.
@@ -117,6 +118,13 @@ message SandboxRuntimeObservationV2 {
 }
 
 message SandboxAuditChunkV2 {
+  // Source order and identity bind a bounded multi-file read to one captured session.
+  // final ends this source. The last source has source_index + 1 == source_count.
+  string source_schema = 9;
+  string source_relative_path = 10;
+  string provider_session_id = 11;
+  uint32 source_index = 12;
+  uint32 source_count = 13;
   string operation_handle = 1;
   string artifact_set_digest = 2;
   string source_id = 3;
@@ -144,6 +152,7 @@ message SandboxAuditEventV2 {
   string attempt_id = 8;
   uint64 generation = 9;
   bool exact_target = 10;
+  string reason_code = 11;
 }
 
 message SandboxReportCoverageV2 {

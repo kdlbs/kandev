@@ -604,6 +604,8 @@ Major 2 extends these same six RPCs with the [typed schema](../../../pluginsdk/p
 
 Typed policy grants and approval envelopes are separate. Operations and actors use distinct oneof alternatives. A runtime-service actor must exactly match the host-authenticated callback binding supplied to normalization. It does not relax child-process identity checks. Runtime observations cannot supply an active boolean. Reports distinguish per-class coverage, integrity, finalization, and signature trust. Chunk and verification replies bind to the requested operation/artifact identity and expected trust key. No major 2 field silently changes policy authority, PTY ownership, process lifecycle, or persistence ownership.
 
+Major 2 typed reports declare `capabilities_v2.report_schemas` separately from audit-signature support. `SandboxAuditChunkV2` binds source schema/path/session and ordered source index/count. The chunk sequence spans the artifact set, while `final` ends one source. Empty existing files are valid final chunks. `audit_final` sources are collected only after confirmed stop. The current host freezes at most 32 files/32 MiB and dispatches at most 256 KiB per chunk. Event reasons are closed codes. Partial identities are inspection-only and cannot enter approval or learning validators. See the owning [major 2 design](../../specs/plugins/system-design/sandbox-provider-v2.md) for artifact-set hashing and persistent source checks.
+
 ### Remote executor providers
 
 The optional `ExecutorProviderPlugin` extension is all-or-nothing. Its seven RPCs

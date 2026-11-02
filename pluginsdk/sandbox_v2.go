@@ -4,6 +4,8 @@ import pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
 
 const SandboxProtocolMajorV2 = 2
 
+const SandboxReportSchemaV2 = "kandev.sandbox.report.v2"
+
 type SandboxFilesystemPermissionV2 = pluginv1.SandboxFilesystemPermissionV2
 type SandboxTCPDestinationV2 = pluginv1.SandboxTCPDestinationV2
 type SandboxCommandInvocationV2 = pluginv1.SandboxCommandInvocationV2

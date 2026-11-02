@@ -8,9 +8,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 )
+
+const RuntimeSourceStatus = "status"
+
+const RuntimeSourceIdentity = "identity"
+
+const RuntimeSourceAuditFinal = "audit_final"
 
 // RuntimeSource selects bounded files below one attempt's private state root.
 type RuntimeSource struct {
@@ -28,11 +35,13 @@ type RuntimeRecord struct {
 	Content []byte
 }
 
-func (s RuntimeSource) Validate() error {
-	if s.Key == "" || len(s.Key) > 128 || strings.ContainsFunc(s.Key, unicode.IsControl) || (s.Kind != "identity" && s.Kind != RuntimeSourceAudit && s.Kind != "status") {
+func (s RuntimeSource) Validate() error { return s.ValidateForProtocol(1) }
+
+func (s RuntimeSource) ValidateForProtocol(major uint32) error {
+	if s.Key == "" || len(s.Key) > 128 || strings.ContainsFunc(s.Key, unicode.IsControl) || !s.validKind(major) {
 		return ErrInvalidPolicy
 	}
-	if !validSourceLocation(s) || !validSourceLimits(s) {
+	if !validSourceLocation(s) || !validSourceLimitsForProtocol(s, major) {
 		return ErrInvalidPolicy
 	}
 	return nil
@@ -66,6 +75,7 @@ func ReadRuntimeSource(ctx context.Context, stateDir string, source RuntimeSourc
 }
 
 type runtimeSourceReader struct {
+	consume func(context.Context, string) error
 	root    *os.Root
 	source  RuntimeSource
 	records []RuntimeRecord
@@ -86,6 +96,7 @@ func (r *runtimeSourceReader) walk(ctx context.Context, directory string, depth 
 	if err != nil && !errors.Is(err, io.EOF) {
 		return ErrInvalidPolicy
 	}
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	r.entries += len(entries)
 	if r.entries > 1024 {
 		return ErrInvalidPolicy
@@ -114,6 +125,9 @@ func (r *runtimeSourceReader) readEntry(ctx context.Context, name string, entry 
 	}
 	if !strings.HasSuffix(entry.Name(), r.source.Suffix) {
 		return nil
+	}
+	if r.consume != nil {
+		return r.consume(ctx, name)
 	}
 	if len(r.records) >= int(r.source.MaxFiles) {
 		return ErrInvalidPolicy
@@ -159,6 +173,17 @@ func validSourceLocation(source RuntimeSource) bool {
 	return source.Suffix != "" && len(source.Suffix) <= 64 && !strings.ContainsAny(source.Suffix, "/\\:") && !strings.ContainsFunc(source.Suffix, unicode.IsControl)
 }
 
-func validSourceLimits(source RuntimeSource) bool {
-	return source.MaxDepth > 0 && source.MaxDepth <= 4 && source.MaxFiles > 0 && source.MaxFiles <= 256 && source.MaxBytes > 0 && source.MaxBytes <= 1<<20
+func validSourceLimitsForProtocol(source RuntimeSource, major uint32) bool {
+	if major != 1 && major != 2 {
+		return false
+	}
+	maximum := uint32(1 << 20)
+	if major == 2 && (source.Kind == RuntimeSourceAudit || source.Kind == RuntimeSourceAuditFinal) {
+		maximum = 32 << 20
+	}
+	return source.MaxDepth > 0 && source.MaxDepth <= 4 && source.MaxFiles > 0 && source.MaxFiles <= 256 && source.MaxBytes > 0 && source.MaxBytes <= maximum
+}
+
+func (s RuntimeSource) validKind(major uint32) bool {
+	return s.Kind == RuntimeSourceIdentity || s.Kind == RuntimeSourceAudit || s.Kind == RuntimeSourceStatus || major == 2 && s.Kind == RuntimeSourceAuditFinal
 }

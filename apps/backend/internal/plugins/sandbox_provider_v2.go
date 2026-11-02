@@ -47,7 +47,7 @@ func sandboxLegacyFields(message protoreflect.Message) bool {
 func validateSandboxV2Reply(request proto.Message, reply proto.Message) error {
 	switch result := reply.(type) {
 	case *pluginsdk.DescribeSandboxProviderResponse:
-		if validateSandboxDescription(result.Description) != nil || !validSandboxCapabilitiesV2(result.Description.GetCapabilitiesV2()) {
+		if validateSandboxDescriptionForProtocol(result.Description, 2) != nil || !validSandboxCapabilitiesV2(result.Description.GetCapabilitiesV2()) {
 			return errSandboxProviderReply
 		}
 		return nil
@@ -135,7 +135,7 @@ func validSandboxCapabilitiesV2(value *pluginsdk.SandboxCapabilitiesV2) bool {
 	if !slices.Contains([]string{sandboxNetworkModeNone, sandboxV2StaticEgress, sandboxV2NetworkPreflight}, value.NetworkMode) {
 		return false
 	}
-	for _, values := range [][]string{value.OperationKinds, value.ActorKinds, value.ObservationSchemas, value.AuditVerificationFormats} {
+	for _, values := range [][]string{value.OperationKinds, value.ActorKinds, value.ObservationSchemas, value.AuditVerificationFormats, value.ReportSchemas} {
 		if !sandboxUniqueTextV2(values, 32, 128) {
 			return false
 		}

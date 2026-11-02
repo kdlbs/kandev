@@ -26,7 +26,7 @@ The SDK's optional complete interface remains `SandboxProviderPlugin`. SDK modul
 
 | RPC | Major 2 additions |
 | --- | --- |
-| DescribeSandboxProvider | Supported operation kinds, actor forms, policy schemas, network enforcement mode, evidence classes, audit verification formats, and explicit limitations |
+| DescribeSandboxProvider | Supported operation kinds, actor forms, policy schemas, network enforcement mode, evidence classes, report schemas, audit verification formats, and explicit limitations |
 | CompileSandboxPolicy | Schema-tagged static grants/envelope/resource policies; typed compiled effective permissions; declared callback and route bindings |
 | NormalizeSandboxApproval | Typed operation plus child-process or runtime-service actor; request scope and operation-specific one-shot semantics |
 | NormalizeSandboxStatus | Optional typed runtime observations with their source/timestamp; existing identity and confinement evidence remain distinct |
@@ -50,6 +50,16 @@ Nono decoding and its PID-zero/shared-label details remain in the dedicated plug
 Extend runtime source declarations only with bounded, relative sources and their semantic classes. Core owns reads and does not execute an arbitrary provider command to obtain evidence. Major 2 status requests include the already-read root-relative source path and expected provider session identity. A provider uses them to reject an audit stream from another runtime session, without receiving an arbitrary filesystem-read capability. Existing source isolation, no-symlink, enumeration, and output limits remain mandatory.
 
 For final reports exceeding one message, `ReadSandboxReport` accepts a versioned chunk envelope: artifact-set digest, core-generated operation handle, source ID, chunk sequence, final marker, and bytes. Core owns offsets and the whole-file digest. The provider keeps a bounded verifier only for this operation and returns continuation state with no file access. Expiry or crash discards it. Restart rereads immutable input; persisted provider cursors never grant arbitrary host reads.
+
+Typed reports are negotiated through `capabilities_v2.report_schemas` using `kandev.sandbox.report.v2`. Audit-signature formats are a separate capability. A provider without the report schema retains its legacy report path.
+
+The chunk source binding includes schema, root-relative path, captured provider session, zero-based source index, and source count. `sequence` counts chunks across the operation. `final` ends the current source. The last source has `source_index + 1 == source_count`. Source order, IDs, schemas, names, whole-source digests, and byte counts form the artifact-set digest. The ordered compact JSON array uses keys `id`, `schema`, `name`, `digest`, and `size` in that order. The SHA-256 digest covers those UTF-8 bytes. The core source ID is SHA-256 of schema, a NUL byte, and relative name.
+
+Major 2 permits `audit_final` declarations for metadata collected only after core confirms terminal ownership. Regular audit logs remain append-only across refreshes. Final metadata is first collected after stop, so its normal atomic finalization cannot be confused with a replaced live event stream. Major 1 rejects that source kind and keeps its existing 1 MiB limits.
+
+Core freezes at most 32 files and 32 MiB per collection into owned private scratch storage. Each RPC chunk is at most 256 KiB. Existing event sources must retain their filesystem birth identity and the digest of their previously captured prefix. Symlinks, hard-link aliases, missing prior files, rewrites, truncation, replacement, cancellation, and changed files during copying fail the collection. File birth identity currently uses Linux statx. Unsupported filesystems/platforms yield unavailable archive evidence without weakening process or policy checks.
+
+A non-exact report event can retain a bounded partial identity for inspection. It cannot become an approval, policy permission, or learning candidate. Partial command reports contain no raw argv, executable path, or resource-policy grant. Exact operations continue to use the full policy validator. Events use closed reason codes rather than raw runtime errors.
 
 A final verification result includes verified input digests, verifier/schema version, final event root, session binding, coverage, ledger result when supplied, signature result, and expected-key fingerprint. Core compares these with the captured input before persistence. Unsupported algorithms and missing required fields fail verification. Missing optional signatures are unsigned. Never claim trusted signing from the artifact's own public key alone.
 

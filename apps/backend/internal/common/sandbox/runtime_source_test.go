@@ -81,3 +81,21 @@ func TestSandboxRuntimeSourcesRejectEscapesAndLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestSandboxAuditArchiveLimitsAreExplicitlyMajorTwo(t *testing.T) {
+	source := RuntimeSource{Key: "fixture.audit.v2", Kind: "audit", Directory: "audit", Suffix: ".ndjson", MaxDepth: 2, MaxFiles: 4, MaxBytes: 32 << 20}
+	require.Error(t, source.Validate())
+	require.NoError(t, source.ValidateForProtocol(2))
+	source.Kind = "status"
+	require.Error(t, source.ValidateForProtocol(2))
+	source.Kind = "audit"
+	source.MaxBytes++
+	require.Error(t, source.ValidateForProtocol(2))
+	require.Error(t, source.ValidateForProtocol(3))
+}
+
+func TestSandboxFinalAuditSourcesRequireMajorTwo(t *testing.T) {
+	source := RuntimeSource{Key: "fixture.final.v2", Kind: "audit_final", Directory: "audit", Suffix: "session.json", MaxDepth: 2, MaxFiles: 4, MaxBytes: 64 << 10}
+	require.Error(t, source.Validate())
+	require.NoError(t, source.ValidateForProtocol(2), "final metadata is read only after core confirms the attempt stopped")
+}

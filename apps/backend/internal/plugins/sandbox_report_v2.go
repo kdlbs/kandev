@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/protobuf/proto"
@@ -33,7 +34,7 @@ func validateSandboxReportV2(req *pluginsdk.ReadSandboxReportRequest, value *plu
 }
 
 func validSandboxChunkV2(value *pluginsdk.SandboxAuditChunkV2) bool {
-	return value != nil && validSandboxText(value.OperationHandle, 256) && sandboxDigestV2(value.ArtifactSetDigest) && validSandboxText(value.SourceId, 128) && sandboxDigestV2(value.SourceDigest) && len(value.Content) <= 256<<10 && value.TotalBytes > 0 && value.TotalBytes <= 128<<20 && uint64(len(value.Content)) <= value.TotalBytes && value.Sequence < 65536
+	return value != nil && validSandboxText(value.OperationHandle, 256) && sandboxDigestV2(value.ArtifactSetDigest) && validSandboxText(value.SourceId, 128) && sandboxDigestV2(value.SourceDigest) && len(value.Content) <= 256<<10 && (value.TotalBytes > 0 || value.Final && len(value.Content) == 0) && value.TotalBytes <= 128<<20 && uint64(len(value.Content)) <= value.TotalBytes && value.Sequence < 65536 && validSandboxChunkSourceV2(value)
 }
 
 func validSandboxCoverageV2(values []*pluginsdk.SandboxReportCoverageV2) bool {
@@ -48,7 +49,7 @@ func validSandboxCoverageV2(values []*pluginsdk.SandboxReportCoverageV2) bool {
 }
 
 func validSandboxEventV2(req *pluginsdk.ReadSandboxReportRequest, event *pluginsdk.SandboxAuditEventV2) bool {
-	return event != nil && req.Context != nil && req.Policy != nil && validSandboxText(event.RecordId, 256) && validSandboxOperationV2(event.Operation) && validSandboxText(event.SourceId, 128) && event.OccurredAtUnixMs > 0 && event.PolicyDigest == req.Policy.Digest && event.AttemptId == req.Context.AttemptId && event.Generation == req.Context.Generation && slices.Contains([]string{sandboxEventAllowed, sandboxEventDenied, sandboxV2ApprovalRequested, sandboxV2ApprovalGranted, sandboxV2ApprovalDenied, sandboxV2Error}, event.Decision)
+	return event != nil && req.Context != nil && req.Policy != nil && validSandboxText(event.RecordId, 256) && validSandboxAuditOperationV2(event) && validSandboxAuditReasonV2(event.ReasonCode) && validSandboxText(event.SourceId, 128) && (req.ChunkV2 == nil || req.ChunkV2.SourceId == event.SourceId) && event.OccurredAtUnixMs > 0 && event.PolicyDigest == req.Policy.Digest && event.AttemptId == req.Context.AttemptId && event.Generation == req.Context.Generation && slices.Contains([]string{sandboxEventAllowed, sandboxEventDenied, sandboxV2ApprovalRequested, sandboxV2ApprovalGranted, sandboxV2ApprovalDenied, sandboxV2Error}, event.Decision)
 }
 
 func validateSandboxVerificationV2(req *pluginsdk.ReadSandboxReportRequest, report *pluginsdk.SandboxReportV2) error {
@@ -107,4 +108,11 @@ func validSandboxVerificationTrustV2(trust *pluginsdk.SandboxAuditTrustV2, resul
 
 func validSandboxRevisionAdditionsV2(req *pluginsdk.ProposeSandboxRevisionRequest, result *pluginsdk.ProposeSandboxRevisionResponse) bool {
 	return req.Policy != nil && validSandboxPolicyV2(req.Policy.PolicyV2) && result.AdditionsV2 != nil && result.AddedGrants == nil && validSandboxPermissionsV2(result.AdditionsV2.StaticGrants) && validSandboxPermissionsV2(result.AdditionsV2.ApprovalEnvelope) && sandboxUniqueTextV2(result.SourceRecordIds, 1000, 256) && len(result.SourceRecordIds) > 0
+}
+
+func validSandboxChunkSourceV2(value *pluginsdk.SandboxAuditChunkV2) bool {
+	if value.SourceSchema == "" && value.SourceRelativePath == "" && value.ProviderSessionId == "" && value.SourceCount == 0 && value.SourceIndex == 0 {
+		return true
+	}
+	return validSandboxText(value.SourceSchema, 128) && validSandboxArtifactName(value.SourceRelativePath) && validSandboxArtifactName(value.ProviderSessionId) && !strings.ContainsAny(value.ProviderSessionId, "/\\") && value.SourceCount > 0 && value.SourceCount <= 32 && value.SourceIndex < value.SourceCount
 }

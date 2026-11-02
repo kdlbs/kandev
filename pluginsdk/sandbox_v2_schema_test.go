@@ -30,3 +30,25 @@ func TestSandboxV2FieldsExtendExistingMessagesWithoutRenumbering(t *testing.T) {
 		})
 	}
 }
+
+func TestAuditChunksBindEverySourceToTheCapturedSession(t *testing.T) {
+	descriptor := (&SandboxAuditChunkV2{}).ProtoReflect().Descriptor()
+	for number, name := range map[protoreflect.FieldNumber]protoreflect.Name{9: "source_schema", 10: "source_relative_path", 11: "provider_session_id", 12: "source_index", 13: "source_count"} {
+		field := descriptor.Fields().ByNumber(number)
+		require.NotNil(t, field, "missing source binding %s", name)
+		require.Equal(t, name, field.Name())
+	}
+}
+
+func TestTypedReportsAreNegotiatedSeparatelyFromAuditSignatures(t *testing.T) {
+	descriptor := (&SandboxCapabilitiesV2{}).ProtoReflect().Descriptor()
+	field := descriptor.Fields().ByName("report_schemas")
+	require.NotNil(t, field)
+	require.Equal(t, protoreflect.FieldNumber(7), field.Number())
+}
+
+func TestAuditEventsUseClosedReasonCodesInsteadOfRawErrors(t *testing.T) {
+	field := (&SandboxAuditEventV2{}).ProtoReflect().Descriptor().Fields().ByName("reason_code")
+	require.NotNil(t, field)
+	require.Equal(t, protoreflect.FieldNumber(11), field.Number())
+}

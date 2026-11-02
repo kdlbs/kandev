@@ -5,7 +5,7 @@ import (
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
-func validateSandboxRuntimeSources(sources []*pluginsdk.SandboxRuntimeSource) error {
+func validateSandboxRuntimeSourcesForProtocol(sources []*pluginsdk.SandboxRuntimeSource, major uint32) error {
 	if len(sources) > 8 {
 		return errSandboxProviderReply
 	}
@@ -15,7 +15,7 @@ func validateSandboxRuntimeSources(sources []*pluginsdk.SandboxRuntimeSource) er
 			return errSandboxProviderReply
 		}
 		declaration := sandbox.RuntimeSource{Key: source.Key, Kind: source.Kind, Directory: source.RelativeDirectory, Suffix: source.FilenameSuffix, MaxDepth: source.MaxDepth, MaxFiles: source.MaxFiles, MaxBytes: source.MaxBytes}
-		if declaration.Validate() != nil {
+		if declaration.ValidateForProtocol(major) != nil {
 			return errSandboxProviderReply
 		}
 		seen[source.Key] = true
