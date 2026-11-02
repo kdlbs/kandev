@@ -26,6 +26,13 @@ const (
 	// headroom below a full commit limit so new launches are held before the
 	// host starts failing allocations or a host watchdog restarts the instance.
 	DefaultMaxCommitPercent float64 = 75
+
+	// maxMinAvailableMB is the largest MiB floor whose byte conversion fits in
+	// uint64. A larger value is invalid and keeps the default.
+	maxMinAvailableMB = ^uint64(0) >> 20
+	// maxCommitPercent is the largest meaningful ceiling. A larger value cannot
+	// describe a host that still has commit headroom and keeps the default.
+	maxCommitPercent = 100
 )
 
 // Reading is one observation of host memory. The counters are installation
@@ -90,12 +97,14 @@ func ReadConfig(enabled bool) Gate {
 		MaxCommitPercent:  DefaultMaxCommitPercent,
 	}
 	if value, ok := os.LookupEnv(EnvMinAvailableMB); ok {
-		if mb, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && mb >= 0 {
+		if mb, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil &&
+			mb >= 0 && uint64(mb) <= maxMinAvailableMB {
 			gate.MinAvailableBytes = uint64(mb) << 20
 		}
 	}
 	if value, ok := os.LookupEnv(EnvMaxCommitPercent); ok {
-		if percent, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && percent >= 0 {
+		if percent, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil &&
+			percent >= 0 && percent <= maxCommitPercent {
 			gate.MaxCommitPercent = percent
 		}
 	}

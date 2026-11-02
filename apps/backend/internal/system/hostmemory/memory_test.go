@@ -99,17 +99,26 @@ func TestReadConfigOverrides(t *testing.T) {
 }
 
 func TestReadConfigIgnoresInvalidValues(t *testing.T) {
-	t.Setenv(EnvMinAvailableMB, "not-a-number")
-	t.Setenv(EnvMaxCommitPercent, "-3")
-	gate := ReadConfig(true)
-	if !gate.Enabled {
-		t.Fatal("Enabled = false, want the flag value true")
-	}
-	if gate.MinAvailableBytes != DefaultMinAvailableBytes {
-		t.Fatalf("MinAvailableBytes = %d, want default", gate.MinAvailableBytes)
-	}
-	if gate.MaxCommitPercent != DefaultMaxCommitPercent {
-		t.Fatalf("MaxCommitPercent = %v, want default", gate.MaxCommitPercent)
+	for _, tc := range []struct {
+		mb      string
+		percent string
+	}{
+		{mb: "not-a-number", percent: "-3"},
+		{mb: "18446744073710", percent: "+Inf"},
+		{mb: "9223372036854775807", percent: "101"},
+	} {
+		t.Setenv(EnvMinAvailableMB, tc.mb)
+		t.Setenv(EnvMaxCommitPercent, tc.percent)
+		gate := ReadConfig(true)
+		if !gate.Enabled {
+			t.Fatal("Enabled = false, want the flag value true")
+		}
+		if gate.MinAvailableBytes != DefaultMinAvailableBytes {
+			t.Fatalf("MinAvailableBytes = %d, want default for %q", gate.MinAvailableBytes, tc.mb)
+		}
+		if gate.MaxCommitPercent != DefaultMaxCommitPercent {
+			t.Fatalf("MaxCommitPercent = %v, want default for %q", gate.MaxCommitPercent, tc.percent)
+		}
 	}
 }
 
