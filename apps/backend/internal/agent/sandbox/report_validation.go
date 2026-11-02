@@ -44,7 +44,7 @@ func validReportEnvelope(data ReportData) bool {
 }
 
 func validReportData(data ReportData, captured time.Time) bool {
-	if !validReportEnvelope(data) || !validTypedReport(data.V2, captured) || !validReportRefresh(data, captured) || !typedReportSourcesMatch(data) {
+	if !validReportEnvelope(data) || !validTypedReport(data.V2, captured) || !validReportRefresh(data, captured) || !typedReportSourcesMatch(data) || !validFinalAuditReceipt(data.FinalAudit, data.Finalized, captured) {
 		return false
 	}
 	sources := make(map[string]bool, len(data.Sources))
@@ -130,7 +130,7 @@ func reportMatchesAttempt(report *Report, attempt *Attempt) bool {
 	resolved := attempt.Snapshot.Resolved
 	return report.AttemptID == attempt.ID && report.SessionID == attempt.Snapshot.SessionID &&
 		report.RevisionID == resolved.Revision.ID && report.PolicyDigest == resolved.Revision.Digest &&
-		report.CeilingDigest == resolved.Ceiling.Digest && report.Provider == attempt.Snapshot.Provider
+		report.CeilingDigest == resolved.Ceiling.Digest && report.Provider == attempt.Snapshot.Provider && auditReceiptMatchesAttempt(report.Data.FinalAudit, attempt)
 }
 
 func validStoredReport(report *Report, version int64, finalized int) bool {

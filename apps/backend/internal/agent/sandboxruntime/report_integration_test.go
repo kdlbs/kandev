@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -42,6 +43,34 @@ func assertRuntimeReportSurvivesInvalidAudit(t *testing.T, ctx context.Context, 
 			require.NoError(t, os.WriteFile(filepath.Join(prepared.files.Directories.State, file.Name), file.Content, 0o600))
 		}
 	}
+}
+
+func assertRuntimeFinalArchive(t *testing.T, ctx context.Context, prepared *Prepared, report *policy.Report) string {
+	t.Helper()
+	require.NotNil(t, report.Data.FinalAudit, "final bytes must survive runtime cleanup independently from normalized rows")
+	receipt := report.Data.FinalAudit
+	if report.Data.Status == "available" {
+		require.Equal(t, report.Data.V2.ArtifactSetDigest, receipt.ArtifactSetDigest)
+	}
+	attempt, err := prepared.manager.policies.ReadAttempt(ctx, prepared.orgID, prepared.launch.AttemptID)
+	require.NoError(t, err)
+	binding, err := policy.AuditBindingDigest(attempt)
+	require.NoError(t, err)
+	require.Equal(t, binding, receipt.BindingDigest)
+	base := filepath.Join(prepared.manager.base, "audit-archives")
+	key := reportHash([]byte(binding + "\x00" + receipt.ArtifactSetDigest))
+	archive, err := contract.LoadAuditArchive(ctx, base, base, key, binding, receipt.ArtifactSetDigest)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, archive.Close()) }()
+	var metadata bool
+	for _, source := range archive.Sources {
+		if strings.HasSuffix(source.Name, "/session.json") {
+			metadata = true
+		}
+	}
+	require.True(t, metadata, "retained artifacts must include finalized metadata")
+	require.NoDirExists(t, prepared.files.Root, "the retained audit must not keep the runtime allocation alive")
+	return filepath.Join(base, key)
 }
 
 func assertRuntimeDenials(t *testing.T, report *policy.Report, target string, finalized bool) {

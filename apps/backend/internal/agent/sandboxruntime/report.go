@@ -39,17 +39,27 @@ func (p *Prepared) captureReport(ctx context.Context) (*policy.Report, error) {
 	}
 	var data policy.ReportData
 	var readErr error
+	readCtx := ctx
+	if attempt.State == policy.AttemptStopped || attempt.State == policy.AttemptFailed {
+		var cancel context.CancelFunc
+		readCtx, cancel = context.WithTimeout(ctx, time.Second)
+		defer cancel()
+	}
 	if p.typedReports() {
-		data, readErr = p.readTypedReport(ctx, attempt, previous)
+		data, readErr = p.readTypedReport(readCtx, attempt, previous)
 	} else {
-		data, readErr = p.readReportData(ctx)
+		data, readErr = p.readReportData(readCtx)
 	}
 	var expected int64
 	if previous != nil {
 		expected = previous.Version
 	}
 	if readErr != nil {
+		finalAudit := data.FinalAudit
 		data = unavailableReport(previous)
+		if finalAudit != nil {
+			data.FinalAudit = finalAudit
+		}
 		data.RefreshError = reportRefreshError(readErr)
 	} else if data.Status == reportStatusAvailable {
 		now := time.Now().UTC()

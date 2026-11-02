@@ -4,6 +4,7 @@ import (
 	"context"
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
+	"path/filepath"
 )
 
 // CleanupSessionState requires the caller's session-deletion admission fence.
@@ -13,6 +14,7 @@ func (m *Manager) CleanupSessionState(ctx context.Context, taskID, sessionID str
 		return policy.ErrConflict
 	}
 	states := map[string]*contract.AgentStateSnapshot{}
+	var archives []*policy.FinalAuditReceipt
 	cursor := policy.CleanupCursor{}
 	for {
 		page, err := m.policies.SessionCleanupAttempts(ctx, taskID, sessionID, cursor)
@@ -30,7 +32,23 @@ func (m *Manager) CleanupSessionState(ctx context.Context, taskID, sessionID str
 			if state != nil {
 				states[state.Home] = state
 			}
+			receipt, readErr := m.finalAuditReceipt(ctx, attempt)
+			if readErr != nil {
+				return readErr
+			}
+			if receipt != nil {
+				archives = append(archives, receipt)
+			}
 			cursor = policy.CleanupCursor{OrgID: attempt.Snapshot.OrgID, AttemptID: attempt.ID}
+		}
+	}
+	return m.removeSessionArtifacts(ctx, states, archives)
+}
+
+func (m *Manager) removeSessionArtifacts(ctx context.Context, states map[string]*contract.AgentStateSnapshot, archives []*policy.FinalAuditReceipt) error {
+	for _, receipt := range archives {
+		if err := contract.RemoveAuditArchive(ctx, filepath.Join(m.base, "audit-archives"), receipt.BindingDigest, receipt.ArtifactSetDigest); err != nil {
+			return err
 		}
 	}
 	for _, state := range states {

@@ -28,6 +28,15 @@ import (
 
 // @covers AC-AGENTS-SANDBOX-003.1 AC-AGENTS-SANDBOX-003.3 AC-AGENTS-SANDBOX-003.5
 func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
+	runSandboxRuntimeApproval(t, false)
+}
+
+func TestSandboxRuntimeRetainsFinalBytesWhenProviderIsUnavailable(t *testing.T) {
+	runSandboxRuntimeApproval(t, true)
+}
+
+func runSandboxRuntimeApproval(t *testing.T, providerUnavailable bool) {
+	t.Helper()
 	packagePath := os.Getenv("KANDEV_TEST_SANDBOX_PACKAGE")
 	if packagePath == "" {
 		t.Skip("set KANDEV_TEST_SANDBOX_PACKAGE to a dedicated provider package")
@@ -180,11 +189,26 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	require.NoError(t, err)
 	assertRuntimeDenials(t, report, outside, false)
 	assertRuntimeReportSurvivesInvalidAudit(t, ctx, prepared, report)
+	if providerUnavailable {
+		require.NoError(t, pluginService.Disable(binding.PluginID))
+	}
 	require.NoError(t, prepared.Close())
 	report, err = policies.ReadReport(ctx, "approval-session", prepared.Launch().AttemptID)
 	require.NoError(t, err)
-	assertRuntimeDenials(t, report, outside, true)
-	assertRuntimeLearning(t, ctx, manager, policies, report, outside)
+	if providerUnavailable {
+		require.Equal(t, "unavailable", report.Data.Status)
+		require.Equal(t, "interrupted", report.Data.V2.Finalization)
+		require.NotEmpty(t, report.Data.RefreshError)
+		require.NotNil(t, report.Data.FinalAudit)
+		require.NotEqual(t, report.Data.V2.ArtifactSetDigest, report.Data.FinalAudit.ArtifactSetDigest, "the final artifact receipt must not verify earlier normalized rows")
+		require.NoError(t, pluginService.Enable(binding.PluginID))
+	} else {
+		assertRuntimeDenials(t, report, outside, true)
+	}
+	retainedAudit := assertRuntimeFinalArchive(t, ctx, prepared, report)
+	if !providerUnavailable {
+		assertRuntimeLearning(t, ctx, manager, policies, report, outside)
+	}
 	// A new attempt for the same agent session must retain its explicit state grant.
 	restarted, err := manager.Prepare(ctx, PrepareRequest{RestartOf: prepared.Launch().AttemptID, MCPForward: forward, Selection: selection, SessionID: "approval-session", ExecutionID: "restart-execution", Generation: 1, WorkDir: work, Arguments: []string{child}})
 	require.NoError(t, err)
@@ -206,6 +230,7 @@ func TestSandboxRuntimeRealApprovalAndPrivateBoundary(t *testing.T) {
 	require.Equal(t, revision.Digest, after.Digest, "allow once must not publish or expand policy")
 	require.NoError(t, manager.CleanupSessionState(ctx, selection.TaskID, "approval-session"))
 	require.NoDirExists(t, filepath.Dir(restarted.Launch().ChildHome))
+	require.NoDirExists(t, retainedAudit)
 }
 
 func buildApprovalChild(t *testing.T, ctx context.Context) string {

@@ -125,3 +125,27 @@ files, changed manifests, and idempotent storage. Runtime retention wiring,
 operator trust and job persistence, native provider verification, and the
 desktop/phone action remain in progress. This checkpoint does not complete
 Task 05 or permit a trusted-audit claim.
+
+The dedicated provider checkpoint is committed and pushed at
+`8b7b3ef6a50eb222cdebc583ed891caa9e9720a5`, using public SDK foundation
+`0a098c9031d62c95c305dc6149224a96fba6dce5`. It invokes the digest-checked
+packaged 0.81.0 executable against private reconstructed artifacts. Separate
+results cover chain, ledger, signature, and expected operator key. Signed,
+untrusted, wrong-key, missing-signature, interrupted, modified-signature,
+changed-action/trust, redirected-bundle, and duplicate-JSON tests pass.
+Ordinary report reads do not execute verification. `make validate
+verify-package` and the independent SDK consumer build pass. The pinned
+upstream tests generate their signature fixtures at runtime. The checked-in
+public fixture was produced by the pinned runtime with a disposable key and
+records its producer, public key, and artifact digests. No private key is
+committed.
+
+Runtime retention now passes the actual packaged Nono approval/private-boundary
+journey, including a second run that disables the provider before final cleanup.
+The stopped runtime is removed, the old report remains stale, and its separate
+final artifact receipt loads the captured metadata and bytes. Scoped session
+cleanup removes the archive. SQLite receipt checks reject another attempt
+binding, invalid digests, future timestamps, and non-final receipts. Full
+SQLite/PostgreSQL policy/runtime/common race suites pass. Operator trust/job storage, host
+verification dispatch, the desktop/phone action, and final acceptance remain
+unfinished.

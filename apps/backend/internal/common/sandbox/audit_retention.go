@@ -104,6 +104,23 @@ func storedAuditKey(binding, artifact string) string {
 	return runtimeDigest([]byte(binding + "\x00" + artifact))
 }
 
+// RemoveAuditArchive removes only the archive named by a captured core receipt.
+// Root-relative removal does not follow replaced directory entries or symlinks.
+func RemoveAuditArchive(ctx context.Context, base, binding, artifact string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !validRuntimeDirectory(base) || !validLaunchDigest(binding) || !validLaunchDigest(artifact) {
+		return ErrInvalidPolicy
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.RemoveAll(storedAuditKey(binding, artifact))
+}
+
 func writeStoredAuditSource(ctx context.Context, directory string, index int, archive *AuditArchive) error {
 	file, err := os.OpenFile(filepath.Join(directory, fmt.Sprintf("source-%02d", index)), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0400)
 	if err != nil {

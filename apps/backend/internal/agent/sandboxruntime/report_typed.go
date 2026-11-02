@@ -32,6 +32,12 @@ func (p *Prepared) readTypedReport(ctx context.Context, attempt *policy.Attempt,
 	if len(archive.Sources) == 0 {
 		return data, nil
 	}
+	if terminal {
+		data.FinalAudit, err = p.retainFinalAudit(ctx, attempt, archive)
+		if err != nil {
+			return data, err
+		}
+	}
 	data.V2.ArtifactSetDigest = archive.Digest
 	for _, source := range archive.Sources {
 		data.V2.Sources = append(data.V2.Sources, policy.TypedReportSource{ID: source.ID, Schema: source.Schema, Digest: source.Digest, Identity: source.Identity, Bytes: source.Size})

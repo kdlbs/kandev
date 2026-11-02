@@ -30,6 +30,9 @@ func (s *Service) CaptureReport(ctx context.Context, orgID, attemptID string, at
 	if data.V2 != nil && attempt.Snapshot.Provider.ProtocolVersion() != 2 {
 		return nil, contract.ErrInvalidPolicy
 	}
+	if !auditReceiptMatchesAttempt(data.FinalAudit, attempt) {
+		return nil, contract.ErrInvalidPolicy
+	}
 	if attempt.Version != attemptVersion || expected < 0 {
 		return nil, ErrConflict
 	}

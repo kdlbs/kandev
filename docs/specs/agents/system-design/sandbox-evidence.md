@@ -54,6 +54,10 @@ Raw audit input remains private. Public projections remove credentials, control 
 
 Verification is an explicit operator action on a finalized record, with bounded asynchronous work and a persisted result. Extend the existing report service and session authorization rather than exposing an unauthenticated Nono endpoint.
 
+The finalized report can carry a separate `final_audit` receipt. It identifies the retained artifact-set digest, captured attempt-binding digest, and collection time. The binding covers the immutable launch snapshot and captured runtime owner, including provider session identity. It does not depend on current policy eligibility. A failed provider read preserves older normalized rows and their original read time while retaining the new final artifact receipt independently. The receipt never asserts that those older rows were verified.
+
+Runtime cleanup gives provider interpretation a shorter deadline than report persistence. It can record an unavailable refresh and remove the stopped runtime even when the provider is disabled. Session deletion first admits all stopped attempts, then removes only their captured archives and child state. Historical archives survive ordinary runtime and backend shutdown.
+
 Verify the recorded event chain and final root against immutable metadata. If the captured local ledger is supplied, report ledger-inclusion verification separately. If a signature bundle exists, verify its session binding and root against an operator-configured public-key fingerprint. An embedded self-selected public key can verify mathematical consistency but cannot yield trusted-signer status.
 
 Core stores trust configuration with operator, version, and provenance. It sends only the expected public key and bounded declared artifact bytes to the provider verifier. Private keys never enter the plugin RPC or public DTO. Missing signatures remain unsigned, not invalid. Missing final metadata or interruption remains incomplete. A changed trust revision produces a separate verification record; revocation removes a current trusted-signer claim while preserving historical verification.

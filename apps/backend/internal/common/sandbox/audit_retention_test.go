@@ -37,6 +37,9 @@ func TestStoredAuditArchiveSurvivesRuntimeCleanupAndRejectsSubstitution(t *testi
 	_, err = LoadAuditArchive(t.Context(), base, scratch, key, binding, strings.Repeat("b", 64))
 	require.Error(t, err, "another artifact cannot reuse the archive")
 	require.DirExists(t, filepath.Join(base, key), "closing a read must preserve historical evidence")
+	require.NoError(t, RemoveAuditArchive(t.Context(), base, binding, digest))
+	require.NoDirExists(t, filepath.Join(base, key))
+	require.NoError(t, RemoveAuditArchive(t.Context(), base, binding, digest), "repeated session cleanup is safe")
 }
 
 func TestStoredAuditArchiveRejectsChangedBytesAndKeepsReadsFrozen(t *testing.T) {
