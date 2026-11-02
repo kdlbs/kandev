@@ -8,10 +8,12 @@ import type {
   CreateTaskResponse,
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
+  WorkspaceRepositoryPlacementPreview,
   Task,
   SidebarTaskQuery,
   SidebarTaskPageResponse,
   TaskPriority,
+  InitialWorkspaceLayout,
   MoveTaskResponse,
   ReorderBand,
   ReorderStepTasksResponse,
@@ -114,9 +116,11 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    mcp_server_ids?: string[];
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
+    initial_workspace_layout?: InitialWorkspaceLayout;
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
@@ -131,6 +135,11 @@ export async function createTask(
     autopilot?: boolean;
     /** Task-only replacements for fixed workflow step agent profiles. */
     workflow_agent_overrides?: Record<string, string>;
+    /**
+     * Caller-supplied create-idempotency identity. The native dialog sends its
+     * retained submission identity so a retried request resolves to one task.
+     */
+    external_id?: string;
   },
   options?: ApiRequestOptions,
 ) {
@@ -203,6 +212,20 @@ export async function attachTaskWorkspaceSources(
   );
 }
 
+export async function previewTaskWorkspaceSources(
+  taskId: string,
+  payload: AttachTaskWorkspaceSourcesRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<WorkspaceRepositoryPlacementPreview>(
+    `/api/v1/tasks/${taskId}/workspace-sources/preview`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
 export async function updateTaskRepositoryBaseBranch(
   taskId: string,
   taskRepositoryId: string,
@@ -226,13 +249,18 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type TaskWorkspaceCleanup = "delete" | "retain";
+
 export type DeleteTaskParams = {
+  allowUnverifiedWorkspaceChanges?: boolean;
+  workspaceCleanup?: TaskWorkspaceCleanup;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   confirmationId?: string;
 };
 
 export type TaskDeletePreflightResponse = {
+  workspace_inspection?: "complete" | "unknown" | "not_requested";
   requires_discard_consent: boolean;
   confirmation_id: string;
 };
@@ -242,7 +270,9 @@ export async function getTaskDeletePreflight(
   cascade: boolean,
   discardWorktreeChanges = false,
   options?: ApiRequestOptions,
+  cleanup: Pick<DeleteTaskParams, "workspaceCleanup" | "allowUnverifiedWorkspaceChanges"> = {},
 ) {
+  const { workspaceCleanup, allowUnverifiedWorkspaceChanges = false } = cleanup;
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
     ...options,
     cache: "no-store",
@@ -250,6 +280,8 @@ export async function getTaskDeletePreflight(
       method: "POST",
       body: JSON.stringify({
         task_ids: taskIds,
+        ...(allowUnverifiedWorkspaceChanges ? { allow_unverified_workspace_changes: true } : {}),
+        ...(workspaceCleanup ? { workspace_cleanup: workspaceCleanup } : {}),
         cascade,
         discard_worktree_changes: discardWorktreeChanges,
       }),
@@ -258,12 +290,24 @@ export async function getTaskDeletePreflight(
   });
 }
 
+export type TaskDeletionResult = {
+  success: boolean;
+  workspace_cleanup?: TaskWorkspaceCleanup;
+  retention_operation_ids?: string[];
+  cleanup_operation_ids?: string[];
+  workspace_cleanup_pending?: boolean;
+  runtime_stop_pending?: boolean;
+};
+
 export async function deleteTask(
   taskId: string,
   params?: DeleteTaskParams,
   options?: ApiRequestOptions,
 ) {
   const queryParams = new URLSearchParams();
+  if (params?.allowUnverifiedWorkspaceChanges)
+    queryParams.set("allow_unverified_workspace_changes", "true");
+  if (params?.workspaceCleanup) queryParams.set("workspace_cleanup", params.workspaceCleanup);
   if (params?.cascade) queryParams.set("cascade", "true");
   if (params?.discardWorktreeChanges) {
     queryParams.set("discard_worktree_changes", "true");
@@ -273,7 +317,7 @@ export async function deleteTask(
   if (params?.confirmationId) {
     headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
   }
-  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
+  return fetchJson<TaskDeletionResult | undefined>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...options?.init, headers },
   });
@@ -294,6 +338,10 @@ export async function deleteTaskAfterUserAction(
     params?.cascade ?? false,
     params?.discardWorktreeChanges ?? false,
     options,
+    {
+      workspaceCleanup: params?.workspaceCleanup,
+      allowUnverifiedWorkspaceChanges: params?.allowUnverifiedWorkspaceChanges,
+    },
   );
   return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }
@@ -478,6 +526,28 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
+/**
+ * The by-external-id GET route's body: the task plus whether that task's own
+ * required synchronous creation work settled. The route is read-only and
+ * returns archived tasks too, so it is the safe way to ask what holds an
+ * identity without risking a create.
+ */
+export type TaskByExternalIDLookup = Task & {
+  creation_complete: boolean;
+};
+
+export async function fetchTaskByExternalId(
+  workspaceId: string,
+  externalId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ external_id: externalId });
+  return fetchJson<TaskByExternalIDLookup>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/by-external-id?${query.toString()}`,
+    { ...options, cache: "no-store" },
+  );
+}
+
 export async function archiveTask(
   taskId: string,
   params?: { cascade?: boolean },
@@ -525,6 +595,7 @@ export async function listTasksByWorkspace(
     query?: string;
     includeArchived?: boolean;
     onlyArchived?: boolean;
+    commandPanelVisible?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -538,6 +609,7 @@ export async function listTasksByWorkspace(
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.onlyArchived) url.searchParams.set("only_archived", "true");
+  if (params.commandPanelVisible) url.searchParams.set("command_panel_visible", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

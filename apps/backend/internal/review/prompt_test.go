@@ -33,7 +33,7 @@ func (f *fakeTemplateSource) ResolveTemplate(_ context.Context, template string,
 func batchFixture() []ChangedFile {
 	return []ChangedFile{
 		{Path: "a.go", Status: "modified", Diff: "@@ -1 +1,2 @@\n x\n+a\n", Additions: 1, Deletions: 0},
-		{Path: "b.go", Status: "added", Diff: "@@ -0,0 +1 @@\n+b\n", Additions: 1, Deletions: 0},
+		{Path: "b.go", Status: localStatusAdded, Diff: "@@ -0,0 +1 @@\n+b\n", Additions: 1, Deletions: 0},
 	}
 }
 

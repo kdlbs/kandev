@@ -152,6 +152,9 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
+Use the information button beside **Pull from** to read queue and feeder guidance.
+On a phone, it opens a drawer that stays open while you read.
+
 ### Recover from a context reset failure
 
 When **Reset agent context** starts a fresh ACP session, Kandev restores the
@@ -286,6 +289,7 @@ A task may contain several repositories, but a workflow step is not bound to one
 - **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`. Remember that a create which starts an agent targets the first Auto-start agent step, not the Start step.
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
+- **Completion reports a stale step or entry:** a turn remains tied to the workflow entry where it started, even if the task returns to the same step. End that turn and have the user resume the session for the current step. Older turns without entry evidence also need a fresh turn; reconnecting does not rewrite their history.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
 - **Moving tasks on a phone:** open the task card menu and choose **Move to**. Swiping a card scrolls the column; phone cards do not support drag-to-move or drag reordering.
 - **Task cannot be dragged on desktop or tablet:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.

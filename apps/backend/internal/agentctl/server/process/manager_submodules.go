@@ -156,7 +156,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 	m.repoTrackersMu.Lock()
 	m.workspaceTracker = root
 	m.repoTrackers = retained
-	m.cfg.WorkDir = workDir
+	m.setWorkspaceWorkDirLocked(workDir)
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.applyWorkspacePollModeLocked(newTrackers...)
@@ -199,7 +199,7 @@ func (m *Manager) replaceWorkspaceTrackerGraph(
 	m.repoTrackersMu.Lock()
 	m.workspaceTracker = desiredRoot
 	m.repoTrackers = desiredTrackers
-	m.cfg.WorkDir = workDir
+	m.setWorkspaceWorkDirLocked(workDir)
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{desiredRoot}, desiredTrackers...)...)

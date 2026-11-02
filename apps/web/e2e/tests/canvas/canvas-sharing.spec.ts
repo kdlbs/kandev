@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { verifyRegistryExampleCopy } from "./canvas-clipboard-helpers";
 import {
   approvePendingCanvas,
   canvasHref,
@@ -9,8 +10,10 @@ import {
 } from "./canvas-fixture";
 
 test.describe("Canvas sharing", () => {
+  test.describe.configure({ retries: 0 });
   test("prepares bundle and source downloads from the active release", async ({
     testPage,
+    prCapture,
     apiClient,
     backend,
     seedData,
@@ -47,6 +50,26 @@ test.describe("Canvas sharing", () => {
 
       const dialog = testPage.getByRole("dialog").last();
       await expect(dialog).toBeVisible();
+      await verifyRegistryExampleCopy(testPage, dialog, false, false);
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await testPage.getByRole("button", { name: "Share canvas", exact: true }).click();
+      await expect(dialog).toBeVisible();
+      await verifyRegistryExampleCopy(testPage, dialog, true, false);
+      if (prCapture.capturing) {
+        await dialog.evaluate(async (element) => {
+          await Promise.all(
+            element
+              .getAnimations({ subtree: true })
+              .filter((animation) =>
+                Number.isFinite(animation.effect?.getComputedTiming().iterations),
+              )
+              .map((animation) => animation.finished.catch(() => undefined)),
+          );
+        });
+        await prCapture.screenshot("registry-copy-desktop", {
+          caption: "Registry example copied after controlled modern clipboard rejection",
+        });
+      }
       await expect(dialog.getByText("Package details", { exact: true })).toBeVisible();
       await dialog.getByRole("button", { name: "Prepare downloads", exact: true }).click();
 

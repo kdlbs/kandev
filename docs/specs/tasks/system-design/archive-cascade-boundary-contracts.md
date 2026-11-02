@@ -225,19 +225,21 @@ steps, not best-effort bus delivery, own destructive cleanup.
 
 ## Absolute request deadline
 
-The initiating request computes one absolute deadline: the earlier caller
-boundary or entry plus `TaskArchiveTimeout`. Every synchronous post-preparation
-context uses `min(original_deadline, now+step_budget)`. This applies to
-preparation rollback, mutation recovery, nested finalization, vacancy
-reconciliation, cleanup activation, and their compensation. A “fresh” budget
-never extends the original deadline.
+The request captures `min(caller_deadline, entry+TaskArchiveTimeout)`.
+Every synchronous post-preparation context uses
+`min(original_deadline, now+step_budget)`: preparation rollback, mutation
+recovery, nested finalization, vacancy reconciliation, cleanup activation, and
+compensation. No fresh budget extends the original deadline.
 
-If no time remains, the request writes retry direction/error/wakeup in the
-operation transaction and returns the durable in-progress/timeout result with
-operation ID. It performs no further synchronous recovery. The independent
-runtime may later claim a new persisted attempt with its own worker deadline;
-that does not extend the expired request attempt. Deterministic tests expire the
-request during rollback, member mutation, finalization, vacancy, activation, and
+At entry, the archive HTTP handler sets its write deadline to the captured work
+deadline plus five seconds for JSON delivery. This changes neither work budgets,
+authorization, cleanup ownership, nor retries. Other routes and writers without
+deadline support retain their existing behavior.
+
+On expiry, persist retry direction/error/wakeup in the operation transaction
+and return the durable in-progress/timeout result with operation ID. Do no more
+synchronous recovery. Independent runtime attempts may use new worker deadlines.
+Tests expire rollback, member mutation, finalization, vacancy, activation, and
 nested compensation and assert no request-owned work crosses the deadline.
 
 ## Bounded cascade and retained artifacts

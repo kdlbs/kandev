@@ -144,7 +144,6 @@ export const defaultState = {
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
   gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
-  gitlabStats: defaultGitLabState.gitlabStats,
   gitlabStatus: defaultGitLabState.gitlabStatus,
   taskMRAutomation: defaultGitLabState.taskMRAutomation,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
@@ -193,7 +192,6 @@ function mergeCodeHostFields(
   | "gitlabIssueWatches"
   | "gitlabMRWatches"
   | "gitlabActionPresets"
-  | "gitlabStats"
   | "gitlabStatus"
   | "azureDevOpsTaskPullRequests"
   | "azureDevOpsTaskWorkItems"
@@ -204,7 +202,6 @@ function mergeCodeHostFields(
     gitlabIssueWatches: { ...d.gitlabIssueWatches, ...s.gitlabIssueWatches },
     gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
     gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
-    gitlabStats: { ...d.gitlabStats, ...s.gitlabStats },
     gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
     azureDevOpsTaskPullRequests: {
       ...d.azureDevOpsTaskPullRequests,

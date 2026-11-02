@@ -51,6 +51,8 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
 const WARNING_TESTID = "still-working-warning";
 const DISCARD_CHECKBOX_TESTID = "delete-discard-worktree-checkbox";
 const CASCADE_CHECKBOX_TESTID = "delete-cascade-checkbox";
+const UNVERIFIED_CHECKBOX_TESTID = "delete-unverified-workspace-checkbox";
+const ARIA_CHECKED = "aria-checked";
 const TASK_ID = "task-1";
 const CONFIRMATION_ID = "confirmation-1";
 
@@ -288,7 +290,7 @@ describe("TaskDeleteConfirmDialog discard consent", () => {
       expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith([TASK_ID], false, true),
     );
     await waitFor(() =>
-      expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID).getAttribute("aria-checked")).toBe("true"),
+      expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID).getAttribute(ARIA_CHECKED)).toBe("true"),
     );
     await waitFor(() => expect(confirm.disabled).toBe(false));
     fireEvent.click(confirm);
@@ -406,7 +408,7 @@ describe("TaskDeleteConfirmDialog discard consent state", () => {
     const discard = await screen.findByTestId(DISCARD_CHECKBOX_TESTID);
     fireEvent.click(discard);
     await waitFor(() =>
-      expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID).getAttribute("aria-checked")).toBe("true"),
+      expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID).getAttribute(ARIA_CHECKED)).toBe("true"),
     );
     fireEvent.click(screen.getByTestId(CASCADE_CHECKBOX_TESTID));
     await waitFor(() =>
@@ -415,7 +417,7 @@ describe("TaskDeleteConfirmDialog discard consent state", () => {
     expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
     fireEvent.click(screen.getByTestId(CASCADE_CHECKBOX_TESTID));
     const freshDiscard = await screen.findByTestId(DISCARD_CHECKBOX_TESTID);
-    expect(freshDiscard.getAttribute("aria-checked")).toBe("false");
+    expect(freshDiscard.getAttribute(ARIA_CHECKED)).toBe("false");
     await waitFor(() =>
       expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith([TASK_ID], false, false),
     );
@@ -661,5 +663,67 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
       ],
     );
     expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+  });
+});
+
+it("allows an explicit keep-files preview after workspace inspection fails", async () => {
+  mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+  mockGetTaskDeletePreflight.mockRejectedValueOnce(new Error("invalid marker"));
+  const confirm = vi.fn();
+  renderDialog(
+    <TaskDeleteConfirmDialog open taskId={TASK_ID} onOpenChange={() => {}} onConfirm={confirm} />,
+  );
+  await screen.findByTestId("delete-preflight-error");
+  expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true);
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: false,
+    confirmation_id: "retain-ticket",
+  });
+  fireEvent.click(screen.getByTestId("delete-keep-files-checkbox"));
+  const action = await screen.findByRole("button", { name: "Delete task and keep files" });
+  await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith([TASK_ID], false, false, undefined, {
+    workspaceCleanup: "retain",
+  });
+  expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+  fireEvent.click(action);
+  expect(confirm).toHaveBeenCalledWith({
+    cascade: false,
+    discardWorktreeChanges: false,
+    confirmationId: "retain-ticket",
+    workspaceCleanup: "retain",
+  });
+});
+
+it("requires a separate unknown-workspace acknowledgement and fresh ticket", async () => {
+  mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: true,
+    workspace_inspection: "unknown",
+    confirmation_id: "unknown",
+  });
+  const confirm = vi.fn();
+  renderDialog(
+    <TaskDeleteConfirmDialog open taskId={TASK_ID} onOpenChange={() => {}} onConfirm={confirm} />,
+  );
+  const acknowledgement = await screen.findByTestId(UNVERIFIED_CHECKBOX_TESTID);
+  expect(acknowledgement.getAttribute(ARIA_CHECKED)).toBe("false");
+  expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+  expect(screen.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: true,
+    workspace_inspection: "unknown",
+    confirmation_id: "acknowledged",
+  });
+  fireEvent.click(acknowledgement);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  expect(confirm).toHaveBeenCalledWith({
+    cascade: false,
+    discardWorktreeChanges: true,
+    allowUnverifiedWorkspaceChanges: true,
+    confirmationId: "acknowledged",
   });
 });

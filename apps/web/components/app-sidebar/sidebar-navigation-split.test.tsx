@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { defaultSidebarLayout } from "@/lib/sidebar/layout-types";
@@ -148,4 +149,27 @@ it("clamps pointer resizing to zero and persists the fully collapsed height", ()
     navigationHeight: 0,
     navigationExpanded: false,
   });
+});
+
+it("expands for clipped navigation focus but ignores portaled menu focus", () => {
+  render(
+    <SidebarNavigationSplit
+      navigation={
+        <>
+          <button>Navigation item</button>
+          {createPortal(<button>Menu item</button>, document.body)}
+        </>
+      }
+      tasks={<div>Tasks</div>}
+    />,
+  );
+  const navigation = screen.getByRole("button", { name: "Navigation item" });
+  const menu = screen.getByRole("button", { name: "Menu item" });
+  vi.spyOn(navigation, "getBoundingClientRect").mockReturnValue({ bottom: 200 } as DOMRect);
+  vi.spyOn(menu, "getBoundingClientRect").mockReturnValue({ bottom: 200 } as DOMRect);
+  fireEvent.focus(navigation);
+  expect(mocks.mutate).toHaveBeenCalledOnce();
+  mocks.mutate.mockClear();
+  fireEvent.focus(menu);
+  expect(mocks.mutate).not.toHaveBeenCalled();
 });

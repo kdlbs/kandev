@@ -101,6 +101,15 @@ const supported = (
 const profileField = (id: string, fieldPath: string, sourcePaths: string[]) =>
   supported(id, "agent_profile", fieldPath, sourcePaths, PROFILE_TASK);
 
+const userSettingField = (id: string, fieldPath: string, component: string, owner = USER_TASK) =>
+  supported(
+    `user-settings-${id}`,
+    "user_settings",
+    fieldPath,
+    source(`apps/web/components/settings/${component}`, USER_DTO_SOURCE),
+    owner,
+  );
+
 type SettingsExceptionInput = {
   id: string;
   domain: string;
@@ -211,41 +220,17 @@ const UI_SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
     ),
     "task-02-profile-mutations",
   ),
-  supported(
-    "user-settings-task-behavior",
-    "user_settings",
-    "confirm_task_archive",
-    source("apps/web/components/settings/task-behavior-settings.tsx", USER_DTO_SOURCE),
-    USER_TASK,
+  userSettingField("task-behavior", "confirm_task_archive", "task-behavior-settings.tsx"),
+  userSettingField(
+    "turn-changed-files",
+    "show_turn_changed_files",
+    "turn-changed-files-settings.tsx",
+    "turn-changed-files-01",
   ),
-  supported(
-    "user-settings-keyboard-shortcuts",
-    "user_settings",
-    "keyboard_shortcuts",
-    source("apps/web/components/settings/keyboard-shortcuts-card.tsx", USER_DTO_SOURCE),
-    USER_TASK,
-  ),
-  supported(
-    "user-settings-terminal",
-    "user_settings",
-    "terminal_font_size",
-    source("apps/web/components/settings/terminal-editors-settings.tsx", USER_DTO_SOURCE),
-    USER_TASK,
-  ),
-  supported(
-    "user-settings-saved-layouts",
-    "user_settings",
-    "saved_layouts",
-    source("apps/web/components/settings/layouts/layout-settings.tsx", USER_DTO_SOURCE),
-    USER_TASK,
-  ),
-  supported(
-    "user-settings-utility-defaults",
-    "user_settings",
-    "default_utility_model",
-    source("apps/web/components/settings/utility-agents-settings.tsx", USER_DTO_SOURCE),
-    USER_TASK,
-  ),
+  userSettingField("keyboard-shortcuts", "keyboard_shortcuts", "keyboard-shortcuts-card.tsx"),
+  userSettingField("terminal", "terminal_font_size", "terminal-editors-settings.tsx"),
+  userSettingField("saved-layouts", "saved_layouts", "layouts/layout-settings.tsx"),
+  userSettingField("utility-defaults", "default_utility_model", "utility-agents-settings.tsx"),
   supported(
     "workflow-name",
     "workflow",

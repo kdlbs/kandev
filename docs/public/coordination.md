@@ -134,6 +134,19 @@ For redirected calls, `parent_resolution` contains `requested_parent_id`, `resol
 
 For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
 
+### Set or change task priority from MCP
+
+`create_task_kandev` uses `medium` when `priority` is omitted, even when the
+parent has another priority. Use `update_task_kandev` to change priority
+without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+See [Set task priority through MCP](automation-and-mcp.md#set-task-priority-through-mcp)
+for accepted values, omission behavior, validation, and retry behavior.
+
 ## Coordinate with targeted messages
 
 `message_task_kandev` sends a message to another task's primary session by default. Supply a session ID to target a particular sibling session on the current task.
@@ -191,7 +204,7 @@ Additional messaging boundaries:
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.
 
-Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
+Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. When a task has more than one session, use `list_task_sessions_kandev` to list them (newest first, flagging the primary and your own) and pass the `session_id` you want. Use `list_related_tasks_kandev` to list a task's parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests. `task_id` defaults to the current task; another target is allowed only when it is an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. Unrelated tasks are denied, including in the same workspace. Compact output is a presentation option, not a separate metadata permission: `verbose` adds descriptions and never widens access.
 
 Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents, for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 
@@ -240,15 +253,22 @@ unavailable instead of using a same-named local or `origin` branch.
 <details>
 <summary>Adding sources details</summary>
 
-For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
+For an idle, non-archived task with a prepared workspace, use **Files → + → Add repositories or folders**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears for Worktree and Local/Local PC tasks. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
-Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
+Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. They use the current workspace root. Local/Local PC links host repositories and folders into that root without switching the current checkout; Docker, Kubernetes, SSH, and Sprites clone repositories inside the executor workspace and require a cloneable origin for local Git rows. Folder sources are live host links and work only on **Worktree** and **Local/Local PC**. They are unavailable to remote executors, where **Upload folder** remains a separate copy flow when supported. Remote Docker remains unimplemented.
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
-Read the consequence summary in the dialog or drawer before submitting. It describes whether the
-current executor will restart the agent or update the live remote workspace. **Cancel** or closing
-the surface sends no attachment request and leaves the workspace unchanged.
+Choose sources first, then review their locations. Additions within the current workspace show a brief
+continuity note. A prominent restart warning appears only when workspace-root expansion is selected.
+**Cancel** or closing the surface sends no attachment request and leaves the workspace unchanged.
+
+On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose
+`kandev/` to group new repositories below the current root, or choose the current root to place each
+one beside the existing repository files. The preview shows the exact relative paths. These nested
+choices keep the agent CWD and workspace processes unchanged, and Kandev protects the outer Git
+worktree from staging the nested checkouts. Parent-rooted tasks add repository siblings directly.
+Workspace-root expansion stays disabled until explicit idle session recovery is available.
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
@@ -315,6 +335,8 @@ A human-led flow uses the same primitives but keeps **Do nothing** transitions a
 Regular Kanban does not currently expose a dependency editor or blocker filter. Stored blocker data can appear through related-task MCP, but it is not a regular-board planning surface. For supported ordering, use parent/child structure, **When Child Tasks Complete**, explicit messages, workflow gates, and pull-request review.
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
+
+The [Office task guide](office-tasks.md) covers its projects, assignments, deeper task trees, dependencies, and review/approval flow. Start with [Office setup](office-getting-started.md) to enable that experimental surface.
 
 </details>
 

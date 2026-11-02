@@ -7,7 +7,7 @@ import type {
   PluginQueryState,
   PluginTaskStatusSnapshot,
   PluginTaskUsageSnapshot,
-} from "@kandev/plugin-sdk";
+} from "@kdlbs/plugin-sdk";
 
 type QueryValue = PluginTaskStatusSnapshot | PluginTaskUsageSnapshot;
 type QueryLoader<Value extends QueryValue> = () => Promise<Value>;

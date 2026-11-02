@@ -570,11 +570,16 @@ func resolveRemoteCLI(binaryPath string) string {
 	return filepath.Join(baseDir, "lib", "vscode", "bin", "remote-cli", "code-"+platform+".sh")
 }
 
-// findVscodeIPCSocket searches /tmp for the most recent vscode-ipc-*.sock file.
+// findVscodeIPCSocket searches the runtime socket directory used by code-server.
 // It validates each candidate by attempting a Unix socket connection to skip
 // stale sockets left behind by crashed VS Code instances.
 func findVscodeIPCSocket() (string, error) {
 	tmpDir := os.TempDir()
+	if runtime.GOOS != "darwin" {
+		if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
+			tmpDir = runtimeDir
+		}
+	}
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to read temp dir: %w", err)

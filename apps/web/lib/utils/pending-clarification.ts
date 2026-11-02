@@ -5,6 +5,10 @@ import type {
   Turn,
 } from "@/lib/types/http";
 import { isInputCapableSessionState } from "./task-pending-input";
+import {
+  permissionPresentationFromMetadata,
+  permissionRequestsInput,
+} from "@/lib/permissions/presentation";
 
 export type PendingClarificationScope = {
   /**
@@ -225,7 +229,10 @@ export function hasPendingClarificationForSession(
 
 export function isPendingPermissionMessage(message: Message): boolean {
   if (message.type !== "permission_request") return false;
-  const metadata = message.metadata as { status?: string } | undefined;
+  const metadata = message.metadata as
+    | { status?: string; permission_presentation?: unknown }
+    | undefined;
+  if (!permissionRequestsInput(permissionPresentationFromMetadata(metadata))) return false;
   return !metadata?.status || metadata.status === "pending";
 }
 

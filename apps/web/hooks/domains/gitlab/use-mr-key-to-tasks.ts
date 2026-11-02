@@ -6,10 +6,6 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { useWorkspaceMRs } from "./use-task-mr";
 
-export function mrKey(host: string, projectPath: string, iid: number): string {
-  return gitLabMRKey(host, projectPath, iid);
-}
-
 export function useMRKeyToTasks(workspaceId: string | null): Map<string, TaskMR[]> {
   useWorkspaceMRs(workspaceId);
   const byTaskId = useAppStore((state) =>
@@ -20,7 +16,7 @@ export function useMRKeyToTasks(workspaceId: string | null): Map<string, TaskMR[
     const result = new Map<string, TaskMR[]>();
     for (const associations of Object.values(byTaskId)) {
       for (const association of associations ?? []) {
-        const key = mrKey(association.host, association.project_path, association.mr_iid);
+        const key = gitLabMRKey(association.host, association.project_path, association.mr_iid);
         result.set(key, [...(result.get(key) ?? []), association]);
       }
     }

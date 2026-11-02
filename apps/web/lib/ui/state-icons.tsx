@@ -359,10 +359,6 @@ export function shouldShowTaskRunningSpinner(
   return taskState === "IN_PROGRESS" || taskState === "SCHEDULING";
 }
 
-export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {
-  return hasPendingPermission;
-}
-
 export function isTaskInFlight(foregroundActivity?: ForegroundActivity | null): boolean {
   return foregroundActivity === "generating" || foregroundActivity === "background";
 }
@@ -428,7 +424,7 @@ function getPendingOrActiveTaskIcon(
     hasPendingPermission,
     parkedOnBackgroundWork,
   } = options;
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+  if (hasPendingPermission ?? false) {
     return PENDING_PERMISSION_ICON;
   }
   if (hasPendingClarification) {

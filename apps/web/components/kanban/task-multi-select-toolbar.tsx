@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
@@ -24,6 +24,8 @@ import type { BulkTaskActionSelection } from "@/hooks/use-task-multi-select";
 type BulkTaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  workspaceCleanup?: "delete" | "retain";
+  allowUnverifiedWorkspaceChanges?: boolean;
   confirmationId?: string;
 };
 
@@ -148,7 +150,13 @@ function BulkDeleteDialog({
   getEligibleSelectedIds: (ids: string[]) => string[];
   isProcessing: boolean;
   onConfirm: (
-    opts: { cascade: boolean; discardWorktreeChanges: boolean; confirmationId: string },
+    opts: {
+      cascade: boolean;
+      discardWorktreeChanges: boolean;
+      workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
+      confirmationId: string;
+    },
     selection: BulkTaskActionSelection,
   ) => void;
 }) {
@@ -187,6 +195,68 @@ function BulkDeleteDialog({
         confirmTestId="bulk-delete-confirm"
       />
     </>
+  );
+}
+
+function BulkMoveMenu({
+  steps,
+  isMobile,
+  isProcessing,
+  canMove,
+  onBulkMove,
+}: {
+  steps: WorkflowStep[];
+  isMobile: boolean;
+  isProcessing: boolean;
+  canMove: boolean;
+  onBulkMove: TaskMultiSelectToolbarProps["onBulkMove"];
+}) {
+  const { t } = useTranslation();
+  const [moveOpen, setMoveOpen] = useState(false);
+  const touchPending = useRef(false);
+  return (
+    <DropdownMenu open={moveOpen} onOpenChange={setMoveOpen} modal={!isMobile}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          touchPending.current = isMobile && event.pointerType === "touch";
+          if (touchPending.current) event.preventDefault();
+        }}
+        onPointerCancel={() => {
+          touchPending.current = false;
+        }}
+        onClick={() => {
+          if (!touchPending.current) return;
+          touchPending.current = false;
+          setMoveOpen((open) => !open);
+        }}
+      >
+        <Button
+          size="default"
+          variant="outline"
+          className="cursor-pointer gap-1.5"
+          disabled={isProcessing || !canMove}
+          title={!canMove ? t("kanban:cannotMoveTasksFromDifferentWorkflows") : undefined}
+          data-testid="bulk-move-button"
+        >
+          {t("kanban:moveTo")}
+          <IconChevronRight className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" side="top">
+        {steps.map((step) => (
+          <DropdownMenuItem
+            key={step.id}
+            className="cursor-pointer"
+            onClick={() => onBulkMove(step.id)}
+            data-testid={`bulk-move-step-${step.id}`}
+          >
+            <div className={cn("w-2 h-2 rounded-full mr-2 shrink-0", step.color)} />
+            {step.title}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -229,34 +299,13 @@ export function TaskMultiSelectToolbar({
       <BulkTaskColorPicker taskIds={taskIds} />
       <BulkActionsSurface isMobile={isMobile} open={actionsOpen} onOpenChange={setActionsOpen}>
         {steps.length > 0 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="default"
-                variant="outline"
-                className="cursor-pointer gap-1.5"
-                disabled={isProcessing || !canMove}
-                title={!canMove ? t("kanban:cannotMoveTasksFromDifferentWorkflows") : undefined}
-                data-testid="bulk-move-button"
-              >
-                {t("kanban:moveTo")}
-                <IconChevronRight className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" side="top">
-              {steps.map((step) => (
-                <DropdownMenuItem
-                  key={step.id}
-                  className="cursor-pointer"
-                  onClick={() => onBulkMove(step.id)}
-                  data-testid={`bulk-move-step-${step.id}`}
-                >
-                  <div className={cn("w-2 h-2 rounded-full mr-2 shrink-0", step.color)} />
-                  {step.title}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <BulkMoveMenu
+            steps={steps}
+            isMobile={isMobile}
+            isProcessing={isProcessing}
+            canMove={canMove}
+            onBulkMove={onBulkMove}
+          />
         )}
 
         <BulkArchiveDialog

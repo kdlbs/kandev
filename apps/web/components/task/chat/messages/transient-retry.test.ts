@@ -10,6 +10,8 @@ describe("transient retry countdown", () => {
 
   it("rejects malformed retry deadlines", () => {
     expect(parseRetryAt(undefined)).toBeUndefined();
+    expect(parseRetryAt("0")).toBeUndefined();
+    expect(parseRetryAt("2026-02-30T12:00:00Z")).toBeUndefined();
     expect(parseRetryAt("not-a-date")).toBeUndefined();
     expect(parseRetryAt("2026-08-08T12:00:00.000Z")).toBe(Date.parse("2026-08-08T12:00:00.000Z"));
   });

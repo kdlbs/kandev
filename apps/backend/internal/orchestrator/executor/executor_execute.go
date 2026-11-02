@@ -181,7 +181,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
 			return mcpprofile.Context{}, err
 		}
-		return e.withCanvasCapability(profile), nil
+		return e.withTaskCapabilities(profile), nil
 	}
 	if noRow {
 		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
@@ -206,7 +206,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 
 	if noRow {
@@ -218,10 +218,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
+		return e.withTaskCapabilities(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -238,7 +238,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
@@ -254,9 +254,16 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
 }
 
-func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
-	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
-		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
+	if e == nil {
+		return profile
+	}
+	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	if e.workspaceCollaborationEnabled &&
+		(profile.Surface == mcpprofile.SurfaceKanbanTask || profile.Surface == mcpprofile.SurfaceAutomation) {
+		profile = profile.WithCapability(mcpprofile.CapabilityWorkspaceCollaborationReport)
 	}
 	return profile
 }
@@ -713,8 +720,8 @@ func (e *Executor) markSessionRunningAfterProcessStart(ctx context.Context, task
 	case models.TaskSessionStateRunning:
 		return true
 	case models.TaskSessionStateStarting:
-		changed, finalState, transitionErr := e.transitionSessionState(
-			ctx, taskID, sessionID, models.TaskSessionStateRunning, "",
+		changed, finalState, transitionErr := e.transitionSessionStateWithHook(
+			ctx, taskID, sessionID, &session.State, models.TaskSessionStateRunning, "", nil,
 		)
 		if transitionErr != nil {
 			e.logger.Warn("failed to mark session running after agent start",
@@ -1083,17 +1090,6 @@ func (e *Executor) transitionSessionState(
 	errorMessage string,
 ) (bool, models.TaskSessionState, error) {
 	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, nil, state, errorMessage, nil)
-}
-
-func (e *Executor) transitionSessionStateFrom(
-	ctx context.Context,
-	taskID, sessionID string,
-	expectedState, state models.TaskSessionState,
-	errorMessage string,
-) (bool, models.TaskSessionState, error) {
-	return e.transitionSessionStateWithHook(
-		ctx, taskID, sessionID, &expectedState, state, errorMessage, nil,
-	)
 }
 
 func (e *Executor) transitionSessionStateWithHook(
@@ -2133,6 +2129,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if err != nil {
 			return nil, err
 		}
+		req.CausingRunID = opts.CausingRunID
 		req.TaskScope, err = e.resolveTaskLaunchScope(ctx, task.ID)
 		if err != nil {
 			return nil, err
@@ -2269,7 +2266,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if hasRunning {
 			result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 				launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-				opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+				opts.OnExecutionAdmitted, opts.OnStartAttemptClaimed, opts.BeforeInitialPromptDispatch,
 				opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 				opts.RefuseIfAgentRunning, opts.TurnID,
 			)
@@ -2550,7 +2547,7 @@ func (e *Executor) handleLaunchFailure(
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr,
+		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
@@ -2568,8 +2565,24 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
+	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
+	if loadErr != nil || session == nil || session.TaskID != taskID {
+		if loadErr != nil {
+			e.logger.Warn("failed to load session before recording early launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(loadErr))
+		}
+		return routingerr.SanitizeError(launchErr)
+	}
+	switch session.State {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput:
+	default:
+		return routingerr.SanitizeError(launchErr)
+	}
+	expectedState := session.State
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, "", launchErr,
+		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
 		return safeErr
@@ -2619,6 +2632,7 @@ func (e *Executor) transitionLaunchFailure(
 	failCtx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
+	expectedState *models.TaskSessionState,
 ) (error, bool) {
 	safeErr := routingerr.SanitizeError(launchErr)
 	e.logger.Error("failed to launch agent",
@@ -2636,7 +2650,7 @@ func (e *Executor) transitionLaunchFailure(
 		}
 	}
 	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, nil, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+		failCtx, taskID, sessionID, expectedState, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
@@ -2794,11 +2808,15 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:            task.IsEphemeral,
 		IsPassthrough:          session.IsPassthrough,
 		WorkspacePath:          session.WorkspacePath,
+		WorkspaceLayout:        task.InitialWorkspaceLayout,
 		WorkspaceReuseRequired: workspaceReuseRequired,
 		McpProviders:           deriveMCPProviders(allRepos),
 	}
 	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
 		return nil, executorConfig{}, err
+	}
+	if existingEnv != nil && existingEnv.WorkspaceLayout != "" {
+		req.WorkspaceLayout = existingEnv.WorkspaceLayout
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -2850,7 +2868,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	} else {
 		for _, f := range folders {
 			if f != nil {
-				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
+					Name:                  f.DisplayName,
+					LocalPath:             f.LocalPath,
+					WorkspaceRelativePath: f.WorkspaceRelativePath,
+				})
 			}
 		}
 	}
@@ -2968,6 +2990,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.BranchIdentitySlug = plan.identitySlug
 			spec.BranchSlug = plan.pathSlug
 		}
+		spec.WorkspaceRelativePath = info.WorkspaceRelativePath
 		out = append(out, spec)
 	}
 	return out
@@ -3009,6 +3032,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.RepositoryID = repoInfo.RepositoryID
 		req.TaskRepositoryID = repoInfo.TaskRepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
+		req.WorkspaceRelativePath = repoInfo.WorkspaceRelativePath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
@@ -3115,7 +3139,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -3128,6 +3152,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	onStartAttemptClaimed func(string),
 	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
@@ -3226,6 +3251,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		return nil, err
+	}
+	if onStartAttemptClaimed != nil {
+		onStartAttemptClaimed(startAttemptID)
 	}
 	if prompt != "" || len(request.Attachments) > 0 {
 		if err := e.registerInitialPromptCallbacks(
@@ -3727,6 +3755,9 @@ func (e *Executor) persistTaskEnvironment(
 		if len(repos) > 0 || len(existingEnv.Repos) > 0 || !repoBacked {
 			existingEnv.Status = models.TaskEnvironmentStatusReady
 		}
+		if req.WorkspaceLayout != "" {
+			existingEnv.WorkspaceLayout = req.WorkspaceLayout
+		}
 		existingEnv.MaterializationSessionID = ""
 		if persister, ok := e.repo.(taskEnvironmentTransitionPersister); ok {
 			if err := persister.PersistTaskEnvironmentTransition(ctx, existingEnv, repos, executorTransition); err != nil {
@@ -3769,6 +3800,7 @@ func (e *Executor) persistTaskEnvironment(
 		ContainerBootstrapNonceSecretID:   extractContainerBootstrapNonceSecretID(resp.Metadata),
 		ContainerControlAuthTokenSecretID: extractContainerControlAuthTokenSecretID(resp.Metadata),
 		TaskDirName:                       req.TaskDirName,
+		WorkspaceLayout:                   req.WorkspaceLayout,
 		SandboxID:                         extractSandboxID(resp.Metadata),
 	}
 	// Embed per-repo rows in the same create transaction. Single-repo
@@ -3842,7 +3874,17 @@ func (e *Executor) persistRecoveredBaseBranch(
 // store excludes them from physical checkout operations.
 func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentResponse) []*models.TaskEnvironmentRepo {
 	if len(resp.Worktrees) > 0 {
-		return buildTaskEnvironmentRepos(resp.Worktrees)
+		repos := buildTaskEnvironmentRepos(resp.Worktrees)
+		for _, repo := range repos {
+			for _, spec := range req.Repositories {
+				if spec.RepositoryID == "" || spec.RepositoryID != repo.RepositoryID || launchRepoBranchIdentitySlug(spec) != repo.BranchSlug {
+					continue
+				}
+				repo.WorkspaceRelativePath = spec.WorkspaceRelativePath
+				break
+			}
+		}
+		return repos
 	}
 	// Clone-based remote executors materialize all repositories inside one
 	// task workspace, so they have no host worktree result to project here.
@@ -3856,8 +3898,9 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 				continue
 			}
 			repos = append(repos, &models.TaskEnvironmentRepo{
-				RepositoryID: spec.RepositoryID,
-				BranchSlug:   launchRepoBranchIdentitySlug(spec),
+				RepositoryID:          spec.RepositoryID,
+				BranchSlug:            launchRepoBranchIdentitySlug(spec),
+				WorkspaceRelativePath: spec.WorkspaceRelativePath,
 				// Remote clone launches only report an environment-level workspace
 				// handle when they have no per-repository result. Do not invent a
 				// path or branch for every repository from that shared handle: it
@@ -3907,6 +3950,7 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		WorktreeSourceClonePath: worktreeSourceClonePath,
 		WorktreeSourceCommonDir: worktreeSourceCommonDir,
 		Position:                0,
+		WorkspaceRelativePath:   req.WorkspaceRelativePath,
 	}}
 }
 
@@ -3931,6 +3975,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 			WorktreeSourceCommonDir: w.MainRepoGitDir,
 			Position:                i,
 			ErrorMessage:            w.ErrorMessage,
+			WorkspaceRelativePath:   w.WorkspaceRelativePath,
 		})
 	}
 	return out
@@ -4024,6 +4069,7 @@ func (e *Executor) persistOneTaskEnvironmentRepoTransition(
 		WorktreeSourceCommonDir: w.WorktreeSourceCommonDir,
 		Position:                position,
 		ErrorMessage:            w.ErrorMessage,
+		WorkspaceRelativePath:   w.WorkspaceRelativePath,
 	}
 	if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
 		e.logger.Warn("failed to persist task environment repo",
@@ -4063,6 +4109,7 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		return nil
 	}
 	row.BranchSlug = w.BranchSlug
+	row.WorkspaceRelativePath = w.WorkspaceRelativePath
 	// Concrete launch results populate the physical tuple together; inventory-only
 	// rows have no WorktreeID and must not replace it.
 	if replacePhysical || w.WorktreeID != "" {
@@ -4104,6 +4151,7 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 
 func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, position int, replacePhysical bool) bool {
 	return row.BranchSlug != w.BranchSlug ||
+		row.WorkspaceRelativePath != w.WorkspaceRelativePath ||
 		((replacePhysical || w.WorktreeID != "") &&
 			(row.WorktreeID != w.WorktreeID ||
 				row.WorktreePath != w.WorktreePath ||

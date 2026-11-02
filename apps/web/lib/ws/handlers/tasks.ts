@@ -1,5 +1,6 @@
 import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -34,6 +35,7 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
+import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
 import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
@@ -305,6 +307,7 @@ function removeArchivedTaskSideEffects(store: StoreApi<AppState>, taskId: string
   state.setOfficeRefetchTrigger("tasks");
 }
 
+/** Follows a changed primary only when neither a pending restart nor a user pin owns selection. */
 function maybeFollowUpdatedTaskPrimary(
   store: StoreApi<AppState>,
   beforeState: AppState,
@@ -332,6 +335,7 @@ function maybeFollowUpdatedTaskPrimary(
     newPrimary !== previousPrimary &&
     afterState.tasks.activeTaskId === taskId &&
     afterState.tasks.activeSessionId === previousPrimary &&
+    !isSessionRestartPending(store, previousPrimary) &&
     !shouldPreservePinnedSessionForTask(afterState, taskId);
   if (!shouldFollow || !newPrimary) return;
   clearPinnedSessionIfOverridden(store, newPrimary);
@@ -460,6 +464,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
       for (const sid of sessionIds) {
+        retireSessionReads(store, sid);
         useContextFilesStore.getState().clearSession(sid);
         currentState.clearQueueStatus?.(sid);
         currentState.removeTaskSession?.(deletedId, sid);

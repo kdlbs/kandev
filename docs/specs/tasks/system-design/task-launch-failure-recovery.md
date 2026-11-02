@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-14
+updated: 2026-10-26
 owners:
   - cfl12
 ---
@@ -359,6 +359,10 @@ errors, tab navigation during a delayed response, explicit deletion racing a lat
 response, reload/reconnect, and retry identity. Include mixed healthy/failed tabs.
 Public recovery guidance belongs in `docs/public/tasks-and-workflows.md` when
 implementation lands. See [delivery package](../../../plans/setup-recovery-ux/plan.md).
+
+The [startup amendment](quick-chat-opening-composer.md#startup-acceptance-amendment)
+moves ordinary creation acceptance before preparation. Its background path
+preserves this retention contract.
 
 ### Quick Chat launch admission coverage
 

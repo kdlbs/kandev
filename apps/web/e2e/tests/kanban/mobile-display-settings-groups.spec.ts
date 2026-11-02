@@ -82,17 +82,30 @@ test.describe("Mobile display settings groups", () => {
     await expect(reopened.getByTestId("mobile-board-sort")).toHaveCount(0);
   });
 
-  test("names the mobile workflow and repository filter controls", async ({ testPage }) => {
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-003.2 AC-TASKS-LIST-ARCHIVE-FILTERS-003.5
+  test("names the List workflow and repository controls in the Filters drawer", async ({
+    testPage,
+  }) => {
     await testPage.goto("/tasks");
     const card = await openMobileMenu(testPage);
-    await expandDisplaySettingsGroup(testPage, "filters", "mobile");
+    await expect(card.getByTestId("mobile-display-settings-filters-toggle")).toHaveCount(0);
+    await closeMobileMenu(testPage);
 
-    await expect(card.getByTestId("mobile-display-workflow-filter")).toHaveAccessibleName(
-      "Workflow",
-    );
-    await expect(card.getByTestId("mobile-display-repository-filter")).toHaveAccessibleName(
+    const opener = testPage.getByTestId("tasks-list-filters-trigger");
+    await expectTouchControl(opener);
+    await opener.tap();
+    const drawer = testPage.getByTestId("tasks-list-filters-drawer");
+    await expect(drawer).toBeVisible();
+
+    await expect(drawer.getByTestId("tasks-list-workflow-filter")).toHaveAccessibleName("Workflow");
+    await expect(drawer.getByTestId("tasks-list-repository-filter")).toHaveAccessibleName(
       "Repository",
     );
+    await expectTouchControl(drawer.getByTestId("tasks-list-workflow-filter"));
+    await expectTouchControl(drawer.getByTestId("tasks-list-repository-filter"));
+    await drawer.getByTestId("tasks-list-filters-done").tap();
+    await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
   });
 
   test("keeps persisted board values visible after closing and reopening the drawer", async ({

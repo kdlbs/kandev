@@ -67,6 +67,46 @@ session, incarnation, and historical harness generation. Foreign streams remain 
 
 ## Automatic repair of provable restart inconsistencies
 
+### Definitive remote absence
+
+Startup reconciliation and periodic remote attachment consume the same
+`DetailedRecoveryBackend` result. A missing returned instance alone leaves
+ownership unknown. `no_matching_instance` ends pending attachment only for
+runtime shapes accepted by `remoteRecoveryNoMatchProvesStopped`. Remote Docker
+and Sprites currently satisfy that predicate. SSH, Kubernetes, plugin runtimes,
+transport failures, and omitted outcomes retain their existing guards.
+
+Before settlement, re-read the pinned task, session, environment, recovery
+identity, and executor row. Fence changed owners, tracked successors, Stop,
+cleanup, and shutdown through the existing pending-attempt arbitration.
+Repair the exact executor row with `RepairExecutorRunningDeadIfCurrent`, using
+the execution ID and observed nonzero `UpdatedAt`. Preserve its resume token,
+workspace, metadata, and historical execution identity. Missing CAS support,
+storage failure, or changed evidence cannot authorize an unconditional write.
+Do not use a cleanup helper whose boolean hides persistence errors.
+
+After a successful repair, remove only the matching pending entry and release
+its retryable guard. Repeat attempts converge after interruption between SQL
+repair and guard release. Never clear an unstoppable guard or release a
+successor's pending entry. Network and storage operations run outside the
+global remote-recovery mutex. Final entry arbitration remains atomic.
+
+This disposition establishes completion of startup attachment, not prompt
+completion or authority to restore native state. Keep delivery blocks,
+uncertain submissions, queue claims, and independent admission gates unchanged.
+Existing recovery actions can then return their actual evidence-based result.
+Native restoration still requires the separate exact source-termination and
+journal proof. No Stop, launch, prompt, queue drain, availability notification,
+or terminal event accompanies absence settlement.
+
+Verification covers startup, deferred startup, periodic retries, SQL failure,
+crash after repair, changed owners, and concurrent Stop. A mixed inventory
+contains an absent owner and an independently live or unknown owner.
+The [remote absence fix package](../../../plans/remote-recovery-absence/plan.md)
+owns this correction. Older recovery results do not verify it.
+
+### Existing restore reconciliation
+
 Use the same bounded reconciliation worker at backend startup and after confirmed local
 shared-runtime replacement. Its inventory must include retained unresolved delivery records
 and execution identities even when an older row lacks current recovery metadata. A typed
@@ -92,6 +132,27 @@ identities, use compare-and-set writes, and re-read both stores at each checkpoi
 after journal classification or retirement resumes from retained proof. A single bad candidate
 does not abort other sessions. Startup and replacement triggers must share bounded ownership
 and cancellation rather than start competing restore workers.
+
+Successor setup events wait within the bounded restore operation instead of
+using a shorter independent event deadline. The execution retains the launch
+owner through native startup and the SQL generation commit. Owner cancellation
+releases a pending wait. A final authoritative read handles cancellation
+immediately after a successful commit. Receipt, projection, and acknowledgement
+remain prohibited before committed generation authority.
+
+On native startup failure, the restore owner also owns cleanup after cancellation.
+It revalidates the pinned checkpoint, workspace owner, and execution identity
+under the session locks. A ready candidate remains available for commit retry.
+Otherwise lifecycle stops the exact failed runtime and calls the durable
+checkpoint writer before removing inventory. A failed SQL commit can disconnect a candidate stream when its launch owner ends.
+A later pass verifies the same execution and initialized native identity, binds
+the new attempt only after the old owner ends, and reconnects before checking
+readiness. A complete, unacknowledged setup prefix without submissions can replay
+from zero while its predecessor generation remains pinned; receipt still waits
+for the successor commit. A failed stop or checkpoint keeps
+the inventory. Confirmed termination advances `candidate_launching` to
+`candidate_dead`, so a later pass can rotate safely even after a crash during
+cleanup. An absent execution row without that proof remains blocked.
 
 When a recovery snapshot exists, both automatic restoration and successful explicit native Resume must commit a newer
 `restored` recovery revision with the matching recovery-block resolution. Keep the original

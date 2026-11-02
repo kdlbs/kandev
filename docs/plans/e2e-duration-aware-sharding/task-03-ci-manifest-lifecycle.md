@@ -7,7 +7,15 @@ depends_on:
   - "01-timing-profile"
   - "02-shard-planner"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
+requirements:
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
+acceptance_criteria:
+  - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1
+  - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.2
+  - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.3
+system_design:
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
 ---
 
 # Task 03: Wire manifests into the CI workflow
@@ -79,3 +87,19 @@ manifests, runs both matrices through the shared validated runner, and uploads
 profile/retry/diagnostic artifacts. A missing-manifest invocation failed closed
 with the expected error. Backend/web builds and the focused type/lint checks
 passed.
+
+
+### PR #3680 CI diagnostic retention (2026-10-10)
+
+The exact-head normal shards 5 and 12 reached their 45-minute job limit. Their
+blob reporters had not finalized, so the blob uploads failed. The results
+uploads used `failure()` and were skipped for the cancelled jobs, losing the
+available trace and screenshot diagnostics. Normal, container and Kubernetes result
+uploads now admit cancellation as well as failure. This preserves diagnosis
+without changing test selection, worker count, retries, timeout or gate status.
+The legacy plan/work-order metadata now uses the existing requirements,
+acceptance criteria and design fields accepted by the coverage evaluator.
+
+Validation: all 16 existing workflow contract tests passed. Catalog and full
+specification validation passed, and the trusted documentation evaluator
+accepted all 13 changed work orders in the candidate diff.

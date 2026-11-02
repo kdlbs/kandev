@@ -70,6 +70,15 @@ func (s *Service) UpsertWorkspaceSettings(ctx context.Context, settings *Workspa
 	if s.store == nil {
 		return fmt.Errorf("github store not configured")
 	}
+	lock := s.workspaceConnectionMutationLock(settings.WorkspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if settings.GitHubHost != "" {
+		ctx = withExpectedGitHubHost(ctx, settings.GitHubHost)
+	}
+	if err := s.validateExpectedGitHubHost(ctx, settings.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.UpsertWorkspaceSettings(ctx, settings)
 }
 
@@ -93,6 +102,12 @@ func (s *Service) UpdateWorkspaceSettings(ctx context.Context, req *UpdateWorksp
 	}
 	if s.store == nil {
 		return nil, fmt.Errorf("github store not configured")
+	}
+	lock := s.workspaceConnectionMutationLock(req.WorkspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	if err := s.validateExpectedGitHubHost(ctx, req.WorkspaceID); err != nil {
+		return nil, err
 	}
 	return s.store.PatchWorkspaceSettings(ctx, req)
 }
@@ -134,7 +149,7 @@ func (s *Service) SearchUserPRsPagedForWorkspaceUser(
 			if fetchErr != nil || result == nil {
 				return nil, 0, fetchErr
 			}
-			return result.PRs, result.TotalCount, nil
+			return prsForHost(result.PRs, resolved.host().String()), result.TotalCount, nil
 		},
 		func(items []*PR) ([]*PR, error) { return s.filterPersonalPRsByAutomation(ctx, workspaceID, items) },
 		func(result filteredPersonalSearchPage[*PR], page, perPage int) *PRSearchPage {
@@ -171,7 +186,7 @@ func (s *Service) SearchUserIssuesPagedForWorkspaceUser(
 			if fetchErr != nil || result == nil {
 				return nil, 0, fetchErr
 			}
-			return result.Issues, result.TotalCount, nil
+			return issuesForHost(result.Issues, resolved.host().String()), result.TotalCount, nil
 		},
 		func(items []*Issue) ([]*Issue, error) {
 			return s.filterPersonalIssuesByAutomation(ctx, workspaceID, items)

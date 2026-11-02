@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-30
+updated: 2026-10-21
 owners:
   - Kandev
 ---
@@ -99,6 +99,13 @@ Preserve the
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.32:** Successful same-conversation recovery shall clear matching controls and retain resolved history. Each eligible owned resume shall persist bounded, stamp-specific proof so history stays resolved after reload without its optional transcript notice. Show the attempt's confirmed model or no model claim, retain the settings/permission disclosure, and preserve saved settings and native identity.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.33:** Delayed prior events shall not replace recovered state or settle a later failure. Tie success to the captured failure stamp and owned resume attempt; a global timestamp or dismissal alone is not recovery proof.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.34:** Desktop and native phone layouts shall show the cause before technical disclosure. Both shall support eligible actions, pending feedback, wrapped diagnostics, and safe copy feedback. Phone and coarse-pointer actions shall measure at least 44 pixels. Copy and status labels shall update with the selected locale, with all shipped locales supplied.
+
+#### Startup transport amendment (October 20)
+
+Criterion .35 narrows .22; see the
+[transport package](../../../plans/start-model-transport-failure/plan.md).
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.35:** Fail-closed startup model branches shall pass typed agent-stream loss, cancellation, and deadlines through unchanged. Opaque replies shall remain application failures; wording alone shall not establish disconnection. Auto-fallback remains unchanged.
 
 ## Session error history amendment
 

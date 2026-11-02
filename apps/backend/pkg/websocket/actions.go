@@ -128,6 +128,7 @@ const (
 	ActionSessionRecover                  = "session.recover"
 	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
 	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionRuntimeStorageChanged    = "task_session.runtime_storage_changed"
 	ActionSessionResetContext             = "session.reset_context"
 	ActionSessionStop                     = "session.stop"
 	ActionSessionDelete                   = "session.delete"
@@ -282,6 +283,7 @@ const (
 	ActionSessionTurnStarted            = "session.turn.started"
 	ActionSessionTurnCompleted          = "session.turn.completed"
 	ActionSessionTurnRemoved            = "session.turn.removed"
+	ActionSessionTurnChangesUpdated     = "session.turn.changes.updated"
 	ActionSessionAvailableCommands      = "session.available_commands"
 	ActionSessionModeChanged            = "session.mode_changed"
 	ActionSessionAgentCapabilities      = "session.agent_capabilities"
@@ -291,6 +293,7 @@ const (
 	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
+	ActionSessionPromptSuggestion       = "session.prompt_suggestion"
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
@@ -514,7 +517,6 @@ const (
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
-
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
 	ActionMCPListTaskDocuments        = "mcp.list_task_documents"

@@ -10,6 +10,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -18,8 +20,8 @@ import (
 )
 
 func findRunByAgent(t *testing.T, repo interface {
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
-}, workspaceID, agentProfileID string) *models.Run {
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
+}, workspaceID, agentProfileID string) *runsmodels.Run {
 	t.Helper()
 	reqs, err := repo.ListRuns(context.Background(), workspaceID)
 	if err != nil {
@@ -172,7 +174,7 @@ func TestQueueRunCtx_AmbiguousMultiClaimActorInheritsDeepestCausationDepth(t *te
 	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	ss.SetRunsService(runsSvc)
 
-	shallow := &models.Run{
+	shallow := &runsmodels.Run{
 		ID: "shallow-claim", AgentProfileID: actorAgentID, Reason: "task_assigned",
 		Payload: `{}`, CausationDepth: 1,
 	}
@@ -182,7 +184,7 @@ func TestQueueRunCtx_AmbiguousMultiClaimActorInheritsDeepestCausationDepth(t *te
 	if _, err := repo.RunsRepository().ClaimRun(ctx, actorAgentID); err != nil {
 		t.Fatalf("claim shallow: %v", err)
 	}
-	deep := &models.Run{
+	deep := &runsmodels.Run{
 		ID: "deep-claim", AgentProfileID: actorAgentID, Reason: "task_assigned",
 		Payload: `{}`, CausationDepth: 4,
 	}

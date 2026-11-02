@@ -156,7 +156,9 @@ export function ModelPicker({
         }));
   const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
   const allowCustomModel = Boolean(discovery?.allows_custom_model);
-  const modelIsGone = Boolean(profile.model && !modelOptions.some((m) => m.id === profile.model));
+  const modelIsGone = Boolean(
+    profile.model && !disabled && !modelOptions.some((m) => m.id === profile.model),
+  );
   if (modelIsGone) {
     modelOptions.unshift(goneModelOption(profile.model, allowCustomModel, goneModelLabel));
   }

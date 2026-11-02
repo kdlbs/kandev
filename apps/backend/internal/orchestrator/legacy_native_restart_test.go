@@ -27,7 +27,7 @@ func (m *legacyNativeTestManager) ReadDeliveryRecordSubmission(context.Context, 
 }
 
 func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
-	for _, condition := range []string{"dead owner", "queue", "retired history", "generic history", "unprojected output", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
+	for _, condition := range []string{"dead owner", "backlog", "queue", "retired history", "generic history", "unprojected output", "live owner", "hash mismatch", "retained terminal", "changed owner", "independent work"} {
 		t.Run(condition, func(t *testing.T) {
 			ctx := context.Background()
 			service, manager, block, row, launched, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
@@ -119,6 +119,11 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 				return proof, nil
 			}
 			service.agentManager = wrapper
+			if condition == "backlog" {
+				_, err = service.messageQueue.QueueMessage(ctx, row.SessionID, "task1", "queued instruction", "", "user", false, nil)
+				require.NoError(t, err)
+				require.NoError(t, service.messageQueue.SetAutoRun(ctx, row.SessionID, true))
+			}
 			session, err := repo.GetTaskSession(ctx, row.SessionID)
 			require.NoError(t, err)
 			restored, err := service.resumeLegacyNativeRestart(ctx, session)
@@ -127,7 +132,7 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			want := condition == "dead owner" || condition == "queue" || condition == "retired history" || condition == "generic history"
+			want := condition == "dead owner" || condition == "backlog" || condition == "queue" || condition == "retired history" || condition == "generic history"
 			require.Equal(t, want, restored)
 			if restored {
 				require.NotNil(t, *launched)
@@ -140,6 +145,11 @@ func TestLegacyNativeRestartWithoutRecoveryNotice(t *testing.T) {
 				require.False(t, again)
 			} else {
 				require.Nil(t, *launched)
+			}
+			if condition == "backlog" {
+				status := service.messageQueue.GetStatus(ctx, row.SessionID)
+				require.False(t, status.AutoRun, "native restoration must not release queued instructions")
+				require.Len(t, status.Entries, 1)
 			}
 			require.Empty(t, manager.capturedPromptCalls)
 		})

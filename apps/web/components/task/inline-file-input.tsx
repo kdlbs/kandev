@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useCallback } from "react";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 import { Input } from "@kandev/ui/input";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useTranslation } from "react-i18next";
@@ -15,29 +16,38 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const doneRef = useRef(false);
   useEffect(() => {
-    // Focus on next tick to ensure the element is rendered
-    requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, []);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        const value = inputRef.current?.value.trim();
-        if (value) onSubmit(value);
-        else onCancel();
-      } else if (e.key === "Escape") {
-        onCancel();
-      }
-    },
-    [onSubmit, onCancel],
-  );
-
-  const handleBlur = useCallback(() => {
+  const commit = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
     const value = inputRef.current?.value.trim();
     if (value) onSubmit(value);
     else onCancel();
   }, [onSubmit, onCancel]);
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: true,
+    inputRef,
+    onLeave: commit,
+  });
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (doneRef.current) return;
+      if (e.key === "Enter") {
+        cancelPendingBlur();
+        commit();
+      } else if (e.key === "Escape") {
+        cancelPendingBlur();
+        doneRef.current = true;
+        onCancel();
+      }
+    },
+    [cancelPendingBlur, commit, onCancel],
+  );
 
   return (
     <div
@@ -57,7 +67,7 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
         className="h-5 text-xs px-1 py-0 border-muted-foreground/30"
         placeholder={t("task:filename")}
         onKeyDown={handleKeyDown}
-        onBlur={handleBlur}
+        onBlur={onBlur}
       />
     </div>
   );

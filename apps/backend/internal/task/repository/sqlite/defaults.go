@@ -65,11 +65,11 @@ func (r *Repository) hideBuiltinWorkflows() error {
 }
 
 // healBuiltinWorkflowStepFlags reconciles workflow_steps.auto_advance_requires_signal
-// on system-workflow rows whose steps were materialized before their embedded
+// on Office Default system-workflow rows materialized before their embedded
 // template started requiring the ADR-0015 completion signal (WO-32:
 // office-default's "work" step). Steps are matched by name within their
 // workflow's template id, scoped to is_system = 1 so user-created and
-// user-customised workflows are never touched.
+// user-customised workflows are never touched. Routine settings are retained.
 func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	templates, err := workflowcfg.LoadTemplates()
 	if err != nil {
@@ -77,6 +77,9 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	}
 	now := time.Now().UTC()
 	for _, tmpl := range templates {
+		if tmpl.ID != templateIDOfficeDefault {
+			continue
+		}
 		for _, step := range tmpl.Steps {
 			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
 			if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`

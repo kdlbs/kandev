@@ -451,24 +451,9 @@ test-coverage:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
-## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
-## docs/plans/plugins/GRPC-CONTRACT.md). Installs protoc-gen-go and
-## protoc-gen-go-grpc into a local .tools/bin (not committed) and drives them
-## via `go run` buf — no system protoc required. Requires network access for
-## the first run (tool + buf module downloads); output is committed so
-## `go build` never needs this target.
-PROTO_TOOLS_BIN := $(CURDIR)/.tools/bin
-BUF_VERSION := v1.47.2
-PROTOC_GEN_GO_VERSION := v1.36.11
-PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
-
 .PHONY: proto
 proto:
-	@echo "Generating proto stubs..."
-	@$(call MKDIR,$(PROTO_TOOLS_BIN))
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
-	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
-	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
+	$(MAKE) -C ../../pluginsdk proto
 
 ## Run linter (requires golangci-lint)
 lint:

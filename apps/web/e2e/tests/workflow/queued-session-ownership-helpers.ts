@@ -1,4 +1,5 @@
 import { expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { TaskStatusSummaryLaunchQueue } from "../../../lib/types/task-status-summary";
@@ -108,29 +109,17 @@ export async function expectSessionMessagesUnchanged(
   timeoutMs = 5_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  let unexpectedMessageIds: string[] | null = null;
-  await expect
-    .poll(
-      async () => {
-        const actualMessageIds = await sessionMessageIds(apiClient, sessionId);
-        if (JSON.stringify(actualMessageIds) !== JSON.stringify(expectedMessageIds)) {
-          unexpectedMessageIds = actualMessageIds;
-          return true;
-        }
-        return Date.now() >= deadline;
-      },
-      {
-        // Give the final poll enough time to observe the end of the stability
-        // window. With the same timeout on both clocks, an unchanged list can
-        // be reported as a timeout instead of a successful invariant check.
-        timeout: timeoutMs + 1_000,
-        message: `session ${sessionId} received an unexpected message`,
-      },
-    )
-    .toBe(true);
-  if (unexpectedMessageIds) {
-    throw new Error(
-      `session ${sessionId} received unexpected messages: ${JSON.stringify(unexpectedMessageIds)}`,
+  while (true) {
+    const actualMessageIds = await sessionMessageIds(apiClient, sessionId);
+    expect(actualMessageIds, `session ${sessionId} received unexpected messages`).toEqual(
+      expectedMessageIds,
+    );
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+    await dwell(
+      Math.min(100, remaining),
+      "negative-assertion",
+      "No event announces that the parked session received no messages during this window",
     );
   }
 }

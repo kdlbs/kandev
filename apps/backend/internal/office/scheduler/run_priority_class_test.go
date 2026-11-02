@@ -17,6 +17,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -68,9 +70,9 @@ func TestQueueRun_StampsEventPriorityClass(t *testing.T) {
 	if claimed == nil {
 		t.Fatal("expected a claimable run")
 	}
-	if claimed.PriorityClass != models.PriorityClassEvent {
+	if claimed.PriorityClass != runsmodels.PriorityClassEvent {
 		t.Fatalf("priority class = %v, want %v (PriorityClassHuman zero-value regression)",
-			claimed.PriorityClass, models.PriorityClassEvent)
+			claimed.PriorityClass, runsmodels.PriorityClassEvent)
 	}
 }
 
@@ -104,8 +106,8 @@ func TestQueueRunCtx_StampsEventPriorityClass(t *testing.T) {
 	if claimed == nil {
 		t.Fatal("expected a claimable run")
 	}
-	if claimed.PriorityClass != models.PriorityClassEvent {
+	if claimed.PriorityClass != runsmodels.PriorityClassEvent {
 		t.Fatalf("priority class = %v, want %v (PriorityClassHuman zero-value regression)",
-			claimed.PriorityClass, models.PriorityClassEvent)
+			claimed.PriorityClass, runsmodels.PriorityClassEvent)
 	}
 }

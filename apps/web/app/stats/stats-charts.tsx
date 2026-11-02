@@ -7,11 +7,11 @@ import type { DailyActivityDTO, ModelUsageDTO, CompletedTaskActivityDTO } from "
 import { useTranslation } from "react-i18next";
 
 function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit", timeZone: "UTC" });
 }
 
 function formatWeekLabel(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function getHeatmapColor(intensity: number): string {
@@ -24,7 +24,7 @@ function getHeatmapColor(intensity: number): string {
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxActivity: number }) {

@@ -12,20 +12,24 @@ type Shape = {
 
 // i18n-exempt: Agent-facing discovery policy, not browser copy.
 const routing =
-  "For structured comparisons, recorded checks, or a chart, graph, plot, preview, KPI, or metrics request with data, call directly.";
+  "For structured comparisons, recorded checks or chart/graph/plot/preview/KPI/metrics with data: call directly.";
 // i18n-exempt: Host presentation policy for agent discovery.
 const presentation =
-  "Kandev owns axes, legends, tooltips, layout, and styling. No ASCII, SVG, HTML, or separate app. Markdown for small text tables. CSV: workspace-relative. Label series with units. line chart/bar chart/CSV chart; file preview.";
+  "Kandev owns axes/legends/tooltips/layout/style. No ASCII/SVG/HTML/separate app. Markdown for small text tables. CSV: workspace-relative. Label series with units. line chart/bar chart/CSV chart; file preview.";
 
-function objectFields(shape: Shape): string {
-  return Object.keys(shape.properties ?? {})
-    .map((key) => key + (shape.required?.includes(key) ? "" : "?"))
+function objectFields(shape: Shape, includeEnumValues = false): string {
+  return Object.entries(shape.properties ?? {})
+    .map(([key, field]) => {
+      const optional = shape.required?.includes(key) ? "" : "?";
+      const values = includeEnumValues && field.enum?.length ? ":" + field.enum.join("|") : "";
+      return key + optional + values;
+    })
     .join(",");
 }
 
 function propertyShape(shape: Shape): string {
   if (shape.type === "array") return propertyShape(shape.items ?? {}) + "[]";
-  if (shape.type === "object") return "{" + objectFields(shape) + "}";
+  if (shape.type === "object") return "{" + objectFields(shape, true) + "}";
   return shape.type ?? "value";
 }
 
@@ -83,7 +87,7 @@ export function createRichOutputDescription(schema: ToolSchema): string {
   const version = schema.properties.version.const;
   const catalogVersion = schema.properties.catalog_version.const;
   // i18n-exempt: Generated shape guidance for the MCP tool contract.
-  const envelope = `Use version ${version},catalog_version ${catalogVersion},spec.root/spec.elements. Each element: {${elementKeys}}. leaves children:[].`;
+  const envelope = `version:${version},catalog_version:${catalogVersion}; spec:{root,elements}; Each element: {${elementKeys}}; leaves children:[].`;
   const description = [routing, envelope, ...components, presentation].join(" ");
   if (Array.from(description).length > 650) {
     // i18n-exempt: Build error for overflowing agent discovery metadata.

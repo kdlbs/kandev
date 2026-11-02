@@ -13,8 +13,6 @@ import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
-import { sendActiveTerminalInput } from "@/lib/terminal/send-shell-input";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
@@ -26,6 +24,7 @@ import { fetchAndOpenFile } from "../file-browser-hooks";
 import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type {
@@ -127,6 +126,7 @@ function MobileChatPanelContent({
   isPassthroughMode,
   effectiveSessionId,
   onOpenFile,
+  onOpenHistoricalDiff,
   scrollTarget,
   onScrollTargetConsumed,
   isVisible,
@@ -135,6 +135,7 @@ function MobileChatPanelContent({
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   scrollTarget: PendingMessageScrollTarget | null;
   onScrollTargetConsumed: (messageId: string) => void;
   isVisible: boolean;
@@ -169,6 +170,7 @@ function MobileChatPanelContent({
           taskId={effectiveSessionId ? activeTaskId : null}
           statusTaskId={activeTaskId}
           onOpenFile={onOpenFile}
+          onOpenHistoricalDiff={onOpenHistoricalDiff}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
           detailActive={isVisible}
@@ -189,6 +191,8 @@ type MobilePanelAreaProps = {
   selectedFile: OpenFileTab | null;
   selectedFilePreview: boolean;
   selectedDiff: { path: string; content?: string } | null;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
+  onCloseHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
@@ -245,6 +249,8 @@ export function MobilePanelArea({
   selectedFile,
   selectedFilePreview,
   selectedDiff,
+  onOpenHistoricalDiff,
+  onCloseHistoricalDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
   handleOpenFile,
@@ -264,7 +270,10 @@ export function MobilePanelArea({
       className="flex flex-col"
       style={{
         paddingTop: topPadding,
-        paddingBottom: `calc(${bottomNavHeight} + ${currentMobilePanel === "chat" && isPassthroughMode ? `${KEYBAR_HEIGHT_PX}px` : "0px"} + env(safe-area-inset-bottom, 0px))`,
+        paddingBottom:
+          currentMobilePanel === "chat" && isPassthroughMode
+            ? `max(calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px)), ${bottomOffset}px)`
+            : `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
         height: "100%",
       }}
     >
@@ -275,6 +284,7 @@ export function MobilePanelArea({
             isPassthroughMode={isPassthroughMode}
             effectiveSessionId={effectiveSessionId}
             onOpenFile={handleOpenFileFromChat}
+            onOpenHistoricalDiff={onOpenHistoricalDiff}
             scrollTarget={mobileScrollTarget}
             onScrollTargetConsumed={onScrollTargetConsumed}
             isVisible
@@ -290,6 +300,7 @@ export function MobilePanelArea({
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}
+            onCloseHistoricalDiff={onCloseHistoricalDiff}
           />
         </div>
       )}
@@ -609,24 +620,11 @@ function SessionMobileFooter({
   taskCanvases,
   onOpenCanvas,
 }: SessionMobileFooterProps) {
-  const ended = useAppStore((state) =>
-    isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
-  );
   return (
     <>
       <MobileTerminalKeybar
         sessionId={sessionId}
-        visible={
-          activePanel === "terminal" ||
-          (activePanel === "chat" && sessionKind === "passthrough" && !ended)
-        }
-        onSend={
-          activePanel === "chat" && sessionKind === "passthrough"
-            ? (data) => {
-                if (sessionId) sendActiveTerminalInput(sessionId, data);
-              }
-            : undefined
-        }
+        visible={activePanel === "terminal"}
         baseBottomOffset={BOTTOM_NAV_HEIGHT}
       />
       <SessionMobileBottomNav
@@ -671,6 +669,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     effectiveSessionId,
     isPassthroughMode,
     selectedDiff,
+    handleSelectHistoricalDiff,
     handleClearSelectedDiff,
     totalChangesCount,
     hasUnseenPlanUpdate,
@@ -681,6 +680,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     isTaskSwitcherOpen,
     handleMenuClick,
   } = useSessionLayoutState({ sessionId: props.sessionId });
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handleSelectHistoricalDiff(target);
+      handlePanelChange("changes");
+    },
+    [handlePanelChange, handleSelectHistoricalDiff],
+  );
   const {
     selectedFile,
     selectedFilePreview,
@@ -688,6 +694,25 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const handleCloseHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      handlePanelChangeAndClearSheet("chat");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const card = [...document.querySelectorAll<HTMLElement>("[data-change-set-id]")].find(
+            (element) => element.dataset.changeSetId === target.changeSetId,
+          );
+          const trigger = target.fileChangeId
+            ? card?.querySelector<HTMLElement>(
+                `[data-turn-file-change-id="${target.fileChangeId}"]`,
+              )
+            : card?.querySelector<HTMLElement>("[data-turn-change-open-diff]");
+          trigger?.focus();
+        });
+      });
+    },
+    [handlePanelChangeAndClearSheet],
+  );
   const workflowFocusRequest = useAppStore((state) => {
     const request = state.workflowSessionFocus.request;
     return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
@@ -774,6 +799,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         selectedFile={selectedFile}
         selectedFilePreview={selectedFilePreview}
         selectedDiff={selectedDiff}
+        onOpenHistoricalDiff={handleOpenHistoricalDiff}
+        onCloseHistoricalDiff={handleCloseHistoricalDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
         handleOpenFile={handleOpenFile}

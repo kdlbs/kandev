@@ -536,6 +536,11 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	// A fixed profile whose resource circuit is open must not be launched,
+	// even though it is not routed through dynamic selection.
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -647,6 +652,10 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 	if err != nil {
 		return fmt.Errorf("load conversation for dynamic continuation: %w", err)
 	}
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load queue ownership for dynamic continuation: %w", err)
+	}
 	conversation := make([]string, 0, len(messages))
 	toolSummary := make([]string, 0)
 	for _, message := range messages {
@@ -655,6 +664,9 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 		}
 		content := strings.TrimSpace(message.Content)
 		if message.AuthorType == models.MessageAuthorUser {
+			if _, queued := held[message.ID]; queued {
+				continue
+			}
 			input.UserMessages = append(input.UserMessages, content)
 			continue
 		}
@@ -832,6 +844,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}
@@ -865,6 +880,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	}
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
+		s.recordIneligibleFailureCircuit(ctx, session, classified)
 		return dynamicFailureRouteResult{}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
@@ -1216,7 +1232,7 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		return
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
-	ctx = withCancelInFlightGuardHeld(ctx)
+	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -1891,10 +1907,18 @@ func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (
 	if err != nil {
 		return capturedPrompt{}, false
 	}
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("cannot reconstruct dynamic relaunch prompt from unreadable queue", zap.String("session_id", sessionID), zap.Error(err))
+		return capturedPrompt{}, false
+	}
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
 		if message == nil || message.AuthorType != models.MessageAuthorUser ||
 			strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		if _, queued := held[message.ID]; queued {
 			continue
 		}
 		return capturedPrompt{text: message.Content}, true

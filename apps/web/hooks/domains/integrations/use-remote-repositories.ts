@@ -13,6 +13,7 @@ import { useAzureDevOpsConnection } from "@/hooks/domains/azure-devops/use-azure
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
 import { repositoryProviderMatchesURL } from "@/lib/plugins/repository-provider-url-resolution";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
 
 export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
@@ -95,6 +96,7 @@ type ProviderConnectionStatus = {
 type BuiltInRepositoryAccess = {
   eligibility: BuiltInRepositoryEligibility;
   refresh: () => void;
+  githubHost?: string;
 };
 
 function hasProviderConnection(status: ProviderConnectionStatus | null | undefined) {
@@ -145,7 +147,7 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
     void gitlabStatus.refresh();
     azureDevOpsConnection.refresh();
   }, [azureDevOpsConnection.refresh, githubStatus.refresh, gitlabStatus.refresh]);
-  return { eligibility, refresh };
+  return { eligibility, refresh, githubHost: githubStatus.status?.automation?.github_host };
 }
 
 async function loadBuiltInRepositories(
@@ -160,11 +162,14 @@ async function loadBuiltInRepositories(
       load: fetchAccessibleRepos({ workspaceId, limit: 100 }).then((repos) =>
         repos.map((repo) => ({
           provider: "github" as const,
-          id: repo.full_name,
+          id: `${repo.github_host ?? "github.com"}/${repo.full_name}`,
+          providerHost: `https://${repo.github_host ?? "github.com"}`,
           owner: repo.owner,
           name: repo.name,
           fullName: repo.full_name,
-          url: `https://github.com/${repo.owner}/${repo.name}`,
+          url:
+            repo.html_url ||
+            `https://${repo.github_host ?? "github.com"}/${repo.owner}/${repo.name}`,
           defaultBranch: repo.default_branch,
           private: repo.private,
         })),
@@ -398,7 +403,11 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     () => registry.getRepositoryProviders(),
     [registry, registryVersion],
   );
-  const { eligibility, refresh: refreshBuiltIns } = useBuiltInRepositoryAccess(workspaceId);
+  const {
+    eligibility,
+    refresh: refreshBuiltIns,
+    githubHost,
+  } = useBuiltInRepositoryAccess(workspaceId);
   const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
   const pluginSource = usePluginRepositorySource(
     workspaceId,
@@ -434,9 +443,10 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   }, [refreshBuiltIns]);
   const matchesURL = useCallback(
     (url: string) =>
+      Boolean(parseGitHubAnyUrl(url, githubHost)) ||
       looksLikeSupportedRemoteURL(url) ||
       pluginProviders.some((provider) => repositoryProviderMatchesURL(provider, url)),
-    [pluginProviders],
+    [githubHost, pluginProviders],
   );
   return {
     repos,

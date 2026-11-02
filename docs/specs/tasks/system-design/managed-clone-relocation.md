@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-09
+updated: 2026-10-22
 owners:
   - kandev
 ---
@@ -89,6 +89,17 @@ the computed workspace destination, acquire a relocation claim, rewrite database
 paths, or run transfer-only filter/submodule/cleanliness checks. Preserve the
 normal credentials policy. Canonicalize filesystem paths without treating every
 case-insensitive string match as the same directory on case-sensitive systems.
+
+Apply that physical identity rule to both persisted source fields as well.
+`verifyRecordedManagedCloneSource` resolves each nonempty recorded path, then
+uses `sameDirectoryIdentity` to compare the source clone and Git common
+directory independently. `filepath.EvalSymlinks` alone does not normalize path
+case on a case-insensitive filesystem. Textually different paths may therefore
+identify the same directory. Missing paths, partially populated source evidence,
+and physically different directories remain refusals; two empty recorded fields
+retain the existing legacy Git-proof path. Do not lowercase paths or accept
+case-insensitive string equality as identity. Reuse does not rewrite persisted
+paths, Git registration, or provider conversation state.
 
 If that exact legacy match is absent, keep the existing destination validation
 and relocation path, including refusal when the registered workspace destination
@@ -458,6 +469,7 @@ metric labels.
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Recorded source path identity](../../../plans/recorded-source-path-identity/plan.md)
 - [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
 - [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
 

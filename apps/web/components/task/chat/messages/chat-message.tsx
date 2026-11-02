@@ -29,6 +29,7 @@ import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
 import { useMessageTaskOrigin } from "./message-task-origin-context";
 import { WokenByEntry, wakeTurnIdOf } from "./woken-by-entry";
+import { taskMentionReferences } from "@/lib/tasks/task-mention-references";
 
 type ChatMessageProps = {
   comment: Message;
@@ -294,6 +295,20 @@ function UserMessageAttachments({
   );
 }
 
+function useUserMentionComponents(comment: Message) {
+  const promptNames = usePromptMentionNames();
+  const entityReferences = useMemo(
+    () => entityReferencesFromMetadata(comment.metadata),
+    [comment.metadata],
+  );
+  const taskMentions = useMemo(
+    () => taskMentionReferences(comment.raw_content || comment.content),
+    [comment.raw_content, comment.content],
+  );
+  const components = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  return { components, taskMentions };
+}
+
 function UserMessageContent({
   comment,
   showRaw,
@@ -305,13 +320,8 @@ function UserMessageContent({
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const taskOrigin = useMessageTaskOrigin();
-  const promptNames = usePromptMentionNames();
+  const { components: promptMentionComponents, taskMentions } = useUserMentionComponents(comment);
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
-  const entityReferences = useMemo(
-    () => entityReferencesFromMetadata(comment.metadata),
-    [comment.metadata],
-  );
-  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames, entityReferences);
   const {
     imageAttachments,
     fileAttachments,
@@ -359,6 +369,7 @@ function UserMessageContent({
             content: comment.content,
             rawContent: comment.raw_content,
             promptMentionComponents,
+            taskMentions,
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,

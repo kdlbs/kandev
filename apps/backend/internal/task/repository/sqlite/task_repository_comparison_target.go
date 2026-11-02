@@ -201,7 +201,7 @@ func (r *Repository) lockTaskThenGetTaskRepository(ctx context.Context, tx *sqlx
 
 func (r *Repository) getTaskRepositoryForUpdate(ctx context.Context, tx *sqlx.Tx, id string) (*models.TaskRepository, error) {
 	query := `
-		SELECT id, task_id, repository_id, base_branch, checkout_branch, position, metadata, created_at, updated_at
+		SELECT id, task_id, repository_id, workspace_relative_path, base_branch, checkout_branch, position, metadata, created_at, updated_at
 		FROM task_repositories WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += " FOR UPDATE"
@@ -212,6 +212,7 @@ func (r *Repository) getTaskRepositoryForUpdate(ctx context.Context, tx *sqlx.Tx
 		&taskRepo.ID,
 		&taskRepo.TaskID,
 		&taskRepo.RepositoryID,
+		&taskRepo.WorkspaceRelativePath,
 		&taskRepo.BaseBranch,
 		&taskRepo.CheckoutBranch,
 		&taskRepo.Position,

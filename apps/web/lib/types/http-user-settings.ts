@@ -214,11 +214,13 @@ export type UserSettings = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -299,11 +301,13 @@ export type UserSettingsUpdatePayload = {
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
   show_todo_list_panel_only_when_not_empty?: boolean;
+  show_turn_changed_files?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  prompt_suggestions?: boolean;
   auto_focus_new_tasks?: boolean;
   agent_tab_close_behavior?: "delete_session" | "hide_panel";
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;

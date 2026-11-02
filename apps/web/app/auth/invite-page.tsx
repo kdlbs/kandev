@@ -165,7 +165,7 @@ export function InvitePage({ token }: InvitePageProps) {
       setError(
         err instanceof ApiError
           ? (err.message ?? t("auth:couldNotAcceptInvite"))
-          : t("auth:somethingWentWrong"),
+          : t("auth:couldNotAcceptInvite"),
       );
     }
   }

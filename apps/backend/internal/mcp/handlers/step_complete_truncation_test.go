@@ -143,10 +143,11 @@ func TestHandleStepComplete_DuplicateReportsNoTruncation(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-dup-trunc", "session-dup-trunc", "step-1", models.TaskSessionStateRunning)
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-dup-trunc", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID:     "step-1",
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    "first call",
-		SignaledAt: time.Now().UTC(),
+		WorkflowStepTransitionID: stepCompletionTestEntry(t, repo, "task-dup-trunc"),
+		StepID:                   "step-1",
+		Source:                   models.StepCompletionSourceAgent,
+		Summary:                  "first call",
+		SignaledAt:               time.Now().UTC(),
 	}))
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)

@@ -106,6 +106,20 @@ type AgentProfileModelAdopter interface {
 	UpdateAgentProfileModelIfEmpty(ctx context.Context, profileID, model string) (bool, error)
 }
 
+// AgentProfileSelectionIntent extends ordinary profile updates with an atomic
+// supplied-field rule for Copilot plugin selections. A nil intent preserves
+// the committed column inside the same UPDATE, so a concurrent selection
+// commit cannot be overwritten by a stale read/modify/write snapshot. The
+// committed value is written back to profile.CopilotSelectedPlugins.
+type AgentProfileSelectionIntent interface {
+	UpdateAgentProfileWithSelectionIntent(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		enabled *bool,
+		selection *[]string,
+	) error
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the

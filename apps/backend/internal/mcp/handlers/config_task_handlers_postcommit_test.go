@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -67,6 +68,50 @@ func TestMCPTaskLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *tes
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeResponse, resp.Type)
 			require.JSONEq(t, `{"success":false,"pending":true,"task_id":"`+taskID+`"}`, string(resp.Payload))
+		})
+	}
+}
+
+func (c *mcpPostCommitCleanupFailure) PrepareTaskResourceCleanupWithDeleteOptions(context.Context, string, models.TaskResourceCleanupTrigger, string, bool, service.DeleteTaskOptions) error {
+	return nil
+}
+func TestMCPRetainedDeleteDoesNotInventPendingStop(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*Handlers, context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		{name: "delete", call: (*Handlers).handleDeleteTask},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := newTestTaskService(t)
+			ctx := context.Background()
+			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-post-commit", Name: "Post commit"}))
+			require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+				ID: "wf-post-commit", WorkspaceID: "ws-post-commit", Name: "Board",
+			}))
+			taskID := "task-post-commit-" + tc.name
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{
+				ID: taskID, WorkspaceID: "ws-post-commit", WorkflowID: "wf-post-commit",
+				Title: "Lifecycle", State: v1.TaskStateTODO,
+			}))
+			handoff := service.NewHandoffService(repo, repo, nil, nil, nil, testLogger(t))
+			handoff.SetTaskResourceCleaner(&mcpPostCommitCleanupFailure{
+				err: errors.New("cleanup unavailable"),
+			})
+			svc := service.NewService(service.Repos{ResourceCleanups: repo}, nil, testLogger(t), service.RepositoryDiscoveryConfig{})
+			h := &Handlers{taskSvc: svc, handoffSvc: handoff, logger: testLogger(t).WithFields()}
+			msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": taskID, "workspace_cleanup": "retain"})
+			if tc.name == "delete" {
+				msg = makeWSMessage(t, ws.ActionMCPDeleteTask, map[string]string{"task_id": taskID, "workspace_cleanup": "retain"})
+			}
+
+			resp, err := tc.call(h, ctx, msg)
+			require.NoError(t, err)
+			require.Equal(t, ws.MessageTypeResponse, resp.Type)
+			var result map[string]any
+			require.NoError(t, json.Unmarshal(resp.Payload, &result))
+			require.Equal(t, true, result["success"])
+			require.Equal(t, false, result["runtime_stop_pending"])
 		})
 	}
 }

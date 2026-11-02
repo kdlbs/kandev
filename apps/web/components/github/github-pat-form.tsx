@@ -5,16 +5,19 @@ import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { githubOrigin } from "@/lib/github/host";
 import { useTranslation } from "react-i18next";
 import { settingsCredentialClassName } from "@/components/settings/settings-control";
 
 export function GitHubPATForm({
   workspaceId,
+  githubHost = "github.com",
   value,
   onChange,
   disabled,
 }: {
   workspaceId: string;
+  githubHost?: string;
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
@@ -32,6 +35,17 @@ export function GitHubPATForm({
         <Label htmlFor="github-workspace-token">{t("github:personalAccessToken")}</Label>
         <p className="text-xs text-muted-foreground">{t("github:kandevStoresThisTokenForThis")}</p>
       </div>
+      {githubOrigin(githubHost) && (
+        <a
+          data-testid="github-token-settings-link"
+          className="cursor-pointer text-xs text-primary underline underline-offset-4"
+          href={`${githubOrigin(githubHost)}/settings/tokens/new`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t("github:createPersonalAccessToken")}
+        </a>
+      )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <div className="relative min-w-0 flex-1">
           <Input

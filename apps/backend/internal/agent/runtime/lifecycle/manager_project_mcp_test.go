@@ -138,6 +138,9 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 		AgentProfileID: "profile-1",
 	}
 
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
 	err := mgr.promoteWorkspaceExecution(context.Background(), execution, req)
 	if err == nil {
 		t.Fatal("expected promotion to fail when .pi/mcp.json cannot be written")
@@ -214,6 +217,9 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 		},
 	}
 
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
 	if err := mgr.promoteWorkspaceExecution(context.Background(), execution, req); err != nil {
 		t.Fatalf("promoteWorkspaceExecution: %v", err)
 	}

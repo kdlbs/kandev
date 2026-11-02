@@ -1,5 +1,7 @@
 "use client";
 
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { useState } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { IconAt } from "@tabler/icons-react";
@@ -30,6 +32,7 @@ type MobileToolbarProps = {
   hideSessionsDropdown: boolean;
   mcpServers: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
+  mcpSelection?: TaskSessionMCPSelection | null;
   sessionId: string | null;
   detailActive: boolean;
   taskId: string | null;
@@ -103,6 +106,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
             <McpIndicator
               mcpServers={props.mcpServers}
               attachmentHistory={props.mcpAttachmentHistory}
+              selection={props.mcpSelection}
             />
           </div>
           <div data-testid="toolbar-item-mode">

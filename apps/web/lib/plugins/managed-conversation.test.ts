@@ -5,7 +5,7 @@ import {
   createManagedConversationInputIntent,
   orderManagedConversationInputs,
 } from "./managed-conversation";
-import type { PluginHostV2ManagedAgentInputReceipt } from "@kandev/plugin-sdk";
+import type { PluginHostV2ManagedAgentInputReceipt } from "@kdlbs/plugin-sdk";
 
 function receipt(
   hostInputId: string,

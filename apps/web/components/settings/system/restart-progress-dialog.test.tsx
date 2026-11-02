@@ -142,10 +142,23 @@ describe("RestartProgressDialog", () => {
       { timeout: 2000 },
     );
   });
+});
 
-  it("does not render startup progress detail outside the restarting phase", () => {
+describe("RestartProgressDialog completion polling", () => {
+  it("fetches final startup detail after restart completion", async () => {
+    mocks.fetchJson.mockResolvedValue({ startup: snapshot({ phase: "ready" }) });
     render(<RestartProgressDialog phase="done" errorMessage={null} onDismiss={vi.fn()} />);
-    expect(screen.queryByText("Kandev is starting and not yet reachable.")).toBeNull();
-    expect(mocks.fetchJson).not.toHaveBeenCalled();
+    expect(await screen.findByText("Ready")).not.toBeNull();
+    expect(screen.getByText("5 seconds elapsed")).not.toBeNull();
+    expect(mocks.fetchJson).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["idle", "starting", "error"] as const)(
+    "does not poll startup detail in the %s phase",
+    (phase) => {
+      render(<RestartProgressDialog phase={phase} errorMessage={null} onDismiss={vi.fn()} />);
+      expect(screen.queryByText("Kandev is starting and not yet reachable.")).toBeNull();
+      expect(mocks.fetchJson).not.toHaveBeenCalled();
+    },
+  );
 });

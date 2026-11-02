@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
@@ -147,27 +147,41 @@ function usePlanFetch({
 }: PlanFetchOptions) {
   const { t } = useTranslation("task");
   const prevVisibleRef = useRef(visible);
-  const setTaskPlan = useAppStore((state) => state.setTaskPlan);
-  const setTaskPlanLoading = useAppStore((state) => state.setTaskPlanLoading);
-  const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
+  const beginRead = useAppStore((state) => state.beginTaskPlanRead);
+  const finishRead = useAppStore((state) => state.finishTaskPlanRead);
+  const viewRef = useRef({ taskId });
+  useLayoutEffect(() => {
+    if (viewRef.current.taskId !== taskId) viewRef.current = { taskId };
+  }, [taskId]);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    setError(null);
+  }, [taskId, setError]);
 
   const fetchPlan = useCallback(async () => {
     if (!taskId) return;
-
-    setTaskPlanLoading(taskId, true);
-    setError(null);
+    const view = viewRef.current;
+    const isCurrentView = () =>
+      mountedRef.current && viewRef.current === view && view.taskId === taskId;
+    const token = beginRead(taskId);
+    if (isCurrentView()) setError(null);
     try {
       const fetchedPlan = await getTaskPlan(taskId);
-      setTaskPlan(taskId, fetchedPlan);
-      // Initial fetch is not a notification — mark as seen so no indicator flashes.
-      markTaskPlanSeen(taskId);
+      // Admission also owns seen/loading state; retired reads publish nothing.
+      finishRead(taskId, token, fetchedPlan);
     } catch (err) {
-      console.error("Failed to fetch task plan:", err);
-      setError(err instanceof Error ? err.message : t("task:failedToFetchPlan"));
-    } finally {
-      setTaskPlanLoading(taskId, false);
+      if (finishRead(taskId, token) && isCurrentView()) {
+        console.error("Failed to fetch task plan:", err);
+        setError(err instanceof Error ? err.message : t("task:failedToFetchPlan"));
+      }
     }
-  }, [taskId, setTaskPlan, setTaskPlanLoading, markTaskPlanSeen, setError, t]);
+  }, [taskId, beginRead, finishRead, setError, t]);
 
   useEffect(() => {
     if (connectionStatus !== "connected") return;

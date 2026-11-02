@@ -57,6 +57,9 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
+				s.runTurnChangeRetentionSweep(ctx, now)
+				s.runTurnChangePreservationRetry(ctx)
+				s.runTurnHistoryDeletionCleanup(ctx)
 			}
 		}
 	}()
@@ -632,4 +635,32 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	// without a reload.
 	s.PublishTaskUpdated(ctx, task)
 	return changed, nil
+}
+
+func (s *Service) runTurnChangePreservationRetry(ctx context.Context) {
+	if s.turnChangePreservationRetrier == nil {
+		return
+	}
+	result, err := s.turnChangePreservationRetrier.RetryPending(ctx)
+	if err != nil {
+		s.logger.Warn("turn-change preservation retry failed", zap.Error(err))
+	}
+	if result.Ready > 0 || result.Settled > 0 {
+		s.logger.Info("turn-change preservation retry settled work",
+			zap.Int("retried", result.Retried), zap.Int("ready", result.Ready),
+			zap.Int("settled", result.Settled), zap.Int("waiting", result.Waiting))
+	}
+}
+
+func (s *Service) runTurnHistoryDeletionCleanup(ctx context.Context) {
+	if s.turnHistoryCleanup == nil {
+		return
+	}
+	count, err := s.turnHistoryCleanup.CleanupDeletionIntents(ctx)
+	if err != nil {
+		s.logger.Warn("turn history deletion cleanup failed", zap.Error(err))
+	}
+	if count > 0 {
+		s.logger.Info("turn history deletion cleanup removed owned refs", zap.Int64("refs", count))
+	}
 }

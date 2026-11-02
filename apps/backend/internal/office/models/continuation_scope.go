@@ -1,6 +1,10 @@
 package models
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+)
 
 // ContinuationScopeForRun computes the continuation-summary scope key for
 // a run: "routine:<routine_id>" when the run's context snapshot carries a
@@ -19,7 +23,7 @@ import "encoding/json"
 // derivation a claim-time in-memory copy is still holding — sharing this
 // function is not enough on its own when its input can drift between
 // calls.
-func ContinuationScopeForRun(run *Run, agentProfileID string) string {
+func ContinuationScopeForRun(run *runsmodels.Run, agentProfileID string) string {
 	if run == nil {
 		return "agent:" + agentProfileID
 	}

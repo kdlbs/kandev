@@ -9,6 +9,7 @@ import {
   querySidebarTasks,
   moveTask,
   previewWorkflowMove,
+  previewTaskWorkspaceSources,
   reorderStepTasks,
   updateTask,
   updateTaskPortForwarding,
@@ -362,6 +363,52 @@ describe("attachTaskWorkspaceSources", () => {
   });
 });
 
+describe("previewTaskWorkspaceSources", () => {
+  it("posts placement and returns the server preview", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: "task-1",
+          revision: "rev-1",
+          workspace_path: "/workspace/task-1/repo",
+          placement: "kandev_directory",
+          sources: [
+            {
+              repository_id: "repo-1",
+              repository_name: "payments",
+              workspace_relative_path: "repo/kandev/payments",
+            },
+          ],
+          supported_placements: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      previewTaskWorkspaceSources(
+        "task-1",
+        {
+          sources: [{ kind: "repository", repository_id: "repo-1", base_branch: "main" }],
+          repository_placement: "kandev_directory",
+        },
+        { baseUrl: API_BASE_URL },
+      ),
+    ).resolves.toMatchObject({ revision: "rev-1", placement: "kandev_directory" });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/workspace-sources/preview`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        sources: [{ kind: "repository", repository_id: "repo-1", base_branch: "main" }],
+        repository_placement: "kandev_directory",
+      }),
+    });
+  });
+});
+
 describe("listTasksByWorkspace", () => {
   it("requests the archived-only mode without changing the existing list contract", async () => {
     fetchSpy.mockResolvedValueOnce(
@@ -547,4 +594,64 @@ describe("previewWorkflowMove", () => {
     });
     expect((init as RequestInit).cache).toBe("no-store");
   });
+});
+
+it("binds keep-files deletion to the explicit retain mode", async () => {
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const params = { confirmationId: CONFIRMATION_ID, workspaceCleanup: "retain" as const };
+  await deleteTask("task-1", params, { baseUrl: API_BASE_URL });
+  expect(fetchSpy.mock.calls[0][0]).toBe(
+    `${API_BASE_URL}/api/v1/tasks/task-1?workspace_cleanup=retain`,
+  );
+});
+
+it("requests retain confirmation without granting discard consent", async () => {
+  fetchSpy.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({ confirmation_id: "retain-ticket", requires_discard_consent: false }),
+      { status: 200 },
+    ),
+  );
+  await Reflect.apply(getTaskDeletePreflight, undefined, [
+    ["task-1"],
+    false,
+    false,
+    { baseUrl: API_BASE_URL },
+    { workspaceCleanup: "retain" },
+  ]);
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+    workspace_cleanup: "retain",
+    discard_worktree_changes: false,
+  });
+});
+
+it("sends separate unknown-workspace consent in preview and deletion", async () => {
+  fetchSpy.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        confirmation_id: "ack",
+        requires_discard_consent: true,
+        workspace_inspection: "unknown",
+      }),
+      { status: 200 },
+    ),
+  );
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await Reflect.apply(getTaskDeletePreflight, undefined, [
+    ["task-1"],
+    false,
+    true,
+    { baseUrl: API_BASE_URL },
+    { workspaceCleanup: "delete", allowUnverifiedWorkspaceChanges: true },
+  ]);
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+    allow_unverified_workspace_changes: true,
+    discard_worktree_changes: true,
+  });
+  await deleteTask(
+    "task-1",
+    { confirmationId: "ack", discardWorktreeChanges: true, allowUnverifiedWorkspaceChanges: true },
+    { baseUrl: API_BASE_URL },
+  );
+  expect(String(fetchSpy.mock.calls[1][0])).toContain("allow_unverified_workspace_changes=true");
 });

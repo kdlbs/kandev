@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestAppendRunEvent_ReturnedEventMatchesTheStoredRow is the round-trip
@@ -15,7 +15,7 @@ import (
 func TestAppendRunEvent_ReturnedEventMatchesTheStoredRow(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned",
 	})
 	before := time.Now().UTC().Add(-time.Second)
@@ -208,7 +208,7 @@ func TestListRunEvents_UnknownRunReturnsNoEvents(t *testing.T) {
 	}
 }
 
-func checkSeqOrder(t *testing.T, label string, got []*models.RunEvent, want ...int) {
+func checkSeqOrder(t *testing.T, label string, got []*runsmodels.RunEvent, want ...int) {
 	t.Helper()
 	seqs := make([]int, 0, len(got))
 	for _, event := range got {

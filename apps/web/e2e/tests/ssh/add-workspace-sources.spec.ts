@@ -91,8 +91,8 @@ test.describe("SSH executor — attach workspace sources", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.clickTab("Files");
-      await testPage.getByTestId("files-workspace-actions").click();
-      await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+      await testPage.getByTestId("files-create-menu").click();
+      await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);

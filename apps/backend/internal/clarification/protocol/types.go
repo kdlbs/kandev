@@ -5,18 +5,20 @@ import "time"
 
 // Option represents a single choice option for a question.
 type Option struct {
-	ID          string `json:"option_id"`
-	Label       string `json:"label"`       // Concise 1-5 words
-	Description string `json:"description"` // Explanation of the option
+	ID          string         `json:"option_id"`
+	Label       string         `json:"label"`       // Concise 1-5 words
+	Description string         `json:"description"` // Explanation of the option
+	Images      QuestionImages `json:"images,omitempty"`
 }
 
 // Question represents a single question with multiple choice options.
 type Question struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`   // Short label (max 12 chars)
-	Prompt          string   `json:"prompt"`  // Full question text
-	Options         []Option `json:"options"` // 2-6 options
-	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
+	ID              string         `json:"id"`
+	Title           string         `json:"title"`   // Short label (max 12 chars)
+	Prompt          string         `json:"prompt"`  // Full question text
+	Options         []Option       `json:"options"` // 2-6 options
+	AllowCustomText *bool          `json:"allow_custom_text,omitempty"`
+	Images          QuestionImages `json:"images,omitempty"`
 }
 
 // Answer represents the user's answer to a single question.

@@ -171,6 +171,21 @@ export class PluginMarketplaceReleaseFixture {
     };
   }
 
+  private readReleaseManifest(): string {
+    const packagePath = this.packages.get(this.currentRelease)!;
+    const options = {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    } as const;
+    try {
+      return execFileSync("tar", ["-xOf", packagePath, "./manifest.yaml"], options);
+    } catch {
+      // The prebuilt fixture package stores `manifest.yaml` at the archive
+      // root; repackaged versions carry the `./` prefix.
+      return execFileSync("tar", ["-xOf", packagePath, "manifest.yaml"], options);
+    }
+  }
+
   private handle(request: http.IncomingMessage, response: http.ServerResponse): void {
     const requestPath = new URL(request.url || "/", this.baseUrl).pathname;
     if (requestPath === "/plugins/index.json") {
@@ -202,10 +217,7 @@ export class PluginMarketplaceReleaseFixture {
       });
     }
     if (requestPath.startsWith(`/raw/${REPOSITORY}/`)) {
-      const packagePath = this.packages.get(this.currentRelease)!;
-      const manifest = execFileSync("tar", ["-xOf", packagePath, "./manifest.yaml"], {
-        encoding: "utf8",
-      });
+      const manifest = this.readReleaseManifest();
       response.writeHead(200, { "Content-Type": "text/yaml" });
       response.end(manifest);
       return;

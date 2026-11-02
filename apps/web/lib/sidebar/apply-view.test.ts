@@ -172,6 +172,36 @@ describe("applyFilters — per-dimension", () => {
   });
 });
 
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.2
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.3
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.4
+describe("applyFilters — missing repository", () => {
+  const tasks = [
+    task({ id: "none", workflowId: "wf" }),
+    task({ id: "first", workflowId: "wf", repositoryPath: "org/first" }),
+    task({ id: "second", workflowId: "wf", repositoryPath: "org/second" }),
+    task({ id: "other-workflow", workflowId: "other" }),
+  ];
+
+  it.each<{ op: FilterClause["op"]; value: FilterClause["value"]; expected: string[] }>([
+    { op: "is", value: "undefined", expected: ["none"] },
+    { op: "in", value: ["undefined"], expected: ["none"] },
+    { op: "in", value: ["undefined", "org/first"], expected: ["none", "first"] },
+    { op: "in", value: ["org/first"], expected: ["first"] },
+    { op: "is_not", value: "undefined", expected: ["first", "second"] },
+    { op: "not_in", value: ["undefined", "org/first"], expected: ["second"] },
+    { op: "in", value: [], expected: [] },
+    { op: "not_in", value: [], expected: ["none", "first", "second"] },
+  ])("matches $op $value while applying other clauses", ({ op, value, expected }) => {
+    const result = applyFilters(tasks, [
+      C({ dimension: "repository", op, value }),
+      { id: "workflow", dimension: "workflow", op: "is", value: "wf" },
+    ]);
+
+    expect(result.map((task) => task.id)).toEqual(expected);
+  });
+});
+
 describe("applyFilters — repository (#1213)", () => {
   // The saved clause value is the filter option value, and the board sets each
   // task's repositoryPath — BOTH via repositorySlug. For a local repo the slug

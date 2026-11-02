@@ -194,7 +194,8 @@ func verifyRecordedManagedCloneSource(source, worktreeCommon string, proof *Mana
 	}
 	recordedPath, pathErr := canonicalExistingPath(proof.RecordedSourcePath)
 	recordedCommon, commonErr := canonicalExistingPath(proof.RecordedSourceCommonDir)
-	if pathErr != nil || commonErr != nil || recordedPath != source || recordedCommon != worktreeCommon {
+	if pathErr != nil || commonErr != nil || !sameDirectoryIdentity(recordedPath, source) ||
+		!sameDirectoryIdentity(recordedCommon, worktreeCommon) {
 		return fmt.Errorf("recorded source does not match worktree registration")
 	}
 	return nil

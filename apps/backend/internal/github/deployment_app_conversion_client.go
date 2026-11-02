@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"io"
 	"net/http"
 	"net/url"
@@ -81,15 +83,11 @@ type ManifestConversionClient struct {
 }
 
 func NewManifestConversionClient() *ManifestConversionClient {
-	return &ManifestConversionClient{
-		httpClient: &http.Client{
-			Timeout: manifestConversionClientTimeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		apiBaseURL: "https://api.github.com",
-	}
+	return NewManifestConversionClientForHost(githubhost.Public())
+}
+
+func NewManifestConversionClientForHost(host githubhost.Host) *ManifestConversionClient {
+	return &ManifestConversionClient{httpClient: newGitHubHTTPClient(manifestConversionClientTimeout), apiBaseURL: host.RESTURL()}
 }
 
 func (c *ManifestConversionClient) Convert(
@@ -107,7 +105,7 @@ func (c *ManifestConversionClient) Convert(
 	}
 	request.Header.Set("Accept", manifestGitHubAccept)
 	request.Header.Set("X-GitHub-Api-Version", manifestGitHubAPIVersion)
-	response, err := c.httpClient.Do(request)
+	response, err := doGitHubRequest(c.httpClient, request)
 	if err != nil {
 		return ManifestConversionResult{}, &ManifestConversionError{Code: ManifestConversionRequestFailed}
 	}

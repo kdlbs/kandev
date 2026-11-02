@@ -235,8 +235,8 @@ func TestCanonicalAgentDeliveryProjectionPersistsNewlineFreeChunksExactlyOnce(t 
 		if err != nil {
 			t.Fatalf("project sequence %d: %v", sequenceNumber, err)
 		}
-		if appended != (sequence == 1) {
-			t.Fatalf("sequence %d appended=%v", sequenceNumber, appended)
+		if appended.Appended != (sequence == 1) {
+			t.Fatalf("sequence %d appended=%v", sequenceNumber, appended.Appended)
 		}
 	}
 
@@ -300,7 +300,7 @@ func TestCanonicalAgentDeliveryProjectionBatchesCompatibleChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("project canonical batch: %v", err)
 	}
-	if len(appended) != 3 || appended[0] || !appended[1] || !appended[2] {
+	if len(appended) != 3 || appended[0].Appended || !appended[1].Appended || !appended[2].Appended {
 		t.Fatalf("batch append results = %v, want [false true true]", appended)
 	}
 	message, err := repo.GetMessage(ctx, "canonical-batch-1")

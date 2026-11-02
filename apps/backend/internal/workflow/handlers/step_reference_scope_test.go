@@ -244,7 +244,7 @@ func TestReorderRequiresStepsToBelongToTheWorkflow(t *testing.T) {
 // one user that another user's workflow exists and is GitHub-synced.
 func TestReadOnlyWorkflowDoesNotLeakToAForeignCaller(t *testing.T) {
 	h := setupScopedRouter(t)
-	h.service.SetWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
+	h.setWorkflowProvider(&fakeWorkflowProvider{workflows: []*taskmodels.Workflow{
 		{ID: "wf-a", WorkspaceID: "ws-a", Name: "A Flow", Source: taskmodels.WorkflowSourceGitHub},
 	}})
 

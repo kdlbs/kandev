@@ -314,6 +314,9 @@ func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 		if !workspaceInventoryRowReceiptMatches(existing, owner, env, spec, ownerInfo, candidate) {
 			return nil, fmt.Errorf("%w: repaired row receipt identity no longer matches", models.ErrWorkspaceInventoryRecoveryConflict)
 		}
+		if err := validateWorkspaceInventoryBranchContinuity(ctx, existing, env, info, candidate); err != nil {
+			return nil, err
+		}
 		attested, err := e.attestInventoryRow(ctx, repairer, existing, spec, session, env, info, candidate)
 		if err != nil {
 			return nil, err
@@ -373,8 +376,8 @@ func workspaceInventoryReceiptCheckoutMatches(
 ) bool {
 	return receipt.Preservation.WorktreeID == row.WorktreeID &&
 		receipt.Preservation.PathHash == pathHash &&
-		receipt.Preservation.ObservedBranch == row.WorktreeBranch &&
-		receipt.Preservation.RefName == "refs/heads/"+row.WorktreeBranch
+		receipt.Preservation.ObservedBranch != "" &&
+		receipt.Preservation.RefName == "refs/heads/"+receipt.Preservation.ObservedBranch
 }
 
 // attestedExistingWorkspaceInventoryReceipt gates an already-committed
@@ -400,11 +403,7 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 	candidate *models.TaskEnvironmentRepo,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
 	if existing.PostRepairVerifiedAt != nil {
-		if existing.PostRepairMatched && existing.PostRepairEvidence != nil &&
-			samePreservationEvidence(
-				preservationEvidenceFromModel(existing.Preservation),
-				preservationEvidenceFromModel(*existing.PostRepairEvidence),
-			) {
+		if workspaceInventoryReceiptHasMatchingAttestation(existing) {
 			return existing, nil
 		}
 		return nil, fmt.Errorf("%w: post-repair attestation recorded a divergent checkout", models.ErrWorkspaceInventoryRecoveryConflict)

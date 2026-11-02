@@ -268,6 +268,55 @@ func TestWorktreePreparer_SingleRepo_RunsSetupScriptOnce(t *testing.T) {
 	}
 }
 
+func TestWorktreePreparer_ParentLayoutRunsSetupScriptAtEffectiveWorkspaceRoot(t *testing.T) {
+	repo := initBareGitRepo(t, "single")
+	preparer, mgr, _ := newPreparerWithScriptHandler(t, map[string]*worktree.Repository{
+		"repo-single": {ID: "repo-single"},
+	})
+
+	req := &EnvPrepareRequest{
+		TaskID:          "task-parent-setup",
+		SessionID:       "session-parent-setup",
+		TaskTitle:       "Parent setup",
+		ExecutorType:    executor.NameStandalone,
+		TaskDirName:     "parent-setup_abc",
+		UseWorktree:     true,
+		WorkspaceLayout: "task_root",
+		RepositoryID:    "repo-single",
+		RepositoryPath:  repo,
+		RepoName:        "single",
+		BaseBranch:      "main",
+		SetupScript:     "pwd > setup-marker.txt",
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success; err: %s; steps: %+v", res.ErrorMessage, res.Steps)
+	}
+
+	marker := filepath.Join(res.WorkspacePath, "setup-marker.txt")
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read setup marker at effective workspace root: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != filepath.Clean(res.WorkspacePath) {
+		t.Fatalf("setup script ran in %q, want %q", got, filepath.Clean(res.WorkspacePath))
+	}
+
+	worktreePaths, err := mgr.ListActiveWorktreePaths(context.Background())
+	if err != nil {
+		t.Fatalf("list created worktrees: %v", err)
+	}
+	for _, worktreePath := range worktreePaths {
+		if _, err := os.Stat(filepath.Join(worktreePath, "setup-marker.txt")); !os.IsNotExist(err) {
+			t.Fatalf("setup marker unexpectedly exists in repository worktree %s: %v", worktreePath, err)
+		}
+	}
+}
+
 // TestWorktreePreparer_SingleRepo_NonIdempotentSetupScriptSucceeds reproduces
 // the user-facing failure for the single-repo worktree path: a non-idempotent
 // setup script (e.g. "mkdir build") fails on a second run. The env preparer

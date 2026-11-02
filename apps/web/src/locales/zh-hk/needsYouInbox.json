@@ -12,7 +12,7 @@
   "anotherCallerRejected": "其他人已經拒絕了「{{question}}」。",
   "bundleNoLongerActive": "「{{question}}」已不再等待回答。",
   "errorTitle": "無法載入您的收件箱",
-  "errorDescription": "載入等待您處理的問題時出錯。",
+  "errorDescription": "無法載入等待您回答的問題。",
   "retry": "重試",
   "emptyTitle": "{{workspace}} 中沒有任何事項在等待您處理。",
   "emptyDescription": "此列表僅涵蓋在此工作區中阻塞代理的問題,不計入其他工作區中的問題集、待處理的權限請求、父問題記錄,或您自己已延後或已忽略的行。",

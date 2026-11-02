@@ -12,7 +12,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestCheckSelfTriggerTotalAllowance_GenuineErrorIncrementsLaunchRefusedTotal
@@ -38,7 +38,7 @@ func TestCheckSelfTriggerTotalAllowance_GenuineErrorIncrementsLaunchRefusedTotal
 	req := QueueRunRequest{
 		AgentProfileID: "agent-1",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 	}
 
@@ -86,7 +86,7 @@ func TestCheckSelfTriggerTotalAllowance_ContextCanceledDefersWithoutRecordingFai
 	req := QueueRunRequest{
 		AgentProfileID: "agent-1",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 	}
 

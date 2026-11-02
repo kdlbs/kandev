@@ -221,7 +221,11 @@ task and session state.
   inventory read fails.
 - **Stop.** SIGTERM, bounded wait, then SIGKILL of the pid and of its direct
   children's process groups (agent processes run in their own groups, so a
-  SIGKILL of `agentctl` alone would strand them). The session runtime
+  SIGKILL of `agentctl` alone would strand them). A second bounded wait
+  confirms signal delivery before reporting failure or removing runtime
+  state. Each wait allows 50 polls at 100 ms intervals. An absent process
+  or zombie completes the delivery wait. A process that remains live
+  fails the stop and retains its session directory. The session runtime
   directory is removed only for a pidfile-attributed stop; the task
   directory is never touched (remote task directory reclamation owns it).
 - **Reporting.** One structured log line per sweep with executor id and

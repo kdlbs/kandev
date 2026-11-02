@@ -6,6 +6,7 @@ import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtim
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
+import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
@@ -289,12 +290,6 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   const { discard } = useGitOperations(sessionId);
   const { toast } = useToast();
 
-  const handleToggleSplitView = useCallback((split: boolean) => {
-    const mode = split ? "split" : "unified";
-    localStorage.setItem("diff-view-mode", mode);
-    window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
-  }, []);
-
   const handleSelectFile = useCallback((key: string, setSelectedFile: (k: string) => void) => {
     setSelectedFile(key);
     // Note: scrolling is now handled by FileDiffSection when isSelected changes
@@ -338,7 +333,6 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   );
 
   return {
-    handleToggleSplitView,
     handleSelectFile,
     handleToggleReviewed,
     handleSendComments,
@@ -383,9 +377,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const reviewSourceKey = reviewDialogSourceKey(sessionId, selectedPRKey);
   const { selectedFile, filter, setSelectedFile, setFilter } =
     useReviewDialogTransientState(reviewSourceKey);
-  const [splitView, setSplitView] = useState(() =>
-    typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
-  );
+  const [viewMode, setViewMode] = useGlobalViewMode();
+  const splitView = viewMode === "split";
   const [wordWrap, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
@@ -433,10 +426,9 @@ function useReviewDialogState(props: ReviewDialogProps) {
   });
   const handleToggleSplitView = useCallback(
     (split: boolean) => {
-      setSplitView(split);
-      handlers.handleToggleSplitView(split);
+      setViewMode(split ? "split" : "unified");
     },
-    [handlers.handleToggleSplitView],
+    [setViewMode],
   );
   const handleSelectFile = usePRKeyedReviewFileSelection(
     handlers.handleSelectFile,

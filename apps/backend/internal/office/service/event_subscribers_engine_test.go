@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -340,19 +342,19 @@ func TestEngineDispatcher_NoSession_DropsTrigger(t *testing.T) {
 type fallbackHandledRoutingDispatcher struct{}
 
 func (fallbackHandledRoutingDispatcher) DispatchWithRouting(
-	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+	context.Context, *runsmodels.Run, *models.AgentInstance, service.LaunchContext,
 ) (bool, bool, error) {
 	return false, false, nil
 }
 
 func (fallbackHandledRoutingDispatcher) HandlePostStartFailure(
-	context.Context, *models.Run, *models.AgentInstance, string, *streams.ProviderError,
+	context.Context, *runsmodels.Run, *models.AgentInstance, string, *streams.ProviderError,
 ) (bool, error) {
 	return true, nil
 }
 
 func (fallbackHandledRoutingDispatcher) MarkRunSuccessHealth(
-	context.Context, *models.Run, *models.AgentInstance,
+	context.Context, *runsmodels.Run, *models.AgentInstance,
 ) {
 }
 
@@ -364,13 +366,13 @@ type blockingPostStartFallbackDispatcher struct {
 }
 
 func (d *blockingPostStartFallbackDispatcher) DispatchWithRouting(
-	context.Context, *models.Run, *models.AgentInstance, service.LaunchContext,
+	context.Context, *runsmodels.Run, *models.AgentInstance, service.LaunchContext,
 ) (bool, bool, error) {
 	return false, false, nil
 }
 
 func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
-	_ context.Context, run *models.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
+	_ context.Context, run *runsmodels.Run, _ *models.AgentInstance, _ string, _ *streams.ProviderError,
 ) (bool, error) {
 	d.svc.ExecSQL(d.t, `UPDATE runs SET status = 'queued', session_id = '',
 		claimed_at = NULL, finished_at = NULL WHERE id = ?`, run.ID)
@@ -380,7 +382,7 @@ func (d *blockingPostStartFallbackDispatcher) HandlePostStartFailure(
 }
 
 func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
-	context.Context, *models.Run, *models.AgentInstance,
+	context.Context, *runsmodels.Run, *models.AgentInstance,
 ) {
 }
 
@@ -389,7 +391,7 @@ func (d *blockingPostStartFallbackDispatcher) MarkRunSuccessHealth(
 // task+agent fallback (GetClaimedRunByTaskAndAgent).
 func queueTaskAssignedRunForAgentFailedTests(
 	t *testing.T, svc *service.Service, agentID, taskID string,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := svc.QueueRun(

@@ -414,7 +414,7 @@ func TestPassthroughAgentCommandInjectsKandevMCPConfig(t *testing.T) {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
 
-	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+	assertClaudePassthroughMCPConfig(t, cmd.Command, "http://localhost:45678/mcp")
 }
 
 func TestFreshPassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
@@ -425,7 +425,7 @@ func TestFreshPassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
 		t.Fatalf("freshPassthroughCommand returned error: %v", err)
 	}
 
-	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+	assertClaudePassthroughMCPConfig(t, cmd.Command, "http://localhost:45678/mcp")
 }
 
 func TestResumePassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
@@ -440,7 +440,7 @@ func TestResumePassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
 		t.Fatalf("resumePassthroughCommand returned error: %v", err)
 	}
 
-	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+	assertClaudePassthroughMCPConfig(t, cmd.Command, "http://localhost:45678/mcp")
 }
 
 func TestPassthroughCodexInjectsKandevMCPArgs(t *testing.T) {
@@ -905,7 +905,7 @@ func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
-	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+	assertClaudePassthroughMCPConfig(t, cmd.Command, "http://localhost:45678/mcp")
 	files := getPassthroughMCPFiles(execution)
 	if len(files) == 0 {
 		t.Fatal("passthrough MCP config file was not stored")
@@ -930,7 +930,7 @@ func TestWritePassthroughMCPConfigKeepsLiteralSessionFilename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
-	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+	assertClaudePassthroughMCPConfig(t, cmd.Command, "http://localhost:45678/mcp")
 	files := getPassthroughMCPFiles(execution)
 	want := filepath.Join(mgr.dataDir, "passthrough-mcp", "session.json")
 	if len(files) != 1 || files[0] != want {
@@ -1067,35 +1067,42 @@ func TestIsFastFailExit(t *testing.T) {
 	}
 }
 
-// TestManager_ProfileCLIFlagTokens confirms profile-configured cli_flags
+// TestManager_ResolveProfileLaunchTokens confirms profile-configured cli_flags
 // reach the passthrough launch path (regression for issue #718, where the
 // passthrough builder silently dropped them).
-func TestManager_ProfileCLIFlagTokens(t *testing.T) {
+func TestManager_ResolveProfileLaunchTokens(t *testing.T) {
 	mgr := newTestManager(t)
 
 	t.Run("nil profile returns nil", func(t *testing.T) {
-		if got := mgr.profileCLIFlagTokens(nil); got != nil {
-			t.Errorf("profileCLIFlagTokens(nil) = %v, want nil", got)
+		if got, _, _ := mgr.resolveProfileLaunchTokens(nil); got != nil {
+			t.Errorf("resolveProfileLaunchTokens(nil) = %v, want nil", got)
 		}
 	})
 
 	t.Run("enabled flags tokenised, disabled skipped", func(t *testing.T) {
 		profile := &AgentProfileInfo{
-			ProfileID: "p1",
+			ProfileID:     "p1",
+			CommandPrefix: `wrapper "argument with spaces"`,
 			CLIFlags: []settingsmodels.CLIFlag{
 				{Flag: "--allow-all-tools", Enabled: true},
 				{Flag: "--skip-me", Enabled: false},
 				{Flag: "--add-dir /shared", Enabled: true},
 			},
 		}
-		got := mgr.profileCLIFlagTokens(profile)
+		got, prefix, err := mgr.resolveProfileLaunchTokens(profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(prefix, []string{"wrapper", "argument with spaces"}) {
+			t.Fatalf("wrapper prefix = %v", prefix)
+		}
 		want := []string{"--allow-all-tools", "--add-dir", "/shared"}
 		if len(got) != len(want) {
-			t.Fatalf("profileCLIFlagTokens() = %v, want %v", got, want)
+			t.Fatalf("resolveProfileLaunchTokens() = %v, want %v", got, want)
 		}
 		for i, tok := range want {
 			if got[i] != tok {
-				t.Errorf("profileCLIFlagTokens()[%d] = %q, want %q", i, got[i], tok)
+				t.Errorf("resolveProfileLaunchTokens()[%d] = %q, want %q", i, got[i], tok)
 			}
 		}
 	})
@@ -1107,8 +1114,8 @@ func TestManager_ProfileCLIFlagTokens(t *testing.T) {
 				{Flag: `--broken "unterminated`, Enabled: true},
 			},
 		}
-		if got := mgr.profileCLIFlagTokens(profile); got != nil {
-			t.Errorf("profileCLIFlagTokens(malformed) = %v, want nil", got)
+		if got, _, _ := mgr.resolveProfileLaunchTokens(profile); got != nil {
+			t.Errorf("resolveProfileLaunchTokens(malformed) = %v, want nil", got)
 		}
 	})
 }
@@ -1185,7 +1192,7 @@ func TestBuildInteractiveStartRequestCarriesStripEnv(t *testing.T) {
 		&AgentExecution{WorkspacePath: "/workspace"},
 		agents.PassthroughConfig{},
 		map[string]string{"KANDEV_SESSION_ID": "session-1"},
-		agents.NewCommand("devin"),
+		passthroughCommand{Command: agents.NewCommand("devin")},
 		stripEnv,
 		true,
 	)

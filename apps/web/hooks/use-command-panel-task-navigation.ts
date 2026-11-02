@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useRouter } from "@/lib/routing/client-router";
 import { isTaskDetailPath, linkToTask } from "@/lib/links";
-import type { Task } from "@/lib/types/http";
+import type { ConversationTask as Task } from "@/lib/types/conversation-search";
 import { cancelSidebarTaskReveal, revealSidebarTask } from "@/lib/sidebar/task-navigation";
 
 export function useCommandPanelTaskNavigation(pathname: string, activeTaskId: string | null) {
@@ -13,7 +13,7 @@ export function useCommandPanelTaskNavigation(pathname: string, activeTaskId: st
     (task: Task) => {
       cancelSidebarTaskReveal();
       setPendingTaskRevealId(task.id);
-      router.push(linkToTask(task.id));
+      router.push(linkToTask(task.id, { sessionId: task.conversation_match?.session_id }));
     },
     [router],
   );

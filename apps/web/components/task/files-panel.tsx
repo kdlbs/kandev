@@ -38,7 +38,7 @@ function TaskSourceDialog({
   opener,
   openerRef,
 }: TaskSourceDialogProps) {
-  if (!activeTask || !(activeTask.repositoryId ?? activeTask.repositories?.length)) return null;
+  if (!activeTask) return null;
   return (
     <AddWorkspaceSourcesDialog
       open={open}
@@ -101,7 +101,6 @@ function useFilesPanelSourceDialog(activeSessionId: string | null) {
 }
 
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
-  const { t } = useTranslation();
   // Use environment-stable sessionId so the file browser doesn't re-fetch
   // when switching between sessions in the same environment.
   const activeSessionId = useEnvironmentSessionId();
@@ -130,10 +129,6 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
     addSourcesButtonRef,
     addSourcesDisabledReason,
   } = sourceDialog;
-  const hasRepository = Boolean(activeTask?.repositoryId ?? activeTask?.repositories?.length);
-  const resolvedAddSourcesDisabledReason = hasRepository
-    ? addSourcesDisabledReason
-    : t("task:taskNeedsRepositoryForSources");
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
   );
@@ -175,15 +170,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onRenameFile={renameFile}
             onDownloadFile={downloadFile}
             activeFilePath={activeTreePath}
-            onAddSources={
-              hasRepository
-                ? (opener) => {
-                    setAddSourcesOpener(opener);
-                    setAddSourcesOpen(true);
-                  }
-                : undefined
-            }
-            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+            onAddSources={(opener) => {
+              setAddSourcesOpener(opener);
+              setAddSourcesOpen(true);
+            }}
+            addSourcesDisabledReason={addSourcesDisabledReason}
             addSourcesButtonRef={addSourcesButtonRef}
           />
         ) : (

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
@@ -13,7 +15,6 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
@@ -65,7 +66,7 @@ func TestQueueRun_DepthRefusalLogsTheRefusingDepth(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "root_reason",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue root: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestQueueRun_DepthRefusalLogsTheRefusingDepth(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "child1_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		CausingRunID:   root.ID,
 	}); err != nil {
@@ -85,7 +86,7 @@ func TestQueueRun_DepthRefusalLogsTheRefusingDepth(t *testing.T) {
 	_, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "child2_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 		CausingRunID:   child1.ID,
 	})

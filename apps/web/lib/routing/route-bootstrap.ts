@@ -1,6 +1,7 @@
 import { getBackendConfig } from "@/lib/config";
+import type { WorkflowsState } from "@/lib/state/slices/kanban/types";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import type { ListWorkspacesResponse, Workflow } from "@/lib/types/http";
 
 export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 export const LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
@@ -83,6 +84,30 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
   };
 }
 
+/**
+ * Maps a listed workflow to its store entry. Every route that hydrates the
+ * workflow store uses this, as does the Go boot payload's
+ * `mapWorkflowItemState`: the workflow settings page treats store entries as the
+ * server's current values and its Save sends every editable field, so a dropped
+ * description or prompt reads as a cleared value and the next save of any step
+ * persists it. The API omits an empty prompt, so an absent prompt maps to "".
+ */
+export function mapWorkflowItem(workflow: Workflow): WorkflowsState["items"][number] {
+  return {
+    id: workflow.id,
+    workspaceId: workflow.workspace_id,
+    name: workflow.name,
+    description: workflow.description ?? null,
+    prompt: workflow.prompt ?? "",
+    sortOrder: workflow.sort_order ?? 0,
+    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+    ...(workflow.source !== undefined ? { source: workflow.source } : {}),
+    ...(workflow.source_path !== undefined ? { source_path: workflow.source_path } : {}),
+    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
+    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
+  };
+}
+
 export function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const encodedName = `${encodeURIComponent(name)}=`;
@@ -91,7 +116,12 @@ export function readCookie(name: string): string | null {
     .map((part) => part.trim())
     .filter((part) => part.startsWith(encodedName));
   const entry = entries[entries.length - 1];
-  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
+  if (!entry) return null;
+  try {
+    return decodeURIComponent(entry.slice(encodedName.length));
+  } catch {
+    return null;
+  }
 }
 
 export function readActiveWorkspaceCookie(): string | null {

@@ -28,6 +28,22 @@ describe("useFilterValueOptions — locale", () => {
     if (i18n.language !== "en") await activateLocale("en");
   });
 
+  // @covers AC-UI-REPOSITORY-FILTER-NONE-001.6
+  it("translates None on a locale switch without changing its persisted value", async () => {
+    await activateLocale("en");
+    const { result } = renderHook(() => useFilterValueOptions("repository"), {
+      wrapper: wrapper(),
+    });
+    expect(result.current).toEqual([{ value: "undefined", label: "None" }]);
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
+    expect(result.current).toEqual([{ value: "undefined", label: i18n.t("task:none") }]);
+    expect(result.current[0].label).not.toBe("None");
+  });
+
   it("recomputes executor-type labels on a locale switch with unchanged store data", async () => {
     await activateLocale("en");
 

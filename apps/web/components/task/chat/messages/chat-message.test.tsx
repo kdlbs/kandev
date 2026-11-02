@@ -846,10 +846,13 @@ describe("ChatMessage image attachments", () => {
     expect(openSpy).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
     const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
-    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("w-[min(96vw,1126px)]");
     expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
-    expect(preview.className).toContain("w-[min(92vw,1100px)]");
-    expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
+    expect(screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
+    expect(screen.getByRole("button", { name: "Actual size" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 

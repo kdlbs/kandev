@@ -130,6 +130,7 @@ export async function seedRichOutputTask({
   seedData,
   title,
   historical = false,
+  failureRetry = false,
   payload,
 }: {
   page: Page;
@@ -137,11 +138,13 @@ export async function seedRichOutputTask({
   seedData: SeedData;
   title: string;
   historical?: boolean;
+  failureRetry?: boolean;
   payload?: unknown;
 }): Promise<SessionPage> {
   fs.writeFileSync(path.join(seedData.repositoryPath, RICH_OUTPUT_FILE), RICH_OUTPUT_FILE_CONTENT);
   fs.writeFileSync(path.join(seedData.repositoryPath, RICH_OUTPUT_CSV), RICH_OUTPUT_CSV_CONTENT);
   let description = richOutputScript();
+  if (failureRetry) description = 'e2e:message("Rich output retry fixture ready.")';
   if (payload)
     description = `e2e:mcp:kandev:show_rich_output_kandev(${JSON.stringify(payload)})\ne2e:message("Rich output complete.")`;
   if (historical) description = 'e2e:message("Historical replay fixture.")';
@@ -225,5 +228,117 @@ export async function seedRichOutputTask({
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (failureRetry) {
+    await seedRichOutputFailureMessage(
+      apiClient,
+      task.session_id,
+      'StatusList item "Build" has unsupported status "success".',
+    );
+    await seedRichOutputSuccessMessage(apiClient, task.session_id);
+  }
   return session;
+}
+
+export async function seedRichOutputFailureMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  diagnostic: string,
+): Promise<void> {
+  const toolName = "mcp__kandev__show_rich_output_kandev";
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "tool_call",
+    content: toolName,
+    authorType: "agent",
+    newTurn: true,
+    turnStartedAt: new Date().toISOString(),
+    turnCompletedAt: new Date().toISOString(),
+    metadata: {
+      tool_call_id: `rich-output-failure-${Date.now()}`,
+      title: toolName,
+      status: "error",
+      normalized: {
+        kind: "generic",
+        generic: {
+          name: "other",
+          input: { kind: "other", raw_input: { secret: "never display submitted arguments" } },
+          output: {
+            structuredContent: null,
+            content: [{ type: "text", text: JSON.stringify({ message: diagnostic }) }],
+          },
+        },
+      },
+    },
+  });
+}
+
+export async function seedRichOutputSuccessMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+): Promise<void> {
+  const toolName = "mcp__kandev__show_rich_output_kandev";
+  const payload = {
+    version: 2,
+    catalog_version: 1,
+    title: "Release health",
+    spec: {
+      root: "report",
+      elements: {
+        report: {
+          type: "Stack",
+          props: { direction: "vertical" },
+          children: ["checks", "chart", "evidence"],
+        },
+        checks: {
+          type: "StatusList",
+          props: {
+            items: [
+              {
+                label: "Corrected verification",
+                status: "passed",
+                detail: "The corrected report remains available.",
+              },
+            ],
+          },
+          children: [],
+        },
+        chart: {
+          type: "Chart",
+          props: {
+            chart_type: "bar",
+            title: "Build results",
+            summary: "Completed and failed checks in this report.",
+            labels: ["Passed", "Failed"],
+            series: [
+              { label: "Checks", values: [38, 0] },
+              { label: "Retries", values: [2, 0] },
+            ],
+          },
+          children: [],
+        },
+        evidence: {
+          type: "FilePreview",
+          props: { path: RICH_OUTPUT_FILE, title: "Raw verification report" },
+          children: [],
+        },
+      },
+    },
+  };
+  await apiClient.seedSessionMessage(sessionId, {
+    type: "tool_call",
+    content: toolName,
+    authorType: "agent",
+    metadata: {
+      tool_call_id: "rich-output-retry-success",
+      title: toolName,
+      status: "complete",
+      normalized: {
+        kind: "generic",
+        generic: {
+          name: "other",
+          input: { kind: "other", raw_input: payload },
+          output: { content: "Rich output accepted." },
+        },
+      },
+    },
+  });
 }

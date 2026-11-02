@@ -208,3 +208,10 @@ waves do not authorize subagents.
 ## Open Questions
 
 None.
+
+
+## Later repository placement package
+
+The [workspace repository placement package](../workspace-repository-placement/plan.md) extends the explicit Worktree batch flow.
+Its work orders own the new creation option, nested placements, and explicit expansion recovery.
+This plan's completed results remain historical evidence. The later package does not authorize restarting legacy active-turn add-branch callers.

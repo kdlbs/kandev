@@ -27,6 +27,40 @@ type PersistedAttachment = {
  *     (the toolbar intentionally omits a duplicate control).
  */
 test.describe("CLI mode: passthrough toolbar", () => {
+  // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.4, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.8
+  test("narrow fine-pointer layouts retain touch-sized keys only below 768px", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const profileId = await createPassthroughProfile(apiClient, "Narrow phone navigation");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Narrow phone navigation",
+      profileId,
+      {
+        description: "initial prompt",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.setViewportSize({ width: 767, height: 850 });
+    await testPage.goto(`/t/${task.id}`);
+    const bar = testPage.getByTestId("mobile-terminal-keybar");
+    await expect(bar).toBeVisible();
+    const ctrl = bar.getByTestId("keybar-key-ctrl");
+    const bounds = await ctrl.boundingBox();
+    expect(bounds!.width).toBeGreaterThanOrEqual(44);
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    await ctrl.click();
+    await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+    await testPage.setViewportSize({ width: 768, height: 850 });
+    await expect(bar).toHaveCount(0);
+    await testPage.setViewportSize({ width: 767, height: 850 });
+    await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+  });
+
   /** Create a passthrough agent profile and return its ID. */
   async function createPassthroughProfile(apiClient: ApiClient, name: string): Promise<string> {
     const { agents } = await apiClient.listAgents();
@@ -131,6 +165,13 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByTestId("passthrough-toggle-composer")).toBeVisible({
       timeout: 5_000,
     });
+
+    // @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.8
+    await expect(testPage.getByTestId("mobile-terminal-keybar")).toHaveCount(0);
+    await session.passthroughTerminal.click();
+    await testPage.keyboard.type("desktop physical keyboard");
+    await testPage.keyboard.press("Enter");
+    await session.expectPassthroughHasText("Processed: desktop physical keyboard");
 
     const chatToggle = testPage.getByTestId("passthrough-toggle-composer");
     await chatToggle.hover();
