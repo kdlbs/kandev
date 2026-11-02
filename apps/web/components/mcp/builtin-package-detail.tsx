@@ -107,6 +107,7 @@ export function BuiltinPackageDetail({
     <section className="min-w-0 space-y-5 pb-4" data-testid="builtin-mcp-detail">
       <div className="sticky top-0 z-10 bg-background">
         <Button
+          type="button"
           autoFocus
           variant="ghost"
           className={controlSizingClassName("standard")}

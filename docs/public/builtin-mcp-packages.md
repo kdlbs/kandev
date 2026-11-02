@@ -59,7 +59,8 @@ Core tools remain subject to the caller's capabilities and resource access.
 Use the shared **Save changes** bar to save workspace edits. Discard restores
 the saved values. Reset restores the package defaults in the draft; save to apply
 them. A conflict or denied write keeps the draft unsaved. Reload discards it and
-loads current values.
+loads current values. Reopening Customize refreshes saved choices when there are
+no unsaved edits. An unsaved draft stays intact when the explorer reopens.
 
 ## Check when changes apply
 

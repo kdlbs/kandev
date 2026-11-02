@@ -204,6 +204,7 @@ function useBuiltinExplorer(selection: TaskSessionMCPSelection | null | undefine
     "tasks",
     selection?.taskId ?? null,
     selection?.workspaceId ?? "",
+    open,
   );
   const builtinSession = useBuiltinMCPSession(
     selection?.taskId ?? null,

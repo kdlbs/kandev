@@ -152,3 +152,54 @@ describe("built-in draft recovery", () => {
     expect(result.current.draft).toEqual({});
   });
 });
+
+describe("built-in editor reopening", () => {
+  it("refreshes saved choices and both revisions when reopened without edits", async () => {
+    const { result, rerender } = renderHook(
+      ({ open }) => useBuiltinMCPManagement("tasks", "task", "ws", open),
+      { initialProps: { open: false } },
+    );
+    await waitFor(() => expect(result.current.pending).toBe(false));
+    const updated = snapshot();
+    updated.policy.revision = 5;
+    updated.preferences!.revision = 3;
+    updated.preferences!.packages.walkthroughs = "off";
+    let resolve!: (value: BuiltinMCPManagementView) => void;
+    api.get.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    rerender({ open: true });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    expect(result.current.pending).toBe(true);
+    await act(async () => resolve(updated));
+    expect(result.current.draft.walkthroughs).toBe("off");
+    expect(result.current.view?.policy.revision).toBe(5);
+    expect(result.current.view?.preferences?.revision).toBe(3);
+    expect(result.current.pending).toBe(false);
+    api.preferences.mockResolvedValue(updated);
+    act(() => result.current.setChoice("configuration", "on"));
+    await act(async () => result.current.save());
+    expect(api.preferences).toHaveBeenCalledWith("task", 3, 5, {
+      walkthroughs: "off",
+      configuration: "on",
+    });
+  });
+
+  it("preserves unsaved choices when reopened", async () => {
+    const { result, rerender } = renderHook(
+      ({ open }) => useBuiltinMCPManagement("tasks", "task", "ws", open),
+      { initialProps: { open: true } },
+    );
+    await waitFor(() => expect(result.current.pending).toBe(false));
+    act(() => result.current.setChoice("configuration", "on"));
+    rerender({ open: false });
+    api.get.mockResolvedValue(snapshot());
+    rerender({ open: true });
+    await act(async () => {});
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(result.current.draft.configuration).toBe("on");
+    expect(result.current.dirty).toBe(true);
+  });
+});

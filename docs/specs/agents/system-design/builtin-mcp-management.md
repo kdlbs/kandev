@@ -462,6 +462,8 @@ Carry safe manifest/package identity in attachment DTOs and hydration/reducers,
 using existing observation ordering and sanitization. No new poller, health enum,
 probe, or global health aggregate. Domain hooks invalidate on known writes and
 reopen, key by workspace/task/session/execution, and reject stale responses.
+Reopening Customize reloads clean choices and both revisions; unsaved drafts stay
+intact. Package-detail Back is a non-submit action inside task creation.
 Third-party pending-change acknowledgments cannot clear package pending state.
 
 ## Desktop and phone composition

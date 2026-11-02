@@ -139,6 +139,27 @@ export async function checkBuiltinTask(page: Page, api: ApiClient, seed: SeedDat
   await activate(page.getByTestId("mcp-customize-tab"), touch);
   await activate(page.getByTestId("builtin-mcp-package-configuration"), touch);
   await expect(page.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
+  await checkBuiltinTaskReopen(page, api, task.id, touch);
+}
+
+async function checkBuiltinTaskReopen(page: Page, api: ApiClient, taskId: string, touch: boolean) {
+  await page.keyboard.press("Escape");
+  const current = await builtinView(api, "tasks", taskId);
+  const saved = await api.rawRequest("PUT", `/api/v1/tasks/${taskId}/mcp-built-in/preferences`, {
+    version: 1,
+    expected_revision: current.preferences!.revision,
+    expected_workspace_policy_revision: current.policy.revision,
+    packages: { ...current.preferences!.packages, configuration: "off" },
+  });
+  expect(saved.status).toBe(200);
+  await activate(page.getByTestId("mcp-status-trigger"), touch);
+  await activate(page.getByTestId("mcp-customize-tab"), touch);
+  await expect(page.getByTestId("builtin-mcp-choice-configuration")).toContainText("Off");
+  await chooseBuiltin(page, "configuration", "On", touch);
+  await page.keyboard.press("Escape");
+  await activate(page.getByTestId("mcp-status-trigger"), touch);
+  await activate(page.getByTestId("mcp-customize-tab"), touch);
+  await expect(page.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
 }
 
 export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: boolean) {
@@ -190,4 +211,36 @@ export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: bo
   await expect(explorer.getByTestId("mcp-server-row-kandev-configuration")).toContainText("Active");
   await activate(explorer.getByTestId("mcp-server-row-kandev-configuration"), touch);
   await expect(explorer.getByTestId("mcp-tool-row-list_shared_prompts_kandev")).toBeVisible();
+}
+
+export async function checkBuiltinCreationBack(page: Page, touch: boolean) {
+  await page.goto("/");
+  const create = touch
+    ? page.getByRole("button", { name: "Add task", exact: true })
+    : page.getByTestId("create-task-button").filter({ visible: true });
+  await activate(create, touch);
+  const dialog = page.getByTestId("create-task-dialog");
+  await dialog.getByTestId("task-title-input").fill("Unfinished package selection");
+  await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
+  const packages = dialog.getByTestId("task-create-builtin-packages");
+  await activate(packages.locator(":scope > summary"), touch);
+  await activate(packages.getByTestId("builtin-mcp-package-configuration"), touch);
+  const form = dialog.locator("form");
+  await form.evaluate((node) => {
+    node.dataset.submissions = "0";
+    node.addEventListener(
+      "submit",
+      (event) => {
+        node.dataset.submissions = String(Number(node.dataset.submissions) + 1);
+        event.preventDefault();
+        event.stopPropagation();
+      },
+      true,
+    );
+  });
+  await activate(packages.getByRole("button", { name: "Back", exact: true }), touch);
+  await expect(packages.getByTestId("builtin-mcp-package-configuration")).toBeFocused();
+  await expect(form).toHaveAttribute("data-submissions", "0");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
 }

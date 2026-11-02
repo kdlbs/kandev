@@ -1,4 +1,7 @@
-import { checkBuiltinCreation } from "../../helpers/builtin-mcp-management";
+import {
+  checkBuiltinCreation,
+  checkBuiltinCreationBack,
+} from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import { checkBuiltinTask, checkBuiltinWorkspace } from "../../helpers/builtin-mcp-management";
 
@@ -56,4 +59,8 @@ test("keeps translated detail usable across phone and touch widths", async ({
   } finally {
     await apiClient.deleteWorkspace(workspace.id, workspace.name);
   }
+});
+
+test("Back from package detail does not submit a new task", async ({ testPage }) => {
+  await checkBuiltinCreationBack(testPage, true);
 });

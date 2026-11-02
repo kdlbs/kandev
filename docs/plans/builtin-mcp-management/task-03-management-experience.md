@@ -170,3 +170,60 @@ and Portuguese dark/light layout at 320/393/767/768/900 px pass. Existing deskto
 and phone MCP explorer tests pass. Six fresh desktop/phone screenshots cover
 workspace policy, task choices, and initial consent. Disposable capture specs were
 removed after the successful managed run; assets remain ignored.
+
+
+## CI and review remediation (2026-11-02)
+
+Rebased onto main `f648e79f9ecc7d5db0db301f20d0b23c7cb44d97`. The Claude ACP
+import conflict keeps main's `streams` subagent support and package-aware native
+permission identity. Backup `backup/builtin-mcp-before-fixup-20261102-79e882f`
+preserves the previously published head.
+
+Fixed the E2E Build failure in run 41438927330 (head 79e882f454d6): a duplicate
+`waitForCascadeArchiveCleanup` import prevented native test-catalog discovery.
+The exact Playwright listing reproduced that failure, then discovered 4,622
+cases after removing the duplicate. No runtime behavior changed for this fix.
+
+Review 4422789201: Back now declares `type="button"` in package detail. Both
+real task forms verify that Back returns to the list, preserves focus and leaves
+the submit count at zero. The existing synchronous Back path also passed this
+browser check before the explicit type was added; this is a semantic HTML guard.
+
+Review 4422789233: reopening the explorer refreshes clean built-in choices and
+both saved revisions. Unsaved drafts remain intact. A deferred hook test failed
+before this fix and now proves current revisions reach the next save. Desktop
+and phone journeys also change saved preferences through the API, reopen without
+a page reload, and retain an unsaved choice across a later close/reopen.
+
+Checks passed:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./internal/mcp/profile ./internal/mcp/server ./internal/agentctl/server/adapter/transport/acp -count=1 -timeout=5m
+bash scripts/lint-go-changed apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude.go
+pnpm --dir apps/web exec vitest run hooks/domains/workspace/use-builtin-mcp-management.test.ts
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web exec playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --project=containers --list --reporter=list
+pnpm --dir apps/web e2e:run --host --project chromium tests/settings/builtin-mcp-management.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-builtin-mcp-management.spec.ts -- --retries=0
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node scripts/validate-public-docs.mjs
+git diff --check
+```
+
+The hook suite passes 10 tests; browser checks pass 5 desktop and 5 phone cases,
+sequentially with one worker and retries disabled. E2E host invocations clear
+`KANDEV_INTERNAL_CONFIG_FILE`, `KANDEV_INTERNAL_CONFIG_HOME_FILE`, and
+`KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG`, and set
+`LD_LIBRARY_PATH=/home/zeval/.cache/kandev-builtin-browser-libs/lib` for Nix-host
+Chromium. Builds use `GOMAXPROCS=2`, `GOMEMLIMIT=4GiB`, `GOFLAGS=-p=2`, and
+`NODE_OPTIONS=--max-old-space-size=4096`. The first two browser attempts exposed
+host configuration/library setup issues, which were resolved before behavioral
+verification. No protected runtime was used.
+
+Changed TypeScript files also pass Prettier and zero-warning ESLint. Go lint
+2.9.0 reports zero issues. Logs are `/tmp/kandev-4762-fixup-{desktop,phone,go-race,
+go-lint,typecheck,eslint,format-check}.log`, `/tmp/kandev-4762-reopen-{red,green}.log`,
+and `/tmp/kandev-4762-catalog-{red,green}.log`. This remediation changes form
+semantics and refresh logic; visual composition and existing screenshot scenes
+remain unchanged. The design and public how-to describe the refresh rule.

@@ -291,3 +291,19 @@ same tools for both caller types and does not change task permissions.
 Existing authorization checks and retained-process combined transport are
 intentional compatibility boundaries. This cleanup removes duplicate assembly;
 it does not turn package selection into a permission grant or restart live agents.
+
+
+## CI, conflicts, and review remediation: 2 November 2026
+
+Rebased onto verified main `f648e79f9ecc7d5db0db301f20d0b23c7cb44d97`, preserving
+both ACP stream support and package permission normalization. Removed the
+reproducible duplicate E2E helper import that broke catalog generation. Back
+is explicitly a non-submit action. Reopening Customize refreshes clean saved
+choices/revisions while preserving a dirty draft.
+
+Validation passes: full profile/server/ACP race suites; affected Go lint; ten
+management-hook tests; full TypeScript checking; changed-file ESLint/Prettier;
+4,622-case E2E catalog generation; five desktop and five phone package journeys;
+documentation, specification, public-page and whitespace checks. Work order 03
+records exact commands, host environment setup, review IDs, and the original
+failing CI run. No full local E2E suite or merge is performed.

@@ -64,7 +64,12 @@ async function persistChoices(
   );
 }
 
-export function useBuiltinMCPManagement(scope: Scope, ownerId: string | null, workspaceId: string) {
+export function useBuiltinMCPManagement(
+  scope: Scope,
+  ownerId: string | null,
+  workspaceId: string,
+  open = false,
+) {
   const auth = useAppStore((state) =>
     JSON.stringify([state.auth.mode, state.auth.authenticated, state.auth.user?.id]),
   );
@@ -143,6 +148,8 @@ export function useBuiltinMCPManagement(scope: Scope, ownerId: string | null, wo
       }
     setState((old) => ({ ...old, draft }));
   };
+  const dirty = Boolean(editor.view && !sameChoices(editor.draft, choicesOf(scope, editor.view)));
+  useReloadOnOpen(open, dirty, editor.pending, reload);
   return {
     ...editor,
     setChoice,
@@ -150,6 +157,20 @@ export function useBuiltinMCPManagement(scope: Scope, ownerId: string | null, wo
     reload,
     discard,
     reset,
-    dirty: Boolean(editor.view && !sameChoices(editor.draft, choicesOf(scope, editor.view))),
+    dirty,
   };
+}
+
+function useReloadOnOpen(
+  open: boolean,
+  dirty: boolean,
+  pending: boolean,
+  reload: () => Promise<void>,
+) {
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    const opening = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (opening && !dirty && !pending) void reload();
+  }, [open, dirty, pending, reload]);
 }

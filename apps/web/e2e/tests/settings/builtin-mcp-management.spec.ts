@@ -1,4 +1,7 @@
-import { checkBuiltinCreation } from "../../helpers/builtin-mcp-management";
+import {
+  checkBuiltinCreation,
+  checkBuiltinCreationBack,
+} from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
   activate,
@@ -64,4 +67,8 @@ test.afterEach(async ({ backend }, testInfo) => {
       path: backend.logPath,
       contentType: "text/plain",
     });
+});
+
+test("Back from package detail does not submit a new task", async ({ testPage }) => {
+  await checkBuiltinCreationBack(testPage, false);
 });
