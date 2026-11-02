@@ -27,6 +27,7 @@ export type SandboxReport = {
   policy_digest: string;
   ceiling_digest: string;
   provider: {
+    protocol_major?: number;
     plugin_id: string;
     installation_id: string;
     key: string;
@@ -39,6 +40,7 @@ export type SandboxReport = {
   digest: string;
   captured_at: string;
   data: {
+    final_audit?: { binding_digest: string; artifact_set_digest: string; captured_at: string };
     v2?: SandboxTypedReport;
     last_successful_read_at?: string;
     refresh_error?: "unavailable" | "unsupported" | "invalid_evidence" | "limit_exceeded";

@@ -232,3 +232,28 @@ and backend observer/sandbox race tests, SQL guard, zero-issue scoped Go lint,
 This still does not complete Task 05. The shared desktop/phone verification
 view and its rendered acceptance remain required. Current-pair managed
 acceptance remains Task 10.
+
+The shared Audit verification view is implemented. It reads bounded history and
+current trust without invoking a verifier. Operators can store a public key,
+revoke trust, and request one explicit verification. A stale draft retains its
+original expected version and requires an explicit reload. Read-only users see
+history without mutation controls. Failed reads preserve earlier results.
+Revocation changes current signer trust without changing the saved signature or
+completion time. Pending-job tracking stops at a terminal state or read error.
+
+Thirteen focused browser-controller/current-trust tests pass, including a
+mutation control that removes the trust-revision identity check. Desktop audit,
+Reports, and learning journeys pass (five tests). Phone audit journeys pass (two
+tests), including 393/700/767px geometry, explicit public-key storage, stale-draft
+rejection, revocation, role changes, focus return, and no write on view reads.
+The 768px desktop boundary and narrow fine-pointer entry also pass. Rendered
+screenshots show a fixed header/footer and one internal scroller. Seven-locale
+validation, the new-copy ratchet, frontend typecheck, and zero-warning scoped
+ESLint pass. Phone Reports/learning regressions also pass (three tests).
+
+Two final Task 05 checks remain: align the explicit verifier RPC budget with
+the existing 30-second worker bound, and distinguish a valid but unsupported
+operator public-key algorithm from an invalid audit chain in the Nono adapter.
+The unsupported-key RED test reproduces the incorrect chain error; its focused
+GREEN test preserves valid chain and ledger results and reports unsupported
+signature verification. Final plugin validation and packaging are still required.

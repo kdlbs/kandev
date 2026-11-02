@@ -2,10 +2,11 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useSandboxLearning } from "@/hooks/domains/session/use-sandbox-learning";
+import { SandboxAuditView } from "./sandbox-audit-view";
 import { SandboxLearningReview } from "./sandbox-learning-review";
 import { SandboxTypedReportContent } from "./sandbox-typed-report";
 import { SandboxReportSummary } from "./sandbox-report-summary";
-import { SandboxReportHeader } from "./sandbox-report-header";
+import { SandboxReportHeader, sandboxReportActionClass } from "./sandbox-report-header";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useSandboxReport } from "@/hooks/domains/session/use-sandbox-report";
@@ -73,14 +74,8 @@ function ReportContent({
   const { data } = report;
   const model = useSandboxLearning(sessionId, report);
   const [selection, setSelection] = useState({ digest: report.digest, ids: [] as string[] });
-  const [reviewDigest, setReviewDigest] = useState<string | null>(null);
-  const reviewButton = useRef<HTMLButtonElement>(null);
-  const wasReview = useRef(false);
-  const reviewing = reviewDigest === report.digest;
-  useLayoutEffect(() => {
-    if (!reviewing && wasReview.current) reviewButton.current?.focus();
-    wasReview.current = reviewing;
-  }, [reviewing]);
+  const audit = useReportNextView(report.digest);
+  const review = useReportNextView(report.digest);
   const selectedIds = selection.digest === report.digest ? selection.ids : [];
   const setSelectedIds: React.Dispatch<React.SetStateAction<string[]>> = (update) =>
     setSelection((current) => ({
@@ -90,12 +85,20 @@ function ReportContent({
           ? update(current.digest === report.digest ? current.ids : [])
           : update,
     }));
-  if (reviewDigest === report.digest)
+  if (audit.open)
+    return (
+      <SandboxAuditView
+        sessionId={sessionId}
+        report={report}
+        onBack={() => audit.setDigest(null)}
+      />
+    );
+  if (review.open)
     return (
       <SandboxLearningReview
         model={model}
         selectedIds={selectedIds}
-        onBack={() => setReviewDigest(null)}
+        onBack={() => review.setDigest(null)}
       />
     );
   return (
@@ -105,7 +108,7 @@ function ReportContent({
         className="min-w-0 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-1 py-2 text-xs"
         data-testid="sandbox-denial-report"
       >
-        <ReportRefresh query={query} />
+        <ReportToolbar report={report} query={query} audit={audit} />
         {data.refresh_error && (
           <p role="alert">
             {t(data.last_successful_read_at ? "agents:reportStale" : "agents:reportReadFailed")}
@@ -131,8 +134,8 @@ function ReportContent({
             model={model}
             selectedIds={selectedIds}
             setSelectedIds={setSelectedIds}
-            reviewRef={reviewButton}
-            onReview={() => setReviewDigest(report.digest)}
+            reviewRef={review.button}
+            onReview={() => review.setDigest(report.digest)}
           />
         )}
       </div>
@@ -143,13 +146,53 @@ function ReportContent({
             variant="outline"
             className="h-7 min-h-7 max-md:min-h-11 pointer-coarse:min-h-11 cursor-pointer"
             disabled={selectedIds.length === 0 || (!model.canPropose && !model.revision)}
-            ref={reviewButton}
-            onClick={() => setReviewDigest(report.digest)}
+            ref={review.button}
+            onClick={() => review.setDigest(report.digest)}
           >
             {t(model.revision ? "agents:learningViewRevision" : "agents:learningReviewSelected")}
           </Button>
         </div>
       )}
     </>
+  );
+}
+
+function useReportNextView(digest: string) {
+  const [selectedDigest, setDigest] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  const open = selectedDigest === digest;
+  useLayoutEffect(() => {
+    if (!open && wasOpen.current) button.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+  return { open, setDigest, button };
+}
+
+function ReportToolbar({
+  report,
+  query,
+  audit,
+}: {
+  report: SandboxReport;
+  query: ReturnType<typeof useSandboxReport>;
+  audit: ReturnType<typeof useReportNextView>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <ReportRefresh query={query} />
+      {report.provider.protocol_major === 2 && (
+        <Button
+          type="button"
+          variant="outline"
+          ref={audit.button}
+          className={sandboxReportActionClass}
+          onClick={() => audit.setDigest(report.digest)}
+        >
+          {t("agents:auditTitle")}
+        </Button>
+      )}
+    </div>
   );
 }

@@ -120,4 +120,10 @@ Use 28px desktop controls and at least 44px phone/coarse-pointer targets. Keep v
 
 ## Acceptance and delivery
 
+The shared Audit verification view is a next view inside Reports. Desktop keeps the existing execution dialog. Phone keeps its full-height shell, fixed Back/title and primary-action footer, and one internal scroll area. Back returns focus to the Audit verification entry. No nested dialog or provider-specific UI is added.
+
+Trust reads and mutations are bound to the captured session, attempt, report, provider identity, backend, authenticated principal, and connection epoch. A key draft retains the displayed trust version. A later revision disables submission until the operator explicitly reloads it. Same-tick duplicate actions are fenced before network dispatch. Failed mutations reconcile with read-only requests and never retry a write automatically. Current signer trust requires both the job's current-trust result and the matching current key revision. Revocation or an unavailable trust read clears that label while preserving saved mathematical results and their original timestamps.
+
+History uses bounded pages and tracks only a pending or running verification ID. Tracking stops after a terminal state, read error, or unmount. An explicit Refresh reconciles failed reads without starting verification. Member sessions can inspect history but cannot publish trust or invoke the verifier.
+
 The [expansion plan](../../../plans/nono-sandbox-expansion/plan.md) defines tests and work orders. Pair malformed and stale fixtures with actual Nono audit samples. Never promote historical 0.80.0 managed acceptance to evidence for a new runtime or package.
