@@ -6,7 +6,9 @@ import type { ModeEntry } from "@/lib/types/http";
 afterEach(cleanup);
 
 const TRIGGER_TEST_ID = "profile-mode-select";
+const CUSTOM_ENTRY_TEST_ID = "profile-mode-custom-entry";
 const SEARCH_PLACEHOLDER = "Search modes...";
+const CUSTOM_MODE_ID = "reviewer";
 
 const modes: ModeEntry[] = [
   { id: "build", name: "Build" },
@@ -48,14 +50,14 @@ describe("ModeCombobox", () => {
 
     openCombobox();
     fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
-      target: { value: "reviewer" },
+      target: { value: CUSTOM_MODE_ID },
     });
 
-    const entry = screen.getByTestId("profile-mode-custom-entry");
-    expect(entry.textContent).toContain('Use "reviewer" as mode ID');
+    const entry = screen.getByTestId(CUSTOM_ENTRY_TEST_ID);
+    expect(entry.textContent).toContain(`Use "${CUSTOM_MODE_ID}" as mode ID`);
 
     fireEvent.click(entry);
-    expect(onChange).toHaveBeenCalledWith("reviewer");
+    expect(onChange).toHaveBeenCalledWith(CUSTOM_MODE_ID);
   });
 
   it("does not offer the custom entry once the typed text exactly matches a listed mode", () => {
@@ -66,7 +68,7 @@ describe("ModeCombobox", () => {
       target: { value: "plan" },
     });
 
-    expect(screen.queryByTestId("profile-mode-custom-entry")).toBeNull();
+    expect(screen.queryByTestId(CUSTOM_ENTRY_TEST_ID)).toBeNull();
   });
 
   it("activates the typed entry over an advertised match on Enter", () => {
@@ -77,25 +79,25 @@ describe("ModeCombobox", () => {
     const input = screen.getByPlaceholderText(SEARCH_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "pla" } });
 
-    expect(screen.getByTestId("profile-mode-custom-entry").textContent).toContain(
-      'Use "pla" as mode ID',
-    );
+    expect(screen.getByTestId(CUSTOM_ENTRY_TEST_ID).textContent).toContain('Use "pla" as mode ID');
     expect(screen.getByText("Plan")).toBeTruthy();
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith("pla");
   });
 
-  it("clears the search filter when the popover closes and reopens", () => {
-    renderCombobox("build");
+  it("clears the search filter after selecting a mode before reopening", () => {
+    const onChange = vi.fn();
+    renderCombobox("build", onChange);
 
     openCombobox();
     fireEvent.change(screen.getByPlaceholderText(SEARCH_PLACEHOLDER), {
-      target: { value: "reviewer" },
+      target: { value: CUSTOM_MODE_ID },
     });
     expect(screen.queryByRole("option", { name: /^Build/ })).toBeNull();
 
-    fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByTestId(CUSTOM_ENTRY_TEST_ID));
+    expect(onChange).toHaveBeenCalledWith(CUSTOM_MODE_ID);
     fireEvent.click(screen.getByTestId(TRIGGER_TEST_ID));
 
     const reopenedInput = screen.getByPlaceholderText(SEARCH_PLACEHOLDER) as HTMLInputElement;

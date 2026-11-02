@@ -14,9 +14,8 @@ import { waitForHttp } from "../../helpers/causal-waits";
  *   resolution error banner never appears and capabilities stay refreshable.
  *   The mode is still applied (and validated) when a real task session starts.
  *
- * Rendered-state assertions wait on the resolve round trip that causes them
- * (arm before act) instead of hand-picked budgets; only the initial editor
- * load keeps the template's navigation timeout.
+ * Rendered-state assertions wait for the profile, capability, resolve, or save
+ * response that causes them (arm before act), then use the default timeout.
  */
 
 const CUSTOM_MODE = "reviewer";
@@ -34,8 +33,14 @@ test.describe("Agent profile — repository-local session modes", () => {
     });
 
     try {
+      const capabilitiesLoaded = waitForHttp(
+        testPage,
+        "POST",
+        /^\/api\/v1\/agent-models\/mock-agent\/probe$/,
+      );
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      await expect(testPage.getByTestId("profile-name-input")).toBeVisible({ timeout: 15_000 });
+      await capabilitiesLoaded;
+      await expect(testPage.getByTestId("profile-name-input")).toBeVisible();
 
       const trigger = testPage.getByTestId("profile-mode-select");
       await expect(trigger).toBeVisible();
@@ -53,7 +58,10 @@ test.describe("Agent profile — repository-local session modes", () => {
         "POST",
         /\/agent-models\/mock-agent\/resolve$/,
         {
-          predicate: (response) => response.status() === 200,
+          predicate: (response) => {
+            const request = response.request().postDataJSON() as { mode?: string };
+            return response.status() === 200 && request.mode === CUSTOM_MODE;
+          },
         },
       );
       await customEntry.click();
@@ -65,25 +73,28 @@ test.describe("Agent profile — repository-local session modes", () => {
       // Resolution must tolerate the unadvertised mode instead of failing.
       await expect(testPage.getByTestId("model-config-resolution-error")).toHaveCount(0);
 
-      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i });
+      await expect(saveButton).toHaveCount(1);
       await expect(saveButton).toBeEnabled();
+      const profileSaved = waitForHttp(
+        testPage,
+        "PATCH",
+        new RegExp(`/api/v1/agent-profiles/${profile.id}$`),
+        { predicate: (response) => response.status() === 200 },
+      );
       await saveButton.click();
-      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+      await profileSaved;
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden();
+      expect((await apiClient.getAgentProfile(profile.id)).mode).toBe(CUSTOM_MODE);
 
-      await expect
-        .poll(
-          async () => {
-            const saved = (await apiClient.getAgentProfile(profile.id)) as unknown as {
-              mode?: string | null;
-            };
-            return saved.mode ?? "";
-          },
-          { timeout: 10_000, intervals: [250, 500, 1000] },
-        )
-        .toBe(CUSTOM_MODE);
-
+      const capabilitiesReloaded = waitForHttp(
+        testPage,
+        "POST",
+        /^\/api\/v1\/agent-models\/mock-agent\/probe$/,
+      );
       await testPage.reload();
-      await expect(testPage.getByTestId("profile-name-input")).toBeVisible({ timeout: 15_000 });
+      await capabilitiesReloaded;
+      await expect(testPage.getByTestId("profile-name-input")).toBeVisible();
       await expect(testPage.getByTestId("profile-mode-select")).toHaveText(new RegExp(CUSTOM_MODE));
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
@@ -110,12 +121,20 @@ test.describe("Agent profile — repository-local session modes", () => {
     try {
       // The editor auto-resolves model options for the saved profile on load;
       // arm before navigation so the load-time resolve is caught.
+      const capabilitiesLoaded = waitForHttp(
+        testPage,
+        "POST",
+        /^\/api\/v1\/agent-models\/mock-agent\/probe$/,
+      );
       const resolvedOnLoad = waitForHttp(testPage, "POST", /\/agent-models\/mock-agent\/resolve$/, {
-        predicate: (response) => response.status() === 200,
+        predicate: (response) => {
+          const request = response.request().postDataJSON() as { mode?: string };
+          return response.status() === 200 && request.mode === CUSTOM_MODE;
+        },
       });
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      await expect(testPage.getByTestId("profile-name-input")).toBeVisible({ timeout: 15_000 });
-      await resolvedOnLoad;
+      await Promise.all([capabilitiesLoaded, resolvedOnLoad]);
+      await expect(testPage.getByTestId("profile-name-input")).toBeVisible();
 
       // Resolution succeeds despite the unadvertised mode (backend tolerance):
       // no error banner, capabilities remain refreshable.

@@ -138,20 +138,23 @@ export function ModeCombobox({
   const activeMode = modes.find((m) => m.id === selected);
   const storedCustom = isCustomMode(selected, modes) ? selected : "";
   const customEntry = customEntryId(filterText, storedCustom, modes);
+  const close = () => {
+    setOpen(false);
+    setFilterText("");
+  };
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      setOpen(true);
+    } else {
+      close();
+    }
+  };
   const select = (id: string) => {
     onChange(id);
-    setOpen(false);
+    close();
   };
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) {
-          setFilterText("");
-        }
-      }}
-    >
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
