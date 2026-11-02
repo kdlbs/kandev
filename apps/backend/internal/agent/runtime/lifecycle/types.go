@@ -1255,6 +1255,11 @@ func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentc
 	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
+	return ae.replaceAgentctlClientLocked(client)
+}
+
+// replaceAgentctlClientLocked publishes under the caller's source write lease.
+func (ae *AgentExecution) replaceAgentctlClientLocked(client *agentctl.Client) *agentctl.Client {
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -1906,13 +1911,14 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID     string
-	ProfileName   string
-	AgentID       string
-	AgentName     string // e.g., "auggie", "claude", "codex"
-	Model         string // applied through ACP model selection at session start
-	Mode          string // applied via ACP session/set_mode at session start (empty = use agent default)
-	ConfigOptions map[string]string
+	ResourceCircuitKey string
+	ProfileID          string
+	ProfileName        string
+	AgentID            string
+	AgentName          string // e.g., "auggie", "claude", "codex"
+	Model              string // applied through ACP model selection at session start
+	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
+	ConfigOptions      map[string]string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string

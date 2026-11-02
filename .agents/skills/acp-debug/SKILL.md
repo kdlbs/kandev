@@ -48,9 +48,20 @@ acpdbg matrix                                          # probe every ACP agent i
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr
 - `--stderr` — capture child stderr into the JSONL
+- `--client-capabilities '{"session":{"notices":{},"compaction":{}}}'` — merge a JSON object into `initialize.clientCapabilities`; nested values merge with the debugger defaults
 - `--air-capabilities "asyncTasks,..."` — advertise AIR extension capabilities in
-  `clientCapabilities._meta.jetbrains.air`; omitted by default. Use it to observe
-  extension-gated frames without editing the initialize payload.
+  `clientCapabilities._meta.jetbrains.air`; omitted by default. This metadata merges with the
+  `--client-capabilities` object, so both sets of keys remain in the recorded initialize frame.
+
+Use the generic flag to probe capability-gated schema events:
+
+```bash
+apps/backend/bin/acpdbg probe --client-capabilities '{"session":{"notices":{},"compaction":{}}}' --out /tmp/acpdbg-check claude-acp
+```
+
+For `prompt --model`, acpdbg uses a `model` category config option when available. It falls back
+to `session/set_model` when the option is absent or the agent does not implement
+`session/set_config_option`.
 
 ## Steps
 

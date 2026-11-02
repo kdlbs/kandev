@@ -203,6 +203,13 @@ from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
 
+After a restart, confirmed evidence that the exact Remote Docker or Sprites
+instance is absent ends attachment so the existing recovery actions can check
+the saved state. An unreachable host or control endpoint does not prove that
+the instance stopped, so Kandev keeps that owner protected. Missing native
+conversation or delivery evidence can still block Resume. Kandev does not resend
+an instruction whose outcome is uncertain.
+
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
 original stream and replays committed output from its durable cursor. It does
@@ -620,6 +627,10 @@ switch is on. Turning chat animations off keeps content visible immediately
 and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
+
+The device preference also makes Kandev's grid, rotating, and pulsing status
+indicators static. Their labels and status updates remain visible. Changes to
+the preference apply while the page is open; no reload is needed.
 
 Select **Jump to latest** above the composer to return to the newest message,
 including agent replies. The action appears only when newer content is below

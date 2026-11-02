@@ -1264,6 +1264,9 @@ func (s *Service) handleSessionLaunchFailure(
 	preloadedSession ...*models.TaskSession,
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
+	if isFixedProfileSuspendedError(launchErr) {
+		return launchErr
+	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
 			zap.String("task_id", taskID),
@@ -7036,6 +7039,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
 	if err != nil {
 		return nil, err
+	}
+
+	// A fixed profile whose resource circuit is open must not receive a new
+	// provider request, even into an execution that is still alive. Dynamic
+	// sessions are gated by their own selection.
+	if !s.isDynamicPromptSession(session) {
+		if err := s.admitFixedSessionPrompt(ctx, session); err != nil {
+			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+			return nil, err
+		}
 	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.

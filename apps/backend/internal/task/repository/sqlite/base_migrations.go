@@ -143,6 +143,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	}
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Apply("dynamic_resource_circuits.failure_count", `ALTER TABLE dynamic_resource_circuits ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
 		return err
 	}
