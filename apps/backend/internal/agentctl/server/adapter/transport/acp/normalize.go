@@ -424,19 +424,24 @@ func (n *Normalizer) EnrichFromToolCallUpdate(
 	rawInput any,
 	supplemental map[string]any,
 ) {
-	n.enrichDialectSubagent(payload, meta, rawInput)
+	n.enrichDialectSubagent(payload, title, meta, rawInput)
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromUpdate(title, meta, rawInput, supplemental))
 }
 
 func (n *Normalizer) enrichDialectSubagent(
 	payload *streams.NormalizedPayload,
+	title *string,
 	meta map[string]any,
 	rawInput any,
 ) {
 	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
 		return
 	}
-	frame, ok := n.dialect.parseSubagentFrame(meta, "", rawInput)
+	updateTitle := ""
+	if title != nil {
+		updateTitle = *title
+	}
+	frame, ok := n.dialect.parseSubagentFrame(meta, updateTitle, rawInput)
 	if !ok {
 		return
 	}

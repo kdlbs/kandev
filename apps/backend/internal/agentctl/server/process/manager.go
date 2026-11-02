@@ -116,6 +116,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
@@ -471,6 +472,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
+		processManagerID:           uuid.NewString(),
 		questionImageWorkDir:       imageWorkDir,
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
@@ -609,6 +611,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 		if capability.Reason == "storage_not_durable" {
 			return journal.RecoveryDescriptor{
 				StorageCapability: capability,
+				ProcessManagerID:  m.ProcessManagerID(),
 				SessionID:         m.cfg.SessionID,
 				IncarnationID:     m.DeliveryIncarnationID(),
 				HarnessGeneration: m.DeliveryHarnessGeneration(),
@@ -632,6 +635,7 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 		return journal.RecoveryDescriptor{}, err
 	}
 	descriptor.StorageCapability = capability
+	descriptor.ProcessManagerID = m.ProcessManagerID()
 	return descriptor, nil
 }
 
@@ -3624,6 +3628,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 				"exit_code":          exitCode,
 				"recent_stderr":      recentStderr,
 				"process_generation": generation,
+				"process_manager_id": m.ProcessManagerID(),
 				"startup_evidence":   evidence,
 			},
 		}

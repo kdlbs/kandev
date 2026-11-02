@@ -807,6 +807,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
+		{Name: "async-followup", Description: "Agent-started follow-up with a status-less tool update"},
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},

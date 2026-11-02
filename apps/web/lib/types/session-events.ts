@@ -313,6 +313,11 @@ export type SessionBackendMessageMap = {
     "session.clarification_requested",
     TaskSessionNotificationPayload
   >;
+  "session.permission_requested": BackendMessage<
+    "session.permission_requested",
+    TaskSessionNotificationPayload
+  >;
+  "session.failed": BackendMessage<"session.failed", TaskSessionNotificationPayload>;
   "session.agentctl_starting": BackendMessage<
     "session.agentctl_starting",
     TaskSessionAgentctlPayload

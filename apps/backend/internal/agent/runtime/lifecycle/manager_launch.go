@@ -1079,6 +1079,9 @@ func (m *Manager) launchPrepareRequest(ctx context.Context, req *LaunchRequest, 
 	if reqWithWorktree.Metadata == nil {
 		reqWithWorktree.Metadata = make(map[string]interface{})
 	}
+	if !req.EnvironmentFinalized {
+		captureResourceCircuitIdentity(reqWithWorktree.Metadata, executionID, profileInfo)
+	}
 	if req.TaskDescription != "" {
 		reqWithWorktree.Metadata["task_description"] = req.TaskDescription
 	}

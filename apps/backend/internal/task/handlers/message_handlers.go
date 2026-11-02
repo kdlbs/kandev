@@ -1983,7 +1983,8 @@ func (h *MessageHandlers) queuePromptIfRuntimeUnavailable(
 	attachments []v1.MessageAttachment,
 	promptErr error,
 ) bool {
-	if !errors.Is(promptErr, orchestrator.ErrSessionRuntimeUnavailable) {
+	var suspended *orchestrator.FixedProfileSuspendedError
+	if !errors.Is(promptErr, orchestrator.ErrSessionRuntimeUnavailable) && !errors.As(promptErr, &suspended) {
 		return false
 	}
 	session, err := h.service.GetTaskSession(ctx, sessionID)
