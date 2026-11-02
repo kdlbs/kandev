@@ -386,6 +386,8 @@ Work orders 01 to 12 are implemented and verified. Their Results sections contai
 - Focused Vitest regressions: 4 files, 25 tests passed. Web typecheck, lint, i18n check, and i18n ratchet passed.
 - Chromium async-question E2E: 8 tests passed. Mobile Chrome async-question E2E: 2 tests passed.
 - `(cd apps/web && pnpm e2e:run --project=chromium tests/git/turn-changes-history-pending.spec.ts --retries=0)`: 1 test passed after the test began asserting pending local-export metadata alongside readable retained history. This covers the archive fallback seen in the earlier PR CI failure.
+- PR CI run `41371739136` attempt 1 had one failure in the unchanged Quick Chat cancellation E2E after cancel escalation left a follow-up prompt unadmitted. The exact managed test passed locally with retries disabled (1 passed in 18.0s); rerunning only failed jobs passed on attempt 2. No related code change was needed.
+- `scripts/pr-await 4980` confirmed the settled `04fab2bde635e54ee7de933cbfeb9f3eb0f55053` head: 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending.
 - Changed-file Go lint passed with `0 issues`; `gofmt` and `git diff --check` passed.
 - `python3 scripts/list-docs.py validate`: passed, validating 426 decisions and 1883 specifications. Full specification lint and public documentation validation passed.
 - The requirements, system design, and work-order Results reflect the implemented author/parent visibility and wait-projection contracts.

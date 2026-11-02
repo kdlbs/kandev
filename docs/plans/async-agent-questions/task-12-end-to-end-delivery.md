@@ -124,3 +124,5 @@ Passed:
 - Backend package, race, SQLite async/pending-action, and named PostgreSQL tests passed. Named PostgreSQL evidence includes `TestAsyncQuestionsPostgresForwardedConversationVisibility` and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
 - Typecheck, lint, i18n check, i18n ratchet, and changed-file Go lint passed.
 - `(cd apps/web && pnpm e2e:run --project=chromium tests/git/turn-changes-history-pending.spec.ts --retries=0)`: 1 test passed. Updated the regression to assert retained Git history serves the file while local export is pending; the earlier CI trace showed that the transient-loading assertion could miss this fast fallback.
+- PR CI run `41371739136` attempt 1 failed once in the unchanged Quick Chat cancellation E2E after cancel escalation left the next prompt unadmitted. The exact managed test passed locally with retries disabled (1 passed in 18.0s), and rerunning only failed jobs passed on attempt 2. No related code change was needed.
+- `scripts/pr-await 4980` confirmed the settled `04fab2bde635e54ee7de933cbfeb9f3eb0f55053` head: 89 passed, 13 skipped, 0 neutral, 0 failed, and 0 pending.
