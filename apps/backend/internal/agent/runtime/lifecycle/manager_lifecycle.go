@@ -723,6 +723,7 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
 	execution.ContinueArgs = commands.continueArgs
+	execution.OpenCodeRuntime = commands.openCodeRuntime
 	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
 	if err != nil {
 		return err

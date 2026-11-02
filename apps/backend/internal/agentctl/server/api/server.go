@@ -3,7 +3,6 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -494,14 +494,14 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	OpenCodeRuntime managedruntime.OpenCodeRuntime `json:"opencode_runtime,omitzero"`
-	LaunchWrapper   launchwrapper.Spec             `json:"launch_wrapper,omitzero"`
-	Command         string                         `json:"command"`
-	AgentArgs       optionalArgs                   `json:"agent_args"`
-	ContinueCommand string                         `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs                   `json:"continue_args"`
-	Env             map[string]string              `json:"env,omitempty"`
-	ReplaceEnv      bool                           `json:"replace_env,omitempty"`
+	OpenCodeRuntime opencode.Runtime   `json:"opencode_runtime,omitzero"`
+	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Command         string             `json:"command"`
+	AgentArgs       optionalArgs       `json:"agent_args"`
+	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs       `json:"continue_args"`
+	Env             map[string]string  `json:"env,omitempty"`
+	ReplaceEnv      bool               `json:"replace_env,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on

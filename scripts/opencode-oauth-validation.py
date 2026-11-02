@@ -12,6 +12,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import time
 import uuid
@@ -36,6 +37,7 @@ def run(inventory, controller, target, command):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     tasks = []
+    resources = []
     preserve_for_recovery = False
     version = settings["version"]
     nonce = "VALIDATED_" + uuid.uuid4().hex
@@ -60,9 +62,11 @@ def run(inventory, controller, target, command):
         home = "/tmp/kandev-oauth-" + uuid.uuid4().hex
         executor = controller.api("executors", {"name": "Disposable OAuth validation",
                    "type": "k8s", "config": target.settings["config"]})
-        environment = {key: home + suffix for key, suffix in (
+        resources.append({"kind": "executor", "id": executor["id"]})
+        safe_environment = {key: home + suffix for key, suffix in (
             ("HOME", ""), ("XDG_DATA_HOME", "/data"),
             ("XDG_CONFIG_HOME", "/config"), ("XDG_STATE_HOME", "/state"))}
+        environment = dict(safe_environment)
         if require_refresh:
             environment.update(HTTPS_PROXY=proxy.url(settings["proxy_reachable"]),
                            HTTP_PROXY=proxy.url(settings["proxy_reachable"]),
@@ -76,13 +80,38 @@ def run(inventory, controller, target, command):
             "env_vars": [{"key": key, "value": value} for key, value in environment.items()],
             "config": {**target.settings["profile_config"],
                        "remote_credentials": json.dumps(["agent:opencode-acp:files:0"])}})
+        resources.append({"kind": "profile", "id": profile["id"],
+                          "executor_id": executor["id"],
+                          "safe_env_vars": [{"key": key, "value": value}
+                                            for key, value in safe_environment.items()]})
         task = controller.api("tasks", {"title": "OAuth refresh validation",
             "workspace_id": controller.api("workspaces")["workspaces"][0]["id"],
             "workflow_id": controller.api("workflows")["workflows"][0]["id"],
             "agent_profile_id": agent_profile, "executor_id": executor["id"],
             "executor_profile_id": profile["id"], "start_agent": True, "description": prompt})
         tasks.append(task)
+        resources.append({"kind": "task", "id": task["id"]})
         return task
+
+    def cleanup_generated_resources(preserve_for_recovery):
+        failures = []
+        for resource in reversed(resources):
+            try:
+                if preserve_for_recovery:
+                    if resource["kind"] == "profile":
+                        route = "executors/" + resource["executor_id"] + "/profiles/" + resource["id"]
+                        controller.api(route, {"env_vars": resource["safe_env_vars"]}, method="PATCH")
+                    continue
+                route = {
+                    "task": "tasks/" + resource["id"],
+                    "profile": "executors/" + resource["executor_id"] + "/profiles/" + resource["id"],
+                    "executor": "executors/" + resource["id"],
+                }[resource["kind"]]
+                controller.api(route, method="DELETE")
+            except RuntimeError:
+                failures.append(resource["kind"])
+        if failures:
+            raise RuntimeError("Could not clean disposable OAuth validation resources")
 
     existed = source.exists()
     if existed:
@@ -148,6 +177,7 @@ def run(inventory, controller, target, command):
                                           "post_resume_responses": "passed",
                                           "refresh_statuses": evidence["statuses"], "overlap": evidence["overlap"]}), flush=True)
                     finally:
+                        primary_failure = sys.exc_info()[0] is not None
                         for task in tasks:
                             try:
                                 controller.action("session.stop", {"session_id": task["session_id"]})
@@ -157,6 +187,13 @@ def run(inventory, controller, target, command):
                                 if not proxy.evidence()["aborted"]:
                                     for name in target.workers(task["id"]):
                                         command(target.settings["kubectl_prefix"] + ["delete", name, "--wait=false"])
+                        try:
+                            cleanup_generated_resources(proxy.evidence()["aborted"])
+                        except RuntimeError:
+                            if primary_failure:
+                                print("Cleanup could not remove disposable OAuth resources", flush=True)
+                            else:
+                                raise
             finally:
                 evidence = proxy.evidence()
                 preserve_for_recovery = evidence["aborted"]

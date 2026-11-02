@@ -3,7 +3,8 @@ id: "02-harden-bootstrap"
 title: "Harden OpenCode bootstrap admission"
 status: done
 wave: 1
-depends_on: []
+depends_on:
+  - "01-provision-credentials"
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-OPENCODE-AUTH-001
@@ -66,8 +67,8 @@ credential replacement, or deployment-workaround retirement.
 From repository root:
 
 ```sh
-(cd apps/backend && env LC_ALL=C LANG=C go test -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api)
-(cd apps/backend && env LC_ALL=C LANG=C go test -race -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api -run 'OpenCode|Opencode|Credential|Identity|LaunchWrapper' -count=1)
+(cd apps/backend && env LC_ALL=C LANG=C go test -tags fts5 -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api)
+(cd apps/backend && env LC_ALL=C LANG=C go test -tags fts5 -race -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/agentctl/server/api -run 'OpenCode|Opencode|Credential|Identity|LaunchWrapper' -count=1)
 (cd apps/backend && go build -trimpath ./cmd/kandev ./cmd/agentctl)
 bash scripts/lint-go-changed $(git diff --name-only upstream/main -- '*.go') $(git ls-files --others --exclude-standard -- '*.go')
 python3 scripts/list-docs.py validate

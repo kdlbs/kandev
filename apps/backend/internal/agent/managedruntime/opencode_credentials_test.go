@@ -6,7 +6,7 @@ import (
 )
 
 func TestOpenCodeCredentialCommandRejectsOtherOperations(t *testing.T) {
-	runtime := OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceManaged, "2.1.2"}
+	runtime := OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceManaged, Version: "2.1.2"}
 	if _, err := runtime.CredentialCommand("logout"); err == nil {
 		t.Fatal("credential provisioning admitted an unrelated auth operation")
 	}
@@ -19,13 +19,13 @@ func TestOpenCodeCredentialRuntimeMetadata(t *testing.T) {
 		runtime OpenCodeRuntime
 		valid   bool
 	}{
-		{"managed minimum", OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceManaged, "2.1.2"}, true},
-		{"managed newer", OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceManaged, "2.2.1"}, true},
-		{"native", OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceNative, "2.2.1"}, false},
-		{"custom", OpenCodeRuntime{OpenCodeFamilyV2, "custom", "2.2.1"}, false},
-		{"old", OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceManaged, "2.1.1"}, false},
-		{"unpinned", OpenCodeRuntime{OpenCodeFamilyV2, OpenCodeSourceManaged, "latest"}, false},
-		{"v1", OpenCodeRuntime{OpenCodeFamilyV1, OpenCodeSourceManaged, "1.18.32"}, false},
+		{"managed minimum", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceManaged, Version: "2.1.2"}, true},
+		{"managed newer", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceManaged, Version: "2.2.1"}, true},
+		{"native", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceNative, Version: "2.2.1"}, false},
+		{"custom", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: "custom", Version: "2.2.1"}, false},
+		{"old", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceManaged, Version: "2.1.1"}, false},
+		{"unpinned", OpenCodeRuntime{Family: OpenCodeFamilyV2, Source: OpenCodeSourceManaged, Version: "latest"}, false},
+		{"v1", OpenCodeRuntime{Family: OpenCodeFamilyV1, Source: OpenCodeSourceManaged, Version: "1.18.32"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.runtime.CredentialCommand("export")

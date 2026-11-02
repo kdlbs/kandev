@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 // SurvivalCapabilities lists every named capability this build of agentctl
@@ -14,7 +14,7 @@ import (
 // set comparison rather than a version match, so a future agentctl build can
 // add capabilities without breaking older backends, and an older agentctl
 // can be correctly refused by a newer backend that requires one it lacks.
-var SurvivalCapabilities = []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, managedruntime.OpenCodeCredentialCapability}
+var SurvivalCapabilities = []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, opencode.CredentialCapability}
 
 // handleIdentity reports this launch's opaque identity and capability
 // scope. It is deliberately exempt from bearer-token auth (see

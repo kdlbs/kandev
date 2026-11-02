@@ -17,27 +17,28 @@ assert.match(version ?? '', /^2\.\d+\.\d+$/);
 const root = mkdtempSync(path.join(os.tmpdir(), 'kandev-credential-fault-'));
 const home = path.join(root, 'home');
 mkdirSync(home);
-const env = { ...process.env, HOME: home, XDG_DATA_HOME: home + '/data',
+const env = { PATH: process.env.PATH || '', HOME: home, XDG_DATA_HOME: home + '/data',
   XDG_CONFIG_HOME: home + '/config', XDG_STATE_HOME: home + '/state',
   KANDEV_HOME_DIR: root + '/kandev', AGENTCTL_LISTEN_HOST: '127.0.0.1' };
-delete env.OPENCODE_DB;
-delete env.OPENCODE_CONFIG;
-delete env.OPENCODE_CONFIG_CONTENT;
-// This is a new loopback-only worker, not the executor's authenticated worker.
-// Never inherit its bootstrap handshake or forward its control credentials.
-delete env.AGENTCTL_BOOTSTRAP_NONCE;
-delete env.AGENTCTL_AUTH_TOKEN;
-delete env.KANDEV_PARENT_PIPE_FD;
+if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
 const cli = ['--yes', '--prefer-offline', '@opencode/cli@' + version];
 // Reuse the disposable executor's package cache, not its credential HOME.
 env.npm_config_cache = process.env.npm_config_cache || path.join(os.homedir(), '.npm');
 symlinkSync(env.npm_config_cache, path.join(home, '.npm'));
-const reserve = net.createServer();
-await new Promise(resolve => reserve.listen(0, '127.0.0.1', resolve));
-const port = reserve.address().port;
-await new Promise(resolve => reserve.close(resolve));
+async function reserveLoopbackPort() {
+  const reserve = net.createServer();
+  await new Promise((resolve, reject) => {
+    reserve.once('error', reject);
+    reserve.listen(0, '127.0.0.1', resolve);
+  });
+  const reservedPort = reserve.address().port;
+  await new Promise((resolve, reject) => reserve.close(error => error ? reject(error) : resolve()));
+  return reservedPort;
+}
+let port;
 let worker;
-function startWorker() {
+function startWorker(listenPort) {
+  port = listenPort;
   worker = spawn(process.env.BOOTSTRAP_AGENTCTL || '/usr/local/bin/agentctl',
     ['-port', String(port), '-workdir', root], { env, stdio: 'ignore', detached: true });
 }
@@ -48,7 +49,7 @@ async function stopWorker(signal = 'SIGTERM') {
     // Managed CLI children have their own process groups. Kill the actual
     // importer as well as the worker; killing only the worker group lets a
     // detached import keep committing while the test claims interruption.
-    const { stdout } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid=']);
+    const { stdout } = await promisify(execFile)('ps', ['-eo', 'pid=,ppid='], { env });
     const rows = stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
     const owned = new Set([worker.pid]);
     for (let size = -1; size !== owned.size;) {
@@ -84,7 +85,7 @@ async function configure() {
   const control = 'http://127.0.0.1:' + port;
   let ready = false;
   for (let attempt = 0; attempt < 150; attempt++) {
-    if (worker.exitCode !== null) throw new Error('Worker exited before readiness');
+    if (worker.exitCode !== null || worker.signalCode !== null) throw new Error('Worker exited before readiness');
     try { await request(control, '/identity'); ready = true; break; } catch { await delay(200); }
   }
   assert.ok(ready, 'Worker readiness deadline exceeded');
@@ -100,9 +101,20 @@ async function configure() {
     opencode_runtime: { family: 'v2', source: 'managed', version } });
   return base;
 }
+async function startWorkerAndConfigure() {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    startWorker(await reserveLoopbackPort());
+    try {
+      return await configure();
+    } catch (error) {
+      if (error.message !== 'Worker exited before readiness' || attempt === 4) throw error;
+      await stopWorker();
+    }
+  }
+  throw new Error('Worker could not reserve a loopback port');
+}
 try {
-  startWorker();
-  let base = await configure();
+  let base = await startWorkerAndConfigure();
   phase = 'initial import';
   if (scenario === 'interrupted-import') {
     const entries = Array.from({ length: 4000 }, (_, index) => ({
@@ -133,9 +145,8 @@ try {
     const stopped = await exported();
     assert.ok(stopped.length > 0 && stopped.length < entries.length,
       'Import completed before interruption; scenario not passed');
-    startWorker();
     phase = 'restart worker';
-    base = await configure();
+    base = await startWorkerAndConfigure();
     phase = 'retry pending import';
     assert.equal((await request(base, '/api/v1/agent/opencode/credentials')).state, 'pending');
     phase = 'merge retry request';

@@ -33,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -336,22 +337,24 @@ type Manager struct {
 	// (see attachment.go). Zero value correctly starts an instance detached.
 	attachedCount atomic.Int32
 	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
-	turnOutcomeMu         sync.RWMutex
-	turnOutcomeRecorder   TurnOutcomeRecorder
-	turnOutcomeInstanceID string
-	startMu               sync.Mutex
-	credentialImport      bool // guarded by startMu
-	admissionMu           sync.Mutex
-	admissionCount        int
-	admissionDrained      chan struct{}
-	stopping              bool
-	lifetimeCtx           context.Context
-	lifetimeCancel        context.CancelFunc
-	mainReapPending       atomic.Bool
-	startupEvidenceMu     sync.Mutex
-	startupGeneration     uint64
-	startupEvidence       *types.ManagedStartupEvidence
-	startupEvidenceDone   chan struct{}
+	turnOutcomeMu           sync.RWMutex
+	turnOutcomeRecorder     TurnOutcomeRecorder
+	turnOutcomeInstanceID   string
+	startMu                 sync.Mutex
+	credentialImport        bool     // guarded by startMu
+	credentialImportBlocked bool     // guarded by startMu; held after uncertain process cleanup
+	credentialStoreLock     *os.File // guarded by startMu
+	admissionMu             sync.Mutex
+	admissionCount          int
+	admissionDrained        chan struct{}
+	stopping                bool
+	lifetimeCtx             context.Context
+	lifetimeCancel          context.CancelFunc
+	mainReapPending         atomic.Bool
+	startupEvidenceMu       sync.Mutex
+	startupGeneration       uint64
+	startupEvidence         *types.ManagedStartupEvidence
+	startupEvidenceDone     chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -2342,7 +2345,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, managedruntime.OpenCodeRuntime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2350,15 +2353,15 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, managedruntime.OpenCodeRuntime{}, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, opencode.Runtime{}, wrapper...)
 }
 
 // ConfigureRuntime atomically carries resolved runtime identity with launch configuration.
-func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime managedruntime.OpenCodeRuntime, wrapper launchwrapper.Spec) error {
+func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime opencode.Runtime, wrapper launchwrapper.Spec) error {
 	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, runtime, wrapper)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime managedruntime.OpenCodeRuntime, wrapper ...launchwrapper.Spec) error {
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime opencode.Runtime, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	if m.credentialImport {
@@ -2423,7 +2426,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 func (m *Manager) commandActive() bool {
 	status := m.Status()
-	return status == StatusRunning || status == StatusStarting
+	return status == StatusRunning || status == StatusStarting || status == StatusStopping
 }
 
 type installedManagedGitTools struct {

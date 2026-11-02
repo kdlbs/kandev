@@ -20,7 +20,7 @@ func TestOpenCodeAutomaticUpdateKeepsSelectedFamily(t *testing.T) {
 			previous := spec.DefaultVersionOrPinned()
 			target := "1.19.0"
 			if family == managedruntime.OpenCodeFamilyV2 {
-				target = "2.0.20"
+				target = "2.1.3"
 			}
 			selection := newMigrationTestState(&migrationEventLog{})
 			selection.selection.Family, selection.selection.Package = family, spec.Package

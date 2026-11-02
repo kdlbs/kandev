@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -20,8 +21,8 @@ func TestConfigureAndStartAgentRejectsUnsupportedOpenCodeCredentialRuntime(t *te
 		WorkspacePath:   t.TempDir(), agentctl: client,
 		metadata: map[string]interface{}{"remote_credentials": `["agent:opencode-acp:files:0"]`},
 	}
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err == nil {
-		t.Fatal("launch succeeded with opted-in credential import on unsupported OpenCode V2")
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); !errors.Is(err, managedruntime.ErrOpenCodeCredentialRuntime) {
+		t.Fatalf("launch error = %v, want unsupported OpenCode credential runtime", err)
 	}
 }
 
