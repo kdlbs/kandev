@@ -371,3 +371,54 @@ The first complete remote run finished with 83 passed, 16 skipped, 1 neutral,
 and 4 failed checks. These represent the two leaf failures above plus their
 backend/E2E aggregate gates. No other leaf failure or unresolved review thread
 was reported. Both fixes are included in the next published checkpoint.
+
+
+### Additional current-head fixture remediation
+
+Full CI at c3371301851e exposed three more fixture/assertion defects and one
+external download failure. The original ambient-environment job now passes.
+
+- E2E shard 6/28, job 125330545523: the historical pending-content test displayed
+  ready content while expecting loading. It waited for turn completion but not
+  content preservation, and its direct database pause did not fence a current
+  export. The test now waits for `content_complete`; the helper atomically
+  removes links/marks pending and advances the export claim token before deferring
+  export. Ready inline content may still have a queued export state, so the
+  precondition correctly uses content completeness. The test retains its real
+  backend pending/resume path and passes five retry-free repetitions.
+- Backend shard 2/4, job 125328683896: the lifecycle package hit its 15-minute
+  limit inside TestSSHExecutorCloseSSHClientFallsBackToTheRealClose. The stack
+  shows NewSession racing transport teardown after Close. The test now observes
+  client.Wait with a bounded deadlock guard, and joins its waiter in cleanup,
+  instead of opening a new channel on the closing connection. The old exact
+  test passed 100 local repetitions; the race evidence is the CI stack. The
+  corrected close cohort passes 100 race-enabled repetitions.
+- E2E shard 11/28, job 125330545723: the direct-cancel fixture used an
+  uninterruptible `/sleep` turn and reached the correct recovery UI after the
+  cancellation could not settle. The successful-cancel test now uses the
+  existing cancelable file hold and waits for a provider acceptance marker.
+  Its direct and detached-background assertions remain unchanged; both cases
+  pass five repetitions each with retries disabled.
+- Backend Static Checks, job 125328683955: the SDK consumer's fresh dependency
+  download failed at sum.golang.org with HTTP/2 INTERNAL_ERROR. No repository
+  assertion failed. A same-head job rerun was rejected while the parent workflow
+  was still active. The next published checkpoint reruns this unchanged check;
+  no SDK or dependency source was changed for the transport error.
+
+Commands (using the clean host environment and Nix browser library path above):
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./internal/agent/runtime/lifecycle -run '^TestSSHExecutorClose' -count=100 -timeout=2m
+pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/git/turn-changes-history-pending.spec.ts -- --retries=0 --repeat-each=5
+pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/chat/cancel-turn-availability.spec.ts -- --retries=0 --repeat-each=5
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_lifecycle_test.go
+pnpm --dir apps/web exec eslint --max-warnings 0 e2e/helpers/turn-changes-history.ts e2e/tests/git/turn-changes-history-pending.spec.ts e2e/tests/chat/cancel-turn-availability.spec.ts
+```
+
+Logs: `/tmp/kandev-4762-ssh-close-{red,green,lint}.log`,
+`/tmp/kandev-4762-turn-pending-{red,final-green}.log`,
+`/tmp/kandev-4762-cancel-availability-{red,green}.log`. The original focused
+browser runs passed; the CI assertions and artifacts provide the failure
+observations. The rejected export-state precondition was corrected to the
+content-completeness contract before the successful repeated checks. All changes
+in this batch are test-only. Public behavior and visual composition are unchanged.
