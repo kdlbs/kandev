@@ -86,4 +86,4 @@ Unretained native usage can pass task and session cleanup only after source adop
 
 The forked-usage tests confirm that deletion fails before adoption, succeeds after adoption, removes the task ledger event, and leaves the workspace gap report visible. Public usage-history documentation now explains this behavior.
 
-The focused tests, analytics and task repository suites, both race checks, changed-file Go lint, and public documentation validators passed. PostgreSQL checks were skipped because no PostgreSQL 18.6 image or configured test DSN was available.
+The focused tests, analytics and task repository suites, both race checks, changed-file Go lint, and public documentation validators passed. With `KANDEV_TEST_POSTGRES_DSN` set to `postgres://postgres:gate@127.0.0.1:55366/usage_history?sslmode=disable`, Task 04 reran `go test -trimpath ./internal/task/repository/sqlite/ -run 'TestUsageHistoryForkedNativeUsageDeletesWithGap|TestUsageHistoryUnprovenNativeBlocksDeletionBeforeAdoption|TestPreUpgradeNativeUsageAppearsAfterMigration' -count=1`; it passed in 0.693 seconds.

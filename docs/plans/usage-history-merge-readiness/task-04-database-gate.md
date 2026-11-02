@@ -1,10 +1,11 @@
 ---
 id: "04-database-gate"
 title: "Run the full database gate"
-status: pending
+status: blocked
 wave: 4
 depends_on:
-  - "03-split-unrelated-fixes"
+  - "01-native-backfill-order"
+  - "02-deletion-of-unprovable-usage"
 plan: "plan.md"
 requirements:
   - REQ-COSTS-USAGE-HISTORY-005
@@ -40,6 +41,13 @@ run() { KANDEV_USAGE_BENCH_EVIDENCE_DIR="/tmp/usage-gate-evidence/$1" go test -p
 mkdir -p /tmp/usage-gate-evidence/sqlite /tmp/usage-gate-evidence/postgres
 run sqlite BenchmarkUsageHistoryFiveYears
 export KANDEV_TEST_POSTGRES_DSN='postgres://postgres:gate@127.0.0.1:55366/usage_history?sslmode=disable'
+(
+  cd /tmp/usage-gate/apps/backend
+  go test -trimpath ./internal/task/repository/sqlite/ -run '^TestPreUpgradeNativeUsageAppearsAfterMigration$' -count=1 > /tmp/usage-gate-task01-postgres.log 2>&1
+  echo "task01-postgres exit $?" >> /tmp/usage-gate-status.txt
+  go test -trimpath ./internal/task/repository/sqlite/ -run 'TestUsageHistoryForkedNativeUsageDeletesWithGap|TestUsageHistoryUnprovenNativeBlocksDeletionBeforeAdoption|TestPreUpgradeNativeUsageAppearsAfterMigration' -count=1 > /tmp/usage-gate-task02-postgres.log 2>&1
+  echo "task02-postgres exit $?" >> /tmp/usage-gate-status.txt
+)
 run postgres BenchmarkUsageHistoryPostgresFiveYears
 echo done >> /tmp/usage-gate-status.txt
 ```
@@ -75,7 +83,7 @@ ls /tmp/usage-gate-evidence/postgres | wc -l
 
 ## Dependencies
 
-Tasks 01 and 02, plus the Task 03 merge if it changes analytics code. A later change to report or projection SQL invalidates this run.
+Tasks 01 and 02, plus the final analytics code on the current #3660 head. Task 03 was cancelled and does not block this gate. A later change to report or projection SQL invalidates this run.
 
 ## Risks
 
@@ -93,4 +101,6 @@ Tasks 01 and 02, plus the Task 03 merge if it changes analytics code. A later ch
 
 ## Results
 
-Pending.
+The detached command `setsid nohup bash /tmp/usage-gate-run.sh >/tmp/usage-gate-run.out 2>&1 < /dev/null &` used current #3660 head `a39942aa5e74be35461bdc09961f44199eb79e0f` and PostgreSQL 18.6. The SQLite command `go test -p 1 -trimpath -tags 'sqlite_trace usage_history_scanstatus' ./internal/analytics/repository/sqlite -run '^$' -bench '^BenchmarkUsageHistoryFiveYears$' -benchtime=10x -benchmem -count=1 -timeout=0` exited 1 after 2,052.861 seconds during `fixture.seedOlder`: bounded fixture projection timed out at `scope_index=0`, page 12,403 with `analytics busy: context deadline exceeded`. Sixteen one-year evidence receipts exist; the five-year phase did not run. `grep -c -- '--- FAIL' /tmp/usage-gate-sqlite.log` returned 1, and the SQLite/PostgreSQL receipt counts were 16/0. The runner stopped before the PostgreSQL benchmark, so no PostgreSQL full-scale result is claimed.
+
+The Task 01 PostgreSQL-focused test passed in 0.245 seconds, and the Task 02 focused tests passed in 0.693 seconds. Their logs are `/tmp/usage-gate-task01-postgres.log` and `/tmp/usage-gate-task02-postgres.log`. The benchmark log and receipts remain under `/tmp/usage-gate-sqlite.log` and `/tmp/usage-gate-evidence/sqlite/`.

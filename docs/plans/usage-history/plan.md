@@ -239,14 +239,14 @@ Receipt: [integrated source verification](https://github.com/kdlbs/kandev/tree/a
 
 Recorded passes apply only to their stated source and scope. They do not close the benchmark, package, Host, browser, or delivery gates.
 
-### Full five-year measurement status (PENDING)
+### Full five-year measurement status (BLOCKED)
 
-Both full runs remain pending on the current source: SQLite and real PostgreSQL 18.6, each with 1,000,000 native rows, 100,000 external rows, and ten samples.
+The run on current #3660 head `a39942aa5e74be35461bdc09961f44199eb79e0f` attempted SQLite and real PostgreSQL 18.6 with 1,000,000 native rows, 100,000 external rows, and ten samples. SQLite stopped during five-year fixture projection before its five-year query phase; PostgreSQL was not run.
 
 | Required run | Status |
 | --- | --- |
-| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Failed on `5b79da2`; five deadline failures require correction and a fresh run. |
-| Current-source PostgreSQL 18.6, same fixture and sample count | Not run after the SQLite failure. Required after the correction. |
+| Current-source SQLite, 1,000,000 native and 100,000 external rows, ten samples | Failed during fixture projection at scope 0, page 12,403, after 2,052.861 seconds (`analytics busy: context deadline exceeded`). Sixteen one-year receipts exist; the five-year phase did not run. Log: `/tmp/usage-gate-sqlite.log`. |
+| Current-source PostgreSQL 18.6, same fixture and sample count | Not run. Task 04 stopped after the SQLite fixture-projection timeout. |
 | C4 construction diagnostics, SQLite | Complete at 20,000/2,000 rows in 59.597 seconds and 100,000/10,000 rows in 664.684 seconds. |
 | 100,000/10,000 actual rows | 100,005 native, 10,013 external, 110,017 facts, and 220,032 contributions. The recorder dropped zero SQL statements. |
 

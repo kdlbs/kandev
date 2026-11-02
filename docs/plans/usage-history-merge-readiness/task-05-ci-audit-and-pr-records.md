@@ -1,7 +1,7 @@
 ---
 id: "05-ci-audit-and-pr-records"
 title: "Audit CI and refresh PR descriptions"
-status: pending
+status: blocked
 wave: 5
 depends_on:
   - "04-database-gate"
@@ -24,7 +24,7 @@ Confirm exact-head CI has no flake in usage history code, then make both PR desc
 
 - Run `scripts/pr-await 3660` after the last push. Download the `e2e-flake-history` artifact from the E2E run for that head, and read `flakyTests` for the entry whose `runId` matches.
 - Apply this rule: fail if a flaky test touches `stats`, `usage`, plugins, or task deletion. List others in the PR body with the `main` baseline from the same file.
-- Replace the marked validation sections in both PR bodies using `gh pr edit --body-file`, and verify the live body afterwards. Only change content between `kandev-usage-history-validation` markers in core and `kandev-g4-plugin-body` markers in the plugin.
+- Replace the marked validation sections in both PR bodies using `gh pr edit --body-file`, and verify the live body afterwards. Only change content between `kandev-usage-history-validation` markers in core and `kandev-g4-plugin-body` markers in the plugin. Add a short `Also included` heading in the core section that lists the unrelated fixes retained in #3660.
 - State plainly: toggle off in `prod`; plugin 0.5.0 isn't to be published until the toggle is on; and forked or transferred native usage is removed on deletion with a gap notice.
 - Mark work orders done and set this plan's status.
 
@@ -75,4 +75,4 @@ Task 04.
 
 ## Results
 
-Pending.
+Blocked by Task 04's SQLite fixture-projection timeout. No PR body was edited. `scripts/pr-await 3660` completed cleanly at head `a39942aa5e74be35461bdc09961f44199eb79e0f` with 93 passed, 11 skipped, and no failures or pending checks. `scripts/pr-state --summary 3660` returned a complete snapshot, and `scripts/pr-resolve list 3660` returned no threads. `gh run download 41432117932 --repo kdlbs/kandev --name e2e-flake-history --dir /tmp/e2e-flake-history-a399` provided the matching E2E history: zero flaky tests in 4,572 executions. Its latest `main` baseline (`runId` `41430702732`) had three in 4,558 executions: OpenCode capacity retry, mobile Git title/branch rename, and mobile Threads selection ordering. These do not touch stats, usage, plugins, or task deletion. PR body updates, including the `Also included` heading, remain pending.

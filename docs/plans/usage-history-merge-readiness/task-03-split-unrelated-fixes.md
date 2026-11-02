@@ -1,7 +1,7 @@
 ---
 id: "03-split-unrelated-fixes"
 title: "Split unrelated fixes out of #3660"
-status: pending
+status: cancelled
 wave: 3
 depends_on:
   - "02-deletion-of-unprovable-usage"
@@ -82,4 +82,4 @@ Task 02. This needs authorization to push and open PRs. If the implementation re
 
 ## Results
 
-Pending.
+The user chose on 2026-11-02 to keep the unrelated fixes in #3660. No split PRs will be opened.
