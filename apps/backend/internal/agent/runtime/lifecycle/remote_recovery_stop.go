@@ -53,7 +53,7 @@ func (m *Manager) recoverPendingRemoteStopInstance(
 	backend ExecutorBackend,
 	entry *remoteRecoveryRetry,
 ) (*ExecutorInstance, RecoveryCandidateOutcome, error) {
-	attemptRecord, err := m.remoteRecoveryAttemptRecord(ctx, entry)
+	attemptRecord, _, err := m.remoteRecoveryAttemptRecord(ctx, entry)
 	if err != nil {
 		return nil, "", err
 	}

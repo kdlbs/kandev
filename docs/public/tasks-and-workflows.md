@@ -668,6 +668,13 @@ generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
 
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
+
 What a job row can show depends on the agent runtime:
 
 - **Running and waiting** counts come from a runtime that reports current job

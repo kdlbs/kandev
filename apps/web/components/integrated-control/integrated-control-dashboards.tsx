@@ -7,6 +7,7 @@ import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlAggregateOverview } from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
+import { ControlProviderCircuits } from "./control-provider-circuits";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -21,6 +22,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
+      {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
@@ -52,29 +54,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       {view === "history" && control.officeEnabled && (
         <ControlGroupedHistory aggregate={control.aggregate} />
       )}
-      {view === "workspaces" || view === "overview" ? (
-        <div className="grid gap-3">
-          {workspaces.map((workspace) => (
-            <section key={workspace.id} className="rounded-lg border p-4">
-              <h2 className="font-medium">{workspace.name}</h2>
-              {workspace.description && (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {workspace.description}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t(
-                  hasScope(workspace.scopes, SCOPE.workspaceManage)
-                    ? "sidebar:integratedControl.manageAccess"
-                    : "sidebar:integratedControl.readAccess",
-                )}
-              </p>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <CoordinatorFacts view={view} rows={rows} />
-      )}
+      <WorkspaceOrCoordinatorFacts view={view} workspaces={workspaces} rows={rows} />
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
@@ -96,6 +76,46 @@ function Fact({ label, value }: { label: string; value: number | string }) {
       <p className="mt-2 text-2xl font-semibold">{value}</p>
     </section>
   );
+}
+
+type FactWorkspaces = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["workspaces"];
+
+function WorkspaceOrCoordinatorFacts({
+  view,
+  workspaces,
+  rows,
+}: {
+  view: ControlView;
+  workspaces: FactWorkspaces;
+  rows: FactRows;
+}) {
+  const { t } = useTranslation();
+  if (view === "workspaces" || view === "overview") {
+    return (
+      <div className="grid gap-3">
+        {workspaces.map((workspace) => (
+          <section key={workspace.id} className="rounded-lg border p-4">
+            <h2 className="font-medium">{workspace.name}</h2>
+            {workspace.description && (
+              <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                {workspace.description}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t(
+                hasScope(workspace.scopes, SCOPE.workspaceManage)
+                  ? "sidebar:integratedControl.manageAccess"
+                  : "sidebar:integratedControl.readAccess",
+              )}
+            </p>
+          </section>
+        ))}
+      </div>
+    );
+  }
+  return <CoordinatorFacts view={view} rows={rows} />;
 }
 
 type FactRows = Array<{

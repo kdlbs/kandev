@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -335,7 +336,8 @@ func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *mo
 }
 
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
-// Relies on CASCADE foreign keys to remove workflow_steps.
+// It deletes their workflow_steps explicitly: the table the task repository
+// creates first has no foreign key, so no CASCADE removes them.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -354,11 +356,25 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 			return 0, err
 		}
 	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockQuery := `SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + ` ORDER BY id FOR UPDATE`
+		var lockedIDs []string
+		if err := tx.SelectContext(ctx, &lockedIDs, tx.Rebind(lockQuery), args...); err != nil {
+			return 0, err
+		}
+	}
 	cleanupQuery := `
 		DELETE FROM task_workflow_session_bindings
 		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
 	`
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(cleanupQuery), args...); err != nil {
+		return 0, err
+	}
+	stepsQuery := `
+		DELETE FROM workflow_steps
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
+	`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(stepsQuery), args...); err != nil {
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
@@ -372,15 +388,36 @@ func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID
 	return rows, nil
 }
 
-// DeleteWorkflow deletes a workflow by ID
+// DeleteWorkflow deletes a workflow by ID together with its workflow_steps.
+// The steps are deleted explicitly rather than through ON DELETE CASCADE: the
+// task repository initializes before the workflow repository and creates
+// workflow_steps without the foreign key, so in a real database no cascade
+// exists. Where the foreign key does exist, the cascade finds nothing left.
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedID string
+		err := tx.QueryRowxContext(ctx, tx.Rebind(`
+			SELECT id FROM workflows WHERE id = ? FOR UPDATE
+		`), id).Scan(&lockedID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("workflow not found: %s", id)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
+	`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workflow_steps WHERE workflow_id = ?
 	`), id); err != nil {
 		return err
 	}

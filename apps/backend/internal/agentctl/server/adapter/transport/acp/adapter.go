@@ -209,7 +209,8 @@ type Adapter struct {
 
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
-	activeToolCalls map[string]*streams.NormalizedPayload
+	activeToolCalls    map[string]*streams.NormalizedPayload
+	contextCompactions map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session
 	// then wire tool-call ID. An entry is drained either when its tool_call
@@ -233,6 +234,13 @@ type Adapter struct {
 	codexSubagentCorrelations map[codexSubagentCorrelationKey]*codexSubagentCorrelation
 	codexEmittedToolCallIDs   map[string]map[string]*codexSubagentCorrelation
 	codexSubagentSequence     uint64
+	// codexControlToolCalls correlates title-less wait/close updates with their
+	// validated initial tool calls, scoped to the ACP session.
+	codexControlToolCalls map[string]map[string]streams.SubagentControl
+	// copilotSubagents correlates Copilot child tool calls with safe parent cards.
+	copilotSubagents map[string]*copilotSubagentSessionState
+	// claudeSubagents tracks Claude background cards across prompt completion and resume.
+	claudeSubagents map[string]*claudeSubagentSessionState
 
 	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
 	// Claude-acp's Monitor tool runs a background script that streams events
@@ -536,6 +544,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		updatesCh:                 make(chan AgentEvent, 100),
 		notifQueue:                make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		contextCompactions:        make(map[string]*streams.NormalizedPayload),
 		openCodePluginClaims:      make(map[string]opencodeplugin.Claim),
 		cursorTaskMetaBySession:   make(map[string]map[string]cursorTaskMeta),
 		toolCallParents:           make(map[string]string),
@@ -938,6 +947,7 @@ func (a *Adapter) Close() error {
 	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)

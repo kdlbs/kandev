@@ -1520,6 +1520,7 @@ func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
 			env = RemoveEnvEntry(env, key)
 		}
 	}
+	env = launchwrapper.StripAgentDebugSettings(env)
 	return launchwrapper.StripControlCredentials(env)
 }
 
