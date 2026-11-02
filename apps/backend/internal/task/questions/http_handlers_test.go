@@ -138,6 +138,93 @@ func TestAsyncQuestionsInboxWaitingIsPerDependency(t *testing.T) {
 	require.False(t, waitingByID[second.Question.ID])
 }
 
+func TestAsyncQuestionsHTTPOperatorScopeRequiresForwardForParentRequests(t *testing.T) {
+	svc, repo := newQuestionsService(t)
+	ctx := context.Background()
+	seedExplicitQuestionBinding(t, repo, "task-http-parent-child", "session-http-parent-child", "workspace-http-parent-child", "task-http-parent")
+	seedExplicitQuestionBinding(t, repo, "task-http-parent", "session-http-parent", "workspace-http-parent", "")
+	_, err := repo.DB().ExecContext(ctx, "UPDATE tasks SET workspace_id = ? WHERE id = ?", "workspace-http-parent-child", "task-http-parent")
+	require.NoError(t, err)
+	created, err := svc.Create(ctx, questions.CreateInput{
+		TaskID: "task-http-parent-child", WorkspaceID: "workspace-http-parent-child", SessionID: "session-http-parent-child",
+		SessionIncarnationID: "inc-session-http-parent-child", Recipient: taskmodels.AsyncQuestionRecipientParent,
+		ParentTaskID: "task-http-parent", ParentSession: "session-http-parent",
+		ParentSessionIncarnationID: "inc-session-http-parent",
+		Questions:                  []protocol.Question{{Prompt: "Which?", Options: []protocol.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
+		RequestID:                  "http-parent-request",
+	})
+	require.NoError(t, err)
+	router := gin.New()
+	directory := parentQuestionDirectory{
+		tasks: map[string]*taskmodels.Task{
+			"task-http-parent-child": {ID: "task-http-parent-child", WorkspaceID: "workspace-http-parent-child"},
+			"task-http-parent":       {ID: "task-http-parent", WorkspaceID: "workspace-http-parent-child"},
+		},
+		sessions: map[string]*taskmodels.TaskSession{
+			"session-http-parent-child": {ID: "session-http-parent-child", TaskID: "task-http-parent-child"},
+			"session-http-parent":       {ID: "session-http-parent", TaskID: "task-http-parent"},
+		},
+	}
+	questions.RegisterRoutes(router, svc, allowAllWorkspaceAuthorizer{}, directory, zap.NewNop())
+	base := "/api/v1/agent-questions"
+
+	list := doRequest(router, http.MethodGet, base+"?workspace_id=workspace-http-parent-child&session_id=session-http-parent-child", nil)
+	require.Equal(t, http.StatusOK, list.Code)
+	var before struct {
+		Questions []struct {
+			QuestionID string `json:"question_id"`
+		} `json:"questions"`
+	}
+	require.NoError(t, json.Unmarshal(list.Body.Bytes(), &before))
+	require.Empty(t, before.Questions, "operator session scope must hide an unforwarded parent request")
+
+	unscoped := doRequest(router, http.MethodGet, base+"/"+created.Question.ID, nil)
+	require.Equal(t, http.StatusNotFound, unscoped.Code)
+	authorTask := doRequest(router, http.MethodGet, base+"/"+created.Question.ID+"?task_id=task-http-parent-child", nil)
+	require.Equal(t, http.StatusOK, authorTask.Code, "the author's transcript card may read its own request by task scope")
+
+	_, err = svc.Forward(ctx, created.Question.ID, "task-http-parent", "session-http-parent", "operator decision")
+	require.NoError(t, err)
+	list = doRequest(router, http.MethodGet, base+"?workspace_id=workspace-http-parent-child&session_id=session-http-parent-child", nil)
+	require.Equal(t, http.StatusOK, list.Code)
+	require.NoError(t, json.Unmarshal(list.Body.Bytes(), &before))
+	require.Len(t, before.Questions, 1)
+	require.Equal(t, created.Question.ID, before.Questions[0].QuestionID)
+	forwardedDetail := doRequest(router, http.MethodGet, base+"/"+created.Question.ID, nil)
+	require.Equal(t, http.StatusOK, forwardedDetail.Code)
+}
+
+type parentQuestionDirectory struct {
+	tasks    map[string]*taskmodels.Task
+	sessions map[string]*taskmodels.TaskSession
+}
+
+func (d parentQuestionDirectory) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
+	return d.sessions[id], nil
+}
+
+func (d parentQuestionDirectory) GetTasksByIDs(_ context.Context, ids []string) ([]*taskmodels.Task, error) {
+	tasks := make([]*taskmodels.Task, 0, len(ids))
+	for _, id := range ids {
+		if task := d.tasks[id]; task != nil {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks, nil
+}
+
+func (d parentQuestionDirectory) BatchGetSessionsForTasks(_ context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error) {
+	sessions := make(map[string][]*taskmodels.TaskSession, len(taskIDs))
+	for _, taskID := range taskIDs {
+		for _, session := range d.sessions {
+			if session.TaskID == taskID {
+				sessions[taskID] = append(sessions[taskID], session)
+			}
+		}
+	}
+	return sessions, nil
+}
+
 func TestAsyncQuestionsHTTPGetByIDReturnsCurrentState(t *testing.T) {
 	svc, repo := newQuestionsService(t)
 	created := createOperatorQuestion(t, svc, repo, "session-http-detail")
@@ -233,6 +320,8 @@ func TestAsyncQuestionsRespondAndConcurrentWinner(t *testing.T) {
 	response := doRequest(router, http.MethodPost,
 		"/api/v1/agent-questions/"+result.Question.ID+"/respond", body)
 	require.Equal(t, http.StatusOK, response.Code)
+	require.NotContains(t, response.Body.String(), "submission_id")
+	require.NotContains(t, response.Body.String(), "submission-1")
 	var first struct {
 		Won       bool   `json:"won"`
 		Status    string `json:"status"`

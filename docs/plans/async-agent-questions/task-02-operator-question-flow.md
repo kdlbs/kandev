@@ -1,7 +1,7 @@
 ---
 id: "02-operator-question-flow"
 title: "Deliver operator async questions"
-status: completed
+status: done
 wave: 2
 depends_on:
   - "01-persist-async-questions"

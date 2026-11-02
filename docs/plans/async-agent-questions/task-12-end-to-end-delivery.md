@@ -1,7 +1,7 @@
 ---
 id: "12-end-to-end-delivery"
 title: "Prove answers reach agents end to end"
-status: completed
+status: done
 wave: 10
 depends_on:
   - "07-parent-session-routing"
@@ -114,17 +114,12 @@ Tasks 07, 08, and 11.
 
 ## Results
 
-Added mock-agent handling for correlated answer deliveries and E2E scenarios for Inbox answers, mid-turn chat answers, explicit waits, parent forwarding, withdrawal history, and the Inbox-disabled path.
+Added mock-agent handling for correlated answer deliveries and E2E assertions for checkpoint reads, later delivery, live wait state, parent/author conversation visibility, rejection, and Inbox-disabled task chat.
 
 Passed:
 
-- `go test -trimpath ./cmd/mock-agent/... -count=1`
-- Chromium async question E2E: 7 tests passed
-- Mobile Chrome async question E2E: 2 tests passed
-- Focused async question and Inbox Vitest suites: 217 tests passed
-- Backend async question, MCP, clarification, orchestrator, persistence, and SQL guard checks
-- Typecheck, lint, i18n check, and i18n ratchet
-- Changed-file Go lint: `0 issues`
-- Public docs validation, catalog validation, 36 specification-linter tests, and full specification lint
-
-PostgreSQL-specific tests were skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/async-agent-questions.spec.ts)`: 8 tests passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-async-agent-questions.spec.ts)`: 2 tests passed.
+- `go test -trimpath ./cmd/mock-agent -run '^TestEmitAsyncQuestionDeliveryResult$' -count=1`: passed, including rejected operator and parent outcomes.
+- Backend package, race, SQLite async/pending-action, and named PostgreSQL tests passed. Named PostgreSQL evidence includes `TestAsyncQuestionsPostgresForwardedConversationVisibility` and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
+- Typecheck, lint, i18n check, i18n ratchet, and changed-file Go lint passed.

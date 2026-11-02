@@ -1,7 +1,7 @@
 ---
 id: "09-chat-question-surface"
 title: "Answer async questions from the task chat"
-status: completed
+status: done
 wave: 7
 depends_on:
   - "06-wait-and-authority-recovery"
@@ -49,7 +49,7 @@ This closes the production gap: operators can answer and get notified without th
 
 ## Acceptance
 
-1. With the Inbox flag off, an open request is visible and answerable from the author's chat, and task scope never returns an unforwarded parent request.
+1. With the Inbox flag off, an open request is visible and answerable from the author's chat, and task scope never returns an unforwarded parent request. The transcript detail lookup may use the matching author task scope to show that request's canonical state.
 2. Answering a running author's question does not cover the composer, and a concurrent winner closes the row and discloses its outcome.
 3. A create or forward raises one notification, and a retried create raises none.
 
@@ -122,12 +122,11 @@ Task 06, because the strip must reflect stale and withdrawn closures.
 
 ## Results
 
-Implemented the task chat question strip, shared answer form, forwarded-child provenance, live invalidation, and phone answer surface. The strip remains available when the Needs-you Inbox is disabled.
+Implemented the task-chat question strip, shared answer form, correct forwarded-question provenance in both conversations, live invalidation, and the phone answer surface. Empty reads render no strip; refresh failures keep the last successful rows visible. Open transcript cards link to the strip.
 
 Passed:
 
-- `go test -trimpath ./internal/task/questions ./internal/backendapp ./internal/gateway/websocket -count=1`
-- Focused async question and Inbox Vitest suites: 217 tests passed
-- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`
-- Mobile async question E2E: 2 tests passed
-- Changed-file Go lint: `0 issues`
+- Focused Vitest regressions: 4 files, 25 tests passed, including empty/loading/error states, coarse-pointer targets, author-chat provenance, and transcript linking.
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/async-agent-questions.spec.ts)`: 8 tests passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-async-agent-questions.spec.ts)`: 2 tests passed.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.

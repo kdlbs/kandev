@@ -234,7 +234,7 @@ func KandevContext() string {
 const userQuestionBlockingSection = `- ask_user_question_kandev: Ask 1-4 related questions. Blocking mode is a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. Keep 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. On validation error before question creation, correct and retry. If an accepted blocking call returns incomplete, end the turn without inferring an answer or continuing work.
 `
 
-const asyncQuestionModeGuidance = `Choose blocking mode when no useful work can continue safely without an answer. Set async=true when useful independent work remains. After an async ask, continue independent work and read the answer with list_question_answers_kandev at a checkpoint. Call wait_for_question_answers_kandev only when all remaining work depends on pending answers. Withdraw with withdraw_question_kandev when an answer is no longer needed. Use request_id only to retry the same ask.
+const asyncQuestionModeGuidance = `Choose blocking mode when a wrong guess could be destructive, irreversible, or expensive to redo, or when no useful work can continue safely without an answer. Set async=true when useful independent work remains. Continue independent work, but do not build on work that depends on an open answer. Read answers with list_question_answers_kandev at a checkpoint and before finishing. A checkpoint read and later notification may show the same answer; treat them as one outcome. Call wait_for_question_answers_kandev only when all remaining work depends on pending answers. Withdraw with withdraw_question_kandev when an answer is no longer needed. Use request_id only to retry the same ask.
 `
 
 const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions, only when you cannot continue safely without a parent decision. Omitted or false async sends the question and MUST end your turn; do not use an operator-question tool. If the parent forwards the request to the operator, the same request identity resolves.
@@ -363,9 +363,6 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	autopilot := ""
 	if options.Autopilot {
 		autopilot = autopilotSection
-		if asyncQuestionGuidanceEnabled {
-			autopilot += asyncQuestionModeGuidance
-		}
 	}
 	canvasGuidance := ""
 	if options.IncludeCanvasGuidance {

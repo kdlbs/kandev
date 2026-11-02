@@ -134,8 +134,7 @@ func (h *HTTPHandlers) get(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
-	if h.tasks == nil || question.WorkspaceID == "" ||
-		h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead) != nil {
+	if !h.canReadQuestionDetail(ctx, c, question) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
 		return
 	}
@@ -145,6 +144,21 @@ func (h *HTTPHandlers) get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, views[0])
+}
+
+func (h *HTTPHandlers) canReadQuestionDetail(ctx context.Context, c *gin.Context, question *taskmodels.AsyncQuestion) bool {
+	if h.tasks == nil || question == nil || question.WorkspaceID == "" ||
+		h.tasks.AuthorizeWorkspaceScope(ctx, question.WorkspaceID, authz.ScopeWorkspaceRead) != nil {
+		return false
+	}
+	if question.Recipient != taskmodels.AsyncQuestionRecipientParent || question.Forwarded {
+		return true
+	}
+	// An author's transcript card can read its own parent request with explicit
+	// task scope. Unscoped operator detail reads remain limited to forwarded rows.
+	authorTaskID := strings.TrimSpace(c.Query("task_id"))
+	return authorTaskID != "" && authorTaskID == question.TaskID &&
+		h.taskBelongsToWorkspace(ctx, authorTaskID, question.WorkspaceID)
 }
 
 func parseListQuery(c *gin.Context) (listQuery, bool) {
@@ -228,7 +242,7 @@ func (h *HTTPHandlers) readTaskPage(c *gin.Context, query listQuery) (*taskmodel
 		c.JSON(http.StatusNotFound, gin.H{"error": "task or session not found"})
 		return nil, true
 	}
-	page, err := h.service.ListOwn(ctx, sessionID, nil, nil, query.limit, query.cursorAt, query.cursorID)
+	page, err := h.service.ListOperatorSession(ctx, sessionID, nil, query.limit, query.cursorAt, query.cursorID)
 	if err != nil {
 		h.writeError(c, err)
 		return nil, true
@@ -460,12 +474,20 @@ func buildQuestionView(
 		ParentTaskTitle: titles[question.ParentTaskID],
 		Context:         question.Context,
 		Questions:       question.Questions,
-		Outcome:         question.Outcome,
+		Outcome:         questionOutcomeView(question.Outcome),
 		WithdrawReason:  question.WithdrawReason,
 		Waiting:         waitingByQuestion[question.ID],
 		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:       question.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func questionOutcomeView(outcome *taskmodels.AsyncQuestionOutcome) *taskmodels.AsyncQuestionOutcome {
+	if outcome == nil {
+		return nil
+	}
+	public := outcome.WithoutSubmissionID()
+	return &public
 }
 
 func (h *HTTPHandlers) writeError(c *gin.Context, err error) {

@@ -45,6 +45,26 @@ Outcome:
 {"answers":[{"question_id":"db","selected_options":["sqlite"]}]}`,
 			want: "ASYNC_PARENT_ANSWER_RECEIVED: SQLite",
 		},
+		{
+			name: "operator rejection",
+			prompt: `ASYNC QUESTION REJECTED
+Question ID: question-3
+Questions and options:
+[{"id":"db","options":[{"option_id":"pg","label":"PostgreSQL"}]}]
+Outcome:
+{"rejected":true,"reject_reason":"Needs a product decision"}`,
+			want: "ASYNC_ANSWER_REJECTED: Needs a product decision",
+		},
+		{
+			name: "parent rejection",
+			prompt: `ASYNC CHILD QUESTION REJECTED
+Question ID: question-4
+Questions and options:
+[{"id":"db","options":[{"option_id":"pg","label":"PostgreSQL"}]}]
+Outcome:
+{"rejected":true,"reject_reason":"Needs a product decision"}`,
+			want: "ASYNC_PARENT_ANSWER_REJECTED: Needs a product decision",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

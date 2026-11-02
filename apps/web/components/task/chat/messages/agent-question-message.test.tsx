@@ -81,4 +81,18 @@ describe("AgentQuestionMessage", () => {
     render(<AgentQuestionMessage comment={message()} />);
     expect(screen.getByText("Question details are unavailable.")).toBeTruthy();
   });
+
+  it("links an open question to the task chat answer strip", () => {
+    detail.question = {
+      ...answeredQuestion(),
+      recipient: "user",
+      status: "pending",
+      outcome: undefined,
+    };
+    render(<AgentQuestionMessage comment={message()} />);
+
+    const link = screen.getByRole("link", { name: "Show" });
+    expect(link.getAttribute("href")).toBe("#task-async-question-strip");
+    expect(link.className).toContain("[@media(pointer:coarse)]:min-h-11");
+  });
 });

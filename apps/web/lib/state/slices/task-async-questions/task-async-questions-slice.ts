@@ -48,8 +48,9 @@ export const createTaskAsyncQuestionsSlice = (set: ImmerSet): TaskAsyncQuestions
   setTaskAsyncQuestionsError: (scopeKey, generation) =>
     set((draft) => {
       if (draft.taskAsyncQuestions.generationByScopeKey[scopeKey] !== generation) return;
+      const current = draft.taskAsyncQuestions.byScopeKey[scopeKey] ?? emptyScopeState();
       draft.taskAsyncQuestions.byScopeKey[scopeKey] = {
-        ...emptyScopeState(),
+        ...current,
         status: "error",
         appliedGeneration: generation,
       };

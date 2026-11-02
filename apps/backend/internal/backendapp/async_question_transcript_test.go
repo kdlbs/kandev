@@ -16,6 +16,7 @@ type transcriptMessageStore struct {
 	rows             map[string]*models.Message
 	createCalls      int
 	createErrorAfter bool
+	assignedTurnID   string
 }
 
 func (s *transcriptMessageStore) GetMessage(_ context.Context, id string) (*models.Message, error) {
@@ -35,6 +36,9 @@ func (s *transcriptMessageStore) CreateMessageWithID(
 		ID: id, TaskSessionID: request.TaskSessionID, TaskID: request.TaskID,
 		TurnID: request.TurnID, Content: request.Content, AuthorType: models.MessageAuthorType(request.AuthorType),
 		Type: models.MessageType(request.Type), Metadata: request.Metadata,
+	}
+	if message.TurnID == "" {
+		message.TurnID = s.assignedTurnID
 	}
 	s.rows[id] = message
 	if s.createErrorAfter {
@@ -74,4 +78,21 @@ func TestAsyncQuestionTranscriptEntryRecoversLostCreateReceipt(t *testing.T) {
 	}, question)
 	require.NoError(t, err, "the stored row must resolve an ambiguous create result")
 	require.Equal(t, 1, store.createCalls)
+}
+
+func TestAsyncQuestionTranscriptRetryAcceptsTurnAssignedAtCreate(t *testing.T) {
+	store := &transcriptMessageStore{
+		rows: make(map[string]*models.Message), createErrorAfter: true,
+		assignedTurnID: "active-turn-at-create",
+	}
+	writer := &asyncQuestionTranscriptWriter{reader: store, creator: store}
+	question := &models.AsyncQuestion{
+		ID: "question-transcript-assigned-turn", TaskID: "task-transcript", SessionID: "session-transcript",
+		PayloadDigest: "request-digest",
+	}
+	err := writer.WriteAsyncQuestionTranscriptEntry(context.Background(), &models.AsyncQuestionDelivery{
+		Content: "ASYNC QUESTION REQUEST",
+	}, question)
+	require.NoError(t, err, "a persisted message may receive its active turn at create time")
+	require.Equal(t, "active-turn-at-create", store.rows[asyncQuestionTranscriptMessagePrefix+question.ID].TurnID)
 }

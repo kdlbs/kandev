@@ -528,9 +528,9 @@ func TestAsyncQuestionsForwardNeedsRecordedParent(t *testing.T) {
 		kinds[delivery.Kind]++
 	}
 	if kinds[models.AsyncQuestionDeliveryParentQuestion] != 1 ||
-		kinds[models.AsyncQuestionDeliveryParentOutcome] != 1 ||
+		kinds[models.AsyncQuestionDeliveryParentOutcome] != 0 ||
 		kinds[models.AsyncQuestionDeliveryOwner] != 1 {
-		t.Fatalf("expected distinct parent question/outcome and owner intents, got %+v", kinds)
+		t.Fatalf("a parent answering its own request must create only its owner intent, got %+v", kinds)
 	}
 }
 

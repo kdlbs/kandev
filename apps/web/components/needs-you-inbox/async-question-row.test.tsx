@@ -169,6 +169,29 @@ describe("AsyncQuestionRow — answer flow", () => {
       mocks.respond.mock.calls[1][1].submission_id,
     );
   });
+
+  it("uses a new submission id when an ambiguous retry changes its answer", async () => {
+    mocks.respond.mockRejectedValueOnce(new Error("network"));
+    mocks.respond.mockResolvedValueOnce({
+      success: true,
+      won: false,
+      status: "answered",
+      questions: [],
+    });
+    renderRow();
+    fireEvent.click(screen.getByTestId(ROW_TOGGLE));
+    fireEvent.click(screen.getAllByTestId(OPTION)[0]);
+    fireEvent.click(screen.getByTestId(SUBMIT));
+    expect(await screen.findByTestId(ERROR)).toBeTruthy();
+    const firstID = mocks.respond.mock.calls[0][1].submission_id;
+
+    fireEvent.click(screen.getAllByTestId(OPTION)[1]);
+    fireEvent.click(screen.getByTestId(SUBMIT));
+    await waitFor(() => expect(mocks.respond).toHaveBeenCalledTimes(2));
+
+    expect(mocks.respond.mock.calls[1][1].submission_id).not.toBe(firstID);
+    expect(mocks.toast).toHaveBeenCalledWith("Someone else already answered this question.");
+  });
 });
 
 describe("AsyncQuestionRow — terminal and phone states", () => {

@@ -30,6 +30,7 @@ export type ClarificationInboxAsyncQuestion = {
   task_title: string;
   parent_task_id?: string;
   parent_task_title?: string;
+  recipient?: "user" | "parent";
   forwarded: boolean;
   waiting: boolean;
   status: "pending" | "answered" | "rejected" | "withdrawn" | "stale";

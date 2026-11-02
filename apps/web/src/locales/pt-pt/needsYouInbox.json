@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "Não foi possível carregar as perguntas.",
   "chatRetry": "Tentar novamente",
   "asyncFromChild": "De {{child}}",
+  "asyncFromParent": "Do pai {{parent}}",
   "asyncWaitingForAnswer": "À espera de resposta",
   "asyncForwardedBy": "Reencaminhada por {{parent}}",
   "asyncWithdrawn": "Retirada",

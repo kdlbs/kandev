@@ -60,16 +60,16 @@ describe("useAgentQuestionDetail", () => {
     mocks.getAgentQuestion.mockResolvedValue(open);
     mocks.refreshAgentQuestion.mockResolvedValue(answered);
 
-    const { result, unmount } = renderHook(() => useAgentQuestionDetail(questionID));
+    const { result, unmount } = renderHook(() => useAgentQuestionDetail(questionID, "task-1"));
     await waitFor(() => expect(result.current.question).toBe(open));
-    expect(mocks.getAgentQuestion).toHaveBeenCalledWith(questionID);
+    expect(mocks.getAgentQuestion).toHaveBeenCalledWith(questionID, "task-1");
 
     act(() => mocks.handler?.({ payload: { question_id: "other-question" } }));
     expect(mocks.refreshAgentQuestion).not.toHaveBeenCalled();
 
     act(() => mocks.handler?.({ payload: { question_id: questionID } }));
     await waitFor(() => expect(result.current.question).toBe(answered));
-    expect(mocks.refreshAgentQuestion).toHaveBeenCalledWith(questionID);
+    expect(mocks.refreshAgentQuestion).toHaveBeenCalledWith(questionID, "task-1");
 
     unmount();
     expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);

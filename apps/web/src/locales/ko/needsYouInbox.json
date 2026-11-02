@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "질문을 불러오지 못했습니다.",
   "chatRetry": "다시 시도",
   "asyncFromChild": "{{child}}에서 전달됨",
+  "asyncFromParent": "상위 작업 {{parent}}에서",
   "asyncWaitingForAnswer": "답변 대기 중",
   "asyncForwardedBy": "{{parent}}이(가) 전달함",
   "asyncWithdrawn": "철회됨",

@@ -1,7 +1,7 @@
 ---
 id: "08-agent-mode-guidance"
 title: "Guide agents on choosing a mode"
-status: completed
+status: done
 wave: 5
 depends_on:
   - "05-inbox-and-mobile"
@@ -85,11 +85,10 @@ Task 05. This work order does not depend on Tasks 06 or 07.
 
 ## Results
 
-Implemented capability-scoped async guidance for operator and parent question tools. Unsupported MCP surfaces keep their existing blocking contract. Updated the public agent communication guide.
+Implemented concise capability-scoped mode guidance once per session prompt. The guidance covers risky guesses, independent work, checkpoint/final reads, duplicate checkpoint/notification answers, and explicit waits. Tool descriptions also retain selected-label, context, self-contained question, and rejection guidance.
 
 Passed:
 
-- `go test -trimpath ./internal/sysprompt -count=1`
-- `go test -trimpath ./internal/mcp/server -count=1`
-- Changed-file Go lint: `0 issues`
-- Public documentation validation
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/backendapp -count=1)`.
+- `TestAsyncQuestionGuidanceByCapability`, `TestAsyncQuestionToolDescriptionsByCapability`, `TestAskUserQuestionAnswerLabelsSchema`, and `TestAskUserQuestion_ConciseContextGuidance` passed.
+- Changed-file Go lint: `0 issues`.

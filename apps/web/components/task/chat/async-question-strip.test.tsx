@@ -21,6 +21,8 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 import { AsyncQuestionStrip } from "./async-question-strip";
 
+const QUESTION_TOGGLE_TEST_ID = "task-async-question-toggle";
+
 function question(overrides: Partial<ClarificationInboxAsyncQuestion> = {}) {
   return {
     question_id: "question-a",
@@ -68,12 +70,47 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AsyncQuestionStrip", () => {
+  it("renders nothing while an empty question read is idle or loading", () => {
+    mocks.state.questions = [];
+    mocks.state.status = "idle";
+    const { rerender } = renderStrip();
+    expect(screen.queryByTestId("task-async-question-strip")).toBeNull();
+    expect(screen.queryByText("Loading questions")).toBeNull();
+
+    mocks.state.status = "loading";
+    rerender(
+      <AsyncQuestionStrip
+        workspaceId="workspace-a"
+        taskId="task-a"
+        hasBlockingClarification={false}
+      />,
+    );
+    expect(screen.queryByTestId("task-async-question-strip")).toBeNull();
+    expect(screen.queryByText("Loading questions")).toBeNull();
+  });
+
+  it("keeps the last good rows visible during refresh and beside a read error", () => {
+    mocks.state.status = "loading";
+    renderStrip();
+    expect(screen.getByTestId("task-async-question-strip")).toBeTruthy();
+    expect(screen.queryByTestId("task-async-question-list")).toBeNull();
+    fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
+    expect(screen.getAllByTestId("async-question-row")).toHaveLength(2);
+
+    mocks.state.status = "error";
+    cleanup();
+    renderStrip();
+    expect(screen.getByTestId("task-async-question-error")).toBeTruthy();
+    fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
+    expect(screen.getAllByTestId("async-question-row")).toHaveLength(2);
+  });
+
   it("shows the count above the composer and hides answer rows until opened", () => {
     renderStrip();
     expect(screen.getByText("2 open questions, agent continues work")).toBeTruthy();
     expect(screen.queryByTestId("task-async-question-list")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("task-async-question-toggle"));
+    fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
     expect(screen.getAllByTestId("async-question-row")).toHaveLength(2);
     expect(screen.queryByTestId("async-question-dismiss")).toBeNull();
   });
@@ -81,14 +118,14 @@ describe("AsyncQuestionStrip", () => {
   it("stays collapsed and keeps the count visible during blocking clarification", () => {
     renderStrip(true);
     expect(screen.getByText("2 open questions, agent continues work")).toBeTruthy();
-    expect(screen.getByTestId("task-async-question-toggle")).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(QUESTION_TOGGLE_TEST_ID)).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("task-async-question-list")).toBeNull();
   });
 
   it("opens the shared full-height answer surface on a phone", () => {
     mocks.responsive.isMobile = true;
     renderStrip();
-    fireEvent.click(screen.getByTestId("task-async-question-toggle"));
+    fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
     fireEvent.click(screen.getAllByTestId("async-question-row-toggle")[0]);
     expect(screen.getByTestId("async-question-answer-surface")).toBeTruthy();
     expect(screen.queryByTestId("async-question-dismiss")).toBeNull();
@@ -101,5 +138,28 @@ describe("AsyncQuestionStrip", () => {
     expect(screen.getByTestId("task-async-question-error")).toBeTruthy();
     fireEvent.click(screen.getByText("Retry"));
     expect(mocks.state.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses coarse-pointer touch targets on tablet widths", () => {
+    renderStrip();
+    const toggle = screen.getByTestId(QUESTION_TOGGLE_TEST_ID);
+    expect(toggle.className).toContain("min-h-7");
+    expect(toggle.className).toContain("max-md:min-h-11");
+    expect(toggle.className).toContain("[@media(pointer:coarse)]:min-h-11");
+  });
+
+  it("shows the parent as provenance in the requesting child's chat", () => {
+    mocks.state.questions = [
+      question({
+        recipient: "parent",
+        forwarded: true,
+        parent_task_title: "Planning",
+      }),
+    ];
+    renderStrip();
+    fireEvent.click(screen.getByTestId(QUESTION_TOGGLE_TEST_ID));
+    expect(screen.getByTestId("async-question-provenance").textContent).toBe(
+      "From parent Planning",
+    );
   });
 });

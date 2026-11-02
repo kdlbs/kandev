@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "Ćōũĺď ńōţ ĺōàď qũēśţĩōńś.",
   "chatRetry": "Ŕēţŕŷ",
   "asyncFromChild": "Ƒŕōḿ {{child}}",
+  "asyncFromParent": "Ƒŕōḿ ƥàŕēńţ {{parent}}",
   "asyncWaitingForAnswer": "Ŵàĩţĩńĝ ƒōŕ àńśŵēŕ",
   "asyncForwardedBy": "Ƒōŕŵàŕďēď ƀŷ {{parent}}",
   "asyncWithdrawn": "Ŵĩţĥďŕàŵń",

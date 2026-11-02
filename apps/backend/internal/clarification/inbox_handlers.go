@@ -66,7 +66,7 @@ type inboxAsyncQuestionReader interface {
 	ListInboxAsyncQuestions(ctx context.Context, workspaceID, userID string, limit int, cursorAt, cursorID string) (*taskmodels.AsyncQuestionPage, error)
 	CountInboxAsyncQuestions(ctx context.Context, workspaceID, userID string) (int, error)
 	ListHiddenInboxAsyncQuestions(ctx context.Context, workspaceID, userID string, limit int, now time.Time) ([]*taskmodels.AsyncQuestion, int, *time.Time, error)
-	HasParkedWait(ctx context.Context, sessionID string) bool
+	WaitingQuestionIDs(ctx context.Context, sessionIDs []string) (map[string]bool, error)
 	AsyncQuestionWorkspace(ctx context.Context, questionID string) (string, bool, error)
 }
 
@@ -124,6 +124,7 @@ type inboxAsyncQuestionView struct {
 	TaskTitle       string                           `json:"task_title"`
 	ParentTaskID    string                           `json:"parent_task_id,omitempty"`
 	ParentTaskTitle string                           `json:"parent_task_title,omitempty"`
+	Recipient       string                           `json:"recipient"`
 	Forwarded       bool                             `json:"forwarded"`
 	Waiting         bool                             `json:"waiting"`
 	Status          string                           `json:"status"`
@@ -482,11 +483,31 @@ func (h *Handlers) buildInboxAsyncViews(
 	taskIDs := inboxAsyncQuestionTaskIDs(visible)
 	titles := h.batchInboxTaskTitles(ctx, taskIDs)
 	sessionStates := h.batchInboxSessionStates(ctx, taskIDs)
+	waiting, err := h.inboxAsyncWaitingQuestionIDs(ctx, visible)
+	if err != nil {
+		return nil, 0, false, err
+	}
 	views := make([]inboxAsyncQuestionView, 0, len(visible))
 	for _, question := range visible {
-		views = append(views, h.buildInboxAsyncView(ctx, question, titles, sessionStates))
+		views = append(views, h.buildInboxAsyncView(question, titles, sessionStates, waiting))
 	}
 	return views, hidden, page.HasMore, nil
+}
+
+func (h *Handlers) inboxAsyncWaitingQuestionIDs(
+	ctx context.Context,
+	questions []*taskmodels.AsyncQuestion,
+) (map[string]bool, error) {
+	sessions := make([]string, 0, len(questions))
+	seen := make(map[string]bool, len(questions))
+	for _, question := range questions {
+		if question == nil || question.SessionID == "" || seen[question.SessionID] {
+			continue
+		}
+		seen[question.SessionID] = true
+		sessions = append(sessions, question.SessionID)
+	}
+	return h.inboxAsync.WaitingQuestionIDs(ctx, sessions)
 }
 
 func (h *Handlers) inboxAsyncSidecarStates(
@@ -539,9 +560,9 @@ func inboxAsyncQuestionTaskIDs(questions []*taskmodels.AsyncQuestion) []string {
 }
 
 func (h *Handlers) buildInboxAsyncView(
-	ctx context.Context,
 	question *taskmodels.AsyncQuestion,
 	titles, sessionStates map[string]string,
+	waiting map[string]bool,
 ) inboxAsyncQuestionView {
 	return inboxAsyncQuestionView{
 		QuestionID:      question.ID,
@@ -551,8 +572,9 @@ func (h *Handlers) buildInboxAsyncView(
 		TaskTitle:       titles[question.TaskID],
 		ParentTaskID:    question.ParentTaskID,
 		ParentTaskTitle: titles[question.ParentTaskID],
+		Recipient:       string(question.Recipient),
 		Forwarded:       question.Forwarded,
-		Waiting:         h.inboxAsync.HasParkedWait(ctx, question.SessionID),
+		Waiting:         waiting[question.ID],
 		Status:          string(question.Status),
 		Context:         question.Context,
 		CreatedAt:       question.CreatedAt.UTC().Format(time.RFC3339Nano),
@@ -584,11 +606,15 @@ func (h *Handlers) buildInboxHiddenAsyncViews(
 	taskIDs := inboxAsyncQuestionTaskIDs(questions)
 	titles := h.batchInboxTaskTitles(ctx, taskIDs)
 	sessionStates := h.batchInboxSessionStates(ctx, taskIDs)
+	waiting, err := h.inboxAsyncWaitingQuestionIDs(ctx, questions)
+	if err != nil {
+		return nil, 0, err
+	}
 	views := make([]inboxHiddenAsyncQuestionView, 0, len(questions))
 	for _, question := range questions {
 		state := states[inboxAsyncSidecarKey(question.ID)]
 		views = append(views, inboxHiddenAsyncQuestionView{
-			inboxAsyncQuestionView: h.buildInboxAsyncView(ctx, question, titles, sessionStates),
+			inboxAsyncQuestionView: h.buildInboxAsyncView(question, titles, sessionStates, waiting),
 			State:                  string(state.State),
 			SnoozeUntil:            formatOptionalInboxTime(state.SnoozeUntil),
 		})

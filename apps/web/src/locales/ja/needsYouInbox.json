@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "質問を読み込めませんでした。",
   "chatRetry": "再試行",
   "asyncFromChild": "{{child}} から",
+  "asyncFromParent": "親タスク {{parent}} から",
   "asyncWaitingForAnswer": "回答待ち",
   "asyncForwardedBy": "{{parent}} が転送",
   "asyncWithdrawn": "撤回済み",

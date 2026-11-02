@@ -8,7 +8,7 @@ type DetailState = {
   status: "loading" | "ready" | "error";
 };
 
-export function useAgentQuestionDetail(questionId: string | null) {
+export function useAgentQuestionDetail(questionId: string | null, taskId?: string | null) {
   const [state, setState] = useState<DetailState>({ question: null, status: "loading" });
 
   const read = useCallback(
@@ -19,14 +19,14 @@ export function useAgentQuestionDetail(questionId: string | null) {
       }
       try {
         const question = refresh
-          ? await refreshAgentQuestion(questionId)
-          : await getAgentQuestion(questionId);
+          ? await refreshAgentQuestion(questionId, taskId ?? undefined)
+          : await getAgentQuestion(questionId, taskId ?? undefined);
         setState({ question, status: "ready" });
       } catch {
         setState((current) => ({ question: current.question, status: "error" }));
       }
     },
-    [questionId],
+    [questionId, taskId],
   );
 
   useEffect(() => {
@@ -35,8 +35,8 @@ export function useAgentQuestionDetail(questionId: string | null) {
       if (!questionId) return;
       try {
         const question = refresh
-          ? await refreshAgentQuestion(questionId)
-          : await getAgentQuestion(questionId);
+          ? await refreshAgentQuestion(questionId, taskId ?? undefined)
+          : await getAgentQuestion(questionId, taskId ?? undefined);
         if (active) setState({ question, status: "ready" });
       } catch {
         if (active) setState((current) => ({ question: current.question, status: "error" }));
@@ -60,7 +60,7 @@ export function useAgentQuestionDetail(questionId: string | null) {
       active = false;
       unsubscribe?.();
     };
-  }, [questionId]);
+  }, [questionId, taskId]);
 
   return { ...state, refresh: () => read(true) };
 }

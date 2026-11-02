@@ -139,7 +139,7 @@ function useAsyncSubmit(question: ClarificationInboxAsyncQuestion, onSettled: ()
   const { t } = useTranslation();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const submissionIdRef = useRef<string>(generateUUID());
+  const submissionIdentityRef = useRef<{ payloadKey: string; id: string } | null>(null);
   const submit = useCallback(
     async (draft: Draft, rejected: boolean) => {
       if (submitting) return;
@@ -148,13 +148,19 @@ function useAsyncSubmit(question: ClarificationInboxAsyncQuestion, onSettled: ()
         setError(t("needsYouInbox:asyncAnswerRequired"));
         return false;
       }
+      const payloadKey = JSON.stringify({ answers, rejected });
+      let submission = submissionIdentityRef.current;
+      if (!submission || submission.payloadKey !== payloadKey) {
+        submission = { payloadKey, id: generateUUID() };
+        submissionIdentityRef.current = submission;
+      }
       setSubmitting(true);
       setError(null);
       try {
         const result = await respondToAgentQuestion(question.question_id, {
           answers,
           rejected,
-          submission_id: submissionIdRef.current,
+          submission_id: submission.id,
         });
         clearDraft(question.question_id);
         if (!result.won) toast(t("needsYouInbox:asyncConcurrentWinner"));

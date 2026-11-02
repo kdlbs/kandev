@@ -88,7 +88,8 @@ func asyncQuestionView(question *models.AsyncQuestion, waiting bool) map[string]
 		view["parent_task_id"] = question.ParentTaskID
 	}
 	if question.Outcome != nil {
-		view["outcome"] = question.Outcome
+		outcome := question.Outcome.WithoutSubmissionID()
+		view["outcome"] = outcome
 	}
 	if question.WithdrawReason != "" {
 		view["withdraw_reason"] = question.WithdrawReason

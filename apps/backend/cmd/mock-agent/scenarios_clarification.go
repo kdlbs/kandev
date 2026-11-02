@@ -130,8 +130,8 @@ func scenarioAsyncQuestion(e *emitter) {
 	fixedDelay(50)
 	e.text("ASYNC_WORK_MARKER: continued independent work before the checkpoint read.")
 	// Keep this foreground turn alive so the browser can answer while work is
-	// still running. The result marker below proves the answer was read before
-	// this turn completed, rather than delivered as a replacement prompt.
+	// still running. The checkpoint marker distinguishes the read from the
+	// correlated delivery prompt that arrives after this turn completes.
 	waitForDelay(e.ctx, 30_000)
 	listed, err := e.callMCPTool("kandev", "list_question_answers_kandev", map[string]any{"scope": "own"})
 	if err != nil {
@@ -140,13 +140,29 @@ func scenarioAsyncQuestion(e *emitter) {
 	}
 	e.text("ASYNC_CHECKPOINT " + listed)
 	if label := asyncQuestionAnswerLabel(listed, questionID); label != "" {
-		e.text("ASYNC_ANSWER_RECEIVED: " + label)
+		e.text("ASYNC_CHECKPOINT_ANSWER: " + label)
 	}
 	if questionID == "" {
 		e.text("ASYNC_RECEIPT_SKIPPED: receipt carried no question id")
 		return
 	}
 	e.text("ASYNC_CONTINUE_WITHOUT_WAIT")
+}
+
+func scenarioAsyncQuestionReject(e *emitter) {
+	args := clarificationQuestionArgs()
+	args["async"] = true
+	args["request_id"] = "e2e-async-question-reject-db"
+	receipt, err := e.callMCPTool("kandev", "ask_user_question_kandev", args)
+	if err != nil {
+		e.text(fmt.Sprintf("Async rejection question failed: %s", err))
+		return
+	}
+	if asyncQuestionID(receipt) == "" {
+		e.text("ASYNC_REJECT_SKIPPED: receipt carried no question id")
+		return
+	}
+	e.text("ASYNC_REJECT_REQUESTED " + receipt)
 }
 
 func asyncQuestionID(result string) string {
@@ -319,6 +335,12 @@ func asyncQuestionDeliveryResult(prompt string) string {
 		return ""
 	}
 	label := asyncQuestionOutcomeLabel(questions, outcome)
+	if outcome.Rejected {
+		label = strings.TrimSpace(outcome.RejectReason)
+		if label == "" {
+			label = "Rejected"
+		}
+	}
 	if label == "" {
 		return ""
 	}
@@ -327,8 +349,12 @@ func asyncQuestionDeliveryResult(prompt string) string {
 
 func asyncQuestionDeliveryMarker(prompt string) (string, string) {
 	switch {
+	case strings.Contains(prompt, "ASYNC CHILD QUESTION REJECTED"):
+		return "ASYNC CHILD QUESTION REJECTED", "ASYNC_PARENT_ANSWER_REJECTED: "
 	case strings.Contains(prompt, "ASYNC CHILD QUESTION RESOLVED"):
 		return "ASYNC CHILD QUESTION RESOLVED", "ASYNC_PARENT_ANSWER_RECEIVED: "
+	case strings.Contains(prompt, "ASYNC QUESTION REJECTED"):
+		return "ASYNC QUESTION REJECTED", "ASYNC_ANSWER_REJECTED: "
 	case strings.Contains(prompt, "ASYNC QUESTION ANSWERED"):
 		return "ASYNC QUESTION ANSWERED", "ASYNC_ANSWER_RECEIVED: "
 	default:

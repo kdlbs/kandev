@@ -87,16 +87,12 @@ Task 06.
 
 ## Results
 
-Implemented task-level parent authorization, replacement-session answers,
-active-session routing for parent notifications and outcomes, and retryable
-delivery while the parent task has no active session. Parent forwarding replays
-remain idempotent across parent sessions.
+Implemented task-level parent authorization, replacement-session answers, active-session routing, and forwarding notifications only for a newly created pending forward. A parent answer does not create an outcome delivery back to the same parent.
 
 Passed:
 
-- `go test -trimpath -race ./internal/task/questions -count=1`
-- `go test -trimpath ./internal/backendapp -run '^TestAsyncQuestionParentDelivery(TargetsActiveSession|WaitsForSession)$' -count=1`
-- `go test -trimpath ./internal/mcp/handlers -run 'TestAsyncQuestions|TestHandleAskParentQuestion' -count=1`
-- `go test -trimpath ./internal/task/repository/sqlite -run '^TestAsyncQuestions' -count=1`
-- Changed-file Go lint: `0 issues`
-- `git diff --check`
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`; includes `TestAsyncQuestionForwardOnlyNotifiesOnNewPendingTransition` and `TestAsyncQuestionOperatorAnswerCreatesParentOutcomeDelivery`.
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/backendapp -count=1)`.
+- `TestAsyncQuestionsPostgresForwardedConversationVisibility` passed by name against PostgreSQL.
+- Chromium async-question E2E: 8 tests passed, including parent-chat forwarding and answer.
+- Changed-file Go lint: `0 issues`.

@@ -284,3 +284,13 @@ func TestAsyncQuestionsWaitPausesOnlyWhenNamed(t *testing.T) {
 	require.Equal(t, models.AsyncQuestionStatusAnswered, result.Status)
 	require.False(t, fixture.service.HasParkedWait(ctx, session.ID), "an answer releases the explicit gate")
 }
+
+func TestAsyncQuestionMCPViewOmitsSubmissionIdentity(t *testing.T) {
+	view := asyncQuestionView(&models.AsyncQuestion{
+		ID: "question-view-private", Outcome: &models.AsyncQuestionOutcome{SubmissionID: "private-submission-id"},
+	}, false)
+	encoded, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "private-submission-id")
+	require.NotContains(t, string(encoded), "submission_id")
+}

@@ -393,7 +393,7 @@ func asyncQuestionFilters(opts models.ListAsyncQuestionsOptions) (string, []any)
 	conditions, args = asyncQuestionPopulationFilters(conditions, args, opts)
 	// The forward predicate is an operator-population rule. An author-scoped
 	// read always owns its requests, including parent-authored ones.
-	if !opts.IncludeUnforwardedParents && opts.AuthorSessionID == "" && opts.SessionID == "" {
+	if !opts.IncludeUnforwardedParents && opts.AuthorSessionID == "" {
 		conditions = append(conditions, asyncQuestionForwardedPredicate)
 	}
 	if opts.RequireAnswerable {
@@ -479,7 +479,11 @@ func asyncQuestionIdentityFilters(opts models.ListAsyncQuestionsOptions) ([]stri
 		args = append(args, opts.TaskID)
 	}
 	if opts.ConversationTaskID != "" {
-		conditions = append(conditions, `((task_id = ? AND recipient_kind = 'user') OR
+		conditions = append(conditions, `((task_id = ? AND (recipient_kind = 'user' OR
+			recipient_kind = 'parent' AND EXISTS (
+				SELECT 1 FROM task_async_question_forwards author_forward
+				WHERE author_forward.question_id = task_async_questions.id
+			))) OR
 			(parent_task_id = ? AND recipient_kind = 'parent' AND EXISTS (
 				SELECT 1 FROM task_async_question_forwards f WHERE f.question_id = task_async_questions.id
 			) AND EXISTS (
@@ -498,6 +502,10 @@ func asyncQuestionPopulationFilters(conditions []string, args []any, opts models
 	if opts.SessionID != "" {
 		conditions = append(conditions, "session_id = ?")
 		args = append(args, opts.SessionID)
+	}
+	if opts.OperatorSessionID != "" {
+		conditions = append(conditions, "session_id = ?")
+		args = append(args, opts.OperatorSessionID)
 	}
 	if opts.AuthorSessionID != "" {
 		conditions = append(conditions, "session_id = ?")

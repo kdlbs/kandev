@@ -1,10 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import {
-  openTaskSession,
-  waitForAgentMessage,
-  waitForSessionDone,
-  waitForSessionState,
-} from "../../helpers/session";
+import { openTaskSession, waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 
@@ -84,6 +79,11 @@ test.describe("Async agent questions", () => {
       message: "the explicit question wait should park the captured turn",
       timeout: 60_000,
     });
+    await expect
+      .poll(() =>
+        apiClient.getTask(task.id).then((current) => current.primary_session_pending_action),
+      )
+      .toBe("clarification");
 
     await testPage.goto("/needs-you-inbox");
     const group = testPage.getByTestId("async-question-group").filter({ hasText: title });
@@ -96,6 +96,11 @@ test.describe("Async agent questions", () => {
     await row.getByTestId("async-question-submit").click();
 
     await expect(group).toHaveCount(0, { timeout: 20_000 });
+    await expect
+      .poll(() =>
+        apiClient.getTask(task.id).then((current) => current.primary_session_pending_action),
+      )
+      .toBeNull();
     await waitForAgentMessage(apiClient, task.session_id, "ASYNC_ANSWER_RECEIVED: SQLite", 45_000);
   });
 
@@ -135,16 +140,34 @@ test.describe("Async agent questions", () => {
     await waitForAgentMessage(
       apiClient,
       task.session_id,
+      "ASYNC_CHECKPOINT_ANSWER: PostgreSQL",
+      45_000,
+    );
+    let messages = (await apiClient.listSessionMessages(task.session_id)).messages;
+    expect(messages.some((message) => message.content.includes("ASYNC_ANSWER_RECEIVED:"))).toBe(
+      false,
+    );
+    await waitForAgentMessage(apiClient, task.session_id, "ASYNC_CONTINUE_WITHOUT_WAIT", 15_000);
+    await waitForAgentMessage(
+      apiClient,
+      task.session_id,
       "ASYNC_ANSWER_RECEIVED: PostgreSQL",
       45_000,
     );
-    await waitForSessionDone(
-      apiClient,
-      task.id,
-      task.session_id,
-      "the original running turn should complete after reading its answer",
-      15_000,
+    messages = (await apiClient.listSessionMessages(task.session_id)).messages;
+    const checkpoint = messages.find((message) =>
+      message.content.includes("ASYNC_CHECKPOINT_ANSWER:"),
     );
+    const continuation = messages.find((message) =>
+      message.content.includes("ASYNC_CONTINUE_WITHOUT_WAIT"),
+    );
+    const delivery = messages.find((message) =>
+      message.content.includes("ASYNC_ANSWER_RECEIVED: PostgreSQL"),
+    );
+    expect(checkpoint?.turn_id).toBeTruthy();
+    expect(continuation?.turn_id).toBe(checkpoint?.turn_id);
+    expect(delivery?.turn_id).toBeTruthy();
+    expect(delivery?.turn_id).not.toBe(checkpoint?.turn_id);
   });
 
   test("resumes an explicit wait after an answer from task chat", async ({
@@ -171,6 +194,12 @@ test.describe("Async agent questions", () => {
     });
 
     await openTaskSession(testPage, task.id);
+    const sidebarTask = testPage
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Async Wait From Chat" });
+    await expect(sidebarTask.getByTestId("task-state-waiting-for-input")).toBeVisible({
+      timeout: 20_000,
+    });
     const strip = testPage.getByTestId("task-async-question-strip");
     await expect(strip).toBeVisible({ timeout: 20_000 });
     await strip.getByTestId("task-async-question-toggle").click();
@@ -180,6 +209,9 @@ test.describe("Async agent questions", () => {
     await row.getByTestId("async-question-submit").click();
 
     await waitForAgentMessage(apiClient, task.session_id, "ASYNC_ANSWER_RECEIVED: SQLite", 45_000);
+    await expect(sidebarTask.getByTestId("task-state-waiting-for-input")).toHaveCount(0, {
+      timeout: 20_000,
+    });
   });
 
   test("forwards two child questions and answers one from the parent chat", async ({
@@ -243,9 +275,28 @@ test.describe("Async agent questions", () => {
       .getByTestId("async-question-row")
       .filter({ hasText: "Async Forward Child A" });
     await expect(firstRow.getByTestId("async-question-provenance")).toBeVisible();
-    await firstRow.getByTestId("async-question-row-toggle").click();
-    await firstRow.getByTestId("async-question-option").filter({ hasText: "PostgreSQL" }).click();
-    await firstRow.getByTestId("async-question-submit").click();
+
+    await openTaskSession(testPage, firstChild.id);
+    const childStrip = testPage.getByTestId("task-async-question-strip");
+    await expect(childStrip).toBeVisible({ timeout: 20_000 });
+    await childStrip.getByTestId("task-async-question-toggle").click();
+    const childQuestion = childStrip.getByTestId("async-question-row").first();
+    await expect(childQuestion.getByTestId("async-question-provenance")).toHaveText(
+      "From parent Async Forward Parent",
+    );
+
+    await openTaskSession(testPage, parent.id);
+    const parentStrip = testPage.getByTestId("task-async-question-strip");
+    await parentStrip.getByTestId("task-async-question-toggle").click();
+    const parentQuestion = parentStrip
+      .getByTestId("async-question-row")
+      .filter({ hasText: "Async Forward Child A" });
+    await parentQuestion.getByTestId("async-question-row-toggle").click();
+    await parentQuestion
+      .getByTestId("async-question-option")
+      .filter({ hasText: "PostgreSQL" })
+      .click();
+    await parentQuestion.getByTestId("async-question-submit").click();
 
     await waitForAgentMessage(
       apiClient,
@@ -305,6 +356,32 @@ test.describe("Async agent questions", () => {
       transcriptQuestion.getByText("Found the database choice in the project docs."),
     ).toBeVisible();
     await expect(testPage.getByTestId("task-async-question-strip")).toHaveCount(0);
+  });
+
+  test("rejects an open async question and delivers the rejection outcome", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const task = await createAsyncQuestionTask(
+      apiClient,
+      seedData,
+      "Async Rejection Delivery",
+      "/e2e:async-question-reject",
+    );
+    if (!task.session_id) throw new Error("expected an active session for rejection delivery");
+
+    await waitForAgentMessage(apiClient, task.session_id, "ASYNC_REJECT_REQUESTED", 60_000);
+    await testPage.goto("/needs-you-inbox");
+    const group = testPage.getByTestId("async-question-group").filter({ hasText: task.title });
+    await expect(group).toBeVisible({ timeout: 30_000 });
+    const row = group.getByTestId("async-question-row").first();
+    await row.getByTestId("async-question-row-toggle").click();
+    await row.getByTestId("async-question-reject").click();
+
+    await expect(group).toHaveCount(0, { timeout: 20_000 });
+    await waitForAgentMessage(apiClient, task.session_id, "ASYNC_ANSWER_REJECTED:", 45_000);
   });
 
   test("answers from task chat when the Inbox feature is disabled", async ({

@@ -11,17 +11,19 @@ import (
 )
 
 type fakeInboxAsyncReader struct {
-	questions     []*taskmodels.AsyncQuestion
-	waiting       map[string]bool
-	countOverride *int
+	questions            []*taskmodels.AsyncQuestion
+	waitingQuestionIDs   map[string]bool
+	waitingQuestionReads int
+	countOverride        *int
 }
 
 func (f *fakeInboxAsyncReader) ListInboxAsyncQuestions(context.Context, string, string, int, string, string) (*taskmodels.AsyncQuestionPage, error) {
 	return &taskmodels.AsyncQuestionPage{Questions: f.questions}, nil
 }
 
-func (f *fakeInboxAsyncReader) HasParkedWait(_ context.Context, sessionID string) bool {
-	return f.waiting[sessionID]
+func (f *fakeInboxAsyncReader) WaitingQuestionIDs(_ context.Context, _ []string) (map[string]bool, error) {
+	f.waitingQuestionReads++
+	return f.waitingQuestionIDs, nil
 }
 
 func (f *fakeInboxAsyncReader) CountInboxAsyncQuestions(context.Context, string, string) (int, error) {
@@ -75,10 +77,50 @@ func newAsyncInboxTestHandler(t *testing.T, question *taskmodels.AsyncQuestion, 
 	bundles := &fakeInboxBundleStore{}
 	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, tasks, bundles)
 	h.SetAsyncQuestionReader(&fakeInboxAsyncReader{
-		questions: []*taskmodels.AsyncQuestion{question},
-		waiting:   map[string]bool{"s1": waiting},
+		questions:          []*taskmodels.AsyncQuestion{question},
+		waitingQuestionIDs: map[string]bool{question.ID: waiting},
 	})
 	return h
+}
+
+func TestAsyncQuestionsInboxWaitingIsPerDependency(t *testing.T) {
+	first := asyncInboxQuestion()
+	second := *first
+	second.ID = "async-q2"
+	second.Questions = append([]protocol.Question(nil), first.Questions...)
+	reader := &fakeInboxAsyncReader{
+		questions: []*taskmodels.AsyncQuestion{first, &second},
+		waitingQuestionIDs: map[string]bool{
+			first.ID: true,
+		},
+	}
+	tasks := &fakeInboxTasks{
+		tasks: map[string]*taskmodels.Task{"t1": {ID: "t1", Title: "Checkout integration"}},
+		sessions: map[string]*taskmodels.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateRunning},
+		},
+	}
+	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, tasks, &fakeInboxBundleStore{})
+	h.SetAsyncQuestionReader(reader)
+	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1", h.httpListInbox)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var response inboxListResponse
+	decodeInboxBody(t, rec, &response)
+	if len(response.AsyncQuestions) != 2 {
+		t.Fatalf("async questions = %d, want 2", len(response.AsyncQuestions))
+	}
+	waiting := make(map[string]bool, len(response.AsyncQuestions))
+	for _, question := range response.AsyncQuestions {
+		waiting[question.QuestionID] = question.Waiting
+	}
+	if !waiting[first.ID] || waiting[second.ID] {
+		t.Fatalf("waiting by question = %+v, want only %s waiting", waiting, first.ID)
+	}
+	if reader.waitingQuestionReads != 1 {
+		t.Fatalf("dependency wait reads = %d, want one per page", reader.waitingQuestionReads)
+	}
 }
 
 func TestAsyncQuestionsInboxMixedPage(t *testing.T) {
@@ -194,7 +236,9 @@ func (failingAsyncReader) ListInboxAsyncQuestions(context.Context, string, strin
 	return nil, context.DeadlineExceeded
 }
 
-func (failingAsyncReader) HasParkedWait(context.Context, string) bool { return false }
+func (failingAsyncReader) WaitingQuestionIDs(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 
 func (failingAsyncReader) CountInboxAsyncQuestions(context.Context, string, string) (int, error) {
 	return 0, context.DeadlineExceeded

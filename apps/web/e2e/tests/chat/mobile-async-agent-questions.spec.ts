@@ -81,6 +81,13 @@ test.describe("Mobile async agent questions", () => {
     });
 
     await openTaskSession(testPage, task.id);
+    const transcriptQuestion = testPage.getByTestId("agent-question-message");
+    await expect(transcriptQuestion).toBeVisible({ timeout: 20_000 });
+    const showQuestions = transcriptQuestion.getByRole("link", { name: "Show" });
+    await expect(showQuestions).toHaveAttribute("href", "#task-async-question-strip");
+    await showQuestions.tap();
+    await expect(testPage).toHaveURL(/#task-async-question-strip$/);
+
     const strip = testPage.getByTestId("task-async-question-strip");
     await expect(strip).toBeVisible({ timeout: 20_000 });
     await strip.getByTestId("task-async-question-toggle").tap();

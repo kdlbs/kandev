@@ -69,7 +69,7 @@ func verifyAsyncQuestionTranscript(
 ) error {
 	if message == nil || message.ID != asyncQuestionTranscriptMessagePrefix+question.ID ||
 		message.TaskID != question.TaskID || message.TaskSessionID != question.SessionID ||
-		message.TurnID != question.TurnID || message.AuthorType != models.MessageAuthorAgent ||
+		(question.TurnID != "" && message.TurnID != question.TurnID) || message.AuthorType != models.MessageAuthorAgent ||
 		message.Type != models.MessageTypeAgentQuestionRequest || message.Content != delivery.Content ||
 		message.Metadata[questions.MetadataAsyncQuestionID] != question.ID ||
 		message.Metadata["async_question_request_digest"] != question.PayloadDigest {

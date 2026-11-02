@@ -1,7 +1,7 @@
 ---
 id: "10-transcript-and-status"
 title: "Add transcript history and accurate status"
-status: completed
+status: done
 wave: 8
 depends_on:
   - "09-chat-question-surface"
@@ -119,15 +119,12 @@ Task 09.
 
 ## Results
 
-Implemented deterministic transcript entries, current-status lookup, parked-gate pending-action projection, per-question waiting state, and terminal outcome labels. Added the transcript message type to the chat visibility filter after E2E exposed that it was being dropped before rendering.
+Implemented deterministic transcript entries, current-status lookup, per-question wait state, and accurate terminal outcomes. Transcript retries accept the active turn assigned during message creation. The chat and Inbox projections refresh on committed wait transitions.
 
 Passed:
 
-- `go test -trimpath -race ./internal/task/questions -count=1`
-- SQLite async question and pending-action tests
-- Clarification, MCP handler, and focused orchestrator suites
-- Focused async question and Inbox Vitest suites: 217 tests passed
-- Typecheck, lint, i18n check, and i18n ratchet
-- SQL guard and changed-file Go lint: `0 issues`
-
-PostgreSQL pending-action coverage was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`.
+- `TestAsyncQuestionTranscriptRetryAcceptsTurnAssignedAtCreate` and `TestAsyncQuestionsInboxWaitingIsPerDependency` passed in the backend package suites.
+- `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction` passed by name against PostgreSQL 16.
+- Chromium async-question E2E: 8 tests passed, including the live parked and released task state.
+- Specification validation: `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.

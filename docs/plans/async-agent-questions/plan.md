@@ -1,6 +1,6 @@
 ---
 created: 2026-10-30
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-ASYNC-QUESTIONS-001
   - REQ-TASKS-ASYNC-QUESTIONS-002
@@ -28,9 +28,9 @@ This is a feature package created through the issue-fix workflow, not a repair o
 
 The implementation order is durable state, operator flow, parent flow, explicit waits, then Inbox integration.
 Each stage preserves the blocking path and has a focused verification boundary.
-Work orders 01 to 05 are implemented on PR #4980.
+Work orders 01 to 12 are implemented on PR #4980; follow-up findings and post-fix verification are recorded in their Results sections.
 
-### Remediation after review of `226eca1`
+### Remediation after review of PR head `1fecf91`
 
 Review found that the shipped design leaves operators without a surface by default, because the Inbox flag is off in production.
 Work orders 06 to 12 make the task chat the primary surface and keep the Inbox as an optional view.
@@ -343,15 +343,17 @@ The existing mock-agent scenario pattern must drive actual MCP async calls and l
 Seed identities through the API, then assert operator outcomes in the rendered Inbox.
 Backend integration tests own precise crash/restart and cancellation races. Browser reload alone does not prove backend restart safety.
 
-The flows above are the original plan. The specs on the PR cover a smaller set, so work order 12 owns the remainder.
+The initial flows record the original desired coverage. Work order 12 adds the remediation scenarios below and records the final executed results.
 Remediation flows live in the same two spec files:
 
-- `answers from chat and the agent uses the answer`: `003.2`, `009.1`, `009.2`. The mock agent must emit a marker containing the answer after it resumes.
+- `answers from chat while the agent keeps working`: `003.2`, `009.1`, `009.2`. The E2E distinguishes checkpoint reads from later delivery, verifies same-turn continuation and later delivery in a new turn, and proves the original turn is not cancelled.
 - `resumes after an explicit wait is answered from chat`: `006.2`, `006.4`, `009.6`.
-- `forwards a child question and answers from the parent chat`: `005.1`, `005.2`, `009.3`.
+- `forwards a child question and answers from both chats`: `005.1`, `005.2`, `009.3`, with provenance in the child and parent chats.
 - `withdraws a question and retains the transcript entry`: `004.1`, `004.2`, `009.4`.
 - `answers from chat with the Inbox disabled`: `009.1`.
-- `mobile-chrome: answers from the phone chat surface`: `009.2`, with containment and 44px checks.
+- `rejects an open async question and delivers its rejection outcome`.
+- `mobile-chrome: answers from the phone chat surface`: `009.2`, with containment and 44px checks. This flow also follows the transcript-card link to the answer strip.
+- The parked-wait flow verifies the sidebar waiting state while parked and its removal immediately after the answer.
 
 ## Work orders
 
@@ -375,29 +377,22 @@ Task 08 is independent and can move earlier. Task 10 needs 09, and Task 12 needs
 
 ## Verification results
 
-Work orders 01 to 12 are complete. Each work order records its detailed scope and verification.
+Work orders 01 to 12 are implemented and verified. Their Results sections contain the scoped commands and regression names.
 
-- Investigation baseline: the two existing parent-pause tests passed, as recorded above.
-- Feature implementation: complete. Targeted Go, web unit, typecheck, i18n, and lint checks passed.
-- Backend verification: async question race and SQLite persistence suites, MCP/server/handler, clarification, sysprompt, backendapp, gateway WebSocket, orchestrator, mock-agent, store-conformance race, and SQL guard passed.
-- Frontend verification: 217 focused Vitest tests, typecheck, lint, i18n check, and i18n ratchet passed.
-- Browser verification: all 7 Chromium async-question E2E tests and both mobile Chrome tests passed. This includes explicit waits, direct-parent forwarding, withdrawal transcript history, and Inbox-disabled task chat.
-- Documentation verification: public documentation validation, catalog validation for 425 decisions and 1871 specifications, 36 specification-linter tests, and full specification lint passed.
-- Changed-file Go lint passed with 0 issues; `gofmt` and diff whitespace checks passed.
-- PostgreSQL race and pending-action coverage is environment-gated and was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
-- PR review fixup: fail-closed HTTP authorization for empty workspaces, full-precision `(created_at, kind, id)` Inbox cursors with correct source boundaries, conditional wait acknowledgement that cannot overwrite a fenced release, stale-pause state writes deferred until the pause settles, capture failures propagated instead of widening the pause, current-parent child-list reads, PostgreSQL advisory locks for create/wait boundaries, seeded PostgreSQL tests, hidden full counts, boot combined hasMore/expiry, root child-question reads, readable labels in continuations, UUID helper usage, desktop sizing, a status announcement, idempotent worker lifecycle with goleak coverage, and a root-object MCP output schema.
-- Review remediation: queue readiness wakes, captured-turn pause fencing, distinct parent delivery kinds, current task/session/parent authority checks, incarnation preservation and lifecycle cleanup, one bounded Inbox page with async counts/hiding, atomic withdrawal wake, async sidecar authorization, discriminated-union output schema, unsupported-surface gating, child/history cursors, async image route/UI, modal focus lifecycle, `task.question.changed` invalidation, and parser-valid public examples. Remediation regressions cover reparent/transfer/cancel/incarnation, stale pause, pause failure, withdrawal wake atomicity, parent delivery kinds, child/history pagination, async dismissal HTTP routes, schema modes, and blocking item IDs.
-- `python3 scripts/list-docs.py validate`: passed. The catalog validated 425 decisions and 1871 specifications.
-- `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
-- `python3 scripts/lint-spec-files.py --all`: passed.
-- Repository documentation coverage preflight: passed for all twelve work orders, using the in-memory trigger described below.
-- Requirement acceptance criteria are mapped to the corresponding implementation work orders. Relative links and changed-document whitespace checks passed.
-- The implementation and design artifacts are included in the feature delivery commit.
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath ./internal/clarification ./internal/sysprompt ./internal/mcp/server ./internal/backendapp -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run 'TestAsyncQuestions|PendingAction' -count=1)`: passed with `KANDEV_TEST_POSTGRES_DSN` set to a local PostgreSQL 16 instance.
+- Named PostgreSQL tests passed: `TestAsyncQuestionsPostgresResolutionRace`, `TestAsyncQuestionsPostgresCreateReplay`, `TestAsyncQuestionsPostgresConcurrentCreateAndWait`, `TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest`, `TestAsyncQuestionsPostgresForwardedConversationVisibility`, and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
+- Focused Vitest regressions: 4 files, 25 tests passed. Web typecheck, lint, i18n check, and i18n ratchet passed.
+- Chromium async-question E2E: 8 tests passed. Mobile Chrome async-question E2E: 2 tests passed.
+- Changed-file Go lint passed with `0 issues`; `gofmt` and `git diff --check` passed.
+- `python3 scripts/list-docs.py validate`: passed, validating 426 decisions and 1883 specifications. Full specification lint and public documentation validation passed.
+- The requirements, system design, and work-order Results reflect the implemented author/parent visibility and wait-projection contracts.
+- PR #4980 is the delivery target; this verification summary is the source for its live validation record.
 
 Each work order owns its exact commands and final results.
 Before the first frontend package command in a fresh worktree, run `(cd apps && pnpm install --frozen-lockfile)`.
-Real PostgreSQL evidence requires `KANDEV_TEST_POSTGRES_DSN`. A skipped test is not PostgreSQL validation.
-Managed E2E commands rebuild changed backend, web, and fixture binaries.
+Real PostgreSQL evidence requires `KANDEV_TEST_POSTGRES_DSN`; the named tests above ran against PostgreSQL 16. Managed E2E commands rebuild changed backend, web, and fixture binaries.
 
 The design-package checks are:
 

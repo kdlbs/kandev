@@ -65,6 +65,14 @@ type AsyncQuestionOutcome struct {
 	Version         int64                      `json:"version"`
 }
 
+// WithoutSubmissionID returns the outcome fields safe to expose in an agent,
+// operator, or transcript view. The persisted submission ID remains internal
+// to exact-retry arbitration.
+func (o AsyncQuestionOutcome) WithoutSubmissionID() AsyncQuestionOutcome {
+	o.SubmissionID = ""
+	return o
+}
+
 // AsyncQuestion is one durable, task-owned request bundle. Item IDs remain
 // local to the bundle; ID identifies the whole request.
 type AsyncQuestion struct {
@@ -202,6 +210,10 @@ type ListAsyncQuestionsOptions struct {
 	// child requests this task explicitly forwarded.
 	ConversationTaskID string
 	SessionID          string
+	// OperatorSessionID scopes an operator read to one session while retaining
+	// the forwarded-parent visibility predicate. AuthorSessionID is the agent
+	// checkpoint read and intentionally includes the author's own parent asks.
+	OperatorSessionID string
 	// AuthorSessionID restricts reads to requests authored by exactly this
 	// session (the checkpoint read).
 	AuthorSessionID string

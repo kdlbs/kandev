@@ -1,7 +1,7 @@
 ---
 id: "04-explicit-question-waits"
 title: "Pause only for explicit question dependencies"
-status: completed
+status: done
 wave: 4
 depends_on:
   - "03-parent-question-flow"

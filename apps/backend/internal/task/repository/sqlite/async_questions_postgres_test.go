@@ -181,3 +181,42 @@ func TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest(t *testing.
 	require.Equal(t, created.ID, updated[0].ID)
 	require.Equal(t, models.AsyncQuestionStatusStale, updated[0].Status)
 }
+
+func TestAsyncQuestionsPostgresForwardedConversationVisibility(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	question := newAsyncQuestionForTest(t, "q-postgres-forward-chat", "session-postgres-forward-chat")
+	question.Recipient = models.AsyncQuestionRecipientParent
+	question.ParentTaskID = "parent-task-postgres-forward-chat"
+	question.ParentSessionID = "parent-session-postgres-forward-chat"
+	created, isNew := createAsyncQuestionForTest(t, repo, question)
+	require.True(t, isNew)
+
+	childConversation, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		ConversationTaskID: question.TaskID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, childConversation.Questions, "unforwarded parent requests stay hidden from operator conversation scope")
+
+	_, err = repo.ForwardAsyncQuestion(ctx, &models.AsyncQuestionForward{
+		QuestionID: created.ID, ParentTaskID: question.ParentTaskID,
+		ParentSessionID: question.ParentSessionID, Reason: "operator decision",
+	})
+	require.NoError(t, err)
+
+	childConversation, err = repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		ConversationTaskID: question.TaskID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, childConversation.Questions, 1, "the author sees the forwarded request in its chat")
+	require.Equal(t, created.ID, childConversation.Questions[0].ID)
+
+	parentConversation, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		ConversationTaskID: question.ParentTaskID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, parentConversation.Questions, 1, "the forwarding parent sees the same request in its chat")
+	require.Equal(t, created.ID, parentConversation.Questions[0].ID)
+}

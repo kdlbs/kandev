@@ -100,20 +100,12 @@ Task 05.
 
 ## Results
 
-Implemented wait-race settlement, bounded task/session/parent authority recovery,
-stale dependency wake delivery, and withdrawal cleanup for unsent parent prompts.
-The stale PostgreSQL authority-sweep regression is present but could not run locally.
+Implemented wait settlement and authority recovery. Wait projection events now publish after committed park, release, cancellation, stale, and reconciliation transitions. The pending-action projection tracks parked gates live.
 
 Passed:
 
-- `go test -trimpath -race ./internal/task/questions -count=1`
-- `go test -trimpath ./internal/task/repository/sqlite -run '^TestAsyncQuestions' -count=1`
-- `go test -trimpath ./internal/task/repository/sqlite -run '^TestAsyncQuestionsLifecycleCleanup$' -count=1`
-- `go test -trimpath ./internal/orchestrator -run '^TestAsyncQuestions' -count=1`
-- `go test -trimpath ./internal/backendapp -run 'TestAsyncQuestion' -count=1`
-- `go run ./cmd/sqlguard ./internal`
-- `git diff --check`
-
-`TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest` compiled and
-was skipped because `KANDEV_TEST_POSTGRES_DSN` is unset. Changed-file lint
-passed with `0 issues` after the repository lint lock cleared.
+- `(cd apps/backend && go test -trimpath -race ./internal/task/questions -count=1)`; includes `TestAsyncQuestionWaitProjectionPublishesParkAndRelease`.
+- `(cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run 'TestAsyncQuestions|PendingAction' -count=1)` with `KANDEV_TEST_POSTGRES_DSN` set; passed against local PostgreSQL 16.
+- `TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest` and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction` passed by name against PostgreSQL.
+- Chromium async-question E2E: 8 tests passed, including live parked-state and release checks.
+- Changed-file Go lint: `0 issues`.

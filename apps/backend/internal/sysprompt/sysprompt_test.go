@@ -206,12 +206,17 @@ func TestAsyncQuestionGuidanceByCapability(t *testing.T) {
 			if test.want {
 				for _, expected := range []string{
 					"Set async=true when useful independent work remains",
+					"destructive, irreversible, or expensive to redo",
+					"do not build on work that depends on an open answer",
+					"at a checkpoint and before finishing",
+					"A checkpoint read and later notification may show the same answer",
 					"list_question_answers_kandev",
 					"wait_for_question_answers_kandev",
 					"withdraw_question_kandev",
 				} {
 					assert.Contains(t, context, expected)
 				}
+				assert.Equal(t, 1, strings.Count(context, "Choose blocking mode"), "async guidance should appear once")
 				return
 			}
 			for _, absent := range []string{

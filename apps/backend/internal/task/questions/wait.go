@@ -61,7 +61,6 @@ func (s *Service) Wait(ctx context.Context, input WaitInput) (*WaitResult, error
 	if raced {
 		return s.releaseRacedWait(ctx, input.SessionID, unique, wait.ID)
 	}
-	s.notifyWait(ctx, wait)
 	return &WaitResult{Status: WaitStatusWaiting, Wait: wait, Questions: page.Questions}, nil
 }
 
@@ -142,9 +141,15 @@ func (s *Service) releaseRacedWait(ctx context.Context, sessionID string, unique
 		return nil, err
 	}
 	if !won {
-		if _, err := s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
-			models.AsyncQuestionWaitReleaseRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait"); err != nil {
+		won, err = s.store.SetAsyncQuestionWaitStatusFrom(ctx, waitID,
+			models.AsyncQuestionWaitReleaseRequested, models.AsyncQuestionWaitReleased, "answer_raced_wait")
+		if err != nil {
 			return nil, err
+		}
+	}
+	if won {
+		if wait, getErr := s.store.GetAsyncQuestionWait(ctx, waitID); getErr == nil && wait != nil {
+			s.notifyWait(ctx, wait)
 		}
 	}
 	snapshots, err := s.store.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
@@ -214,6 +219,9 @@ func (s *Service) acknowledgeFencedRelease(ctx context.Context, wait *models.Asy
 	}
 	if won {
 		s.wakeWaitDestination(ctx, wait)
+		if updated, getErr := s.store.GetAsyncQuestionWait(ctx, wait.ID); getErr == nil && updated != nil {
+			s.notifyWait(ctx, updated)
+		}
 	}
 	return s.canonicalWaitStatus(ctx, wait.ID)
 }
@@ -235,6 +243,9 @@ func (s *Service) acknowledgeRequestedPause(ctx context.Context, wait *models.As
 		return "", err
 	}
 	if won {
+		if updated, getErr := s.store.GetAsyncQuestionWait(ctx, wait.ID); getErr == nil && updated != nil {
+			s.notifyWait(ctx, updated)
+		}
 		return models.AsyncQuestionWaitParked, nil
 	}
 	latest, err := s.store.GetAsyncQuestionWait(ctx, wait.ID)
@@ -267,7 +278,66 @@ func (s *Service) MarkWaitCancelled(ctx context.Context, waitID, reason string) 
 	if waitID == "" {
 		return nil
 	}
-	return s.store.SetAsyncQuestionWaitStatus(ctx, waitID, models.AsyncQuestionWaitCancelled, reason)
+	return s.setWaitStatusAndNotify(ctx, waitID, models.AsyncQuestionWaitCancelled, reason)
+}
+
+func (s *Service) setWaitStatusAndNotify(ctx context.Context, waitID string, status models.AsyncQuestionWaitStatus, reason string) error {
+	before, err := s.store.GetAsyncQuestionWait(ctx, waitID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.SetAsyncQuestionWaitStatus(ctx, waitID, status, reason); err != nil {
+		return err
+	}
+	if before == nil || before.Status == status {
+		return nil
+	}
+	after, err := s.store.GetAsyncQuestionWait(ctx, waitID)
+	if err != nil {
+		s.logger.Warn("failed to read transitioned async question wait for notification",
+			zap.String("wait_id", waitID), zap.Error(err))
+		return nil
+	}
+	if after != nil && after.Status != before.Status {
+		s.notifyWait(ctx, after)
+	}
+	return nil
+}
+
+func (s *Service) captureDependencyWait(ctx context.Context, question *models.AsyncQuestion) *models.AsyncQuestionWait {
+	if question == nil || question.SessionID == "" {
+		return nil
+	}
+	wait, err := s.store.GetActiveAsyncQuestionWait(ctx, question.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to read async question wait before dependency change",
+			zap.String("session_id", question.SessionID), zap.Error(err))
+		return nil
+	}
+	if wait == nil {
+		return nil
+	}
+	for _, questionID := range wait.DependencyIDs {
+		if questionID == question.ID {
+			return wait
+		}
+	}
+	return nil
+}
+
+func (s *Service) notifyWaitIfChanged(ctx context.Context, before *models.AsyncQuestionWait) {
+	if before == nil {
+		return
+	}
+	after, err := s.store.GetAsyncQuestionWait(ctx, before.ID)
+	if err != nil {
+		s.logger.Warn("failed to read transitioned async question wait for notification",
+			zap.String("wait_id", before.ID), zap.Error(err))
+		return
+	}
+	if after != nil && after.Status != before.Status {
+		s.notifyWait(ctx, after)
+	}
 }
 
 func (s *Service) notifyWait(ctx context.Context, wait *models.AsyncQuestionWait) {
@@ -316,6 +386,7 @@ func (s *Service) ReconcileWaitGates(ctx context.Context) error {
 			if err := s.store.SetAsyncQuestionWaitStatus(ctx, wait.ID, models.AsyncQuestionWaitCancelled, "destination_terminal"); err != nil {
 				return err
 			}
+			s.notifyWaitIfChanged(ctx, wait)
 			continue
 		}
 		switch wait.Status {
@@ -323,6 +394,7 @@ func (s *Service) ReconcileWaitGates(ctx context.Context) error {
 			if err := s.store.SetAsyncQuestionWaitStatus(ctx, wait.ID, models.AsyncQuestionWaitReleased, "restart_release"); err != nil {
 				return err
 			}
+			s.notifyWaitIfChanged(ctx, wait)
 			s.wakeWaitDestination(ctx, wait)
 		case models.AsyncQuestionWaitRequested:
 			// The pause that registered this gate did not survive the restart.
@@ -331,6 +403,7 @@ func (s *Service) ReconcileWaitGates(ctx context.Context) error {
 			if err := s.store.SetAsyncQuestionWaitStatus(ctx, wait.ID, models.AsyncQuestionWaitCancelled, "restart_without_pause"); err != nil {
 				return err
 			}
+			s.notifyWaitIfChanged(ctx, wait)
 		}
 	}
 	return nil

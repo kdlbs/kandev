@@ -95,7 +95,7 @@ function metadataQuestionId(message: Message): string | null {
 export function AgentQuestionMessage({ comment }: { comment: Message }) {
   const { t } = useTranslation();
   const questionId = metadataQuestionId(comment);
-  const { question, status, refresh } = useAgentQuestionDetail(questionId);
+  const { question, status, refresh } = useAgentQuestionDetail(questionId, comment.task_id);
 
   return (
     <article
@@ -118,6 +118,15 @@ export function AgentQuestionMessage({ comment }: { comment: Message }) {
             )}
           </div>
           {question && <QuestionRequestBody question={question} />}
+          {question?.status === "pending" &&
+            (question.recipient === "user" || question.forwarded) && (
+              <a
+                href="#task-async-question-strip"
+                className="mt-2 inline-flex min-h-7 items-center text-xs text-primary underline-offset-4 hover:underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+              >
+                {t("needsYouInbox:chatShowQuestions")}
+              </a>
+            )}
           {!question && status === "error" && (
             <div className="mt-1 flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
@@ -127,7 +136,7 @@ export function AgentQuestionMessage({ comment }: { comment: Message }) {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="min-h-11 cursor-pointer px-3 md:min-h-7"
+                className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer px-3"
                 onClick={() => void refresh()}
               >
                 {t("needsYouInbox:chatRetry")}

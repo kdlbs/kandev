@@ -1,7 +1,7 @@
 ---
 id: "01-persist-async-questions"
 title: "Persist async requests and delivery intents"
-status: completed
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "Could not load questions.",
   "chatRetry": "Retry",
   "asyncFromChild": "From {{child}}",
+  "asyncFromParent": "From parent {{parent}}",
   "asyncWaitingForAnswer": "Waiting for answer",
   "asyncForwardedBy": "Forwarded by {{parent}}",
   "asyncWithdrawn": "Withdrawn",

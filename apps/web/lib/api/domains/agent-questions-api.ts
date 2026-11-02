@@ -33,31 +33,50 @@ export type AgentQuestionPage = {
 const questionReads = new Map<string, Promise<ClarificationInboxAsyncQuestion>>();
 const questionRefreshes = new Map<string, Promise<ClarificationInboxAsyncQuestion>>();
 
-export function getAgentQuestion(questionId: string): Promise<ClarificationInboxAsyncQuestion> {
-  const existing = questionReads.get(questionId);
+function questionReadKey(questionId: string, taskId?: string): string {
+  return `${questionId}:${taskId ?? ""}`;
+}
+
+function questionDetailPath(questionId: string, taskId?: string): string {
+  const path = `${BASE}/${encodeURIComponent(questionId)}`;
+  if (!taskId) return path;
+  const query = new URLSearchParams({ task_id: taskId });
+  return `${path}?${query.toString()}`;
+}
+
+export function getAgentQuestion(
+  questionId: string,
+  taskId?: string,
+): Promise<ClarificationInboxAsyncQuestion> {
+  const key = questionReadKey(questionId, taskId);
+  const existing = questionReads.get(key);
   if (existing) return existing;
   const request = fetchJson<ClarificationInboxAsyncQuestion>(
-    `${BASE}/${encodeURIComponent(questionId)}`,
+    questionDetailPath(questionId, taskId),
   );
   const tracked = request.finally(() => {
-    if (questionReads.get(questionId) === tracked) questionReads.delete(questionId);
+    if (questionReads.get(key) === tracked) questionReads.delete(key);
   });
-  questionReads.set(questionId, tracked);
+  questionReads.set(key, tracked);
   return tracked;
 }
 
-export function refreshAgentQuestion(questionId: string): Promise<ClarificationInboxAsyncQuestion> {
-  const existing = questionRefreshes.get(questionId);
+export function refreshAgentQuestion(
+  questionId: string,
+  taskId?: string,
+): Promise<ClarificationInboxAsyncQuestion> {
+  const key = questionReadKey(questionId, taskId);
+  const existing = questionRefreshes.get(key);
   if (existing) return existing;
-  const currentRead = questionReads.get(questionId);
+  const currentRead = questionReads.get(key);
   const request = (async () => {
     if (currentRead) await currentRead.catch(() => undefined);
-    return getAgentQuestion(questionId);
+    return getAgentQuestion(questionId, taskId);
   })();
   const tracked = request.finally(() => {
-    if (questionRefreshes.get(questionId) === tracked) questionRefreshes.delete(questionId);
+    if (questionRefreshes.get(key) === tracked) questionRefreshes.delete(key);
   });
-  questionRefreshes.set(questionId, tracked);
+  questionRefreshes.set(key, tracked);
   return tracked;
 }
 

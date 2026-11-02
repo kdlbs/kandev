@@ -14,11 +14,16 @@ import (
 )
 
 type staleQuestionEventObserver struct {
-	repo     *sqlite.Repository
-	statuses []models.AsyncQuestionStatus
+	repo             *sqlite.Repository
+	statuses         []models.AsyncQuestionStatus
+	waitChangedCount int
 }
 
 func (o *staleQuestionEventObserver) AsyncQuestionChanged(ctx context.Context, change questions.QuestionChange) {
+	if change.Kind == "wait_changed" {
+		o.waitChangedCount++
+		return
+	}
 	question, err := o.repo.GetAsyncQuestion(ctx, change.QuestionID)
 	if err == nil && question != nil {
 		o.statuses = append(o.statuses, question.Status)
@@ -230,7 +235,10 @@ func TestAsyncQuestionsStaleDependencyWakesAuthor(t *testing.T) {
 		t.Fatalf("stale deliveries = %+v, want one author wake", deliveries)
 	}
 	if len(observer.statuses) != 1 || observer.statuses[0] != models.AsyncQuestionStatusStale {
-		t.Fatalf("published stale states = %v, want one committed stale event", observer.statuses)
+		t.Fatalf("published question states = %v, want one committed stale event", observer.statuses)
+	}
+	if observer.waitChangedCount != 1 {
+		t.Fatalf("wait_changed notifications = %d, want one dependency release event", observer.waitChangedCount)
 	}
 }
 

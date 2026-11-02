@@ -2014,7 +2014,7 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	description := `Ask the user 1-4 related questions; this call waits for all answers. Each needs 2-6 labeled, described options. Set allow_custom_text=false to require a choice. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, and put full reports outside this call. Returns answers by question ID with selected_option and selected_label. Rejections include rejected and may include reject_reason.`
 	if s.asyncQuestionsSupported() {
-		description = `Ask 1-4 related questions. Block if work cannot continue safely; otherwise set async=true, continue, and read with list_question_answers_kandev. Wait only when all work depends on answers: use wait_for_question_answers_kandev. Withdraw with withdraw_question_kandev when no longer needed. Context: 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it. Keep questions and options self-contained. Use 2-6 options; set allow_custom_text=false to require a choice. Returns answers by ID with selected_label.`
+		description = `Block if guessing could be destructive, irreversible, or expensive to redo, or work cannot safely continue. Otherwise async=true; continue independent work, read with list_question_answers_kandev. Wait when all remaining work depends: use wait_for_question_answers_kandev. Withdraw with withdraw_question_kandev. Context: 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it. Keep questions and options self-contained. Use selected_label for choices. Rejections include rejected and may include reject_reason.`
 	}
 	options := []mcp.ToolOption{
 		mcp.WithDescription(description),
@@ -2048,7 +2048,7 @@ func (s *Server) registerInteractionTools() {
 func (s *Server) registerParentQuestionTool() {
 	description := `Ask the direct parent when an autopilot child reaches a critical decision. The default sends a durable question and pauses this turn. The parent answers with message_task_kandev using question_id as reply_to_question_id. Do not use ask_user_question_kandev for this task.`
 	if s.asyncQuestionsSupported() {
-		description = `Ask the direct parent when an autopilot child reaches a critical decision. The default sends a durable question and pauses this turn. Set async=true when useful independent work remains; read with list_question_answers_kandev. Use wait_for_question_answers_kandev only when all remaining work depends. The parent answers with message_task_kandev using question_id as reply_to_question_id. Do not use ask_user_question_kandev.`
+		description = `Ask the direct parent when a critical decision is needed. Block if a wrong guess could be destructive, irreversible, or expensive to redo, or no safe work can continue. Set async=true when useful independent work remains; read with list_question_answers_kandev. A read may report rejected and reject_reason. Wait only when all remaining work depends: use wait_for_question_answers_kandev. Reply with message_task_kandev using question_id as reply_to_question_id. Do not use ask_user_question_kandev.`
 	}
 	options := []mcp.ToolOption{
 		mcp.WithDescription(description),

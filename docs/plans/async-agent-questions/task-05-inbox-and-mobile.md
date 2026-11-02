@@ -1,7 +1,7 @@
 ---
 id: "05-inbox-and-mobile"
 title: "Integrate desktop and phone Inbox flows"
-status: completed
+status: done
 wave: 5
 depends_on:
   - "04-explicit-question-waits"

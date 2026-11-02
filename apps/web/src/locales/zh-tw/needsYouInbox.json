@@ -45,6 +45,7 @@
   "chatQuestionsLoadFailed": "無法載入問題。",
   "chatRetry": "重試",
   "asyncFromChild": "來自 {{child}}",
+  "asyncFromParent": "來自上層任務 {{parent}}",
   "asyncWaitingForAnswer": "等待回答",
   "asyncForwardedBy": "由 {{parent}} 轉發",
   "asyncWithdrawn": "已撤回",

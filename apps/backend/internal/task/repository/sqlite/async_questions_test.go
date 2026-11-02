@@ -376,6 +376,15 @@ func TestAsyncQuestionsForwardPreservesIdentity(t *testing.T) {
 	if len(own.Questions) != 1 {
 		t.Fatalf("an author must read its own parent request before any forward, got %d", len(own.Questions))
 	}
+	conversation, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		ConversationTaskID: question.TaskID, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list author conversation before forward: %v", err)
+	}
+	if len(conversation.Questions) != 0 {
+		t.Fatalf("unforwarded parent request must stay hidden from operator conversation scope, got %d", len(conversation.Questions))
+	}
 	forwarded, err := repo.ForwardAsyncQuestion(ctx, &models.AsyncQuestionForward{
 		QuestionID: question.ID, ParentTaskID: "parent-task", ParentSessionID: "parent-session",
 		Reason: "operator decision",
@@ -385,6 +394,12 @@ func TestAsyncQuestionsForwardPreservesIdentity(t *testing.T) {
 	}
 	if forwarded.ID != question.ID || !forwarded.Forwarded {
 		t.Fatalf("forward must preserve request identity: %+v", forwarded)
+	}
+	conversation, err = repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{
+		ConversationTaskID: question.TaskID, Limit: 10,
+	})
+	if err != nil || len(conversation.Questions) != 1 || conversation.Questions[0].ID != question.ID {
+		t.Fatalf("forwarded question missing from author conversation: questions=%+v err=%v", conversation.Questions, err)
 	}
 	page, err := repo.ListAsyncQuestions(ctx, models.ListAsyncQuestionsOptions{WorkspaceID: question.WorkspaceID, OpenOnly: true})
 	if err != nil {

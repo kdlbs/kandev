@@ -598,49 +598,87 @@ func (r *Repository) ForwardAsyncQuestionWithWake(
 	forward *models.AsyncQuestionForward,
 	buildWake models.AsyncQuestionWakeBuilder,
 ) (*models.AsyncQuestion, error) {
+	question, _, err := r.ForwardAsyncQuestionWithWakeAndTransition(ctx, forward, buildWake)
+	return question, err
+}
+
+func (r *Repository) ForwardAsyncQuestionWithWakeAndTransition(
+	ctx context.Context,
+	forward *models.AsyncQuestionForward,
+	buildWake models.AsyncQuestionWakeBuilder,
+) (*models.AsyncQuestion, bool, error) {
 	if err := validateAsyncQuestionForward(forward); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.acquireAsyncQuestionWriteLockTx(ctx, tx, forward.QuestionID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	question, err := r.lockAsyncQuestionTx(ctx, tx, forward.QuestionID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if question == nil {
-		return nil, ErrAsyncQuestionNotFound
+		return nil, false, ErrAsyncQuestionNotFound
 	}
 	if question.Status.Terminal() {
-		return question, tx.Commit()
+		return question, false, tx.Commit()
 	}
 	if err := authorizeAsyncQuestionForward(question, forward); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := r.validateAsyncQuestionAuthorityTx(ctx, tx, question, asyncQuestionAuthorityForward, "", buildWake); err != nil {
 		if errors.Is(err, models.ErrAsyncQuestionStale) {
 			if commitErr := tx.Commit(); commitErr != nil {
-				return nil, commitErr
+				return nil, false, commitErr
 			}
 		}
-		return nil, err
+		return nil, false, err
+	}
+	updated, newlyForwarded, err := r.persistAsyncQuestionForwardTx(ctx, tx, forward)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return updated, newlyForwarded, nil
+}
+
+func (r *Repository) persistAsyncQuestionForwardTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	forward *models.AsyncQuestionForward,
+) (*models.AsyncQuestion, bool, error) {
+	existed, err := r.asyncQuestionForwardExistsTx(ctx, tx, forward.QuestionID)
+	if err != nil {
+		return nil, false, err
 	}
 	if err := r.upsertAsyncQuestionForwardTx(ctx, tx, forward); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	updated, err := r.getAsyncQuestionTx(ctx, tx, forward.QuestionID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if updated.Forwarded && updated.ParentTaskID != forward.ParentTaskID {
-		return nil, ErrAsyncQuestionForwardUnauthorized
+		return nil, false, ErrAsyncQuestionForwardUnauthorized
 	}
-	return updated, tx.Commit()
+	newlyForwarded := !existed && updated.Status == models.AsyncQuestionStatusPending
+	return updated, newlyForwarded, nil
+}
+
+func (r *Repository) asyncQuestionForwardExistsTx(ctx context.Context, tx *sqlx.Tx, questionID string) (bool, error) {
+	var exists bool
+	err := tx.GetContext(ctx, &exists, r.db.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM task_async_question_forwards WHERE question_id = ?
+		)`), questionID)
+	return exists, err
 }
 
 func validateAsyncQuestionForward(forward *models.AsyncQuestionForward) error {

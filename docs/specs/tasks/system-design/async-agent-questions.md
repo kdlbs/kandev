@@ -279,7 +279,7 @@ Add task-authorized **new** routes:
   The winning outcome stores that ID, so an exact retry reports `won=true` and creates no delivery.
 - `GET /api/v1/agent-questions/:id/images/:imageID?question_id=...`: saved operator-question images only.
 
-HTTP reads and responses expose parent requests only through an authorized forward.
+Operator-scoped list and response routes expose parent requests only through an authorized forward. The transcript detail read may return an author's parent request when the caller supplies the matching author `task_id`; this permits the card in that task's own transcript to resolve its canonical state. Unscoped detail reads and operator session lists still require a forward. Parent request discovery outside the author's transcript uses the separate MCP caller context.
 Task-bound parent discovery uses the separate MCP caller context.
 Use 400 for malformed requests, non-disclosing 404 for inaccessible records, and the existing scope contract for 403.
 Responses include canonical state and whether this caller won. A concurrent terminal winner is an observable outcome, not a retryable submission failure.
@@ -325,7 +325,7 @@ The chat surface reads through a task-scoped store slice and domain hook. Neithe
 A strip sits in `ComposerFooterAllocation`, above the composer and outside the transcript scroller, and it renders nothing with no open requests.
 It expands to the shared answer form in the footer region without covering the composer. A phone opens the existing full-height answer surface.
 Blocking clarifications keep precedence: while one is active, the strip collapses to its count.
-A forwarded request appears in the author's chat and the forwarding parent's chat under the same ID. The parent's row names the child task.
+A forwarded request appears in the author's chat and the forwarding parent's chat under the same ID. The author's row names the parent task, and the parent's row names the child task.
 
 A durable `transcript` outbox intent creates an `agent_question_request` message in the author's session, with `requests_input=false`.
 The message ID derives from the question ID, so a retry cannot duplicate it.

@@ -38,6 +38,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":             scenarioUntrackedFileSetup,
 	"untracked-file-modify":            scenarioUntrackedFileModify,
 	"async-question":                   scenarioAsyncQuestion,
+	"async-question-reject":            scenarioAsyncQuestionReject,
 	"async-question-wait":              scenarioAsyncQuestionWait,
 	"async-parent-question":            scenarioAsyncParentQuestion,
 	"async-parent-forward-watch":       scenarioAsyncParentForwardWatch,

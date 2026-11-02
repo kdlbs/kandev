@@ -43,8 +43,14 @@ func TestAsyncQuestionToolDescriptionsByCapability(t *testing.T) {
 				require.True(t, ok)
 				if asyncSupported {
 					assert.Contains(t, tool.Tool.Description, "async=true")
+					assert.Contains(t, tool.Tool.Description, "destructive, irreversible, or expensive to redo")
 					assert.Contains(t, tool.Tool.Description, "list_question_answers_kandev")
 					assert.Contains(t, tool.Tool.Description, "wait_for_question_answers_kandev")
+					if test.toolName == "ask_user_question_kandev" {
+						assert.Contains(t, tool.Tool.Description, "Rejections include rejected and may include reject_reason")
+					} else {
+						assert.Contains(t, tool.Tool.Description, "A read may report rejected and reject_reason")
+					}
 					assert.Contains(t, toolInputProperties(t, server, test.toolName), asyncArg)
 					assert.Contains(t, getRegisteredToolNames(server), "list_question_answers_kandev")
 				} else {

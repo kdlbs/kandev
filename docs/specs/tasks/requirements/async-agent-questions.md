@@ -173,7 +173,7 @@ It does not change the active blocking clarification contract.
 - **AC-TASKS-ASYNC-QUESTIONS-009.1:** Open operator requests shall be visible and answerable from the author task's chat, whether the Inbox is enabled or disabled.
 - **AC-TASKS-ASYNC-QUESTIONS-009.2:** The chat surface shall stay visible while the transcript scrolls and shall show the open request count.
   Answering or rejecting shall not cover the composer of a running author. A phone shall use one full-height answer surface with touch-accessible controls.
-- **AC-TASKS-ASYNC-QUESTIONS-009.3:** A forwarded request shall also be answerable from the forwarding parent's chat, with the same request identity and child task context.
+- **AC-TASKS-ASYNC-QUESTIONS-009.3:** A forwarded request shall appear and be answerable in both the author's chat and the forwarding parent's chat, with the same request identity and clear parent/child provenance.
   An answer from either chat, or from the Inbox, shall compete for the same terminal outcome.
 - **AC-TASKS-ASYNC-QUESTIONS-009.4:** The author's transcript shall retain an entry for each request, showing its current state, outcome, and any withdrawal reason.
   The entry shall survive reloads and shall not act as a blocking clarification.

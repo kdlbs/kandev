@@ -113,7 +113,7 @@ func (s *Service) parentOutcomeDelivery(question *models.AsyncQuestion, outcome 
 	metadata := correlatedMetadata(question, models.AsyncQuestionDeliveryParentOutcome)
 	metadata[models.MetaKeyParentQuestionID] = question.ID
 	metadata[models.MetaKeyParentQuestion] = true
-	metadata[models.MetaKeyParentQuestionStatus] = "answered"
+	metadata[models.MetaKeyParentQuestionStatus] = asyncQuestionOutcomeStatus(outcome)
 	return s.newDelivery(question, models.AsyncQuestionDeliveryParentOutcome,
 		question.ParentTaskID, question.ParentSessionID, content, metadata)
 }
@@ -129,23 +129,52 @@ func formatParentNotification(question *models.AsyncQuestion) string {
 }
 
 func formatOutcomeForOwner(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) string {
-	data, _ := json.MarshalIndent(outcome, "", "  ")
+	data, _ := json.MarshalIndent(outcome.WithoutSubmissionID(), "", "  ")
 	questions, _ := json.MarshalIndent(question.Questions, "", "  ")
-	return fmt.Sprintf("ASYNC QUESTION ANSWERED\n\nQuestion ID: %s\nOriginal context: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThis is the correlated decision for a question you asked earlier. Read it at your next checkpoint. It does not cancel or steer your current turn; continue your work and use the answer where it applies.",
-		question.ID, strings.TrimSpace(question.Context), questions, data)
+	heading := "ASYNC QUESTION ANSWERED"
+	if outcome.Rejected {
+		heading = "ASYNC QUESTION REJECTED"
+	}
+	return fmt.Sprintf("%s\n\nQuestion ID: %s\nOriginal context: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThis is the correlated decision for a question you asked earlier. Read it at your next checkpoint. It does not cancel or steer your current turn; continue your work and use the answer where it applies.",
+		heading, question.ID, strings.TrimSpace(question.Context), questions, data)
 }
 
 func formatOutcomeForParent(question *models.AsyncQuestion, outcome models.AsyncQuestionOutcome) string {
-	data, _ := json.MarshalIndent(outcome, "", "  ")
+	data, _ := json.MarshalIndent(outcome.WithoutSubmissionID(), "", "  ")
 	questions, _ := json.MarshalIndent(question.Questions, "", "  ")
-	return fmt.Sprintf("ASYNC CHILD QUESTION RESOLVED\n\nChild task: %s\nQuestion ID: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThe canonical child request is now closed. No manual relay is required.",
-		question.TaskID, question.ID, questions, data)
+	heading := "ASYNC CHILD QUESTION RESOLVED"
+	if outcome.Rejected {
+		heading = "ASYNC CHILD QUESTION REJECTED"
+	}
+	return fmt.Sprintf("%s\n\nChild task: %s\nQuestion ID: %s\nQuestions and options:\n%s\nOutcome:\n%s\n\nThe canonical child request is now closed. No manual relay is required.",
+		heading, question.TaskID, question.ID, questions, data)
+}
+
+func asyncQuestionOutcomeStatus(outcome models.AsyncQuestionOutcome) string {
+	if outcome.Rejected {
+		return string(models.AsyncQuestionStatusRejected)
+	}
+	return string(models.AsyncQuestionStatusAnswered)
 }
 
 // ReconcileOnce admits every due durable intent. It returns the number of
 // intents that reached an admission receipt.
 func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
+	waitsBefore, waitReadErr := s.store.ListAsyncQuestionWaits(ctx, []models.AsyncQuestionWaitStatus{
+		models.AsyncQuestionWaitRequested,
+		models.AsyncQuestionWaitReleaseRequested,
+		models.AsyncQuestionWaitParked,
+	}, 500)
+	if waitReadErr != nil {
+		s.logger.Warn("failed to capture async question waits before authority reconciliation",
+			zap.Error(waitReadErr))
+	}
 	stale, staleErr := s.store.ReconcileAsyncQuestionAuthority(ctx, authoritySweepLimit, s.buildWaitWakeDelivery)
+	if waitReadErr == nil {
+		for _, wait := range waitsBefore {
+			s.notifyWaitIfChanged(ctx, wait)
+		}
+	}
 	for _, question := range stale {
 		s.notify(ctx, question, "updated")
 		s.retireParentQuestionPrompt(ctx, question)
@@ -154,16 +183,16 @@ func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
 		s.signal()
 	}
 	if staleErr != nil {
-		return 0, staleErr
+		s.logger.Warn("failed to reconcile async question authority; continuing due deliveries", zap.Error(staleErr))
 	}
 	admitted := 0
 	for {
 		deliveries, err := s.store.ListAsyncQuestionDeliveries(ctx, s.now(), deliveryPageSize)
 		if err != nil {
-			return admitted, err
+			return admitted, errors.Join(staleErr, err)
 		}
 		if len(deliveries) == 0 {
-			return admitted, nil
+			return admitted, staleErr
 		}
 		for _, delivery := range deliveries {
 			if err := ctx.Err(); err != nil {
@@ -171,7 +200,7 @@ func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
 			}
 			ok, err := s.admitDelivery(ctx, delivery)
 			if err != nil {
-				return admitted, err
+				return admitted, errors.Join(staleErr, err)
 			}
 			if ok {
 				admitted++

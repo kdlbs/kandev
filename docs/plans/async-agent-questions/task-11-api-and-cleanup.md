@@ -1,7 +1,7 @@
 ---
 id: "11-api-and-cleanup"
 title: "Close remaining API and cleanup gaps"
-status: completed
+status: done
 wave: 9
 depends_on:
   - "10-transcript-and-status"
@@ -94,14 +94,11 @@ Task 10. It runs late because it touches files that Tasks 09 and 10 also change.
 
 ## Results
 
-Implemented idempotent answer retry reporting, non-disclosing response authorization, workspace cascade cleanup, and removal of the unused withdrawal route and wait workspace value. Updated public API, agent communication, coordination, and WebSocket documentation.
+Implemented forward-scoped operator HTTP reads for parent requests, author-scoped transcript detail access for the transcript card, payload-aware answer submission IDs, owner/MCP response identity redaction, and delivery admission despite an authority-sweep query error.
 
 Passed:
 
-- Async question service and SQLite async question/workspace cascade suites
-- Store conformance race suite
-- Focused async question and Inbox Vitest suites: 217 tests passed
-- Public documentation, catalog, and specification validation
-- SQL guard and changed-file Go lint: `0 issues`
-
-PostgreSQL-specific coverage was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+- Backend question, MCP server, and backendapp suites passed.
+- `TestAsyncQuestionsHTTPOperatorScopeRequiresForwardForParentRequests`, `TestAsyncQuestionMCPViewOmitsSubmissionIdentity`, `TestAsyncQuestionOwnerDeliveryOmitsSubmissionIdentity`, and `TestAsyncQuestionDeliveryAdmissionContinuesAfterAuthoritySweepError` passed.
+- Focused Vitest regressions: 4 files, 25 tests passed, including payload-change submission retries.
+- Changed-file Go lint: `0 issues`.

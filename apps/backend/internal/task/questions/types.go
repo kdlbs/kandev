@@ -50,6 +50,7 @@ type Store interface {
 	WithdrawAsyncQuestion(ctx context.Context, id, authorSessionID, reason string, deliveries []*models.AsyncQuestionDelivery, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, bool, []*models.AsyncQuestionWait, error)
 	ForwardAsyncQuestion(ctx context.Context, forward *models.AsyncQuestionForward) (*models.AsyncQuestion, error)
 	ForwardAsyncQuestionWithWake(ctx context.Context, forward *models.AsyncQuestionForward, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, error)
+	ForwardAsyncQuestionWithWakeAndTransition(ctx context.Context, forward *models.AsyncQuestionForward, buildWake models.AsyncQuestionWakeBuilder) (*models.AsyncQuestion, bool, error)
 	CreateAsyncQuestionDelivery(ctx context.Context, delivery *models.AsyncQuestionDelivery) error
 	ListAsyncQuestionDeliveries(ctx context.Context, now time.Time, limit int) ([]*models.AsyncQuestionDelivery, error)
 	ListAsyncQuestionDeliveriesForQuestion(ctx context.Context, questionID string, kind models.AsyncQuestionDeliveryKind) ([]*models.AsyncQuestionDelivery, error)
