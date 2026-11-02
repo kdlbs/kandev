@@ -4095,6 +4095,19 @@ func (r *Repository) ListActiveTaskSessions(ctx context.Context) ([]*models.Task
 	return r.loadWorktreesBatch(ctx, sessions)
 }
 
+// ListFixedProfileWaitSessions selects active sessions with a circuit wait marker.
+func (r *Repository) ListFixedProfileWaitSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	wait := dialect.JSONExtractIsNotNull(r.ro.DriverName(), "ts.metadata", "fixed_profile_resource_wait")
+	automation := dialect.JSONExtractIsNotNull(r.ro.DriverName(), "ts.metadata", "fixed_profile_automation_wait")
+	rows, err := r.ro.QueryContext(ctx, `SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+
+		` WHERE ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT') AND (`+wait+` OR `+automation+`)`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTaskSessions(ctx, rows)
+}
+
 // ListLiveWorkspaceSessions returns every session across all tasks whose
 // state is one of the five live states (CREATED, STARTING, RUNNING, IDLE,
 // WAITING_FOR_INPUT), with each session's effective workspace_path

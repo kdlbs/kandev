@@ -78,7 +78,7 @@ apps/backend/
 │   ├── lsp/              # LSP server
 │   ├── mcp/              # MCP protocol support
 │   ├── health/           # Health check endpoints
-│   ├── notifications/    # Notification system
+│   ├── notifications/    # Notification system (providers: local WS, Apprise, system, webpush; webpush/ owns VAPID keys + device subscriptions)
 │   ├── persistence/      # Persistence layer
 │   ├── prompts/          # Prompt management
 │   ├── repoclone/        # Repository cloning for remote executors

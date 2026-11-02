@@ -357,6 +357,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			until_at TIMESTAMP,
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
+			failure_count INTEGER NOT NULL DEFAULT 0,
 			updated_at TIMESTAMP NOT NULL
 		);
 
