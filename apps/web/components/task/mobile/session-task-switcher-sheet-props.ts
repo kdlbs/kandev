@@ -55,8 +55,6 @@ export function buildMobileTaskSwitcherProps(
     onReorderSubtasks: helpers.onReorderSubtasks,
     pinnedTaskIds: helpers.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
-    archivingTaskId: props.archivingTaskId,
-    isArchiving: props.isArchiving,
     isLoading: props.isLoading,
     loadError: props.loadError,
     onRetryLoad: props.onRetryLoad,

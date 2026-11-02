@@ -165,3 +165,38 @@ describe("CommandPreviewCard flag destination", () => {
     });
   });
 });
+
+describe("CommandPreviewCard deferred Copilot mounts", () => {
+  it("shows deferred plugin identities without a resolved directory", async () => {
+    previewAgentCommandActionMock.mockImplementation(async () => ({
+      ...response("npx @github/copilot@1.0.88"),
+      deferred_plugin_ids: ["installed:copilot-plugins/spark"],
+      deferred_plugin_count: 1,
+      command_incomplete: true,
+    }));
+
+    render(
+      <CommandPreviewCard
+        agentName="copilot-acp"
+        model="auto"
+        permissionSettings={{}}
+        cliPassthrough
+        cliFlags={[]}
+        commandPrefix=""
+        copilotSelectedPlugins={["installed:copilot-plugins/spark"]}
+      />,
+    );
+
+    expect(await screen.findByTestId("command-preview-deferred-plugins")).toBeTruthy();
+    expect(screen.getByText(/Selected plugin mounts resolve/)).toBeTruthy();
+    expect(screen.getByText(/installed:copilot-plugins\/spark/)).toBeTruthy();
+    expect(screen.getByText(/Base command is incomplete/)).toBeTruthy();
+    expect(screen.queryByText(/--plugin-dir/)).toBeNull();
+    expect(previewAgentCommandActionMock).toHaveBeenCalledWith(
+      "copilot-acp",
+      expect.objectContaining({
+        copilot_selected_plugins: ["installed:copilot-plugins/spark"],
+      }),
+    );
+  });
+});

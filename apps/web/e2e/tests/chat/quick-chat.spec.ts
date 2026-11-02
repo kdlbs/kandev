@@ -1,4 +1,5 @@
 import { type Locator, type Page } from "@playwright/test";
+import { assertDirtyQuickChatDeletion } from "./quick-chat-dirty-delete-helpers";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
@@ -13,6 +14,7 @@ import {
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 /**
@@ -56,6 +58,22 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.12 AC-UI-TASK-CLEANUP-CONFIRMATION-001.13
+  test("deletes dirty repository quick chat with consent", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await assertDirtyQuickChatDeletion(
+      testPage,
+      apiClient,
+      seedData.repositoryId,
+      false,
+      prCapture,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.1 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.2 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.3 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.4 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
   test("keeps the viewport layout contained for new and long chats", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 1440, height: 800 });
@@ -1016,6 +1034,7 @@ test.describe("Quick Chat", () => {
     await startQuickChatFromSetup(dialog, testPage);
     const first = (await (await firstStart).json()) as { session_id: string; task_id: string };
     const firstReference = `conversation:${first.session_id}`;
+    await waitForSessionSettledBaseline(apiClient, first.task_id, first.session_id);
 
     // The deterministic script calls the real title MCP endpoint through the
     // mock agent, then the task.updated event relabels the open tab.

@@ -13,14 +13,51 @@ import type {
 
 const EMPTY_WORKLOADS: WorkloadRunObservation[] = [];
 
+type WorkloadCountSummary = {
+  runningCount: number;
+  waitingCount: number;
+  unknownCount: number;
+  totalCount: number;
+  totalJobCount: number;
+  hasActiveWork: boolean;
+  hasHistory: boolean;
+};
+
+/** Counts the shared workload list once for the chip summary and history. */
+function summarizeWorkloads(workloads: WorkloadRunObservation[]): WorkloadCountSummary {
+  let running = 0;
+  let waiting = 0;
+  let unknown = 0;
+  for (const w of workloads) {
+    if (w.state === "running") running++;
+    else if (w.state === "waiting") waiting++;
+    else if (w.state === "unknown") unknown++;
+  }
+  const active = running + waiting + unknown;
+  return {
+    runningCount: running,
+    waitingCount: waiting,
+    unknownCount: unknown,
+    totalCount: active,
+    totalJobCount: workloads.length,
+    hasActiveWork: active > 0,
+    hasHistory: workloads.length > 0,
+  };
+}
+
 export interface UseBackgroundWorkReturn {
   workloads: WorkloadRunObservation[];
   activeWorkload: WorkloadRunObservation | null;
   activeWorkId: string | null;
   runningCount: number;
   waitingCount: number;
+  unknownCount: number;
+  /** Active (running, waiting, or unknown) jobs; zero when only history remains. */
   totalCount: number;
+  /** Every observed job, including completed and failed history. */
+  totalJobCount: number;
   hasActiveWork: boolean;
+  hasHistory: boolean;
   isLoading: boolean;
   executeAction: (
     req: Omit<BackgroundWorkActionRequest, "work_id"> & { work_id?: string },
@@ -79,23 +116,15 @@ export function useBackgroundWork(
     return workloads.find((w) => w.work_id === activeWorkId) ?? workloads[0] ?? null;
   }, [workloads, activeWorkId]);
 
-  const { runningCount, waitingCount, totalCount, hasActiveWork } = useMemo(() => {
-    let running = 0;
-    let waiting = 0;
-    let unknown = 0;
-    for (const w of workloads) {
-      if (w.state === "running") running++;
-      else if (w.state === "waiting") waiting++;
-      else if (w.state === "unknown") unknown++;
-    }
-    const active = running + waiting + unknown;
-    return {
-      runningCount: running,
-      waitingCount: waiting,
-      totalCount: active,
-      hasActiveWork: active > 0,
-    };
-  }, [workloads]);
+  const {
+    runningCount,
+    waitingCount,
+    unknownCount,
+    totalCount,
+    totalJobCount,
+    hasActiveWork,
+    hasHistory,
+  } = useMemo(() => summarizeWorkloads(workloads), [workloads]);
 
   const executeAction = useCallback(
     async (
@@ -132,8 +161,11 @@ export function useBackgroundWork(
     activeWorkId,
     runningCount,
     waitingCount,
+    unknownCount,
     totalCount,
+    totalJobCount,
     hasActiveWork,
+    hasHistory,
     isLoading,
     executeAction,
     setActiveWorkload,

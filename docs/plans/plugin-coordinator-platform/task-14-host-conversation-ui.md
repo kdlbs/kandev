@@ -102,7 +102,7 @@ Applicable criteria: `AC-PLUGINS-MANAGED-COORDINATION-009.1`, `AC-PLUGINS-MANAGE
 Add the named tests before implementation using TDD. These commands run after the work order is implemented; they are not results from planning.
 
 ```bash
-(cd apps && pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)
 (cd apps/web && pnpm exec vitest run lib/plugins/managed-conversation.test.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/plugins/managed-conversation.spec.ts)
@@ -170,7 +170,7 @@ command status values so successful admission clears the composer.
 
 Validation passed:
 
-- `pnpm --filter @kandev/plugin-sdk test` and `pnpm --filter @kandev/plugin-sdk typecheck`.
+- `pnpm --filter @kdlbs/plugin-sdk test` and `pnpm --filter @kdlbs/plugin-sdk typecheck`.
 - Six focused web test files: 40 tests passed.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and focused ESLint.
 - Desktop `managed-conversation.spec.ts` and phone `mobile-managed-conversation.spec.ts`.

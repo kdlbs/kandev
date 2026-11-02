@@ -10,9 +10,9 @@ import (
 // session state, serialization, and event delivery.
 type acpDialect struct {
 	continuationSupport         streams.ContinuationSupport
+	continuationSupportForError func(error) streams.ContinuationSupport
 	capacityContinuationSupport streams.CapacityContinuationSupport
 	continuationError           func(error) bool
-	retainedApplicationErr      func(error) bool
 	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,
@@ -68,6 +68,8 @@ func newACPDialect(agentID string) acpDialect {
 		return newCursorACPDialect()
 	case claudeAgentID:
 		return newClaudeACPDialect()
+	case openCodeAgentID:
+		return newOpenCodeACPDialect()
 	case mockAgentID:
 		return newMockACPDialect()
 	}

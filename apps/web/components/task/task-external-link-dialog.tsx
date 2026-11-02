@@ -69,7 +69,7 @@ type ProviderConfig = {
 const SENTRY_NUMERIC_ISSUE_URL_RE = /\/issues\/(\d+)(?:[/?#]|$)/i;
 
 function extractSentryIssueKey(raw: string): string | null {
-  return extractSentryShortId(raw) ?? raw.match(SENTRY_NUMERIC_ISSUE_URL_RE)?.[1] ?? null;
+  return raw.match(SENTRY_NUMERIC_ISSUE_URL_RE)?.[1] ?? extractSentryShortId(raw);
 }
 
 function isSentryIssue(result: unknown): result is SentryIssue {

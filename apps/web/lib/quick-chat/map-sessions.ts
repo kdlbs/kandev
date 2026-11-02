@@ -16,5 +16,6 @@ export function toQuickChatSessions(sessions: QuickChatSessionResponse[]): Quick
     workspaceId: session.workspace_id,
     name: session.name,
     agentProfileId: session.agent_profile_id,
+    ...(session.creation_id ? { creationId: session.creation_id } : {}),
   }));
 }

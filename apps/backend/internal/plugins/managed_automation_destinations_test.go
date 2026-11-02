@@ -9,7 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func TestListManagedConversationDestinationsAvailabilityAndScope(t *testing.T) {

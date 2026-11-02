@@ -110,7 +110,12 @@ def decode_file(response: object, requested_path: str) -> str:
 def read_pr_file(raw_path: str) -> str:
     repository, pr_number = require_environment()
     requested_path = validate_path(raw_path)
+    pinned_head = os.environ.get("CLAUDE_REVIEW_HEAD_SHA")
+    if pinned_head is not None and SHA_PATTERN.fullmatch(pinned_head) is None:
+        raise PrFileError("CLAUDE_REVIEW_HEAD_SHA is not a valid commit SHA")
     head_sha = get_head_sha(repository, pr_number)
+    if pinned_head is not None and head_sha != pinned_head:
+        raise PrFileError("pull request head changed since this review event")
     encoded_path = quote(requested_path, safe="/")
     endpoint = f"repos/{repository}/contents/{encoded_path}?ref={head_sha}"
     return decode_file(gh_api(endpoint), requested_path)

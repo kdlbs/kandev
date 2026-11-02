@@ -85,3 +85,4 @@ Host discovery remains an editing aid. Executor startup retains its existing mod
 
 - [Profile capability discovery](../../../plans/profile-capability-discovery/plan.md)
 - [First-run agent setup and compact profile refresh](../../../plans/first-run-agent-setup/plan.md)
+- [Generic launch wrapper implementation plan](../../../plans/generic-launch-wrappers/plan.md)

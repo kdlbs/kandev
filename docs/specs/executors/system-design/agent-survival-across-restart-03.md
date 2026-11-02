@@ -119,7 +119,8 @@ inventing a different answer per value:
 | Runtime environment | The adopted instance's own environment |
 | Run identity | The runtime environment, which carries it as `KANDEV_RUN_ID`. Office launches set it from the run; other launches do not set it at all, so empty is legitimate |
 | Provider session identity | The adopted instance, which holds the provider session |
-| Agent identity, agent and continuation commands and their arguments, history setting | Re-derived from the restored agent profile and the agent-type registry |
+| Agent identity, inner agent and continuation commands and their arguments, history setting | Re-derived from the restored agent profile and the agent-type registry |
+| Generic profile wrapper template | Read from authenticated agentctl process configuration under the [generic wrapper contract](../../agents/system-design/generic-launch-wrappers.md). Missing or ambiguous new state refuses adoption. The instance does not supply inner commands. |
 
 The last row is the one that would otherwise be got wrong. Those values look like
 per-launch state and are not: the launch path computes them from the profile and the

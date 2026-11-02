@@ -36,6 +36,7 @@ type UserSettingsDTO struct {
 	PreventAutoStartAgentOnOpen       bool                                    `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                                    `json:"unread_divider"`
 	AgentGeneratedTaskTitles          bool                                    `json:"agent_generated_task_titles"`
+	PromptSuggestions                 bool                                    `json:"prompt_suggestions"`
 	AutoFocusNewTasks                 bool                                    `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                                  `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                                    `json:"show_anchored_prompt_bar"`
@@ -158,6 +159,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool                              `json:"prevent_auto_start_agent_on_open,omitempty"`
 	UnreadDivider                     *bool                              `json:"unread_divider,omitempty"`
 	AgentGeneratedTaskTitles          *bool                              `json:"agent_generated_task_titles,omitempty"`
+	PromptSuggestions                 *bool                              `json:"prompt_suggestions,omitempty"`
 	AutoFocusNewTasks                 *bool                              `json:"auto_focus_new_tasks,omitempty"`
 	MCPTaskAgentProfileDefault        *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar             *bool                              `json:"show_anchored_prompt_bar,omitempty"`
@@ -363,6 +365,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		PreventAutoStartAgentOnOpen:       settings.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     settings.UnreadDivider,
 		AgentGeneratedTaskTitles:          settings.AgentGeneratedTaskTitles,
+		PromptSuggestions:                 settings.PromptSuggestions,
 		AutoFocusNewTasks:                 settings.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:             settings.ShowAnchoredPromptBar,

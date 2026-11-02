@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,9 +19,10 @@ type SecretProvider interface {
 
 // SecretListItem mirrors secrets.SecretListItem to avoid a direct import cycle.
 type SecretListItem struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	HasValue bool   `json:"has_value"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	HasValue  bool      `json:"has_value"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 const legacyMockAuthMethod = "mock"

@@ -56,6 +56,42 @@ func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.C
 	return true, tx.Commit()
 }
 
+// VerifyResolvedSessionRecoveryBlockWithNativeEvidence confirms completed recovery
+// without changing metadata or releasing parked work again.
+func (r *Repository) VerifyResolvedSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	if !validNativeResumeProof(proof) {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockNativeResumeProofTx(ctx, tx, proof); err != nil {
+		return false, err
+	}
+	valid, err := r.verifyNativeResumeSnapshotTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
+	resolved, err := r.nativeResumeIncidentAlreadyResolvedTx(ctx, tx, id, proof)
+	if err != nil || !resolved {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func (r *Repository) nativeResumeIncidentAlreadyResolvedTx(ctx context.Context, tx *sqlx.Tx, id string, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	var resolved bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+ SELECT 1 FROM session_recovery_blocks b
+ WHERE b.id = ? AND b.session_id = ? AND b.incarnation_id = ? AND b.expected_generation = ?
+ AND b.consumer_reference = 'agent_delivery' AND b.state = 'resolved' AND b.authorized_action = 'resume'
+ AND NOT EXISTS (SELECT 1 FROM session_recovery_blocks open_block WHERE open_block.session_id = b.session_id AND open_block.state = 'open')
+ )`), id, proof.SessionID, proof.IncarnationID, proof.HarnessGeneration).Scan(&resolved)
+	return resolved, err
+}
+
 func (r *Repository) verifyNativeResumeSnapshotTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
 	var valid bool
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (

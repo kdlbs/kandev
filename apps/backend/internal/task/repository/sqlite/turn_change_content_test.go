@@ -27,7 +27,7 @@ func TestTurnChangeContentDeduplicatesAndVerifiesPayload(t *testing.T) {
 		t.Fatalf("StoreTurnChangeFiles: %v", err)
 	}
 	var contentCount int
-	if err := repo.db.GetContext(ctx, &contentCount, `SELECT COUNT(*) FROM turn_change_contents`); err != nil {
+	if err := repo.db.GetContext(ctx, &contentCount, repo.db.Rebind(`SELECT COUNT(*) FROM turn_change_contents`)); err != nil {
 		t.Fatalf("count content rows: %v", err)
 	}
 	if contentCount != 4 {
@@ -118,7 +118,7 @@ func TestTurnChangeContentMarksOversizedPatchPartialWithoutLosingMetadata(t *tes
 	var availability, reason string
 	var truncated bool
 	var canonicalID string
-	if err := repo.db.QueryRowContext(ctx, `SELECT content_availability, content_reason, content_truncated, canonical_content_id FROM turn_file_changes WHERE id = ?`, file.File.ID).
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(`SELECT content_availability, content_reason, content_truncated, canonical_content_id FROM turn_file_changes WHERE id = ?`), file.File.ID).
 		Scan(&availability, &reason, &truncated, &canonicalID); err != nil {
 		t.Fatalf("load partial file row: %v", err)
 	}
@@ -126,11 +126,11 @@ func TestTurnChangeContentMarksOversizedPatchPartialWithoutLosingMetadata(t *tes
 		t.Fatalf("oversized file status = %q/%q truncated=%t canonical=%q", availability, reason, truncated, canonicalID)
 	}
 	var contentCount int
-	if err := repo.db.GetContext(ctx, &contentCount, `SELECT COUNT(*) FROM turn_change_contents`); err != nil || contentCount != 2 {
+	if err := repo.db.GetContext(ctx, &contentCount, repo.db.Rebind(`SELECT COUNT(*) FROM turn_change_contents`)); err != nil || contentCount != 2 {
 		t.Fatalf("bounded old/new blobs retained = %d, %v; want two while patch is omitted", contentCount, err)
 	}
 	var fileCount int
-	if err := repo.db.GetContext(ctx, &fileCount, `SELECT COUNT(*) FROM turn_file_changes`); err != nil || fileCount != 1 {
+	if err := repo.db.GetContext(ctx, &fileCount, repo.db.Rebind(`SELECT COUNT(*) FROM turn_file_changes`)); err != nil || fileCount != 1 {
 		t.Fatalf("file metadata rows = %d, %v; want one", fileCount, err)
 	}
 }
@@ -172,7 +172,7 @@ func TestTurnChangeContentAggregateLimitKeepsEarlierVariants(t *testing.T) {
 	}
 	var availability, reason string
 	var oldContentID, newContentID string
-	if err := repo.db.QueryRowContext(ctx, `SELECT content_availability, content_reason, old_content_id, new_content_id FROM turn_file_changes WHERE id = ?`, second.File.ID).
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(`SELECT content_availability, content_reason, old_content_id, new_content_id FROM turn_file_changes WHERE id = ?`), second.File.ID).
 		Scan(&availability, &reason, &oldContentID, &newContentID); err != nil {
 		t.Fatalf("load truncated second file: %v", err)
 	}
@@ -331,6 +331,16 @@ func seedTurnChangeContentOwner(t *testing.T, repo *Repository, suffix string, r
 	}
 	if err := repo.CreateTurn(ctx, &models.Turn{ID: turnID, TaskID: taskID, TaskSessionID: sessionID, StartedAt: now}); err != nil {
 		t.Fatalf("create turn: %v", err)
+	}
+	oldTime := "2020-01-01T00:00:00Z"
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET state='COMPLETED', queued_for_step_id='', queued_at=NULL, created_at=?, updated_at=? WHERE id=?`), oldTime, oldTime, taskID); err != nil {
+		t.Fatalf("age retention task fixture: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET state='COMPLETED', started_at=?, completed_at=?, updated_at=? WHERE id=?`), oldTime, oldTime, oldTime, sessionID); err != nil {
+		t.Fatalf("age retention session fixture: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_session_turns SET started_at=?, created_at=?, completed_at=?, updated_at=?, metadata='{}' WHERE id=?`), oldTime, oldTime, oldTime, oldTime, turnID); err != nil {
+		t.Fatalf("age retention turn fixture: %v", err)
 	}
 	changeSetID := "change-set-" + suffix
 	changeSet := &models.TurnChangeSet{

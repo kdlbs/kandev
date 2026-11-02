@@ -26,11 +26,15 @@ API.
 
 ## Composition contract
 
-Each covered dialog uses a dynamic-viewport height cap and hides overflow at
-the outer content surface. Its layout has explicit content-sized rows around a
+Each covered dialog uses a dynamic-viewport height cap. Its layout has explicit
+content-sized rows around a
 `minmax(0, 1fr)` body row, or the equivalent flex composition. The body has
 `min-height: 0`, vertical auto overflow, overscroll containment, and horizontal
 overflow containment.
+
+The body contains growing form content. Transient pickers can extend outside
+the dialog shell when their surfaces remain inside the viewport. A clipping
+shell must not cut off picker content or its interactive area.
 
 The body is the only region newly responsible for vertical scrolling. Headers,
 host close controls, and surface-specific persistent controls stay outside it.
@@ -84,6 +88,39 @@ content a bounded scroll region, so its composition remains unchanged.
 in the scroll body, and keeps Cancel/Create Project in the final auto-sized row.
 Repository chips remain part of the form body and can grow or wrap without
 pushing the footer outside the viewport.
+
+`CreateProjectDialog` retains the existing height cap, grid rows, and scrolling
+body. Its shell uses visible overflow so a floating picker can extend beyond
+the shell. The body retains horizontal overflow containment and vertical auto
+overflow; the shell does not become a horizontal scroll container.
+
+The dialog captures its mounted `DialogContent` element with a callback ref.
+`ProjectFormBody` and `ReposField` pass that element to
+`ProjectRepositoryPicker` through an optional `portalContainer` prop. The
+picker uses the existing `PopoverContent` portal support. Its portal targets
+the dialog shell, outside the scrolling body. The project-detail consumer omits
+the prop and uses the default document-body portal.
+
+This follows the dialog-local portal pattern in `TaskCreateDialog`. It keeps
+the picker inside the modal DOM boundary that owns focus and scroll locking.
+It does not require a shared context, a new overlay primitive, or task-specific
+context imports into Office.
+
+The picker retains its 420-pixel preferred width. Its maximum width leaves
+16 pixels on each side of the viewport. Radix collision padding uses the same
+inset. The available-height constraint keeps the search control visible and
+lets only the command list scroll. The command layout permits that list to
+shrink within the available height.
+
+Phones retain the click/search combobox, with the same filtering and selection
+state. This temporary, flat choice fits a contained popover without another
+navigation surface. Phone and coarse-pointer controls retain their existing
+44-pixel minimum targets. A shorter viewport shrinks the list rather than
+clipping the search control or creating document horizontal overflow.
+
+Repository selection, query reset, lazy discovery, exclusions, and project
+submission retain their existing callbacks and values. Escape dismisses the
+picker before the project dialog and returns focus to its actual trigger.
 
 ## Components and responsibilities
 
@@ -154,6 +191,17 @@ containment, a body with real scroll range, reachable final content, visible
 persistent controls where applicable, touch-safe required actions, and no
 document horizontal overflow. Existing focused component tests continue to
 cover callbacks, dismissibility, and conditional action rules.
+
+Office picker regressions also measure the painted interactive area outside
+the dialog bounds. They use right-edge hit testing and real click, wheel,
+keyboard, and touch input. DOM visibility alone cannot establish that an
+ancestor does not clip a picker. Existing long-chip cases continue to verify
+the body scroll range, persistent footer, and project submission path.
+
+## Implementation plans
+
+- [Original dialog containment package](../../../plans/dialog-content-containment/plan.md).
+- [Office repository picker correction](../../../plans/office-project-picker-clipping/plan.md).
 
 ## Related decisions
 

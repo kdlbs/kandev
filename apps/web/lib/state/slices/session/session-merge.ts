@@ -1,3 +1,4 @@
+import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
 import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
@@ -308,6 +309,12 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
   const pendingAction = mergePendingActionProjection(existing, incoming);
   const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
+  const runtimeStorageHealth = mergeRuntimeStorageHealth(
+    existing.runtime_storage_health,
+    incoming.runtime_storage_health,
+  );
+  if (runtimeStorageHealth) merged.runtime_storage_health = runtimeStorageHealth;
+  else delete merged.runtime_storage_health;
   merged.workspace_recovery = mergeWorkspaceRecoveryProjection(
     existing.workspace_recovery,
     incoming.workspace_recovery,

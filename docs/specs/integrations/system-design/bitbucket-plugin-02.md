@@ -24,7 +24,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-BITBUCKE
 ## Scenarios
 
 - **GIVEN** the independently released Bitbucket UI bundle, **WHEN** it compiles or
-  launches native task creation, **THEN** it consumes `@kandev/plugin-sdk` and typed
+  launches native task creation, **THEN** it consumes `@kdlbs/plugin-sdk` and typed
   `host.context` reads without copied host interfaces or private Zustand slice parsing.
 - **GIVEN** Bitbucket is active and a user pastes a URL owned by GitHub, GitLab, or
   another self-hosted provider, **WHEN** Kandev probes registered repository providers,

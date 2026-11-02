@@ -548,8 +548,16 @@ export type LaunchWarningState = {
 
 export type BackgroundWorkState = {
   workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
+  outputWindowsBySessionId: Record<string, Record<string, BackgroundOutputWindow>>;
+  nextOutputWindowGeneration: number;
   activeWorkIdBySessionId: Record<string, string>;
   loadingBySessionId: Record<string, boolean>;
+};
+
+export type BackgroundOutputWindow = {
+  runId: string | undefined;
+  generation: number;
+  evicted: number;
 };
 
 export type SessionRuntimeSliceState = {

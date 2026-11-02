@@ -34,6 +34,12 @@ Resolve and persist the initiating user's settings policy before dispatch.
 New defaults disable capture; existing saved preferences still control subsequent capture.
 The viewer's setting controls card visibility independently of retained history.
 
+## Storage amendment (2026-10-28)
+
+[Git turn history and unified compaction](2026-10-28-git-turn-history-and-unified-compaction.md) selects Git objects for historical content.
+Durable backend Git storage satisfies preservation before ephemeral source destruction.
+SQL keeps metadata, with a legacy reader for previously materialized patches.
+
 ## Consequences
 
 Historical comparisons remain stable after later edits, staging, commits, restart, and executor cleanup within retention limits.

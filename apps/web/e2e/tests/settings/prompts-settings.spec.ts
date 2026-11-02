@@ -40,7 +40,7 @@ test.describe("Prompts settings — duplicate name handling", () => {
       .getByRole("button", { name: "Save changes" })
       .click();
 
-    const toast = testPage.getByTestId("toast-message");
+    const toast = testPage.getByTestId("toast-message").filter({ hasText: /already exists/i });
     await expect(toast).toBeVisible({ timeout: 5_000 });
     await expect(toast).toContainText(/already exists/i);
 
@@ -71,7 +71,7 @@ test.describe("Prompts settings — duplicate name handling", () => {
       .getByRole("button", { name: "Save changes" })
       .click();
 
-    const toast = testPage.getByTestId("toast-message");
+    const toast = testPage.getByTestId("toast-message").filter({ hasText: /already exists/i });
     await expect(toast).toBeVisible({ timeout: 5_000 });
     await expect(toast).toContainText(/already exists/i);
 

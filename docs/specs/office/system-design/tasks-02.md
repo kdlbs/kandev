@@ -21,6 +21,17 @@ This design preserves the technical source detail for `REQ-OFFICE-TASKS-001` dur
 
 ## Migrated source detail
 
+## Automatic completion of Office tasks
+
+Automatic terminal completion is a compare-and-set. The orchestrator records the
+observed task state and workflow step from the same read, and the repository
+update matches both before writing COMPLETED. A BLOCKED Office task never enters
+that automatic path: its turn-end and terminal-step handling leaves it waiting.
+A write whose state or step changed loses the comparison, returns a
+stale-completion error, and publishes no completion side effects. Manual status
+changes, approval redirects, and non-Office completion keep their existing
+semantics.
+
 ## Failure modes
 
 - **Approver gate violation.** A `done` transition while approvers are pending is rejected with 409 and a typed error naming the missing approvals. The UI redirects the transition to `in_review` as a convenience.

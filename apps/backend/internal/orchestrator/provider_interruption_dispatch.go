@@ -31,6 +31,14 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
 		return
 	}
+	if entry.continuationPolicy == continuationPolicyAgentManagedPendingLive {
+		if entry.retainedRuntime == nil ||
+			s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable ||
+			!s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry, continuationInstruction) {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
+		}
+		return
+	}
 	if entry.continuationPolicy == continuationPolicyCapacityLive {
 		if entry.retainedRuntime == nil {
 			s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
@@ -134,7 +142,8 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		return false
 	}
 	var liveExecutionFence *promptTaskLiveExecutionFence
-	if entry.continuationPolicy == continuationPolicyCapacityLive {
+	if entry.continuationPolicy == continuationPolicyCapacityLive ||
+		entry.continuationPolicy == continuationPolicyAgentManagedPendingLive {
 		if entry.retainedRuntime == nil || entry.continuation == nil {
 			return false
 		}
@@ -349,6 +358,7 @@ func (s *Service) validateContinuationOwner(ctx context.Context, taskID, session
 	switch entry.continuationPolicy {
 	case continuationPolicySavedHistoryRestore:
 	case continuationPolicyCapacityLive:
+	case continuationPolicyAgentManagedPendingLive:
 	default:
 		return ErrResumeAttemptCancelled
 	}
@@ -420,7 +430,9 @@ func (s *Service) finishContinuationManual(ctx context.Context, taskID, sessionI
 	defer guard.Unlock()
 	defer release()
 	current, ok := s.transientRetries.Load(sessionID)
-	if !ok || current != entry {
+	expectedCancel, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
+	retiredByAcceptedCancel := !ok && expectedCancel == entry && len(disposition) > 0 && disposition[0] == stopReasonCancelled
+	if (!ok && !retiredByAcceptedCancel) || (ok && current != entry) {
 		return
 	}
 	settlementCtx := context.WithoutCancel(ctx)

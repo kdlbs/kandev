@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -40,6 +41,10 @@ type AgentExecution struct {
 	// CausingRunID is the trusted Office run that initiated this task-owned
 	// execution. RunID remains reserved for run-owned runtime identity.
 	CausingRunID string
+	// TerminalCausingRunID keeps the launch cause on terminal events after
+	// CausingRunID is consumed by the first ready event. A new prompt replaces
+	// this value with its current launch cause.
+	TerminalCausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -71,11 +76,19 @@ type AgentExecution struct {
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
-	ExecutorType string
+	ExecutorType  string
+	RepositoryIDs []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
+	// CopilotSelectedPlugins carries the stable plugin identities from the
+	// authorized profile snapshot. Roots are resolved at each new process
+	// boundary and never persisted here.
+	CopilotSelectedPlugins []string
+	// ExecutionProfileID names the concrete CLI profile that owns this
+	// execution. Empty falls back to AgentProfileID for legacy sessions.
+	ExecutionProfileID string
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID      string
@@ -106,6 +119,7 @@ type AgentExecution struct {
 	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec   `json:"-"`
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -293,6 +307,12 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// attachedExistingCompute records that this attempt attached to runtime
+	// storage that already existed instead of allocating it. Recovery retention
+	// reads it so a reused workspace is not destroyed with the failed attempt.
+	// Conversation-resume intent is a separate fact and never authorizes or
+	// prevents destructive cleanup.
+	attachedExistingCompute bool
 	// suppressBootStatusMessage is set only for silent restart restore, where a
 	// boot status would otherwise create a synthetic completed transcript turn.
 	suppressBootStatusMessage bool
@@ -1886,13 +1906,14 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID     string
-	ProfileName   string
-	AgentID       string
-	AgentName     string // e.g., "auggie", "claude", "codex"
-	Model         string // applied through ACP model selection at session start
-	Mode          string // applied via ACP session/set_mode at session start (empty = use agent default)
-	ConfigOptions map[string]string
+	ResourceCircuitKey string
+	ProfileID          string
+	ProfileName        string
+	AgentID            string
+	AgentName          string // e.g., "auggie", "claude", "codex"
+	Model              string // applied through ACP model selection at session start
+	Mode               string // applied via ACP session/set_mode at session start (empty = use agent default)
+	ConfigOptions      map[string]string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string
@@ -1908,6 +1929,7 @@ type AgentProfileInfo struct {
 	CursorPluginsMCPEnabled bool
 	MCPSelectionMode        string
 	MCPSelectedServers      []string
+	CopilotSelectedPlugins  []string
 	NativeSessionResume     bool // Agent supports ACP session/load for resume
 	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
@@ -1955,6 +1977,13 @@ type BootMessageRequest struct {
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
+}
+
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

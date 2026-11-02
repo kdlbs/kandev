@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "sdk_version": "0.1.0",
+  "host_release": null,
+  "min_kandev_version": null,
+  "api_versions": [1, 2],
+  "change_kind": "initial"
+}

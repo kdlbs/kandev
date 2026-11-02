@@ -275,6 +275,8 @@ func (s *Service) rebuildMissingSummaries(
 		}
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
+			taskTurnErrorSummary(task),
+			true,
 			sessionsByTask[task.ID],
 			environmentIDsByTask[task.ID],
 			pendingBySession,

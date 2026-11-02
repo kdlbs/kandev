@@ -19,6 +19,7 @@ import {
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
+import { compareMessageTimestamps } from "./message-timestamp";
 import { resolveRunningNotices } from "./running-notice-activity";
 import {
   buildPromptMessageActions,
@@ -104,8 +105,21 @@ function retainDismissedMetadata(
   return true;
 }
 
+/** Keep a newer local row when a delayed/duplicate payload carries an older
+ *  server timestamp. The backend always bumps updated_at on a mutation, so an
+ *  older payload must not reverse a newer outcome such as a promoted
+ *  permission prompt or an approved decision. */
+function isOlderMessagePayload(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (typeof target.updated_at !== "string" || typeof source.updated_at !== "string") return false;
+  return compareMessageTimestamps(target.updated_at, source.updated_at) === 1;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  if (isOlderMessagePayload(target, source)) return;
   const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (

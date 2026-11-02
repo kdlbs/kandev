@@ -54,6 +54,12 @@ describe("upsertOpenFileTab", () => {
     ]);
   });
 
+  it("retains a dirty repo-scoped tab when Files opens its workspace path", () => {
+    const existing = { ...file, repo: "frontend", content: "unsaved", isDirty: true };
+    const result = upsertOpenFileTab([existing], { ...file, path: "frontend/README.md" });
+    expect(result).toEqual([existing]);
+  });
+
   it("adds a new tab", () => {
     expect(upsertOpenFileTab([], file)).toMatchObject([file]);
   });

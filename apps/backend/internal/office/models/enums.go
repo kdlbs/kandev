@@ -287,6 +287,7 @@ const (
 	RouteAttemptOutcomeSkippedUserAction     RouteAttemptOutcome = "skipped_user_action"
 	RouteAttemptOutcomeSkippedMissingMapping RouteAttemptOutcome = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           RouteAttemptOutcome = "skipped_max_attempts"
+	RouteAttemptOutcomeDeferredCircuit       RouteAttemptOutcome = "deferred_circuit"
 )
 
 // String implements fmt.Stringer.

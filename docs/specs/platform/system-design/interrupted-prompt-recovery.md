@@ -85,6 +85,14 @@ after matching every unresolved SQL row to its peer record by ID, session, incar
 generation, and payload hash. Missing or conflicting evidence prevents every retirement write.
 It then re-reads both stores and requires retained retirement for each unresolved SQL row
 before clearing the database block. Already-retired matching records make this idempotent.
+If background recovery resolves the same block while explicit Resume gathers proof,
+SQL verification revalidates the complete proof under the delivery lock. It accepts
+the completed resolution only for the same session, incarnation, generation, and
+authorized `resume` action, with no remaining open session recovery block. It does
+not update recovery metadata or timestamps again. Stale proof, a different action,
+or a new incident remains blocked.
+The resolver's change flag remains false for repeated resolution. Explicit Resume
+uses the separate verification result to report completed recovery as success.
 The eligible journal records belong to the current incarnation at or before the current generation.
 Historical blocks may predate recovery-notice metadata. After the same authenticated retirement
 check, SQL resolution accepts that case only when persisted ACP native identity matches the

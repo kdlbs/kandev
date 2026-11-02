@@ -70,3 +70,9 @@ describe("GitHub App onboarding model", () => {
     expect(githubAppEvents).toEqual(["push", "check_run"]);
   });
 });
+
+it("builds App settings links on the registration host", () => {
+  expect(
+    githubAppSettingsURL("Organization", "acme", "automation", "git.company.example:8443"),
+  ).toBe("https://git.company.example:8443/organizations/acme/settings/apps/automation");
+});
