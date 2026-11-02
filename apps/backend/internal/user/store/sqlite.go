@@ -631,6 +631,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
+		"unread_task_dot":                          settings.UnreadTaskDot,
+		"unread_task_dot_hide_delay_seconds":       settings.UnreadTaskDotHideDelaySeconds,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
@@ -747,6 +749,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ReviewAutoMarkOnScroll:            true,
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
+		UnreadTaskDot:                     false,
+		UnreadTaskDotHideDelaySeconds:     models.UnreadTaskDotHideDelayDefaultSeconds,
 		AgentGeneratedTaskTitles:          true,
 		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
@@ -836,6 +840,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ConfirmTaskArchive                *bool                                   `json:"confirm_task_archive"`
 		PreventAutoStartAgentOnOpen       *bool                                   `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                                   `json:"unread_divider"`
+		UnreadTaskDot                     *bool                                   `json:"unread_task_dot"`
+		UnreadTaskDotHideDelaySeconds     json.RawMessage                         `json:"unread_task_dot_hide_delay_seconds"`
 		AgentGeneratedTaskTitles          *bool                                   `json:"agent_generated_task_titles"`
 		PromptSuggestions                 *bool                                   `json:"prompt_suggestions"`
 		AutoFocusNewTasks                 *bool                                   `json:"auto_focus_new_tasks"`
@@ -931,6 +937,14 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
+	}
+	if payload.UnreadTaskDot != nil {
+		settings.UnreadTaskDot = *payload.UnreadTaskDot
+	}
+	var dotHideDelay *int
+	if json.Unmarshal(payload.UnreadTaskDotHideDelaySeconds, &dotHideDelay) == nil && dotHideDelay != nil &&
+		models.ValidUnreadTaskDotHideDelaySeconds(*dotHideDelay) {
+		settings.UnreadTaskDotHideDelaySeconds = *dotHideDelay
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles

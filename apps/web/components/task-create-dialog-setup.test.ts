@@ -126,6 +126,7 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     executors: [],
     snapshots: {},
     workspaceSnapshotRead: {},
+    selectedWorkflowSteps: { status: "idle", steps: [], retry: vi.fn() },
     repositories: [],
     repositoriesLoading: false,
     refreshRepositories: vi.fn(),

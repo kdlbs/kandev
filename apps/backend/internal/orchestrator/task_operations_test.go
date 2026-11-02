@@ -1656,6 +1656,12 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
+	// The first cancellation settled the turn, so the session is idle now. A
+	// fresh cancel must be allowed through once the operation clears, but it is
+	// only a real target again while a turn is live.
+	require.NoError(t, repo.UpdateTaskSessionState(
+		context.Background(), "session1", models.TaskSessionStateRunning, "",
+	))
 	if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
 		t.Fatalf("post-release CancelAgent returned error: %v", err)
 	}

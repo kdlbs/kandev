@@ -33,6 +33,7 @@ type AgentEventPayload struct {
 	AgentID                   string                           `json:"agent_id,omitempty"`
 	AgentProfileID            string                           `json:"agent_profile_id"`
 	ExecutionProfileID        string                           `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey        string                           `json:"resource_circuit_key,omitempty"`
 	ContainerID               string                           `json:"container_id,omitempty"`
 	Status                    string                           `json:"status"`
 	StartedAt                 time.Time                        `json:"started_at"`
@@ -379,6 +380,7 @@ type AgentStreamEventPayload struct {
 	RunAttempt                      int                   `json:"run_attempt,omitempty"`
 	AgentProfileID                  string                `json:"agent_profile_id,omitempty"`     // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
 	ExecutionProfileID              string                `json:"execution_profile_id,omitempty"` // Concrete profile captured from the execution that produced this event.
+	ResourceCircuitKey              string                `json:"resource_circuit_key,omitempty"`
 	AgentType                       string                `json:"agent_type,omitempty"`
 	TaskID                          string                `json:"task_id"`
 	SessionID                       string                `json:"session_id"` // Task session ID

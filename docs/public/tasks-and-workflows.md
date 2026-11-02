@@ -635,7 +635,9 @@ For a new capture, Kandev compares the turn with its captured history. If the br
 
 Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+Some captures are partial or unavailable. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. A turn whose summary is unavailable or failed has no card, even when it retained file entries or a history comparison. Partial summaries with usable changes keep their card, label the state, and identify the affected repositories. The selected historical diff still explains why an unavailable comparison has no totals.
+
+Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
@@ -667,6 +669,13 @@ The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
+
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
 
 What a job row can show depends on the agent runtime:
 

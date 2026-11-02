@@ -1530,6 +1530,8 @@ export class ApiClient {
     prevent_auto_start_agent_on_open?: boolean;
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
+    unread_task_dot?: boolean;
+    unread_task_dot_hide_delay_seconds?: number;
     agent_generated_task_titles?: boolean;
     message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
@@ -2938,6 +2940,22 @@ export class ApiClient {
   }
 
   // --- Session ---
+
+  /** Reads the authoritative background-work projection for a session. */
+  async listBackgroundWorkloads(sessionId: string): Promise<{
+    workloads: Array<{ work_id: string; title: string; state: string }>;
+  }> {
+    const response = await this.rawRequest(
+      "GET",
+      `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/background-work`,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `listBackgroundWorkloads failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    return response.json();
+  }
 
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{

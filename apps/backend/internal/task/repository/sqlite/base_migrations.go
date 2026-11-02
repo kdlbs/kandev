@@ -146,6 +146,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	}
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Apply("dynamic_resource_circuits.failure_count", `ALTER TABLE dynamic_resource_circuits ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
 		return err
 	}
@@ -443,6 +446,12 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// compatible with databases whose workflow repository has not replayed its
 	// own migrations yet, same as the columns above.
 	_ = r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
+	// Remove the steps that workflow deletes left behind while workflow_steps
+	// had no foreign key (see pruneOrphanWorkflowStepsOnce). Runs after the
+	// projection table exists; the workflows table is created by initSchema.
+	if err := r.pruneOrphanWorkflowStepsOnce(); err != nil {
+		return err
+	}
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
