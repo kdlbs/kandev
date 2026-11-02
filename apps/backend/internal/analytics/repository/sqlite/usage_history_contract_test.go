@@ -307,8 +307,6 @@ func TestUsageHistoryContractExplicitRetirementAndUnknownSemantics(t *testing.T)
 // @covers AC-COSTS-USAGE-HISTORY-002.5 AC-COSTS-USAGE-HISTORY-002.1
 func TestUsageHistoryContractScopeTransferAndErasureFailClosed(t *testing.T) {
 	repo, api := historyContractFixtureInOrg(t, "org-a")
-	_, err := repo.db.Exec(`CREATE TABLE task_usage_events (id INTEGER PRIMARY KEY, usage_event_id TEXT, usage_binding_id TEXT, task_id TEXT)`)
-	require.NoError(t, err)
 	page, err := api.ListUsageCollectionTargets(context.Background(), "collector-a", pluginsdk.UsageCollectionTargetQueryV1{WorkspaceID: "ws-1"})
 	require.NoError(t, err)
 	item := contractObservation(t, page.Targets[0].SubjectBinding, "owned-item", 1, "model", 3)

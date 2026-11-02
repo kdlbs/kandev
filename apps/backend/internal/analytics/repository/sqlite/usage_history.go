@@ -16,7 +16,6 @@ import (
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/common/usagehistory"
-	"github.com/kandev/kandev/internal/db"
 )
 
 var _ usagehistory.Retainer = (*Repository)(nil)
@@ -121,19 +120,9 @@ func (r *Repository) persistScopedNativeUsageTx(ctx context.Context, tx *sqlx.Tx
 		measurement.SubjectID, measurement.TaskID, measurement.SessionID); err != nil {
 		return fmt.Errorf("link retained native usage event: %w", err)
 	}
-	deleteGapQuery := `DELETE FROM usage_history_migration_gaps WHERE source_key = 'native' AND record_key = ?`
-	deleteGapArgs := []any{native.UsageEventID}
-	ledgerExists, err := db.TableExistsContext(ctx, tx, "task_usage_events")
-	if err != nil {
-		return fmt.Errorf("check native usage ledger before clearing migration gap: %w", err)
-	}
-	if ledgerExists {
-		deleteGapQuery = `DELETE FROM usage_history_migration_gaps WHERE source_key = 'native'
-			AND (record_key = ? OR record_key = (SELECT CAST(id AS TEXT) FROM task_usage_events
-				WHERE usage_event_id = ? AND task_id = ?))`
-		deleteGapArgs = []any{native.UsageEventID, native.UsageEventID, native.TaskID}
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(deleteGapQuery), deleteGapArgs...); err != nil {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM usage_history_migration_gaps WHERE source_key = 'native'
+		AND (record_key = ? OR record_key = (SELECT CAST(id AS TEXT) FROM task_usage_events
+			WHERE usage_event_id = ? AND task_id = ?))`), native.UsageEventID, native.UsageEventID, native.TaskID); err != nil {
 		return fmt.Errorf("delete retained native usage migration gap: %w", err)
 	}
 	return nil

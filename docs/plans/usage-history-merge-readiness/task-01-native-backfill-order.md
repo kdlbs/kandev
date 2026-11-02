@@ -84,4 +84,6 @@ None.
 
 `TestPreUpgradeNativeUsageAppearsAfterMigration` confirms that an eligible pre-upgrade event is retained once without a gap, a forked event keeps a gap, and deleting either task preserves the expected retained copy or gap.
 
-The focused test, analytics and task repository suites, analytics race check, and changed-file Go lint passed. PostgreSQL checks were skipped because no PostgreSQL 18.6 image or configured test DSN was available.
+Native usage retention now clears gaps with one two-key delete and does not query the schema catalog on each write. `TestNativeUsageRetentionDoesNotProbeSchema` denies reads from `sqlite_master` while retaining a native event; it failed before this change and passes after it. The analytics test schema includes `task_usage_events`, matching production's always-present ledger.
+
+The focused pre-upgrade test, analytics and task repository suites, analytics race check, and changed-file Go lint passed. PostgreSQL checks were skipped because no PostgreSQL 18.6 image or configured test DSN was available; rerun them with Task 04's database gate.

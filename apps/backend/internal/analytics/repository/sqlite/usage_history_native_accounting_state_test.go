@@ -3,13 +3,54 @@ package sqlite
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/kandev/kandev/internal/analytics/models"
+	"github.com/kandev/kandev/internal/common/usagehistory"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNativeUsageRetentionDoesNotProbeSchema(t *testing.T) {
+	repo, _ := historyContractFixture(t)
+	ctx := context.Background()
+	point := time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)
+	binding := usagehistory.Binding{
+		ID: "native-schema-free", Kind: usagehistory.BindingKindExecution,
+		WorkspaceID: "ws-1", TaskID: "task-1", TaskIncarnationID: "2026-01-01T00:00:00Z",
+		SessionID: "session-1", SessionIncarnationID: "session-1", CapturedAt: point,
+		ActorID: "actor", ActorStatus: usagehistory.ActorStatusAttributed,
+		ActorKind: usagehistory.ActorKindUser, ActorSource: "authenticated-execution",
+	}
+	setupTx, err := repo.db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.AdmitBindingTx(ctx, setupTx, binding))
+	require.NoError(t, setupTx.Commit())
+
+	conn, err := repo.db.Connx(ctx)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, conn.Close()) }()
+	require.NoError(t, conn.Raw(func(raw any) error {
+		raw.(*sqlite3.SQLiteConn).RegisterAuthorizer(func(op int, table, _, _ string) int {
+			if op == sqlite3.SQLITE_READ && table == "sqlite_master" {
+				return sqlite3.SQLITE_DENY
+			}
+			return sqlite3.SQLITE_OK
+		})
+		return nil
+	}))
+	tx, err := conn.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	require.NoError(t, repo.RetainNativeUsageTx(ctx, tx, usagehistory.NativeUsage{
+		BindingID: binding.ID, UsageEventID: "native-schema-free-event", TaskID: binding.TaskID,
+		SessionID: binding.SessionID, Model: "model", Provider: "provider", TotalTokens: 10,
+		UsageCompleteness: "complete", OccurredAt: point, CollectedAt: point,
+	}))
+	require.NoError(t, tx.Commit())
+}
 
 func TestUsageHistoryNativeAccountingReadinessNoSourceReads(t *testing.T) {
 	f := newNativeTurnsFixture(t, false, 4)
