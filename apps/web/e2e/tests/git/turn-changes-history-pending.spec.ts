@@ -11,7 +11,7 @@ import {
 test.describe("paused turn content preservation", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("shows the existing loading state, then opens saved content without another agent turn", async ({
+  test("reads retained content while local export is pending without another agent turn", async ({
     testPage,
     apiClient,
     seedData,
@@ -30,6 +30,19 @@ test.describe("paused turn content preservation", () => {
         changeSetId!,
         "untracked_test.txt",
       );
+      const repositoryId = history.change_sets?.[0]?.repositories?.[0]?.id;
+      expect(repositoryId).toBeTruthy();
+      const filesResponse = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSetId}/repositories/${repositoryId}/files?offset=0&limit=100`,
+      );
+      expect(filesResponse.ok).toBe(true);
+      const files = (await filesResponse.json()) as {
+        files?: Array<{ id: string; content_availability: string }>;
+      };
+      expect(files.files?.find((file) => file.id === paused.fileID)?.content_availability).toBe(
+        "pending",
+      );
 
       const card = await reloadUntilTurnCard(testPage, session);
       await expect(card).toBeVisible({ timeout: 30_000 });
@@ -38,7 +51,7 @@ test.describe("paused turn content preservation", () => {
       await pendingFile.click();
       const viewer = testPage.getByTestId("historical-turn-diff");
       await expect(viewer).toBeVisible();
-      await expect(viewer.getByText("Loading changed files...")).toBeVisible();
+      await waitForDiffText(testPage, "INITIAL_CONTENT");
       await session.showSessionContext();
 
       resumeTurnFileContent(

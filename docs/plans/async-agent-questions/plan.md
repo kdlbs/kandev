@@ -385,6 +385,7 @@ Work orders 01 to 12 are implemented and verified. Their Results sections contai
 - Named PostgreSQL tests passed: `TestAsyncQuestionsPostgresResolutionRace`, `TestAsyncQuestionsPostgresCreateReplay`, `TestAsyncQuestionsPostgresConcurrentCreateAndWait`, `TestAsyncQuestionsPostgresAuthoritySweepStalesReparentedRequest`, `TestAsyncQuestionsPostgresForwardedConversationVisibility`, and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
 - Focused Vitest regressions: 4 files, 25 tests passed. Web typecheck, lint, i18n check, and i18n ratchet passed.
 - Chromium async-question E2E: 8 tests passed. Mobile Chrome async-question E2E: 2 tests passed.
+- `(cd apps/web && pnpm e2e:run --project=chromium tests/git/turn-changes-history-pending.spec.ts --retries=0)`: 1 test passed after the test began asserting pending local-export metadata alongside readable retained history. This covers the archive fallback seen in the earlier PR CI failure.
 - Changed-file Go lint passed with `0 issues`; `gofmt` and `git diff --check` passed.
 - `python3 scripts/list-docs.py validate`: passed, validating 426 decisions and 1883 specifications. Full specification lint and public documentation validation passed.
 - The requirements, system design, and work-order Results reflect the implemented author/parent visibility and wait-projection contracts.

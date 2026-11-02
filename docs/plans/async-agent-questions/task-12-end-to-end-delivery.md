@@ -123,3 +123,4 @@ Passed:
 - `go test -trimpath ./cmd/mock-agent -run '^TestEmitAsyncQuestionDeliveryResult$' -count=1`: passed, including rejected operator and parent outcomes.
 - Backend package, race, SQLite async/pending-action, and named PostgreSQL tests passed. Named PostgreSQL evidence includes `TestAsyncQuestionsPostgresForwardedConversationVisibility` and `TestPostgresAsyncQuestionsParkedGateProjectsPendingAction`.
 - Typecheck, lint, i18n check, i18n ratchet, and changed-file Go lint passed.
+- `(cd apps/web && pnpm e2e:run --project=chromium tests/git/turn-changes-history-pending.spec.ts --retries=0)`: 1 test passed. Updated the regression to assert retained Git history serves the file while local export is pending; the earlier CI trace showed that the transient-loading assertion could miss this fast fallback.
