@@ -992,7 +992,14 @@ func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	// Mode can change the provider's available options. Apply it before the
 	// model and use the resulting notification, when present, as the next
 	// model-selection snapshot.
-	if mode != "" {
+	//
+	// A mode the agent did not advertise is left unapplied: repository-local
+	// modes (for example OpenCode agents defined in a checkout's opencode.json)
+	// only exist once a task session opens in that checkout. The probe runs in
+	// a scratch workspace, so rejecting the probe would block saving profiles
+	// and workflow rules for a mode the real session applies fine. Task
+	// sessions still apply the mode and fail loudly when it is invalid.
+	if mode != "" && sessionAllowsMode(sessionResp, mode) {
 		updated, err := applyProbeMode(ctx, conn, sessionResp.SessionId, mode, updates)
 		if err != nil {
 			return nil, err
@@ -1227,6 +1234,47 @@ func applyConfigOptionsAsModes(out *ProbeResponse, opts []acp.SessionConfigOptio
 			Meta:        opt.Meta,
 		})
 	}
+}
+
+// sessionAllowsMode reports whether a mode can be applied to a fresh session.
+// An agent that did not advertise any mode state cannot tell, so every mode is
+// attempted there to preserve the previous behavior. An advertised mode list,
+// including an authoritative empty one, marks modes outside it as
+// repository-local: those are skipped rather than failed; see
+// probeACPSessionWithContext.
+func sessionAllowsMode(sessionResp acp.NewSessionResponse, mode string) bool {
+	advertised, present := sessionAdvertisedModeIDs(sessionResp)
+	if !present {
+		return true
+	}
+	_, ok := advertised[mode]
+	return ok
+}
+
+// sessionAdvertisedModeIDs collects the mode ids a new session offers, from
+// both the legacy modes state and the configOptions[] mode select. The second
+// return reports whether the agent advertised mode state at all: a present
+// modes state or mode select with zero options is authoritative, while their
+// absence means the agent never described its modes.
+func sessionAdvertisedModeIDs(sessionResp acp.NewSessionResponse) (map[string]struct{}, bool) {
+	var count int
+	present := sessionResp.Modes != nil
+	if sessionResp.Modes != nil {
+		count = len(sessionResp.Modes.AvailableModes)
+	}
+	advertised := make(map[string]struct{}, count+len(sessionResp.ConfigOptions))
+	if sessionResp.Modes != nil {
+		for _, mode := range sessionResp.Modes.AvailableModes {
+			advertised[string(mode.Id)] = struct{}{}
+		}
+	}
+	if sel := findSelectConfigOption(sessionResp.ConfigOptions, acp.SessionConfigOptionCategoryMode); sel != nil {
+		present = true
+		for _, opt := range selectOptionsUngrouped(sel.Options) {
+			advertised[string(opt.Value)] = struct{}{}
+		}
+	}
+	return advertised, present
 }
 
 // findSelectConfigOption returns the first Select-typed configOption whose

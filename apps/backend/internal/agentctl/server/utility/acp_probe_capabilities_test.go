@@ -2,6 +2,7 @@ package utility
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -203,6 +204,202 @@ func TestProbeACPSessionWithContextErrorsWhenConfigOptionYieldsNoSnapshot(t *tes
 	)
 	if err == nil || !strings.Contains(err.Error(), "returned no configuration options") {
 		t.Fatalf("error = %v, want missing configuration snapshot", err)
+	}
+}
+
+// probeAdvertisedModesAgent advertises build/plan modes on session/new. Its
+// SetSessionMode records every call so tests can prove which modes the probe
+// attempted, and can be told to reject the call outright. With emptyModes the
+// modes state is still present but offers no modes, an authoritative empty
+// advertisement.
+type probeAdvertisedModesAgent struct {
+	*probeCaptureAgent
+	conn        *acp.AgentSideConnection
+	mu          sync.Mutex
+	modeCalls   []string
+	failSetMode bool
+	emptyModes  bool
+}
+
+func (a *probeAdvertisedModesAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	state := &acp.SessionModeState{
+		CurrentModeId: acp.SessionModeId("build"),
+		AvailableModes: []acp.SessionMode{
+			{Id: acp.SessionModeId("build"), Name: "Build"},
+			{Id: acp.SessionModeId("plan"), Name: "Plan"},
+		},
+	}
+	if a.emptyModes {
+		state.AvailableModes = nil
+	}
+	return acp.NewSessionResponse{
+		SessionId: acp.SessionId("probe-session"),
+		Modes:     state,
+	}, nil
+}
+
+func (a *probeAdvertisedModesAgent) SetSessionMode(
+	ctx context.Context,
+	request acp.SetSessionModeRequest,
+) (acp.SetSessionModeResponse, error) {
+	a.mu.Lock()
+	a.modeCalls = append(a.modeCalls, string(request.ModeId))
+	a.mu.Unlock()
+	if a.failSetMode {
+		return acp.SetSessionModeResponse{}, errors.New("mode rejected")
+	}
+	return acp.SetSessionModeResponse{}, a.conn.SessionUpdate(ctx, acp.SessionNotification{
+		SessionId: request.SessionId,
+		Update: acp.SessionUpdate{
+			ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
+				ConfigOptions: probeModelConfigOptions("default-model"),
+			},
+		},
+	})
+}
+
+func (a *probeAdvertisedModesAgent) recordedModeCalls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.modeCalls...)
+}
+
+// A mode the agent did not advertise (for example an OpenCode agent defined in
+// a repository checkout) must not fail the probe: the probe workspace has no
+// repository context, and the real task session applies the mode itself.
+func TestProbeACPSessionWithContextSkipsUnadvertisedMode(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+
+	fake := &probeAdvertisedModesAgent{probeCaptureAgent: &probeCaptureAgent{}, failSetMode: true}
+	fake.conn = acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	e := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := e.probeACPSessionWithContext(
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "", "planner", nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("probeACPSessionWithContext(): %v", err)
+	}
+	if calls := fake.recordedModeCalls(); len(calls) != 0 {
+		t.Fatalf("set_mode calls = %v, want none for unadvertised mode", calls)
+	}
+	if resp.CurrentModeID != "build" {
+		t.Fatalf("current mode = %q, want the advertised default", resp.CurrentModeID)
+	}
+	if len(resp.Modes) != 2 {
+		t.Fatalf("modes = %#v, want the two advertised modes", resp.Modes)
+	}
+}
+
+// Advertised modes are still applied so their option effects are captured.
+func TestProbeACPSessionWithContextAppliesAdvertisedMode(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+
+	fake := &probeAdvertisedModesAgent{probeCaptureAgent: &probeCaptureAgent{}}
+	fake.conn = acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	e := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := e.probeACPSessionWithContext(
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "", "plan", nil, nil,
+	); err != nil {
+		t.Fatalf("probeACPSessionWithContext(): %v", err)
+	}
+	if calls := fake.recordedModeCalls(); len(calls) != 1 || calls[0] != "plan" {
+		t.Fatalf("set_mode calls = %v, want [plan]", calls)
+	}
+}
+
+// A present modes state with no available modes is an authoritative empty
+// advertisement, not a missing one: every mode counts as unadvertised.
+func TestProbeACPSessionWithContextSkipsModeWhenAdvertisementIsEmpty(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+
+	fake := &probeAdvertisedModesAgent{probeCaptureAgent: &probeCaptureAgent{}, failSetMode: true, emptyModes: true}
+	fake.conn = acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	e := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := e.probeACPSessionWithContext(
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "", "reviewer", nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("probeACPSessionWithContext(): %v", err)
+	}
+	if calls := fake.recordedModeCalls(); len(calls) != 0 {
+		t.Fatalf("set_mode calls = %v, want none against an empty advertisement", calls)
+	}
+	if resp.CurrentModeID != "build" {
+		t.Fatalf("current mode = %q, want the advertised default", resp.CurrentModeID)
+	}
+}
+
+// probeModeRejectAgent advertises no modes and rejects every SetSessionMode.
+type probeModeRejectAgent struct {
+	*probeCaptureAgent
+	mu        sync.Mutex
+	modeCalls int
+}
+
+func (a *probeModeRejectAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	a.mu.Lock()
+	a.modeCalls++
+	a.mu.Unlock()
+	return acp.SetSessionModeResponse{}, errors.New("mode rejected")
+}
+
+// Without a mode advertisement the probe cannot tell a repository-local mode
+// from a typo, so it keeps attempting the mode and surfaces the failure.
+func TestProbeACPSessionWithContextStillAppliesModeWithoutModeAdvertisement(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = c2aR.Close()
+		_ = c2aW.Close()
+		_ = a2cR.Close()
+		_ = a2cW.Close()
+	})
+
+	fake := &probeModeRejectAgent{probeCaptureAgent: &probeCaptureAgent{}}
+	acp.NewAgentSideConnection(fake, a2cW, c2aR)
+
+	e := NewACPInferenceExecutor(zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := e.probeACPSessionWithContext(
+		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "", "planner", nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "session/set_mode") {
+		t.Fatalf("error = %v, want session/set_mode failure", err)
 	}
 }
 
