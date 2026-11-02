@@ -54,10 +54,20 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       {view === "history" && control.officeEnabled && (
         <ControlGroupedHistory aggregate={control.aggregate} />
       )}
-      <WorkspaceOrCoordinatorFacts view={view} workspaces={workspaces} rows={rows} />
+      <WorkspaceOrCoordinatorFacts
+        view={view}
+        workspaces={workspaces}
+        byWorkspace={byWorkspace}
+        rows={rows}
+      />
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
+        </p>
+      )}
+      {Object.values(byWorkspace).some((list) => list.error) && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("sidebar:integratedControl.partialData")}
         </p>
       )}
       {workspaces.length === 0 && (
@@ -82,13 +92,19 @@ type FactWorkspaces = NonNullable<
   NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
 >["workspaces"];
 
+type FactByWorkspace = NonNullable<
+  NonNullable<ReturnType<typeof useIntegratedControl>>["data"]
+>["byWorkspace"];
+
 function WorkspaceOrCoordinatorFacts({
   view,
   workspaces,
+  byWorkspace,
   rows,
 }: {
   view: ControlView;
   workspaces: FactWorkspaces;
+  byWorkspace: FactByWorkspace;
   rows: FactRows;
 }) {
   const { t } = useTranslation();
@@ -110,6 +126,11 @@ function WorkspaceOrCoordinatorFacts({
                   : "sidebar:integratedControl.readAccess",
               )}
             </p>
+            {byWorkspace[workspace.id]?.error && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {t("sidebar:integratedControl.loadError")}
+              </p>
+            )}
           </section>
         ))}
       </div>
