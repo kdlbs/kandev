@@ -172,3 +172,10 @@ func appendTypedEvent(data *policy.ReportData, event *pluginsdk.SandboxAuditEven
 	}
 	data.V2.Records = append(data.V2.Records, record)
 }
+
+func (p *Prepared) capturedAuditDeclarations() []contract.RuntimeSource {
+	if !p.typedReports() {
+		return nil
+	}
+	return p.auditDeclarations(true)
+}

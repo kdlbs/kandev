@@ -23,7 +23,7 @@ func validStoredAttempt(attempt *Attempt, orgID, executionID string, generation 
 	if !validStoredResolution(resolved, orgID, launch.PolicyDigest) {
 		return false
 	}
-	if !validAttemptProvider(snapshot.Provider, resolved, launch) {
+	if !validAttemptProvider(snapshot.Provider, resolved, launch) || !validAuditDeclarations(snapshot.AuditSources, snapshot.Provider.ProtocolVersion()) {
 		return false
 	}
 	if attempt.Owner != nil && !completeAttemptOwner(attempt.Owner) {

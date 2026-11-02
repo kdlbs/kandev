@@ -28,6 +28,15 @@ import (
 )
 
 func TestSandboxRuntimePreparesAndBindsPackagedProvider(t *testing.T) {
+	runPackagedProviderOwnership(t, false)
+}
+
+func TestFailedRecoveryPreservesRuntimeFilesWhileDescendantsAreAlive(t *testing.T) {
+	runPackagedProviderOwnership(t, true)
+}
+
+func runPackagedProviderOwnership(t *testing.T, failWhileLive bool) {
+	t.Helper()
 	packagePath := os.Getenv("KANDEV_TEST_SANDBOX_PACKAGE")
 	if packagePath == "" {
 		t.Skip("set KANDEV_TEST_SANDBOX_PACKAGE to a dedicated provider package")
@@ -136,6 +145,22 @@ func TestSandboxRuntimePreparesAndBindsPackagedProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "unknown", historical.Facts.Process.State, "restart cannot restore a live ownership handle from JSON")
 	require.Equal(t, launchReceipt, historical.Facts.LaunchChecks.Receipt)
+	if failWhileLive {
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			require.NoError(t, prepared.launch.Containment.Kill(cleanup))
+		})
+		_, err = policies.TransitionAttempt(ctx, "org", attempt.ID, attempt.Version, policy.AttemptFailed, nil)
+		require.NoError(t, err)
+		_, err = restartedManager.ReconcileAttempt(ctx, "org", attempt.ID)
+		require.Error(t, err, "a failed status does not prove that the sandbox has stopped")
+		require.DirExists(t, prepared.launch.Root)
+		require.NoError(t, prepared.launch.Containment.Kill(ctx))
+		_ = input.Close()
+		_ = command.Wait()
+		return
+	}
 	_, err = restartedManager.ReconcileAttempt(ctx, "org", prepared.Launch().AttemptID)
 	require.Error(t, err, "a live supervisor cannot be treated as a stopped attempt")
 	require.Error(t, prepared.Close(), "live processes prevent artifact removal")
@@ -151,6 +176,11 @@ func TestSandboxRuntimePreparesAndBindsPackagedProvider(t *testing.T) {
 	reconciled, err := restartedManager.ReconcileAttempt(ctx, "org", prepared.Launch().AttemptID)
 	require.NoError(t, err)
 	require.Equal(t, policy.AttemptStopped, reconciled.State)
+	recoveredReport, err := policies.ReadCapturedReport(ctx, "org", attempt.ID)
+	require.NoError(t, err, "recovery must retain final artifacts before removing runtime files even while the provider is disabled")
+	require.True(t, recoveredReport.Data.Finalized)
+	require.Equal(t, "unavailable", recoveredReport.Data.Status)
+	assertRuntimeFinalArchive(t, ctx, prepared, recoveredReport)
 	observed, err = restartedManager.Observe(ctx, "org", attempt.ID)
 	require.NoError(t, err)
 	require.True(t, observed.ValidFields())

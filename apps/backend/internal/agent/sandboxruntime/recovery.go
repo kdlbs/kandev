@@ -25,7 +25,7 @@ func (m *Manager) ReconcileAttempt(ctx context.Context, orgID, attemptID string)
 		return nil, err
 	}
 	if attempt.State == policy.AttemptStopped || attempt.State == policy.AttemptFailed {
-		return attempt, nil
+		return attempt, m.finishRecoveredArtifacts(ctx, attempt, false)
 	}
 	neverDispatched := attempt.State == policy.AttemptPrepared
 	if attempt.State != policy.AttemptRecoveryRequired {
@@ -43,10 +43,14 @@ func (m *Manager) ReconcileAttempt(ctx context.Context, orgID, attemptID string)
 	if err = m.releaseRecoveredState(attempt); err != nil {
 		return attempt, err
 	}
-	if err = m.removeRecoveredFiles(attempt.Snapshot.Launch); err != nil {
+	if _, err = m.validateRecoveredRoot(attempt.Snapshot.Launch); err != nil {
 		return attempt, err
 	}
-	return m.policies.TransitionAttempt(ctx, orgID, attempt.ID, attempt.Version, policy.AttemptStopped, nil)
+	attempt, err = m.policies.TransitionAttempt(ctx, orgID, attempt.ID, attempt.Version, policy.AttemptStopped, nil)
+	if err != nil {
+		return nil, err
+	}
+	return attempt, m.finishRecoveredArtifacts(ctx, attempt, true)
 }
 
 func recoveredSessionTerminated(owner *policy.AttemptOwner) bool {
@@ -78,25 +82,37 @@ func (m *Manager) releaseRecoveredState(attempt *policy.Attempt) error {
 }
 
 func (m *Manager) removeRecoveredFiles(launch *contract.Launch) error {
-	if launch == nil || filepath.Dir(launch.Root) != m.base || !strings.HasPrefix(filepath.Base(launch.Root), "attempt-") {
-		return policy.ErrConflict
-	}
-	base, err := filepath.EvalSymlinks(m.base)
-	if err != nil || base != m.base {
-		return policy.ErrConflict
-	}
-	before, err := os.Lstat(launch.Root)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil || launch.Validate() != nil {
-		return policy.ErrConflict
+	before, err := m.validateRecoveredRoot(launch)
+	if err != nil || before == nil {
+		return err
 	}
 	after, err := os.Lstat(launch.Root)
 	if err != nil || !os.SameFile(before, after) {
 		return policy.ErrConflict
 	}
 	return os.RemoveAll(launch.Root)
+}
+
+func (m *Manager) validateRecoveredRoot(launch *contract.Launch) (os.FileInfo, error) {
+	if launch == nil || filepath.Dir(launch.Root) != m.base || !strings.HasPrefix(filepath.Base(launch.Root), "attempt-") {
+		return nil, policy.ErrConflict
+	}
+	base, err := filepath.EvalSymlinks(m.base)
+	if err != nil || base != m.base {
+		return nil, policy.ErrConflict
+	}
+	before, err := os.Lstat(launch.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || launch.Validate() != nil {
+		return nil, policy.ErrConflict
+	}
+	after, err := os.Lstat(launch.Root)
+	if err != nil || !os.SameFile(before, after) {
+		return nil, policy.ErrConflict
+	}
+	return before, nil
 }
 
 func releaseRecoveredContainment(ctx context.Context, launch *contract.Launch) error {

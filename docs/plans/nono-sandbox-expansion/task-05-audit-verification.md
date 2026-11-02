@@ -160,3 +160,18 @@ owning-store descriptor includes both trust tables. The previous-stable manifest
 already records the entire sandbox store as absent, so no historical fixture
 or manifest exception was changed. SQL guard and scoped lint pass. No trust HTTP route or verification job is
 exposed by this storage checkpoint.
+
+Recovery retention now passes focused real-runtime checks. New typed-report
+attempts capture their bounded audit declarations. Empty declarations remain
+omitted from old snapshots and hashes. Recovery retains bytes without provider
+RPCs, stores an unavailable historical report with a separate artifact receipt,
+and retries removal when a stopped attempt still owns runtime files. A failed
+status cannot authorize removal while the supervisor or captured descendants
+are alive. The stopped-retry test preserves sibling allocations and the work
+directory. Full SQLite/PostgreSQL policy/runtime/common race suites and scoped
+Go lint pass after these changes.
+
+Verification jobs must still cancel and join before session archive removal.
+Backend restart must interrupt pending jobs without automatically verifying
+again. Job persistence, the operator API, host dispatch, and the desktop/phone
+action remain required. Tasks 06-10 remain pending.

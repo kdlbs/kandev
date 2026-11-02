@@ -12,11 +12,15 @@ import (
 )
 
 func (p *Prepared) retainFinalAudit(ctx context.Context, attempt *policy.Attempt, archive *contract.AuditArchive) (*policy.FinalAuditReceipt, error) {
+	return p.manager.retainFinalAudit(ctx, attempt, archive)
+}
+
+func (m *Manager) retainFinalAudit(ctx context.Context, attempt *policy.Attempt, archive *contract.AuditArchive) (*policy.FinalAuditReceipt, error) {
 	binding, err := policy.AuditBindingDigest(attempt)
 	if err != nil {
 		return nil, err
 	}
-	base := filepath.Join(p.manager.base, "audit-archives")
+	base := filepath.Join(m.base, "audit-archives")
 	if err = os.Mkdir(base, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}

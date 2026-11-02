@@ -12,7 +12,7 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if !s.enabled {
 		return AttemptSnapshot{}, ErrDisabled
 	}
-	if !validAttemptCapture(request) {
+	if !validAttemptCapture(request) || !validAuditDeclarations(request.AuditSources, request.Provider.ProtocolVersion()) {
 		return AttemptSnapshot{}, contract.ErrInvalidPolicy
 	}
 	resolved, previous, err := s.resolveCapture(ctx, request)
@@ -48,7 +48,7 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if err != nil {
 		return AttemptSnapshot{}, err
 	}
-	return AttemptSnapshot{LaunchChecks: request.LaunchChecks, RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
+	return AttemptSnapshot{AuditSources: slices.Clone(request.AuditSources), LaunchChecks: request.LaunchChecks, RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
 		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: grants, Ceiling: ceiling,
 		Launch: request.Launch.Clone(), Provider: request.Provider, CreatedAt: time.Now().UTC()}, nil
 }
