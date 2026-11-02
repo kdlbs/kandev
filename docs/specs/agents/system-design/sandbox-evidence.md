@@ -21,18 +21,18 @@ Nono session records and `inspect --json` still lack the effective-policy digest
 
 ## Independent facts
 
-Extend the common `Observation` and authenticated execution projection with versioned facts, rather than replacing `StatusActive` semantics. Each fact carries attempt ID, generation, source kind, observation time, optional expiry, and evidence digest where relevant.
+Extend the common `Observation` and authenticated execution projection with versioned facts, rather than replacing `StatusActive` semantics. Facts inherit the enclosing observation's attempt ID and generation. Each fact retains its own observation time, optional expiry, and evidence digest where relevant.
 
 - `process`: running, stopped, or unknown. Only core's current ownership verification can assert running. Use captured supervisor birth identity and owned containment, not a registry PID alone.
 - `launch_checks`: passed, failed, or unavailable. Record the named checks that actually completed, runtime/package/policy digests, and completion time. Configuration compilation is not a kernel check. Old snapshots have unavailable checks; never backfill from current settings.
 - `runtime_observations`: typed platform, detected ABI, execute-enforcement claim, and command-mediation state. Preserve provider source and collection time. Detected kernel capability differs from a runtime assertion that enforcement was installed. A one-time runtime event remains historical.
 - `audit`: independent coverage, integrity, finalization, and signer-trust results. No audit result controls current confinement status.
 
-`internal/agent/sandboxruntime/evidence.go` retains `boundConfinementEvidence`. The existing observer and `VerifyLive` supply process facts and bounded refresh. Do not introduce a browser polling loop or a provider-specific kernel probe in core.
+`internal/agent/sandboxruntime/evidence.go` retains `boundConfinementEvidence`. The existing observer supplies bounded refresh. The retained ownership handle checks process birth, ancestry, and containment independently of provider availability. `VerifyLive` retains its separate policy/provider authority checks for approvals and active confinement. Do not introduce a browser polling loop or a provider-specific kernel probe in core.
 
 ## Persistence and ordering
 
-Add an optional versioned facts payload to the existing execution observation model and attempt-bound persistence. Extend SQLite/PostgreSQL migrations and conformance manifests together. Legacy rows decode to explicit unavailable facts. Never alter immutable launch snapshots or revision hashes.
+Add an optional versioned facts payload to the existing execution observation model and attempt-bound persistence. The existing SQLite and PostgreSQL JSON payload columns store the optional facts without new DDL. Test round trips, backend-owner replacement, and legacy decoding against both databases. Legacy rows decode to explicit unavailable facts. Never alter immutable launch snapshots or revision hashes.
 
 Reuse session/attempt/generation/projection ordering in session reads, WebSocket handlers, and the session store. Backend-owner replacement and browser disconnect expire live facts. Historical checks and verified artifacts remain readable with their original timestamps. A new attempt starts with new live observations and cannot reuse a sibling's receipt.
 

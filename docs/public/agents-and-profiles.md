@@ -934,6 +934,13 @@ An unavailable provider or incompatible stored policy remains selected until an 
 
 Open **Execution details** from the session tab or its action menu. On a phone, use the labelled **Execution** control. The view separates the captured launch from current defaults for the next launch. Command previews omit private arguments and environment values. An active shield requires fresh evidence for that exact attempt. A wrapper name, installed provider, or old observation cannot establish active protection.
 
+Execution details shows four independent facts:
+
+- **Process** reports core-verified process ownership. An unavailable provider can coexist with a running process. Restart, disconnect, or an expired observation clears the live claim.
+- **Launch checks** records the completed policy, checksum, private-file, and process-containment preparation checks. This historical receipt does not prove current kernel confinement. Older attempts have no receipt.
+- **Runtime observations** preserves the provider's original event time and reported platform, detected ABI, execute enforcement, and command mediation. A conditional event can be missing. Repeated reads do not make it current.
+- **Audit** separates chain integrity, finalization, and signer trust. These facts cannot activate the shield. Unchecked means no verification result exists.
+
 A pending sandbox permission adds a request control beside Execution. Open it to inspect the operation, target, policy digest, and expiry. An authenticated administrator can select **Allow once** or **Deny**. Allow once applies to that operation and does not modify a saved policy. Sandbox decisions remain explicit even when the agent profile enables automatic ACP permission approval.
 
 The review stays open to show the delivery result. Expired, stale, disconnected, or read-only requests cannot be decided. A failed decision is not retried automatically. Check the refreshed record before trying again. You can also open recorded requests from **Execution details > Approvals**. Desktop and phone use the same records and authority rules.

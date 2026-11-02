@@ -29,7 +29,7 @@ type RuntimeRecord struct {
 }
 
 func (s RuntimeSource) Validate() error {
-	if s.Key == "" || len(s.Key) > 128 || strings.ContainsFunc(s.Key, unicode.IsControl) || (s.Kind != "identity" && s.Kind != "audit" && s.Kind != "status") {
+	if s.Key == "" || len(s.Key) > 128 || strings.ContainsFunc(s.Key, unicode.IsControl) || (s.Kind != "identity" && s.Kind != RuntimeSourceAudit && s.Kind != "status") {
 		return ErrInvalidPolicy
 	}
 	if !validSourceLocation(s) || !validSourceLimits(s) {

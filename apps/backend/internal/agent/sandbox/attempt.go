@@ -35,19 +35,21 @@ func (p AttemptProvider) ProtocolVersion() uint32 {
 }
 
 type CaptureRequest struct {
-	RestartOf   string
-	Selection   SelectionContext
-	Resolved    *Resolved
-	SessionID   string
-	ExecutionID string
-	AgentState  *contract.AgentState
-	WorkDir     string
-	Launch      *contract.Launch
-	Provider    AttemptProvider
+	LaunchChecks *contract.LaunchCheckReceipt
+	RestartOf    string
+	Selection    SelectionContext
+	Resolved     *Resolved
+	SessionID    string
+	ExecutionID  string
+	AgentState   *contract.AgentState
+	WorkDir      string
+	Launch       *contract.Launch
+	Provider     AttemptProvider
 }
 
 // AttemptSnapshot is private launch evidence. It is never a public API projection.
 type AttemptSnapshot struct {
+	LaunchChecks   *contract.LaunchCheckReceipt `json:"launch_checks,omitempty"`
 	RestartReview  *RestartReviewReceipt        `json:"restart_review,omitempty"`
 	RestartOf      string                       `json:"restart_of,omitempty"`
 	RestartVersion int64                        `json:"restart_version,omitempty"`

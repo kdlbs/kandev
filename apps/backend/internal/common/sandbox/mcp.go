@@ -28,5 +28,5 @@ func validMCPRoute(raw string) bool {
 }
 
 func validMCPEndpoint(parsed *url.URL) bool {
-	return parsed.Scheme == "http" && parsed.Hostname() == "127.0.0.1" && parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == "" && parsed.RawFragment == "" && parsed.RawPath == ""
+	return parsed.Scheme == ProtocolHTTP && parsed.Hostname() == "127.0.0.1" && parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == "" && parsed.RawFragment == "" && parsed.RawPath == ""
 }

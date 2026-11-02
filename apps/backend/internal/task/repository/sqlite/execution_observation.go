@@ -62,6 +62,7 @@ func (r *Repository) RecordExecutionObservation(ctx context.Context, token strin
 	value := &models.ExecutionObservation{SchemaVersion: 1, ObserverGeneration: generation, Revision: 1, SessionID: snapshot.SessionID, TaskID: snapshot.TaskID, SnapshotSequence: snapshot.Sequence, Observation: observation}
 	if previous != nil {
 		value.Revision = previous.Revision + 1
+		preserveExecutionHistory(value, previous)
 		if value.EvidenceAt == nil {
 			value.EvidenceAt = previous.EvidenceAt
 			value.Mechanism = previous.Mechanism
@@ -163,6 +164,7 @@ func decodeExecutionObservation(payload string, snapshot *models.ExecutionSnapsh
 	if !observationMatchesSnapshot(&value, snapshot) {
 		return nil
 	}
+	value.InvalidateLiveFacts(now, value.ObserverGeneration != generation)
 	if value.ObserverGeneration != generation {
 		value.ProviderHealth = contract.HealthUnknown
 		if value.Status != contract.StatusStopped && value.Status != contract.StatusFailed {
@@ -180,10 +182,10 @@ func decodeExecutionObservation(payload string, snapshot *models.ExecutionSnapsh
 
 func validObservationInput(snapshot *models.ExecutionSnapshot, value contract.Observation) bool {
 	return snapshot != nil && snapshot.Sandbox != nil && value.AttemptID == snapshot.AttemptID &&
-		value.Generation == snapshot.Sandbox.Generation && value.ValidFields() && value.Fresh(time.Now())
+		value.Generation == snapshot.Sandbox.Generation && launchFactsMatchSnapshot(value.Facts, snapshot) && value.ValidFields() && value.Fresh(time.Now())
 }
 
 func observationMatchesSnapshot(value *models.ExecutionObservation, snapshot *models.ExecutionSnapshot) bool {
 	return value.SessionID == snapshot.SessionID && value.TaskID == snapshot.TaskID && value.AttemptID == snapshot.AttemptID &&
-		value.SnapshotSequence == snapshot.Sequence && value.Generation == snapshot.Sandbox.Generation
+		value.SnapshotSequence == snapshot.Sequence && value.Generation == snapshot.Sandbox.Generation && launchFactsMatchSnapshot(value.Facts, snapshot)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -52,7 +53,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if m.closed {
 		return nil, policy.ErrConflict
 	}
-	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{ProtocolMajor: binding.ProtocolVersion(), PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
+	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{LaunchChecks: &contract.LaunchCheckReceipt{CheckedAt: time.Now().UTC(), PolicyDigest: p.launch.PolicyDigest, PackageDigest: p.launch.PackageDigest, RuntimeDigest: binary.Digest, Checks: []string{"policy_ceiling", "runtime_checksum", "private_artifacts", "process_containment"}}, RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{ProtocolMajor: binding.ProtocolVersion(), PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 		return nil, nil, contract.Grants{}, err
 	}
 	p.description = description.Description
-	if !slices.Contains(p.description.SupportedTransports, sandboxLocalTransport) {
+	if !slices.Contains(p.description.SupportedTransports, sandboxLocalTransport) || p.binding.ProtocolVersion() == 2 && !slices.Contains(p.description.GetCapabilitiesV2().GetPolicySchemas(), uint32(1)) {
 		return nil, nil, contract.Grants{}, policy.ErrIneligible
 	}
 	binary, err := p.manager.providers.ReadSandboxRuntime(ctx, p.binding, p.description.RuntimeArtifact)

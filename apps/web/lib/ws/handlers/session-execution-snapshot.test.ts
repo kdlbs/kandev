@@ -127,6 +127,36 @@ const selected: ExecutionSnapshot = {
   },
 };
 const observation: ExecutionObservation = {
+  facts: {
+    schema_version: 1,
+    process: {
+      state: "running",
+      checked_at: "2026-10-24T00:00:00Z",
+      valid_until: "2026-10-24T00:00:30Z",
+    },
+    launch_checks: {
+      state: "passed",
+      receipt: {
+        checked_at: initialTime,
+        policy_digest: "c".repeat(64),
+        package_digest: "a".repeat(64),
+        runtime_digest: "b".repeat(64),
+        checks: ["policy_ceiling", "runtime_checksum", "private_artifacts", "process_containment"],
+      },
+    },
+    runtime: {
+      state: "reported",
+      observations: [
+        {
+          source_id: "runtime.v2",
+          evidence_digest: "e".repeat(64),
+          observed_at: initialTime,
+          platform: "linux",
+        },
+      ],
+    },
+    audit: { integrity: "unchecked", finalization: "unknown", signer: "unchecked" },
+  },
   schema_version: 1,
   observer_generation: 2,
   revision: 3,
@@ -218,6 +248,10 @@ it("invalidates live observations on connection loss until a newer server observ
   store.getState().setConnectionStatus("disconnected");
   const invalidated = current();
   expect(invalidated?.status).toBe("unknown");
+  expect(invalidated!.facts!.process.state).toBe("unknown");
+  expect(invalidated!.facts!.launch_checks).toEqual(observation.facts!.launch_checks);
+  expect(invalidated!.facts!.runtime.state).toBe("unavailable");
+  expect(invalidated!.facts!.runtime.observations).toEqual(observation.facts!.runtime.observations);
   expect(invalidated?.evidence_at).toBe(observation.evidence_at);
   expect(invalidated?.valid_until).toBeUndefined();
   expect(
@@ -226,6 +260,7 @@ it("invalidates live observations on connection loss until a newer server observ
   store.getState().setConnectionStatus("connected");
   emit(observation);
   expect(current()?.status).toBe("unknown");
+  expect(current()!.facts!.process.state).toBe("unknown");
   emit({ ...observation, revision: 4 });
   expect(current()?.status).toBe("active");
   store.getState().setConnectionStatus("reconnecting");

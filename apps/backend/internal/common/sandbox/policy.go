@@ -148,7 +148,7 @@ func canonicalPath(path string) (string, error) {
 }
 
 func validRoute(grant NetworkGrant) bool {
-	if grant.Port == 0 || (grant.Protocol != ProtocolHTTPS && grant.Protocol != "http" && grant.Protocol != "tcp") {
+	if grant.Port == 0 || (grant.Protocol != ProtocolHTTPS && grant.Protocol != ProtocolHTTP && grant.Protocol != "tcp") {
 		return false
 	}
 	if addr, err := netip.ParseAddr(grant.Host); err == nil {

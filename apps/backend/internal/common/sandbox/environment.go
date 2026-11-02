@@ -6,6 +6,13 @@ import (
 )
 
 const (
+	environmentPythonPath   = "PYTHONPATH"
+	environmentPythonHome   = "PYTHONHOME"
+	environmentRubyOptions  = "RUBYOPT"
+	environmentPerlOptions  = "PERL5OPT"
+	environmentShellOptions = "SHELLOPTS"
+	environmentBashOptions  = "BASHOPTS"
+
 	environmentHome       = "HOME"
 	environmentBashEnv    = "BASH_ENV"
 	environmentShellEnv   = "ENV"
@@ -48,5 +55,5 @@ func privateEnvironmentKey(key string) bool {
 			return true
 		}
 	}
-	return slices.Contains([]string{environmentHome, environmentTempDir, "TMP", "TEMP", environmentPath, environmentBashEnv, environmentShellEnv, "NODE_OPTIONS", "PYTHONPATH", "PYTHONHOME", "RUBYOPT", "PERL5OPT", "SHELLOPTS", "BASHOPTS"}, key)
+	return slices.Contains([]string{environmentHome, environmentTempDir, "TMP", "TEMP", environmentPath, environmentBashEnv, environmentShellEnv, environmentNodeOptions, environmentPythonPath, environmentPythonHome, environmentRubyOptions, environmentPerlOptions, environmentShellOptions, environmentBashOptions}, key)
 }

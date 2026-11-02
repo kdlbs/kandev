@@ -7,6 +7,7 @@ import { isExecutionObservationBound } from "@/lib/execution-status";
 import { sandboxMessageKey } from "@/lib/sandbox-messages";
 import type { ExecutionSnapshot } from "@/lib/types/execution";
 import { SandboxPermissions } from "@/components/settings/sandbox-permissions";
+import { ExecutionFactsDetails } from "./execution-facts";
 import { CommandDetails } from "./execution-command-details";
 import { NextExecutionCommand } from "./next-execution-command";
 import { SandboxApprovals } from "./sandbox-approvals";
@@ -81,7 +82,7 @@ function CapturedLaunch({ snapshot }: { snapshot: ExecutionSnapshot }) {
 }
 
 function useExecutionDetails({ sessionId }: { sessionId: string }) {
-  const { session, status } = useSessionExecution(sessionId);
+  const { session, status, facts } = useSessionExecution(sessionId);
   const candidate = session?.execution_snapshot;
   const snapshot =
     candidate?.schema_version === 1 &&
@@ -93,12 +94,12 @@ function useExecutionDetails({ sessionId }: { sessionId: string }) {
     ? session.execution_observation
     : null;
   const policies = useExecutionPolicyDetails(snapshot);
-  return { status, snapshot, observation, policies };
+  return { status, snapshot, observation, policies, facts };
 }
 
 export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
-  const { status, snapshot, observation, policies } = useExecutionDetails({ sessionId });
+  const { status, snapshot, observation, policies, facts } = useExecutionDetails({ sessionId });
   return (
     <>
       <div className="space-y-2">
@@ -117,6 +118,7 @@ export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
           </div>
         )}
       </div>
+      {snapshot?.sandbox && <ExecutionFactsDetails facts={facts} />}
       <ExecutionDetailSection title={t("agents:executionThisAttempt")}>
         {snapshot ? (
           <CapturedLaunch snapshot={snapshot} />

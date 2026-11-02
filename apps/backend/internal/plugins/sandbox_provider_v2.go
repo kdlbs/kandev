@@ -182,9 +182,6 @@ func validateSandboxObservationsV2(req *pluginsdk.NormalizeSandboxStatusRequest,
 			return err
 		}
 	}
-	if value.Evidence == nil && value.Identity == nil && len(value.ObservationsV2) == 0 {
-		return errSandboxProviderReply
-	}
 	for _, fact := range value.ObservationsV2 {
 		if fact == nil || fact.SourceId != req.EvidenceSchema || !validSandboxText(fact.SourceId, 128) || fact.ObservedAtUnixMs <= 0 || !slices.Contains([]string{sandboxPlatformLinux, sandboxV2MacOS}, fact.Platform) || !sandboxUniqueTextV2(fact.Limitations, 32, 512) {
 			return errSandboxProviderReply

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
 
 func (m *Manager) RefreshReport(ctx context.Context, orgID, attemptID string) (*policy.Report, error) {
@@ -53,7 +54,7 @@ func unavailableReport(previous *policy.Report) policy.ReportData {
 	if previous != nil {
 		data = previous.Data
 	}
-	data.Status = "unavailable"
+	data.Status = contract.FactUnavailable
 	data.Complete = false
 	return data
 }

@@ -1,6 +1,7 @@
 import { sessionId as toSessionId, taskId as toTaskId } from "./types/ids";
 import { describe, expect, it } from "vitest";
 import type { ExecutionObservation, ExecutionSnapshot } from "./types/execution";
+import { getExecutionFacts, executionObservationDeadline } from "./execution-facts";
 import { getExecutionStatus } from "./execution-status";
 
 const now = Date.parse("2026-10-24T00:00:01Z");
@@ -149,4 +150,148 @@ describe("truthful execution status", () => {
       ),
     ).toBe("unknown");
   });
+});
+
+const facts = {
+  schema_version: 1 as const,
+  process: {
+    state: "running" as const,
+    checked_at: active.checked_at,
+    valid_until: "2026-10-24T00:00:31Z",
+  },
+  launch_checks: {
+    state: "passed" as const,
+    receipt: {
+      checked_at: active.checked_at,
+      policy_digest: snapshot.sandbox!.policy_digest,
+      package_digest: snapshot.sandbox!.package_digest,
+      runtime_digest: snapshot.sandbox!.runtime_digest,
+      checks: ["policy_ceiling", "runtime_checksum", "private_artifacts", "process_containment"],
+    },
+  },
+  runtime: {
+    state: "reported" as const,
+    observations: [
+      {
+        source_id: "runtime.v2",
+        evidence_digest: "a".repeat(64),
+        observed_at: "2026-10-23T00:00:00Z",
+        platform: "linux" as const,
+        landlock_abi: 5,
+        execute_enforced: true,
+        command_mediation_active: true,
+      },
+    ],
+  },
+  audit: {
+    integrity: "unchecked" as const,
+    finalization: "unknown" as const,
+    signer: "unchecked" as const,
+  },
+};
+const running = {
+  ...session,
+  execution_observation: {
+    ...active,
+    status: "unknown" as const,
+    provider_health: "unavailable" as const,
+    facts,
+  },
+};
+
+describe("independent execution facts", () => {
+  it("shows owned liveness independently and never upgrades confinement", () => {
+    expect(getExecutionFacts(running, "connected", now)?.process.state).toBe("running");
+    expect(getExecutionStatus(running, "connected", now)).toBe("unknown");
+    expect(
+      getExecutionFacts(running, "connected", now)?.runtime.observations?.[0].observed_at,
+    ).toBe("2026-10-23T00:00:00Z");
+  });
+  it("expires liveness on disconnect or deadline while retaining history", () => {
+    for (const value of [
+      getExecutionFacts(running, "disconnected", now),
+      getExecutionFacts(running, "connected", now + 30_000),
+    ]) {
+      expect(value?.process.state).toBe("unknown");
+      expect(value?.launch_checks.receipt).toEqual(facts.launch_checks.receipt);
+    }
+  });
+  it.each(["0", "2026-02-30T00:00:00Z", "2026-10-24T00:00:02Z"])(
+    "rejects malformed or future process time %s",
+    (checked_at) => {
+      const value = {
+        ...running,
+        execution_observation: {
+          ...running.execution_observation,
+          facts: { ...facts, process: { ...facts.process, checked_at } },
+        },
+      };
+      expect(getExecutionFacts(value, "connected", now)?.process.state).toBe("unknown");
+    },
+  );
+  it("does not reuse sibling facts or invent launch receipts for old rows", () => {
+    expect(
+      getExecutionFacts(
+        {
+          ...running,
+          execution_observation: { ...running.execution_observation, attempt_id: "sibling" },
+        },
+        "connected",
+        now,
+      ),
+    ).toBeNull();
+    expect(getExecutionFacts(session, "connected", now)?.launch_checks.state).toBe("unavailable");
+    const value = {
+      ...running,
+      execution_observation: {
+        ...running.execution_observation,
+        facts: {
+          ...facts,
+          launch_checks: {
+            ...facts.launch_checks,
+            receipt: { ...facts.launch_checks.receipt, policy_digest: "f".repeat(64) },
+          },
+        },
+      },
+    };
+    expect(getExecutionFacts(value, "connected", now)?.launch_checks.state).toBe("unavailable");
+  });
+});
+
+it("schedules process expiry when confinement is unknown and after an earlier evidence deadline", () => {
+  const value = {
+    ...session,
+    execution_observation: {
+      ...active,
+      status: "unknown" as const,
+      facts: {
+        schema_version: 1 as const,
+        process: {
+          state: "running" as const,
+          checked_at: active.checked_at,
+          valid_until: "2026-10-24T00:00:31Z",
+        },
+        launch_checks: { state: "unavailable" as const },
+        runtime: { state: "missing" as const },
+        audit: {
+          integrity: "unchecked" as const,
+          finalization: "unknown" as const,
+          signer: "unchecked" as const,
+        },
+      },
+    },
+  };
+  expect(
+    executionObservationDeadline(value as Parameters<typeof executionObservationDeadline>[0], now),
+  ).toBe(now + 30_000);
+  const withActive = {
+    ...value,
+    execution_observation: { ...value.execution_observation, status: "active" as const },
+  };
+  expect(
+    executionObservationDeadline(
+      withActive as Parameters<typeof executionObservationDeadline>[0],
+      now + 29_000,
+    ),
+  ).toBe(now + 30_000);
 });

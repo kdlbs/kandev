@@ -149,7 +149,7 @@ Files are under `apps/web/e2e/tests/task/`, except editor files under `settings/
 
 - [x] [Task 01: Migrate the plugin SDK and evaluate pinned Nono 0.81.0](task-01-sdk-runtime.md)
 - [x] [Task 02: Add compatible major 2 provider contracts](task-02-provider-protocol.md)
-- [ ] [Task 03: Show separate process and launch evidence](task-03-runtime-facts.md)
+- [x] [Task 03: Show separate process and launch evidence](task-03-runtime-facts.md)
 - [ ] [Task 04: Expose network and command audit reports](task-04-typed-reports.md)
 - [ ] [Task 05: Verify finalized audit artifacts against explicit trust](task-05-audit-verification.md)
 - [ ] [Task 06: Deliver exact connection approvals and policy envelopes](task-06-network-approvals.md)
@@ -171,7 +171,7 @@ Design validation passed on 2026-10-30:
 - All work-order dependency references, 15 new documents' local links, and verification-block shell syntax passed.
 - `git diff --check`: passed. All new artifacts are visible in the specification catalog or plan directory.
 
-All implementation, browser, and runtime checks remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
+Task-level results are recorded in each work order. Tasks 01-03 passed their required checks. Tasks 04-10 remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
 
 Leave this package unstaged and uncommitted for review. After a later explicit implementation request, use TDD per work order. Update host PR #4769 and companion PR #2 within existing authorization after their affected checks pass. A production plugin release additionally requires the public compatible SDK dependency and independent package validation. No merge is authorized.
 
@@ -181,4 +181,8 @@ The candidate's network request identity differs from file requests. Conditional
 
 ## Implementation authorization (2026-11-02)
 
-The user explicitly requested implementation of this package. Task 01 is in progress in the primary session. The design checkpoint above is historical. Existing branch/PR authorization remains; do not merge or change retained instances.
+The user explicitly requested implementation of this package. Implementation follows the ten sequential work orders in the primary session. The design checkpoint above is historical. Existing branch/PR authorization remains; do not merge or change retained instances.
+
+## Foundation delivery checkpoint (2026-11-02)
+
+Tasks 01 and 02 are complete. Host foundation `7545c750c150` is pushed to the existing feature branch/PR. Task 03 is complete: independent facts, captured launch receipts, runtime metadata, SQLite/PostgreSQL persistence, localized desktop/phone UI, and rendered expiry checks passed. Task 04 is next. GitHub reports new conflicts against moving main; integration is required before final managed acceptance. No PR merge is authorized.

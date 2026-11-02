@@ -88,3 +88,10 @@ func TestSandboxV2AuditVerificationRequiresExplicitTrust(t *testing.T) {
 	report.Verification.ExpectedKeyFingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	require.Error(t, validateSandboxReportV2(request, report))
 }
+
+func TestSandboxV2MissingRuntimeEventIsNotAnRPCFailure(t *testing.T) {
+	request := &pluginsdk.NormalizeSandboxStatusRequest{Context: &pluginsdk.SandboxRequestContext{ProtocolMajor: 2}, EvidenceSchema: "runtime.v2"}
+	require.NoError(t, validateSandboxReplyPayload(request, &pluginsdk.NormalizeSandboxStatusResponse{}), "the runtime may not emit a conditional event")
+	request.Context.ProtocolMajor = 1
+	require.Error(t, validateSandboxReplyPayload(request, &pluginsdk.NormalizeSandboxStatusResponse{}))
+}

@@ -53,6 +53,44 @@ export async function projectExecutionFixture(page: Page, id: string) {
         },
       },
       execution_observation: {
+        facts: {
+          schema_version: 1,
+          process: {
+            state: "running",
+            checked_at: now,
+            valid_until: new Date(nowMs + 30_000).toISOString(),
+          },
+          launch_checks: {
+            state: "passed",
+            receipt: {
+              checked_at: now,
+              policy_digest: "c".repeat(64),
+              package_digest: "a".repeat(64),
+              runtime_digest: "b".repeat(64),
+              checks: [
+                "policy_ceiling",
+                "runtime_checksum",
+                "private_artifacts",
+                "process_containment",
+              ],
+            },
+          },
+          runtime: {
+            state: "reported",
+            observations: [
+              {
+                source_id: "runtime.v2",
+                evidence_digest: "e".repeat(64),
+                observed_at: new Date(nowMs - 60_000).toISOString(),
+                platform: "linux",
+                landlock_abi: 5,
+                execute_enforced: true,
+                command_mediation_active: true,
+              },
+            ],
+          },
+          audit: { integrity: "unchecked", finalization: "unknown", signer: "unchecked" },
+        },
         schema_version: 1,
         observer_generation: 100,
         revision: 1,
@@ -125,11 +163,17 @@ export function executionDetailsScenario() {
     await expect(dialog.getByText("fixture-wrapper", { exact: true })).toBeVisible();
     await expect(dialog.getByText("Verified mechanism: fixture-kernel")).toBeVisible();
     await expect(dialog.getByText(/Denial reports are unavailable/)).toBeAttached();
+    const facts = dialog.getByTestId("execution-facts");
+    await expect(facts.getByRole("heading", { name: "Launch checks", exact: true })).toBeAttached();
+    await expect(facts.getByText("Passed", { exact: true })).toBeAttached();
+    await expect(facts.getByText("Detected Landlock ABI", { exact: true })).toBeAttached();
+    await expect(facts.getByTestId("execution-process-state")).toHaveText("Running");
     await assertNoDocumentHorizontalOverflow(testPage, "execution details");
     const body = dialog.getByTestId("execution-details-body");
     expect(await body.evaluate((element) => getComputedStyle(element).overscrollBehaviorY)).toBe(
       "contain",
     );
+    await facts.scrollIntoViewIfNeeded();
     await dialog.screenshot({ path: testInfo.outputPath("execution-details.png") });
     if (mobile) {
       for (const width of [393, 700, 767]) {
@@ -141,8 +185,61 @@ export function executionDetailsScenario() {
         await assertNoDocumentHorizontalOverflow(testPage, `execution details at ${width}`);
       }
     }
+    if (!mobile) {
+      await testPage.setViewportSize({ width: 767, height: 851 });
+      // Open the selected record from its menu without changing the active session.
+      await testPage.getByTestId("mobile-sessions-pill").click();
+      await testPage
+        .getByTestId(`mobile-session-row-${sessionId}`)
+        .getByRole("button", { name: "Session actions" })
+        .click();
+      await testPage.getByRole("menuitem", { name: "Execution details", exact: true }).click();
+      const back = dialog.getByRole("button", { name: "Back", exact: true });
+      await expect(back).toBeVisible();
+      expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await assertNoDocumentHorizontalOverflow(testPage, "narrow fine-pointer execution facts");
+      await testPage.setViewportSize({ width: 768, height: 851 });
+      await expect(testPage.getByTestId("mobile-sessions-pill")).not.toBeVisible();
+      await expect(trigger).toBeVisible();
+      if (!(await dialog.isVisible())) await trigger.click();
+      await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+      expect((await dialog.boundingBox())!.width).toBeLessThan(768);
+    }
+    await testPage.evaluate((id) => {
+      const state = (
+        window as unknown as { __KANDEV_E2E_STORE__: { getState(): AppState } }
+      ).__KANDEV_E2E_STORE__.getState();
+      const session = state.taskSessions.items[id];
+      const observation = session.execution_observation!;
+      const checked = new Date(Date.now() - 27_000).toISOString();
+      state.upsertTaskSessionFromEvent(session.task_id, {
+        ...session,
+        execution_observation: {
+          ...observation,
+          revision: observation.revision + 1,
+          checked_at: new Date().toISOString(),
+          status: "unknown",
+          provider_health: "unavailable",
+          facts: {
+            ...observation.facts!,
+            process: {
+              state: "running",
+              checked_at: checked,
+              valid_until: new Date(Date.parse(checked) + 30_000).toISOString(),
+            },
+          },
+        },
+      });
+    }, sessionId);
+    await expect(facts.getByTestId("execution-process-state")).toHaveText("Running");
+    await expect(dialog.getByRole("status").filter({ hasText: /^Unknown$/ })).toBeVisible();
+    await expect(facts.getByTestId("execution-process-state")).toHaveText("Unknown", {
+      timeout: 6000,
+    });
+    await expect(facts.getByText("Passed", { exact: true })).toBeAttached();
     await dialog.getByRole("button", { name: mobile ? "Back" : "Close", exact: true }).click();
     await expect(dialog).not.toBeVisible();
+    await expect(trigger).toHaveAccessibleName(/Unknown/);
     await expect(trigger).toBeFocused();
     expect(
       await testPage.evaluate(

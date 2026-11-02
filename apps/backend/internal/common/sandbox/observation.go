@@ -20,16 +20,17 @@ const (
 
 // Observation separates current confinement evidence from provider availability.
 type Observation struct {
-	AttemptID      string     `json:"attempt_id"`
-	Generation     uint64     `json:"generation"`
-	AttemptVersion int64      `json:"attempt_version"`
-	Status         string     `json:"status"`
-	ProviderHealth string     `json:"provider_health"`
-	Reason         string     `json:"reason"`
-	Mechanism      string     `json:"mechanism,omitempty"`
-	CheckedAt      time.Time  `json:"checked_at"`
-	EvidenceAt     *time.Time `json:"evidence_at,omitempty"`
-	ValidUntil     *time.Time `json:"valid_until,omitempty"`
+	Facts          *ExecutionFacts `json:"facts,omitempty"`
+	AttemptID      string          `json:"attempt_id"`
+	Generation     uint64          `json:"generation"`
+	AttemptVersion int64           `json:"attempt_version"`
+	Status         string          `json:"status"`
+	ProviderHealth string          `json:"provider_health"`
+	Reason         string          `json:"reason"`
+	Mechanism      string          `json:"mechanism,omitempty"`
+	CheckedAt      time.Time       `json:"checked_at"`
+	EvidenceAt     *time.Time      `json:"evidence_at,omitempty"`
+	ValidUntil     *time.Time      `json:"valid_until,omitempty"`
 }
 
 func (o Observation) ValidFields() bool {
@@ -42,10 +43,13 @@ func (o Observation) ValidFields() bool {
 	if !slices.Contains([]string{"", "provider_unavailable", "ownership_unavailable", "evidence_unavailable", "launch_failed"}, o.Reason) {
 		return false
 	}
-	if o.EvidenceAt != nil && (o.EvidenceAt.IsZero() || o.EvidenceAt.After(o.CheckedAt) || !ValidMechanismKey(o.Mechanism)) {
+	if !o.validEvidenceIdentity() {
 		return false
 	}
 	if o.EvidenceAt == nil && o.Mechanism != "" {
+		return false
+	}
+	if !o.Facts.valid(o) {
 		return false
 	}
 	return o.validEvidenceWindow()
@@ -71,4 +75,8 @@ func ValidMechanismKey(key string) bool {
 		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
 		return !valid
 	})
+}
+
+func (o Observation) validEvidenceIdentity() bool {
+	return o.EvidenceAt == nil || !o.EvidenceAt.IsZero() && !o.EvidenceAt.After(o.CheckedAt) && ValidMechanismKey(o.Mechanism)
 }

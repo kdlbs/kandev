@@ -2,7 +2,6 @@ package sandboxruntime
 
 import (
 	"context"
-	"slices"
 	"time"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -17,6 +16,26 @@ type Observation = contract.Observation
 func (m *Manager) Observe(ctx context.Context, orgID, attemptID string) (*Observation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	result, err := m.observe(ctx, orgID, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := m.policies.ReadAttempt(ctx, orgID, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Version != result.AttemptVersion {
+		return initialObservation(current), nil
+	}
+	result.CheckedAt = time.Now().UTC()
+	result.InvalidateLiveFacts(result.CheckedAt, false)
+	if !result.Fresh(result.CheckedAt) {
+		result.Status, result.Reason, result.ValidUntil = contract.StatusUnknown, "evidence_unavailable", nil
+	}
+	return result, nil
+}
+
+func (m *Manager) observe(ctx context.Context, orgID, attemptID string) (*Observation, error) {
 	attempt, err := m.policies.ReadAttempt(ctx, orgID, attemptID)
 	if err != nil {
 		return nil, err
@@ -25,10 +44,12 @@ func (m *Manager) Observe(ctx context.Context, orgID, attemptID string) (*Observ
 	if attempt.State == policy.AttemptStopped || attempt.State == policy.AttemptFailed {
 		return result, nil
 	}
+	m.observeProcess(ctx, attempt, result)
 	provider := attempt.Snapshot.Provider
 	binding, err := m.selectProvider(ctx, provider.InstallationID, provider.Key)
 	if err != nil || binding.ProtocolVersion() != provider.ProtocolVersion() || binding.Version != provider.Version || binding.PackageDigest != provider.PackageDigest {
 		result.Status, result.ProviderHealth, result.Reason = contract.StatusUnknown, contract.HealthUnavailable, "provider_unavailable"
+		result.Facts.Runtime.State = contract.FactUnavailable
 		return result, nil
 	}
 	result.ProviderHealth = contract.HealthAvailable
@@ -40,11 +61,12 @@ func (m *Manager) Observe(ctx context.Context, orgID, attemptID string) (*Observ
 
 func (m *Manager) observeRunning(ctx context.Context, attempt *policy.Attempt, result *Observation) (*Observation, error) {
 	prepared, err := m.retained(attempt.Snapshot.OrgID, attempt.ID)
-	if err != nil || m.VerifyLive(ctx, attempt) != nil {
+	if err != nil || attempt.Owner == nil || prepared.verifyProcesses(ctx, attempt.Owner) != nil {
 		result.Reason = ownershipUnavailableReason
 		return result, nil
 	}
-	evidence, err := prepared.readStatusEvidence(ctx, attempt)
+	evidence, err := prepared.readStatusFacts(ctx, attempt, result)
+	result.CheckedAt = time.Now().UTC()
 	if err != nil || evidence == nil || ctx.Err() != nil {
 		return result, nil
 	}
@@ -92,6 +114,7 @@ func freshConfinementEvidence(evidence *pluginsdk.SandboxStatusEvidence, now tim
 func initialObservation(attempt *policy.Attempt) *Observation {
 	result := &Observation{AttemptID: attempt.ID, Generation: attempt.Snapshot.Launch.Generation,
 		AttemptVersion: attempt.Version, Status: contract.StatusUnknown, ProviderHealth: contract.HealthUnknown, Reason: "evidence_unavailable", CheckedAt: time.Now().UTC()}
+	result.Facts = initialFacts(attempt, result.CheckedAt)
 	switch attempt.State {
 	case policy.AttemptPrepared:
 		result.Status, result.Reason = contract.StatusConfigured, ""
@@ -105,34 +128,4 @@ func initialObservation(attempt *policy.Attempt) *Observation {
 		result.Reason = ownershipUnavailableReason
 	}
 	return result
-}
-
-func (p *Prepared) readStatusEvidence(ctx context.Context, attempt *policy.Attempt) (*pluginsdk.SandboxStatusEvidence, error) {
-	var matched *pluginsdk.SandboxStatusEvidence
-	for _, source := range p.description.RuntimeSources {
-		if source.Kind != "status" || !slices.Contains(p.description.EvidenceSchemas, source.Key) {
-			continue
-		}
-		records, err := contract.ReadRuntimeSource(ctx, p.files.Directories.State, contract.RuntimeSource{
-			Key: source.Key, Kind: source.Kind, Directory: source.RelativeDirectory, Suffix: source.FilenameSuffix,
-			MaxDepth: source.MaxDepth, MaxFiles: source.MaxFiles, MaxBytes: source.MaxBytes})
-		if err != nil {
-			return nil, err
-		}
-		for _, record := range records {
-			response, err := p.manager.providers.NormalizeSandboxStatus(ctx, p.binding, &pluginsdk.NormalizeSandboxStatusRequest{
-				Context: p.operation(), Policy: p.policy, Process: &pluginsdk.SandboxProcessIdentity{Pid: int64(attempt.Owner.SupervisorPID), BirthId: attempt.Owner.SupervisorBirth}, Evidence: record.Content, EvidenceSchema: source.Key})
-			if err != nil {
-				return nil, err
-			}
-			if !boundConfinementEvidence(response.Evidence, attempt, time.Now()) {
-				continue
-			}
-			if matched != nil {
-				return nil, policy.ErrConflict
-			}
-			matched = response.Evidence
-		}
-	}
-	return matched, nil
 }

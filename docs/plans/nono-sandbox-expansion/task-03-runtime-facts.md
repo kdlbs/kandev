@@ -1,7 +1,7 @@
 ---
 id: "03-runtime-facts"
 title: "Show separate process and launch evidence"
-status: pending
+status: done
 wave: 3
 depends_on: 
   - "02-provider-protocol"
@@ -92,7 +92,7 @@ Also run `(cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run 
 
 ## Risks
 
-A runtime event emitted once must not gain a new observation timestamp on each read. SQLite and PostgreSQL need equivalent migrations.
+A runtime event emitted once must not gain a new observation timestamp on each read. SQLite and PostgreSQL need equivalent persistence and invalidation checks. The optional facts use existing JSON columns, so this change requires no new DDL.
 
 ## Parallelism
 
@@ -105,4 +105,13 @@ A runtime event emitted once must not gain a new observation timestamp on each r
 
 ## Results
 
-Pending.
+Implemented in the primary session on 2026-11-02. All Task 03 delivery checks passed.
+
+- Added optional versioned facts to the existing observation JSON. SQLite and PostgreSQL round trips cover receipt binding, expiry, backend-owner replacement, failed refresh, and legacy observations. No DDL is required.
+- Core process ownership remains useful during provider loss. `VerifyLive` retains the policy/provider checks required for approvals and active confinement. New launch receipts name preparation checks and bind policy, package, and runtime digests. Old attempts have no invented receipt.
+- Nono major 2 reports conditional runtime metadata from the captured session's verified audit chain. Original timestamps remain unchanged. Missing events, optional fields, siblings, malformed values, and tampering have dedicated tests. The actual packaged default launch reports missing metadata without claiming failed confinement.
+- Added localized Process, Launch checks, Runtime observations, and Audit groups in the existing desktop and phone view. Live facts expire on disconnect/deadline. Historical receipts and metadata survive. The shared clock schedules process expiry even when confinement is unknown.
+- Passed current-package race tests for common sandbox, policy, runtime, and task models; SQLite/PostgreSQL execution tests; 62 browser-state tests; actual-runtime plugin validation and packaging; independent public SDK consumer build; typecheck; seven-language/pseudo copy checks; zero-issue scoped Go/frontend lint; docs validation; and whitespace checks.
+- Rendered desktop and phone scenarios passed with retries disabled. They cover a non-active session, stale liveness, historical checks, keyboard/focus return, 393/700/767px phone layouts, and 767/768px fine-pointer transitions. Screenshots were inspected. The final run after the test fixture timestamp correction passed both projects with retries disabled.
+
+Local test setup required a loopback-only bind and the existing Nix browser library paths. Neither changes the main instance or product configuration. Current-pair managed acceptance remains Task 10.

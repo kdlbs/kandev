@@ -30,9 +30,27 @@ function invalidateExecutionObservations(
 
 function invalidate(session: TaskSession): void {
   const value = session.execution_observation;
-  if (!value || value.status === "stopped" || value.status === "failed") return;
+  if (!value) return;
+  const facts = value.facts
+    ? {
+        ...value.facts,
+        process:
+          value.facts.process.state === "running"
+            ? { ...value.facts.process, state: "unknown" as const, valid_until: undefined }
+            : value.facts.process,
+        runtime:
+          value.facts.runtime.state === "reported"
+            ? { ...value.facts.runtime, state: "unavailable" as const }
+            : value.facts.runtime,
+      }
+    : undefined;
+  if (value.status === "stopped" || value.status === "failed") {
+    session.execution_observation = { ...value, facts };
+    return;
+  }
   session.execution_observation = {
     ...value,
+    facts,
     status: "unknown",
     provider_health: "unknown",
     reason: "evidence_unavailable",

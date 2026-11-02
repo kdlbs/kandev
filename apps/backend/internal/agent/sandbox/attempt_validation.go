@@ -48,13 +48,13 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if err != nil {
 		return AttemptSnapshot{}, err
 	}
-	return AttemptSnapshot{RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
+	return AttemptSnapshot{LaunchChecks: request.LaunchChecks, RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
 		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: grants, Ceiling: ceiling,
 		Launch: request.Launch.Clone(), Provider: request.Provider, CreatedAt: time.Now().UTC()}, nil
 }
 
 func validAttemptCapture(request CaptureRequest) bool {
-	return request.Launch != nil && request.Launch.Validate() == nil && request.Resolved != nil && request.Resolved.Revision != nil && request.ExecutionID != "" && len(request.ExecutionID) <= 128
+	return request.Launch != nil && request.Launch.Validate() == nil && validLaunchChecks(request.LaunchChecks, request.Launch, time.Now()) && request.Resolved != nil && request.Resolved.Revision != nil && request.ExecutionID != "" && len(request.ExecutionID) <= 128
 }
 
 func validAttemptProvider(provider AttemptProvider, resolved *Resolved, launch *contract.Launch) bool {
@@ -133,4 +133,8 @@ func capturedResolutionMatches(resolved *Resolved, request CaptureRequest) bool 
 	return resolved != nil && resolved.Revision.ID == request.Resolved.Revision.ID &&
 		resolved.Revision.Digest == request.Launch.PolicyDigest && resolved.BindingVersion == request.Resolved.BindingVersion &&
 		slices.Equal(resolved.Bindings, request.Resolved.Bindings)
+}
+
+func validLaunchChecks(receipt *contract.LaunchCheckReceipt, launch *contract.Launch, now time.Time) bool {
+	return receipt == nil || receipt.Valid(now) && receipt.PolicyDigest == launch.PolicyDigest && receipt.PackageDigest == launch.PackageDigest && receipt.RuntimeDigest == launch.Digests["runtime"]
 }

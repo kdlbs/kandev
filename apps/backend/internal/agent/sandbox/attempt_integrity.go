@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"slices"
+	"time"
 
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
@@ -16,7 +17,7 @@ func validStoredAttempt(attempt *Attempt, orgID, executionID string, generation 
 		return false
 	}
 	launch, resolved := snapshot.Launch, snapshot.Resolved
-	if !validStoredLaunch(launch, attempt.ID, generation) {
+	if !validStoredLaunch(launch, attempt.ID, generation) || !validLaunchChecks(snapshot.LaunchChecks, launch, time.Now()) {
 		return false
 	}
 	if !validStoredResolution(resolved, orgID, launch.PolicyDigest) {
