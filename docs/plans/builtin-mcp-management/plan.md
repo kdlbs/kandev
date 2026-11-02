@@ -42,6 +42,16 @@ revision. No reviewed implementation package has been found. Autopilot remains
 off. No workers, additional tasks/sessions, commits, pushes, or merge are
 part of this design turn. Recheck current base/contracts before implementation.
 
+## Registration cleanup authorized on 2026-11-02
+
+The user requested completion of the registration cleanup after the latest main
+rebase. Work order 01 is complete again with package-owned assembly and shared
+Core tool builders. The configuration-chat assembly path and temporary server
+used by ordinary tasks to copy Configuration tools are removed. Existing schemas,
+caller capabilities, resource permissions, and non-native catalogs are preserved.
+Work orders 02 and 03 remain complete. Publish the checked result to the existing
+open PR #4762; no merge or CI/review waiting is authorized.
+
 ## Historical partial publication checkpoint (2026-10-24)
 
 The coordinator requested publication of all task-owned work as a draft on

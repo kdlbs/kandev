@@ -268,3 +268,26 @@ failure and final correction are captured in
 formatting, specification and documentation catalog checks pass. The four
 conflicted Go packages pass affected lint with zero issues. No browser suite or
 GitHub CI waiter runs for this rebase; UI logic is unchanged.
+
+
+## Package-owned registration cleanup: 2 November 2026
+
+Completed the cleanup requested after the rebase caveat above. Native callers
+now select package builders directly. Configuration chats default to Core and
+Configuration through the same package path as regular tasks. Removed the old
+surface-first group registry, configuration task registration, and temporary
+Configuration assembly/copy server. Shared Core definitions are registered once;
+caller eligibility and schema limits remain explicit in Core. The fixed external
+and automation catalogs reuse these definitions without gaining new tools.
+
+The ownership regression failed on the original mixed builders and now passes.
+Full profile/server suites pass with `-race`; focused agentctl package/route tests
+and affected Go lint pass. A before/after comparison across all seven legacy caller
+types preserves full tool definitions. See work order 01's cleanup results for
+exact commands and logs. The temporary catalog capture test was removed before
+publication. The public package how-to now explains that Configuration uses the
+same tools for both caller types and does not change task permissions.
+
+Existing authorization checks and retained-process combined transport are
+intentional compatibility boundaries. This cleanup removes duplicate assembly;
+it does not turn package selection into a permission grant or restart live agents.

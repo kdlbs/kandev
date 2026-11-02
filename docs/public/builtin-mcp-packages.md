@@ -52,6 +52,10 @@ Configuration cannot be on by default for regular tasks. Configuration chats
 always receive Core and Configuration; workspace task policy does not change
 that fixed set. Office supports Core and optional Rich Output.
 
+Configuration chats and regular tasks use the same Configuration package. Selecting
+it adds configuration tools without changing the task's identity or permissions.
+Core tools remain subject to the caller's capabilities and resource access.
+
 Use the shared **Save changes** bar to save workspace edits. Discard restores
 the saved values. Reset restores the package defaults in the draft; save to apply
 them. A conflict or denied write keeps the draft unsaved. Reload discards it and

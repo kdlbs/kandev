@@ -1304,85 +1304,6 @@ func (s *Server) assembleTools() []server.ServerTool {
 	return tools
 }
 
-type profileToolGroup struct {
-	name     string
-	enabled  func(mcpprofile.Context) bool
-	register func(*Server)
-}
-
-func surfaceEnabled(surface mcpprofile.Surface) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool { return ctx.Surface == surface }
-}
-
-func capabilityEnabled(capability mcpprofile.Capability) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool { return ctx.HasCapability(capability) }
-}
-
-func andProfilePredicates(predicates ...func(mcpprofile.Context) bool) func(mcpprofile.Context) bool {
-	return func(ctx mcpprofile.Context) bool {
-		for _, predicate := range predicates {
-			if !predicate(ctx) {
-				return false
-			}
-		}
-		return true
-	}
-}
-
-func (s *Server) profileToolGroups() []profileToolGroup {
-	config := surfaceEnabled(mcpprofile.SurfaceConfiguration)
-	external := surfaceEnabled(mcpprofile.SurfaceExternal)
-	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
-	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
-	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
-	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
-	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
-		return nil
-	}
-	return []profileToolGroup{
-		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
-		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
-		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
-		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
-		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
-		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
-		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
-		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
-		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
-		{name: "task-transfer", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) || office(ctx) }, register: func(s *Server) { s.registerTaskTransferTool() }},
-		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
-		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
-		{name: "external-update-task", enabled: external, register: func(s *Server) { s.registerUpdateTaskTool() }},
-		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
-		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
-		// Dependency edges are manageable wherever a task can be created.
-		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
-		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
-		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
-			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
-				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
-		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
-		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
-		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
-		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
-		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
-		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
-		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
-		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
-		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
-		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
-		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
-			s.registerAddBranchToTaskTool()
-			s.registerAddWorkspaceSourcesTool()
-			s.registerUpdateRepositoryBaseBranchTool()
-		}},
-		{name: "step-completion", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerStepCompleteTool() }},
-		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
-		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
-		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
-	}
-}
-
 func (s *Server) registerTaskTransferTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("transfer_task_kandev",
@@ -1429,16 +1350,9 @@ func (s *Server) registerAgentPermissionTools() {
 	)
 }
 
-// registerTools registers MCP tools from the declarative profile registry.
-// Each group owns one additive capability or base surface. The registry is
-// backend-owned: an agent receives the result, not an arbitrary tool list.
+// registerTools assembles the selected packages before publishing their views.
 func (s *Server) registerTools() {
-	for _, group := range s.profileToolGroups() {
-		if group.enabled(s.profile) {
-			group.register(s)
-		}
-	}
-	s.registerSelectedConfiguration()
+	s.registerContextTools()
 	if s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}
@@ -1449,42 +1363,17 @@ func (s *Server) registerTools() {
 	s.rebuildToolArgumentValidators()
 }
 
-// registerAutomationTools composes the fixed coordinator catalog from the
-// existing read/task lifecycle registrations, then removes every mutation or
-// task-local capability that is not part of the automation authority. Keeping
-// this allowlist next to the profile registry makes accidental additions
-// visible in the catalog test instead of silently expanding automation power.
+// registerAutomationTools retains the fixed automation authority.
 func (s *Server) registerAutomationTools() {
-	s.registerKanbanTools()
+	s.registerCoreDiscoveryTools()
+	s.registerCoreTaskTools()
+	s.registerTaskExecutionTools()
+	s.registerListRepositoriesTool()
 	s.registerTaskDependencyTools()
 	s.registerRelatedTasksTool()
 	s.registerQuestionAnsweringTools()
 	s.registerAgentPermissionTools()
-	s.registerConfigWorkflowTools()
-	s.registerConfigExecutorTools()
-	s.mcpServer.DeleteTools(
-		"delete_task_kandev",
-		"update_task_state_kandev",
-		"create_workflow_kandev",
-		"update_workflow_kandev",
-		"delete_workflow_kandev",
-		"import_workflow_kandev",
-		"export_workflow_kandev",
-		"create_workflow_step_kandev",
-		"update_workflow_step_kandev",
-		"delete_workflow_step_kandev",
-		"reorder_workflow_steps_kandev",
-		"update_agent_kandev",
-		"create_agent_profile_kandev",
-		"delete_agent_profile_kandev",
-		"list_agent_profiles_kandev",
-		"update_agent_profile_kandev",
-		"get_mcp_config_kandev",
-		"update_mcp_config_kandev",
-		"create_executor_profile_kandev",
-		"update_executor_profile_kandev",
-		"delete_executor_profile_kandev",
-	)
+	s.mcpServer.DeleteTools("delete_task_kandev")
 }
 
 func (s *Server) registerDiagnosticBundleTool() {
@@ -1501,93 +1390,9 @@ func (s *Server) registerDiagnosticBundleTool() {
 	)
 }
 
-func (s *Server) registerKanbanTools() {
-	// Use NewToolWithRawSchema for parameter-less tools to ensure the schema
-	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
-	// omitempty which drops empty properties maps, causing OpenAI API validation
-	// errors ("object schema missing properties").
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces_kandev",
-			"List all workspaces. Use this first to get workspace IDs.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
-		),
-		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
-		),
-		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
-	)
+func (s *Server) registerTaskExecutionTools() {
 	s.registerCreateTaskTool()
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_agents_kandev",
-			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev and spawn_session_kandev.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
-	)
-	s.registerListExecutorsTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_executor_profiles_kandev",
-			mcp.WithDescription("List profiles for the specified executor. Call list_executors_kandev first to discover visible executors and their profiles, including custom executor IDs. A returned profile ID can be selected with executor_profile_id in create_task_kandev."),
-			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID returned by list_executors_kandev")),
-		),
-		s.wrapHandler("list_executor_profiles_kandev", s.listExecutorProfilesHandler()),
-	)
 	s.registerUpdateTaskTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry. Moving to a manual step that does not start an agent on entry (for example Waiting, Blocked, or Done) must not carry a prompt or entry_options; such a call is rejected with a validation error. Record the instruction in the task description or plan instead.`),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
-			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
-			mcp.WithNumber("position", mcp.Description("Requested position (0-based); the server determines arrival order, and a current-step request preserves the stored position.")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at a new step. Only actual step changes are deferred during an active turn; non-empty prompts are invalid for a current-step request. Omit it when the target step does not start an agent on entry.")),
-			moveTaskEntryOptionsToolOption(),
-		),
-		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("delete_task_kandev",
-			mcp.WithDescription("Delete a task permanently. Use to clean up orphaned, duplicate, or test tasks you no longer need. This cannot be undone — prefer archive_task_kandev when the task may still be wanted. Restoring an archived task is a user action done from the UI, not via MCP."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithIdempotentHintAnnotation(false),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
-			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
-			mcp.WithBoolean("discard_worktree_changes", mcp.Description("Allow removal of local workspace changes.")),
-			mcp.WithBoolean("allow_unverified_workspace_changes", mcp.Description("Acknowledge that workspace changes cannot be checked. Requires discard_worktree_changes=true and workspace_cleanup=delete. Task removal succeeds independently of pending physical cleanup.")),
-		),
-		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("archive_task_kandev",
-			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Archiving an already-archived task is a no-op that succeeds with already_archived: true. Unarchiving is a user action done from the UI, not via MCP."),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(false),
-			mcp.WithIdempotentHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
-		),
-		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
-	)
 	messageDescription := `Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question.`
 	messageDeliveryModes := []string{"queued", "interrupt"}
 	if s.profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport) {
@@ -1623,20 +1428,6 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
 	s.registerSpawnSessionTool()
-	s.mcpServer.AddTool(
-		mcp.NewTool("get_task_conversation_kandev",
-			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
-			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
-			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
-			mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
-			mcp.WithString("sort", mcp.Description("Optional sort order: asc or desc")),
-			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{"type": "string"})),
-		),
-		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
-	)
-	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerUpdateTaskTool() {

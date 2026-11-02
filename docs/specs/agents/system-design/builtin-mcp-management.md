@@ -141,9 +141,13 @@ Common discovery (`list_workspaces`, `list_workflows`, `list_workflow_steps`,
 Configuration task management (`list_tasks`, `move_task`, `delete_task`,
 `archive_task`, `update_task_state`, `get_task_conversation`, `list_task_sessions`) stays Core under its
 existing surface predicates. Do not register duplicate versions through both
-packages. Consolidate overlapping registration definitions without widening a
-surface's schema or handler rights. Catalog tests compare full schemas as well
-as names against the prior context-specific catalog.
+packages. Package-owned builders register tools directly from the resolved
+selection. Configuration chats and task opt-in use the same Configuration builder;
+there is no configuration-only assembly server or tool-copy path. Core owns
+shared discovery/task definitions and their caller-specific schemas and rights.
+Legacy native defaults come from the package descriptors and use these same
+builders with the combined transport. Catalog tests compare names and full
+schemas against the prior context-specific catalog.
 
 Core's `transfer_task_kandev` remains configuration/external/Office-only under
 existing actor checks. A regular task selecting Configuration still cannot

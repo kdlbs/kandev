@@ -144,3 +144,46 @@ bash scripts/lint-go-changed \
 Evidence uses local HTTP/SSE test servers and backend fakes. No installed-provider
 or live runtime claim is made. The main runtime and protected preview ports were
 not used.
+
+## Registration cleanup (2026-11-02)
+
+Reopened by the user's explicit request to finish package-owned registration.
+Use a common package registry for configuration chats and task opt-in. Extract
+shared discovery and task definitions into Core builders; Configuration builders
+must never register or replace a Core tool. Resolve legacy native defaults from
+the package descriptors, while retaining their combined transport. Keep fixed
+external, automation, coordinator, and managed catalogs unchanged.
+
+Validate builder ownership, full Configuration schema equality across callers,
+Core schema stability with task opt-in, existing route/permission regressions,
+and the full server suite with the race detector. Compare every legacy surface's
+catalog against a pre-change capture, including schemas and descriptions.
+
+Cleanup completed on 2026-11-02. `builtin_registration.go` selects packages before
+assembly for native callers. `core_registration.go` owns caller eligibility;
+`core_discovery_tools.go` and `core_task_tools.go` hold the shared definitions.
+Removed `profileToolGroups`, `registerSelectedConfiguration`, and the mixed
+configuration task registration. Configuration builders contain only their own
+tools. Fixed external/automation/coordinator/managed catalogs retain parity.
+
+The new ownership regression failed against the old workflow, agent, and executor
+builders, then passed after extraction. Configuration schemas match across caller
+types, task opt-in preserves Core schemas, and unselected packages are absent
+before transport publication. A temporary local capture compared all seven prior
+caller catalogs, including names, schemas, descriptions, and annotations. The
+capture comparison passed; its temporary test was removed before publication.
+
+Final cleanup checks passed:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./internal/mcp/profile ./internal/mcp/server -count=1 -timeout=5m
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -p=1 ./internal/agentctl/server/api -run 'Builtin|MCPRoutes' -count=1 -timeout=5m
+bash scripts/lint-go-changed apps/backend/internal/mcp/server/server.go apps/backend/internal/mcp/server/config_handlers.go apps/backend/internal/mcp/server/builtin_registration.go apps/backend/internal/mcp/server/core_registration.go apps/backend/internal/mcp/server/core_discovery_tools.go apps/backend/internal/mcp/server/core_task_tools.go apps/backend/internal/mcp/server/builtin_registration_test.go
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+Local logs: `/tmp/kandev-4762-registration-{red,green,race,api,lint}.log`.
+Go lint used the CI-pinned 2.9.0 binary and reported zero issues. No frontend
+behavior changed, so this cleanup does not repeat browser suites.
