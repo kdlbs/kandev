@@ -8,7 +8,7 @@ import (
 func TestCatalogIncludesSandboxPolicies(t *testing.T) {
 	for _, entry := range Catalog() {
 		if entry.ID == "sandbox-policies" {
-			for _, table := range []string{"sandbox_attempts", "sandbox_approval_requests", "sandbox_reports", "sandbox_learning_proposals", "sandbox_audit_trust_heads", "sandbox_audit_trust_revisions"} {
+			for _, table := range []string{"sandbox_attempts", "sandbox_approval_requests", "sandbox_reports", "sandbox_learning_proposals", "sandbox_audit_trust_heads", "sandbox_audit_trust_revisions", "sandbox_audit_verifications"} {
 				if !slices.Contains(entry.RequiredTables, table) {
 					t.Fatalf("sandbox table %s is missing from startup coverage", table)
 				}

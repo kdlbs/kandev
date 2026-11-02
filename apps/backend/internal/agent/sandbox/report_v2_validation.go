@@ -98,11 +98,11 @@ func typedReportSourcesMatch(data ReportData) bool {
 }
 
 func validTypedReportHeader(value *TypedReport) bool {
-	if value.SchemaVersion != 2 || !slices.Contains([]string{"unchecked", "valid", "invalid"}, value.Integrity) || !slices.Contains([]string{"unknown", "live", "final", "interrupted"}, value.Finalization) {
+	if value.SchemaVersion != 2 || !slices.Contains([]string{auditStateUnchecked, auditStateValid, auditStateInvalid}, value.Integrity) || !slices.Contains([]string{"unknown", "live", reportFinalizationFinal, reportFinalizationInterrupted}, value.Finalization) {
 		return false
 	}
 	if len(value.Sources) > 32 || len(value.Records) > 1000 || !validReportCoverage(value.Coverage) {
 		return false
 	}
-	return len(value.Sources) != 0 || value.ArtifactSetDigest == "" && value.Integrity == "unchecked" && len(value.Records) == 0 && value.Finalization != "final"
+	return len(value.Sources) != 0 || value.ArtifactSetDigest == "" && value.Integrity == auditStateUnchecked && len(value.Records) == 0 && value.Finalization != reportFinalizationFinal
 }

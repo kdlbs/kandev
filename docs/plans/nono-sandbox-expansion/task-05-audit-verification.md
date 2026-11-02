@@ -175,3 +175,14 @@ Verification jobs must still cancel and join before session archive removal.
 Backend restart must interrupt pending jobs without automatically verifying
 again. Job persistence, the operator API, host dispatch, and the desktop/phone
 action remain required. Tasks 06-10 remain pending.
+
+Verification-job storage is now being checked. Focused SQLite/PostgreSQL tests
+cover operator-only admission, expected report/artifact/trust guards, request
+idempotence, one active job per attempt, epoch/version-fenced claims and results,
+session/artifact/signer/trust replay rejection, restart interruption, corrupt-row
+refusal, input-key ownership, and historical preservation after key revocation.
+The job table is in the owning startup descriptor. Previous-stable upgrade and
+replay checks pass on both engines without changing historical fixtures. Full
+policy, SQL guard, and owning-store checks pass. Runtime dispatch, cancellation
+and joining, HTTP routes, facts projection, and desktop/phone UI are not yet
+connected. No verifier starts from these store reads or schema initialization.
