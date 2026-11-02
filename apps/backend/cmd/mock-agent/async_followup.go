@@ -34,9 +34,9 @@ func emitAsyncFollowup(e *emitter) {
 		background.completeTool("async-followup-work", "follow-up work complete")
 		background.text("Background follow-up finished.")
 
-		// Keep the follow-up turn open a little longer so the browser flow has a
-		// deterministic window to queue a message while it runs.
-		time.Sleep(2 * time.Second)
+		// Keep the follow-up turn open long enough for loaded CI workers to open
+		// queue mode and submit a message while it runs.
+		time.Sleep(15 * time.Second)
 		background.text("Background follow-up still running.")
 	}()
 }
