@@ -72,10 +72,11 @@ class Controller:
                          data=None if entries is None else json.dumps(entries).encode())
         return json.loads(output) if operation == "export" else None
 
-    def api(self, route, body=None, headers=None):
+    def api(self, route, body=None, headers=None, method=None):
         request = urllib.request.Request(self.base + "/api/v1/" + route,
                   data=None if body is None else json.dumps(body).encode(),
-                  headers={"Content-Type": "application/json", **(headers or {})})
+                  headers={"Content-Type": "application/json", **(headers or {})},
+                  method=method or ("POST" if body is not None else "GET"))
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
                 return json.load(response)
@@ -250,7 +251,8 @@ class Target:
                 controller.action("session.stop", {"session_id": task["session_id"]})
                 phase = "worker fault injection"
                 interactive = list(prefix)
-                interactive.insert(interactive.index("exec") + 1, "-i")
+                if self.kind in ("docker", "kubernetes"):
+                    interactive.insert(interactive.index("exec") + 1, "-i")
                 helper = Path(__file__).with_name("opencode-credential-faults.mjs").read_bytes()
                 result = command(interactive + ["env", "HOME=" + home,
                                  "node", "--input-type=module", "-", version, scenario],

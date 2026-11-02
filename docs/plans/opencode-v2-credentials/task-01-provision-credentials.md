@@ -33,7 +33,8 @@ in the agent descriptor/catalog, lifecycle launch and Kubernetes refresh hooks,
 and agentctl client/server/process boundary. Update the V2 default and public
 executor reference. Preserve the V1 file method and stable selection identity.
 
-All criteria of `REQ-EXECUTORS-OPENCODE-AUTH-001` apply. Cache lifecycle,
+This work order covers criteria `AC-EXECUTORS-OPENCODE-AUTH-001.1` through
+`.6`. Tasks 02 and 03 cover the remaining criteria. Cache lifecycle,
 volatile bootstrap repair, provider-history durability, demo configuration,
 and PR submission are excluded.
 
@@ -50,8 +51,8 @@ and PR submission are excluded.
 From `apps/backend`:
 
 ```sh
-env LC_ALL=C LANG=C go test -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle
-env LC_ALL=C LANG=C go test -race -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'OpenCodeCredential|OpenCodeV2|OpenCodeACP|ConfigureAndStartAgentProvisions|ConfigureAndStartAgentRejectsUnsupported' -count=1
+env LC_ALL=C LANG=C go test -tags fts5 -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle
+env LC_ALL=C LANG=C go test -tags fts5 -race -trimpath ./internal/agent/managedruntime ./internal/agent/agents ./internal/agent/remoteauth ./internal/agent/runtime/agentctl ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle -run 'OpenCodeCredential|OpenCodeV2|OpenCodeACP|ConfigureAndStartAgentProvisions|ConfigureAndStartAgentRejectsUnsupported' -count=1
 go build -trimpath ./cmd/kandev ./cmd/agentctl
 ```
 

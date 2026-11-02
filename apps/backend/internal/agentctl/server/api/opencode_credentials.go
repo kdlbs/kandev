@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 func (s *Server) handleOpenCodeCredentialStatus(c *gin.Context) {
@@ -31,7 +31,7 @@ func (s *Server) handleOpenCodeCredentials(c *gin.Context) {
 	}
 	if err := s.procMgr.ImportOpenCodeCredentials(c.Request.Context(), data); err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, managedruntime.ErrOpenCodeCredentialRuntime) {
+		if errors.Is(err, opencode.ErrCredentialRuntime) {
 			status = http.StatusBadRequest
 		}
 		c.JSON(status, gin.H{errKey: err.Error()})

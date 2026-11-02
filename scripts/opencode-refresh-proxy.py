@@ -74,6 +74,8 @@ class RefreshProxy:
                     else:
                         grant = None
                     if grant != "refresh_token":
+                        with owner.lock:
+                            owner.rejected["grant"] += 1
                         self.send_error(403)
                         return
                     with owner.lock:

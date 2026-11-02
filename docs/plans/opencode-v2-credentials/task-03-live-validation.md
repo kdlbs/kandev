@@ -1,7 +1,7 @@
 ---
 id: "03-live-validation"
 title: "Validate real imports and OAuth refresh"
-status: done
+status: blocked
 wave: 2
 depends_on:
   - "02-harden-bootstrap"
@@ -25,15 +25,16 @@ system_design:
 
 ## Summary
 
-Completed with the explicit natural-expiry/concurrent-refresh waiver below.
-Final provider validation passed for the controller and fresh Kubernetes sessions
-A/B/C, including actual replies after stop/resume. Source CLI was 2.2.5 and
-destination CLI 2.2.1. The complete synthetic interruption/lost-ack matrix passed
-on Docker, SSH, and Kubernetes at 2.1.2 and 2.2.1 with two independent HOMEs.
+Partially completed with the explicit natural-expiry/concurrent-refresh waiver
+below. The synthetic interruption/lost-ack matrix passed on Docker, SSH, and
+Kubernetes at 2.1.2 and 2.2.1 with two independent HOMEs. Provider-backed
+responses after import and after stop/resume were not established.
 Fault injection covers the real worker HTTP/CLI boundary separately from the
 controller lifecycle smoke; it does not claim controller transport fault injection.
-Final command used the private OAuth inventory with `skip_natural_expiry: true`;
-it reported fresh-session and post-resume responses passed, refresh waived.
+The final command used the private OAuth inventory with `skip_natural_expiry: true`.
+It waived natural expiry. The detailed results below show three overlapping
+refresh requests that returned HTTP 401. No fresh-session or post-resume
+provider response was established.
 The resume harness explicitly disables automatic queue dispatch before adding
 and draining its prompt, avoiding duplicate dispatch races.
 Disposable controllers and Docker/SSH test workers are stopped/removed. Two
@@ -154,10 +155,10 @@ lab workaround records, and successful Task 02 results.
 
 The user explicitly waived natural-expiry/concurrent-refresh validation after
 reauthentication produced an OAuth token with approximately ten days until expiry.
-That requirement is waived, not passed; the earlier three HTTP 401 responses remain
-failed refresh evidence. Fresh-session provider responses and post-restart responses
-are being checked with the new credential. The source CLI was upgraded to 2.2.5;
-the executor compatibility matrix above covers 2.1.2 and 2.2.1.
+That requirement is waived, not passed. The earlier three HTTP 401 responses remain
+failed refresh evidence. Fresh-session provider responses and post-resume responses
+remain unverified. The source CLI was upgraded to 2.2.5; the executor compatibility
+matrix above covers 2.1.2 and 2.2.1.
 Task 02's HTTP timeout mismatch was fixed and its follow-up checks passed.
 
 - Rebuilt controller started in an isolated HOME/XDG/data directory under

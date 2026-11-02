@@ -4,10 +4,10 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -31,7 +31,7 @@ var SurvivalCapabilities = []string{
 	agentctltypes.ProjectMCPDeliveryCapability,
 	agentctltypes.ManagedRuntimePrivatePreparationCapability,
 	agentctltypes.ManagedRuntimeRepairReuseCapability,
-	managedruntime.OpenCodeCredentialCapability,
+	opencode.CredentialCapability,
 }
 
 // handleIdentity reports this launch's opaque identity and capability

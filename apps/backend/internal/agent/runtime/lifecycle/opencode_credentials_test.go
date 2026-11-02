@@ -45,6 +45,62 @@ func TestOpenCodeCredentialRestartWithoutSource(t *testing.T) {
 	}
 }
 
+func TestRecoveredOpenCodeRuntimeReachesKubernetesRefresh(t *testing.T) {
+	want := managedruntime.OpenCodeRuntime{Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, Version: "2.1.2"}
+	var configured managedruntime.OpenCodeRuntime
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/configure":
+			var request struct {
+				Runtime managedruntime.OpenCodeRuntime `json:"opencode_runtime"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+				return
+			}
+			configured = request.Runtime
+			_, _ = io.WriteString(w, `{"success":true}`)
+		case "/identity":
+			_, _ = io.WriteString(w, `{"capabilities":["opencode-credential-bootstrap.v1"]}`)
+		case "/api/v1/agent/opencode/credentials":
+			if r.Method != http.MethodGet {
+				t.Errorf("unexpected credential request method: %s", r.Method)
+			}
+			_, _ = io.WriteString(w, `{"version":1,"state":"present"}`)
+		default:
+			_, _ = io.WriteString(w, `{"success":true}`)
+		}
+	}))
+	defer server.Close()
+
+	manager := newTestManager(t)
+	manager.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		ProfileID: "profile-opencode", AgentName: "opencode-acp",
+	}}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeOpenCodeStore{openCodeSelection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: want.Family, Source: want.Source, Package: "@opencode/cli",
+		SelectedVersion: want.Version, AppliedDefaultVersion: want.Version, Revision: 1,
+	}})
+	execution := &AgentExecution{
+		ID: "recovered-opencode", AgentProfileID: "profile-opencode", RuntimeName: agentruntime.RuntimeKubernetes,
+		WorkspacePath: t.TempDir(), metadata: map[string]interface{}{"remote_credentials": ` ["agent:opencode-acp:files:0"] `},
+	}
+	if err := manager.reDeriveRecoveredAgentIdentity(context.Background(), execution); err != nil {
+		t.Fatalf("rederive recovered agent identity: %v", err)
+	}
+	if execution.OpenCodeRuntime != want {
+		t.Fatalf("recovered runtime identity = %+v, want %+v", execution.OpenCodeRuntime, want)
+	}
+	client := newTestAgentctlClient(t, server.URL, newTestLogger())
+	refresh := &RemoteInstanceRefresh{Instance: &ExecutorInstance{Client: client}}
+	if _, err := manager.prepareRestartedKubernetesAgentctl(context.Background(), execution, refresh); err != nil {
+		t.Fatalf("prepare restarted Kubernetes agentctl: %v", err)
+	}
+	if configured != want {
+		t.Fatalf("Kubernetes refresh configured runtime = %+v, want %+v", configured, want)
+	}
+}
+
 const syntheticOpenCodeCredentials = `[{"id":"cred_test","integrationID":"openai","label":"test","active":true,"value":{"type":"key","key":"synthetic-secret"}}]`
 
 func TestOpenCodeCredentialProvisioningLeavesV1Unchanged(t *testing.T) {

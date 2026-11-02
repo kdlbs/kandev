@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/filelock"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
@@ -98,18 +99,77 @@ func (m *Manager) runManagedCommandInput(parent context.Context, spec tools.Comm
 		cancel()
 	}
 	if !finished {
+		m.holdCredentialAdmissionUntilReaped(proc)
 		return nil, nil, errors.Join(ctx.Err(), stopErr)
 	}
 
 	stdoutOutput := <-stdout
 	stderrOutput := <-stderr
 	waitErr := proc.Wait()
+	if proc.processReapError() != nil {
+		m.holdCredentialAdmissionUntilReaped(proc)
+	}
 	_ = proc.Stdin.Close()
 	waitErr = errors.Join(waitErr, <-written)
 	if canceled {
 		return stdoutOutput, stderrOutput, errors.Join(ctx.Err(), stopErr, waitErr)
 	}
 	return stdoutOutput, stderrOutput, waitErr
+}
+
+func (m *Manager) holdCredentialAdmissionUntilReaped(proc *PipedProcess) <-chan struct{} {
+	completed := make(chan struct{})
+	m.startMu.Lock()
+	if !m.credentialImport {
+		m.startMu.Unlock()
+		close(completed)
+		return completed
+	}
+	m.credentialImportBlocked = true
+	m.startMu.Unlock()
+
+	go func() {
+		defer close(completed)
+		<-proc.Done
+		if proc.processReapError() != nil {
+			return
+		}
+		m.startMu.Lock()
+		if !m.credentialImportBlocked {
+			m.startMu.Unlock()
+			return
+		}
+		storeLock := m.credentialStoreLock
+		m.credentialStoreLock = nil
+		m.startMu.Unlock()
+		if err := filelock.Release(storeLock); err != nil {
+			return
+		}
+		m.startMu.Lock()
+		m.credentialImport = false
+		m.credentialImportBlocked = false
+		m.startMu.Unlock()
+	}()
+	return completed
+}
+
+func (p *PipedProcess) processReapError() error {
+	p.process.mu.Lock()
+	defer p.process.mu.Unlock()
+	return p.process.reapErr
+}
+
+func (m *Manager) releaseOpenCodeCredentialAdmission() error {
+	m.startMu.Lock()
+	if m.credentialImportBlocked {
+		m.startMu.Unlock()
+		return nil
+	}
+	m.credentialImport = false
+	storeLock := m.credentialStoreLock
+	m.credentialStoreLock = nil
+	m.startMu.Unlock()
+	return filelock.Release(storeLock)
 }
 
 func collectManagedCommandOutput(reader io.ReadCloser) <-chan []byte {

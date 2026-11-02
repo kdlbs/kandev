@@ -4,8 +4,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/kandev/kandev/internal/agent/managedruntime"
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -26,8 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -542,14 +542,14 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	OpenCodeRuntime managedruntime.OpenCodeRuntime `json:"opencode_runtime,omitzero"`
-	LaunchWrapper   launchwrapper.Spec             `json:"launch_wrapper,omitzero"`
-	Command         string                         `json:"command"`
-	AgentArgs       optionalArgs                   `json:"agent_args"`
-	ContinueCommand string                         `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs                   `json:"continue_args"`
-	Env             map[string]string              `json:"env,omitempty"`
-	ReplaceEnv      bool                           `json:"replace_env,omitempty"`
+	OpenCodeRuntime opencode.Runtime   `json:"opencode_runtime,omitzero"`
+	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Command         string             `json:"command"`
+	AgentArgs       optionalArgs       `json:"agent_args"`
+	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs       `json:"continue_args"`
+	Env             map[string]string  `json:"env,omitempty"`
+	ReplaceEnv      bool               `json:"replace_env,omitempty"`
 	// ProjectMCPDelivery carries execution-bound project-file delivery
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.

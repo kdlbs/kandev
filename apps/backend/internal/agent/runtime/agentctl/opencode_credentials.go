@@ -10,10 +10,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
-const OpenCodeCredentialCapability = managedruntime.OpenCodeCredentialCapability
+const OpenCodeCredentialCapability = opencode.CredentialCapability
 
 func (c *Client) OpenCodeCredentialStatus(parent context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
@@ -39,7 +39,7 @@ func (c *Client) OpenCodeCredentialStatus(parent context.Context) (string, error
 		return "", errors.New("invalid OpenCode credential status response")
 	}
 	switch result.State {
-	case "empty", "present", "pending":
+	case opencode.CredentialStoreEmpty, opencode.CredentialStorePresent, opencode.CredentialStorePending:
 		return result.State, nil
 	default:
 		return "", errors.New("unknown OpenCode credential status")

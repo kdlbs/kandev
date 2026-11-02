@@ -78,7 +78,7 @@ reported as blocked, never counted as passed.
 
 - [x] [Task 01: Provision V2 session credentials](task-01-provision-credentials.md)
 - [x] [Task 02: Harden bootstrap admission](task-02-harden-bootstrap.md)
-- [x] [Task 03: Validate real imports and OAuth refresh](task-03-live-validation.md)
+- [ ] [Task 03: Validate real imports and OAuth refresh](task-03-live-validation.md)
 
 ## Risks and boundaries
 
@@ -95,13 +95,13 @@ Task 01's historical counts do not certify the revised implementation.
 
 ## Verification results
 
-Final: full affected-package tests, scoped race tests, build, changed-file lint,
+Historical affected-package tests, scoped race tests, build, changed-file lint,
 and documentation checks passed. Real interruption and lost-acknowledgement
-matrices passed on all three executors at both tested CLI versions. Actual
-provider replies passed before and after resume, including fresh session C.
-Successful concurrent refresh remains explicitly waived after reauthentication,
-not passed; the earlier overlapping attempt returned three 401 responses.
-Task work orders retain detailed chronological evidence and final outcomes.
+matrices passed on all three executors at both tested CLI versions. The provider
+refresh attempt returned three HTTP 401 responses. Natural-expiry and successful
+concurrent refresh validation were waived, not passed. Fresh-session and
+post-resume provider responses remain unverified. Task 03 is blocked until this
+remaining provider evidence is resolved.
 The baseline/design-only entries below are historical.
 
 Rebase baseline: `0f1d3d011` on upstream `edebfa524`. Focused race tests passed

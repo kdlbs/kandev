@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -20,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -146,7 +146,7 @@ type AgentExecution struct {
 	AgentCommand         string             // Command to start the agent subprocess
 	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
 	LaunchWrapper        launchwrapper.Spec `json:"-"`
-	OpenCodeRuntime      managedruntime.OpenCodeRuntime
+	OpenCodeRuntime      opencode.Runtime
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")

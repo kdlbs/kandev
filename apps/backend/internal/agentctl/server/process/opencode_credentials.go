@@ -9,11 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/filelock"
+	"github.com/kandev/kandev/internal/common/opencode"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
+const openCodeCredentialStoreLockNamespace = "opencode-credential-stores"
+
 // OpenCodeCredentialStatus returns only readiness, never credential data.
-func (m *Manager) OpenCodeCredentialStatus(parent context.Context) (string, error) {
+func (m *Manager) OpenCodeCredentialStatus(parent context.Context) (state string, err error) {
 	m.startMu.Lock()
 	if m.credentialImport || m.commandActive() || m.passthrough.Live() {
 		m.startMu.Unlock()
@@ -31,17 +35,29 @@ func (m *Manager) OpenCodeCredentialStatus(parent context.Context) (string, erro
 	if err != nil {
 		return "", err
 	}
-	defer func() { m.startMu.Lock(); m.credentialImport = false; m.startMu.Unlock() }()
+	defer func() {
+		if releaseErr := m.releaseOpenCodeCredentialAdmission(); releaseErr != nil {
+			err = errors.Join(err, errors.New("could not release OpenCode credential store lock"))
+		}
+	}()
 	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
-	marker, err := m.openCodePendingMarker(ctx)
+	storePath, err := m.openCodeCredentialStorePath(ctx)
 	if err != nil {
 		return "", err
 	}
+	lock, err := filelock.Acquire(ctx, openCodeCredentialStoreLockNamespace, storePath)
+	if err != nil {
+		return "", errors.New("could not lock OpenCode credential store")
+	}
+	m.startMu.Lock()
+	m.credentialStoreLock = lock
+	m.startMu.Unlock()
+	marker := openCodePendingMarker(storePath)
 	if pending, err := inspectOpenCodePendingMarker(marker); err != nil {
 		return "", err
 	} else if pending {
-		return "pending", nil
+		return opencode.CredentialStorePending, nil
 	}
 	return m.inspectOpenCodeCredentials(ctx, args, dir)
 }
@@ -57,19 +73,19 @@ func (m *Manager) inspectOpenCodeCredentials(ctx context.Context, args []string,
 		return "", errors.New("could not inspect OpenCode credentials")
 	}
 	if len(entries) == 0 {
-		return "empty", nil
+		return opencode.CredentialStoreEmpty, nil
 	}
 	for _, entry := range entries {
 		if entry.ID == "" {
 			return "", errors.New("could not inspect OpenCode credentials")
 		}
 	}
-	return "present", nil
+	return opencode.CredentialStorePresent, nil
 }
 
 // ImportOpenCodeCredentials provisions the configured session through the CLI's
 // merge contract. Credential values are carried only through stdin.
-func (m *Manager) ImportOpenCodeCredentials(ctx context.Context, data []byte) error {
+func (m *Manager) ImportOpenCodeCredentials(ctx context.Context, data []byte) (err error) {
 	m.startMu.Lock()
 	if m.credentialImport || m.commandActive() || m.passthrough.Live() {
 		m.startMu.Unlock()
@@ -88,16 +104,24 @@ func (m *Manager) ImportOpenCodeCredentials(ctx context.Context, data []byte) er
 		return err
 	}
 	defer func() {
-		m.startMu.Lock()
-		m.credentialImport = false
-		m.startMu.Unlock()
+		if releaseErr := m.releaseOpenCodeCredentialAdmission(); releaseErr != nil {
+			err = errors.Join(err, errors.New("could not release OpenCode credential store lock"))
+		}
 	}()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	marker, err := m.openCodePendingMarker(ctx)
+	storePath, err := m.openCodeCredentialStorePath(ctx)
 	if err != nil {
 		return err
 	}
+	lock, err := filelock.Acquire(ctx, openCodeCredentialStoreLockNamespace, storePath)
+	if err != nil {
+		return errors.New("could not lock OpenCode credential store")
+	}
+	m.startMu.Lock()
+	m.credentialStoreLock = lock
+	m.startMu.Unlock()
+	marker := openCodePendingMarker(storePath)
 	ready, err := m.prepareOpenCodeBootstrap(ctx, marker, dir)
 	if err != nil || ready {
 		return err
@@ -131,7 +155,7 @@ func (m *Manager) prepareOpenCodeBootstrap(ctx context.Context, marker, dir stri
 	if inspectErr != nil {
 		return false, inspectErr
 	}
-	if state == "present" {
+	if state == opencode.CredentialStorePresent {
 		return true, nil
 	}
 	return false, persistOpenCodePendingMarker(marker)
@@ -178,8 +202,9 @@ func syncOpenCodeMarkerDirectory(marker string) error {
 }
 
 // Ask the public CLI for the effective store path, including OPENCODE_DB and
-// XDG overrides. The adjacent marker contains no credentials and survives restarts.
-func (m *Manager) openCodePendingMarker(ctx context.Context) (string, error) {
+// XDG overrides. Kandev uses this path only as the identity for a file lock and
+// the adjacent retry marker.
+func (m *Manager) openCodeCredentialStorePath(ctx context.Context) (string, error) {
 	args, err := m.cfg.OpenCodeRuntime.CredentialStoreCommand()
 	if err == nil {
 		args, err = m.prepareSessionArgs(args)
@@ -192,5 +217,9 @@ func (m *Manager) openCodePendingMarker(ctx context.Context) (string, error) {
 	if err != nil || len(data) >= managedCommandOutputLimit || !filepath.IsAbs(path) || strings.ContainsAny(path, "\r\n\x00") {
 		return "", errors.New("could not resolve durable OpenCode credential store")
 	}
-	return path + ".kandev-bootstrap-v1.pending", nil
+	return path, nil
+}
+
+func openCodePendingMarker(storePath string) string {
+	return storePath + ".kandev-bootstrap-v1.pending"
 }

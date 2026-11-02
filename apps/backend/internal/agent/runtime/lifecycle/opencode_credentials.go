@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 const openCodeCredentialMethodID = "agent:opencode-acp:files:0"
@@ -71,7 +72,7 @@ func (m *Manager) provisionOpenCodeCredentials(ctx context.Context, execution *A
 	if err != nil {
 		return err
 	}
-	if state == "present" {
+	if state == opencode.CredentialStorePresent {
 		return nil
 	}
 	data, err := m.openCodeCredentialSource.export(ctx, execution.OpenCodeRuntime)
@@ -123,6 +124,7 @@ func runOpenCodeExport(ctx context.Context, cmd *exec.Cmd) error {
 	}
 	stop, err := captureCredentialExportProcess(cmd)
 	if err != nil {
+		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return err
 	}
