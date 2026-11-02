@@ -59,6 +59,20 @@ func assertRuntimeAuditVerification(t *testing.T, ctx context.Context, prepared 
 	history, err := policies.ReadAuditVerification(ctx, report.SessionID, report.AttemptID, job.ID)
 	require.NoError(t, err)
 	require.Equal(t, completed, history.Verification)
+	observed, err := restarted.Observe(ctx, prepared.orgID, report.AttemptID)
+	require.NoError(t, err)
+	require.Equal(t, "valid", observed.Facts.Audit.Integrity)
+	require.Equal(t, "final", observed.Facts.Audit.Finalization)
+	require.Equal(t, "unsigned", observed.Facts.Audit.Signer)
+	require.NotNil(t, observed.Facts.Audit.Verification)
+	require.Equal(t, *completed.CompletedAt, observed.Facts.Audit.Verification.CompletedAt)
+	require.Equal(t, completed.ID, observed.Facts.Audit.Verification.ID)
+	require.Equal(t, "stopped", observed.Status, "audit validity cannot activate confinement")
+	require.NoError(t, manager.providers.Disable(prepared.binding.PluginID))
+	defer func() { require.NoError(t, manager.providers.Enable(prepared.binding.PluginID)) }()
+	withoutProvider, err := restarted.Observe(ctx, prepared.orgID, report.AttemptID)
+	require.NoError(t, err)
+	require.Equal(t, observed.Facts.Audit, withoutProvider.Facts.Audit, "captured verification must not need a provider RPC")
 }
 
 func assertAuditWorkerCapacity(t *testing.T, ctx context.Context, manager *Manager, report *policy.Report, request policy.AuditVerificationRequest) {

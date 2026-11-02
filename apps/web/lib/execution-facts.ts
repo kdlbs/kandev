@@ -39,7 +39,12 @@ export function getExecutionFacts(
     return null;
   const facts = observation.facts;
   if (facts?.schema_version !== 1) return unavailableExecutionFacts();
-  const result = { ...facts, process: { ...facts.process }, runtime: { ...facts.runtime } };
+  const result = {
+    ...facts,
+    process: { ...facts.process },
+    runtime: { ...facts.runtime },
+    audit: getCurrentAuditFacts(facts.audit, observation, connection, now),
+  };
   if (
     facts.process.state === "running" &&
     !processIsFresh(facts.process, observation, connection, now)
@@ -52,6 +57,22 @@ export function getExecutionFacts(
   if (connection !== "connected" && facts.runtime.state === "reported")
     result.runtime.state = "unavailable";
   return result;
+}
+
+function getCurrentAuditFacts(
+  captured: ExecutionFacts["audit"],
+  observation: ExecutionObservation,
+  connection: ConnectionStatus,
+  now: number,
+): ExecutionFacts["audit"] {
+  const audit = { ...captured };
+  const checked = timestampMillis(observation.checked_at);
+  if (
+    audit.signer === "trusted" &&
+    (connection !== "connected" || checked === null || checked > now)
+  )
+    audit.signer = "untrusted";
+  return audit;
 }
 
 function validLaunchReceipt(

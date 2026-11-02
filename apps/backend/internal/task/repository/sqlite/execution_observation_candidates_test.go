@@ -53,6 +53,10 @@ func runObservationCandidates(t *testing.T, repo *Repository) {
 	})
 	require.NoError(t, err)
 	input := observationSnapshotInput()
+	history, err := repo.ListExecutionHistoryCandidates(t.Context(), "", 100)
+	require.NoError(t, err)
+	require.Len(t, history, 2, "audit projection must include the current stopped capture")
+	require.Equal(t, snapshots[0], history[0].Snapshot)
 	input.SessionID, input.AttemptID, input.Sandbox.AttemptID = "b", "d", "d"
 	latest, err := repo.CaptureExecutionSnapshot(t.Context(), input)
 	require.NoError(t, err)

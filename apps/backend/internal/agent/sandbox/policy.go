@@ -49,6 +49,7 @@ type Revision struct {
 }
 
 type Service struct {
+	auditChanges       attemptChangeNotifier
 	attemptChanges     attemptChangeNotifier
 	approvalChanges    approvalChangeNotifier
 	availabilityCheck  func(context.Context, *Resolved) error

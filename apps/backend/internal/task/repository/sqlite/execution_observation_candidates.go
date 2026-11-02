@@ -10,10 +10,23 @@ type ExecutionObservationCandidate struct {
 	Snapshot *models.ExecutionSnapshot
 }
 
+// ListExecutionHistoryCandidates includes terminal captures for audit projection.
+func (r *Repository) ListExecutionHistoryCandidates(ctx context.Context, after string, limit int) ([]ExecutionObservationCandidate, error) {
+	return r.listExecutionObservationCandidates(ctx, after, limit, true)
+}
+
 // ListExecutionObservationCandidates returns bounded pages of current sandbox attempts.
 func (r *Repository) ListExecutionObservationCandidates(ctx context.Context, after string, limit int) ([]ExecutionObservationCandidate, error) {
+	return r.listExecutionObservationCandidates(ctx, after, limit, false)
+}
+
+func (r *Repository) listExecutionObservationCandidates(ctx context.Context, after string, limit int, history bool) ([]ExecutionObservationCandidate, error) {
 	if limit < 1 || limit > 100 {
 		return nil, errExecutionSnapshotConflict
+	}
+	terminalFilter := "o.status NOT IN ('stopped','failed') AND "
+	if history {
+		terminalFilter = ""
 	}
 	rows, err := r.db.QueryContext(ctx, r.db.Rebind(`SELECT snap.payload,s.id,s.task_id,COALESCE(w.org_id,'')
   FROM agent_execution_observations o
@@ -21,7 +34,7 @@ func (r *Repository) ListExecutionObservationCandidates(ctx context.Context, aft
   JOIN task_sessions s ON s.id=snap.session_id
   JOIN tasks t ON t.id=s.task_id
   JOIN workspaces w ON w.id=t.workspace_id
-  WHERE o.status NOT IN ('stopped','failed') AND snap.attempt_id>?
+  WHERE `+terminalFilter+`snap.attempt_id>?
    AND NOT EXISTS (SELECT 1 FROM agent_execution_snapshots newer WHERE newer.session_id=snap.session_id AND newer.sequence>snap.sequence)
   ORDER BY snap.attempt_id LIMIT ?`), after, limit)
 	if err != nil {

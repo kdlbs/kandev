@@ -70,5 +70,6 @@ func (s *Service) SetAuditTrust(ctx context.Context, sessionID, attemptID string
 	if err = s.insertAuditTrust(ctx, scope, revision, request.ExpectedVersion); err != nil {
 		return nil, err
 	}
+	s.notifyAuditChange()
 	return revision, nil
 }

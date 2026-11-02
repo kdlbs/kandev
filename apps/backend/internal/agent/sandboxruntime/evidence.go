@@ -25,7 +25,10 @@ func (m *Manager) Observe(ctx context.Context, orgID, attemptID string) (*Observ
 		return nil, err
 	}
 	if current.Version != result.AttemptVersion {
-		return initialObservation(current), nil
+		result = initialObservation(current)
+	}
+	if err = m.observeAudit(ctx, current, result); err != nil {
+		return nil, err
 	}
 	result.CheckedAt = time.Now().UTC()
 	result.InvalidateLiveFacts(result.CheckedAt, false)

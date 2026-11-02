@@ -70,6 +70,21 @@ Verification requests name the expected final report, retained artifact set, tru
 
 Job completion and audit validity are separate results. A completed verification can find an unsigned, incomplete, invalid, or untrusted audit. Core checks result binding to the captured session, artifact set, and selected key revision. A trusted signature also requires a valid finalized chain and matching observed signer. Current signer trust is computed from the current operator key revision. Revocation changes that current claim while preserving the original result and timestamps.
 
+Execution facts project the last completed verification, even if a newer job
+failed or was interrupted. The optional `audit.verification` carries its job ID,
+original completion time, artifact digest, verifier version, historical signature
+state, ledger state, and selected trust revision. These fields remain separate
+from the current signer label. Backend replacement, a failed trust refresh, or
+browser disconnect clears the current trusted label without changing signature
+history. Saved trust does not expire with the process-liveness timer.
+
+The existing observer performs an audit-history pass at startup and after a
+committed verification or trust change. It uses pages of 100 current captures
+and four concurrent readers. Regular polling still excludes terminal captures.
+Coalesced audit wakes received during a pass remain pending. Failed history
+passes retry without reversing terminal state. This also repairs a wake lost
+before backend exit. Reads project stored evidence and never execute a verifier.
+
 The runtime owns at most four verification workers with a 30-second job deadline.
 Workers use the runtime context after authenticated admission. Browser disconnect
 does not abandon an admitted job. Shutdown closes admission, cancels workers,

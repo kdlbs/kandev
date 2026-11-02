@@ -200,6 +200,45 @@ const running = {
 };
 
 describe("independent execution facts", () => {
+  it("invalidates current signer trust on disconnect while retaining original verification", () => {
+    const verification = {
+      id: "verification",
+      completed_at: "2026-10-23T00:00:00Z",
+      artifact_set_digest: "a".repeat(64),
+      verifier_version: "fixture/1",
+      signature_state: "verified" as const,
+      ledger_state: "valid" as const,
+      trust_revision: "operator-revision",
+    };
+    const audited = {
+      ...running,
+      state: "RUNNING" as const,
+      started_at: snapshot.captured_at,
+      updated_at: snapshot.captured_at,
+      execution_observation: {
+        ...running.execution_observation,
+        status: "stopped" as const,
+        facts: {
+          ...facts,
+          process: { state: "stopped" as const },
+          audit: {
+            integrity: "valid" as const,
+            finalization: "final" as const,
+            signer: "trusted" as const,
+            verification,
+          },
+        },
+      },
+    };
+    expect(getExecutionFacts(audited, "connected", now)?.audit.signer).toBe("trusted");
+    for (const value of [getExecutionFacts(audited, "disconnected", now)]) {
+      expect(value?.audit.signer).toBe("untrusted");
+      expect(value?.audit.verification).toEqual(verification);
+    }
+    expect(getExecutionFacts(audited, "connected", now + 30_000)?.audit.signer).toBe("trusted");
+    expect(executionObservationDeadline(audited, now)).toBeNull();
+    expect(getExecutionStatus(audited, "connected", now)).toBe("stopped");
+  });
   it("shows owned liveness independently and never upgrades confinement", () => {
     expect(getExecutionFacts(running, "connected", now)?.process.state).toBe("running");
     expect(getExecutionStatus(running, "connected", now)).toBe("unknown");

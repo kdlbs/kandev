@@ -34,6 +34,10 @@ function invalidate(session: TaskSession): void {
   const facts = value.facts
     ? {
         ...value.facts,
+        audit:
+          value.facts.audit.signer === "trusted"
+            ? { ...value.facts.audit, signer: "untrusted" as const }
+            : value.facts.audit,
         process:
           value.facts.process.state === "running"
             ? { ...value.facts.process, state: "unknown" as const, valid_until: undefined }

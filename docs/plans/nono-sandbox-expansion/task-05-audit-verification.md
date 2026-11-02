@@ -101,7 +101,7 @@ A report-selected signer is not operator trust. Cryptographic validity does not 
 
 ## Results
 
-Pending implementation. Pinned 0.81.0 API investigation confirms that
+In progress. Pinned 0.81.0 API investigation confirms that
 `nono audit verify --json --public-key-file <file> <session>` reports chain,
 ledger, and attestation results separately. JSON mode can exit successfully
 while result fields report a mismatch. A verifier must check the individual
@@ -206,6 +206,29 @@ engines. The backend factory initializes recovery before binding dispatch.
 Its packaged-provider test also exposed and fixed a generic availability
 check that sent protocol 1 to a protocol 2 installation.
 
-This checkpoint still does not complete Task 05. Facts projection, the shared
-desktop/phone verification view, and its browser acceptance remain required.
-Current-pair managed acceptance remains Task 10.
+The runtime/API checkpoint is committed and pushed at `e91ddb1c9ef6`. Normal
+commit hooks, full policy/runtime/common race suites, backend sandbox tests,
+scoped Go lint, public docs checks, and specification validation pass.
+
+Audit projection now preserves the last completed result and its original
+completion time after restart, provider loss, or a later interrupted job.
+The projected signature state differs from current operator trust. The core
+observer reads terminal history at startup and on committed audit/trust changes.
+Regular polling still excludes terminal captures. Tests cover failed refresh
+retry, a wake during a scan, and terminal-state preservation. SQLite/PostgreSQL
+tests cover persisted verification metadata and failed trust refresh. A mutation
+that renews trust from old data fails on both engines.
+
+Browser state retains the original verification through notifications and
+reconnect. Disconnect invalidates current trust in both session caches. An old
+server revision cannot restore it, including for a stopped session. A new
+revision can restore it. Saved trust does not share the process-liveness expiry.
+This checkpoint changes data/state inside the existing presentation. It does
+not introduce a phone layout, control, or navigation change.
+
+Full policy/runtime/common race suites, targeted SQLite/PostgreSQL repository
+and backend observer/sandbox race tests, SQL guard, zero-issue scoped Go lint,
+63 browser-state tests, frontend typecheck, and zero-warning scoped ESLint pass.
+This still does not complete Task 05. The shared desktop/phone verification
+view and its rendered acceptance remain required. Current-pair managed
+acceptance remains Task 10.

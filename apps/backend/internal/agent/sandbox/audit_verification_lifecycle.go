@@ -115,5 +115,8 @@ func (s *Service) updateAuditVerification(ctx context.Context, org string, recor
 	if err = s.writeAuditVerification(ctx, org, record, expected, previous); err != nil {
 		return nil, err
 	}
+	if record.Verification.State == auditVerificationCompleted {
+		s.notifyAuditChange()
+	}
 	return record.Verification, nil
 }

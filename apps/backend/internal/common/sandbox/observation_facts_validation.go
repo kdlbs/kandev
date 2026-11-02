@@ -2,7 +2,10 @@ package sandbox
 
 import (
 	"slices"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 func (f *ExecutionFacts) valid(observation Observation) bool {
@@ -12,9 +15,42 @@ func (f *ExecutionFacts) valid(observation Observation) bool {
 	if f.SchemaVersion != 1 || !f.Process.valid(observation) || !f.LaunchChecks.valid(observation.CheckedAt) || !f.Runtime.valid(observation.CheckedAt) {
 		return false
 	}
-	return slices.Contains([]string{"unchecked", "valid", "invalid"}, f.Audit.Integrity) &&
-		slices.Contains([]string{StatusUnknown, "live", "final", "interrupted"}, f.Audit.Finalization) &&
-		slices.Contains([]string{"unchecked", "unsigned", "untrusted", "trusted", "invalid"}, f.Audit.Signer)
+	return f.Audit.valid(observation.CheckedAt)
+}
+
+func (a AuditFacts) valid(now time.Time) bool {
+	if !slices.Contains([]string{AuditUnchecked, AuditValid, AuditInvalid}, a.Integrity) ||
+		!slices.Contains([]string{StatusUnknown, "live", AuditFinal, "interrupted"}, a.Finalization) ||
+		!slices.Contains([]string{AuditUnchecked, AuditUnsigned, AuditUntrusted, AuditTrusted, AuditInvalid}, a.Signer) {
+		return false
+	}
+	v := a.Verification
+	if v == nil {
+		return true
+	}
+	if !v.valid(now) {
+		return false
+	}
+	switch v.SignatureState {
+	case AuditVerified:
+		return a.Integrity == AuditValid && a.Finalization == AuditFinal && v.TrustRevision != "" && (a.Signer == AuditTrusted || a.Signer == AuditUntrusted)
+	case AuditUnsigned, AuditInvalid, AuditUntrusted:
+		return a.Signer == v.SignatureState
+	default:
+		return a.Signer == AuditUnchecked
+	}
+}
+
+func (v AuditVerificationFact) valid(now time.Time) bool {
+	if !ValidMechanismKey(v.ID) || v.CompletedAt.IsZero() || v.CompletedAt.After(now) || !validLaunchDigest(v.ArtifactSetDigest) {
+		return false
+	}
+	if v.VerifierVersion == "" || len(v.VerifierVersion) > 128 || !utf8.ValidString(v.VerifierVersion) || strings.ContainsFunc(v.VerifierVersion, unicode.IsControl) {
+		return false
+	}
+	return (v.TrustRevision == "" || ValidMechanismKey(v.TrustRevision)) &&
+		slices.Contains([]string{AuditUnchecked, AuditUnsigned, AuditUntrusted, AuditVerified, AuditInvalid, "unsupported"}, v.SignatureState) &&
+		slices.Contains([]string{"unavailable", AuditValid, AuditInvalid}, v.LedgerState)
 }
 
 func (p ProcessFact) valid(observation Observation) bool {

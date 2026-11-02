@@ -49,9 +49,20 @@ type RuntimeObservation struct {
 }
 
 type AuditFacts struct {
-	Integrity    string `json:"integrity"`
-	Finalization string `json:"finalization"`
-	Signer       string `json:"signer"`
+	Integrity    string                 `json:"integrity"`
+	Finalization string                 `json:"finalization"`
+	Signer       string                 `json:"signer"`
+	Verification *AuditVerificationFact `json:"verification,omitempty"`
+}
+
+type AuditVerificationFact struct {
+	ID                string    `json:"id"`
+	CompletedAt       time.Time `json:"completed_at"`
+	ArtifactSetDigest string    `json:"artifact_set_digest"`
+	VerifierVersion   string    `json:"verifier_version"`
+	SignatureState    string    `json:"signature_state"`
+	LedgerState       string    `json:"ledger_state"`
+	TrustRevision     string    `json:"trust_revision,omitempty"`
 }
 
 // InvalidateLiveFacts preserves immutable receipts and historical runtime observations.
@@ -65,5 +76,8 @@ func (o *Observation) InvalidateLiveFacts(now time.Time, ownerChanged bool) {
 	}
 	if ownerChanged && o.Facts.Runtime.State == RuntimeReported {
 		o.Facts.Runtime.State = FactUnavailable
+	}
+	if o.Facts.Audit.Signer == AuditTrusted && ownerChanged {
+		o.Facts.Audit.Signer = AuditUntrusted
 	}
 }

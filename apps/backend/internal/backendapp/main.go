@@ -783,6 +783,7 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetExecutionSnapshotRecorder(recorder.record)
 	if services.Sandbox != nil {
 		services.Sandbox.SetAttemptChangeNotifier(observer.wake)
+		services.Sandbox.SetAuditChangeNotifier(observer.wakeAudit)
 	}
 	if evidenceSource != nil {
 		addRuntimeCleanup(observer.start(ctx, log))

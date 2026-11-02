@@ -24,6 +24,7 @@ func runExecutionFacts(t *testing.T, repo *Repository) {
 	until := now.Add(30 * time.Second)
 	receipt := &contract.LaunchCheckReceipt{CheckedAt: now, PolicyDigest: snapshot.Sandbox.PolicyDigest, PackageDigest: snapshot.Sandbox.PackageDigest, RuntimeDigest: snapshot.Sandbox.RuntimeDigest, Checks: []string{"policy_ceiling", "runtime_checksum", "private_artifacts", "process_containment"}}
 	value := contract.Observation{AttemptID: snapshot.AttemptID, Generation: 7, AttemptVersion: 3, Status: "unknown", ProviderHealth: "unavailable", Reason: "provider_unavailable", CheckedAt: now, Facts: &contract.ExecutionFacts{SchemaVersion: 1, Process: contract.ProcessFact{State: "running", CheckedAt: &now, ValidUntil: &until}, LaunchChecks: contract.LaunchChecksFact{State: "passed", Receipt: receipt}, Runtime: contract.RuntimeFacts{State: "reported", Observations: []contract.RuntimeObservation{{SourceID: "runtime.v2", EvidenceDigest: snapshot.Sandbox.RuntimeDigest, ObservedAt: now, Platform: "linux"}}}, Audit: contract.AuditFacts{Integrity: "unchecked", Finalization: "unknown", Signer: "unchecked"}}}
+	value.Facts.Audit = contract.AuditFacts{Integrity: "valid", Finalization: "final", Signer: "unsigned", Verification: &contract.AuditVerificationFact{ID: "a89ae798-dce6-4617-956b-5485a4eb6a87", CompletedAt: now.Add(-time.Hour), ArtifactSetDigest: snapshot.Sandbox.RuntimeDigest, VerifierVersion: "fixture/1", SignatureState: "unsigned", LedgerState: "valid"}}
 	invalid := value
 	invalidFacts := *value.Facts
 	invalidReceipt := *receipt
@@ -37,6 +38,7 @@ func runExecutionFacts(t *testing.T, repo *Repository) {
 	read, err := readSessionObservation(t, repo, "session")
 	require.NoError(t, err)
 	require.Equal(t, first, read)
+	require.Equal(t, value.Facts.Audit, read.Facts.Audit)
 	refresh := value
 	refreshedFacts := *value.Facts
 	refreshedFacts.Process = contract.ProcessFact{State: contract.StatusUnknown}
@@ -54,6 +56,7 @@ func runExecutionFacts(t *testing.T, repo *Repository) {
 	require.NoError(t, err)
 	require.Equal(t, "unknown", old.Facts.Process.State, "a complete legacy observation cannot reuse live facts")
 	require.Equal(t, receipt, old.Facts.LaunchChecks.Receipt)
+	require.Equal(t, value.Facts.Audit, old.Facts.Audit, "legacy refresh cannot erase a completed audit")
 	expired := decodeExecutionObservation(marshalObservation(t, first), snapshot, first.ObserverGeneration, until)
 	require.Equal(t, "unknown", expired.Facts.Process.State)
 	require.Nil(t, expired.Facts.Process.ValidUntil)
@@ -66,7 +69,23 @@ func runExecutionFacts(t *testing.T, repo *Repository) {
 	require.Equal(t, "unavailable", history.Facts.Runtime.State)
 	require.Equal(t, receipt, history.Facts.LaunchChecks.Receipt)
 	require.Equal(t, now, history.Facts.Runtime.Observations[0].ObservedAt)
+	require.Equal(t, value.Facts.Audit, history.Facts.Audit, "backend replacement preserves the original audit time")
 	require.True(t, history.ValidFields())
+	assertAuditTrustRefreshFailure(t, repo, snapshot, now)
+}
+
+func assertAuditTrustRefreshFailure(t *testing.T, repo *Repository, snapshot *models.ExecutionSnapshot, completed time.Time) {
+	t.Helper()
+	audit := contract.AuditFacts{Integrity: "valid", Finalization: "final", Signer: "trusted", Verification: &contract.AuditVerificationFact{ID: "a89ae798-dce6-4617-956b-5485a4eb6a87", CompletedAt: completed, ArtifactSetDigest: snapshot.Sandbox.RuntimeDigest, VerifierVersion: "fixture/1", SignatureState: "verified", LedgerState: "valid", TrustRevision: "8734165f-cdcd-43de-847b-0eb54152194f"}}
+	value := contract.Observation{AttemptID: snapshot.AttemptID, Generation: 7, AttemptVersion: 3, Status: "unknown", ProviderHealth: "unavailable", CheckedAt: time.Now().UTC(), Facts: &contract.ExecutionFacts{SchemaVersion: 1, Process: contract.ProcessFact{State: "unknown"}, LaunchChecks: contract.LaunchChecksFact{State: "unavailable"}, Runtime: contract.RuntimeFacts{State: "unavailable"}, Audit: audit}}
+	_, err := repo.RecordExecutionObservation(t.Context(), "second", snapshot, value)
+	require.NoError(t, err)
+	value.CheckedAt = time.Now().UTC()
+	value.Facts = nil
+	failed, err := repo.RecordExecutionObservation(t.Context(), "second", snapshot, value)
+	require.NoError(t, err)
+	require.Equal(t, "untrusted", failed.Facts.Audit.Signer, "failed refresh cannot renew current trust")
+	require.Equal(t, audit.Verification, failed.Facts.Audit.Verification, "failed refresh preserves original signature evidence")
 }
 
 func marshalObservation(t *testing.T, value *models.ExecutionObservation) string {

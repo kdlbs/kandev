@@ -120,6 +120,41 @@ func TestExecutionObservationBackendReplacementWithoutProvider(t *testing.T) {
 	require.Equal(t, 1, published, "old observer must not publish")
 }
 
+func TestExecutionAuditChangeRefreshesTerminalHistoryOnce(t *testing.T) {
+	tasks, _, _ := observationTestScope(t)
+	source := &observationSource{value: contract.Observation{AttemptID: "attempt", Generation: 1, AttemptVersion: 4, Status: "stopped", ProviderHealth: "unknown", CheckedAt: time.Now().UTC()}}
+	observer, err := newExecutionObserver(t.Context(), tasks, source, nil)
+	require.NoError(t, err)
+	require.NoError(t, observer.refresh(t.Context()))
+	require.Equal(t, 1, source.calls)
+	observer.wakeAudit()
+	require.NoError(t, observer.refresh(t.Context()))
+	require.Equal(t, 2, source.calls, "audit changes must project after process stop")
+	require.NoError(t, observer.refresh(t.Context()))
+	require.Equal(t, 2, source.calls, "terminal history must leave regular polling")
+	replacement, err := newExecutionObserver(t.Context(), tasks, source, nil)
+	require.NoError(t, err)
+	require.NoError(t, replacement.refresh(t.Context()))
+	require.Equal(t, 3, source.calls, "startup must recover an audit wake lost before backend exit")
+	source.err = errors.New("private-verifier-failure")
+	replacement.wakeAudit()
+	require.Error(t, replacement.refresh(t.Context()))
+	session, err := tasks.GetTaskSession(t.Context(), "session")
+	require.NoError(t, err)
+	require.Equal(t, "stopped", session.ExecutionObservation.Status, "a failed historical refresh cannot reverse terminal state")
+	source.err = nil
+	source.value.CheckedAt = time.Now().UTC()
+	require.NoError(t, replacement.refresh(t.Context()))
+	require.Equal(t, 5, source.calls, "failed audit refresh must remain eligible for retry")
+	source.before = func() { source.before = nil; replacement.wakeAudit() }
+	replacement.wakeAudit()
+	require.NoError(t, replacement.refresh(t.Context()))
+	require.NoError(t, replacement.refresh(t.Context()))
+	require.Equal(t, 7, source.calls, "a wake received during refresh must survive the current scan")
+	require.NoError(t, replacement.refresh(t.Context()))
+	require.Equal(t, 7, source.calls)
+}
+
 func TestExecutionObservationAttemptChangesDuringRead(t *testing.T) {
 	tasks, _, input := observationTestScope(t)
 	source := &observationSource{value: activeObservation()}

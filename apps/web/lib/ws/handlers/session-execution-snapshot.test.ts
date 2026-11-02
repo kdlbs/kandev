@@ -155,7 +155,20 @@ const observation: ExecutionObservation = {
         },
       ],
     },
-    audit: { integrity: "unchecked", finalization: "unknown", signer: "unchecked" },
+    audit: {
+      integrity: "valid",
+      finalization: "final",
+      signer: "trusted",
+      verification: {
+        id: "verification",
+        completed_at: initialTime,
+        artifact_set_digest: "a".repeat(64),
+        verifier_version: "fixture/1",
+        signature_state: "verified",
+        ledger_state: "valid",
+        trust_revision: "operator-revision",
+      },
+    },
   },
   schema_version: 1,
   observer_generation: 2,
@@ -252,6 +265,8 @@ it("invalidates live observations on connection loss until a newer server observ
   expect(invalidated!.facts!.launch_checks).toEqual(observation.facts!.launch_checks);
   expect(invalidated!.facts!.runtime.state).toBe("unavailable");
   expect(invalidated!.facts!.runtime.observations).toEqual(observation.facts!.runtime.observations);
+  expect(invalidated!.facts!.audit.signer).toBe("untrusted");
+  expect(invalidated!.facts!.audit.verification).toEqual(observation.facts!.audit.verification);
   expect(invalidated?.evidence_at).toBe(observation.evidence_at);
   expect(invalidated?.valid_until).toBeUndefined();
   expect(
@@ -261,12 +276,30 @@ it("invalidates live observations on connection loss until a newer server observ
   emit(observation);
   expect(current()?.status).toBe("unknown");
   expect(current()!.facts!.process.state).toBe("unknown");
+  expect(current()!.facts!.audit.signer).toBe("untrusted");
   emit({ ...observation, revision: 4 });
   expect(current()?.status).toBe("active");
+  expect(current()!.facts!.audit.signer).toBe("trusted");
   store.getState().setConnectionStatus("reconnecting");
   emit({ ...observation, revision: 5 });
   store.getState().setConnectionStatus("connected");
   expect(current()?.status).toBe("unknown");
   emit({ ...observation, revision: 6 });
   expect(current()?.status).toBe("active");
+  const stopped = {
+    ...observation,
+    revision: 7,
+    status: "stopped" as const,
+    valid_until: undefined,
+  };
+  emit(stopped);
+  store.getState().setConnectionStatus("disconnected");
+  expect(current()?.status).toBe("stopped");
+  expect(current()!.facts!.audit.signer).toBe("untrusted");
+  store.getState().setConnectionStatus("connected");
+  emit(stopped);
+  expect(current()!.facts!.audit.signer).toBe("untrusted");
+  emit({ ...stopped, revision: 8 });
+  expect(current()!.facts!.audit.signer).toBe("trusted");
+  expect(current()!.facts!.audit.verification).toEqual(observation.facts!.audit.verification);
 });

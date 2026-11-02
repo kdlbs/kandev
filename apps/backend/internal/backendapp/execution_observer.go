@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,11 +18,17 @@ type executionEvidenceSource interface {
 }
 
 type executionObserver struct {
-	tasks   *taskrepo.Repository
-	source  executionEvidenceSource
-	publish func(context.Context, *models.ExecutionSnapshot) error
-	token   string
-	wakeups chan struct{}
+	auditRefresh atomic.Bool
+	tasks        *taskrepo.Repository
+	source       executionEvidenceSource
+	publish      func(context.Context, *models.ExecutionSnapshot) error
+	token        string
+	wakeups      chan struct{}
+}
+
+func (o *executionObserver) wakeAudit() {
+	o.auditRefresh.Store(true)
+	o.wake()
 }
 
 func newExecutionObserver(ctx context.Context, tasks *taskrepo.Repository, source executionEvidenceSource, publish func(context.Context, *models.ExecutionSnapshot) error) (*executionObserver, error) {
@@ -29,18 +36,30 @@ func newExecutionObserver(ctx context.Context, tasks *taskrepo.Repository, sourc
 	if _, err := tasks.ClaimExecutionObserver(ctx, token); err != nil {
 		return nil, err
 	}
-	return &executionObserver{tasks: tasks, source: source, publish: publish, token: token, wakeups: make(chan struct{}, 1)}, nil
+	observer := &executionObserver{tasks: tasks, source: source, publish: publish, token: token, wakeups: make(chan struct{}, 1)}
+	observer.auditRefresh.Store(true)
+	return observer, nil
 }
 
-func (o *executionObserver) refresh(ctx context.Context) error {
+func (o *executionObserver) refresh(ctx context.Context) (refreshErr error) {
 	if o.source == nil {
 		return nil
+	}
+	history := o.auditRefresh.Swap(false)
+	defer func() {
+		if history && refreshErr != nil {
+			o.auditRefresh.Store(true)
+		}
+	}()
+	list := o.tasks.ListExecutionObservationCandidates
+	if history {
+		list = o.tasks.ListExecutionHistoryCandidates
 	}
 	const pageSize = 100
 	after := ""
 	var failures []error
 	for ctx.Err() == nil {
-		candidates, err := o.tasks.ListExecutionObservationCandidates(ctx, after, pageSize)
+		candidates, err := list(ctx, after, pageSize)
 		if err != nil {
 			return err
 		}
@@ -91,6 +110,9 @@ func (o *executionObserver) observationFailed(ctx context.Context, snapshot *mod
 	}
 	value := contract.Observation{AttemptID: snapshot.AttemptID, Generation: snapshot.Sandbox.Generation,
 		AttemptVersion: previous.AttemptVersion, Status: contract.StatusUnknown, ProviderHealth: contract.HealthUnknown, Reason: "evidence_unavailable", CheckedAt: time.Now().UTC()}
+	if previous.Status == contract.StatusStopped || previous.Status == contract.StatusFailed {
+		value.Status = previous.Status
+	}
 	if _, err = o.tasks.RecordExecutionObservation(ctx, o.token, snapshot, value); err != nil {
 		return err
 	}

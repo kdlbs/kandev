@@ -47,7 +47,7 @@ func (p *Prepared) readTypedReport(ctx context.Context, attempt *policy.Attempt,
 		return data, err
 	}
 	data.Status, data.Integrity = reportStatusAvailable, pluginsdk.SandboxReportPartial
-	if data.V2.Integrity == "invalid" {
+	if data.V2.Integrity == contract.AuditInvalid {
 		return data, contract.ErrInvalidPolicy
 	}
 	// Byte integrity does not establish complete collection coverage.

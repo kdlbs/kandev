@@ -107,5 +107,20 @@ export type ExecutionFacts = {
     integrity: "unchecked" | "valid" | "invalid";
     finalization: "unknown" | "live" | "final" | "interrupted";
     signer: "unchecked" | "unsigned" | "untrusted" | "trusted" | "invalid";
+    verification?: {
+      id: string;
+      completed_at: string;
+      artifact_set_digest: string;
+      verifier_version: string;
+      signature_state:
+        | "unchecked"
+        | "unsigned"
+        | "untrusted"
+        | "verified"
+        | "invalid"
+        | "unsupported";
+      ledger_state: "unavailable" | "valid" | "invalid";
+      trust_revision?: string;
+    };
   };
 };
