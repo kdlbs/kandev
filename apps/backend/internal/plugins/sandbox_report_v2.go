@@ -34,7 +34,7 @@ func validateSandboxReportV2(req *pluginsdk.ReadSandboxReportRequest, value *plu
 }
 
 func validSandboxChunkV2(value *pluginsdk.SandboxAuditChunkV2) bool {
-	return value != nil && validSandboxText(value.OperationHandle, 256) && sandboxDigestV2(value.ArtifactSetDigest) && validSandboxText(value.SourceId, 128) && sandboxDigestV2(value.SourceDigest) && len(value.Content) <= 256<<10 && (value.TotalBytes > 0 || value.Final && len(value.Content) == 0) && value.TotalBytes <= 128<<20 && uint64(len(value.Content)) <= value.TotalBytes && value.Sequence < 65536 && validSandboxChunkSourceV2(value)
+	return value != nil && validSandboxText(value.OperationHandle, 256) && sandboxDigestV2(value.ArtifactSetDigest) && validSandboxText(value.SourceId, 128) && sandboxDigestV2(value.SourceDigest) && (len(value.Content) > 0 || value.Final) && len(value.Content) <= 256<<10 && (value.TotalBytes > 0 || value.Final && len(value.Content) == 0) && value.TotalBytes <= 128<<20 && uint64(len(value.Content)) <= value.TotalBytes && value.Sequence < 65536 && validSandboxChunkSourceV2(value)
 }
 
 func validSandboxCoverageV2(values []*pluginsdk.SandboxReportCoverageV2) bool {

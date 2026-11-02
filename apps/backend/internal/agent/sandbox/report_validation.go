@@ -30,7 +30,7 @@ func reportIntegrity(value string) int {
 }
 
 func validReportEnvelope(data ReportData) bool {
-	if !slices.Contains([]string{reportStatusAvailable, "unavailable", reportStatusUnsupported}, data.Status) ||
+	if !slices.Contains([]string{reportStatusAvailable, reportStatusUnavailable, reportStatusUnsupported}, data.Status) ||
 		reportIntegrity(data.Integrity) < 0 || len(data.Sources) > 32 || len(data.Records) > 1000 || len(data.SupportedClasses) > 3 {
 		return false
 	}
@@ -44,7 +44,7 @@ func validReportEnvelope(data ReportData) bool {
 }
 
 func validReportData(data ReportData, captured time.Time) bool {
-	if !validReportEnvelope(data) {
+	if !validReportEnvelope(data) || !validTypedReport(data.V2, captured) || !validReportRefresh(data, captured) || !typedReportSourcesMatch(data) {
 		return false
 	}
 	sources := make(map[string]bool, len(data.Sources))
@@ -67,7 +67,7 @@ func validReportData(data ReportData, captured time.Time) bool {
 func validReportClasses(classes []string) bool {
 	seen := map[string]bool{}
 	for _, class := range classes {
-		if seen[class] || !slices.Contains([]string{reportClassFilesystem, "network", "command"}, class) {
+		if seen[class] || !slices.Contains([]string{reportClassFilesystem, reportClassNetwork, reportClassCommand}, class) {
 			return false
 		}
 		seen[class] = true
@@ -107,9 +107,9 @@ func validDenialRecord(record DenialRecord, captured time.Time) bool {
 	switch record.Kind {
 	case reportClassFilesystem:
 		return record.Operation == filesystemRead || record.Operation == filesystemWrite
-	case "network":
+	case reportClassNetwork:
 		return record.Operation == "connect"
-	case "command":
+	case reportClassCommand:
 		return record.Operation == "execute"
 	default:
 		return false
@@ -136,6 +136,10 @@ func reportMatchesAttempt(report *Report, attempt *Attempt) bool {
 func validStoredReport(report *Report, version int64, finalized int) bool {
 	digest, err := reportDigest(*report)
 	return err == nil && digest == report.Digest && report.SchemaVersion == 1 &&
-		report.Version == version && version > 0 && (finalized == 0 || finalized == 1) &&
+		(report.Data.V2 == nil || report.Provider.ProtocolVersion() == 2) && report.Version == version && version > 0 && (finalized == 0 || finalized == 1) &&
 		report.Data.Finalized == (finalized == 1) && !report.CapturedAt.IsZero()
+}
+
+func validReportRefresh(data ReportData, captured time.Time) bool {
+	return slices.Contains([]string{"", reportStatusUnavailable, reportStatusUnsupported, "invalid_evidence", "limit_exceeded"}, data.RefreshError) && (data.LastSuccessfulReadAt == nil || !data.LastSuccessfulReadAt.IsZero() && !data.LastSuccessfulReadAt.After(captured))
 }

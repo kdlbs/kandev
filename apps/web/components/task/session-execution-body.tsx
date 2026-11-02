@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionExecution } from "@/hooks/domains/session/use-session-execution";
 import { useExecutionPolicyDetails } from "@/hooks/domains/session/use-execution-policy-details";
@@ -11,7 +11,7 @@ import { ExecutionFactsDetails } from "./execution-facts";
 import { CommandDetails } from "./execution-command-details";
 import { NextExecutionCommand } from "./next-execution-command";
 import { SandboxApprovals } from "./sandbox-approvals";
-import { SandboxDenialReport } from "./sandbox-denial-report";
+import { Button } from "@kandev/ui/button";
 import { ExecutionStatusIcon, executionStatusKeys } from "./execution-status-presentation";
 
 function ExecutionDetailSection({ title, children }: { title: string; children: ReactNode }) {
@@ -97,7 +97,15 @@ function useExecutionDetails({ sessionId }: { sessionId: string }) {
   return { status, snapshot, observation, policies, facts };
 }
 
-export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
+export function SessionExecutionBody({
+  sessionId,
+  onOpenReports,
+  reportsTrigger,
+}: {
+  sessionId: string;
+  onOpenReports: () => void;
+  reportsTrigger: RefObject<HTMLButtonElement | null>;
+}) {
   const { t } = useTranslation();
   const { status, snapshot, observation, policies, facts } = useExecutionDetails({ sessionId });
   return (
@@ -146,7 +154,15 @@ export function SessionExecutionBody({ sessionId }: { sessionId: string }) {
         <SandboxApprovals sessionId={sessionId} />
       </ExecutionDetailSection>
       <ExecutionDetailSection title={t("agents:executionDenials")}>
-        <SandboxDenialReport sessionId={sessionId} />
+        <Button
+          type="button"
+          variant="outline"
+          className="h-7 min-h-7 max-md:min-h-11 pointer-coarse:min-h-11 cursor-pointer"
+          ref={reportsTrigger}
+          onClick={onOpenReports}
+        >
+          {t("agents:reportTitle")}
+        </Button>
       </ExecutionDetailSection>
     </>
   );

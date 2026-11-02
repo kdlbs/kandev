@@ -8,6 +8,8 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kdlbs/kandev/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -57,7 +59,7 @@ func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 	frozen.GetContext().DeadlineUnixMs = deadline.UnixMilli()
 	reply, err := call(remote, ctx, frozen)
 	if err != nil || ctx.Err() != nil {
-		return empty, errors.Join(ErrSandboxProviderUnavailable, ctx.Err())
+		return empty, sandboxProviderCallError(frozen, err, ctx.Err())
 	}
 	if !validSandboxMessage(reply) ||
 		!validSandboxResponseContext(reply.GetContext(), frozen.GetContext()) || !sandboxMajorFields(reply, frozen.GetContext().ProtocolMajor) {
@@ -150,4 +152,14 @@ func sandboxBindingMatches(record *store.Record, binding SandboxProviderBinding)
 
 func validSandboxDispatchRequest(request sandboxRequest, binding SandboxProviderBinding) bool {
 	return validSandboxMessage(request) && validSandboxRequestPayload(request) && validSandboxRequestContext(request.GetContext(), binding) && sandboxMajorFields(request, request.GetContext().ProtocolMajor)
+}
+
+func sandboxProviderCallError(request proto.Message, callErr, contextErr error) error {
+	if contextErr != nil {
+		return errors.Join(ErrSandboxProviderUnavailable, contextErr)
+	}
+	if _, report := request.(*pluginsdk.ReadSandboxReportRequest); report && status.Code(callErr) == codes.Unimplemented {
+		return ErrSandboxReportUnsupported
+	}
+	return ErrSandboxProviderUnavailable
 }

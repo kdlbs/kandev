@@ -16,11 +16,11 @@ import (
 const sandboxAccessRead = "read"
 
 func (p *Prepared) readReportData(ctx context.Context) (policy.ReportData, error) {
-	data := policy.ReportData{Status: "unsupported", Integrity: pluginsdk.SandboxReportUnverified, SupportedClasses: slices.Clone(p.description.ReportClasses)}
+	data := policy.ReportData{Status: reportStatusUnsupported, Integrity: pluginsdk.SandboxReportUnverified, SupportedClasses: slices.Clone(p.description.ReportClasses)}
 	if len(data.SupportedClasses) == 0 {
 		return data, nil
 	}
-	data.Status, data.Integrity, data.Complete = "available", "complete", true
+	data.Status, data.Integrity, data.Complete = reportStatusAvailable, "complete", true
 	for _, source := range p.description.RuntimeSources {
 		if source.Kind != "audit" {
 			continue
@@ -38,7 +38,7 @@ func (p *Prepared) readReportData(ctx context.Context) (policy.ReportData, error
 		}
 	}
 	if len(data.Sources) == 0 {
-		data.Status, data.Integrity, data.Complete = "unavailable", pluginsdk.SandboxReportUnverified, false
+		data.Status, data.Integrity, data.Complete = contract.FactUnavailable, pluginsdk.SandboxReportUnverified, false
 	}
 	return data, nil
 }
@@ -87,11 +87,11 @@ func (p *Prepared) appendDenials(data *policy.ReportData, sourceID string, recor
 func denialKind(operation string) string {
 	switch operation {
 	case sandboxAccessRead, "write":
-		return "filesystem"
+		return reportClassFilesystem
 	case "connect":
-		return "network"
+		return reportClassNetwork
 	case "execute":
-		return "command"
+		return reportClassCommand
 	default:
 		return ""
 	}

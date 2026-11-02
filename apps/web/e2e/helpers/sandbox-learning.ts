@@ -68,7 +68,9 @@ export function sandboxLearningScenario() {
     await testPage.route("**/api/v1/sandbox/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
-      if (request.method() === "POST") writes.push({ path, body: request.postDataJSON() });
+      // Policy preview uses POST but does not persist a mutation.
+      if (request.method() === "POST" && path !== "/api/v1/sandbox/preview")
+        writes.push({ path, body: request.postDataJSON() });
       if (path.endsWith("/report")) await route.fulfill({ json: reportFixture(sessionId) });
       else if (path.endsWith("/learning")) await route.fulfill({ status: 201, json: proposal });
       else if (path.endsWith("/publish"))
@@ -79,6 +81,7 @@ export function sandboxLearningScenario() {
     await projectExecutionFixture(testPage, sessionId);
     await enableSandboxSettingsFixture(testPage);
     await testPage.getByTestId(`execution-control-${sessionId}`).click();
+    await testPage.getByRole("button", { name: "Reports", exact: true }).click();
     const section = testPage.getByTestId("sandbox-denial-report");
     await section.getByRole("checkbox").check();
     const trigger = section.getByRole("button", { name: "Review selected denials", exact: true });
@@ -102,11 +105,31 @@ export function sandboxLearningScenario() {
         await testPage.setViewportSize({ width, height: 851 });
         expect((await publish.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         await expect(review.getByRole("button", { name: "Back", exact: true })).toBeVisible();
+        const heading = review.getByRole("heading", { name: "Review policy changes", exact: true });
+        const headerGeometry = await heading.evaluate((element) => {
+          const text = element.firstChild!;
+          const range = document.createRange();
+          range.setStart(text, 0);
+          range.setEnd(text, 1);
+          const glyph = range.getBoundingClientRect();
+          const bounds = element.getBoundingClientRect();
+          return {
+            glyphLeft: glyph.left,
+            boundsLeft: bounds.left,
+            glyphRight: glyph.right,
+            boundsRight: bounds.right,
+          };
+        });
+        expect(headerGeometry.glyphLeft).toBeGreaterThanOrEqual(headerGeometry.boundsLeft - 1);
+        expect(headerGeometry.glyphRight).toBeLessThanOrEqual(headerGeometry.boundsRight + 1);
         await assertNoDocumentHorizontalOverflow(testPage, `learning at ${width}`);
       }
       await testPage.setViewportSize({ width: 393, height: 851 });
     }
-    await review.screenshot({ path: testInfo.outputPath("sandbox-learning.png") });
+    await testPage.screenshot({
+      path: testInfo.outputPath("sandbox-learning.png"),
+      clip: (await review.boundingBox())!,
+    });
     if (prCapture.capturing) await waitForFiniteAnimations(review);
     await prCapture.screenshot(mobile ? "policy-learning-phone" : "policy-learning-desktop", {
       caption: "Review exact added access and source digests before creating a policy revision.",
@@ -117,7 +140,7 @@ export function sandboxLearningScenario() {
     ).toBeVisible();
     expect(writes).toHaveLength(2);
     expect(writes[1].body).toEqual({ expected_digest: proposal.digest });
-    await review.getByRole("button", { name: "Close", exact: true }).last().click();
+    await review.getByRole("button", { name: "Back", exact: true }).last().click();
     await expect(
       section.getByRole("button", { name: "View created revision", exact: true }),
     ).toBeFocused();

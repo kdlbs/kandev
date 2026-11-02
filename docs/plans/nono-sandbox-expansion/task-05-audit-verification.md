@@ -101,4 +101,18 @@ A report-selected signer is not operator trust. Cryptographic validity does not 
 
 ## Results
 
-Pending.
+Pending implementation. Pinned 0.81.0 API investigation confirms that
+`nono audit verify --json --public-key-file <file> <session>` reports chain,
+ledger, and attestation results separately. JSON mode can exit successfully
+while result fields report a mismatch. A verifier must check the individual
+fields, exact session/root/count, expected key, and captured artifact binding.
+The upstream keyed verifier uses ECDSA P-256 and the audit-session DSSE
+predicate. Disposable `file://` test keys are supported without changing a
+system keystore. Production signing-key provisioning remains out of scope.
+
+The existing chunk RPC has optional trust but no explicit verification request.
+Add a negotiated major 2 verification request field so ordinary report reads
+never start verification. Final private artifact retention must precede runtime
+cleanup. Preserve its binding separately from an earlier normalized report if
+the last read fails. Cleanup must not depend on a successful provider RPC.
+These are implementation details within the approved verification boundary.

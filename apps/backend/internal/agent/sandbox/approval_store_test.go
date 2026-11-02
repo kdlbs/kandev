@@ -18,13 +18,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func approvalStoreFixture(t *testing.T, database *sqlx.DB) (*Service, *Attempt, string) {
+func approvalStoreFixture(t *testing.T, database *sqlx.DB, protocol ...uint32) (*Service, *Attempt, string) {
 	t.Helper()
 	policy := policyFixture(t)
-	return approvalPolicyFixture(t, database, policy, policy)
+	return approvalPolicyFixture(t, database, policy, policy, protocol...)
 }
 
-func approvalPolicyFixture(t *testing.T, database *sqlx.DB, policy, ceiling Policy) (*Service, *Attempt, string) {
+func approvalPolicyFixture(t *testing.T, database *sqlx.DB, policy, ceiling Policy, protocol ...uint32) (*Service, *Attempt, string) {
 	t.Helper()
 	ctx := operatorContext(t)
 	service, err := NewService(database, true, nil)
@@ -58,7 +58,11 @@ func approvalPolicyFixture(t *testing.T, database *sqlx.DB, policy, ceiling Poli
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, files.Close()) })
 	launch := &contract.Launch{Version: 1, AttemptID: "approval-attempt", Generation: 1, PolicyDigest: revision.Digest, PackageDigest: strings.Repeat("b", 64), Root: files.Root, Prefix: []string{files.Executable}, Digests: files.Digests}
-	attempt, err := service.CaptureAttempt(ctx, CaptureRequest{Selection: selection, Resolved: resolved, SessionID: "session", ExecutionID: "execution", WorkDir: policy.Grants.Filesystem[0].Path, Launch: launch, Provider: AttemptProvider{PluginID: "plugin", InstallationID: policy.InstallationID, Key: policy.ProviderKey, Version: "1", RuntimeVersion: "1", PackageDigest: launch.PackageDigest, RuntimeDigest: runtimeDigest}})
+	provider := AttemptProvider{PluginID: "plugin", InstallationID: policy.InstallationID, Key: policy.ProviderKey, Version: "1", RuntimeVersion: "1", PackageDigest: launch.PackageDigest, RuntimeDigest: runtimeDigest}
+	if len(protocol) > 0 {
+		provider.ProtocolMajor = protocol[0]
+	}
+	attempt, err := service.CaptureAttempt(ctx, CaptureRequest{Selection: selection, Resolved: resolved, SessionID: "session", ExecutionID: "execution", WorkDir: policy.Grants.Filesystem[0].Path, Launch: launch, Provider: provider})
 	require.NoError(t, err)
 	attempt, err = service.TransitionAttempt(ctx, "org", attempt.ID, attempt.Version, AttemptStarting, nil)
 	require.NoError(t, err)

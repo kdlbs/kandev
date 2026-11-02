@@ -31,13 +31,16 @@ type DenialRecord struct {
 // ReportData is a provider-normalized snapshot. Missing evidence is unavailable,
 // and partial reports never imply that every denied operation was observed.
 type ReportData struct {
-	Status           string         `json:"status"`
-	Integrity        string         `json:"integrity"`
-	Complete         bool           `json:"complete"`
-	Finalized        bool           `json:"finalized"`
-	SupportedClasses []string       `json:"supported_classes"`
-	Sources          []ReportSource `json:"sources"`
-	Records          []DenialRecord `json:"records"`
+	V2                   *TypedReport   `json:"v2,omitempty"`
+	LastSuccessfulReadAt *time.Time     `json:"last_successful_read_at,omitempty"`
+	RefreshError         string         `json:"refresh_error,omitempty"`
+	Status               string         `json:"status"`
+	Integrity            string         `json:"integrity"`
+	Complete             bool           `json:"complete"`
+	Finalized            bool           `json:"finalized"`
+	SupportedClasses     []string       `json:"supported_classes"`
+	Sources              []ReportSource `json:"sources"`
+	Records              []DenialRecord `json:"records"`
 }
 
 type Report struct {

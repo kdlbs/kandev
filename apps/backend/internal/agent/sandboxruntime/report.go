@@ -37,15 +37,25 @@ func (p *Prepared) captureReport(ctx context.Context) (*policy.Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, readErr := p.readReportData(ctx)
+	var data policy.ReportData
+	var readErr error
+	if p.typedReports() {
+		data, readErr = p.readTypedReport(ctx, attempt, previous)
+	} else {
+		data, readErr = p.readReportData(ctx)
+	}
 	var expected int64
 	if previous != nil {
 		expected = previous.Version
 	}
 	if readErr != nil {
 		data = unavailableReport(previous)
+		data.RefreshError = reportRefreshError(readErr)
+	} else if data.Status == reportStatusAvailable {
+		now := time.Now().UTC()
+		data.LastSuccessfulReadAt = &now
 	}
-	data.Finalized = attempt.State == policy.AttemptStopped || attempt.State == policy.AttemptFailed
+	data = settleReport(data, attempt.State == policy.AttemptStopped || attempt.State == policy.AttemptFailed)
 	return p.manager.policies.CaptureReport(ctx, p.orgID, attempt.ID, attempt.Version, expected, data)
 }
 
@@ -53,8 +63,22 @@ func unavailableReport(previous *policy.Report) policy.ReportData {
 	data := policy.ReportData{Integrity: pluginsdk.SandboxReportUnverified}
 	if previous != nil {
 		data = previous.Data
+		if data.LastSuccessfulReadAt == nil && previous.Data.Status == reportStatusAvailable {
+			captured := previous.CapturedAt
+			data.LastSuccessfulReadAt = &captured
+		}
 	}
 	data.Status = contract.FactUnavailable
 	data.Complete = false
+	return data
+}
+
+func settleReport(data policy.ReportData, terminal bool) policy.ReportData {
+	data.Finalized = terminal
+	if terminal && data.V2 != nil && data.V2.Finalization == "live" {
+		settled := *data.V2
+		settled.Finalization = "interrupted"
+		data.V2 = &settled
+	}
 	return data
 }

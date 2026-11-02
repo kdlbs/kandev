@@ -1,5 +1,7 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
+import { SandboxDenialReport } from "./sandbox-denial-report";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -16,6 +18,13 @@ export function SessionExecutionDetails({
   onCloseAutoFocus?: (event: Event) => void;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
+  const [reports, setReports] = useState(false);
+  const reportsTrigger = useRef<HTMLButtonElement>(null);
+  const wasReports = useRef(false);
+  useLayoutEffect(() => {
+    if (!reports && wasReports.current) reportsTrigger.current?.focus();
+    wasReports.current = reports;
+  }, [reports]);
   const { session } = useSessionExecution(sessionId);
   return (
     <DialogContent
@@ -32,13 +41,23 @@ export function SessionExecutionDetails({
       onDoubleClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <ExecutionDetailsHeader name={session?.name || sessionId} isMobile={isMobile} />
-      <div
-        className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-1 py-2 text-xs"
-        data-testid="execution-details-body"
-      >
-        <SessionExecutionBody sessionId={sessionId} />
-      </div>
+      {reports ? (
+        <SandboxDenialReport sessionId={sessionId} onBack={() => setReports(false)} />
+      ) : (
+        <>
+          <ExecutionDetailsHeader name={session?.name || sessionId} isMobile={isMobile} />
+          <div
+            className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-1 py-2 text-xs"
+            data-testid="execution-details-body"
+          >
+            <SessionExecutionBody
+              sessionId={sessionId}
+              reportsTrigger={reportsTrigger}
+              onOpenReports={() => setReports(true)}
+            />
+          </div>
+        </>
+      )}
     </DialogContent>
   );
 }

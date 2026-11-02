@@ -42,3 +42,10 @@ func TestSandboxAuditSourceBoundsPreserveMajorOne(t *testing.T) {
 	description.RuntimeSources[0].Kind = "identity"
 	require.Error(t, validateSandboxDescriptionForProtocol(description, 2))
 }
+
+func TestSandboxChunkRequiresByteProgressUnlessItEndsTheSource(t *testing.T) {
+	chunk := &pluginsdk.SandboxAuditChunkV2{OperationHandle: "operation", ArtifactSetDigest: strings.Repeat("a", 64), SourceId: "audit.v2", SourceDigest: strings.Repeat("b", 64), TotalBytes: 100}
+	require.False(t, validSandboxChunkV2(chunk))
+	chunk.Final = true
+	require.True(t, validSandboxChunkV2(chunk))
+}

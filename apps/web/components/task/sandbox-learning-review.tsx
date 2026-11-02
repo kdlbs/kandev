@@ -1,12 +1,12 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { DialogClose, DialogContent, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
+import { DialogClose, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { useSandboxLearning } from "@/hooks/domains/session/use-sandbox-learning";
@@ -18,39 +18,34 @@ const actionClass = "h-7 min-h-7 max-md:min-h-12 pointer-coarse:min-h-11 cursor-
 export function SandboxLearningReview({
   model,
   selectedIds,
+  onBack,
 }: {
   model: LearningModel;
   selectedIds: string[];
+  onBack: () => void;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const [name, setName] = useState(() => t("agents:learningDefaultName"));
+  const title = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => title.current?.focus(), []);
   const [scope, setScope] = useState<"workspace" | "installation">("workspace");
   return (
-    <DialogContent
-      showCloseButton={false}
-      enterConfirms={false}
-      className={
-        isMobile
-          ? "inset-0 h-dvh max-h-dvh w-full max-w-none sm:max-w-none translate-x-0 translate-y-0 rounded-none border-0 flex flex-col overflow-hidden pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
-          : "flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl"
-      }
-      onClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-    >
+    <>
       <div className="flex shrink-0 items-start gap-3">
-        {isMobile && (
-          <DialogClose asChild>
-            <Button type="button" variant="ghost" className="h-12 min-h-12 px-3 cursor-pointer">
-              <IconArrowLeft aria-hidden className="size-4" />
-              {t("common:back")}
-            </Button>
-          </DialogClose>
-        )}
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-7 min-h-7 max-md:min-h-11 pointer-coarse:min-h-11 cursor-pointer"
+          onClick={onBack}
+        >
+          <IconArrowLeft aria-hidden className="size-4" />
+          {t("common:back")}
+        </Button>
         <div className="min-w-0 flex-1">
-          <DialogTitle>{t("agents:learningTitle")}</DialogTitle>
+          <DialogTitle ref={title} tabIndex={-1} className="focus:outline-none">
+            {t("agents:learningTitle")}
+          </DialogTitle>
           <DialogDescription className="mt-2">{t("agents:learningHelp")}</DialogDescription>
         </div>
         {!isMobile && (
@@ -80,9 +75,15 @@ export function SandboxLearningReview({
         )}
       </div>
       <div className="shrink-0 border-t pt-3 flex justify-end gap-2">
-        <LearningActions model={model} selectedIds={selectedIds} name={name} scope={scope} />
+        <LearningActions
+          model={model}
+          selectedIds={selectedIds}
+          name={name}
+          scope={scope}
+          onBack={onBack}
+        />
       </div>
-    </DialogContent>
+    </>
   );
 }
 
@@ -158,6 +159,7 @@ type LearningDraftProps = {
   selectedIds: string[];
   name: string;
   scope: "workspace" | "installation";
+  onBack?: () => void;
 };
 function LearningContent({
   model,
@@ -214,15 +216,19 @@ function LearningContent({
     </div>
   );
 }
-function LearningActions({ model, selectedIds, name, scope }: LearningDraftProps) {
+function LearningActions({
+  model,
+  selectedIds,
+  name,
+  scope,
+  onBack,
+}: LearningDraftProps & { onBack: () => void }) {
   const { t } = useTranslation();
   if (model.revision)
     return (
-      <DialogClose asChild>
-        <Button type="button" className={actionClass}>
-          {t("common:close")}
-        </Button>
-      </DialogClose>
+      <Button type="button" className={actionClass} onClick={onBack}>
+        {t("common:back")}
+      </Button>
     );
   if (model.proposal)
     return (

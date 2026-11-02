@@ -9,6 +9,8 @@ import (
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
+var ErrSandboxReportUnsupported = errors.New("plugins: sandbox report schema is unsupported")
+
 var ErrSandboxProviderUnavailable = errors.New("plugins: sandbox provider is unavailable")
 
 // SetSandboxProvidersEnabled applies the restart-required feature gate at startup.

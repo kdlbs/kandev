@@ -13,7 +13,7 @@ import (
 )
 
 func initialFacts(attempt *policy.Attempt, checkedAt time.Time) *contract.ExecutionFacts {
-	facts := &contract.ExecutionFacts{SchemaVersion: 1, Process: contract.ProcessFact{State: contract.StatusUnknown}, LaunchChecks: contract.LaunchChecksFact{State: contract.FactUnavailable}, Runtime: contract.RuntimeFacts{State: "unsupported"}, Audit: contract.AuditFacts{Integrity: "unchecked", Finalization: "unknown", Signer: "unchecked"}}
+	facts := &contract.ExecutionFacts{SchemaVersion: 1, Process: contract.ProcessFact{State: contract.StatusUnknown}, LaunchChecks: contract.LaunchChecksFact{State: contract.FactUnavailable}, Runtime: contract.RuntimeFacts{State: reportStatusUnsupported}, Audit: contract.AuditFacts{Integrity: reportAuditUnchecked, Finalization: "unknown", Signer: reportAuditUnchecked}}
 	if receipt := attempt.Snapshot.LaunchChecks; receipt != nil {
 		facts.LaunchChecks = contract.LaunchChecksFact{State: "passed", Receipt: receipt}
 	}
@@ -49,7 +49,7 @@ func (p *Prepared) readStatusFacts(ctx context.Context, attempt *policy.Attempt,
 		if typed && result.Facts.Runtime.State != contract.RuntimeReported {
 			result.Facts.Runtime.State = contract.RuntimeMissing
 		}
-		records, err := contract.ReadRuntimeSource(ctx, p.files.Directories.State, contract.RuntimeSource{Key: source.Key, Kind: source.Kind, Directory: source.RelativeDirectory, Suffix: source.FilenameSuffix, MaxDepth: source.MaxDepth, MaxFiles: source.MaxFiles, MaxBytes: source.MaxBytes})
+		records, err := contract.ReadRuntimeSource(ctx, p.files.Directories.State, contract.RuntimeSource{Key: source.Key, Kind: source.Kind, Directory: source.RelativeDirectory, Suffix: source.FilenameSuffix, MaxDepth: source.MaxDepth, MaxFiles: source.MaxFiles, MaxBytes: min(source.MaxBytes, 1<<20)})
 		if err != nil {
 			result.Facts.Runtime.State = contract.FactUnavailable
 			return nil, err

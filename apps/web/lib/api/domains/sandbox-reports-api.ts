@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import type { SandboxTypedReport } from "./sandbox-report-types";
 
 export type SandboxReportSource = {
   id: string;
@@ -38,6 +39,9 @@ export type SandboxReport = {
   digest: string;
   captured_at: string;
   data: {
+    v2?: SandboxTypedReport;
+    last_successful_read_at?: string;
+    refresh_error?: "unavailable" | "unsupported" | "invalid_evidence" | "limit_exceeded";
     status: "available" | "unavailable" | "unsupported";
     integrity: "complete" | "partial" | "unverified";
     complete: boolean;

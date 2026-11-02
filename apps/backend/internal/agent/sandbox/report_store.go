@@ -27,6 +27,9 @@ func (s *Service) CaptureReport(ctx context.Context, orgID, attemptID string, at
 	if err != nil {
 		return nil, err
 	}
+	if data.V2 != nil && attempt.Snapshot.Provider.ProtocolVersion() != 2 {
+		return nil, contract.ErrInvalidPolicy
+	}
 	if attempt.Version != attemptVersion || expected < 0 {
 		return nil, ErrConflict
 	}

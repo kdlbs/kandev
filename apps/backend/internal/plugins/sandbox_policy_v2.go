@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/hex"
 	"net"
+	"net/http"
 	"net/url"
 	"path"
 	"slices"
@@ -171,7 +172,7 @@ func validSandboxCommandV2(value *pluginsdk.SandboxCommandInvocationV2) bool {
 }
 
 func validSandboxEndpointV2(value *pluginsdk.SandboxHTTPEndpointV2) bool {
-	if value == nil || !validSandboxText(value.RouteId, 128) || !slices.Contains([]string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}, value.Method) {
+	if value == nil || !validSandboxText(value.RouteId, 128) || !slices.Contains([]string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions}, value.Method) {
 		return false
 	}
 	return validSandboxOriginV2(value.Origin) && validSandboxHTTPPathV2(value.Path, value.Query)
