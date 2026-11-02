@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-TASK-CREATE-LAUNCH-PREVIEW-001
@@ -59,16 +59,16 @@ existing fields:
 - `events.on_enter`
 - `is_start_step`
 - `prompt`
-- `workflowId` when the step came from a fallback fetch
+- `workflowId` for both snapshot-backed and lightweight-read selected steps
 
 The dialog uses the current selected metadata result. A successful empty read
 is authoritative and produces no destination. Complete loaded steps from the
 selected workflow's current workspace can supply that result. Workflow-step
 WebSocket events keep loaded snapshot steps current after edits made elsewhere.
 The observer must retain those live updates rather than freeze its initial seed.
-Missing or placeholder snapshots require the shared lightweight step read,
-including when the effective workflow is the route's workflow. Another scope's
-steps are never candidates. See the selected observer design for request states,
+Missing, placeholder, or failed snapshots require the shared lightweight step
+read, including when the effective workflow is the route's workflow. Another
+scope's steps are never candidates. See the selected observer design for request states,
 mapping, cancellation, and Retry. Launch-step projection remains unchanged.
 
 ## Launch-step projection

@@ -381,6 +381,7 @@ function useDialogSetupData(
   const repositoryBranches = useAppStore((state) => state.repositoryBranches);
   const data = useTaskCreateDialogData({
     open,
+    enabled: (props.mode ?? "create") === "create",
     workspaceId,
     workflowId,
     defaultStepId,

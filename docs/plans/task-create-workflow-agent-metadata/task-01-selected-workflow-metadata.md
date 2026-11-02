@@ -94,7 +94,7 @@ Run from the repository root. In a fresh worktree without dependencies, first ru
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run hooks/use-task-create-workflow-steps.test.ts hooks/journey-metadata-resources.test.ts components/task-create-dialog-effects.test.ts components/task-create-dialog-state.test.ts components/task-create-dialog-setup.test.ts components/task-create-dialog-workflow-agent-override-validation.test.ts components/task-create-dialog-workflow-agent-overrides.test.ts components/task-create-dialog-launch-preview.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx components/task-create-dialog-prop-builders.test.ts components/task-create-dialog-submit.test.tsx)
+(cd apps/web && pnpm exec vitest run hooks/use-task-create-workflow-steps.test.ts hooks/journey-metadata-resources.test.ts components/task-create-dialog-effects.test.ts components/task-create-dialog-state.test.ts components/task-create-dialog-setup.test.ts components/task-create-dialog-workflow-agent-override-validation.test.ts components/task-create-dialog-workflow-agent-overrides.test.ts components/task-create-dialog-launch-preview.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx components/task-create-dialog-prop-builders.test.ts components/task-create-dialog-submit.test.tsx components/task-create-dialog.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint hooks/use-task-create-workflow-steps.ts hooks/use-task-create-workflow-steps.test.ts components/task-create-dialog-effects.ts components/task-create-dialog-state.ts components/task-create-dialog-setup.ts components/task-create-dialog-types.ts components/task-create-dialog-prop-builders.ts components/task-create-dialog-workflow-agent-override-validation.ts)
 (cd apps/web && pnpm run i18n:check)
@@ -122,9 +122,11 @@ const paths = [
   'docs/specs/tasks/requirements/task-create-launch-preview.md',
   'docs/specs/tasks/system-design/task-create-launch-preview.md',
 ];
-const changed = execFileSync('git', ['diff', '--name-only', 'HEAD', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+const base = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { encoding: 'utf8' }).trim();
+const committed = execFileSync('git', ['diff', '--name-only', base, 'HEAD', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+const working = execFileSync('git', ['diff', '--name-only', 'HEAD', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
 const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
-const changedFiles = [...new Set([...changed, ...untracked])].map(filename => ({ filename, status: fs.existsSync(filename) ? 'modified' : 'removed', additions: 1, changes: 1 }));
+const changedFiles = [...new Set([...committed, ...working, ...untracked])].map(filename => ({ filename, status: fs.existsSync(filename) ? 'modified' : 'removed', additions: 1, changes: 1 }));
 const fileContents = Object.fromEntries(paths.map(path => [path, fs.readFileSync(path, 'utf8')]));
 const result = validateCoverage({ changedFiles, fileContents });
 console.log(JSON.stringify({ ok: result.ok, status: result.status, errors: result.errors }, null, 2));
@@ -196,7 +198,9 @@ workspace, workflow, auth, open-cycle, retry, and selected-workflow activation
 identities, aborts on close or unmount, and exposes targeted Retry with shared
 refresh demand. Each activation, including a return to an earlier workflow or a
 previously failed workflow, starts from loading instead of publishing retired
-metadata. The result now feeds grouping, launch preview, validation, and the
+metadata. Failed snapshots that retain stale steps are rejected so the
+lightweight read runs, and edit/session dialogs establish no selected-metadata
+demand. The result now feeds grouping, launch preview, validation, and the
 existing default-step bridge. `useWorkflowStepsEffect` and the snapshot-error
 Retry wiring were removed.
 
@@ -209,11 +213,14 @@ step-bound replacement.
 
 Verification:
 
-- Focused Vitest: 13 files, 190 tests passed.
+- Focused Vitest: 13 files, 191 tests passed. The affected edit-mode save/retry
+  suite passed 11 additional tests.
 - `pnpm run typecheck`: passed.
 - Focused ESLint: passed with no warnings.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`: passed.
 - Desktop `create-task-workflow-agent-overrides.spec.ts`: 4 tests passed.
 - Phone `mobile-create-task-workflow-agent-overrides.spec.ts`: 3 tests passed.
+  Phone checks used managed Playwright mobile-chrome emulation; no physical
+  device was available in this environment.
 - Documentation validation, traceability preflight (`covered`), and
   `git diff --check`: passed.

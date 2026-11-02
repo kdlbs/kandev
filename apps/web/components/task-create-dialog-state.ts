@@ -484,6 +484,7 @@ export function useSessionRepoName(isSessionMode: boolean) {
 
 type TaskCreateDialogDataArgs = {
   open: boolean;
+  enabled?: boolean;
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
@@ -503,12 +504,13 @@ function resolveLoadedWorkflowSnapshot(args: {
   const workflow = workflows.find((item) => item.id === effectiveWorkflowId);
   if (!workflow || workflow.workspaceId !== workspaceId) return null;
   const snapshot = snapshots[effectiveWorkflowId];
-  if (!snapshot || snapshot.isPlaceholder) return null;
+  if (!snapshot || snapshot.isPlaceholder || snapshot.fetchFailed) return null;
   return snapshot;
 }
 
 export function useTaskCreateDialogData({
   open,
+  enabled = true,
   workspaceId,
   workflowId,
   defaultStepId,
@@ -560,6 +562,7 @@ export function useTaskCreateDialogData({
   });
   const selectedWorkflowSteps = useTaskCreateWorkflowSteps({
     open,
+    enabled,
     workspaceId,
     workflowId: computed.effectiveWorkflowId,
     openCycle: fs.openCycle,

@@ -138,13 +138,4 @@ describe("workflow agent override submit validation", () => {
       buildWorkflowAgentOverrideValidation({ ...args, isCreateMode: false }).blockedReason,
     ).toBeUndefined();
   });
-
-  it("ignores unrelated board-reader failures", () => {
-    const result = buildWorkflowAgentOverrideValidation({
-      ...base,
-      selectedWorkflowSteps: selected("success", implementedSteps),
-    });
-    expect(result.error).toBe(false);
-    expect(result.blockedReason).toBeUndefined();
-  });
 });

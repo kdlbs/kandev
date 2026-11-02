@@ -592,6 +592,7 @@ test.describe("task-specific workflow agent overrides", () => {
       createdTaskIds.push(createdTaskId);
       const stored = await apiClient.getTask(createdTaskId);
       expect(stored.title).toBe("Cold remembered desktop task");
+      expect(stored.description).toContain("Cold remembered desktop description");
       expect(stored.workflow_agent_overrides).toMatchObject({
         workflow_id: fixture.workflow.id,
         steps: [

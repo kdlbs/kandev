@@ -470,6 +470,7 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
       createdTaskIds.push(createdTaskId);
       const stored = await apiClient.getTask(createdTaskId);
       expect(stored.title).toBe("Cold remembered mobile task");
+      expect(stored.description).toContain("Cold remembered mobile description");
       expect(stored.workflow_agent_overrides?.steps).toEqual([
         expect.objectContaining({
           step_id: fixture.implementStep.id,

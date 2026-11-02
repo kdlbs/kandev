@@ -18,6 +18,8 @@ type StoredWorkflowSteps = {
 
 type HookArgs = {
   open: boolean;
+  /** Only task creation consumes selected metadata for previews and replacements. */
+  enabled?: boolean;
   workspaceId: string | null;
   workflowId: string | null;
   openCycle: number;
@@ -46,7 +48,13 @@ function snapshotMetadata(
   loadedSnapshot: WorkflowSnapshotData | null,
 ): StepType[] | null {
   if (!workflowId || !loadedSnapshot) return null;
-  if (loadedSnapshot.workflowId !== workflowId || loadedSnapshot.isPlaceholder) return null;
+  if (
+    loadedSnapshot.workflowId !== workflowId ||
+    loadedSnapshot.isPlaceholder ||
+    loadedSnapshot.fetchFailed
+  ) {
+    return null;
+  }
   return fromSnapshot(workflowId, loadedSnapshot.steps);
 }
 
@@ -76,6 +84,7 @@ function useActivationKey(scopeKey: string | null): string | null {
  */
 export function useTaskCreateWorkflowSteps({
   open,
+  enabled = true,
   workspaceId,
   workflowId,
   openCycle,
@@ -95,7 +104,7 @@ export function useTaskCreateWorkflowSteps({
   // Snapshot-backed and read-backed activations are distinct identities, so a
   // stored read result cannot reappear after a snapshot-backed visit.
   const scopeKey =
-    open && workspaceId && workflowId
+    enabled && open && workspaceId && workflowId
       ? JSON.stringify([readScope, workspaceId, workflowId, dialogCycle, snapshotSteps !== null])
       : null;
   const activationKey = useActivationKey(scopeKey);

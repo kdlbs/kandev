@@ -21,6 +21,7 @@ const WORKFLOW_A = "workflow-a";
 const WORKFLOW_B = "workflow-b";
 const WORKSPACE_A = "workspace-1";
 const WORKSPACE_B = "workspace-2";
+const RECOVERED_B = "recovered-b";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -180,7 +181,9 @@ describe("useTaskCreateWorkflowSteps snapshot seeds", () => {
     ]);
     expect(readMocks.readJourneyWorkflowSteps).not.toHaveBeenCalled();
   });
+});
 
+describe("useTaskCreateWorkflowSteps snapshot retirement", () => {
   it("starts loading when a snapshot-backed result retires for the same workflow", async () => {
     const refreshed = deferred<ReadResponse>();
     readMocks.readJourneyWorkflowSteps.mockReturnValueOnce(refreshed.promise);
@@ -216,6 +219,32 @@ describe("useTaskCreateWorkflowSteps snapshot seeds", () => {
 
     expect(result.current.status).toBe("success");
     expect(result.current.steps.map((step) => step.id)).toEqual(["refreshed-b"]);
+  });
+
+  it("rejects a failed snapshot that retains stale steps", async () => {
+    readMocks.readJourneyWorkflowSteps.mockResolvedValue(readResponse(RECOVERED_B, "Recovered B"));
+    const failedSnapshot = {
+      ...snapshot(WORKFLOW_B, [
+        {
+          id: "stale-b",
+          title: "Stale B",
+          color: "gray",
+          position: 0,
+          is_start_step: true,
+        },
+      ]),
+      fetchFailed: true,
+    };
+
+    const { result } = renderHook(() =>
+      useTaskCreateWorkflowSteps({ ...baseArgs, loadedSnapshot: failedSnapshot }),
+    );
+
+    expect(result.current.status).toBe("loading");
+    expect(result.current.steps).toEqual([]);
+    await waitFor(() => expect(result.current.status).toBe("success"));
+    expect(result.current.steps.map((step) => step.id)).toEqual([RECOVERED_B]);
+    expect(readMocks.readJourneyWorkflowSteps).toHaveBeenCalledTimes(1);
   });
 
   it("requests metadata for a placeholder snapshot and treats an empty success as authoritative", async () => {
@@ -268,6 +297,16 @@ describe("useTaskCreateWorkflowSteps request states", () => {
       expect.objectContaining({ refresh: true }),
     );
     expect(result.current.steps.map((step) => step.id)).toEqual(["analysis"]);
+  });
+
+  it("does not establish demand outside task creation", () => {
+    const { result } = renderHook(() =>
+      useTaskCreateWorkflowSteps({ ...baseArgs, enabled: false }),
+    );
+
+    expect(result.current.status).toBe("idle");
+    expect(result.current.steps).toEqual([]);
+    expect(readMocks.readJourneyWorkflowSteps).not.toHaveBeenCalled();
   });
 
   it("does not repeat demand on stable rerenders", async () => {
@@ -390,12 +429,12 @@ describe("useTaskCreateWorkflowSteps activations", () => {
     expect(result.current.status).toBe("loading");
 
     await act(async () => {
-      second.resolve(readResponse("recovered-b", "Recovered B"));
+      second.resolve(readResponse(RECOVERED_B, "Recovered B"));
       await Promise.resolve();
     });
 
     expect(result.current.status).toBe("success");
-    expect(result.current.steps.map((step) => step.id)).toEqual(["recovered-b"]);
+    expect(result.current.steps.map((step) => step.id)).toEqual([RECOVERED_B]);
   });
 });
 

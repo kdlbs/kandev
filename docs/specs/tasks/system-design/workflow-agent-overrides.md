@@ -145,17 +145,18 @@ path and retry payload. Session-create and task-edit modes have no new fields.
 ### Selected workflow metadata
 
 Use one dialog observer in `hooks/use-task-create-workflow-steps.ts`. Its inputs
-are dialog visibility, workspace, effective workflow, and eligible loaded steps.
-Its result distinguishes idle, loading, success, and error, and exposes Retry.
-Success includes an ordered step array. An empty successful array is authoritative.
+are create-mode dialog visibility, workspace, effective workflow, and eligible
+loaded steps. Its result distinguishes idle, loading, success, and error, and
+exposes Retry. Success includes an ordered step array. An empty successful array
+is authoritative.
 
 The observer uses `readJourneyWorkflowSteps` in
 `hooks/journey-metadata-resources.ts`. This existing owner shares concurrent
 reads within one store and authorized scope. Do not introduce another cache or
-use `requestWorkspaceContextRefresh` for this read. A complete, non-placeholder
-snapshot can supply initial steps only when its workflow belongs to the current
-workspace. Missing and placeholder snapshots establish lightweight metadata
-demand. They do not establish a pending board request.
+use `requestWorkspaceContextRefresh` for this read. A complete, non-placeholder,
+non-failed snapshot can supply initial steps only when its workflow belongs to
+the current workspace. Missing, placeholder, and failed snapshots establish
+lightweight metadata demand. They do not establish a pending board request.
 
 `useTaskCreateDialogData` exposes the selected result to dialog setup.
 `buildWorkflowAgentOverrideValidation` consumes that result instead of inferring
@@ -265,9 +266,9 @@ unit tests prove grouping, reset, workflow changes, and payload preservation.
 Desktop and mobile E2E reproduce Analysis, Implement, Review, and PR with mock
 agents and prove profile identity plus session reuse.
 
-Selected-metadata hook and dialog tests cover missing and placeholder snapshots,
-idle board readers, successful empty steps, error/retry, complete recipient
-mapping, and stale responses across workflow/workspace/open cycles. Existing
+Selected-metadata hook and dialog tests cover missing, placeholder, and failed
+snapshots, idle board readers, successful empty steps, error/retry, complete
+recipient mapping, and stale responses across workflow/workspace/open cycles. Existing
 loaded-board behavior remains a control. Concurrent dialog and picker consumers
 share the lightweight request. Browser regressions load board A and select
 workflow B only in the dialog, both explicitly and through remembered defaults.

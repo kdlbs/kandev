@@ -159,14 +159,16 @@ These views cover .1, .7, and .8 through the rendered checks below.
 
 ## Tests
 
-All acceptance IDs below use `AC-TASKS-WORKFLOW-AGENT-OVERRIDES-001`.
+All override acceptance IDs in the table below use
+`AC-TASKS-WORKFLOW-AGENT-OVERRIDES-001`; the preserved launch-preview criteria
+are listed after the table.
 
 | Criteria | Permanent regression evidence to add or update |
 | --- | --- |
-| .1, .8 | `hooks/use-task-create-workflow-steps.test.ts`: `loads selected workflow metadata without a snapshot or pending board read`; absent/placeholder inputs, loaded control, empty response, failure and targeted Retry |
+| .1, .8 | `hooks/use-task-create-workflow-steps.test.ts`: `loads selected workflow metadata without a snapshot or pending board read`; absent, placeholder, and failed inputs; loaded control; empty response; failure and targeted Retry; create-only demand |
 | .1, .10 | Mapper and dialog tests retain fixed profiles, initial/step recipients, prompt/events/start/order/color; grouping includes Implement and PR; preview and overrides use the same workflow result |
 | .6, .8 | Hook/adapter tests reject delayed workflow A after selecting B, workspace/auth changes, close/reopen and unmount; revisiting a workflow after a snapshot-backed selection or prior failure starts loading and publishes only the new result; retry retains draft/choice; stable rerenders do not repeat demand |
-| .8, .10 | Validation tests distinguish idle/loading/success/error, ignore unrelated board-reader errors, keep ordinary creation available and block unresolved selected replacements |
+| .8, .10 | Validation tests distinguish idle/loading/success/error, keep ordinary creation available, and block unresolved selected replacements independently of board-reader state |
 | .1, .8 | `hooks/journey-metadata-resources.test.ts`: concurrent picker/dialog reads share a flight; releasing one observer leaves the other valid; explicit retry uses the existing refresh path |
 | .1, .6, .7, .10 | Desktop/phone rendered integration and browser regressions verify grouped rows, reset/switch, selectors, persisted create payload and consistent launch preview |
 
@@ -220,12 +222,13 @@ Planning validation on 2026-11-02:
 
 Implementation validation on 2026-11-02:
 
-- Focused Vitest: 13 files and 190 tests passed. The new hook suite covers absent and
-  placeholder snapshots, complete loaded and successful-empty controls, complete
-  profile/recipient mapping, targeted Retry, stable rerenders, stale workflow and
-  generation results, activation identity reuse after visiting a snapshot-backed
-  workflow, retired snapshot seeds, retired-error masking, workspace changes,
-  close/reopen, and unmount.
+- Focused Vitest: 13 files and 191 tests passed. The new hook suite covers absent,
+  placeholder, and failed snapshots, complete loaded and successful-empty controls,
+  complete profile/recipient mapping, targeted Retry, create-only demand, stable
+  rerenders, stale workflow and generation results, activation identity reuse after
+  visiting a snapshot-backed workflow, retired snapshot seeds, retired-error
+  masking, workspace changes, close/reopen, and unmount. The affected edit-mode
+  save/retry suite also passed 11 tests.
 - Desktop browser suite: four tests passed, including both `cold workflow metadata`
   entries and the existing loaded-board controls. No workflow B task-snapshot request
   occurred; the explicit and remembered entry variants persisted the step-bound
