@@ -30,11 +30,23 @@ test.describe("Mobile ACP context compaction", () => {
     );
     await expect(card.getByTestId("context-compaction-trigger")).toBeVisible();
     await expect(card.getByTestId("context-compaction-duration")).toBeVisible();
-    const statusBox = await card.getByTestId("context-compaction-status").boundingBox();
-    const tokenCountBox = await card.getByTestId("context-compaction-token-counts").boundingBox();
-    expect(statusBox).toBeTruthy();
-    expect(tokenCountBox).toBeTruthy();
-    expect(tokenCountBox!.y).toBeGreaterThanOrEqual(statusBox!.y + statusBox!.height);
+    const status = card.getByTestId("context-compaction-status");
+    const tokenCounts = card.getByTestId("context-compaction-token-counts");
+    await expect(status).toBeVisible();
+    await expect(tokenCounts).toBeVisible();
+    const metadataDoesNotOverlap = await card.evaluate((element) => {
+      const status = element.querySelector('[data-testid="context-compaction-status"]');
+      const tokenCounts = element.querySelector('[data-testid="context-compaction-token-counts"]');
+      if (!status || !tokenCounts) return false;
+      const statusBox = status.getBoundingClientRect();
+      const tokenCountBox = tokenCounts.getBoundingClientRect();
+      const separatedVertically =
+        tokenCountBox.top >= statusBox.bottom - 1 || statusBox.top >= tokenCountBox.bottom - 1;
+      const separatedHorizontally =
+        tokenCountBox.left >= statusBox.right - 1 || statusBox.left >= tokenCountBox.right - 1;
+      return separatedVertically || separatedHorizontally;
+    });
+    expect(metadataDoesNotOverlap).toBe(true);
 
     const viewport = testPage.viewportSize();
     if (!viewport) throw new Error("mobile viewport size is unavailable");
