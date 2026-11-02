@@ -31,7 +31,7 @@ behavior (first visit, pagination, initial scroll) aren't otherwise obvious from
 
 #### Acceptance criteria
 
-- **AC-OFFICE-UNREAD-DIVIDER-001.1:** Each user can enable or disable the divider from **Settings > General > Task Actions > Unread Messages**. It defaults **off** and takes effect immediately: when disabled, the frontend does not compute or render a divider, the message list performs its normal scroll behavior, and `useSessionReadTracking` does not dispatch `POST /task-sessions/:id/mark-read`; existing `last_read_message_id` values remain stored for a future re-enable. Missing portable-setting values are resolved at the backend boundary and mapped consistently across frontend delivery paths per [ADR 0041](../../../decisions/0041-backend-owned-portable-user-settings.md).
+- **AC-OFFICE-UNREAD-DIVIDER-001.1:** Each user can enable or disable the divider from **Settings > General > Task Actions > Unread Messages**. It defaults **off** and takes effect immediately: when disabled, the frontend does not compute or render a divider, the message list performs its normal scroll behavior, and `useSessionReadTracking` does not dispatch `POST /task-sessions/:id/mark-read` unless the separate unread task dot setting ([REQ-TASKS-TASK-UNREAD-DOT-001](../../tasks/requirements/task-unread-dot.md)) is enabled; existing `last_read_message_id` values remain stored for a future re-enable. Missing portable-setting values are resolved at the backend boundary and mapped consistently across frontend delivery paths per [ADR 0041](../../../decisions/0041-backend-owned-portable-user-settings.md).
 - **AC-OFFICE-UNREAD-DIVIDER-001.2:** Each `task_sessions` row carries one `last_read_message_id` column — the ID of the newest message the session has "seen." This is **session-global, not per-user or per-device**: kandev tasks do not currently model multiple independent viewers of the same session, so there is exactly one read cursor per session, shared by whoever opens it. If a second viewer (or the same user on a second device/tab) opens the same session, they observe and advance the same cursor as the first.
 - **AC-OFFICE-UNREAD-DIVIDER-001.3:** The cursor advances **live** while the session is the visible chat panel: as new messages render, `useSessionReadTracking` dispatches `POST /task-sessions/:id/mark-read` with the newest currently-rendered message id, and the backend persists it via `UpdateTaskSessionLastReadMessageID` (monotonic — see below).
 - **AC-OFFICE-UNREAD-DIVIDER-001.4:** The divider's position is decided once per **visit** (a transition from hidden/inactive to the active, visible chat panel), not on every render: the hook captures the cursor's value at the instant the session becomes visible (before this visit's live-advance can touch it) and freezes it as the anchor. Re-rendering while still visible never moves the divider; leaving and returning (or switching sessions and back) captures a fresh anchor from whatever the cursor advanced to since.
@@ -59,7 +59,8 @@ aren't otherwise obvious from the UI alone.
   Actions > Unread Messages**. It defaults **off** and takes effect immediately:
   when disabled, the frontend does not compute or render a divider, the message
   list performs its normal scroll behavior, and `useSessionReadTracking` does
-  not dispatch `POST /task-sessions/:id/mark-read`; existing
+  not dispatch `POST /task-sessions/:id/mark-read` unless the separate unread
+  task dot setting is enabled; existing
   `last_read_message_id` values remain stored for a future re-enable.
   Missing portable-setting values are resolved at the backend boundary and
   mapped consistently across frontend delivery paths per [ADR 0041](../../../decisions/0041-backend-owned-portable-user-settings.md).
