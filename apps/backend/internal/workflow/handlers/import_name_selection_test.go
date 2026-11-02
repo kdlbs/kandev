@@ -23,6 +23,7 @@ func (p *importNameHTTPProvider) CreateWorkflow(ctx context.Context, workspace, 
 	workflow, err := p.fakeWorkflowProvider.CreateWorkflow(ctx, workspace, name, description)
 	if err == nil {
 		workflow.ID = uuid.NewString()
+		p.ensureWorkflowRow(workflow.ID, workspace, name)
 	}
 	return workflow, err
 }
@@ -36,6 +37,7 @@ func TestWorkflowImportNameSelectionHTTP(t *testing.T) {
 			t.Run(form+map[bool]string{false: "/valid", true: "/invalid-skipped"}[malformed], func(t *testing.T) {
 				h := setupStepRouter(t)
 				provider := &importNameHTTPProvider{}
+				provider.db = h.db
 				h.service.SetWorkflowProvider(provider)
 				skipped := models.StepPortable{Name: "Later", Position: 0, AgentProfile: &models.AgentProfilePortable{AgentName: "Unavailable"}}
 				steps := []models.StepPortable{skipped}

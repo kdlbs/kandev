@@ -42,4 +42,4 @@ between a transition's read and write and be overwritten by its stale snapshot.
 ## Changed-path coverage
 
 The work order owns the dynamic runtime files above, the regression test, and
-`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.25`.
+`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.27`.

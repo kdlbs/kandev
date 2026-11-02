@@ -84,6 +84,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.14.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
@@ -152,6 +153,9 @@ require (
 
 replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261029234457-5e124db622e9
 
-require github.com/kdlbs/kandev/pluginsdk v0.1.0
+require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/kdlbs/kandev/pluginsdk v0.1.0
+)
 
 replace github.com/kdlbs/kandev/pluginsdk => ../../pluginsdk
