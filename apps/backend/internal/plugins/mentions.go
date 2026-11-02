@@ -13,7 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 const (
@@ -266,7 +266,7 @@ func (s *Service) SearchEntityReferences(
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
-	_, release, err := s.beginPluginDispatch(id, expected)
+	_, release, err := s.beginPluginDispatchContext(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func (s *Service) AuthorizeEntityReference(
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
-	_, release, err := s.beginPluginDispatch(id, expected)
+	_, release, err := s.beginPluginDispatchContext(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}

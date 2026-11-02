@@ -88,10 +88,6 @@ export function taskColorPresentation(token: FixedAutomaticTaskColor): TaskMarke
   return { token, className: AUTOMATIC_TASK_COLOR_BAR_CLASS[token] };
 }
 
-export function fixedAutomaticTaskColor(token: FixedAutomaticTaskColor): TaskMarkerPresentation {
-  return taskColorPresentation(token);
-}
-
 /** Maps persisted workflow color data to a safe marker presentation. */
 export function parseWorkflowStepColor(value: string | undefined): TaskMarkerPresentation {
   if (!value) return taskColorPresentation("gray");

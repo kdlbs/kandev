@@ -59,7 +59,8 @@ function upsertQuickChatSessionDraft(
   quickChat: Draft<UISlice["quickChat"]>,
   session: QuickChatSession,
 ): boolean {
-  const { sessionId, workspaceId, agentProfileId, kind, taskId } = session;
+  const { sessionId, workspaceId, agentProfileId, kind, taskId, creationId, startupPending } =
+    session;
   quickChat.tombstonedSessions = pruneTombstones(quickChat.tombstonedSessions);
   if (quickChat.tombstonedSessions[sessionId]) return false;
   const existing = quickChat.sessions.find((session) => session.sessionId === sessionId);
@@ -67,8 +68,18 @@ function upsertQuickChatSessionDraft(
     if (existing.workspaceId !== workspaceId) return false;
     if (agentProfileId) existing.agentProfileId = agentProfileId;
     if (taskId) existing.taskId = taskId;
+    if (creationId) existing.creationId = creationId;
+    if (startupPending !== undefined) existing.startupPending = startupPending;
   } else {
-    quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
+    quickChat.sessions.push({
+      sessionId,
+      workspaceId,
+      agentProfileId,
+      kind,
+      taskId,
+      creationId,
+      startupPending,
+    });
   }
   const ownedTaskId = taskId ?? existing?.taskId ?? quickChat.sessionOwnership[sessionId]?.taskId;
   quickChat.sessionOwnership[sessionId] = { workspaceId, taskId: ownedTaskId };

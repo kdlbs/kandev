@@ -14,6 +14,8 @@ describe("Task behavior tab ownership", () => {
     expect(taskBehaviorTab("general-task-sleep-inhibition")).toBe("runtime");
     expect(taskBehaviorTab("general-agent-tab-close-behavior")).toBe("conversation");
     expect(taskBehaviorTab("general-message-time-display")).toBe("conversation");
+    expect(taskBehaviorTab("general-prompt-suggestions")).toBe("conversation");
+    expect(taskBehaviorTab("general-prompt-suggestion-profile")).toBe("conversation");
     expect(taskBehaviorTab("unrelated")).toBeUndefined();
   });
   it("reveals new attention once in tab order without trapping navigation", () => {
@@ -37,5 +39,6 @@ it("preserves all discovery fragments", () => {
     "setting-session-capacity": "runtime",
     "setting-message-time-display": "conversation",
     "setting-message-queue": "runtime",
+    "setting-prompt-suggestions": "conversation",
   });
 });

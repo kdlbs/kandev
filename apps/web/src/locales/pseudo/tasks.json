@@ -76,5 +76,20 @@
   "filtersButton_one": "Ƒĩĺţēŕś ({{count}})",
   "filtersButton_other": "Ƒĩĺţēŕś ({{count}})",
   "appliedWorkflow": "Ŵōŕķƒĺōŵ: {{name}}",
-  "appliedRepository": "Ŕēƥōśĩţōŕŷ: {{name}}"
+  "appliedRepository": "Ŕēƥōśĩţōŕŷ: {{name}}",
+  "ungrouped": "Ũńĝŕōũƥēď",
+  "collaborationTitle": "Ŵōŕķśƥàćē ćōĺĺàƀōŕàţĩōń",
+  "collaborationDescription": "{{task}} ĩń {{workspace}}. Ḿàńàĝē ţĥĩś ćōńvēŕśàţĩōń'ś àććēśś ţō ōţĥēŕ ŵōŕķśƥàćēś.",
+  "collaborationNativePermissions": "Ŕēàď, ŕēƥōŕţ, ƥŕōḿƥţ àńď ćōńţŕōĺ àŕē ĩńďēƥēńďēńţ. Ńàţĩvē ũśēŕ ƥēŕḿĩśśĩōńś śţĩĺĺ àƥƥĺŷ. Ćĺēàŕĩńĝ àĺĺ ƒōũŕ ŕēvōķēś àććēśś.",
+  "collaborationRead": "Ŕēàď",
+  "collaborationReport": "Ŕēƥōŕţ",
+  "collaborationPrompt": "Ƥŕōḿƥţ",
+  "collaborationControl": "Ćōńţŕōĺ",
+  "collaborationTargetUnavailable": "Ţĥĩś ţàŕĝēţ ĩś ōũţśĩďē ŷōũŕ ćũŕŕēńţ ńàţĩvē ŕēàď àććēśś. Ĩţś śàvēď ĝŕàńţ ĩś śĥōŵń ŵĩţĥōũţ àĺĺōŵĩńĝ ēďĩţś.",
+  "collaborationLoadDenied": "Ŷōũ ďō ńōţ ĥàvē ƥēŕḿĩśśĩōń ţō ḿàńàĝē ţĥĩś ćōńvēŕśàţĩōń'ś ŵōŕķśƥàćē àććēśś.",
+  "collaborationLoadFailed": "Ŵōŕķśƥàćē àććēśś ćōũĺď ńōţ ƀē ĺōàďēď. Ēxĩśţĩńĝ ēďĩţś àŕē ŕēţàĩńēď; ŕēţŕŷ ƀēƒōŕē śàvĩńĝ.",
+  "collaborationSaveDenied": "Ţĥĩś ŕōŵ ćōũĺď ńōţ ƀē śàvēď ƀēćàũśē ƥēŕḿĩśśĩōń ŵàś ďēńĩēď. Ŷōũŕ ēďĩţś àŕē ŕēţàĩńēď.",
+  "collaborationSaveFailed": "Ţĥĩś ŕōŵ ćōũĺď ńōţ ƀē śàvēď. Ŷōũŕ ēďĩţś àŕē ŕēţàĩńēď.",
+  "collaborationNoTargets": "Ńō ōţĥēŕ ŵōŕķśƥàćēś àŕē àvàĩĺàƀĺē.",
+  "collaborationRetry": "Ŕēţŕŷ ĺōàďĩńĝ"
 }

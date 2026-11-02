@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import {
   getStoredAppSidebarCollapsed,
   getStoredAppSidebarSectionExpanded,
@@ -35,7 +36,7 @@ export function loadAppSidebarState(): AppSidebarState {
   };
 }
 
-type ImmerSet = Parameters<StateCreator<UISlice, [["zustand/immer", never]], [], UISlice>>[0];
+type ImmerSet = Parameters<SliceCreator<UISlice>>[0];
 
 /**
  * Force-expand the rail and persist it — surfaces that render only in the

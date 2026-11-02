@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const cursorMCPRecoveryTimeout = 60 * time.Second
@@ -24,15 +25,18 @@ const cursorMCPAuthenticationWindowsShell = "windows"
 var ErrCursorMCPAuthenticationUnsupported = errors.New("cursor MCP authentication terminal is unsupported on this shell")
 
 type cursorMCPRecoveryTarget struct {
-	execution   *AgentExecution
-	agentConfig agents.Agent
-	profile     *AgentProfileInfo
-	candidate   mcpconfig.DiscoveredServerCandidate
-	serverID    string
-	fingerprint string
-	cursorHome  string
-	sourceRepo  string
-	acpServers  []agentctltypes.McpServer
+	execution     *AgentExecution
+	agentConfig   agents.Agent
+	profile       *AgentProfileInfo
+	candidate     mcpconfig.DiscoveredServerCandidate
+	serverID      string
+	fingerprint   string
+	cursorHome    string
+	sourceRepo    string
+	operation     *preparedMCPOperation
+	setup         *mcpconfig.MCPSetupSnapshot
+	setupRevision int64
+	setupCaptured bool
 }
 
 // CursorMCPAuthenticationSpec resolves a selected, owned native server into
@@ -138,15 +142,16 @@ func (m *Manager) resolveCursorMCPRecoveryTarget(ctx context.Context, sessionID,
 	if !owned {
 		return nil, ErrCursorMCPRecoveryUnavailable
 	}
-	acpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	operation, err := m.prepareExecutionMCP(ctx, execution, agentConfig)
 	if err != nil {
 		return nil, ErrCursorMCPRecoveryUnavailable
 	}
+	setup, revision, captured := operation.setup, operation.revision, operation.captured
 	return &cursorMCPRecoveryTarget{
 		execution: execution, agentConfig: agentConfig, profile: profile,
 		candidate: *selected, serverID: serverID, fingerprint: fingerprint,
 		cursorHome: filepath.Join(home, ".cursor"), sourceRepo: sourceRepo,
-		acpServers: acpServers,
+		operation: operation, setup: setup, setupRevision: revision, setupCaptured: captured,
 	}, nil
 }
 
@@ -250,7 +255,7 @@ func (m *Manager) resolveCurrentCursorMCPRecoveryCandidate(
 	if !sourceAvailable || sourceRepo != target.sourceRepo {
 		return mcpconfig.DiscoveredServerCandidate{}, "", "", mcpconfig.Policy{}, nil, ErrCursorMCPRecoveryUnavailable
 	}
-	policy, _, reserved, err := m.resolveCursorProfileAndPolicy(ctx, target.execution, profile, target.execution.ExecutorType)
+	policy, _, reserved, err := m.resolveCursorProfileAndPolicy(ctx, target.execution, profile, target.execution.ExecutorType, target.operation)
 	if err != nil {
 		return mcpconfig.DiscoveredServerCandidate{}, "", "", mcpconfig.Policy{}, nil, ErrCursorMCPRecoveryUnavailable
 	}
@@ -413,13 +418,17 @@ func (m *Manager) reloadCursorMCPACPSession(ctx context.Context, target *cursorM
 	if err := m.validateCursorMCPRecoveryTarget(ctx, target, workspaceKey, generation); err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
-	if err := client.LoadSession(ctx, target.execution.ACPSessionID, target.acpServers); err != nil {
+	attemptID, err := client.LoadSessionWithResult(target.operation.context(ctx), target.execution.ACPSessionID, target.operation.servers, streams.SessionSettingsPolicyStrict)
+	if err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
 	if err := m.validateCursorMCPRecoveryTarget(ctx, target, workspaceKey, generation); err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
-	if err := m.restoreSessionRuntimeConfig(ctx, target.execution, target.execution.ACPSessionID, runtimeConfig); err != nil {
+	if target.setupCaptured {
+		m.recordAcceptedMCPSetupOperation(ctx, target.execution, target.setup, target.setupRevision, attemptID)
+	}
+	if err := m.restoreSessionRuntimeConfigWithClient(ctx, target.execution, client, target.execution.ACPSessionID, runtimeConfig); err != nil {
 		return ErrCursorMCPRecoveryUnavailable
 	}
 	return m.validateCursorMCPRecoveryTarget(ctx, target, workspaceKey, generation)

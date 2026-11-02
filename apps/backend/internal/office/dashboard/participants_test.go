@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -362,11 +364,11 @@ func TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity(t *t
 
 	// The run step-entry fan-out queued for the auto-cast agent —
 	// CancelDisplacedParticipantRun should cancel it once the claim lands.
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-auto",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"claim1","workflow_step_id":"` + stepID + `"}`,
-		Status:         models.RunStatusQueued,
+		Status:         runsmodels.RunStatusQueued,
 		CoalescedCount: 1,
 	}
 	if err := deps.repo.CreateRun(context.Background(), run); err != nil {

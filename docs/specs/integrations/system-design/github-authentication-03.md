@@ -240,7 +240,8 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - Automatically editing an imported App's GitHub settings or uninstalling an App on disconnect.
 - Automatic private-key/client-secret rotation; users replace an unbound stored registration or
   import the replacement App credentials through the guided flow.
-- GitHub Enterprise Server, enterprise-owned Apps, or hosts other than `github.com`.
+- Enterprise-owned Apps. GHES and GHE.com host support is defined in the
+  [GitHub Enterprise host design](github-enterprise-hosts.md).
 - Kandev multi-user login, workspace membership, or RBAC implementation.
 - Publishing Apps to GitHub Marketplace.
 - Discovering or verifying the actor behind inherited credential managers, SSH agents, or explicit

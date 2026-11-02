@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -38,7 +40,7 @@ type routedTestLauncher struct {
 }
 
 func (l *routedTestLauncher) StartRunSession(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	launch service.LaunchContext, route *service.RouteOverride,
 ) (service.RunSessionLaunch, error) {
 	l.mu.Lock()
@@ -427,7 +429,7 @@ func TestRoutedTaskless_PostStartFallback_RetryAndDelayedDuplicateAreSafe(t *tes
 			sessionsAfterFailure, err)
 	}
 	queuedRun, err := svc.RepoForTest().GetRun(ctx, run.ID)
-	if err != nil || queuedRun.Status != models.RunStatusQueued {
+	if err != nil || queuedRun.Status != runsmodels.RunStatusQueued {
 		t.Fatalf("run status after post-start fallback = %#v, err=%v, want queued", queuedRun, err)
 	}
 
@@ -511,7 +513,7 @@ func TestRoutedTaskless_PostStartFallback_RetryAndDelayedDuplicateAreSafe(t *tes
 	if err != nil {
 		t.Fatalf("get run after duplicate: %v", err)
 	}
-	if runAfterDuplicate.Status == models.RunStatusFinished || runAfterDuplicate.Status == models.RunStatusFailed {
+	if runAfterDuplicate.Status == runsmodels.RunStatusFinished || runAfterDuplicate.Status == runsmodels.RunStatusFailed {
 		t.Fatalf("run status after delayed duplicate = %q, want no completion", runAfterDuplicate.Status)
 	}
 	session2Unchanged, err := svc.RepoForTest().GetRunSession(ctx, session2ID)

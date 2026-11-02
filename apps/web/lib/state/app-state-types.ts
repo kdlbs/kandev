@@ -193,7 +193,6 @@ export type AppState = KanbanSlice & {
   gitlabIssueWatches: (typeof defaultGitLabState)["gitlabIssueWatches"];
   gitlabMRWatches: (typeof defaultGitLabState)["gitlabMRWatches"];
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
-  gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
 
@@ -486,13 +485,7 @@ export type AppState = KanbanSlice & {
     hydrationEpoch: number,
     observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
-  completeTurn: (
-    sessionId: string,
-    turnId: string,
-    completedAt: string,
-    metadata?: Record<string, unknown>,
-    updatedAt?: string,
-  ) => void;
+  completeTurn: import("./slices/session/types").SessionSliceActions["completeTurn"];
   /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   /** Reconciles the active-turn marker after REST hydration, epoch-guarded. */
@@ -588,6 +581,8 @@ export type AppState = KanbanSlice & {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;

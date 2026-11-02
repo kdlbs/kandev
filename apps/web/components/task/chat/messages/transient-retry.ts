@@ -1,3 +1,5 @@
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+
 export function retryCountdownLabel(milliseconds: number): string {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1_000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -6,7 +8,6 @@ export function retryCountdownLabel(milliseconds: number): string {
 }
 
 export function parseRetryAt(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
+  const timestamp = parseStrictRfc3339Timestamp(value);
+  return timestamp === null ? undefined : Number(timestamp / BigInt(1_000_000));
 }

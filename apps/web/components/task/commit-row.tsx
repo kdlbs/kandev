@@ -38,6 +38,7 @@ const provenanceAccessibleLabelKey = {
 
 export type CommitItem = {
   commit_sha: string;
+  parent_sha?: string;
   commit_message: string;
   insertions: number;
   deletions: number;
@@ -52,6 +53,10 @@ export type CommitItem = {
 };
 
 let nextCommitFileNavigationToken = 0;
+
+function eligibleRevertHandler(commit: CommitItem, handler?: (sha: string, repo?: string) => void) {
+  return commit.parent_sha === "" ? undefined : handler;
+}
 
 /** Context menu for commit items */
 function CommitContextMenu({
@@ -74,7 +79,8 @@ function CommitContextMenu({
 }) {
   const { t } = useTranslation();
   const hasActions =
-    commit.detailTarget.source === "local" && (onAmendCommit || onRevertCommit || onResetToCommit);
+    commit.detailTarget.source === "local" &&
+    (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
 
   if (!hasActions) {
     return <>{children}</>;
@@ -368,8 +374,9 @@ export function CommitRow({
   const [localExpanded, setLocalExpanded] = useState(false);
   const [hasExpanded, setHasExpanded] = useState(false);
   const expanded = controlledExpansion?.expanded ?? localExpanded;
+  const eligibleRevert = eligibleRevertHandler(commit, onRevertCommit);
   const showActions =
-    isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
+    isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || eligibleRevert)));
   const inlineFilesId = `commit-inline-files-${commit.detailTarget.source}-${commit.commit_sha}-${
     commit.repository_name ?? "root"
   }`.replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -388,7 +395,7 @@ export function CommitRow({
       commit={commit}
       isLatest={isLatest}
       onAmendCommit={onAmendCommit}
-      onRevertCommit={onRevertCommit}
+      onRevertCommit={eligibleRevert}
       onResetToCommit={onResetToCommit}
     >
       <RowElement
@@ -419,7 +426,7 @@ export function CommitRow({
               commit={commit}
               isLatest={isLatest}
               onAmendCommit={onAmendCommit}
-              onRevertCommit={onRevertCommit}
+              onRevertCommit={eligibleRevert}
               onResetToCommit={onResetToCommit}
             />
           )}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
@@ -18,7 +20,7 @@ import (
 func (ss *SchedulerService) QueueDeferredAssignment(
 	ctx context.Context, assignment models.DeferredAssignment,
 ) error {
-	actorKind := models.ActorKind(assignment.ActorType)
+	actorKind := runsmodels.ActorKind(assignment.ActorType)
 	if !actorKind.Valid() {
 		payloadBytes, _ := json.Marshal(map[string]string{"task_id": assignment.TaskID})
 		return ss.svc.QueueRunFromTaskBoundary(

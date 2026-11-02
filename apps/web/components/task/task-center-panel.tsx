@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useEffect, useMemo } from "react";
+import { memo, useCallback, useState, useEffect, useMemo, type RefObject } from "react";
 import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { TabsContent } from "@kandev/ui/tabs";
 import { Button } from "@kandev/ui/button";
@@ -16,21 +16,20 @@ import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
+import { useTabletFileState } from "./use-tablet-file-state";
+import type { RenameAdapter } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { isRenameReserved, treePath } from "@/hooks/file-rename-continuity";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { executeApprove } from "@/lib/services/session-approve";
-import {
-  setOpenFileTabs as saveOpenFileTabs,
-  getActiveTabForSession,
-  setActiveTabForSession,
-} from "@/lib/local-storage";
+import { getActiveTabForSession, setActiveTabForSession } from "@/lib/local-storage";
 import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
-import { useFileTabRestoration, useFileSaveDelete } from "./task-center-panel-restoration";
+import { useFileSaveDelete } from "./task-center-panel-restoration";
 import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
 import {
@@ -40,7 +39,6 @@ import {
 } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
-import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 import type { SelectedDiff } from "./task-layout";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
@@ -53,6 +51,7 @@ type TaskCenterPanelProps = {
   onFileOpenHandled: () => void;
   onActiveFileChange?: (filePath: string | null) => void;
   sessionId?: string | null;
+  renameAdapter?: RefObject<RenameAdapter | null>;
 };
 
 function useSessionApprove(activeSessionId: string | null, activeTaskId: string | null) {
@@ -144,13 +143,24 @@ function useFileTabOperations({
   leftTab,
 }: FileTabOperationsOptions) {
   const { toast } = useToast();
+  const { t } = useTranslation();
+  const store = useAppStoreApi();
 
   const addFileTab = useCallback(
     (fileTab: OpenFileTab) => {
+      if (activeSessionId && isRenameReserved(store, activeSessionId, fileTab.path, fileTab.repo)) {
+        toast({
+          title: t("task:failedToOpenFile"),
+          variant: "error",
+        });
+        return;
+      }
+      const requestedPath = treePath(fileTab);
+      const existing = openFileTabs.find((tab) => requestedPath && treePath(tab) === requestedPath);
       setOpenFileTabs((prev) => upsertOpenFileTab(prev, fileTab));
-      setLeftTab(`file:${getFileTabKey(fileTab)}`);
+      setLeftTab(`file:${getFileTabKey(existing ?? fileTab)}`);
     },
-    [setOpenFileTabs, setLeftTab],
+    [activeSessionId, store, t, toast, openFileTabs, setOpenFileTabs, setLeftTab],
   );
 
   const handleOpenFileFromChat = useTaskCenterFileOpen({
@@ -275,21 +285,6 @@ function reviewLabelForReviews(
   return t("task:review");
 }
 
-function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: OpenFileTab[]) {
-  useEffect(() => {
-    if (!activeSessionId) return;
-    saveOpenFileTabs(
-      activeSessionId,
-      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
-        path,
-        name,
-        repo,
-        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
-      })),
-    );
-  }, [activeSessionId, openFileTabs]);
-}
-
 function useCenterPanelState(props: TaskCenterPanelProps) {
   const {
     selectedDiff: externalSelectedDiff,
@@ -321,8 +316,14 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     handleTabChange,
     handleRequestChanges,
   } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
-  useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs });
-  usePersistOpenFileTabs(activeSessionId, openFileTabs);
+  useTabletFileState({
+    adapter: props.renameAdapter,
+    session: activeSessionId,
+    tabs: openFileTabs,
+    setTabs: setOpenFileTabs,
+    selected: leftTab,
+    setSelected: setLeftTab,
+  });
   const fileTabOps = useFileTabOperations({
     activeSessionId,
     openFileTabs,

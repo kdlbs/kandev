@@ -229,6 +229,7 @@ func controlCredentialAuth(creds *credentialState, adoptionOnlyPaths map[string]
 			return
 		}
 
+		c.Set(controlAuthorizationConsumedContextKey, true)
 		c.Next()
 	}
 }

@@ -48,6 +48,9 @@ acpdbg matrix                                          # probe every ACP agent i
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr
 - `--stderr` — capture child stderr into the JSONL
+- `--air-capabilities "asyncTasks,..."` — advertise AIR extension capabilities in
+  `clientCapabilities._meta.jetbrains.air`; omitted by default. Use it to observe
+  extension-gated frames without editing the initialize payload.
 
 ## Steps
 

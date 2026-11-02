@@ -75,8 +75,8 @@ test.describe("Clarification overlay resizable layout", () => {
     apiClient,
     seedData,
   }) => {
-    // Tall viewport so the content-sized overlay has plenty of room to grow
-    // without bumping into the 35vh safety cap on the first drag.
+    // Tall viewport so the content-sized overlay has room to grow without
+    // reaching the initial 50vh cap on the first drag.
     await testPage.setViewportSize({ width: 1280, height: 3000 });
 
     const session = await seedTaskAndWaitForIdle(
@@ -109,7 +109,7 @@ test.describe("Clarification overlay resizable layout", () => {
     // Sanity check: content-sized overlay is at least tall enough for the
     // question card but well under the 35vh safety cap.
     expect(initial.height).toBeGreaterThan(200);
-    expect(initial.height).toBeLessThan(3000 * 0.35);
+    expect(initial.height).toBeLessThan(3000 * 0.5);
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
@@ -134,6 +134,13 @@ test.describe("Clarification overlay resizable layout", () => {
     // Allow ±10px tolerance for rounding / mouse event coalescing.
     expect(afterDrag.height).toBeGreaterThan(initial.height + dragDistance - 10);
 
+    const hostMax = Number(await container.getAttribute("data-host-max-height"));
+    expect(hostMax).toBeGreaterThan(afterDrag.height);
+    const expand = testPage.getByTestId("clarification-panel-expand");
+    await expect(expand).toBeEnabled();
+    await expand.click();
+    await expect(container).toHaveCSS("height", `${hostMax}px`);
+
     // Double-click the handle → back to auto-sized.
     await handle.dblclick();
     const afterReset = await container.evaluate((el) => ({
@@ -144,47 +151,55 @@ test.describe("Clarification overlay resizable layout", () => {
     expect(Math.abs(afterReset.height - initial.height)).toBeLessThanOrEqual(2);
   });
 
-  // Regression coverage for the task-chat-panel cap: the rendered CSS
-  // max-height and the resize hook's drag clamp must agree on 50vh here.
-  // Before the fix, ClarificationPanelSection rendered a flat 35vh cap
-  // (inherited from Quick Chat) while the hook still clamped drags to 50vh,
-  // so the handle silently stopped growing the box ~30% short of its own
-  // documented ceiling with zero feedback.
-  test("dragging well past the old 35vh mark keeps growing the task panel up to its 50vh cap, with no dead zone", async ({
+  // The initial 50vh cap remains the default. Manual resizing can use only
+  // the measured task-chat host budget, which may be smaller than the viewport.
+  test("dragging past the initial cap grows the task panel to its measured host bound", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // 2000px viewport → 35vh = 700px, 50vh = 1000px. Round numbers make the
-    // two caps unambiguous to distinguish in assertions.
-    await testPage.setViewportSize({ width: 1280, height: 2000 });
+    await testPage.setViewportSize({ width: 1280, height: 900 });
 
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
-      "Clarification Resize Cap",
+      "Clarification Resize Host Bound",
     );
 
-    await session.sendMessage("/ask-multiple");
+    await session.sendMessage("/e2e:clarification-markdown");
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
     const container = session.clarificationBar();
     await expect(container).toBeVisible();
-    await expect(container).toHaveCSS("max-height", "1000px");
+    const geometry = await container.evaluate((el) => ({
+      hostMax: Number((el as HTMLElement).dataset.hostMaxHeight),
+      initialMax: Number.parseFloat((el as HTMLElement).style.maxHeight),
+      viewportHeight: window.innerHeight,
+      contentHeight: (
+        el.querySelector('[data-testid="clarification-scroll-region"]') as HTMLElement
+      ).scrollHeight,
+      contentClientHeight: (
+        el.querySelector('[data-testid="clarification-scroll-region"]') as HTMLElement
+      ).clientHeight,
+    }));
+    const initialCap = Math.round(geometry.viewportHeight * 0.5);
+    expect(geometry.hostMax).toBeGreaterThan(initialCap);
+    expect(geometry.initialMax).toBe(initialCap);
+    expect(geometry.contentHeight).toBeGreaterThan(geometry.contentClientHeight);
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
 
-    // Drag far enough (900px) that a working cap must clamp it — well past
-    // the old, wrong 700px (35vh) ceiling.
+    // A large real mouse gesture crosses the 50vh initial cap and exercises
+    // the independently measured host ceiling.
     const handleBox = await handle.boundingBox();
     expect(handleBox).not.toBeNull();
     const startX = handleBox!.x + handleBox!.width / 2;
     const startY = handleBox!.y + handleBox!.height / 2;
     await testPage.mouse.move(startX, startY);
     await testPage.mouse.down();
-    await testPage.mouse.move(startX, startY - 900, { steps: 15 });
+    await testPage.mouse.move(startX, startY - 1800, { steps: 20 });
     await testPage.mouse.up();
 
     const afterDrag = await container.evaluate((el) => ({
@@ -192,12 +207,9 @@ test.describe("Clarification overlay resizable layout", () => {
       inlineHeight: (el as HTMLElement).style.height,
     }));
 
-    // The drag target overshoots 50vh, so the hook's own clamp pins the
-    // inline height at exactly 1000px...
-    expect(afterDrag.inlineHeight).toBe("1000px");
-    // ...and because the CSS cap now agrees, the box actually renders there
-    // instead of stopping dead at the old 700px ceiling.
-    expect(afterDrag.height).toBeGreaterThan(700);
-    expect(afterDrag.height).toBeCloseTo(1000, 0);
+    const hostMaxAfterDrag = Number(await container.getAttribute("data-host-max-height"));
+    expect(afterDrag.inlineHeight).toBe(`${hostMaxAfterDrag}px`);
+    await expect(container).toHaveCSS("max-height", `${hostMaxAfterDrag}px`);
+    expect(afterDrag.height).toBeCloseTo(hostMaxAfterDrag, 0);
   });
 });

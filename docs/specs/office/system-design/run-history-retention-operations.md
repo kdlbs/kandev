@@ -12,7 +12,7 @@ requirements:
 
 The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
 allocates the shipped page composition. Office retention lives at Storage > Office retention.
-Message compaction remains in Data & Logs > Database.
+History compaction remains in Data & Logs > Database.
 Policy, API, and persistence contracts remain unchanged.
 
 ## Purpose and boundaries
@@ -274,6 +274,35 @@ copy goes through `t()` and must ship in `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`;
 `pnpm run i18n:check` and the new-code ratchet gate the build. Health issue
 titles and messages stay English, matching every other backend-produced
 `health.Issue`.
+
+
+
+### Browser read and acknowledgement ordering
+
+`useRetentionSettings` is the sole browser publisher. A store-scoped weak map
+holds only the current read token, shared across route instances and concurrent
+consumers. Read admission replaces that token; a normalized PUT acknowledgement
+invalidates it before merging settings into the cached status. The merge preserves
+last sweep, skip record, and retained counts. An accepted GET publishes the whole
+status. No timestamps, server versions, or completed-request history are needed.
+
+Each mounted hook lifetime also owns its current read token. Unmount retires
+reads and local state updates; overlapping reloads finalize loading only for their
+own latest local read. Success/error publication additionally requires shared
+read ownership. An admitted PUT still publishes its acknowledgement to its
+captured store after unmount, but starts no refresh in the retired lifetime.
+The card adopts normalized acknowledgements only when its submitted draft is
+still current; later edits remain dirty. Independent app stores have independent
+tokens. A failed PUT neither advances the
+baseline nor invalidates valid reads. A later fresh GET remains authoritative.
+
+Storage's visited tab panels force-mount: tab switches do not retire reads.
+Leaving the Storage route does. `SettingsLayoutClient` keys the save provider by
+pathname; reentry registers a new contributor against the shared cached baseline.
+The reusable submitted-revision and Reset contract remains owned by
+[settings manual save](../../ui/system-design/settings-manual-save.md).
+This implements AC-OFFICE-RUN-HISTORY-RETENTION-004.10 without changing API,
+authorization, persistence, sweep scheduling, or deletion behavior.
 
 
 ## Ordering, concurrency, and failure

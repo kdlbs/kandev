@@ -3,6 +3,7 @@ status: current
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITHUB-MOBILE-001
+  - REQ-INTEGRATIONS-GITHUB-SAVED-QUERY-CAPABILITY-001
 ---
 # GitHub dashboard mobile design
 
@@ -19,6 +20,12 @@ Associate workspace data and load status with the workspace ID so the first rend
 `useSavedPresetActions.onConfirmSave` reports whether persistence succeeded in the originating scope. `SavePresetDialog` awaits the outcome, prevents duplicate submission, retains values on failure, and closes only on success. Scope changes discard the old form. Existing error toasts remain localized.
 
 A save completion must belong to the same navigation generation, including A-to-B-to-A navigation. Keep the Save action's accessible name stable while pending and announce progress in one localized status region.
+
+## Saved-query identity capability
+
+`REQ-INTEGRATIONS-GITHUB-SAVED-QUERY-CAPABILITY-001` maps to the shared `useSavedPresets` creation path used by desktop and phone. Generate the non-secret preset ID as `p_` plus `generateUUID` from `apps/web/lib/uuid.ts`. The established helper prefers `crypto.randomUUID`, uses `crypto.getRandomValues` when it is absent, and retains its existing legacy fallback. Its fallback is not suitable for secrets or authentication. Keep the input fields, scope, optimistic publication, write queues, rollback, hydration, and action settlement unchanged; neither backend settings contract nor saved-preset shape changes.
+
+Regression evidence exercises `SavePresetDialog`, `useSavedPresetActions`, and `useSavedPresets` together with the settings API as the boundary. A focused browser flow also simulates the missing capability on the actual GitHub page; this demonstrates browser interaction and is not evidence of real insecure-origin networking.
 
 ## Picker composition
 

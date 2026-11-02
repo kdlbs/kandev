@@ -12,7 +12,7 @@
   "anotherCallerRejected": "Someone else already rejected \"{{question}}\".",
   "bundleNoLongerActive": "\"{{question}}\" is no longer waiting on an answer.",
   "errorTitle": "Could not load your inbox",
-  "errorDescription": "Something went wrong loading the questions waiting on you.",
+  "errorDescription": "Could not load questions awaiting your answer.",
   "retry": "Retry",
   "emptyTitle": "Nothing is waiting on you in {{workspace}}.",
   "emptyDescription": "This list only covers questions blocking an agent in this workspace. It does not count bundles in other workspaces, pending permission requests, parent-question records, or your own snoozed or dismissed rows.",

@@ -400,10 +400,6 @@ func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
 	return matchRuntimeRules(text, text, "", false)
 }
 
-func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, text, "", true)
-}
-
 func matchRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {
 	return matchRuntimeRules(text, rawText, providerID, false)
 }

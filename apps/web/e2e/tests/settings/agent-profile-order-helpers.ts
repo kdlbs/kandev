@@ -42,7 +42,9 @@ export async function pointerDragProfile(page: Page, source: Locator, target: Lo
   const handle = source.getByTestId("agent-profile-drag-handle");
   await expect(handle).toBeVisible({ timeout: 15_000 });
   await expect(target).toBeVisible({ timeout: 15_000 });
-  await target.scrollIntoViewIfNeeded();
+  // Agent discovery can replace the row while the browser scrolls it into view.
+  // Retry preparation before pressing the pointer, never the drag itself.
+  await expect(async () => target.scrollIntoViewIfNeeded()).toPass({ timeout: 5_000 });
   const from = await settledBoundingBox(handle);
   await expect(handle).toBeInViewport();
   await expect(target).toBeInViewport();
@@ -57,6 +59,8 @@ export async function pointerDragProfile(page: Page, source: Locator, target: Lo
 }
 
 export async function restoreProfileOrder(page: Page, baseUrl: string, agent: Agent) {
+  if (agent.profiles.length === 0) return;
+
   const token = await loadInterimSettingsInterlockToken(baseUrl);
   const response = await page.request.put(`${baseUrl}/api/v1/agents/${agent.id}/profiles/order`, {
     headers: { "X-Kandev-Interim-Settings-Interlock": token },

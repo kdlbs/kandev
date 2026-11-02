@@ -62,6 +62,7 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
+	RetryClock RetryClock
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
@@ -118,6 +119,14 @@ func DefaultServiceConfig() ServiceConfig {
 }
 
 // MessageCreator is an interface for creating messages on tasks
+// SessionMessageTimestampReader returns the immutable creation time of a
+// persisted session message. A message creator that can resolve its own rows
+// implements it so durable attention ordering uses message time, not the time
+// settlement happened to record it.
+type SessionMessageTimestampReader interface {
+	SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool)
+}
+
 type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
@@ -138,8 +147,9 @@ type MessageCreator interface {
 	// already-completed lifecycle-only turn. The turn is never active, so a
 	// later prompt cannot adopt it.
 	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
+	UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error)
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error)
@@ -795,6 +805,9 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+	// turnErrorRecorder persists durable task attention for a manual retained
+	// failure. Nil leaves the historical settlement behavior unchanged.
+	turnErrorRecorder TaskTurnErrorRecorder
 
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
@@ -830,9 +843,15 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents             TaskEventPublisher
-	feederPulls            FeederPullReconciler
-	backgroundWorkObserver BackgroundWorkObserver
+	taskEvents                  TaskEventPublisher
+	feederPulls                 FeederPullReconciler
+	backgroundWorkObserver      BackgroundWorkObserver
+	backgroundWorkSettleMu      sync.Mutex
+	backgroundWorkSettleCtx     context.Context
+	backgroundWorkSettleCancel  context.CancelFunc
+	backgroundWorkSettleStopped bool
+	backgroundWorkSettleWorkers *sync.WaitGroup
+	backgroundWorkSettleDrain   chan struct{}
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -940,6 +959,11 @@ type Service struct {
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
+
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
 
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
@@ -1266,6 +1290,12 @@ type Service struct {
 	// Nil is the common case; see LaunchCredentialReminter.
 	launchCredentialReminter LaunchCredentialReminter
 
+	// ceilingDeferredLaunchSettler lets the component that queued a
+	// ceiling-deferred launch settle its own durable record once the ceiling
+	// replay admits or terminally drops that launch. Nil is the common case;
+	// see CeilingDeferredLaunchSettler.
+	ceilingDeferredLaunchSettler CeilingDeferredLaunchSettler
+
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
 	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler
@@ -1339,6 +1369,10 @@ type Service struct {
 	// narrow interval after handleAgentReady releases its per-session guard
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
+	// afterBusyAutoStartSessionRead is a deterministic test seam for the
+	// interval after a workflow auto-start reads a mid-turn session and before
+	// it queues the step prompt.
+	afterBusyAutoStartSessionRead func()
 	// agentReadyReservationWaitTimeout is a deterministic test seam. Zero uses
 	// the production timeout derived from the prompt dispatch budgets.
 	agentReadyReservationWaitTimeout time.Duration
@@ -1838,6 +1872,7 @@ func NewService(
 	ciAutomationCtx, ciAutomationCancel := context.WithCancel(context.Background())
 	dynamicSuccessorCtx, dynamicSuccessorCancel := context.WithCancel(context.Background())
 	parkedLoopCtx, parkedLoopCancel := context.WithCancel(context.Background())
+	backgroundWorkSettleCtx, backgroundWorkSettleCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -1872,6 +1907,9 @@ func NewService(
 		parkedEpoch:                  uint64(time.Now().UnixNano()),
 		parkedLoopCtx:                parkedLoopCtx,
 		parkedLoopCancel:             parkedLoopCancel,
+		backgroundWorkSettleCtx:      backgroundWorkSettleCtx,
+		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
+		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
@@ -2065,6 +2103,11 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetTaskTurnErrorRecorder wires the task-owned failed-turn attention store.
+func (s *Service) SetTaskTurnErrorRecorder(recorder TaskTurnErrorRecorder) {
+	s.turnErrorRecorder = recorder
+}
+
 // SetTransientRetryMessageService wires the task service used to write and
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
@@ -2096,6 +2139,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetWorkspaceCollaborationEnabled applies the collaboration release gate to
+// task MCP profiles before agentctl receives them.
+func (s *Service) SetWorkspaceCollaborationEnabled(enabled bool) {
+	if s.executor != nil {
+		s.executor.SetWorkspaceCollaborationEnabled(enabled)
 	}
 }
 
@@ -3383,6 +3434,9 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 
 func (s *Service) reconcileStartupState(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
+	if err := s.resetBackgroundWorkSettleWorkers(); err != nil {
+		return err
+	}
 	if err := s.resetSendNowWorkers(); err != nil {
 		return err
 	}
@@ -3597,6 +3651,7 @@ func (s *Service) Stop() error {
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.
 	s.stopDynamicSuccessorWorkers()
+	s.stopBackgroundWorkSettleWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
 	s.stopOrphanReentryWorkers()
@@ -4305,7 +4360,7 @@ func (s *Service) withSessionPromptAdmission(
 	if s.messageQueue == nil {
 		return fn(ctx)
 	}
-	return s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+	return s.messageQueue.WithPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		return fn(context.WithValue(admittedCtx, sessionPromptAdmissionContextKey{}, sessionID))
 	})
 }

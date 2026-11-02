@@ -36,7 +36,7 @@ function makeStore() {
   // We don't need the full AppState — cast through unknown so the handler
   // signature is satisfied without standing up unrelated slices.
   return create<SessionRuntimeSlice>()(
-    immer((set, get, store) => createSessionRuntimeSlice(set, get, store)),
+    immer((set, get) => createSessionRuntimeSlice(set, get)),
   ) as unknown as StoreApi<AppState>;
 }
 

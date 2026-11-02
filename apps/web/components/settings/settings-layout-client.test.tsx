@@ -12,6 +12,7 @@ const WS_HREF = `${WORKSPACES_HREF}/ws-1`;
 
 const state = {
   configChat: { isOpen: false },
+  userSettings: { startupPage: "task_overview" },
   workspaces: {
     activeId: "ws-1",
     items: [
@@ -38,7 +39,7 @@ const state = {
 
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 

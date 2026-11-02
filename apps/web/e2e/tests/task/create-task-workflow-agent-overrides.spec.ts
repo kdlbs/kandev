@@ -181,7 +181,7 @@ test.describe("task-specific workflow agent overrides", () => {
       );
       await testPage.mouse.move(0, 0);
 
-      const plannedAboveChatButton = testPage.getByTestId("proceed-next-step");
+      const plannedAboveChatButton = sessionPage.activeChat().getByTestId("proceed-next-step");
       await expect(plannedAboveChatButton).toBeVisible();
       await plannedAboveChatButton.hover();
       const plannedAboveChatOptions = testPage.getByTestId("proceed-next-step-options");
@@ -222,7 +222,7 @@ test.describe("task-specific workflow agent overrides", () => {
       );
       await testPage.mouse.move(0, 0);
 
-      const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
+      const actualAboveChatButton = sessionPage.activeChat().getByTestId("proceed-next-step");
       await expect(actualAboveChatButton).toBeVisible();
       await actualAboveChatButton.hover();
       const actualAboveChatOptions = testPage.getByTestId("proceed-next-step-options");

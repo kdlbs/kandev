@@ -1,6 +1,6 @@
 package shared
 
-import "github.com/kandev/kandev/internal/office/models"
+import runsmodels "github.com/kandev/kandev/internal/runs/models"
 
 // WakeReasonRegistry is the single declared enumeration of every wake
 // reason value the system persists on runs.reason, including reasons kept
@@ -17,48 +17,48 @@ import "github.com/kandev/kandev/internal/office/models"
 // PriorityClassForReason never needs to resolve them, because
 // REQ-OFFICE-BACKPRESSURE-001.3 stops at the first matching rule before the
 // reason is consulted.
-var WakeReasonRegistry = map[string]models.PriorityClass{
+var WakeReasonRegistry = map[string]runsmodels.PriorityClass{
 	// Periodic: unattended, schedule-driven fires only. A row whose
 	// originating trigger cannot be recovered (RunReasonRoutineDispatch)
 	// is deliberately excluded — see the comment on that constant.
-	RunReasonRoutineDispatchCron: models.PriorityClassPeriodic,
-	RunReasonHeartbeat:           models.PriorityClassPeriodic,
+	RunReasonRoutineDispatchCron: runsmodels.PriorityClassPeriodic,
+	RunReasonHeartbeat:           runsmodels.PriorityClassPeriodic,
 
 	// Event: every other reason in the registry, by explicit rule rather
 	// than by falling through the unmapped fallback.
-	RunReasonTaskAssigned:             models.PriorityClassEvent,
-	RunReasonTaskComment:              models.PriorityClassEvent,
-	RunReasonTaskBlockersResolved:     models.PriorityClassEvent,
-	RunReasonTaskChildrenCompleted:    models.PriorityClassEvent,
-	RunReasonApprovalResolved:         models.PriorityClassEvent,
-	RunReasonTaskReviewRequested:      models.PriorityClassEvent,
-	RunReasonTaskChangesRequested:     models.PriorityClassEvent,
-	RunReasonRoutineTrigger:           models.PriorityClassEvent,
-	RunReasonBudgetAlert:              models.PriorityClassEvent,
-	RunReasonAgentError:               models.PriorityClassEvent,
-	RunReasonRoutineDispatchEvent:     models.PriorityClassEvent,
-	RunReasonRoutineDispatch:          models.PriorityClassEvent,
-	RunReasonManualResumeAfterFailure: models.PriorityClassEvent,
-	RunReasonQueueRun:                 models.PriorityClassEvent,
+	RunReasonTaskAssigned:             runsmodels.PriorityClassEvent,
+	RunReasonTaskComment:              runsmodels.PriorityClassEvent,
+	RunReasonTaskBlockersResolved:     runsmodels.PriorityClassEvent,
+	RunReasonTaskChildrenCompleted:    runsmodels.PriorityClassEvent,
+	RunReasonApprovalResolved:         runsmodels.PriorityClassEvent,
+	RunReasonTaskReviewRequested:      runsmodels.PriorityClassEvent,
+	RunReasonTaskChangesRequested:     runsmodels.PriorityClassEvent,
+	RunReasonRoutineTrigger:           runsmodels.PriorityClassEvent,
+	RunReasonBudgetAlert:              runsmodels.PriorityClassEvent,
+	RunReasonAgentError:               runsmodels.PriorityClassEvent,
+	RunReasonRoutineDispatchEvent:     runsmodels.PriorityClassEvent,
+	RunReasonRoutineDispatch:          runsmodels.PriorityClassEvent,
+	RunReasonManualResumeAfterFailure: runsmodels.PriorityClassEvent,
+	RunReasonQueueRun:                 runsmodels.PriorityClassEvent,
 
 	// Reactivity-pipeline reasons (office/scheduler/run.go's
 	// RunReasonTaskUnblocked family). All are triggered by a task-state
 	// change (a human comment, a blocker resolving, a reviewer decision),
 	// never by an unattended schedule, so all classify as event.
-	RunReasonTaskUnblocked:         models.PriorityClassEvent,
-	RunReasonTaskReopened:          models.PriorityClassEvent,
-	RunReasonTaskReopenedComment:   models.PriorityClassEvent,
-	RunReasonTaskMentioned:         models.PriorityClassEvent,
-	RunReasonStagePending:          models.PriorityClassEvent,
-	RunReasonStageChangesRequested: models.PriorityClassEvent,
-	RunReasonTaskReadyToClose:      models.PriorityClassEvent,
+	RunReasonTaskUnblocked:         runsmodels.PriorityClassEvent,
+	RunReasonTaskReopened:          runsmodels.PriorityClassEvent,
+	RunReasonTaskReopenedComment:   runsmodels.PriorityClassEvent,
+	RunReasonTaskMentioned:         runsmodels.PriorityClassEvent,
+	RunReasonStagePending:          runsmodels.PriorityClassEvent,
+	RunReasonStageChangesRequested: runsmodels.PriorityClassEvent,
+	RunReasonTaskReadyToClose:      runsmodels.PriorityClassEvent,
 
 	// Historical-row-only literals, retained so an old persisted run row
 	// still resolves through an explicit rule rather than the fallback.
-	RunReasonLegacyBlockersResolved:  models.PriorityClassEvent,
-	RunReasonLegacyChildrenCompleted: models.PriorityClassEvent,
-	RunReasonLegacyReviewStarted:     models.PriorityClassEvent,
-	RunReasonLegacyApprovalStarted:   models.PriorityClassEvent,
+	RunReasonLegacyBlockersResolved:  runsmodels.PriorityClassEvent,
+	RunReasonLegacyChildrenCompleted: runsmodels.PriorityClassEvent,
+	RunReasonLegacyReviewStarted:     runsmodels.PriorityClassEvent,
+	RunReasonLegacyApprovalStarted:   runsmodels.PriorityClassEvent,
 }
 
 // ReasonOnlyHumanCanCause names wake reasons whose priority class is
@@ -82,7 +82,7 @@ var ReasonOnlyHumanCanCause = map[string]struct{}{
 // silently defaulting, so the two failure paths (registry miss vs.
 // recognized-but-mapped-to-event) stay distinguishable to a caller that
 // wants to count them separately.
-func PriorityClassForReason(reason string) (models.PriorityClass, bool) {
+func PriorityClassForReason(reason string) (runsmodels.PriorityClass, bool) {
 	class, ok := WakeReasonRegistry[reason]
 	return class, ok
 }

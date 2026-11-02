@@ -125,7 +125,8 @@ sequential
 
 Implemented the bounded proof loop at `GetNativeResumeDeliveryEvidence`.
 Distinct sentinels preserve existing blocked/stale error compatibility. A single
-10-second budget and 200 ms cadence apply after verified lag; the caller can
+10-second budget and 200 ms cadence apply after verified lag or monotonic
+same-owner stream progress, including on the first proof attempt. The caller can
 shorten the deadline. Every attempt rechecks the execution and authenticated
 client, then rebuilds the full proof. Client leases are released between
 attempts so connection replacement can proceed during the wait.
@@ -149,6 +150,15 @@ The fixture uses a 5-second SQLite busy timeout for concurrent backend writes.
 A startup-event race observed during verification was rejected by the final SQL
 snapshot check. This final guard remains unchanged: evidence that changes after
 the proof can still require another explicit Resume.
+
+PR review identified an early return when the first proof observed valid stream
+progress without prior cursor lag. That result now starts the same bounded wait.
+Regressions cover first-attempt acknowledgement progress that settles, and both
+initial lag and initial stream progress that continue until the caller deadline.
+The deadline, polling cadence, owner checks, and final SQL guard are unchanged.
+Focused lifecycle and caller race tests, changed-package Go lint, and both
+desktop and both phone recovery cases passed after this correction. Browser
+retries were disabled. Catalog validation and specification lint also passed.
 
 Verification passed:
 

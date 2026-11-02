@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import { waitForAgentMessage } from "../../helpers/session";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
 async function prepareMonitorTask(apiClient: ApiClient, seedData: SeedData, title: string) {
@@ -104,6 +105,17 @@ test.describe("Claude-acp Monitor tool", () => {
     // The browser send path records the first user turn before launching the
     // agent, so fast Monitor notifications have an active turn to update.
     await session.sendMessageViaButton(script);
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) => message.author_type === "agent" && message.content === "watching done",
+          );
+        },
+        { timeout: 30_000, message: "Monitor script did not finish producing its messages" },
+      )
+      .toBe(true);
 
     // The dedicated Monitor card renders, not the generic tool_call row.
     const monitorCard = session.activeChat().locator('[data-testid="monitor-card"]');
@@ -155,6 +167,7 @@ test.describe("Claude-acp Monitor tool", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await waitForMonitorSubscription(capture, sessionId);
     await session.sendMessageViaButton(script);
+    await waitForAgentMessage(apiClient, sessionId, "Monitor", 30_000);
     const card = session.activeChat().locator('[data-testid="monitor-card"]');
     await expect(card).toHaveCount(1);
     await expect(card).toContainText("1 event", { timeout: 30_000 });
@@ -188,6 +201,7 @@ test.describe("Claude-acp Monitor tool", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await waitForMonitorSubscription(capture, sessionId);
     await session.sendMessageViaButton(script);
+    await waitForAgentMessage(apiClient, sessionId, "Monitor", 30_000);
     const cards = session.activeChat().locator('[data-testid="monitor-card"]');
     await expect(cards).toHaveCount(1);
     await expect(cards).toContainText("2 events", { timeout: 30_000 });

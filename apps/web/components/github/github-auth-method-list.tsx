@@ -41,14 +41,17 @@ const methods: AuthMethodOption[] = [
 export function GitHubAuthMethodList({
   value,
   onChange,
+  disabled = false,
 }: {
   value: GitHubAutomationMethod;
   onChange: (value: GitHubAutomationMethod) => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <RadioGroup
       value={value}
+      disabled={disabled}
       onValueChange={(next) => onChange(next as GitHubAutomationMethod)}
       className="grid gap-2 sm:grid-cols-3"
       aria-label={t("github:connectionMethod")}
@@ -60,8 +63,8 @@ export function GitHubAuthMethodList({
             key={method.value}
             htmlFor={`github-method-${method.value}`}
             className={cn(
-              "flex min-h-24 cursor-pointer items-start gap-3 rounded-md border p-3",
-              "transition-colors hover:bg-muted/40",
+              "flex min-h-24 items-start gap-3 rounded-md border p-3 transition-colors",
+              disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-muted/40",
               value === method.value && "border-primary bg-muted/30",
             )}
           >

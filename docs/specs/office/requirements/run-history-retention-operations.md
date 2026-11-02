@@ -189,6 +189,17 @@ of the most recent sweep is readable by an operator without reading logs.
   configured retention window with a shorter default and destroy history the
   operator meant to keep.
 
+
+- **AC-OFFICE-RUN-HISTORY-RETENTION-004.10:** On desktop and phones, a successful
+  Save advances the retention baseline to its normalized acknowledgement. A read
+  started before that acknowledgement must not rewind it, including after leaving
+  and returning to Storage. Superseded reads must not replace newer status,
+  report obsolete errors, or end a newer loading state. Reset restores the latest
+  accepted baseline without a write; edits made during Save remain dirty. Fresh
+  reads remain eligible to update the complete sweep, skip, count, and settings
+  status. Failed saves retain the draft and retry behavior defined by
+  [settings manual save](../../ui/requirements/settings-manual-save.md).
+
 ## Out of scope
 
 - **A persisted history of retention sweeps.** The last sweep's result is held

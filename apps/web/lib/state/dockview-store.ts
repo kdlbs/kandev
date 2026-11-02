@@ -335,7 +335,6 @@ type DockviewStore = {
   hiddenRightPane: HiddenRightPane | null;
   /** Identity of the active built-in or saved custom layout profile. */
   activeLayoutProfile: LayoutProfileIdentity;
-  toggleSidebar: () => void;
   toggleRightPanels: () => void;
   setSidebarVisible: (visible: boolean) => void;
   setRightPanelsVisible: (visible: boolean) => void;
@@ -699,12 +698,6 @@ function visibilityForLayout(
 /** Build the store's visibility actions for the contextual right pane. */
 function buildVisibilityActions(set: StoreSet, get: StoreGet) {
   return {
-    // Legacy dockview-embedded sidebar is gone after the unified AppSidebar
-    // landed; the keybinding redirects to the AppSidebar toggle elsewhere.
-    // We keep these on the store as no-ops so any stragglers compile cleanly.
-    toggleSidebar: () => {
-      /* moved to UI slice: toggleAppSidebar */
-    },
     toggleRightPanels: () => {
       const { api, hiddenRightPane, preMaximizeLayout } = get();
       if (!api || preMaximizeLayout) return;
@@ -828,7 +821,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       }
       set({
         ...ids,
-        sidebarVisible: true,
+        sidebarVisible: !!api.getPanel("sidebar"),
         ...visibilityForLayout(state, null),
         pinnedWidths: cleanedWidths,
       });
@@ -1875,9 +1868,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   centerGroupId: CENTER_GROUP,
   rightTopGroupId: RIGHT_TOP_GROUP,
   rightBottomGroupId: RIGHT_BOTTOM_GROUP,
-  // Legacy fields preserved for backwards compatibility with code that still
-  // reads them; the embedded dockview sidebar pane was removed in favour of
-  // the unified AppSidebar. Treated as inert: sidebarVisible is always false.
+  // Legacy saved layouts can still contain a sidebar panel. Visibility follows
+  // the applied layout so its width is reserved only when the panel exists.
   sidebarGroupId: SIDEBAR_GROUP,
   sidebarVisible: false,
   rightPanelsVisible: true,

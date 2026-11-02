@@ -38,7 +38,6 @@ function renderRow(overrides: Partial<Parameters<typeof SecretListItemRow>[0]> =
       onCopyMove={onCopyMove}
       isBusy={false}
       showCreate={false}
-      isEditing={false}
       isDeleteConfirming={false}
       {...overrides}
     />,
@@ -125,11 +124,6 @@ describe("SecretListItemRow", () => {
 
   it("disables copy/move while a create draft is open", () => {
     renderRow({ showCreate: true });
-    expect(copyMoveDisabled()).toBe(true);
-  });
-
-  it("disables copy/move while that row is being edited", () => {
-    renderRow({ isEditing: true });
     expect(copyMoveDisabled()).toBe(true);
   });
 

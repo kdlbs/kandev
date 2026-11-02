@@ -693,6 +693,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
+		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,
@@ -784,13 +785,17 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 	}
 }
 
-// mapWorkflowItemState maps a workflow DTO to its SPA boot shape.
+// mapWorkflowItemState maps a workflow DTO to its SPA boot shape. It must carry
+// every field the workflow settings page saves: an omitted prompt reads there as
+// a cleared value and the next step save persists it. This mirrors the web
+// mapWorkflowItem in apps/web/lib/routing/route-bootstrap.ts.
 func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 	return map[string]any{
 		"id":               workflow.ID,
 		"workspaceId":      workflow.WorkspaceID,
 		"name":             workflow.Name,
 		"description":      workflow.Description,
+		"prompt":           stringValue(workflow.Prompt),
 		"sortOrder":        workflow.SortOrder,
 		"agent_profile_id": nullString(workflow.AgentProfileID),
 		"hidden":           workflow.Hidden,

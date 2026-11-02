@@ -54,7 +54,9 @@ export function useAgentProfileSettings(
   const refreshKeyRef = useRef<string | null>(null);
 
   const agent = useMemo(() => {
-    return settingsAgents.find((item: Agent) => item.name === agentKey) ?? null;
+    return (
+      settingsAgents.find((item: Agent) => item.id === agentKey || item.name === agentKey) ?? null
+    );
   }, [agentKey, settingsAgents]);
 
   const profile = useMemo(() => {

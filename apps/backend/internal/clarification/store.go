@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/clarification/protocol"
+	"slices"
 	"sync"
 	"time"
 
@@ -638,7 +640,11 @@ func questionsEqual(a, b []Question) bool {
 	if len(a) != len(b) {
 		return false
 	}
+	imageBearing := protocol.HasQuestionImages(a) || protocol.HasQuestionImages(b)
 	for i := range a {
+		if !slices.Equal(a[i].Images, b[i].Images) || (imageBearing && a[i].ID != b[i].ID) {
+			return false
+		}
 		if a[i].Prompt != b[i].Prompt {
 			return false
 		}
@@ -657,6 +663,9 @@ func optionsEqual(a, b []Option) bool {
 		return false
 	}
 	for i := range a {
+		if !slices.Equal(a[i].Images, b[i].Images) {
+			return false
+		}
 		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
 			return false
 		}

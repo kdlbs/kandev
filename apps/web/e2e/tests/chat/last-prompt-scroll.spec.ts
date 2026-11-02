@@ -19,6 +19,8 @@ const ANCHORED_PROMPT_CONTENT = "Pinned prompt preview content.";
 
 const PROMPT_MENTION_CHIP = "custom-prompt-mention";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("@chat last prompt scroll affordance", () => {
   test.afterEach(async ({ apiClient }) => {
     const { prompts } = await apiClient.listPrompts();

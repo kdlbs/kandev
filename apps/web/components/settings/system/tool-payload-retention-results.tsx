@@ -42,10 +42,22 @@ function SkippedItems({ skipped }: { skipped: Record<string, number> }) {
 function OperationOutcome({ operation }: { operation: ToolPayloadOperation }) {
   const { t } = useTranslation();
   if (operation.kind === "analysis") {
-    if (operation.state === "succeeded" && operation.payload_bytes === 0)
+    if (
+      operation.state === "succeeded" &&
+      operation.payload_bytes === 0 &&
+      (operation.history_sql_bytes ?? 0) === 0 &&
+      (operation.history_git_bytes ?? 0) === 0
+    )
       return <p>{t("system:toolPayload.empty")}</p>;
     return (
-      <p>{t("system:toolPayload.estimate", { size: formatBytes(operation.payload_bytes) })}</p>
+      <p>
+        {t("system:toolPayload.estimate", {
+          toolSize: formatBytes(operation.payload_bytes),
+          historySize: formatBytes(
+            (operation.history_sql_bytes ?? 0) + (operation.history_git_bytes ?? 0),
+          ),
+        })}
+      </p>
     );
   }
   return (
@@ -53,10 +65,76 @@ function OperationOutcome({ operation }: { operation: ToolPayloadOperation }) {
       {t("system:toolPayload.removed", {
         count: operation.removed_messages,
         size: formatBytes(operation.payload_bytes),
+        snapshots: operation.expired_change_sets ?? 0,
       })}
     </p>
   );
 }
+
+function HistoryByteLines({ sqlBytes, gitBytes }: { sqlBytes: number; gitBytes: number }) {
+  const { t } = useTranslation();
+  if (sqlBytes === 0 && gitBytes === 0) return null;
+  return (
+    <p>
+      {t("system:toolPayload.historyBytes", {
+        sql: formatBytes(sqlBytes),
+        git: formatBytes(gitBytes),
+      })}
+    </p>
+  );
+}
+
+function HistoryCleanupLines({
+  expired,
+  refsDeleted,
+  retrying,
+}: {
+  expired: number;
+  refsDeleted: number;
+  retrying: number;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {expired > 0 && <p>{t("system:toolPayload.historyExpired", { count: expired })}</p>}
+      {refsDeleted > 0 && (
+        <p>{t("system:toolPayload.historyRefsDeleted", { count: refsDeleted })}</p>
+      )}
+      {retrying > 0 && <p>{t("system:toolPayload.historyRetry", { count: retrying })}</p>}
+    </>
+  );
+}
+
+function HistoryDetails({ operation }: { operation: ToolPayloadOperation }) {
+  const { t } = useTranslation();
+  const snapshots = operation.history_snapshots ?? 0;
+  const historyTasks = operation.history_tasks ?? 0;
+  const expired = operation.expired_change_sets ?? 0;
+  const refsDeleted = operation.deleted_archive_refs ?? 0;
+  const retrying = operation.archive_failures ?? 0;
+  if (
+    snapshots === 0 &&
+    historyTasks === 0 &&
+    expired === 0 &&
+    refsDeleted === 0 &&
+    retrying === 0
+  ) {
+    return null;
+  }
+  return (
+    <>
+      {(snapshots > 0 || historyTasks > 0) && (
+        <p>{t("system:toolPayload.historyProgress", { snapshots, tasks: historyTasks })}</p>
+      )}
+      <HistoryByteLines
+        sqlBytes={operation.history_sql_bytes ?? 0}
+        gitBytes={operation.history_git_bytes ?? 0}
+      />
+      <HistoryCleanupLines expired={expired} refsDeleted={refsDeleted} retrying={retrying} />
+    </>
+  );
+}
+
 function OperationResult({ operation }: { operation: ToolPayloadOperation }) {
   const { t } = useTranslation();
   if (operation.kind === "backup")
@@ -84,6 +162,7 @@ function OperationResult({ operation }: { operation: ToolPayloadOperation }) {
             messages: operation.eligible_messages,
           })}
         </p>
+        <HistoryDetails operation={operation} />
         {skipped > 0 && (
           <>
             <p>{t("system:toolPayload.skipped", { count: skipped })}</p>

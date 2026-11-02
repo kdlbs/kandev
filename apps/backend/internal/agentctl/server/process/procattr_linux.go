@@ -7,8 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"syscall"
+
+	"github.com/kandev/kandev/internal/common/procstat"
 )
 
 // setProcGroup configures the command to run in its own process group.
@@ -71,24 +72,11 @@ func processGroupAlive(pid int) bool {
 			continue
 		}
 		stat, err := os.ReadFile("/proc/" + strconv.Itoa(memberPID) + "/stat")
-		if err == nil && processStatMatchesLiveGroup(string(stat), pid) {
+		if err == nil && procstat.StatMatchesLiveGroup(string(stat), pid) {
 			return true
 		}
 	}
 	return false
-}
-
-func processStatMatchesLiveGroup(stat string, pgid int) bool {
-	commandEnd := strings.LastIndex(stat, ") ")
-	if commandEnd < 0 {
-		return false
-	}
-	fields := strings.Fields(stat[commandEnd+2:])
-	if len(fields) < 3 || fields[0] == "Z" || fields[0] == "X" {
-		return false
-	}
-	group, err := strconv.Atoi(fields[2])
-	return err == nil && group == pgid
 }
 
 func processGroupResponds(pid int) bool {

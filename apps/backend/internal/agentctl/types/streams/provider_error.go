@@ -17,8 +17,9 @@ const MaxProviderMessageBytes = 2048
 const MaxCompleteProviderDiagnosticBytes = 1024
 
 var (
-	providerMessageURLPattern        = regexp.MustCompile(`(?i)https?://[^\s]+`)
-	providerMessageIdentifierPattern = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
+	providerMessageURLPattern         = regexp.MustCompile(`(?i)https?://[^\s]+`)
+	providerMessageIdentifierPattern  = regexp.MustCompile(`(?i)\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`)
+	providerMessageDailyReasonPattern = regexp.MustCompile(`(?im)^(\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*)(free-models-per-day\b\S*|limit_rpd/\S+)`)
 )
 
 // SanitizeProviderMessage redacts likely credentials (via
@@ -29,11 +30,13 @@ var (
 // ACP transport layer and the recovery-evidence layer must observe
 // identically, so both call this rather than each keeping their own copy. A
 // raw ACP RequestError.Message is adapter-defined and may itself embed a
-// credential the same way error.data can, so credential redaction runs before
-// any other transform. The unbounded tier is used because this function
+// credential the same way error.data can. Recognized daily reasons that would
+// be redacted are reduced to fixed public labels; already-safe diagnostics
+// retain their exact identity. The unbounded tier is used because this function
 // applies its own MaxProviderMessageBytes cut below, on top of any redaction
 // the shared tier already performed.
 func SanitizeProviderMessage(message string) string {
+	message = preserveProviderDailyReason(message)
 	message = routingerr.SanitizeFullUnbounded(message)
 	message = providerMessageURLPattern.ReplaceAllString(message, "")
 	message = providerMessageIdentifierPattern.ReplaceAllString(message, "[redacted]")
@@ -43,6 +46,19 @@ func SanitizeProviderMessage(message string) string {
 		message = message[:MaxProviderMessageBytes]
 	}
 	return message
+}
+
+func preserveProviderDailyReason(message string) string {
+	return providerMessageDailyReasonPattern.ReplaceAllStringFunc(message, func(diagnostic string) string {
+		parts := providerMessageDailyReasonPattern.FindStringSubmatch(diagnostic)
+		if routingerr.SanitizeFullUnbounded(parts[2]) == parts[2] {
+			return diagnostic
+		}
+		if strings.HasPrefix(strings.ToLower(parts[2]), "limit_rpd/") {
+			return parts[1] + "limit_rpd/model"
+		}
+		return parts[1] + "free-models-per-day"
+	})
 }
 
 // IsCompleteProviderDiagnostic reports whether raw is safe to use as an exact

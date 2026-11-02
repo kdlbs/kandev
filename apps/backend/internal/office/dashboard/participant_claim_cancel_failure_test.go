@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/office/models"
 )
 
 // TestAddTaskReviewer_ClaimSucceedsWhenDisplacedRunCancellationFails covers
@@ -56,11 +57,11 @@ func TestAddTaskReviewer_ClaimSucceedsWhenDisplacedRunCancellationFails(t *testi
 
 	// The run the step-entry fan-out queued for the agent about to be
 	// displaced. Seeded before the table goes away.
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-auto",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"cancelfail","workflow_step_id":"` + stepID + `"}`,
-		Status:         models.RunStatusQueued,
+		Status:         runsmodels.RunStatusQueued,
 		CoalescedCount: 1,
 	}
 	if err := deps.repo.CreateRun(t.Context(), run); err != nil {
@@ -143,7 +144,7 @@ func TestAddTaskReviewer_ClaimSucceedsWhenDisplacedRunCancellationFails(t *testi
 	if err != nil {
 		t.Fatalf("get displaced run: %v", err)
 	}
-	if gotRun.Status != models.RunStatusQueued {
-		t.Fatalf("displaced run status = %q, want %q (still runnable)", gotRun.Status, models.RunStatusQueued)
+	if gotRun.Status != runsmodels.RunStatusQueued {
+		t.Fatalf("displaced run status = %q, want %q (still runnable)", gotRun.Status, runsmodels.RunStatusQueued)
 	}
 }

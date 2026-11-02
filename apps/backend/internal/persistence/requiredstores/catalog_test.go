@@ -101,6 +101,25 @@ func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
 	}
 }
 
+func TestNotificationCatalogIncludesWebPushTables(t *testing.T) {
+	for _, descriptor := range Catalog() {
+		if descriptor.ID != "notification" {
+			continue
+		}
+		got := make(map[string]bool, len(descriptor.RequiredTables))
+		for _, table := range descriptor.RequiredTables {
+			got[table] = true
+		}
+		for _, table := range []string{"webpush_vapid_keys", "webpush_subscriptions"} {
+			if !got[table] {
+				t.Errorf("notification descriptor omits %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("notification descriptor is missing")
+}
+
 func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 	tests := []struct {
 		name    string

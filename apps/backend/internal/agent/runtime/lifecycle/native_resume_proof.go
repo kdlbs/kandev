@@ -14,7 +14,7 @@ import (
 // admission fence. The snapshot cannot authorize dispatch or alter old outcomes.
 func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID string) (*models.NativeResumeDeliveryEvidence, error) {
 	execution, exists := m.GetExecutionBySessionID(sessionID)
-	if !exists {
+	if !exists || execution == nil {
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
 	client, release := execution.AcquireAgentCtlClient()
@@ -111,7 +111,8 @@ func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryReposi
 	if _, err := projectedCursorCoveredByPeer(cursor, status); err != nil {
 		return nil, err
 	}
-	if cursor.ReceivedSequence != cursor.ProjectedSequence {
+	if cursor.ReceivedSequence != cursor.ProjectedSequence ||
+		(status.Stream != nil && uint64(cursor.ProjectedSequence) < status.Stream.HighWater) {
 		return nil, errNativeResumeProjectionLag
 	}
 	return cursor, nil

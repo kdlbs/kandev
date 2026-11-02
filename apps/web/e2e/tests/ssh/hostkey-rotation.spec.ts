@@ -1,6 +1,27 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { regenerateHostKey } from "../../helpers/ssh";
+import { regenerateHostKey, type SSHServerHandle } from "../../helpers/ssh";
+import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionDone } from "../../helpers/session";
+
+async function waitForRotatedFingerprint(apiClient: ApiClient, target: SSHServerHandle) {
+  let fingerprint = "";
+  // TCP can accept connections before sshd finishes reloading its host keys.
+  await expect(async () => {
+    const result = await apiClient.testSSHConnection({
+      name: "Observe rotated host key",
+      host: target.host,
+      port: target.port,
+      user: target.user,
+      identity_source: "file",
+      identity_file: target.identityFile,
+    });
+    expect(result.success, result.error).toBe(true);
+    expect(result.fingerprint).toBeTruthy();
+    expect(result.fingerprint).not.toBe(target.hostFingerprint);
+    fingerprint = result.fingerprint!;
+  }).toPass({ timeout: 15_000 });
+  return fingerprint;
+}
 
 /**
  * Host-key rotation: regenerate the container's host key and assert
@@ -47,17 +68,8 @@ test.describe("ssh executor — host key rotation", () => {
     const before = seedData.sshTarget.hostFingerprint;
     regenerateHostKey(seedData.sshTarget);
 
-    const result = await apiClient.testSSHConnection({
-      name: "K1 after rekey",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    expect(result.success).toBe(true);
-    expect(result.fingerprint).toBeTruthy();
-    expect(result.fingerprint).not.toBe(before);
+    const fingerprint = await waitForRotatedFingerprint(apiClient, seedData.sshTarget);
+    expect(fingerprint).not.toBe(before);
   });
 
   test("launching against a stale pinned fingerprint fails with host-key-changed", async ({
@@ -110,16 +122,7 @@ test.describe("ssh executor — host key rotation", () => {
     // Rotate, observe via kandev's probe (ssh-keyscan disagrees in some
     // host-key configurations), re-trust.
     regenerateHostKey(seedData.sshTarget);
-    const test1 = await apiClient.testSSHConnection({
-      name: "K3 observe new",
-      host: seedData.sshTarget.host,
-      port: seedData.sshTarget.port,
-      user: seedData.sshTarget.user,
-      identity_source: "file",
-      identity_file: seedData.sshTarget.identityFile,
-    });
-    expect(test1.success).toBe(true);
-    const newFp = test1.fingerprint!;
+    const newFp = await waitForRotatedFingerprint(apiClient, seedData.sshTarget);
 
     await apiClient.updateExecutor(seedData.sshExecutorId, {
       config: {

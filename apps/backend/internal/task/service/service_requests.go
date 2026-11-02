@@ -92,6 +92,8 @@ type CreateTaskRequest struct {
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
 	TrustedHandoffMetadata bool `json:"-"`
+	// RequiredSubtaskCount is set only by the trusted routine materializer.
+	RequiredSubtaskCount int `json:"-"`
 	// AutomationStartOwned reserves the new task's initial start for the
 	// automation run that creates it (models.MetaKeyAutomationStartOwned). It is
 	// internal-only: the marker suppresses workflow auto-start, so it is never
@@ -106,9 +108,17 @@ type CreateTaskRequest struct {
 	// ExecutorID and ExecutorProfileID are resolved by authenticated create
 	// adapters and are used to validate task-scoped replacement profiles before
 	// any task row is written.
-	ExecutorID        string                 `json:"-"`
-	ExecutorProfileID string                 `json:"-"`
-	DeferredLaunch    map[string]interface{} `json:"deferred_launch,omitempty"`
+	ExecutorID        string `json:"-"`
+	ExecutorProfileID string `json:"-"`
+	// ExecutorProfileIDExplicit marks a caller-selected profile. Deferred
+	// inherited profile IDs remain valid until launch-time admission.
+	ExecutorProfileIDExplicit bool `json:"-"`
+	// Attachments is the creation-time submission. File-backed descriptors are
+	// claimed atomically with the task row; the bounded inline compatibility
+	// path stays on DeferredLaunch.
+	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
+	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
+	MCPServerIDs   []string               `json:"mcp_server_ids,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.
@@ -138,12 +148,9 @@ type CreateTaskRequest struct {
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
-	// AllowReservedExternalID permits ExternalID to carry the
-	// ReservedExternalIDPrefixCoordinatorProposal prefix, which every other
-	// caller is refused (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
-	// Tagged json:"-" so no HTTP or MCP request body can set it; only the
-	// coordinator service sets it, when creating the task behind an approved
-	// proposal.
+	// AllowReservedExternalID permits an internal adapter to claim a reserved
+	// external identity namespace. Tagged json:"-" so public HTTP and MCP
+	// request bodies cannot set it.
 	AllowReservedExternalID bool `json:"-"`
 	// AllowReservedMetadata permits Metadata keys with the
 	// ReservedMetadataKeyPrefixCoordinator prefix. Tagged json:"-" so no

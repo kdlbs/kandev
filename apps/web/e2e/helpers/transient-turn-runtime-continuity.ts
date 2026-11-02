@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { freezeCapacityRetries } from "./capacity-retry-clock";
 import path from "node:path";
 import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
@@ -25,7 +26,7 @@ export async function createRetainedCapacityFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
-  options: { initialPrompt?: string } = {},
+  options: { initialPrompt?: string; controlRetryClock?: boolean } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `retained-capacity-${Date.now()}.jsonl`);
   let profileId = "";
@@ -41,6 +42,7 @@ export async function createRetainedCapacityFixture(
   };
   try {
     await backend.restart({ KANDEV_DEBUG_PPROF_ENABLED: "true" });
+    if (options.controlRetryClock || scenario === "exhaust") await freezeCapacityRetries(backend);
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((candidate) => candidate.name === "mock-agent");
     if (!agent) throw new Error("mock-agent was not registered");
@@ -55,7 +57,9 @@ export async function createRetainedCapacityFixture(
       `Retained capacity ${scenario}`,
       profile.id,
       {
-        description: options.initialPrompt ?? `/capacity-${scenario}`,
+        description:
+          options.initialPrompt ??
+          (scenario === "exhaust" ? "/capacity-exhaust:100" : `/capacity-${scenario}`),
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],

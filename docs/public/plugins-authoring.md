@@ -31,6 +31,96 @@ support, not a starter repository.
 6. Smoke-test every declared hook and capability, then bump the version for
    the next iteration.
 
+## Install and migrate SDK dependencies
+
+The standalone SDK starts at **0.1.0**. This source change does not establish
+public availability: wait for a successful Stable SDK publication and its
+verified host mapping before running the public installation commands below.
+The general and coordinator templates have separate migration handoffs.
+
+The Go and npm packages share an SDK version, independent of Kandev's version.
+Each package includes `sdk-release.json`: `host_release` names the originating
+Stable host, `min_kandev_version` is the SDK-wide host floor, and `api_versions`
+lists supported manifest API versions. A package version is not a manifest
+`api_version`, a handshake version, or a plugin's own version.
+
+After the selected SDK version is publicly verified:
+
+1. Change Go imports from `github.com/kandev/kandev/pkg/pluginsdk` to
+   `github.com/kdlbs/kandev/pluginsdk`. Generated wire imports move from
+   `github.com/kandev/kandev/proto/kandev/plugin/v1` to
+   `github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1`.
+2. Remove the old backend requirement and its local replacement from `go.mod`.
+   Install the exact SDK release, then regenerate `go.sum`:
+
+   ```bash
+   go get github.com/kdlbs/kandev/pluginsdk@v0.1.0
+   go mod tidy
+   ```
+
+3. Replace frontend `file:`, `link:`, or workspace SDK dependencies with an exact
+   registry version and commit the generated lockfile:
+
+   ```bash
+   npm install --save-dev --save-exact @kdlbs/plugin-sdk@0.1.0
+   ```
+
+4. Set `manifest.yaml`'s `min_kandev_version` to at least the highest floor of
+   the SDKs actually installed. Select an `api_version` supported by all of
+   them. Use a complete Stable host version without prerelease or build suffixes.
+   Inspect the installed npm record with
+   `node -p 'require("@kdlbs/plugin-sdk/sdk-release.json")'`.
+   Do not invent the initial host number from these examples.
+5. Add the compatibility check before build/package in CI, after dependency
+   installation. Run it from the plugin's Go module and manifest directory:
+
+   ```bash
+   go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 \
+     --manifest manifest.yaml --frontend-sdk node_modules/@kdlbs/plugin-sdk
+   ```
+
+Omit `--frontend-sdk` for Go-only plugins. Add `--frontend-only` for a project
+that only checks frontend dependencies. The checker reads the Go module version
+selected by Go, which can be higher than the direct requirement. It checks the
+installed frontend package against npm lockfile v2/v3 or pnpm lockfile v9.
+Run frontend checks from that package's project root; use `--manifest` to select
+a manifest elsewhere. For npm workspaces, the same `--frontend-sdk` argument
+finds a hoisted SDK up to the nearest lockfile root and checks its exact lock
+entry. A closer installed package takes precedence. Checkout-directory symlinks
+and normal pnpm store links are supported, including aliases directly to workspace
+members. Lockfiles can be up to 32 MiB;
+package manifests, plugin manifests, and SDK release records can be up to 1 MiB.
+The checker rejects SDK replacements, links to substituted SDK packages, local
+lockfile resolutions, missing metadata, insufficient host minima, and unsupported
+API versions. It does not rewrite project files.
+
+Keep exact pins and upgrade deliberately. Before committing an upgrade, install
+the new versions, rerun the checker and plugin tests, and test on the declared
+minimum host. A plugin that uses only a small part of an SDK still inherits that
+SDK's whole host floor. The local Kandev workspace replacement is for host
+contributors; it is not the external plugin release path.
+
+### Support for existing plugins
+
+Moving source packages does not change the plugin wire protocol or handshake.
+An already built plugin does not need a rebuild just because the import path
+changed. Its existing manifest, API, permissions, and host compatibility still
+apply. The extraction includes a legacy-binary handshake and Host roundtrip test;
+that test is not a certification of every third-party plugin.
+
+Source builds that still import the old path will fail against the new checkout.
+Keep their previously tested Kandev commit pinned until migration is possible.
+There is no forwarding package at the old path. Migrate dependencies and rerun
+tests before publishing a new plugin release; a higher declared host minimum
+can intentionally exclude older hosts.
+
+SDK publication removes the sibling checkout requirement for SDK compilation
+and typechecking. `plugin-pack` remains a backend-owned packaging tool. A
+repository that uses it must retain a separately pinned tooling checkout or
+provide an equivalent validated packaging path. Do not delete all checkout steps
+without inspecting their purpose. See [SDK release and recovery](release-process.md#plugin-sdk-publication)
+for maintainer prerequisites and artifact verification.
+
 ## Lifecycle
 
 ![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)
@@ -328,6 +418,10 @@ curated React, UI, and app-store surface.
   utility-agent calls; and capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
+- When workspace collaboration is enabled, Host calls that read or mutate
+  conversation data require the server context from the handler that produced
+  them; plugin-owned capability operations keep their native behavior. Never
+  synthesize a caller context or store one principal in a shared Host field.
 - Declared webhook keys default to public. Set `webhooks[].access: authenticated`
   for browser UI and billable operations. Kandev does not enforce
   `webhooks[].method`; public integrations must still validate the provider
@@ -381,7 +475,7 @@ app does not receive that API. Use the canvas state protocol instead.
 The guide summarizes the contract for discovery. These files remain the source
 of truth and must be updated together when the contract changes:
 
-- Versioned frontend author contract: `@kandev/plugin-sdk`, sourced from
+- Versioned frontend author contract: `@kdlbs/plugin-sdk`, sourced from
   `apps/packages/plugin-sdk`. Import it with `import type`; the package has no
   dependency on Kandev, React, Zustand, or private `@/` modules, so it also
   typechecks when consumed from an isolated or sparse checkout.
@@ -389,8 +483,8 @@ of truth and must be updated together when the contract changes:
   apps/web/lib/plugins/types.ts. These may contain compatibility-only host
   details that are deliberately absent from the public SDK.
 - Concrete frontend Host exports: apps/web/lib/plugins/host-api.ts.
-- Backend author API: apps/backend/pkg/pluginsdk.
-- Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
+- Backend author API: pluginsdk.
+- Wire contract: pluginsdk/proto/kandev/plugin/v1/plugin.proto.
 - Manifest model and semantic validation: apps/backend/internal/plugins/manifest.
 - Package integrity and installation: apps/backend/internal/plugins/pkgtar.
 - Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md),
@@ -434,7 +528,7 @@ Type frontend bundles against the versioned, runtime-free SDK rather than
 copying host interfaces or importing Kandev application files:
 
 ```ts
-import type { PluginHostApi, PluginRegistry } from "@kandev/plugin-sdk";
+import type { PluginHostApi, PluginRegistry } from "@kdlbs/plugin-sdk";
 ```
 
 Official code-host plugins use `host.context` for provider-neutral workspace,
@@ -502,7 +596,7 @@ closing future reads.
 ### Managed conversation and task surfaces
 
 Use the shared Host components for an installation-owned conversation. Import
-the prop and controller types from `@kandev/plugin-sdk`; the plugin owns the
+the prop and controller types from `@kdlbs/plugin-sdk`; the plugin owns the
 controller adapter and calls its declared workspace actions.
 
 ```tsx
@@ -570,7 +664,7 @@ before submitting the request.
 | host.useSettingsSaveContributor | Registers one plugin-owned contributor for the native save bar; the host prefixes ids with `plugin:<pluginId>:` before shared coordination                                                                                                                                                             | Active ui.bundle                                                       | Contributor lifecycle follows the rendering component; save and discard remain plugin-owned                                                                                                                     | host.useSettingsSaveContributor({ id: "credentials", revision, isDirty, save, discard })                            |
 | host.setIntegrationEnabled      | Publishes one registration's live enabled value for one workspace; the value is reactive but not durable                                                                                                                                                                                               | Active ui.bundle                                                       | The host validates that `integrationId` belongs to this plugin; republish after load using `host.context.getWorkspaceIds()` and `subscribeWorkspaces()`                                                         | host.setIntegrationEnabled("acme", workspaceId, enabled)                                                            |
 | host.i18n                       | Plugin-scoped `locale`, imperative `t(key, options?)`, and reactive `useTranslation()`                                                                                                                                                                                                                 | A registered English catalog                                           | Locale changes re-render reactive consumers; missing active-locale messages fall back to the plugin's English catalog                                                                                           | const { t } = host.i18n.useTranslation(); t("pullRequests")                                                         |
-| host.store (legacy)             | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kandev/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
+| host.store (legacy)             | Compatibility-only access to Kandev's private Zustand store; intentionally absent from `@kdlbs/plugin-sdk`                                                                                                                                                                                            | Older ui.bundle                                                        | Do not use in new or official plugins; private slices may change without plugin-API compatibility                                                                                                               | Migrate reads to host.context                                                                                       |
 | host.api.fetch / baseUrl        | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments                                                                                                                                                                                      | Active ui.bundle; backend path must be a declared webhook when relayed | Declare `webhooks[].access: authenticated` for UI-only or billable operations; requests are generation-aborted on unload                                                                                        | host.api.fetch("webhooks/inbound", { method: "POST" })                                                              |
 | host.api.invokeAction           | Authenticated call to a declared action with host-verified workspace/task/session/repository selectors and bounded untrusted body                                                                                                                                                                      | Matching manifest `actions[]` key/scope                                | Browser abort cancels the bounded plugin RPC; safe domain statuses and `Retry-After` may be returned                                                                                                            | host.api.invokeAction("reviews.get", { taskId }, { signal })                                                        |
 | host.storage                    | Authenticated, per-user key/value storage: get(scope, scopeId, key, options?)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key, options?)/list(scope, scopeId, options?) plus subscribe(filter, handler); no plugin backend required                                               | capabilities.user_state: true                                          | Reads and writes accept an AbortSignal; set/delete also accept writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId, signal })                                      |
@@ -893,7 +987,7 @@ sidebar cluster and `presentation: "mobile"` for the phone navigation sheet.
 Mobile actions must keep their own buttons or links at least 44px in the active
 dimension and provide an accessible name.
 
-`PluginComposerSlotProps` is exported by `@kandev/plugin-sdk` as `{ surface,
+`PluginComposerSlotProps` is exported by `@kdlbs/plugin-sdk` as `{ surface,
 presentation, taskId, taskTitle?, activeSessionId, sessionIds, disabled,
 submittable, disabledReason?, composer, registerTaskCreatedHandler? }`. The
 optional `registerTaskCreatedHandler` is supplied only to create-mode
@@ -956,12 +1050,13 @@ subscription vocabulary and wildcard rules are in the
 | Interactions               | Interactions().ListPending, Interactions().Get                                                                                   | api_read: interactions                                                                                                                            | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                                                                                                                |
 | Exact interaction responses | `HostExactInteractionCommands(host)`: `RespondPermission`, `AnswerClarification`                                                | `api_write: interactions` plus `host.v2.write:interactions` and a Host-issued human response receipt                                              | The authenticated native UI issues a short-lived receipt for one interaction revision and exact response; legacy v1 response methods return `PermissionDenied`                                                                                                                             |
 | Exact observations         | `pluginsdk.HostExactQueries(host)`                                                                                               | Resource declaration plus matching `host.v2.read:<resource>` workspace grant                                                                      | Snapshot-bound workspace, task, session, interaction, message, inbox, relation, pending-transition, PR-evidence, and usage reads; use capability discovery for per-host support                                                                                                           |
+| Automation history         | `pluginsdk.HostAutomationHistory(host)`: `ListAutomations`, `ListRuns`, `GetRun`                                                   | `api_read: automations` plus `host.v2.read:automations`                                                                                           | Workspace-authorized definition and retained-run observations; list reads use the shared bounded snapshot, and `GetRun` refreshes one known run through current authority                                                                                                                 |
 | Linked issue writeback      | `pluginsdk.HostSourceIssueWriteback(host)`: `GetCapabilities`, `Comment`, `Transition`                                          | `api_read: source_issues` and `host.v2.read:source_issues` for reads; `api_write: source_issues` and `host.v2.write:source_issues` for writes          | Resolves the task's existing Jira/Linear link and uses workspace credentials; commands carry task/source versions and durable receipts, and ambiguous outcomes return `UNCERTAIN` without automatic resend                                                                                     |
 | Agent invocation           | InvokeUtilityAgent(ctx, prompt, options...)                                                                                      | agent_invoke: true                                                                                                                                | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
 | Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
 
 The Go signatures, filters, DTOs, and pagination types live in
-apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
+pluginsdk/host.go and data_types.go. api_write task/message
 methods are implemented in the current branch; do not repeat older docs that
 call them reserved.
 
@@ -1662,6 +1757,78 @@ workflow moves. Directive reads stay unsupported until the Host advertises a
 durable directive source. Read `GetCapabilityContext` and use each method's
 `Supported` and `Authorized` values before depending on an optional operation.
 
+### Automation history
+
+Use `pluginsdk.HostAutomationHistory(host)` for supported automation
+definitions, retained run history, and exact run refresh. Declare
+`api_read: [automations]` and obtain the workspace grant
+`host.v2.read:automations`. The manifest declaration alone does not authorize a
+read.
+
+```go
+history, ok := pluginsdk.HostAutomationHistory(host)
+if !ok {
+    return errors.New("automation history is unsupported")
+}
+definitions, err := history.ListAutomations(ctx, pluginsdk.AutomationDefinitionQuery{
+    RequestID: "automation-inventory-01", WorkspaceID: workspaceID,
+    Page: pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+if len(definitions.Items) == 0 {
+    return nil // successful empty query: this workspace has no automations
+}
+// definitions.PageInfo.HasMore reports more pages: repeat the call with Cursor
+// and SnapshotVersion until it is false before treating the inventory as complete.
+runs, err := history.ListRuns(ctx, pluginsdk.AutomationRunQuery{
+    RequestID: "automation-runs-01", WorkspaceID: workspaceID,
+    Filter: pluginsdk.AutomationRunFilter{AutomationID: definitions.Items[0].ID},
+    Page:   pluginsdk.ExactReadPage{Limit: 100},
+})
+if err != nil {
+    return err
+}
+if len(runs.Items) == 0 {
+    return nil // successful empty query: this automation has no retained runs
+}
+refreshed, receipt, err := history.GetRun(ctx, pluginsdk.AutomationRunGetQuery{
+    RequestID: "automation-refresh-01", WorkspaceID: workspaceID, RunID: runs.Items[0].ID,
+})
+if err != nil {
+    return err
+}
+_ = refreshed.Status      // current observed status
+_ = refreshed.SourceStatus // stored run status
+_ = receipt.ObservedAt
+```
+
+Definition observations include automation identity, name, enabled state, and
+safe trigger identities. Scheduled triggers expose `cron_expression` and the
+configured timezone only when `schedule_available` is true; other trigger kinds
+keep their identity without configuration. Malformed schedule data leaves the
+automation visible with an unavailable schedule.
+
+Run observations keep `source_status` (what the run recorded) separate from
+`status` (the automation service's current task-aware projection). Retry state
+and delivery state are independent, and absent timestamps and unknown status
+strings remain absent rather than becoming success. `attempt_number` is absent
+when the source did not record one. Summary and error fields are bounded,
+credential-sanitized excerpts, not transcripts.
+
+Lists use the same bounded immutable snapshots as other exact reads: pages are
+at most 200 rows, one snapshot is limited to 5,000 rows and 8 MiB, and
+continuations expire after five minutes. Cursors bind to the installation,
+workspace, method, normalized filters, and approval revision. An oversized
+filtered result fails with `ResourceExhausted`; narrow the automation or
+creation-time filter instead of treating the error as an empty workspace.
+Creation-time bounds are UTC RFC3339 strings; `created_from` is inclusive and
+`created_before` is exclusive. `GetRun` is independent of list snapshots and
+always uses current authorization, so use it to reconcile a missed completion
+event. Optional-method discovery reports support and current authority; an
+older Host returns `Unimplemented` from the new calls.
+
 ## Remote executor providers
 
 A managed plugin can declare one or more remote executor providers. Set
@@ -1696,6 +1863,18 @@ Start agentctl with its control server on the bootstrap `runtime_port` and the
 bootstrap `nonce`. Kandev then creates a session instance, which agentctl serves
 on a port it assigns, so `ResolveExecutorConnection` must route both the control
 port and any instance port Kandev requests.
+
+For private repositories, choose the workspace's managed task Git credentials
+mode (`task_git_credentials_mode: managed`) to use its connected Git provider.
+Kandev sends the scoped credential lease to the session instance, and agentctl
+uses it during repository materialization. Providers do not need to add Git
+credentials to bootstrap data or reusable runtime images. The remote runtime
+must be able to reach Kandev's Git credential broker.
+
+Fresh workspaces default to executor-owned Git credentials
+(`task_git_credentials_mode: executor`). In that mode, private repositories need
+Git access configured on the remote executor; connecting a Git provider in Kandev
+does not automatically grant the remote clone access.
 
 Return short-lived HTTPS connection leases. Put credentials in HTTP or
 WebSocket headers, never in the URL. Remote environments must reach the
@@ -1749,7 +1928,7 @@ ui:
 // server/main.go
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
+import "github.com/kdlbs/kandev/pluginsdk"
 
 func main() { pluginsdk.Serve(&pluginsdk.UnimplementedPlugin{}) }
 ```
@@ -1857,6 +2036,24 @@ type Host interface {
 }
 ```
 
+### Conversation caller context
+
+Reuse the `context.Context` Kandev passed to your plugin handler (event, webhook,
+action, or agent-tool invocation) for every Host call. Kandev restores the
+caller's native principal and any workspace collaboration grant from that
+context. Dropping it and calling with `context.Background()` cannot gain
+conversation authority: task, workspace, session, message, interaction, and
+execution operations then fail with `PermissionDenied` while workspace
+collaboration is enabled.
+
+Plugin-owned operations keep their existing capability rules without that
+context: Host state, config, secrets, events, capability context, plugin-owned
+task trees, managed agent conversations and schedules, managed inputs, executor
+progress and artifacts, declared source-issue writeback, utility agents, and
+profile catalogs. Detached background work that uses only those operations
+continues to run when collaboration is enabled. Retain the handler context for
+the duration of each conversation-domain call instead of storing one globally.
+
 Executor profiles are an additive, optional Host extension so older Host
 implementations remain source-compatible. Discover it through the SDK helper:
 
@@ -1928,7 +2125,7 @@ event bus for delivery to any subscriber (including other plugins).
 The data-reader accessors return typed, paginated readers, for example
 `host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
-next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
+next page. See `pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
 
@@ -2312,6 +2509,31 @@ an unavailable error. After successful inspection, Kandev persists the validated
 descriptor with the normal native task flow. Existing repository IDs and built-in
 provider URLs continue to use their existing paths.
 
+### Bare project URL discovery
+
+Office projects store repository source strings without a provider hint. When a
+source is not a public built-in URL and does not name a provider, Kandev asks
+every active manifest owner that declares the workspace `repositories.inspect`
+action to inspect it. Each candidate receives the selected workspace and must
+reject URLs its own connection does not own before any authenticated provider
+call. Return `{"matched":false}` for those URLs.
+
+Kandev keeps all validated candidates and never chooses one by registration
+order, hostname resemblance, or response speed. A project source that two
+providers both recognize is rejected as ambiguous, and so is a source that no
+provider recognizes. Discovery uses at most four simultaneous inspections under
+one 15-second deadline. Cancellation, a deadline, or a plugin that disables,
+upgrades, or uninstalls during the pass discards the whole candidate set, so the
+caller retries rather than accepting a partial result.
+
+An unrelated candidate's ordinary inspection failure does not cancel another
+candidate's match. The host selects that failure for the user-visible error only
+when no provider matched. Plugin participation needs no new wire action, SDK
+method, or host provider list: declare `repository_providers`, declare the
+workspace `repositories.inspect` action, and implement its connection checks.
+Installation makes the capability available; the plugin still owns its
+connection, authentication, and URL rules.
+
 A code-host review provider may publish normalized task chrome on each snapshot:
 
 ```ts
@@ -2607,7 +2829,7 @@ interface PluginHostApi {
     // plugin reach first-party kandev REST endpoints directly.
     baseUrl: string;
   };
-  ui: PluginUIApi; // named curated host components; see @kandev/plugin-sdk
+  ui: PluginUIApi; // named curated host components; see @kdlbs/plugin-sdk
   i18n: {
     readonly locale: string;
     t(
@@ -2683,7 +2905,7 @@ interface PluginModalHandle {
 ```
 
 A compatibility-only `host.store` remains for older bundles, but it is absent
-from `@kandev/plugin-sdk`. New plugins must not depend on private `AppState`
+from `@kdlbs/plugin-sdk`. New plugins must not depend on private `AppState`
 records or mutate the SPA store.
 
 A plugin bundle must render with `host.React` / `host.jsx`; bundling your
@@ -2961,7 +3183,7 @@ Register a `chat-top-bar` component to surface at-a-glance status in the
 session top bar. Import its context from the public SDK:
 
 ```ts
-import type { ChatTopBarSlotProps } from "@kandev/plugin-sdk";
+import type { ChatTopBarSlotProps } from "@kdlbs/plugin-sdk";
 
 // The exported type contains:
 type Context = {
@@ -2999,7 +3221,7 @@ a `chat-submit-decoration` component instead. The host layers it over the send
 button's own box:
 
 ```ts
-import type { ChatSubmitDecorationSlotProps } from "@kandev/plugin-sdk";
+import type { ChatSubmitDecorationSlotProps } from "@kdlbs/plugin-sdk";
 ```
 
 ```ts
@@ -3717,7 +3939,7 @@ repackaging.
 - **Leaving stale frontend registrations:** use destroy, unsubscribe store/WS
   listeners, clear timers, and rely on host bulk revocation after disable or
   uninstall.
-- **Importing direct DB/internal packages:** use apps/backend/pkg/pluginsdk and
+- **Importing direct DB/internal packages:** use pluginsdk and
   typed Host methods. Direct database access is outside the plugin contract.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay

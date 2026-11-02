@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
 // runIDs projects a run slice down to its IDs so ordering assertions
 // read as a single comparison.
-func runIDs(runs []*models.Run) []string {
+func runIDs(runs []*runsmodels.Run) []string {
 	out := make([]string, 0, len(runs))
 	for _, run := range runs {
 		out = append(out, run.ID)
@@ -20,7 +21,7 @@ func runIDs(runs []*models.Run) []string {
 	return out
 }
 
-func checkIDOrder(t *testing.T, label string, got []*models.Run, want ...string) {
+func checkIDOrder(t *testing.T, label string, got []*runsmodels.Run, want ...string) {
 	t.Helper()
 	gotIDs := runIDs(got)
 	if len(gotIDs) != len(want) {
@@ -245,14 +246,14 @@ func TestListPendingRunsForTask_OnlyQueuedRetriesForThatTask(t *testing.T) {
 // seedTaskRun creates a run carrying a task id in its payload.
 func seedTaskRun(
 	t *testing.T, repo *runssqlite.Repository, id, agentID, taskID, status string,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
-	return mustCreateRun(t, repo, &models.Run{
+	return mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             id,
 		AgentProfileID: agentID,
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + taskID + `"}`,
-		Status:         models.RunStatus(status),
+		Status:         runsmodels.RunStatus(status),
 		CoalescedCount: 1,
 	})
 }

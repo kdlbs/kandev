@@ -17,14 +17,13 @@ import { prettifyToolTitle } from "@/lib/pretty-tool-title";
 import type { Message } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { PermissionActionRow } from "./permission-action-row";
+import { PermissionUnavailableFeedback } from "./permission-unavailable-feedback";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import {
-  parsePermission,
-  resolvePermissionAvailability,
   type PermissionActionChoice,
   type PermissionRequestMetadata,
-  usePermissionResponseHandlers,
+  useResolvedPermission,
 } from "./use-permission-handlers";
 import { t } from "@/lib/i18n";
 
@@ -149,28 +148,16 @@ function getInlineOutput(output: unknown): string | null {
   return trimmed;
 }
 
-function parseToolCallMetadata(comment: Message, permissionMessage: Message | undefined) {
+function parseToolCallMetadata(comment: Message) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const toolName = metadata?.tool_name ?? "";
   const status = metadata?.status;
   const { output, isHttpError } = parseToolCallOutput(metadata);
-  const { permissionMetadata, permissionStatus, isPermissionPending } =
-    parsePermission(permissionMessage);
   const hasOutput = hasToolOutput(output);
   const inlineOutput = getInlineOutput(output);
   // When output is shown inline, there's nothing more to expand — skip the expand affordance
   // unless a permission prompt still needs to be rendered.
-  return {
-    toolName,
-    status,
-    output,
-    isHttpError,
-    permissionMetadata,
-    permissionStatus,
-    isPermissionPending,
-    hasOutput,
-    inlineOutput,
-  };
+  return { toolName, status, output, isHttpError, hasOutput, inlineOutput };
 }
 
 export const ToolCallMessage = memo(function ToolCallMessage({
@@ -178,34 +165,19 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   permissionMessage,
   worktreePath,
 }: ToolCallMessageProps) {
+  const { toolName, status, output, isHttpError, hasOutput, inlineOutput } =
+    parseToolCallMetadata(comment);
   const {
-    toolName,
-    status,
-    output,
-    isHttpError,
-    permissionMetadata,
-    permissionStatus,
-    isPermissionPending,
-    hasOutput,
-    inlineOutput,
-  } = parseToolCallMetadata(comment, permissionMessage);
-  const {
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
     isResponding,
-    isUnavailable,
     handleApprove,
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
     offeredChoices,
     handleOfferedChoice,
-  } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage,
-  });
-  const {
-    permissionStatus: effectivePermissionStatus,
-    isPermissionPending: effectivePermissionPending,
-  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
+  } = useResolvedPermission(permissionMessage);
   const { hasExpandableContent, isSuccess, autoExpanded } = deriveToolCallPermissionPresentation({
     status,
     permissionStatus: effectivePermissionStatus,
@@ -222,55 +194,62 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
 
   return (
-    <ExpandableRow
-      icon={getToolIcon(
-        toolName,
-        cn(
-          "h-4 w-4",
-          effectivePermissionPending
-            ? "text-amber-600 dark:text-amber-400"
-            : "text-muted-foreground",
-        ),
-      )}
-      header={
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5",
-              effectivePermissionPending && "text-amber-600 dark:text-amber-400",
-            )}
-          >
-            <span className="font-mono text-xs text-muted-foreground">{title}</span>
-            {inlineOutput && (
-              <span
-                className={cn(
-                  "text-xs",
-                  isHttpError ? "text-red-600 dark:text-red-400" : "text-muted-foreground/80",
-                )}
-              >
-                {inlineOutput}
-              </span>
-            )}
-            {!isSuccess && getToolCallStatusIcon(status, effectivePermissionStatus)}
-          </span>
+    <>
+      <ExpandableRow
+        icon={getToolIcon(
+          toolName,
+          cn(
+            "h-4 w-4",
+            effectivePermissionPending
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground",
+          ),
+        )}
+        header={
+          <div className="flex items-center gap-2 text-xs">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5",
+                effectivePermissionPending && "text-amber-600 dark:text-amber-400",
+              )}
+            >
+              <span className="font-mono text-xs text-muted-foreground">{title}</span>
+              {inlineOutput && (
+                <span
+                  className={cn(
+                    "text-xs",
+                    isHttpError ? "text-red-600 dark:text-red-400" : "text-muted-foreground/80",
+                  )}
+                >
+                  {inlineOutput}
+                </span>
+              )}
+              {!isSuccess && getToolCallStatusIcon(status, effectivePermissionStatus)}
+            </span>
+          </div>
+        }
+        hasExpandableContent={!!hasExpandableContent}
+        isExpanded={isExpanded}
+        onToggle={handleToggle}
+      >
+        <ToolCallExpandedContent
+          formattedOutput={formattedOutput}
+          isHttpError={isHttpError}
+          isPermissionPending={effectivePermissionPending}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
+          offeredChoices={offeredChoices}
+          onChooseOfferedChoice={handleOfferedChoice}
+          isResponding={isResponding}
+        />
+      </ExpandableRow>
+      {effectivePermissionStatus === "expired" && (
+        <div className="ml-7">
+          <PermissionUnavailableFeedback />
         </div>
-      }
-      hasExpandableContent={!!hasExpandableContent}
-      isExpanded={isExpanded}
-      onToggle={handleToggle}
-    >
-      <ToolCallExpandedContent
-        formattedOutput={formattedOutput}
-        isHttpError={isHttpError}
-        isPermissionPending={effectivePermissionPending}
-        onApprove={handleApprove}
-        onReject={handleReject}
-        onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
-        offeredChoices={offeredChoices}
-        onChooseOfferedChoice={handleOfferedChoice}
-        isResponding={isResponding}
-      />
-    </ExpandableRow>
+      )}
+    </>
   );
 });
 

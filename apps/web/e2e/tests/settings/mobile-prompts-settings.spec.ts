@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 
+test.use({ trace: "retain-on-failure" });
+
 test.afterEach(async ({ apiClient }) => {
   const { prompts } = await apiClient.listPrompts();
   for (const prompt of prompts) {

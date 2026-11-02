@@ -247,7 +247,7 @@ describe("ApiError response classification", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: "forbidden" }), {
+        new Response(JSON.stringify({ error: "forbidden", error_code: "forbidden" }), {
           status: 403,
           headers: { "Content-Type": "application/json" },
         }),
@@ -259,6 +259,7 @@ describe("ApiError response classification", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       status: 403,
+      errorCode: "forbidden",
       handled: false,
     });
     expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();

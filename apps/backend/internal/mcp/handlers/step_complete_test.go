@@ -345,10 +345,11 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	seedStepCompleteTarget(t, repo, "task-dup", "session-dup", "step-1", models.TaskSessionStateRunning)
 	// Pre-write the bag to simulate "first call already happened".
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-dup", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID:     "step-1",
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    "first call",
-		SignaledAt: time.Now().UTC(),
+		WorkflowStepTransitionID: stepCompletionTestEntry(t, repo, "task-dup"),
+		StepID:                   "step-1",
+		Source:                   models.StepCompletionSourceAgent,
+		Summary:                  "first call",
+		SignaledAt:               time.Now().UTC(),
 	}))
 	seedAgentProfileSnapshot(t, repo, "session-dup", "claude-dup-call")
 	bus := &mcpRecordingEventBus{}
@@ -389,12 +390,13 @@ func TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers(t *te
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-dup-overwrite", "session-dup-overwrite", "step-1", models.TaskSessionStateRunning)
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-dup-overwrite", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID:     "step-1",
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    "first call",
-		Handoff:    "first handoff",
-		Blockers:   "first blockers",
-		SignaledAt: time.Now().UTC(),
+		WorkflowStepTransitionID: stepCompletionTestEntry(t, repo, "task-dup-overwrite"),
+		StepID:                   "step-1",
+		Source:                   models.StepCompletionSourceAgent,
+		Summary:                  "first call",
+		Handoff:                  "first handoff",
+		Blockers:                 "first blockers",
+		SignaledAt:               time.Now().UTC(),
 	}))
 	seedAgentProfileSnapshot(t, repo, "session-dup-overwrite", "claude-dup-overwrite")
 	bus := &mcpRecordingEventBus{}
@@ -436,10 +438,11 @@ func TestHandleStepComplete_DedupWaitingRepublishes(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-retry", "session-retry", "step-1", models.TaskSessionStateWaitingForInput)
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-retry", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID:     "step-1",
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    "first call",
-		SignaledAt: time.Now().UTC(),
+		WorkflowStepTransitionID: stepCompletionTestEntry(t, repo, "task-retry"),
+		StepID:                   "step-1",
+		Source:                   models.StepCompletionSourceAgent,
+		Summary:                  "first call",
+		SignaledAt:               time.Now().UTC(),
 	}))
 	bus := &mcpRecordingEventBus{}
 	h := newStepCompleteHandler(t, svc, repo, bus)
@@ -539,4 +542,11 @@ func TestHandleStepComplete_ConcurrentCallsClaimOneSignal(t *testing.T) {
 	require.True(t, ok, "the winning request must persist the completion signal")
 	assert.Equal(t, "step-1", signal.StepID)
 	assert.Contains(t, []string{"first concurrent signal", "second concurrent signal"}, signal.Summary)
+}
+
+func stepCompletionTestEntry(t *testing.T, repo *sqliterepo.Repository, taskID string) *int64 {
+	t.Helper()
+	_, _, entry, err := repo.GetTaskWorkflowStepEntry(t.Context(), taskID)
+	require.NoError(t, err)
+	return &entry
 }

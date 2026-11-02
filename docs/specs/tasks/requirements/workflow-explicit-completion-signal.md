@@ -23,6 +23,9 @@ This document is the migrated task-system source for the capability. The source 
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.2:** The `step_complete_kandev` response additively carries `advances` (bool), reporting whether the recorded signal can move the task from the calling turn's current step, without changing `accepted:true`. When `advances` is `false`, the response also carries a `note` explaining the signal was recorded but will not move the task. When the current step cannot be resolved, both fields are omitted rather than defaulted, so a caller never receives a guessed value.
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.3:** `advances` is `true` only when the current step is `auto_advance_requires_signal` and its `on_turn_complete` declares a move the workflow engine runs on turn completion: `move_to_next`, `move_to_previous`, or `move_to_step` with a non-empty `step_id` that differs from the current step, without `requires_approval: true`. An unguarded self-target is selected before later actions and blocks them, but it does not advance the task. A guarded self-target can fall through to later actions when its guard is not satisfied. A signal-gated step without a move the engine can run returns `accepted:true`, `advances:false`, and a `note` stating that the step has no `on_turn_complete` move that runs automatically, so the signal will not move the task. The signal is recorded and published exactly as for any other accepted call.
 
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.4:** When an agent resumes independently after its previous turn has closed, a newly created output turn shall identify the task's workflow step and its current entry at creation. A task without a step shall acquire no workflow attribution. Reusing a requested or open turn, or replaying already committed output, shall preserve that turn's original attribution.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.5:** When workflow attribution for a new durable output turn cannot be read safely, projection shall remain uncommitted and available for retry. It shall not publish a partially created turn, message, or completion effect, or acknowledge progress beyond committed projection. Recoverable lock contention shall retry without requiring another user prompt; cancellation shall stop that retry.
+
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002: Signal-Gated Manual Move Visibility
 
 **Intent:** Keep the normal workflow recovery action available when an explicit
@@ -91,7 +94,14 @@ signal and recover without completing the wrong step.
   It does not claim that waiting, reconnecting, or retrying the stale turn changes
   its completion eligibility.
 
-This addition specifies recovery guidance. Automatic turn restart, deferred-move
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.6:** When a task leaves and re-enters the same step, a completion attempt from the earlier entry shall be rejected without recording or publishing a signal. A fresh turn in the new entry shall remain eligible. A concurrent move between initial validation and signal recording shall not make the earlier entry eligible.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003.7:** A recorded completion signal shall authorize only its originating workflow entry, including after restart, delayed delivery, or duplicate invocation. An earlier entry's signal shall neither advance a later entry nor erase or replace its valid signal. A stored signal without provable entry attribution shall not authorize advancement of a known entry; a fresh eligible completion attempt shall be able to replace that legacy signal.
+
+The additions 001.4-001.5 and 003.6-003.7 are the intended repair contract for
+[issue #4705](https://github.com/kdlbs/kandev/issues/4705). Implementation and
+validation remain tracked by the [repair package](../../../plans/agent-delivery-turn-step-stamp/plan.md).
+
+The original 003.1-003.5 addition specifies recovery guidance. Automatic turn restart, deferred-move
 scheduling repairs, and changes to completion authorization are outside its scope.
 
 ## Migrated source detail

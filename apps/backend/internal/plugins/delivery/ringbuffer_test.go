@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func delivery(id string) Delivery {

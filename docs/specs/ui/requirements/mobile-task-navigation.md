@@ -29,7 +29,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.8:** Search and live workflow/task updates choose a deterministic visible fallback if the focused workflow disappears.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.9:** When a dropdown or context action menu opens as a bottom sheet below 640px, its background shall be dimmed and lightly blurred using the same treatment as the existing mobile navigation drawers. The menu text and controls shall remain sharp. Browsers without background-blur support shall retain the dimming.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.10:** When a user enters or leaves a submenu, the menu hierarchy shall retain one backdrop without adding another darkening or blur layer for each submenu. An enclosing drawer shall retain its own existing backdrop and remain usable after the menu closes.
-- **AC-UI-MOBILE-TASK-NAVIGATION-001.11:** When the root menu closes, its backdrop shall fade with the sheet's exit motion and leave no visible layer afterward. Unmounting or leaving the bottom-sheet viewport range shall remove the backdrop immediately. Outside-tap dismissal, Escape, focus return, action selection, and any existing non-modal interaction shall retain their current behavior.
+- **AC-UI-MOBILE-TASK-NAVIGATION-001.11:** When the root menu closes, its backdrop shall fade with the sheet's exit motion and leave no visible layer afterward. Unmounting or leaving the bottom-sheet viewport range shall remove the backdrop immediately. Outside-tap dismissal, Escape, focus return, action selection, and any existing non-modal interaction shall retain their current behavior. Opening or dismissing the native Sessions row action menu shall perform no session lifecycle, primary-session, deletion, or handoff mutation. A separate explicit menu-item selection shall invoke the existing action for that row exactly once.
 - **AC-UI-MOBILE-TASK-NAVIGATION-001.12:** The backdrop treatment shall apply consistently to task and non-task dropdown/context bottom sheets, including workspace selection, session options, file actions, and topbar overflow. At widths of 640px and above, those menus shall retain their existing anchored presentation without a new menu backdrop.
 
 ## Menu backdrop design
@@ -109,3 +109,4 @@ Mobile users need the same task controls as desktop without relying on long pres
 - [SPA blank-screen resilience](../../../plans/spa-blank-screen-resilience/plan.md)
 - [Mobile repository switcher removal](../../../plans/mobile-repository-switcher-removal/plan.md)
 - [Mobile menu backdrops](../../../plans/mobile-menu-backdrops/plan.md)
+- [Session menu opening gesture](../../../plans/session-menu-opening-gesture/plan.md)

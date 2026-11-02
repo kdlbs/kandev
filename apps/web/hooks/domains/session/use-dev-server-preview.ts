@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
+import { useStore } from "zustand";
+import { getDevServerCommands, runDevServerCommand } from "@/lib/state/dev-server-commands";
 import { startProcess, stopProcess } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isProcessLive, toProcessStatusEntry } from "@/lib/state/process-status";
@@ -16,19 +18,6 @@ export type DevServerPreview = {
   start: () => Promise<void>;
   stop: () => Promise<void>;
 };
-
-/**
- * In-flight start requests, keyed by session.
- *
- * The same control renders in two dockview headers, each with its own local
- * pending flag, so two clicks inside one round trip would both pass their own
- * guard. The backend deduplicates by listing the session's processes, which is
- * not atomic with the start, so a second request can win that race and leave a
- * second dev process fighting for the port with no control pointing at it.
- * Sharing the promise at module scope makes every control in the tab issue one
- * request and await the same result.
- */
-const startsInFlight = new Map<string, Promise<void>>();
 
 /**
  * Apply a start response without clobbering a newer WebSocket frame.
@@ -57,8 +46,9 @@ function applyStartedProcess(
  * in-flight request so the button cannot be double-fired.
  */
 export function useDevServerPreview(sessionId: string | null): DevServerPreview {
-  const [isPending, setIsPending] = useState(false);
   const store = useAppStoreApi();
+  const commands = getDevServerCommands(store);
+  const isPending = useStore(commands, (state) => !!sessionId && !!state[sessionId]);
   const devProcessId = useAppStore((state) =>
     sessionId ? state.processes.devProcessBySessionId[sessionId] : undefined,
   );
@@ -68,49 +58,31 @@ export function useDevServerPreview(sessionId: string | null): DevServerPreview 
 
   const start = useCallback(async () => {
     if (!sessionId) return;
-    setIsPending(true);
-    try {
-      const inFlight = startsInFlight.get(sessionId);
-      if (inFlight) {
-        await inFlight;
-        return;
+    await runDevServerCommand(commands, sessionId, async () => {
+      const response = await startProcess(sessionId, { kind: "dev" });
+      if (!response?.process) return;
+      const started = toProcessStatusEntry(response.process);
+      const state = store.getState();
+      const existing = state.processes.processesById[started.processId];
+      if (applyStartedProcess(existing, started)) {
+        state.upsertProcessStatus(started);
       }
-      const request = startProcess(sessionId, { kind: "dev" })
-        .then((response) => {
-          if (!response?.process) return;
-          const started = toProcessStatusEntry(response.process);
-          const state = store.getState();
-          const existing = state.processes.processesById[started.processId];
-          if (applyStartedProcess(existing, started)) {
-            state.upsertProcessStatus(started);
-          }
-          state.setActiveProcess(started.sessionId, started.processId);
-        })
-        .catch(() => {
-          // Already running, or the start failed; the WS status frame is the
-          // source of truth either way.
-        })
-        .finally(() => {
-          startsInFlight.delete(sessionId);
-        });
-      startsInFlight.set(sessionId, request);
-      await request;
-    } finally {
-      setIsPending(false);
-    }
-  }, [sessionId, store]);
+      state.setActiveProcess(started.sessionId, started.processId);
+    });
+  }, [sessionId, store, commands]);
 
   const stop = useCallback(async () => {
-    if (!sessionId || !devProcessId) return;
-    setIsPending(true);
-    try {
-      await stopProcess(sessionId, { process_id: devProcessId });
-    } catch {
-      // Already gone; the WS status frame reconciles the button.
-    } finally {
-      setIsPending(false);
+    if (!sessionId) return;
+    const inFlight = commands.getState()[sessionId];
+    if (inFlight) {
+      await inFlight;
+      return;
     }
-  }, [sessionId, devProcessId]);
+    if (!devProcessId) return;
+    await runDevServerCommand(commands, sessionId, async () => {
+      await stopProcess(sessionId, { process_id: devProcessId });
+    });
+  }, [sessionId, devProcessId, commands]);
 
   return {
     devProcessId,

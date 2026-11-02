@@ -317,6 +317,7 @@ test.describe("mobile PR CI chip drawer", () => {
     await expect(notice).toContainText("Awaiting maintainer approval");
     const link = notice.getByTestId("pr-workflow-attention-link");
     await expect(link).toHaveAttribute("href", "https://github.com/acme/demo/actions/runs/700");
+    await waitForFiniteAnimations(session.prStatusChipDrawer());
     const box = await link.boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);
     await prCapture.screenshot("mobile-workflow-approval-attention", {

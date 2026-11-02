@@ -23,6 +23,11 @@ the native identity, ownership, cancellation, and original-replay constraints.
 
 ## Decision
 
+The [October 26 pending-tool decision](2026-10-26-cursor-pending-tool-continuation.md)
+amends the pending foreground tool exclusion for retained Cursor transport
+failures. Other exclusions and the original-prompt replay fence remain in force.
+
+
 Availability is amended by the
 [October 8 graduation decision](2026-10-08-unconditional-interruption-continuation.md):
 supported continuation becomes unconditional and its release toggle is retired.
