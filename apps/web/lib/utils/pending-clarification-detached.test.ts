@@ -26,11 +26,26 @@ function message(overrides: Partial<Message> = {}): Message {
 }
 
 describe("detached clarification ownership", () => {
-  it("keeps an explicitly detached request visible after pending action clears", () => {
+  it("keeps a current detached request answerable when clarification authority remains", () => {
     const detached = message();
-    const scope = { currentTurnId: TURN_ID, pendingAction: null } as const;
+    const scope = {
+      currentTurnId: TURN_ID,
+      currentTurnCompleted: true,
+      pendingAction: "clarification",
+    } as const;
 
     expect(findPendingClarification([detached], scope)).toBe(detached);
     expect(findPendingClarificationGroup([detached], scope)).toEqual([detached]);
+  });
+
+  it("suppresses a detached request when the projection clears", () => {
+    const detached = message();
+
+    expect(
+      findPendingClarification([detached], { currentTurnId: TURN_ID, pendingAction: null }),
+    ).toBeNull();
+    expect(
+      findPendingClarificationGroup([detached], { currentTurnId: TURN_ID, pendingAction: null }),
+    ).toEqual([]);
   });
 });
