@@ -574,8 +574,7 @@ exports the generated typed messages from `plugin/v1` and the interface in
 `pluginsdk/sandbox_provider.go`. An older plugin remains
 compatible and returns `Unimplemented` for this extension.
 
-Each request binds protocol major 1, installation, provider key, operation,
-attempt, execution, generation, and deadline. Responses contain schema version 1, the operation ID, and an optional error code. The host rejects unknown protobuf fields, messages over 1 MiB,
+Each request binds its declared protocol major (1 or 2), installation, provider key, operation, attempt, execution, generation, and deadline. Responses must use that same major as their schema version, the request operation ID, and an optional error code. The host rejects unknown protobuf fields, messages over 1 MiB,
 stale installation bindings, and malformed results. RPC budgets are 5 seconds
 for describe/status/report, 10 seconds for compile/propose, and 2 seconds for
 approval normalization, bounded by the caller deadline.
@@ -600,6 +599,10 @@ uninstall. Core owns process termination and retained policy artifacts.
 
 See the [public recipe](../../public/plugins-authoring.md#contribute-a-sandbox-provider)
 and [fixture](../../../apps/backend/cmd/plugin-fixture/sandbox_provider.go).
+
+Major 2 extends these same six RPCs with the [typed schema](../../../pluginsdk/proto/kandev/plugin/v1/sandbox_v2.proto). Existing field numbers remain stable; new parent fields start at 100. Major 1 validation rejects those fields even though the current generated decoder recognizes them. Unknown fields remain rejected for both majors. Captured provider bindings retain their major; pre-version bindings mean major 1 only.
+
+Typed policy grants and approval envelopes are separate. Operations and actors use distinct oneof alternatives. A runtime-service actor must exactly match the host-authenticated callback binding supplied to normalization. It does not relax child-process identity checks. Runtime observations cannot supply an active boolean. Reports distinguish per-class coverage, integrity, finalization, and signature trust. Chunk and verification replies bind to the requested operation/artifact identity and expected trust key. No major 2 field silently changes policy authority, PTY ownership, process lifecycle, or persistence ownership.
 
 ### Remote executor providers
 

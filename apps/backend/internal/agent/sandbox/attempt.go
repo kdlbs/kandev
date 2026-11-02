@@ -16,6 +16,7 @@ const (
 
 // AttemptProvider freezes the installed package and runtime used at launch.
 type AttemptProvider struct {
+	ProtocolMajor  uint32 `json:"protocol_major,omitempty"`
 	PluginID       string `json:"plugin_id"`
 	InstallationID string `json:"installation_id"`
 	Key            string `json:"key"`
@@ -23,6 +24,14 @@ type AttemptProvider struct {
 	PackageDigest  string `json:"package_digest"`
 	RuntimeVersion string `json:"runtime_version"`
 	RuntimeDigest  string `json:"runtime_digest"`
+}
+
+// ProtocolVersion preserves the implicit major of existing captured attempts.
+func (p AttemptProvider) ProtocolVersion() uint32 {
+	if p.ProtocolMajor == 0 {
+		return 1
+	}
+	return p.ProtocolMajor
 }
 
 type CaptureRequest struct {

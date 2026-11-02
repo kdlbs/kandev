@@ -15,6 +15,8 @@ It does not reuse `ExecutorProviderPlugin`, which provisions remote environments
 [Agents](../../agents/system-design/sandbox-policies.md) owns authorization, policy, process ownership, and user outcomes.
 REQ-PLUGINS-SANDBOX-001 maps to negotiation, calls, lifecycle, and repository boundaries below.
 
+The proposed [major 2 extension](sandbox-provider-v2.md) preserves this major 1 baseline.
+
 ## Negotiation
 
 Propose manifest contribution `sandbox_providers` with stable provider ID and protocol major 1.

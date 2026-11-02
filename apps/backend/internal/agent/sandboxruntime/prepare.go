@@ -26,7 +26,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if err != nil {
 		return nil, err
 	}
-	if previous != nil && (previous.Snapshot.Provider.Version != binding.Version || previous.Snapshot.Provider.PackageDigest != binding.PackageDigest) {
+	if previous != nil && !sameCapturedProvider(previous.Snapshot.Provider, binding) {
 		return nil, policy.ErrIneligible
 	}
 	p := &Prepared{manager: m, orgID: req.Selection.OrgID, binding: binding, protectedPorts: slices.Clone(req.ProtectedPorts)}
@@ -34,7 +34,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if err != nil {
 		return nil, err
 	}
-	p.request = &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, InstallationId: binding.InstallationID, ProviderKey: binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: uuid.NewString(), ExecutionId: req.ExecutionID, Generation: req.Generation}
+	p.request = &pluginsdk.SandboxRequestContext{ProtocolMajor: binding.ProtocolVersion(), InstallationId: binding.InstallationID, ProviderKey: binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: uuid.NewString(), ExecutionId: req.ExecutionID, Generation: req.Generation}
 	defer func() {
 		if err != nil {
 			p.discard()
@@ -52,7 +52,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if m.closed {
 		return nil, policy.ErrConflict
 	}
-	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
+	_, err = m.policies.CaptureAttempt(ctx, policy.CaptureRequest{RestartOf: req.RestartOf, Selection: req.Selection, Resolved: resolved, SessionID: req.SessionID, ExecutionID: req.ExecutionID, WorkDir: req.WorkDir, AgentState: p.agentState, Launch: p.launch, Provider: policy.AttemptProvider{ProtocolMajor: binding.ProtocolVersion(), PluginID: binding.PluginID, InstallationID: binding.InstallationID, Key: binding.ProviderKey, Version: binding.Version, PackageDigest: binding.PackageDigest, RuntimeVersion: p.description.RuntimeVersion, RuntimeDigest: binary.Digest}})
 	if err != nil {
 		return nil, err
 	}
@@ -138,4 +138,8 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 	}
 	p.constraints = contract.OverrideConstraints{ForbiddenArguments: slices.Clone(compiled.Compiled.GetConstraints().GetForbiddenArguments()), ForbiddenEnvironment: slices.Clone(compiled.Compiled.GetConstraints().GetForbiddenEnvironmentKeys())}
 	return compiled, binary, grants, nil
+}
+
+func sameCapturedProvider(captured policy.AttemptProvider, binding plugins.SandboxProviderBinding) bool {
+	return captured.ProtocolVersion() == binding.ProtocolVersion() && captured.PluginID == binding.PluginID && captured.InstallationID == binding.InstallationID && captured.Key == binding.ProviderKey && captured.Version == binding.Version && captured.PackageDigest == binding.PackageDigest
 }

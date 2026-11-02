@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package kandev.plugin.v1;
+
+option go_package = "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1;pluginv1";
+
+// These payloads require sandbox protocol major 2. Core retains authority.
+message SandboxFilesystemPermissionV2 {
+  string path = 1;
+  string reference = 2;
+  bool writable = 3;
+}
+
+message SandboxTCPDestinationV2 {
+  string host = 1;
+  uint32 port = 2;
+  string transport = 3;
+}
+
+message SandboxCommandInvocationV2 {
+  string command_id = 1;
+  string executable_path = 2;
+  string executable_sha256 = 3;
+  repeated string argv = 4;
+  string caller = 5;
+  string work_dir_reference = 6;
+  string resource_policy_digest = 7;
+}
+
+message SandboxHTTPEndpointV2 {
+  string route_id = 1;
+  string origin = 2;
+  string method = 3;
+  string path = 4;
+  string query = 5;
+}
+
+message SandboxPermissionsV2 {
+  repeated SandboxFilesystemPermissionV2 filesystem = 1;
+  repeated SandboxTCPDestinationV2 tcp = 2;
+  repeated SandboxCommandInvocationV2 commands = 3;
+  repeated SandboxHTTPEndpointV2 http_endpoints = 4;
+  repeated string environment_keys = 5;
+  bool kandev_mcp = 6;
+}
+
+message SandboxResourcePolicyV2 {
+  string digest = 1;
+  SandboxPermissionsV2 permissions = 2;
+}
+
+message SandboxPolicyV2 {
+  uint32 schema_version = 1;
+  SandboxPermissionsV2 static_grants = 2;
+  SandboxPermissionsV2 approval_envelope = 3;
+  repeated SandboxResourcePolicyV2 resource_policies = 4;
+}
+
+message SandboxFilesystemOperationV2 {
+  string path = 1;
+  string access = 2;
+}
+
+message SandboxOperationV2 {
+  oneof value {
+    SandboxFilesystemOperationV2 filesystem = 1;
+    SandboxTCPDestinationV2 tcp = 2;
+    SandboxCommandInvocationV2 command = 3;
+    SandboxHTTPEndpointV2 http_endpoint = 4;
+  }
+}
+
+message SandboxChildActorV2 {
+  int64 pid = 1;
+  string provider_session_id = 2;
+}
+
+// IDs describe the authenticated channel, never its secret URL or token.
+message SandboxServiceBindingV2 {
+  string channel_id = 1;
+  string service_key = 2;
+  string route_id = 3;
+}
+
+message SandboxApprovalActorV2 {
+  oneof value {
+    SandboxChildActorV2 child_process = 1;
+    SandboxServiceBindingV2 runtime_service = 2;
+  }
+}
+
+message SandboxApprovalV2 {
+  string request_id = 1;
+  SandboxOperationV2 operation = 2;
+  SandboxApprovalActorV2 actor = 3;
+  repeated string supported_decisions = 4;
+}
+
+message SandboxCapabilitiesV2 {
+  repeated uint32 policy_schemas = 1;
+  repeated string operation_kinds = 2;
+  repeated string actor_kinds = 3;
+  string network_mode = 4;
+  repeated string observation_schemas = 5;
+  repeated string audit_verification_formats = 6;
+}
+
+// Runtime assertions are observations, not current-policy attestation.
+message SandboxRuntimeObservationV2 {
+  string source_id = 1;
+  int64 observed_at_unix_ms = 2;
+  string platform = 3;
+  optional uint32 landlock_abi = 4;
+  optional bool execute_enforced = 5;
+  optional bool command_mediation_active = 6;
+  repeated string limitations = 7;
+}
+
+message SandboxAuditChunkV2 {
+  string operation_handle = 1;
+  string artifact_set_digest = 2;
+  string source_id = 3;
+  uint64 sequence = 4;
+  bytes content = 5;
+  bool final = 6;
+  uint64 total_bytes = 7;
+  string source_digest = 8;
+}
+
+message SandboxAuditTrustV2 {
+  bytes expected_public_key_pem = 1;
+  string expected_key_fingerprint = 2;
+  string trust_revision = 3;
+}
+
+message SandboxAuditEventV2 {
+  string record_id = 1;
+  SandboxOperationV2 operation = 2;
+  string decision = 3;
+  string source_id = 4;
+  uint64 sequence = 5;
+  int64 occurred_at_unix_ms = 6;
+  string policy_digest = 7;
+  string attempt_id = 8;
+  uint64 generation = 9;
+  bool exact_target = 10;
+}
+
+message SandboxReportCoverageV2 {
+  string operation_kind = 1;
+  string coverage = 2;
+}
+
+message SandboxAuditVerificationV2 {
+  string artifact_set_digest = 1;
+  string verifier_version = 2;
+  string session_id = 3;
+  string event_root = 4;
+  uint64 event_count = 5;
+  string chain_state = 6;
+  string finalization = 7;
+  string signature_state = 8;
+  string expected_key_fingerprint = 9;
+  string ledger_state = 10;
+  string trust_revision = 11;
+}
+
+message SandboxReportV2 {
+  repeated SandboxAuditEventV2 events = 1;
+  repeated SandboxReportCoverageV2 coverage = 2;
+  string integrity = 3;
+  string finalization = 4;
+  SandboxAuditVerificationV2 verification = 5;
+  string operation_handle = 6;
+  string artifact_set_digest = 7;
+  uint64 next_sequence = 8;
+}
+
+message SandboxRevisionAdditionsV2 {
+  SandboxPermissionsV2 static_grants = 1;
+  SandboxPermissionsV2 approval_envelope = 2;
+}

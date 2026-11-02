@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"time"
 
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -25,12 +26,21 @@ func (s *Service) sandboxEnabled() bool {
 
 // SandboxProviderBinding pins the installation generation selected by core.
 type SandboxProviderBinding struct {
+	ProtocolMajor  int       `json:"protocol_major,omitempty"`
 	PluginID       string    `json:"plugin_id"`
 	InstallationID string    `json:"installation_id"`
 	ProviderKey    string    `json:"provider_key"`
 	Version        string    `json:"version"`
 	InstalledAt    time.Time `json:"installed_at"`
 	PackageDigest  string    `json:"package_digest"`
+}
+
+// ProtocolVersion preserves the implicit major of captured pre-version bindings.
+func (b SandboxProviderBinding) ProtocolVersion() uint32 {
+	if b.ProtocolMajor == 0 {
+		return manifest.SandboxProviderProtocolMajor
+	}
+	return uint32(b.ProtocolMajor)
 }
 
 type SandboxProviderDescriptor struct {
@@ -52,7 +62,7 @@ func (s *Service) ListSandboxProviders(ctx context.Context) ([]SandboxProviderDe
 		for _, declared := range record.SandboxProviders {
 			providers = append(providers, SandboxProviderDescriptor{
 				Binding: SandboxProviderBinding{PluginID: record.ID, InstallationID: record.InstallationID,
-					ProviderKey: declared.Key, Version: record.Version, InstalledAt: record.InstalledAt, PackageDigest: record.PackageDigest},
+					ProviderKey: declared.Key, ProtocolMajor: declared.ProtocolMajor, Version: record.Version, InstalledAt: record.InstalledAt, PackageDigest: record.PackageDigest},
 				DisplayName:   declared.DisplayName,
 				PluginRunning: running && remote != nil && record.Status == StatusActive && record.Capabilities.SandboxProvider,
 			})

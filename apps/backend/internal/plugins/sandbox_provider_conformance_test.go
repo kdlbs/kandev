@@ -104,8 +104,12 @@ func assertPackagedSandboxCalls(t *testing.T, ctx context.Context, svc *Service,
 	require.Empty(t, req.Policy.Grants.Filesystem)
 }
 
-func sandboxFixturePackage(t *testing.T, binary []byte, version string) *bytes.Buffer {
+func sandboxFixturePackage(t *testing.T, binary []byte, version string, protocols ...int) *bytes.Buffer {
 	t.Helper()
+	major := 1
+	if len(protocols) > 0 {
+		major = protocols[0]
+	}
 	manifestYAML := fmt.Sprintf(`id: sandbox-contract-fixture
 api_version: 2
 version: %s
@@ -116,9 +120,9 @@ runtime:
 capabilities:
   sandbox_provider: true
 sandbox_providers:
-  - {key: fixture-alpha, display_name: fixture-alpha, protocol_major: 1}
-  - {key: fixture-beta, display_name: fixture-beta, protocol_major: 1}
-`, version, goruntime.GOOS, goruntime.GOARCH)
+  - {key: fixture-alpha, display_name: fixture-alpha, protocol_major: %d}
+  - {key: fixture-beta, display_name: fixture-beta, protocol_major: %d}
+`, version, goruntime.GOOS, goruntime.GOARCH, major, major)
 	var buffer bytes.Buffer
 	require.NoError(t, pkgtartest.WritePackage(&buffer, map[string][]byte{"manifest.yaml": []byte(manifestYAML), "server/plugin": binary}))
 	return &buffer

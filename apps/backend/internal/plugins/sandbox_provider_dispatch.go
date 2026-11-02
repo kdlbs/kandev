@@ -30,8 +30,7 @@ func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 	if !service.sandboxEnabled() {
 		return empty, ErrSandboxProviderUnavailable
 	}
-	if !validSandboxMessage(request) || !validSandboxRequestPayload(request) ||
-		!validSandboxRequestContext(request.GetContext(), binding) {
+	if !validSandboxDispatchRequest(request, binding) {
 		return empty, ErrSandboxProviderUnavailable
 	}
 	ctx, cancel := sandboxCallContext(ctx, request.GetContext(), timeout)
@@ -61,7 +60,7 @@ func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 		return empty, errors.Join(ErrSandboxProviderUnavailable, ctx.Err())
 	}
 	if !validSandboxMessage(reply) ||
-		!validSandboxResponseContext(reply.GetContext(), frozen.GetContext()) {
+		!validSandboxResponseContext(reply.GetContext(), frozen.GetContext()) || !sandboxMajorFields(reply, frozen.GetContext().ProtocolMajor) {
 		return empty, errSandboxProviderReply
 	}
 	if err := validateSandboxReplyPayload(frozen, reply); err != nil {
@@ -109,14 +108,14 @@ func sandboxCallContext(ctx context.Context, request *pluginsdk.SandboxRequestCo
 }
 
 func validSandboxRequestContext(value *pluginsdk.SandboxRequestContext, binding SandboxProviderBinding) bool {
-	return value != nil && value.ProtocolMajor == manifest.SandboxProviderProtocolMajor &&
+	return value != nil && manifest.SupportedSandboxProviderProtocol(int(value.ProtocolMajor)) && value.ProtocolMajor == binding.ProtocolVersion() &&
 		value.InstallationId != "" && value.InstallationId == binding.InstallationID &&
 		value.ProviderKey != "" && value.ProviderKey == binding.ProviderKey &&
 		value.OperationId != "" && value.AttemptId != "" && value.ExecutionId != ""
 }
 
 func validSandboxResponseContext(value *pluginsdk.SandboxResponseContext, request *pluginsdk.SandboxRequestContext) bool {
-	return value != nil && value.SchemaVersion == manifest.SandboxProviderProtocolMajor &&
+	return value != nil && manifest.SupportedSandboxProviderProtocol(int(request.ProtocolMajor)) && value.SchemaVersion == request.ProtocolMajor &&
 		value.OperationId == request.OperationId && value.ErrorCode == ""
 }
 
@@ -142,9 +141,13 @@ func sandboxBindingMatches(record *store.Record, binding SandboxProviderBinding)
 		return false
 	}
 	for _, provider := range record.SandboxProviders {
-		if provider.Key == binding.ProviderKey && provider.ProtocolMajor == manifest.SandboxProviderProtocolMajor {
+		if provider.Key == binding.ProviderKey && manifest.SupportedSandboxProviderProtocol(provider.ProtocolMajor) && uint32(provider.ProtocolMajor) == binding.ProtocolVersion() {
 			return true
 		}
 	}
 	return false
+}
+
+func validSandboxDispatchRequest(request sandboxRequest, binding SandboxProviderBinding) bool {
+	return validSandboxMessage(request) && validSandboxRequestPayload(request) && validSandboxRequestContext(request.GetContext(), binding) && sandboxMajorFields(request, request.GetContext().ProtocolMajor)
 }

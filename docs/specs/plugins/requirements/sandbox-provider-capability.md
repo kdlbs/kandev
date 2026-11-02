@@ -31,6 +31,16 @@ Production provider code belongs in a dedicated repository.
   Availability shall not assert active confinement. Unsupported evidence shall remain unknown.
   A second fixture provider shall use the same settings, details, and status contracts without host changes keyed to its identity.
 
+### REQ-PLUGINS-SANDBOX-002: Compatible evidence and operation extensions
+
+**Intent:** Providers can add typed evidence and operations without weakening older contracts.
+
+- **AC-PLUGINS-SANDBOX-002.1:** Extended providers shall declare an explicit compatible protocol and tested operation capabilities. Older providers and ordinary wrappers shall retain their previous behavior. An unsupported extension shall fail without downgrade.
+- **AC-PLUGINS-SANDBOX-002.2:** Extended reports shall carry typed operations, evidence provenance, coverage, and verification results separately. Providers shall not assign authoritative UI status or operator decisions.
+- **AC-PLUGINS-SANDBOX-002.3:** The host shall distinguish child-process requests from attempt-owned runtime-service requests. Only a validated channel and operation binding can admit either form.
+- **AC-PLUGINS-SANDBOX-002.4:** SDK consumers shall build against the public standalone module. A packaged plugin shall declare its exact runtime and contract support. No backend-internal import shall be required.
+- **AC-PLUGINS-SANDBOX-002.5:** A second fixture provider shall exercise the extended contract without provider-name branches in host policy, UI, or lifecycle code.
+
 ## Exclusions
 
 The remote executor provider interface does not own this capability.
@@ -39,3 +49,4 @@ Plugin capability declarations do not isolate trusted installed code from the ho
 ## Implementation plans
 
 - [Nono sandbox integration](../../../plans/nono-sandbox-integration/plan.md)
+- [Expanded evidence and approvals](../../../plans/nono-sandbox-expansion/plan.md)

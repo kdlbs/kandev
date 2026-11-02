@@ -249,3 +249,7 @@ Validation passed: standalone SDK tests, deterministic protobuf generation, isol
 Rebased the host branch onto main at `3a740c6911a340e73ade7edad6f4b234035f2fc9` (PR #4905). Resolved the executor restart import conflict while preserving main's Enterprise PR-base handling and the sandbox restart policy type. Targeted PR-base, Enterprise, and sandbox restart tests passed across executor, backend application, task models, and GitHub packages.
 
 Expanded the [walkthrough](walkthrough.md) with the exact optional manifest/SDK/wire additions, compatibility limits, and Nono maturity evidence. The companion plugin still uses the former in-tree SDK import and host pin. Its standalone SDK migration and a fresh managed acceptance run remain outstanding. Earlier runtime receipts remain historical evidence. No retained instance was changed.
+
+## Expanded support package (2026-10-30)
+
+The user confirmed richer evidence/reporting and typed TCP, command, and HTTP-endpoint approvals. The [expansion plan](../nono-sandbox-expansion/plan.md) owns the new draft work orders. Completed baseline work and historical acceptance above remain unchanged. New runtime capabilities require fresh package and managed acceptance.

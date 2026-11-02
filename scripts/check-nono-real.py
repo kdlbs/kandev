@@ -3,7 +3,7 @@
 
 Conformance does not read credentials or Kandev state. Managed acceptance requires
 an explicitly selected disposable fixture and test credential file. Both modes
-require the published 0.80.0 Linux x86_64 musl artifact.
+require the published 0.81.0 Linux x86_64 musl artifact.
 """
 import argparse
 import ctypes
@@ -15,10 +15,10 @@ from pathlib import Path
 import platform
 import subprocess
 
-VERSION = '0.80.0'
-SOURCE = '8bb041356d48f771a221e58c98d9b1ff442e76fe'
-ARCHIVE_SHA256 = 'cae6755f1188b561ea02f62995feb8ad87d457f6d5255956ec54f41bbefca31e'
-BINARY_SHA256 = 'a66396777ed756dff196ef61cf704abd4feebf58599d41e2da3363bbe90e22af'
+VERSION = '0.81.0'
+SOURCE = 'b2d859deeb7a65f9ca5b334eb8726637ba76c866'
+ARCHIVE_SHA256 = 'd395bc5fd320e3c6be5fc30aafc61c9fee11fed0a087a2175204ce845eadcdd5'
+BINARY_SHA256 = '2d3c29641c87921f7cd469387e4838b1676d54edb7291aebda7a780787d7c1b2'
 
 
 def prerequisites(env):

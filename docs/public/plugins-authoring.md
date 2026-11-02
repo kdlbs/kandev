@@ -1054,8 +1054,15 @@ off in all shipped profiles. Its environment alias is
 contract does not change basic agent command wrapping. A plugin without this
 interface remains compatible and returns `Unimplemented` for these RPCs.
 
-Set response schema version 1 and copy the request operation ID into the response
-context. Return typed prefix tokens, UTF-8 configuration artifacts, and the exact
+Set the response schema version to the request's admitted protocol major and copy the request operation ID into the response context. Major 1 preserves the original field shapes. Major 2 uses the [typed SDK messages](../../pluginsdk/sandbox_v2.go) and [wire definitions](../../pluginsdk/proto/kandev/plugin/v1/sandbox_v2.proto). Declare `protocol_major: 2` to opt in. The host never sends these new fields to a major 1 provider and never downgrades a major 2 call.
+
+Major 2 separates static grants from approval eligibility and distinguishes filesystem, TCP, command, and HTTP-endpoint operations. Child-process actors and attempt-owned runtime-service actors have different identity checks. The host authenticates runtime-service callbacks before normalization and compares the returned channel/route binding; a PID of zero is not a child identity. Neither actor type grants operator authority.
+
+Runtime observations do not establish active confinement. Reports carry separate coverage, integrity, finalization, and signature-verification results. Chunk replies must retain the core-generated operation handle, artifact-set digest, and sequence. Trusted signature results require the expected public key, trust revision, and matching artifact identity. Private keys and callback secrets never enter these RPC payloads. See the maintained [major 2 fixture test](../../apps/backend/cmd/plugin-fixture/sandbox_provider_v2_test.go) for a complete-interface example.
+
+The versioned wire surface does not by itself enable a runtime capability. A provider must pass real host/transport/runtime acceptance before advertising an operation. Core admission can refuse a major 2 policy whose execution path is not yet supported.
+
+ Return typed prefix tokens, UTF-8 configuration artifacts, and the exact
 canonical effective grants. Do not return replacement agent commands, executable
 artifacts, arbitrary file paths, or a claim that confinement is active.
 Kandev rejects unknown fields, invalid references, expanded grants, oversized
@@ -1088,7 +1095,7 @@ cancellation, cleanup, and negative filesystem/network checks.
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | Plugin.OnEvent       | OnEvent(ctx, \*pluginsdk.Event) error; event has EventID, EventType, OccurredAt, WorkspaceID, Payload                             | Matching capabilities.events subject/pattern                          | Delivery is sequential per plugin with bounded queue and retries; make handlers idempotent by EventID and reconcile critical state | if event.EventType == "task.created" { ... }       |
 | Plugin.HandleWebhook | HandleWebhook(ctx, *pluginsdk.WebhookRequest) (*WebhookResponse, error); request includes key, method, path, query, headers, body | webhooks[].key; auth additionally required for login assertion header | Undeclared keys are 404; GET/POST are relayed; validate method/signature and bound side effects                                    | if req.WebhookKey == "inbound" { ... }             |
-| SandboxProviderPlugin | Six typed policy, evidence, report, and proposal RPCs | `capabilities.sandbox_provider`, `sandbox_providers`, managed API v2 | Host bounds messages and deadlines; disable, restart, crash, upgrade, and uninstall cancel calls | [Sandbox provider recipe](#contribute-a-sandbox-provider) |
+| SandboxProviderPlugin | Six versioned policy, typed operation/evidence, report, and proposal RPCs | `capabilities.sandbox_provider`, `sandbox_providers`, managed API v2 | Host bounds messages and deadlines; disable, restart, crash, upgrade, and uninstall cancel calls | [Sandbox provider recipe](#contribute-a-sandbox-provider) |
 | Host.EmitEvent       | EmitEvent(ctx, name, payload) publishes plugin.<id>.<name>                                                                        | None; intentionally ungated                                           | Subscribers must declare the emitted subject; use versioned names/payloads                                                         | host.EmitEvent(ctx, "sync.completed", payload-map) |
 
 Event delivery is best-effort: Kandev makes the initial attempt plus retries

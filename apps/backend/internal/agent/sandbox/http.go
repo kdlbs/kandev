@@ -69,7 +69,7 @@ func (s *Service) revokeHTTP(c *gin.Context) {
 		return
 	}
 	err := s.Revoke(c.Request.Context(), c.Param("id"), request.Digest)
-	sandboxJSON(c, http.StatusOK, gin.H{"revoked": err == nil}, err)
+	sandboxJSON(c, http.StatusOK, gin.H{revisionRevoked: err == nil}, err)
 }
 
 func decodeSandboxRequest(c *gin.Context, value any) bool {

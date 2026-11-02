@@ -59,7 +59,7 @@ func validAttemptCapture(request CaptureRequest) bool {
 
 func validAttemptProvider(provider AttemptProvider, resolved *Resolved, launch *contract.Launch) bool {
 	policy := resolved.Revision.Policy
-	return provider.PluginID != "" && len(provider.PluginID) <= 128 && provider.InstallationID == policy.InstallationID && provider.Key == policy.ProviderKey &&
+	return provider.ProtocolVersion() <= 2 && provider.PluginID != "" && len(provider.PluginID) <= 128 && provider.InstallationID == policy.InstallationID && provider.Key == policy.ProviderKey &&
 		provider.Version != "" && len(provider.Version) <= 128 && provider.RuntimeVersion != "" && len(provider.RuntimeVersion) <= 128 &&
 		provider.PackageDigest == launch.PackageDigest && provider.RuntimeDigest == launch.Digests["runtime"]
 }

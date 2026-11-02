@@ -14,8 +14,12 @@ import (
 const sandboxLocalTransport = "local"
 
 const sandboxJSONContentType = "application/json"
+const sandboxAccessRead = "read"
 
 func validateSandboxReplyPayload(request proto.Message, reply proto.Message) error {
+	if value, ok := request.(sandboxRequest); ok && value.GetContext().GetProtocolMajor() == 2 {
+		return validateSandboxV2Reply(request, reply)
+	}
 	switch result := reply.(type) {
 	case *pluginsdk.DescribeSandboxProviderResponse:
 		return validateSandboxDescription(result.Description)
@@ -121,7 +125,6 @@ func validateSandboxApproval(value *pluginsdk.SandboxApprovalOperation) error {
 }
 
 func validSandboxApprovalAccess(value *pluginsdk.SandboxApprovalOperation) bool {
-	const sandboxAccessRead = "read"
 	return (value.Kind == pluginsdk.SandboxOperationFilesystem && (value.Access == sandboxAccessRead || value.Access == "write")) ||
 		(value.Kind == pluginsdk.SandboxOperationNetwork && value.Access == "connect")
 }

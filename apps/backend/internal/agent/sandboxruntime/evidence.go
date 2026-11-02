@@ -27,7 +27,7 @@ func (m *Manager) Observe(ctx context.Context, orgID, attemptID string) (*Observ
 	}
 	provider := attempt.Snapshot.Provider
 	binding, err := m.selectProvider(ctx, provider.InstallationID, provider.Key)
-	if err != nil || binding.Version != provider.Version || binding.PackageDigest != provider.PackageDigest {
+	if err != nil || binding.ProtocolVersion() != provider.ProtocolVersion() || binding.Version != provider.Version || binding.PackageDigest != provider.PackageDigest {
 		result.Status, result.ProviderHealth, result.Reason = contract.StatusUnknown, contract.HealthUnavailable, "provider_unavailable"
 		return result, nil
 	}

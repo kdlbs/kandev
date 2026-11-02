@@ -22,7 +22,7 @@ func (m *Manager) CompileLearning(ctx context.Context, attempt *policy.Attempt, 
 	if err != nil {
 		return contract.Grants{}, err
 	}
-	if binding.PluginID != captured.PluginID || binding.Version != captured.Version || binding.PackageDigest != captured.PackageDigest {
+	if binding.ProtocolVersion() != captured.ProtocolVersion() || binding.PluginID != captured.PluginID || binding.Version != captured.Version || binding.PackageDigest != captured.PackageDigest {
 		return contract.Grants{}, policy.ErrConflict
 	}
 	request, err := learningRequest(attempt, records)
@@ -54,7 +54,7 @@ func learningRequest(attempt *policy.Attempt, records []policy.DenialRecord) (*p
 	snapshot := attempt.Snapshot
 	provider := snapshot.Provider
 	request := &pluginsdk.ProposeSandboxRevisionRequest{
-		Context: &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, InstallationId: provider.InstallationID, ProviderKey: provider.Key,
+		Context: &pluginsdk.SandboxRequestContext{ProtocolMajor: provider.ProtocolVersion(), InstallationId: provider.InstallationID, ProviderKey: provider.Key,
 			OperationId: uuid.NewString(), AttemptId: attempt.ID, ExecutionId: snapshot.ExecutionID, Generation: snapshot.Launch.Generation},
 		Policy:     wirePolicy(snapshot.Resolved, snapshot.Grants),
 		Runtime:    &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport, RuntimeVersion: provider.RuntimeVersion, RuntimeDigest: provider.RuntimeDigest},

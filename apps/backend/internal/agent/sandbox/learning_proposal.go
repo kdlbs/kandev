@@ -33,7 +33,7 @@ func (s *Service) ProposeLearning(ctx context.Context, sessionID, attemptID stri
 		if candidate.WorkspaceID == "" {
 			return nil, ErrIneligible
 		}
-	case "installation":
+	case policyScopeInstallation:
 		candidate.WorkspaceID = ""
 	default:
 		return nil, contract.ErrInvalidPolicy
@@ -66,7 +66,7 @@ func (s *Service) learningInputs(ctx context.Context, sessionID, attemptID, dige
 	if err != nil {
 		return nil, nil, err
 	}
-	if report.Digest != digest || report.Data.Status != "available" || report.Data.Integrity == reportIntegrityUnverified {
+	if report.Digest != digest || report.Data.Status != reportStatusAvailable || report.Data.Integrity == reportIntegrityUnverified {
 		return nil, nil, ErrConflict
 	}
 	identity, err := s.operator(ctx)
@@ -150,7 +150,7 @@ func (s *Service) compileLearningPolicy(ctx context.Context, attempt *Attempt, r
 	}
 	candidate := base.Policy
 	candidate.Grants = grants
-	candidate.Sources = []Source{{Kind: "policy_revision", ID: base.ID, Digest: base.Digest}}
+	candidate.Sources = []Source{{Kind: policySourceRevision, ID: base.ID, Digest: base.Digest}}
 	return candidate, added, nil
 }
 

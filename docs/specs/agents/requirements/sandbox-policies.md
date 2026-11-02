@@ -139,6 +139,46 @@ Tasks retains launch failure, recovery, queue, and error-history ownership.
 - **AC-AGENTS-SANDBOX-008.8:** Previews, indicators, and detail responses shall omit credentials, callback secrets, and unfiltered provider output.
   Legacy attempts without recorded execution evidence shall show unknown history. Current profile settings shall not reconstruct that history.
 
+### REQ-AGENTS-SANDBOX-009: Separate runtime facts
+
+**Intent:** Users can understand available evidence without an unsupported protection claim.
+
+- **AC-AGENTS-SANDBOX-009.1:** Execution details shall show process liveness, completed launch checks, runtime observations, and audit verification as separate facts with source and observation time.
+- **AC-AGENTS-SANDBOX-009.2:** Missing, unsupported, failed, and stale evidence shall remain distinguishable. A successful launch or verified completed audit shall not establish current policy enforcement.
+- **AC-AGENTS-SANDBOX-009.3:** Disconnect, owner loss, restart, and late events shall invalidate live facts without deleting historical launch or audit evidence. Sibling attempts shall not supply evidence.
+- **AC-AGENTS-SANDBOX-009.4:** Desktop and phone shall expose the same facts and limitations. A running process without accepted confinement evidence shall retain a neutral indicator and accessible explanation.
+
+### REQ-AGENTS-SANDBOX-010: Typed reports and audit verification
+
+**Intent:** Operators can inspect available evidence and learn only from exact authorized operations.
+
+- **AC-AGENTS-SANDBOX-010.1:** Reports shall expose available filesystem, network, command, and HTTP-endpoint events with independent coverage, integrity, and finalization information. Unsupported or missing classes shall not appear as zero events.
+- **AC-AGENTS-SANDBOX-010.2:** Refresh failure, malformed input, truncation, and provider replacement shall preserve the last valid report and identify its age and limitations. Incomplete or redacted targets shall not produce permission additions.
+- **AC-AGENTS-SANDBOX-010.3:** Completed audit verification shall distinguish an intact event chain, a complete finalized record, and a signature verified against an operator-trusted key. A key supplied only by the report shall not establish signer trust.
+- **AC-AGENTS-SANDBOX-010.4:** Verification shall survive restart as historical evidence bound to its attempt and artifact. Changed evidence or trust configuration shall require a new verification result without rewriting the old result.
+- **AC-AGENTS-SANDBOX-010.5:** Reports and explicit learning shall work on desktop and phone, preserve redaction, and identify the exact added permission and persistence scope. Publication and adoption shall remain separate operator actions.
+
+### REQ-AGENTS-SANDBOX-011: Typed operation approvals
+
+**Intent:** Operators can authorize a bounded operation without granting a broader permission class.
+
+- **AC-AGENTS-SANDBOX-011.1:** Policies shall distinguish filesystem, TCP destination, command invocation, and HTTP-endpoint permissions. Static grants, approval eligibility, and mandatory ceilings shall remain separate. An absent approval envelope shall allow no new expansion for newly created policies.
+- **AC-AGENTS-SANDBOX-011.2:** Network approval shall identify exact host and port and authorize one connection. Endpoint approval shall identify exact origin, method, and path and authorize one request. Command approval shall identify executable, arguments, caller scope, and resource policy and authorize one invocation.
+- **AC-AGENTS-SANDBOX-011.3:** Hard denials, protected services, and ceiling restrictions shall remain unapprovable. A grant in one operation class shall not satisfy another class or authorize an unrestricted route around it.
+- **AC-AGENTS-SANDBOX-011.4:** Decisions shall require current operator authority and a verified attempt-owned caller. Missing child-process identity shall never be replaced with an invented identity. Stale, replayed, cancelled, foreign, or expired requests shall grant nothing.
+- **AC-AGENTS-SANDBOX-011.5:** Settings and review surfaces shall show operation type, exact scope, expiry, and delivery outcome. Pending requests shall preserve their state across responsive layout changes. Disconnected or read-only views shall not grant access.
+- **AC-AGENTS-SANDBOX-011.6:** Repeated connections, command invocations, and endpoint requests shall require separate decisions unless already covered by static policy. Approval shall not publish, select, or modify a saved revision. Network approval shall disclose that one connection can carry multiple application requests.
+- **AC-AGENTS-SANDBOX-011.7:** Legacy revisions shall preserve their captured meaning. Migration shall not silently add new approval classes, broaden task limits, or reinterpret old approval records.
+
+### REQ-AGENTS-SANDBOX-012: Proven provider upgrades
+
+**Intent:** A provider upgrade preserves existing guarantees and adds only demonstrated capabilities.
+
+- **AC-AGENTS-SANDBOX-012.1:** New capability claims shall identify tested host, transport, runtime, and plugin versions. A runtime upgrade shall require explicit selection and shall not change an existing attempt.
+- **AC-AGENTS-SANDBOX-012.2:** Each enabled approval class shall demonstrate permitted work and forbidden alternatives, denial, timeout, replay refusal, cancellation, and sibling isolation using the packaged real runtime.
+- **AC-AGENTS-SANDBOX-012.3:** Upgrade acceptance shall preserve discovery, ACP chat/tools, native terminal input/resize, scoped MCP, same-session restart, and owned cleanup. Earlier acceptance receipts shall remain historical.
+- **AC-AGENTS-SANDBOX-012.4:** Unsupported mechanisms shall block the affected policy before launch with a specific reason. The upgrade shall not use unrestricted networking, automatic unwrapping, broader profile grants, or a weaker approval fallback.
+
 ## Exclusions
 
 Remote sandbox execution, Windows Nono support, universal confinement against host administrators, automatic learning, and automatic upgrades are excluded.
@@ -148,3 +188,4 @@ Nono runtime approval support outside the verified Linux capability path remains
 ## Implementation plans
 
 - [Nono sandbox integration](../../../plans/nono-sandbox-integration/plan.md)
+- [Expanded evidence and approvals](../../../plans/nono-sandbox-expansion/plan.md)

@@ -26,7 +26,7 @@ The [boundary decision](../../../decisions/2026-10-22-optional-sandbox-provider-
 Source baseline is `main` at `1eb53576f496759b58ae73d4cba7bd96cbc91288`.
 PR #4538 merged as `76c9ada7baaa6b15bf814aec2ef093cc7dc07610` and supplies core wrapping.
 The [investigation](../../../plans/nono-sandbox-integration/investigation.md) distinguishes historical failures from current source and runtime experiments.
-Policy storage, authority, plugin RPCs, and runtime wiring use a default-off flag. Operator UI and product acceptance remain in progress. Work orders record evidence and open gates.
+The default-off baseline remains. Draft extensions: [evidence](sandbox-evidence.md) and [typed approvals](sandbox-operation-approvals.md).
 
 ## Requirement mapping
 

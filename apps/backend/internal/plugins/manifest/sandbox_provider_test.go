@@ -31,7 +31,7 @@ sandbox_providers:
 func TestSandboxProviderManifestRequiresExplicitSupportedCapability(t *testing.T) {
 	for _, tc := range []struct{ name, old, replacement string }{
 		{"missing permission", "sandbox_provider: true", "sandbox_provider: false"},
-		{"unknown protocol", "protocol_major: 1", "protocol_major: 2"},
+		{"unknown protocol", "protocol_major: 1", "protocol_major: 3"},
 		{"missing protocol", "protocol_major: 1", ""},
 		{"unsafe key", "key: confinement", "key: ../confinement"},
 		{"HTML label", "display_name: Confinement", "display_name: <b>Confinement</b>"},
@@ -80,4 +80,12 @@ func TestSandboxProviderManifestRequiresManagedRuntimeAndDeclaration(t *testing.
 		mutate(&copy)
 		require.Error(t, copy.Validate())
 	}
+}
+
+// @covers AC-PLUGINS-SANDBOX-002.1
+func TestSandboxProviderManifestAcceptsExplicitMajorTwo(t *testing.T) {
+	parsed, err := Parse([]byte(strings.Replace(sandboxProviderManifest, "protocol_major: 1", "protocol_major: 2", 1)))
+	require.NoError(t, err)
+	require.NoError(t, parsed.Validate())
+	require.Equal(t, 2, parsed.SandboxProviders[0].ProtocolMajor)
 }

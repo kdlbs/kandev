@@ -679,6 +679,7 @@ func (x *SandboxPolicySource) GetDigest() string {
 
 type SandboxPolicySnapshot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	PolicyV2      *SandboxPolicyV2       `protobuf:"bytes,100,opt,name=policy_v2,json=policyV2,proto3" json:"policy_v2,omitempty"`
 	PolicyId      string                 `protobuf:"bytes,1,opt,name=policy_id,json=policyId,proto3" json:"policy_id,omitempty"`
 	Revision      uint64                 `protobuf:"varint,2,opt,name=revision,proto3" json:"revision,omitempty"`
 	Digest        string                 `protobuf:"bytes,3,opt,name=digest,proto3" json:"digest,omitempty"`
@@ -717,6 +718,13 @@ func (x *SandboxPolicySnapshot) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SandboxPolicySnapshot.ProtoReflect.Descriptor instead.
 func (*SandboxPolicySnapshot) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SandboxPolicySnapshot) GetPolicyV2() *SandboxPolicyV2 {
+	if x != nil {
+		return x.PolicyV2
+	}
+	return nil
 }
 
 func (x *SandboxPolicySnapshot) GetPolicyId() string {
@@ -1255,6 +1263,7 @@ func (x *SandboxOverrideConstraints) GetProtectedRoots() []string {
 
 type SandboxCompiledPolicy struct {
 	state                protoimpl.MessageState      `protogen:"open.v1"`
+	EffectivePolicyV2    *SandboxPolicyV2            `protobuf:"bytes,100,opt,name=effective_policy_v2,json=effectivePolicyV2,proto3" json:"effective_policy_v2,omitempty"`
 	Prefix               []*SandboxArgument          `protobuf:"bytes,1,rep,name=prefix,proto3" json:"prefix,omitempty"`
 	Artifacts            []*SandboxArtifact          `protobuf:"bytes,2,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	EffectiveGrants      *SandboxGrants              `protobuf:"bytes,3,opt,name=effective_grants,json=effectiveGrants,proto3" json:"effective_grants,omitempty"`
@@ -1293,6 +1302,13 @@ func (x *SandboxCompiledPolicy) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SandboxCompiledPolicy.ProtoReflect.Descriptor instead.
 func (*SandboxCompiledPolicy) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *SandboxCompiledPolicy) GetEffectivePolicyV2() *SandboxPolicyV2 {
+	if x != nil {
+		return x.EffectivePolicyV2
+	}
+	return nil
 }
 
 func (x *SandboxCompiledPolicy) GetPrefix() []*SandboxArgument {
@@ -1513,6 +1529,7 @@ func (x *SandboxApprovalWire) GetTimeoutBodyUtf8() string {
 
 type SandboxProviderDescription struct {
 	state               protoimpl.MessageState  `protogen:"open.v1"`
+	CapabilitiesV2      *SandboxCapabilitiesV2  `protobuf:"bytes,100,opt,name=capabilities_v2,json=capabilitiesV2,proto3" json:"capabilities_v2,omitempty"`
 	DisplayName         string                  `protobuf:"bytes,1,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	ProviderVersion     string                  `protobuf:"bytes,2,opt,name=provider_version,json=providerVersion,proto3" json:"provider_version,omitempty"`
 	RuntimeVersion      string                  `protobuf:"bytes,3,opt,name=runtime_version,json=runtimeVersion,proto3" json:"runtime_version,omitempty"`
@@ -1556,6 +1573,13 @@ func (x *SandboxProviderDescription) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SandboxProviderDescription.ProtoReflect.Descriptor instead.
 func (*SandboxProviderDescription) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SandboxProviderDescription) GetCapabilitiesV2() *SandboxCapabilitiesV2 {
+	if x != nil {
+		return x.CapabilitiesV2
+	}
+	return nil
 }
 
 func (x *SandboxProviderDescription) GetDisplayName() string {
@@ -2001,12 +2025,13 @@ func (x *SandboxApprovalOperation) GetChildPid() int64 {
 }
 
 type NormalizeSandboxApprovalRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Context       *SandboxRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Policy        *SandboxPolicySnapshot `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
-	VerifiedEvent []byte                 `protobuf:"bytes,3,opt,name=verified_event,json=verifiedEvent,proto3" json:"verified_event,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState   `protogen:"open.v1"`
+	ServiceBindingV2 *SandboxServiceBindingV2 `protobuf:"bytes,100,opt,name=service_binding_v2,json=serviceBindingV2,proto3" json:"service_binding_v2,omitempty"`
+	Context          *SandboxRequestContext   `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Policy           *SandboxPolicySnapshot   `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
+	VerifiedEvent    []byte                   `protobuf:"bytes,3,opt,name=verified_event,json=verifiedEvent,proto3" json:"verified_event,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *NormalizeSandboxApprovalRequest) Reset() {
@@ -2039,6 +2064,13 @@ func (*NormalizeSandboxApprovalRequest) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{24}
 }
 
+func (x *NormalizeSandboxApprovalRequest) GetServiceBindingV2() *SandboxServiceBindingV2 {
+	if x != nil {
+		return x.ServiceBindingV2
+	}
+	return nil
+}
+
 func (x *NormalizeSandboxApprovalRequest) GetContext() *SandboxRequestContext {
 	if x != nil {
 		return x.Context
@@ -2062,6 +2094,7 @@ func (x *NormalizeSandboxApprovalRequest) GetVerifiedEvent() []byte {
 
 type NormalizeSandboxApprovalResponse struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
+	ApprovalV2    *SandboxApprovalV2        `protobuf:"bytes,100,opt,name=approval_v2,json=approvalV2,proto3" json:"approval_v2,omitempty"`
 	Context       *SandboxResponseContext   `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Operation     *SandboxApprovalOperation `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -2096,6 +2129,13 @@ func (x *NormalizeSandboxApprovalResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NormalizeSandboxApprovalResponse.ProtoReflect.Descriptor instead.
 func (*NormalizeSandboxApprovalResponse) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *NormalizeSandboxApprovalResponse) GetApprovalV2() *SandboxApprovalV2 {
+	if x != nil {
+		return x.ApprovalV2
+	}
+	return nil
 }
 
 func (x *NormalizeSandboxApprovalResponse) GetContext() *SandboxResponseContext {
@@ -2265,14 +2305,17 @@ func (x *SandboxStatusEvidence) GetLimitations() []string {
 }
 
 type NormalizeSandboxStatusRequest struct {
-	state          protoimpl.MessageState  `protogen:"open.v1"`
-	Context        *SandboxRequestContext  `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Policy         *SandboxPolicySnapshot  `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
-	Process        *SandboxProcessIdentity `protobuf:"bytes,3,opt,name=process,proto3" json:"process,omitempty"`
-	Evidence       []byte                  `protobuf:"bytes,4,opt,name=evidence,proto3" json:"evidence,omitempty"`
-	EvidenceSchema string                  `protobuf:"bytes,5,opt,name=evidence_schema,json=evidenceSchema,proto3" json:"evidence_schema,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Core supplies only the path already read below the attempt's private root.
+	SourceRelativePathV2 string                  `protobuf:"bytes,100,opt,name=source_relative_path_v2,json=sourceRelativePathV2,proto3" json:"source_relative_path_v2,omitempty"`
+	ProviderSessionIdV2  string                  `protobuf:"bytes,101,opt,name=provider_session_id_v2,json=providerSessionIdV2,proto3" json:"provider_session_id_v2,omitempty"`
+	Context              *SandboxRequestContext  `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Policy               *SandboxPolicySnapshot  `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
+	Process              *SandboxProcessIdentity `protobuf:"bytes,3,opt,name=process,proto3" json:"process,omitempty"`
+	Evidence             []byte                  `protobuf:"bytes,4,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	EvidenceSchema       string                  `protobuf:"bytes,5,opt,name=evidence_schema,json=evidenceSchema,proto3" json:"evidence_schema,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *NormalizeSandboxStatusRequest) Reset() {
@@ -2303,6 +2346,20 @@ func (x *NormalizeSandboxStatusRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NormalizeSandboxStatusRequest.ProtoReflect.Descriptor instead.
 func (*NormalizeSandboxStatusRequest) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *NormalizeSandboxStatusRequest) GetSourceRelativePathV2() string {
+	if x != nil {
+		return x.SourceRelativePathV2
+	}
+	return ""
+}
+
+func (x *NormalizeSandboxStatusRequest) GetProviderSessionIdV2() string {
+	if x != nil {
+		return x.ProviderSessionIdV2
+	}
+	return ""
 }
 
 func (x *NormalizeSandboxStatusRequest) GetContext() *SandboxRequestContext {
@@ -2402,12 +2459,13 @@ func (x *SandboxRuntimeIdentity) GetProviderSessionId() string {
 }
 
 type NormalizeSandboxStatusResponse struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	Context       *SandboxResponseContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Evidence      *SandboxStatusEvidence  `protobuf:"bytes,2,opt,name=evidence,proto3" json:"evidence,omitempty"`
-	Identity      *SandboxRuntimeIdentity `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState         `protogen:"open.v1"`
+	ObservationsV2 []*SandboxRuntimeObservationV2 `protobuf:"bytes,100,rep,name=observations_v2,json=observationsV2,proto3" json:"observations_v2,omitempty"`
+	Context        *SandboxResponseContext        `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Evidence       *SandboxStatusEvidence         `protobuf:"bytes,2,opt,name=evidence,proto3" json:"evidence,omitempty"`
+	Identity       *SandboxRuntimeIdentity        `protobuf:"bytes,3,opt,name=identity,proto3" json:"identity,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *NormalizeSandboxStatusResponse) Reset() {
@@ -2438,6 +2496,13 @@ func (x *NormalizeSandboxStatusResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use NormalizeSandboxStatusResponse.ProtoReflect.Descriptor instead.
 func (*NormalizeSandboxStatusResponse) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *NormalizeSandboxStatusResponse) GetObservationsV2() []*SandboxRuntimeObservationV2 {
+	if x != nil {
+		return x.ObservationsV2
+	}
+	return nil
 }
 
 func (x *NormalizeSandboxStatusResponse) GetContext() *SandboxResponseContext {
@@ -2547,6 +2612,8 @@ func (x *SandboxDenialRecord) GetAttemptId() string {
 
 type ReadSandboxReportRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChunkV2       *SandboxAuditChunkV2   `protobuf:"bytes,100,opt,name=chunk_v2,json=chunkV2,proto3" json:"chunk_v2,omitempty"`
+	TrustV2       *SandboxAuditTrustV2   `protobuf:"bytes,101,opt,name=trust_v2,json=trustV2,proto3" json:"trust_v2,omitempty"`
 	Context       *SandboxRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Policy        *SandboxPolicySnapshot `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
 	Audit         []byte                 `protobuf:"bytes,3,opt,name=audit,proto3" json:"audit,omitempty"`
@@ -2585,6 +2652,20 @@ func (*ReadSandboxReportRequest) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{32}
 }
 
+func (x *ReadSandboxReportRequest) GetChunkV2() *SandboxAuditChunkV2 {
+	if x != nil {
+		return x.ChunkV2
+	}
+	return nil
+}
+
+func (x *ReadSandboxReportRequest) GetTrustV2() *SandboxAuditTrustV2 {
+	if x != nil {
+		return x.TrustV2
+	}
+	return nil
+}
+
 func (x *ReadSandboxReportRequest) GetContext() *SandboxRequestContext {
 	if x != nil {
 		return x.Context
@@ -2615,6 +2696,7 @@ func (x *ReadSandboxReportRequest) GetCursor() string {
 
 type ReadSandboxReportResponse struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
+	ReportV2      *SandboxReportV2        `protobuf:"bytes,100,opt,name=report_v2,json=reportV2,proto3" json:"report_v2,omitempty"`
 	Context       *SandboxResponseContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
 	Records       []*SandboxDenialRecord  `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
 	NextCursor    string                  `protobuf:"bytes,3,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
@@ -2654,6 +2736,13 @@ func (*ReadSandboxReportResponse) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{33}
 }
 
+func (x *ReadSandboxReportResponse) GetReportV2() *SandboxReportV2 {
+	if x != nil {
+		return x.ReportV2
+	}
+	return nil
+}
+
 func (x *ReadSandboxReportResponse) GetContext() *SandboxResponseContext {
 	if x != nil {
 		return x.Context
@@ -2690,15 +2779,16 @@ func (x *ReadSandboxReportResponse) GetIntegrity() string {
 }
 
 type ProposeSandboxRevisionRequest struct {
-	state           protoimpl.MessageState     `protogen:"open.v1"`
-	Context         *SandboxRequestContext     `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Policy          *SandboxPolicySnapshot     `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
-	SelectedRecords []*SandboxDenialRecord     `protobuf:"bytes,3,rep,name=selected_records,json=selectedRecords,proto3" json:"selected_records,omitempty"`
-	Runtime         *SandboxRuntimeFacts       `protobuf:"bytes,4,opt,name=runtime,proto3" json:"runtime,omitempty"`
-	References      []*SandboxRuntimeReference `protobuf:"bytes,5,rep,name=references,proto3" json:"references,omitempty"`
-	Endpoints       []*SandboxEndpoint         `protobuf:"bytes,6,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState     `protogen:"open.v1"`
+	SelectedEventsV2 []*SandboxAuditEventV2     `protobuf:"bytes,100,rep,name=selected_events_v2,json=selectedEventsV2,proto3" json:"selected_events_v2,omitempty"`
+	Context          *SandboxRequestContext     `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Policy           *SandboxPolicySnapshot     `protobuf:"bytes,2,opt,name=policy,proto3" json:"policy,omitempty"`
+	SelectedRecords  []*SandboxDenialRecord     `protobuf:"bytes,3,rep,name=selected_records,json=selectedRecords,proto3" json:"selected_records,omitempty"`
+	Runtime          *SandboxRuntimeFacts       `protobuf:"bytes,4,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	References       []*SandboxRuntimeReference `protobuf:"bytes,5,rep,name=references,proto3" json:"references,omitempty"`
+	Endpoints        []*SandboxEndpoint         `protobuf:"bytes,6,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProposeSandboxRevisionRequest) Reset() {
@@ -2729,6 +2819,13 @@ func (x *ProposeSandboxRevisionRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ProposeSandboxRevisionRequest.ProtoReflect.Descriptor instead.
 func (*ProposeSandboxRevisionRequest) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ProposeSandboxRevisionRequest) GetSelectedEventsV2() []*SandboxAuditEventV2 {
+	if x != nil {
+		return x.SelectedEventsV2
+	}
+	return nil
 }
 
 func (x *ProposeSandboxRevisionRequest) GetContext() *SandboxRequestContext {
@@ -2774,11 +2871,12 @@ func (x *ProposeSandboxRevisionRequest) GetEndpoints() []*SandboxEndpoint {
 }
 
 type ProposeSandboxRevisionResponse struct {
-	state           protoimpl.MessageState  `protogen:"open.v1"`
-	Context         *SandboxResponseContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	AddedGrants     *SandboxGrants          `protobuf:"bytes,2,opt,name=added_grants,json=addedGrants,proto3" json:"added_grants,omitempty"`
-	SourceRecordIds []string                `protobuf:"bytes,3,rep,name=source_record_ids,json=sourceRecordIds,proto3" json:"source_record_ids,omitempty"`
-	Compiled        *SandboxCompiledPolicy  `protobuf:"bytes,4,opt,name=compiled,proto3" json:"compiled,omitempty"`
+	state           protoimpl.MessageState      `protogen:"open.v1"`
+	AdditionsV2     *SandboxRevisionAdditionsV2 `protobuf:"bytes,100,opt,name=additions_v2,json=additionsV2,proto3" json:"additions_v2,omitempty"`
+	Context         *SandboxResponseContext     `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	AddedGrants     *SandboxGrants              `protobuf:"bytes,2,opt,name=added_grants,json=addedGrants,proto3" json:"added_grants,omitempty"`
+	SourceRecordIds []string                    `protobuf:"bytes,3,rep,name=source_record_ids,json=sourceRecordIds,proto3" json:"source_record_ids,omitempty"`
+	Compiled        *SandboxCompiledPolicy      `protobuf:"bytes,4,opt,name=compiled,proto3" json:"compiled,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2811,6 +2909,13 @@ func (x *ProposeSandboxRevisionResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ProposeSandboxRevisionResponse.ProtoReflect.Descriptor instead.
 func (*ProposeSandboxRevisionResponse) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ProposeSandboxRevisionResponse) GetAdditionsV2() *SandboxRevisionAdditionsV2 {
+	if x != nil {
+		return x.AdditionsV2
+	}
+	return nil
 }
 
 func (x *ProposeSandboxRevisionResponse) GetContext() *SandboxResponseContext {
@@ -27406,7 +27511,7 @@ var File_kandev_plugin_v1_plugin_proto protoreflect.FileDescriptor
 
 const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\x1dkandev/plugin/v1/plugin.proto\x12\x10kandev.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xb9\x02\n" +
+	"\x1dkandev/plugin/v1/plugin.proto\x12\x10kandev.plugin.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a!kandev/plugin/v1/sandbox_v2.proto\"\xb9\x02\n" +
 	"\x15SandboxRequestContext\x12%\n" +
 	"\x0eprotocol_major\x18\x01 \x01(\rR\rprotocolMajor\x12'\n" +
 	"\x0finstallation_id\x18\x02 \x01(\tR\x0einstallationId\x12!\n" +
@@ -27443,8 +27548,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\x1b\n" +
 	"\tsource_id\x18\x02 \x01(\tR\bsourceId\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x04R\brevision\x12\x16\n" +
-	"\x06digest\x18\x04 \x01(\tR\x06digest\"\x89\x02\n" +
-	"\x15SandboxPolicySnapshot\x12\x1b\n" +
+	"\x06digest\x18\x04 \x01(\tR\x06digest\"\xc9\x02\n" +
+	"\x15SandboxPolicySnapshot\x12>\n" +
+	"\tpolicy_v2\x18d \x01(\v2!.kandev.plugin.v1.SandboxPolicyV2R\bpolicyV2\x12\x1b\n" +
 	"\tpolicy_id\x18\x01 \x01(\tR\bpolicyId\x12\x1a\n" +
 	"\brevision\x18\x02 \x01(\x04R\brevision\x12\x16\n" +
 	"\x06digest\x18\x03 \x01(\tR\x06digest\x12%\n" +
@@ -27484,8 +27590,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x1aSandboxOverrideConstraints\x12/\n" +
 	"\x13forbidden_arguments\x18\x01 \x03(\tR\x12forbiddenArguments\x12<\n" +
 	"\x1aforbidden_environment_keys\x18\x02 \x03(\tR\x18forbiddenEnvironmentKeys\x12'\n" +
-	"\x0fprotected_roots\x18\x03 \x03(\tR\x0eprotectedRoots\"\x8f\x03\n" +
-	"\x15SandboxCompiledPolicy\x129\n" +
+	"\x0fprotected_roots\x18\x03 \x03(\tR\x0eprotectedRoots\"\xe2\x03\n" +
+	"\x15SandboxCompiledPolicy\x12Q\n" +
+	"\x13effective_policy_v2\x18d \x01(\v2!.kandev.plugin.v1.SandboxPolicyV2R\x11effectivePolicyV2\x129\n" +
 	"\x06prefix\x18\x01 \x03(\v2!.kandev.plugin.v1.SandboxArgumentR\x06prefix\x12?\n" +
 	"\tartifacts\x18\x02 \x03(\v2!.kandev.plugin.v1.SandboxArtifactR\tartifacts\x12J\n" +
 	"\x10effective_grants\x18\x03 \x01(\v2\x1f.kandev.plugin.v1.SandboxGrantsR\x0feffectiveGrants\x12N\n" +
@@ -27502,8 +27609,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\fcontent_type\x18\x01 \x01(\tR\vcontentType\x12/\n" +
 	"\x14allow_once_body_utf8\x18\x02 \x01(\tR\x11allowOnceBodyUtf8\x12$\n" +
 	"\x0edeny_body_utf8\x18\x03 \x01(\tR\fdenyBodyUtf8\x12*\n" +
-	"\x11timeout_body_utf8\x18\x04 \x01(\tR\x0ftimeoutBodyUtf8\"\xdb\x04\n" +
-	"\x1aSandboxProviderDescription\x12!\n" +
+	"\x11timeout_body_utf8\x18\x04 \x01(\tR\x0ftimeoutBodyUtf8\"\xad\x05\n" +
+	"\x1aSandboxProviderDescription\x12P\n" +
+	"\x0fcapabilities_v2\x18d \x01(\v2'.kandev.plugin.v1.SandboxCapabilitiesV2R\x0ecapabilitiesV2\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12)\n" +
 	"\x10provider_version\x18\x02 \x01(\tR\x0fproviderVersion\x12'\n" +
 	"\x0fruntime_version\x18\x03 \x01(\tR\x0eruntimeVersion\x121\n" +
@@ -27546,12 +27654,15 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x06access\x18\x04 \x01(\tR\x06access\x12/\n" +
 	"\x13supported_decisions\x18\x05 \x03(\tR\x12supportedDecisions\x12.\n" +
 	"\x13provider_session_id\x18\x06 \x01(\tR\x11providerSessionId\x12\x1b\n" +
-	"\tchild_pid\x18\a \x01(\x03R\bchildPid\"\xcc\x01\n" +
-	"\x1fNormalizeSandboxApprovalRequest\x12A\n" +
+	"\tchild_pid\x18\a \x01(\x03R\bchildPid\"\xa5\x02\n" +
+	"\x1fNormalizeSandboxApprovalRequest\x12W\n" +
+	"\x12service_binding_v2\x18d \x01(\v2).kandev.plugin.v1.SandboxServiceBindingV2R\x10serviceBindingV2\x12A\n" +
 	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.SandboxRequestContextR\acontext\x12?\n" +
 	"\x06policy\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxPolicySnapshotR\x06policy\x12%\n" +
-	"\x0everified_event\x18\x03 \x01(\fR\rverifiedEvent\"\xb0\x01\n" +
-	" NormalizeSandboxApprovalResponse\x12B\n" +
+	"\x0everified_event\x18\x03 \x01(\fR\rverifiedEvent\"\xf6\x01\n" +
+	" NormalizeSandboxApprovalResponse\x12D\n" +
+	"\vapproval_v2\x18d \x01(\v2#.kandev.plugin.v1.SandboxApprovalV2R\n" +
+	"approvalV2\x12B\n" +
 	"\acontext\x18\x01 \x01(\v2(.kandev.plugin.v1.SandboxResponseContextR\acontext\x12H\n" +
 	"\toperation\x18\x02 \x01(\v2*.kandev.plugin.v1.SandboxApprovalOperationR\toperation\"E\n" +
 	"\x16SandboxProcessIdentity\x12\x10\n" +
@@ -27568,8 +27679,10 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"generation\x12%\n" +
 	"\x0eschema_version\x18\x06 \x01(\rR\rschemaVersion\x12-\n" +
 	"\x13observed_at_unix_ms\x18\a \x01(\x03R\x10observedAtUnixMs\x12 \n" +
-	"\vlimitations\x18\b \x03(\tR\vlimitations\"\xac\x02\n" +
-	"\x1dNormalizeSandboxStatusRequest\x12A\n" +
+	"\vlimitations\x18\b \x03(\tR\vlimitations\"\x98\x03\n" +
+	"\x1dNormalizeSandboxStatusRequest\x125\n" +
+	"\x17source_relative_path_v2\x18d \x01(\tR\x14sourceRelativePathV2\x123\n" +
+	"\x16provider_session_id_v2\x18e \x01(\tR\x13providerSessionIdV2\x12A\n" +
 	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.SandboxRequestContextR\acontext\x12?\n" +
 	"\x06policy\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxPolicySnapshotR\x06policy\x12B\n" +
 	"\aprocess\x18\x03 \x01(\v2(.kandev.plugin.v1.SandboxProcessIdentityR\aprocess\x12\x1a\n" +
@@ -27578,8 +27691,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x16SandboxRuntimeIdentity\x12%\n" +
 	"\x0esupervisor_pid\x18\x01 \x01(\x03R\rsupervisorPid\x12\x1b\n" +
 	"\tchild_pid\x18\x02 \x01(\x03R\bchildPid\x12.\n" +
-	"\x13provider_session_id\x18\x03 \x01(\tR\x11providerSessionId\"\xef\x01\n" +
-	"\x1eNormalizeSandboxStatusResponse\x12B\n" +
+	"\x13provider_session_id\x18\x03 \x01(\tR\x11providerSessionId\"\xc7\x02\n" +
+	"\x1eNormalizeSandboxStatusResponse\x12V\n" +
+	"\x0fobservations_v2\x18d \x03(\v2-.kandev.plugin.v1.SandboxRuntimeObservationV2R\x0eobservationsV2\x12B\n" +
 	"\acontext\x18\x01 \x01(\v2(.kandev.plugin.v1.SandboxResponseContextR\acontext\x12C\n" +
 	"\bevidence\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxStatusEvidenceR\bevidence\x12D\n" +
 	"\bidentity\x18\x03 \x01(\v2(.kandev.plugin.v1.SandboxRuntimeIdentityR\bidentity\"\xdb\x01\n" +
@@ -27590,20 +27704,24 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x13occurred_at_unix_ms\x18\x04 \x01(\x03R\x10occurredAtUnixMs\x12#\n" +
 	"\rpolicy_digest\x18\x05 \x01(\tR\fpolicyDigest\x12\x1d\n" +
 	"\n" +
-	"attempt_id\x18\x06 \x01(\tR\tattemptId\"\xcc\x01\n" +
-	"\x18ReadSandboxReportRequest\x12A\n" +
+	"attempt_id\x18\x06 \x01(\tR\tattemptId\"\xd0\x02\n" +
+	"\x18ReadSandboxReportRequest\x12@\n" +
+	"\bchunk_v2\x18d \x01(\v2%.kandev.plugin.v1.SandboxAuditChunkV2R\achunkV2\x12@\n" +
+	"\btrust_v2\x18e \x01(\v2%.kandev.plugin.v1.SandboxAuditTrustV2R\atrustV2\x12A\n" +
 	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.SandboxRequestContextR\acontext\x12?\n" +
 	"\x06policy\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxPolicySnapshotR\x06policy\x12\x14\n" +
 	"\x05audit\x18\x03 \x01(\fR\x05audit\x12\x16\n" +
-	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"\xfb\x01\n" +
-	"\x19ReadSandboxReportResponse\x12B\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\"\xbb\x02\n" +
+	"\x19ReadSandboxReportResponse\x12>\n" +
+	"\treport_v2\x18d \x01(\v2!.kandev.plugin.v1.SandboxReportV2R\breportV2\x12B\n" +
 	"\acontext\x18\x01 \x01(\v2(.kandev.plugin.v1.SandboxResponseContextR\acontext\x12?\n" +
 	"\arecords\x18\x02 \x03(\v2%.kandev.plugin.v1.SandboxDenialRecordR\arecords\x12\x1f\n" +
 	"\vnext_cursor\x18\x03 \x01(\tR\n" +
 	"nextCursor\x12\x1a\n" +
 	"\bcomplete\x18\x04 \x01(\bR\bcomplete\x12\x1c\n" +
-	"\tintegrity\x18\x05 \x01(\tR\tintegrity\"\xc2\x03\n" +
-	"\x1dProposeSandboxRevisionRequest\x12A\n" +
+	"\tintegrity\x18\x05 \x01(\tR\tintegrity\"\x97\x04\n" +
+	"\x1dProposeSandboxRevisionRequest\x12S\n" +
+	"\x12selected_events_v2\x18d \x03(\v2%.kandev.plugin.v1.SandboxAuditEventV2R\x10selectedEventsV2\x12A\n" +
 	"\acontext\x18\x01 \x01(\v2'.kandev.plugin.v1.SandboxRequestContextR\acontext\x12?\n" +
 	"\x06policy\x18\x02 \x01(\v2'.kandev.plugin.v1.SandboxPolicySnapshotR\x06policy\x12P\n" +
 	"\x10selected_records\x18\x03 \x03(\v2%.kandev.plugin.v1.SandboxDenialRecordR\x0fselectedRecords\x12?\n" +
@@ -27611,8 +27729,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\n" +
 	"references\x18\x05 \x03(\v2).kandev.plugin.v1.SandboxRuntimeReferenceR\n" +
 	"references\x12?\n" +
-	"\tendpoints\x18\x06 \x03(\v2!.kandev.plugin.v1.SandboxEndpointR\tendpoints\"\x99\x02\n" +
-	"\x1eProposeSandboxRevisionResponse\x12B\n" +
+	"\tendpoints\x18\x06 \x03(\v2!.kandev.plugin.v1.SandboxEndpointR\tendpoints\"\xea\x02\n" +
+	"\x1eProposeSandboxRevisionResponse\x12O\n" +
+	"\fadditions_v2\x18d \x01(\v2,.kandev.plugin.v1.SandboxRevisionAdditionsV2R\vadditionsV2\x12B\n" +
 	"\acontext\x18\x01 \x01(\v2(.kandev.plugin.v1.SandboxResponseContextR\acontext\x12B\n" +
 	"\fadded_grants\x18\x02 \x01(\v2\x1f.kandev.plugin.v1.SandboxGrantsR\vaddedGrants\x12*\n" +
 	"\x11source_record_ids\x18\x03 \x03(\tR\x0fsourceRecordIds\x12C\n" +
@@ -30450,610 +30569,631 @@ var file_kandev_plugin_v1_plugin_proto_goTypes = []any{
 	nil,                                                       // 380: kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
 	nil,                                                       // 381: kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
 	nil,                                                       // 382: kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	(*structpb.Struct)(nil),                                   // 383: google.protobuf.Struct
+	(*SandboxPolicyV2)(nil),                                   // 383: kandev.plugin.v1.SandboxPolicyV2
+	(*SandboxCapabilitiesV2)(nil),                             // 384: kandev.plugin.v1.SandboxCapabilitiesV2
+	(*SandboxServiceBindingV2)(nil),                           // 385: kandev.plugin.v1.SandboxServiceBindingV2
+	(*SandboxApprovalV2)(nil),                                 // 386: kandev.plugin.v1.SandboxApprovalV2
+	(*SandboxRuntimeObservationV2)(nil),                       // 387: kandev.plugin.v1.SandboxRuntimeObservationV2
+	(*SandboxAuditChunkV2)(nil),                               // 388: kandev.plugin.v1.SandboxAuditChunkV2
+	(*SandboxAuditTrustV2)(nil),                               // 389: kandev.plugin.v1.SandboxAuditTrustV2
+	(*SandboxReportV2)(nil),                                   // 390: kandev.plugin.v1.SandboxReportV2
+	(*SandboxAuditEventV2)(nil),                               // 391: kandev.plugin.v1.SandboxAuditEventV2
+	(*SandboxRevisionAdditionsV2)(nil),                        // 392: kandev.plugin.v1.SandboxRevisionAdditionsV2
+	(*structpb.Struct)(nil),                                   // 393: google.protobuf.Struct
 }
 var file_kandev_plugin_v1_plugin_proto_depIdxs = []int32{
 	6,   // 0: kandev.plugin.v1.SandboxGrants.filesystem:type_name -> kandev.plugin.v1.SandboxFilesystemGrant
 	7,   // 1: kandev.plugin.v1.SandboxGrants.network:type_name -> kandev.plugin.v1.SandboxNetworkGrant
-	8,   // 2: kandev.plugin.v1.SandboxPolicySnapshot.grants:type_name -> kandev.plugin.v1.SandboxGrants
-	9,   // 3: kandev.plugin.v1.SandboxPolicySnapshot.sources:type_name -> kandev.plugin.v1.SandboxPolicySource
-	16,  // 4: kandev.plugin.v1.SandboxArtifact.bindings:type_name -> kandev.plugin.v1.SandboxArtifactBinding
-	14,  // 5: kandev.plugin.v1.SandboxCompiledPolicy.prefix:type_name -> kandev.plugin.v1.SandboxArgument
-	15,  // 6: kandev.plugin.v1.SandboxCompiledPolicy.artifacts:type_name -> kandev.plugin.v1.SandboxArtifact
-	8,   // 7: kandev.plugin.v1.SandboxCompiledPolicy.effective_grants:type_name -> kandev.plugin.v1.SandboxGrants
-	17,  // 8: kandev.plugin.v1.SandboxCompiledPolicy.constraints:type_name -> kandev.plugin.v1.SandboxOverrideConstraints
-	4,   // 9: kandev.plugin.v1.DescribeSandboxProviderRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	11,  // 10: kandev.plugin.v1.DescribeSandboxProviderRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
-	20,  // 11: kandev.plugin.v1.SandboxProviderDescription.runtime_artifact:type_name -> kandev.plugin.v1.SandboxRuntimeArtifact
-	21,  // 12: kandev.plugin.v1.SandboxProviderDescription.approval_wire:type_name -> kandev.plugin.v1.SandboxApprovalWire
-	23,  // 13: kandev.plugin.v1.SandboxProviderDescription.runtime_sources:type_name -> kandev.plugin.v1.SandboxRuntimeSource
-	5,   // 14: kandev.plugin.v1.DescribeSandboxProviderResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	22,  // 15: kandev.plugin.v1.DescribeSandboxProviderResponse.description:type_name -> kandev.plugin.v1.SandboxProviderDescription
-	4,   // 16: kandev.plugin.v1.CompileSandboxPolicyRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	10,  // 17: kandev.plugin.v1.CompileSandboxPolicyRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
-	11,  // 18: kandev.plugin.v1.CompileSandboxPolicyRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
-	12,  // 19: kandev.plugin.v1.CompileSandboxPolicyRequest.references:type_name -> kandev.plugin.v1.SandboxRuntimeReference
-	13,  // 20: kandev.plugin.v1.CompileSandboxPolicyRequest.endpoints:type_name -> kandev.plugin.v1.SandboxEndpoint
-	5,   // 21: kandev.plugin.v1.CompileSandboxPolicyResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	18,  // 22: kandev.plugin.v1.CompileSandboxPolicyResponse.compiled:type_name -> kandev.plugin.v1.SandboxCompiledPolicy
-	4,   // 23: kandev.plugin.v1.NormalizeSandboxApprovalRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	10,  // 24: kandev.plugin.v1.NormalizeSandboxApprovalRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
-	5,   // 25: kandev.plugin.v1.NormalizeSandboxApprovalResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	27,  // 26: kandev.plugin.v1.NormalizeSandboxApprovalResponse.operation:type_name -> kandev.plugin.v1.SandboxApprovalOperation
-	30,  // 27: kandev.plugin.v1.SandboxStatusEvidence.process:type_name -> kandev.plugin.v1.SandboxProcessIdentity
-	4,   // 28: kandev.plugin.v1.NormalizeSandboxStatusRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	10,  // 29: kandev.plugin.v1.NormalizeSandboxStatusRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
-	30,  // 30: kandev.plugin.v1.NormalizeSandboxStatusRequest.process:type_name -> kandev.plugin.v1.SandboxProcessIdentity
-	5,   // 31: kandev.plugin.v1.NormalizeSandboxStatusResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	31,  // 32: kandev.plugin.v1.NormalizeSandboxStatusResponse.evidence:type_name -> kandev.plugin.v1.SandboxStatusEvidence
-	33,  // 33: kandev.plugin.v1.NormalizeSandboxStatusResponse.identity:type_name -> kandev.plugin.v1.SandboxRuntimeIdentity
-	4,   // 34: kandev.plugin.v1.ReadSandboxReportRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	10,  // 35: kandev.plugin.v1.ReadSandboxReportRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
-	5,   // 36: kandev.plugin.v1.ReadSandboxReportResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	35,  // 37: kandev.plugin.v1.ReadSandboxReportResponse.records:type_name -> kandev.plugin.v1.SandboxDenialRecord
-	4,   // 38: kandev.plugin.v1.ProposeSandboxRevisionRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
-	10,  // 39: kandev.plugin.v1.ProposeSandboxRevisionRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
-	35,  // 40: kandev.plugin.v1.ProposeSandboxRevisionRequest.selected_records:type_name -> kandev.plugin.v1.SandboxDenialRecord
-	11,  // 41: kandev.plugin.v1.ProposeSandboxRevisionRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
-	12,  // 42: kandev.plugin.v1.ProposeSandboxRevisionRequest.references:type_name -> kandev.plugin.v1.SandboxRuntimeReference
-	13,  // 43: kandev.plugin.v1.ProposeSandboxRevisionRequest.endpoints:type_name -> kandev.plugin.v1.SandboxEndpoint
-	5,   // 44: kandev.plugin.v1.ProposeSandboxRevisionResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
-	8,   // 45: kandev.plugin.v1.ProposeSandboxRevisionResponse.added_grants:type_name -> kandev.plugin.v1.SandboxGrants
-	18,  // 46: kandev.plugin.v1.ProposeSandboxRevisionResponse.compiled:type_name -> kandev.plugin.v1.SandboxCompiledPolicy
-	40,  // 47: kandev.plugin.v1.HostCapabilityContext.operations:type_name -> kandev.plugin.v1.HostOperationSupport
-	374, // 48: kandev.plugin.v1.HostCapabilityContext.limits:type_name -> kandev.plugin.v1.HostCapabilityContext.LimitsEntry
-	41,  // 49: kandev.plugin.v1.GetCapabilityContextResponse.context:type_name -> kandev.plugin.v1.HostCapabilityContext
-	0,   // 50: kandev.plugin.v1.HostCommandReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
-	0,   // 51: kandev.plugin.v1.HostCommandResult.status:type_name -> kandev.plugin.v1.HostCommandStatus
-	44,  // 52: kandev.plugin.v1.HostCommandResult.receipt:type_name -> kandev.plugin.v1.HostCommandReceipt
-	45,  // 53: kandev.plugin.v1.UpdateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 54: kandev.plugin.v1.UpdateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	285, // 55: kandev.plugin.v1.CreateTaskExactRequest.task:type_name -> kandev.plugin.v1.CreateTaskRequest
-	45,  // 56: kandev.plugin.v1.CreateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 57: kandev.plugin.v1.CreateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	45,  // 58: kandev.plugin.v1.SetTaskLabelsExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 59: kandev.plugin.v1.SetTaskLabelsExactResponse.task:type_name -> kandev.plugin.v1.Task
-	45,  // 60: kandev.plugin.v1.AssignTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 61: kandev.plugin.v1.AssignTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	45,  // 62: kandev.plugin.v1.MoveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 63: kandev.plugin.v1.MoveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	45,  // 64: kandev.plugin.v1.ArchiveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	196, // 65: kandev.plugin.v1.ArchiveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
-	45,  // 66: kandev.plugin.v1.AddTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 67: kandev.plugin.v1.RemoveTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 68: kandev.plugin.v1.SendTaskMessageExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 69: kandev.plugin.v1.TaskManagementClaimExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	64,  // 70: kandev.plugin.v1.TaskManagementClaimExactResponse.claim:type_name -> kandev.plugin.v1.TaskManagementClaim
-	69,  // 71: kandev.plugin.v1.TaskCompletionEvidence.subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
-	69,  // 72: kandev.plugin.v1.TaskCompletionCriterion.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
-	70,  // 73: kandev.plugin.v1.TaskCompletionCriterion.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
-	69,  // 74: kandev.plugin.v1.TaskCompletionCriterionInput.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
-	71,  // 75: kandev.plugin.v1.TaskCompletionGateSnapshot.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterion
-	73,  // 76: kandev.plugin.v1.TaskCompletionGateSnapshot.blockers:type_name -> kandev.plugin.v1.TaskCompletionBlocker
-	72,  // 77: kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterionInput
-	70,  // 78: kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
-	45,  // 79: kandev.plugin.v1.TaskCompletionGateExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	74,  // 80: kandev.plugin.v1.TaskCompletionGateExactResponse.snapshot:type_name -> kandev.plugin.v1.TaskCompletionGateSnapshot
-	79,  // 81: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workspace_defaults:type_name -> kandev.plugin.v1.WorkspaceDefaultsUpdateExact
-	81,  // 82: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowCreateExact
-	82,  // 83: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowUpdateExact
-	83,  // 84: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowReorderExact
-	86,  // 85: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepCreateExact
-	87,  // 86: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact
-	88,  // 87: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepReorderExact
-	89,  // 88: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_register:type_name -> kandev.plugin.v1.WorkspaceRepositoryRegisterExact
-	90,  // 89: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_update:type_name -> kandev.plugin.v1.WorkspaceRepositoryUpdateExact
-	80,  // 90: kandev.plugin.v1.WorkspaceWorkflowCreateExact.configuration:type_name -> kandev.plugin.v1.WorkspaceWorkflowConfig
-	84,  // 91: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_start_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
-	84,  // 92: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_complete_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
-	85,  // 93: kandev.plugin.v1.WorkspaceWorkflowStepCreateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
-	85,  // 94: kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
-	45,  // 95: kandev.plugin.v1.WorkspaceAdministrationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	92,  // 96: kandev.plugin.v1.ExactSourceIssueCapabilities.transitions:type_name -> kandev.plugin.v1.SourceIssueTransition
-	45,  // 97: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	93,  // 98: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.item:type_name -> kandev.plugin.v1.ExactSourceIssueCapabilities
-	314, // 99: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	0,   // 100: kandev.plugin.v1.SourceIssueWritebackReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
-	45,  // 101: kandev.plugin.v1.SourceIssueWritebackExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	96,  // 102: kandev.plugin.v1.SourceIssueWritebackExactResponse.receipt:type_name -> kandev.plugin.v1.SourceIssueWritebackReceipt
-	45,  // 103: kandev.plugin.v1.IssueTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	325, // 104: kandev.plugin.v1.IssueTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
-	45,  // 105: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	325, // 106: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
-	105, // 107: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest.spec:type_name -> kandev.plugin.v1.ManagedAgentConversationSpec
-	45,  // 108: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	104, // 109: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	104, // 110: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	104, // 111: kandev.plugin.v1.ListManagedAgentConversationsExactResponse.conversations:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	45,  // 112: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	104, // 113: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	45,  // 114: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	1,   // 115: kandev.plugin.v1.ManagedAgentInputReceipt.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	2,   // 116: kandev.plugin.v1.ManagedAgentInputReceipt.state:type_name -> kandev.plugin.v1.ManagedAgentInputState
-	1,   // 117: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	45,  // 118: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	116, // 119: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	116, // 120: kandev.plugin.v1.GetManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	116, // 121: kandev.plugin.v1.ListManagedAgentInputsExactResponse.inputs:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	45,  // 122: kandev.plugin.v1.CancelManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	116, // 123: kandev.plugin.v1.CancelManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
-	1,   // 124: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
-	45,  // 125: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	3,   // 126: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.dispatch_status:type_name -> kandev.plugin.v1.ManagedAgentDispatchStatus
-	104, // 127: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
-	127, // 128: kandev.plugin.v1.ManagedConversationSchedule.triggers:type_name -> kandev.plugin.v1.ManagedConversationScheduleTrigger
-	128, // 129: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse.schedules:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	128, // 130: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	128, // 131: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	45,  // 132: kandev.plugin.v1.ManagedConversationScheduleExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	128, // 133: kandev.plugin.v1.ManagedConversationScheduleExactResponse.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
-	45,  // 134: kandev.plugin.v1.EnsureTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 135: kandev.plugin.v1.StopTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 136: kandev.plugin.v1.RecoverSessionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 137: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	144, // 138: kandev.plugin.v1.GetSessionModeContextExactResponse.available_modes:type_name -> kandev.plugin.v1.SessionModeOption
-	45,  // 139: kandev.plugin.v1.SetSessionModeExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	45,  // 140: kandev.plugin.v1.RespondPermissionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	269, // 141: kandev.plugin.v1.RespondPermissionExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	277, // 142: kandev.plugin.v1.AnswerClarificationExactRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
-	45,  // 143: kandev.plugin.v1.AnswerClarificationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
-	269, // 144: kandev.plugin.v1.AnswerClarificationExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	383, // 145: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
-	383, // 146: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
-	157, // 147: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
-	383, // 148: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
-	375, // 149: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
-	376, // 150: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
-	162, // 151: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
-	377, // 152: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
-	166, // 153: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
-	383, // 154: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
-	383, // 155: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
-	383, // 156: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
-	383, // 157: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
-	181, // 158: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
-	383, // 159: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
-	383, // 160: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
-	383, // 161: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
-	197, // 162: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
-	383, // 163: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
-	198, // 164: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
-	199, // 165: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
-	199, // 166: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
-	200, // 167: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
-	194, // 168: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
-	196, // 169: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
-	195, // 170: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	196, // 171: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	194, // 172: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
-	205, // 173: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
-	195, // 174: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	194, // 175: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
-	208, // 176: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
-	195, // 177: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	194, // 178: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
-	211, // 179: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
-	195, // 180: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	194, // 181: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
-	214, // 182: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
-	195, // 183: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	217, // 184: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
-	194, // 185: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	220, // 186: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
-	195, // 187: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	194, // 188: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
-	223, // 189: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
-	195, // 190: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	378, // 191: kandev.plugin.v1.ExecutorProfileSnapshot.config:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
-	379, // 192: kandev.plugin.v1.ExecutorProfileSnapshot.secret_values:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
-	228, // 193: kandev.plugin.v1.ExecutorProviderError.fields:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
-	230, // 194: kandev.plugin.v1.ExecutorResourceDescriptor.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
-	226, // 195: kandev.plugin.v1.ValidateExecutorProfileRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	227, // 196: kandev.plugin.v1.ValidateExecutorProfileRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	228, // 197: kandev.plugin.v1.ValidateExecutorProfileResponse.field_errors:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
-	230, // 198: kandev.plugin.v1.ValidateExecutorProfileResponse.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
-	229, // 199: kandev.plugin.v1.ValidateExecutorProfileResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 200: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	227, // 201: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	231, // 202: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	229, // 203: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 204: kandev.plugin.v1.RecoverExecutorOperationRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	227, // 205: kandev.plugin.v1.RecoverExecutorOperationRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
-	231, // 206: kandev.plugin.v1.RecoverExecutorOperationResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	229, // 207: kandev.plugin.v1.RecoverExecutorOperationResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 208: kandev.plugin.v1.AttachExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	231, // 209: kandev.plugin.v1.AttachExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	231, // 210: kandev.plugin.v1.AttachExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	229, // 211: kandev.plugin.v1.AttachExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 212: kandev.plugin.v1.InspectExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	231, // 213: kandev.plugin.v1.InspectExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	229, // 214: kandev.plugin.v1.InspectExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 215: kandev.plugin.v1.ResolveExecutorConnectionRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	231, // 216: kandev.plugin.v1.ResolveExecutorConnectionRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	380, // 217: kandev.plugin.v1.ExecutorConnectionLease.http_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
-	381, // 218: kandev.plugin.v1.ExecutorConnectionLease.websocket_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
-	243, // 219: kandev.plugin.v1.ResolveExecutorConnectionResponse.lease:type_name -> kandev.plugin.v1.ExecutorConnectionLease
-	229, // 220: kandev.plugin.v1.ResolveExecutorConnectionResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 221: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	231, // 222: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	229, // 223: kandev.plugin.v1.DestroyExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
-	226, // 224: kandev.plugin.v1.CheckpointExecutorResourceRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	231, // 225: kandev.plugin.v1.CheckpointExecutorResourceRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
-	226, // 226: kandev.plugin.v1.ReportExecutorProgressRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	226, // 227: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
-	194, // 228: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
-	253, // 229: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
-	195, // 230: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	257, // 231: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	194, // 232: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
-	256, // 233: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
-	195, // 234: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	257, // 235: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	194, // 236: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
-	260, // 237: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
-	195, // 238: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	264, // 239: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
-	194, // 240: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
-	263, // 241: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
-	195, // 242: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	267, // 243: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
-	267, // 244: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
-	268, // 245: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
-	270, // 246: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
-	194, // 247: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
-	269, // 248: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
-	195, // 249: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
-	269, // 250: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	269, // 251: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	277, // 252: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
-	269, // 253: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	269, // 254: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
-	286, // 255: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
-	288, // 256: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
-	383, // 257: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
-	287, // 258: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
-	196, // 259: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	196, // 260: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	196, // 261: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
-	196, // 262: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
-	302, // 263: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
-	301, // 264: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	301, // 265: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
-	382, // 266: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
-	314, // 267: kandev.plugin.v1.ExactReadPageInfo.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	208, // 268: kandev.plugin.v1.ExactWorkspaceObservation.workspace:type_name -> kandev.plugin.v1.Workspace
-	211, // 269: kandev.plugin.v1.ExactWorkflowObservation.workflow:type_name -> kandev.plugin.v1.Workflow
-	217, // 270: kandev.plugin.v1.ExactWorkflowStepObservation.step:type_name -> kandev.plugin.v1.WorkflowStep
-	196, // 271: kandev.plugin.v1.ExactTaskObservation.task:type_name -> kandev.plugin.v1.Task
-	256, // 272: kandev.plugin.v1.ExactSessionObservation.session:type_name -> kandev.plugin.v1.Session
-	269, // 273: kandev.plugin.v1.ExactInteractionObservation.interaction:type_name -> kandev.plugin.v1.Interaction
-	263, // 274: kandev.plugin.v1.ExactMessageObservation.message:type_name -> kandev.plugin.v1.Message
-	313, // 275: kandev.plugin.v1.ListWorkspacesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	316, // 276: kandev.plugin.v1.ListWorkspacesExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkspaceObservation
-	315, // 277: kandev.plugin.v1.ListWorkspacesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 278: kandev.plugin.v1.ListWorkflowsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	317, // 279: kandev.plugin.v1.ListWorkflowsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowObservation
-	315, // 280: kandev.plugin.v1.ListWorkflowsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 281: kandev.plugin.v1.ListWorkflowStepsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	318, // 282: kandev.plugin.v1.ListWorkflowStepsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowStepObservation
-	315, // 283: kandev.plugin.v1.ListWorkflowStepsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	200, // 284: kandev.plugin.v1.ListTasksExactRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
-	313, // 285: kandev.plugin.v1.ListTasksExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	319, // 286: kandev.plugin.v1.ListTasksExactResponse.items:type_name -> kandev.plugin.v1.ExactTaskObservation
-	315, // 287: kandev.plugin.v1.ListTasksExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	319, // 288: kandev.plugin.v1.GetTaskExactResponse.item:type_name -> kandev.plugin.v1.ExactTaskObservation
-	314, // 289: kandev.plugin.v1.GetTaskExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	257, // 290: kandev.plugin.v1.ListSessionsExactRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
-	313, // 291: kandev.plugin.v1.ListSessionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	320, // 292: kandev.plugin.v1.ListSessionsExactResponse.items:type_name -> kandev.plugin.v1.ExactSessionObservation
-	315, // 293: kandev.plugin.v1.ListSessionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	270, // 294: kandev.plugin.v1.ListPendingInteractionsExactRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
-	313, // 295: kandev.plugin.v1.ListPendingInteractionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	321, // 296: kandev.plugin.v1.ListPendingInteractionsExactResponse.items:type_name -> kandev.plugin.v1.ExactInteractionObservation
-	315, // 297: kandev.plugin.v1.ListPendingInteractionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	321, // 298: kandev.plugin.v1.GetInteractionExactResponse.item:type_name -> kandev.plugin.v1.ExactInteractionObservation
-	314, // 299: kandev.plugin.v1.GetInteractionExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	264, // 300: kandev.plugin.v1.ListSanitizedMessagesExactRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
-	313, // 301: kandev.plugin.v1.ListSanitizedMessagesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	322, // 302: kandev.plugin.v1.ListSanitizedMessagesExactResponse.items:type_name -> kandev.plugin.v1.ExactMessageObservation
-	315, // 303: kandev.plugin.v1.ListSanitizedMessagesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 304: kandev.plugin.v1.ListTaskInboxExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	324, // 305: kandev.plugin.v1.ListTaskInboxExactResponse.items:type_name -> kandev.plugin.v1.TaskInboxItem
-	315, // 306: kandev.plugin.v1.ListTaskInboxExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	325, // 307: kandev.plugin.v1.GetTaskDirectiveExactResponse.item:type_name -> kandev.plugin.v1.TaskDirective
-	314, // 308: kandev.plugin.v1.GetTaskDirectiveExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	313, // 309: kandev.plugin.v1.ListTaskDirectivesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	325, // 310: kandev.plugin.v1.ListTaskDirectivesExactResponse.items:type_name -> kandev.plugin.v1.TaskDirective
-	315, // 311: kandev.plugin.v1.ListTaskDirectivesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 312: kandev.plugin.v1.GetTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	323, // 313: kandev.plugin.v1.GetTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
-	315, // 314: kandev.plugin.v1.GetTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 315: kandev.plugin.v1.ListTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	323, // 316: kandev.plugin.v1.ListTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
-	315, // 317: kandev.plugin.v1.ListTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 318: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	326, // 319: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.items:type_name -> kandev.plugin.v1.PendingTaskTransition
-	315, // 320: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 321: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	327, // 322: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.items:type_name -> kandev.plugin.v1.ChangeRequestEvidence
-	315, // 323: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	313, // 324: kandev.plugin.v1.ListTaskUsageExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	328, // 325: kandev.plugin.v1.ListTaskUsageExactResponse.items:type_name -> kandev.plugin.v1.TaskUsageObservation
-	315, // 326: kandev.plugin.v1.ListTaskUsageExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	364, // 327: kandev.plugin.v1.AutomationDefinitionObservation.triggers:type_name -> kandev.plugin.v1.AutomationTriggerObservation
-	363, // 328: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationDefinitionFilter
-	313, // 329: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	365, // 330: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.items:type_name -> kandev.plugin.v1.AutomationDefinitionObservation
-	315, // 331: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	368, // 332: kandev.plugin.v1.ListAutomationRunsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationRunFilter
-	313, // 333: kandev.plugin.v1.ListAutomationRunsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
-	369, // 334: kandev.plugin.v1.ListAutomationRunsExactResponse.items:type_name -> kandev.plugin.v1.AutomationRunObservation
-	315, // 335: kandev.plugin.v1.ListAutomationRunsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
-	369, // 336: kandev.plugin.v1.GetAutomationRunExactResponse.item:type_name -> kandev.plugin.v1.AutomationRunObservation
-	314, // 337: kandev.plugin.v1.GetAutomationRunExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
-	154, // 338: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
-	159, // 339: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
-	309, // 340: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
-	311, // 341: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
-	161, // 342: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
-	164, // 343: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
-	167, // 344: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
-	169, // 345: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
-	171, // 346: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
-	156, // 347: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
-	232, // 348: kandev.plugin.v1.Plugin.ValidateExecutorProfile:input_type -> kandev.plugin.v1.ValidateExecutorProfileRequest
-	234, // 349: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:input_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
-	236, // 350: kandev.plugin.v1.Plugin.RecoverExecutorOperation:input_type -> kandev.plugin.v1.RecoverExecutorOperationRequest
-	238, // 351: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:input_type -> kandev.plugin.v1.AttachExecutorEnvironmentRequest
-	240, // 352: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:input_type -> kandev.plugin.v1.InspectExecutorEnvironmentRequest
-	242, // 353: kandev.plugin.v1.Plugin.ResolveExecutorConnection:input_type -> kandev.plugin.v1.ResolveExecutorConnectionRequest
-	245, // 354: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:input_type -> kandev.plugin.v1.DestroyExecutorEnvironmentRequest
-	19,  // 355: kandev.plugin.v1.Plugin.DescribeSandboxProvider:input_type -> kandev.plugin.v1.DescribeSandboxProviderRequest
-	25,  // 356: kandev.plugin.v1.Plugin.CompileSandboxPolicy:input_type -> kandev.plugin.v1.CompileSandboxPolicyRequest
-	28,  // 357: kandev.plugin.v1.Plugin.NormalizeSandboxApproval:input_type -> kandev.plugin.v1.NormalizeSandboxApprovalRequest
-	32,  // 358: kandev.plugin.v1.Plugin.NormalizeSandboxStatus:input_type -> kandev.plugin.v1.NormalizeSandboxStatusRequest
-	36,  // 359: kandev.plugin.v1.Plugin.ReadSandboxReport:input_type -> kandev.plugin.v1.ReadSandboxReportRequest
-	38,  // 360: kandev.plugin.v1.Plugin.ProposeSandboxRevision:input_type -> kandev.plugin.v1.ProposeSandboxRevisionRequest
-	42,  // 361: kandev.plugin.v1.Host.GetCapabilityContext:input_type -> kandev.plugin.v1.GetCapabilityContextRequest
-	46,  // 362: kandev.plugin.v1.Host.UpdateTaskExact:input_type -> kandev.plugin.v1.UpdateTaskExactRequest
-	48,  // 363: kandev.plugin.v1.Host.CreateTaskExact:input_type -> kandev.plugin.v1.CreateTaskExactRequest
-	50,  // 364: kandev.plugin.v1.Host.SetTaskLabelsExact:input_type -> kandev.plugin.v1.SetTaskLabelsExactRequest
-	52,  // 365: kandev.plugin.v1.Host.AssignTaskExact:input_type -> kandev.plugin.v1.AssignTaskExactRequest
-	54,  // 366: kandev.plugin.v1.Host.MoveTaskExact:input_type -> kandev.plugin.v1.MoveTaskExactRequest
-	56,  // 367: kandev.plugin.v1.Host.ArchiveTaskExact:input_type -> kandev.plugin.v1.ArchiveTaskExactRequest
-	58,  // 368: kandev.plugin.v1.Host.AddTaskRelationExact:input_type -> kandev.plugin.v1.AddTaskRelationExactRequest
-	60,  // 369: kandev.plugin.v1.Host.RemoveTaskRelationExact:input_type -> kandev.plugin.v1.RemoveTaskRelationExactRequest
-	62,  // 370: kandev.plugin.v1.Host.SendTaskMessageExact:input_type -> kandev.plugin.v1.SendTaskMessageExactRequest
-	100, // 371: kandev.plugin.v1.Host.IssueTaskDirectiveExact:input_type -> kandev.plugin.v1.IssueTaskDirectiveExactRequest
-	102, // 372: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:input_type -> kandev.plugin.v1.ResolveTaskDirectiveExactRequest
-	65,  // 373: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:input_type -> kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
-	66,  // 374: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:input_type -> kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
-	67,  // 375: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:input_type -> kandev.plugin.v1.TransferTaskManagementClaimExactRequest
-	75,  // 376: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:input_type -> kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
-	76,  // 377: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:input_type -> kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
-	78,  // 378: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:input_type -> kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
-	94,  // 379: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:input_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
-	97,  // 380: kandev.plugin.v1.Host.CommentSourceIssueExact:input_type -> kandev.plugin.v1.CommentSourceIssueExactRequest
-	98,  // 381: kandev.plugin.v1.Host.TransitionSourceIssueExact:input_type -> kandev.plugin.v1.TransitionSourceIssueExactRequest
-	106, // 382: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:input_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
-	108, // 383: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:input_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
-	110, // 384: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:input_type -> kandev.plugin.v1.ListManagedAgentConversationsExactRequest
-	112, // 385: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:input_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
-	114, // 386: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:input_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
-	117, // 387: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:input_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
-	119, // 388: kandev.plugin.v1.Host.GetManagedAgentInputExact:input_type -> kandev.plugin.v1.GetManagedAgentInputExactRequest
-	121, // 389: kandev.plugin.v1.Host.ListManagedAgentInputsExact:input_type -> kandev.plugin.v1.ListManagedAgentInputsExactRequest
-	123, // 390: kandev.plugin.v1.Host.CancelManagedAgentInputExact:input_type -> kandev.plugin.v1.CancelManagedAgentInputExactRequest
-	125, // 391: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:input_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
-	129, // 392: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:input_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
-	131, // 393: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
-	132, // 394: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
-	133, // 395: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:input_type -> kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
-	134, // 396: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:input_type -> kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
-	136, // 397: kandev.plugin.v1.Host.EnsureTaskRunExact:input_type -> kandev.plugin.v1.EnsureTaskRunExactRequest
-	138, // 398: kandev.plugin.v1.Host.StopTaskRunExact:input_type -> kandev.plugin.v1.StopTaskRunExactRequest
-	140, // 399: kandev.plugin.v1.Host.RecoverSessionExact:input_type -> kandev.plugin.v1.RecoverSessionExactRequest
-	142, // 400: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:input_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
-	145, // 401: kandev.plugin.v1.Host.GetSessionModeContextExact:input_type -> kandev.plugin.v1.GetSessionModeContextExactRequest
-	147, // 402: kandev.plugin.v1.Host.SetSessionModeExact:input_type -> kandev.plugin.v1.SetSessionModeExactRequest
-	150, // 403: kandev.plugin.v1.Host.RespondPermissionExact:input_type -> kandev.plugin.v1.RespondPermissionExactRequest
-	152, // 404: kandev.plugin.v1.Host.AnswerClarificationExact:input_type -> kandev.plugin.v1.AnswerClarificationExactRequest
-	329, // 405: kandev.plugin.v1.Host.ListWorkspacesExact:input_type -> kandev.plugin.v1.ListWorkspacesExactRequest
-	331, // 406: kandev.plugin.v1.Host.ListWorkflowsExact:input_type -> kandev.plugin.v1.ListWorkflowsExactRequest
-	333, // 407: kandev.plugin.v1.Host.ListWorkflowStepsExact:input_type -> kandev.plugin.v1.ListWorkflowStepsExactRequest
-	335, // 408: kandev.plugin.v1.Host.ListTasksExact:input_type -> kandev.plugin.v1.ListTasksExactRequest
-	337, // 409: kandev.plugin.v1.Host.GetTaskExact:input_type -> kandev.plugin.v1.GetTaskExactRequest
-	339, // 410: kandev.plugin.v1.Host.ListSessionsExact:input_type -> kandev.plugin.v1.ListSessionsExactRequest
-	341, // 411: kandev.plugin.v1.Host.ListPendingInteractionsExact:input_type -> kandev.plugin.v1.ListPendingInteractionsExactRequest
-	343, // 412: kandev.plugin.v1.Host.GetInteractionExact:input_type -> kandev.plugin.v1.GetInteractionExactRequest
-	345, // 413: kandev.plugin.v1.Host.ListSanitizedMessagesExact:input_type -> kandev.plugin.v1.ListSanitizedMessagesExactRequest
-	347, // 414: kandev.plugin.v1.Host.ListTaskInboxExact:input_type -> kandev.plugin.v1.ListTaskInboxExactRequest
-	349, // 415: kandev.plugin.v1.Host.GetTaskDirectiveExact:input_type -> kandev.plugin.v1.GetTaskDirectiveExactRequest
-	351, // 416: kandev.plugin.v1.Host.ListTaskDirectivesExact:input_type -> kandev.plugin.v1.ListTaskDirectivesExactRequest
-	353, // 417: kandev.plugin.v1.Host.GetTaskRelationsExact:input_type -> kandev.plugin.v1.GetTaskRelationsExactRequest
-	355, // 418: kandev.plugin.v1.Host.ListTaskRelationsExact:input_type -> kandev.plugin.v1.ListTaskRelationsExactRequest
-	357, // 419: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:input_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
-	359, // 420: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:input_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
-	361, // 421: kandev.plugin.v1.Host.ListTaskUsageExact:input_type -> kandev.plugin.v1.ListTaskUsageExactRequest
-	366, // 422: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:input_type -> kandev.plugin.v1.ListAutomationDefinitionsExactRequest
-	370, // 423: kandev.plugin.v1.Host.ListAutomationRunsExact:input_type -> kandev.plugin.v1.ListAutomationRunsExactRequest
-	372, // 424: kandev.plugin.v1.Host.GetAutomationRunExact:input_type -> kandev.plugin.v1.GetAutomationRunExactRequest
-	173, // 425: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
-	175, // 426: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
-	177, // 427: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
-	179, // 428: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
-	190, // 429: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
-	192, // 430: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
-	184, // 431: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
-	186, // 432: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
-	188, // 433: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
-	182, // 434: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
-	201, // 435: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
-	203, // 436: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
-	206, // 437: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
-	209, // 438: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
-	212, // 439: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
-	218, // 440: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
-	215, // 441: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
-	221, // 442: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
-	224, // 443: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
-	247, // 444: kandev.plugin.v1.Host.CheckpointExecutorResource:input_type -> kandev.plugin.v1.CheckpointExecutorResourceRequest
-	249, // 445: kandev.plugin.v1.Host.ReportExecutorProgress:input_type -> kandev.plugin.v1.ReportExecutorProgressRequest
-	251, // 446: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:input_type -> kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
-	254, // 447: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
-	258, // 448: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
-	261, // 449: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
-	265, // 450: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
-	271, // 451: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
-	273, // 452: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
-	282, // 453: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
-	283, // 454: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
-	285, // 455: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
-	290, // 456: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
-	292, // 457: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
-	294, // 458: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
-	296, // 459: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
-	298, // 460: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
-	303, // 461: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
-	305, // 462: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
-	307, // 463: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
-	275, // 464: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
-	278, // 465: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
-	280, // 466: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
-	155, // 467: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
-	160, // 468: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
-	310, // 469: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
-	312, // 470: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
-	163, // 471: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
-	165, // 472: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
-	168, // 473: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
-	170, // 474: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
-	172, // 475: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
-	158, // 476: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
-	233, // 477: kandev.plugin.v1.Plugin.ValidateExecutorProfile:output_type -> kandev.plugin.v1.ValidateExecutorProfileResponse
-	235, // 478: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:output_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
-	237, // 479: kandev.plugin.v1.Plugin.RecoverExecutorOperation:output_type -> kandev.plugin.v1.RecoverExecutorOperationResponse
-	239, // 480: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:output_type -> kandev.plugin.v1.AttachExecutorEnvironmentResponse
-	241, // 481: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:output_type -> kandev.plugin.v1.InspectExecutorEnvironmentResponse
-	244, // 482: kandev.plugin.v1.Plugin.ResolveExecutorConnection:output_type -> kandev.plugin.v1.ResolveExecutorConnectionResponse
-	246, // 483: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:output_type -> kandev.plugin.v1.DestroyExecutorEnvironmentResponse
-	24,  // 484: kandev.plugin.v1.Plugin.DescribeSandboxProvider:output_type -> kandev.plugin.v1.DescribeSandboxProviderResponse
-	26,  // 485: kandev.plugin.v1.Plugin.CompileSandboxPolicy:output_type -> kandev.plugin.v1.CompileSandboxPolicyResponse
-	29,  // 486: kandev.plugin.v1.Plugin.NormalizeSandboxApproval:output_type -> kandev.plugin.v1.NormalizeSandboxApprovalResponse
-	34,  // 487: kandev.plugin.v1.Plugin.NormalizeSandboxStatus:output_type -> kandev.plugin.v1.NormalizeSandboxStatusResponse
-	37,  // 488: kandev.plugin.v1.Plugin.ReadSandboxReport:output_type -> kandev.plugin.v1.ReadSandboxReportResponse
-	39,  // 489: kandev.plugin.v1.Plugin.ProposeSandboxRevision:output_type -> kandev.plugin.v1.ProposeSandboxRevisionResponse
-	43,  // 490: kandev.plugin.v1.Host.GetCapabilityContext:output_type -> kandev.plugin.v1.GetCapabilityContextResponse
-	47,  // 491: kandev.plugin.v1.Host.UpdateTaskExact:output_type -> kandev.plugin.v1.UpdateTaskExactResponse
-	49,  // 492: kandev.plugin.v1.Host.CreateTaskExact:output_type -> kandev.plugin.v1.CreateTaskExactResponse
-	51,  // 493: kandev.plugin.v1.Host.SetTaskLabelsExact:output_type -> kandev.plugin.v1.SetTaskLabelsExactResponse
-	53,  // 494: kandev.plugin.v1.Host.AssignTaskExact:output_type -> kandev.plugin.v1.AssignTaskExactResponse
-	55,  // 495: kandev.plugin.v1.Host.MoveTaskExact:output_type -> kandev.plugin.v1.MoveTaskExactResponse
-	57,  // 496: kandev.plugin.v1.Host.ArchiveTaskExact:output_type -> kandev.plugin.v1.ArchiveTaskExactResponse
-	59,  // 497: kandev.plugin.v1.Host.AddTaskRelationExact:output_type -> kandev.plugin.v1.AddTaskRelationExactResponse
-	61,  // 498: kandev.plugin.v1.Host.RemoveTaskRelationExact:output_type -> kandev.plugin.v1.RemoveTaskRelationExactResponse
-	63,  // 499: kandev.plugin.v1.Host.SendTaskMessageExact:output_type -> kandev.plugin.v1.SendTaskMessageExactResponse
-	101, // 500: kandev.plugin.v1.Host.IssueTaskDirectiveExact:output_type -> kandev.plugin.v1.IssueTaskDirectiveExactResponse
-	103, // 501: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:output_type -> kandev.plugin.v1.ResolveTaskDirectiveExactResponse
-	68,  // 502: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	68,  // 503: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	68,  // 504: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
-	77,  // 505: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
-	77,  // 506: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
-	91,  // 507: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:output_type -> kandev.plugin.v1.WorkspaceAdministrationExactResponse
-	95,  // 508: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:output_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
-	99,  // 509: kandev.plugin.v1.Host.CommentSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
-	99,  // 510: kandev.plugin.v1.Host.TransitionSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
-	107, // 511: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:output_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
-	109, // 512: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:output_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
-	111, // 513: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:output_type -> kandev.plugin.v1.ListManagedAgentConversationsExactResponse
-	113, // 514: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:output_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
-	115, // 515: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:output_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
-	118, // 516: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:output_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
-	120, // 517: kandev.plugin.v1.Host.GetManagedAgentInputExact:output_type -> kandev.plugin.v1.GetManagedAgentInputExactResponse
-	122, // 518: kandev.plugin.v1.Host.ListManagedAgentInputsExact:output_type -> kandev.plugin.v1.ListManagedAgentInputsExactResponse
-	124, // 519: kandev.plugin.v1.Host.CancelManagedAgentInputExact:output_type -> kandev.plugin.v1.CancelManagedAgentInputExactResponse
-	126, // 520: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:output_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
-	130, // 521: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:output_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
-	135, // 522: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	135, // 523: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	135, // 524: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
-	45,  // 525: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:output_type -> kandev.plugin.v1.HostCommandResult
-	137, // 526: kandev.plugin.v1.Host.EnsureTaskRunExact:output_type -> kandev.plugin.v1.EnsureTaskRunExactResponse
-	139, // 527: kandev.plugin.v1.Host.StopTaskRunExact:output_type -> kandev.plugin.v1.StopTaskRunExactResponse
-	141, // 528: kandev.plugin.v1.Host.RecoverSessionExact:output_type -> kandev.plugin.v1.RecoverSessionExactResponse
-	143, // 529: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:output_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
-	146, // 530: kandev.plugin.v1.Host.GetSessionModeContextExact:output_type -> kandev.plugin.v1.GetSessionModeContextExactResponse
-	148, // 531: kandev.plugin.v1.Host.SetSessionModeExact:output_type -> kandev.plugin.v1.SetSessionModeExactResponse
-	151, // 532: kandev.plugin.v1.Host.RespondPermissionExact:output_type -> kandev.plugin.v1.RespondPermissionExactResponse
-	153, // 533: kandev.plugin.v1.Host.AnswerClarificationExact:output_type -> kandev.plugin.v1.AnswerClarificationExactResponse
-	330, // 534: kandev.plugin.v1.Host.ListWorkspacesExact:output_type -> kandev.plugin.v1.ListWorkspacesExactResponse
-	332, // 535: kandev.plugin.v1.Host.ListWorkflowsExact:output_type -> kandev.plugin.v1.ListWorkflowsExactResponse
-	334, // 536: kandev.plugin.v1.Host.ListWorkflowStepsExact:output_type -> kandev.plugin.v1.ListWorkflowStepsExactResponse
-	336, // 537: kandev.plugin.v1.Host.ListTasksExact:output_type -> kandev.plugin.v1.ListTasksExactResponse
-	338, // 538: kandev.plugin.v1.Host.GetTaskExact:output_type -> kandev.plugin.v1.GetTaskExactResponse
-	340, // 539: kandev.plugin.v1.Host.ListSessionsExact:output_type -> kandev.plugin.v1.ListSessionsExactResponse
-	342, // 540: kandev.plugin.v1.Host.ListPendingInteractionsExact:output_type -> kandev.plugin.v1.ListPendingInteractionsExactResponse
-	344, // 541: kandev.plugin.v1.Host.GetInteractionExact:output_type -> kandev.plugin.v1.GetInteractionExactResponse
-	346, // 542: kandev.plugin.v1.Host.ListSanitizedMessagesExact:output_type -> kandev.plugin.v1.ListSanitizedMessagesExactResponse
-	348, // 543: kandev.plugin.v1.Host.ListTaskInboxExact:output_type -> kandev.plugin.v1.ListTaskInboxExactResponse
-	350, // 544: kandev.plugin.v1.Host.GetTaskDirectiveExact:output_type -> kandev.plugin.v1.GetTaskDirectiveExactResponse
-	352, // 545: kandev.plugin.v1.Host.ListTaskDirectivesExact:output_type -> kandev.plugin.v1.ListTaskDirectivesExactResponse
-	354, // 546: kandev.plugin.v1.Host.GetTaskRelationsExact:output_type -> kandev.plugin.v1.GetTaskRelationsExactResponse
-	356, // 547: kandev.plugin.v1.Host.ListTaskRelationsExact:output_type -> kandev.plugin.v1.ListTaskRelationsExactResponse
-	358, // 548: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:output_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
-	360, // 549: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:output_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
-	362, // 550: kandev.plugin.v1.Host.ListTaskUsageExact:output_type -> kandev.plugin.v1.ListTaskUsageExactResponse
-	367, // 551: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:output_type -> kandev.plugin.v1.ListAutomationDefinitionsExactResponse
-	371, // 552: kandev.plugin.v1.Host.ListAutomationRunsExact:output_type -> kandev.plugin.v1.ListAutomationRunsExactResponse
-	373, // 553: kandev.plugin.v1.Host.GetAutomationRunExact:output_type -> kandev.plugin.v1.GetAutomationRunExactResponse
-	174, // 554: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
-	176, // 555: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
-	178, // 556: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
-	180, // 557: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
-	191, // 558: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
-	193, // 559: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
-	185, // 560: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
-	187, // 561: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
-	189, // 562: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
-	183, // 563: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
-	202, // 564: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
-	204, // 565: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
-	207, // 566: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
-	210, // 567: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
-	213, // 568: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
-	219, // 569: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
-	216, // 570: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
-	222, // 571: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
-	225, // 572: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
-	248, // 573: kandev.plugin.v1.Host.CheckpointExecutorResource:output_type -> kandev.plugin.v1.CheckpointExecutorResourceResponse
-	250, // 574: kandev.plugin.v1.Host.ReportExecutorProgress:output_type -> kandev.plugin.v1.ReportExecutorProgressResponse
-	252, // 575: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:output_type -> kandev.plugin.v1.ExecutorRuntimeArtifactChunk
-	255, // 576: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
-	259, // 577: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
-	262, // 578: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
-	266, // 579: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
-	272, // 580: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
-	274, // 581: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
-	284, // 582: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	284, // 583: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
-	289, // 584: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
-	291, // 585: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
-	293, // 586: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
-	295, // 587: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
-	297, // 588: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
-	299, // 589: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
-	304, // 590: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
-	306, // 591: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
-	308, // 592: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
-	276, // 593: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
-	279, // 594: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
-	281, // 595: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
-	467, // [467:596] is the sub-list for method output_type
-	338, // [338:467] is the sub-list for method input_type
-	338, // [338:338] is the sub-list for extension type_name
-	338, // [338:338] is the sub-list for extension extendee
-	0,   // [0:338] is the sub-list for field type_name
+	383, // 2: kandev.plugin.v1.SandboxPolicySnapshot.policy_v2:type_name -> kandev.plugin.v1.SandboxPolicyV2
+	8,   // 3: kandev.plugin.v1.SandboxPolicySnapshot.grants:type_name -> kandev.plugin.v1.SandboxGrants
+	9,   // 4: kandev.plugin.v1.SandboxPolicySnapshot.sources:type_name -> kandev.plugin.v1.SandboxPolicySource
+	16,  // 5: kandev.plugin.v1.SandboxArtifact.bindings:type_name -> kandev.plugin.v1.SandboxArtifactBinding
+	383, // 6: kandev.plugin.v1.SandboxCompiledPolicy.effective_policy_v2:type_name -> kandev.plugin.v1.SandboxPolicyV2
+	14,  // 7: kandev.plugin.v1.SandboxCompiledPolicy.prefix:type_name -> kandev.plugin.v1.SandboxArgument
+	15,  // 8: kandev.plugin.v1.SandboxCompiledPolicy.artifacts:type_name -> kandev.plugin.v1.SandboxArtifact
+	8,   // 9: kandev.plugin.v1.SandboxCompiledPolicy.effective_grants:type_name -> kandev.plugin.v1.SandboxGrants
+	17,  // 10: kandev.plugin.v1.SandboxCompiledPolicy.constraints:type_name -> kandev.plugin.v1.SandboxOverrideConstraints
+	4,   // 11: kandev.plugin.v1.DescribeSandboxProviderRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	11,  // 12: kandev.plugin.v1.DescribeSandboxProviderRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
+	384, // 13: kandev.plugin.v1.SandboxProviderDescription.capabilities_v2:type_name -> kandev.plugin.v1.SandboxCapabilitiesV2
+	20,  // 14: kandev.plugin.v1.SandboxProviderDescription.runtime_artifact:type_name -> kandev.plugin.v1.SandboxRuntimeArtifact
+	21,  // 15: kandev.plugin.v1.SandboxProviderDescription.approval_wire:type_name -> kandev.plugin.v1.SandboxApprovalWire
+	23,  // 16: kandev.plugin.v1.SandboxProviderDescription.runtime_sources:type_name -> kandev.plugin.v1.SandboxRuntimeSource
+	5,   // 17: kandev.plugin.v1.DescribeSandboxProviderResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	22,  // 18: kandev.plugin.v1.DescribeSandboxProviderResponse.description:type_name -> kandev.plugin.v1.SandboxProviderDescription
+	4,   // 19: kandev.plugin.v1.CompileSandboxPolicyRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	10,  // 20: kandev.plugin.v1.CompileSandboxPolicyRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
+	11,  // 21: kandev.plugin.v1.CompileSandboxPolicyRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
+	12,  // 22: kandev.plugin.v1.CompileSandboxPolicyRequest.references:type_name -> kandev.plugin.v1.SandboxRuntimeReference
+	13,  // 23: kandev.plugin.v1.CompileSandboxPolicyRequest.endpoints:type_name -> kandev.plugin.v1.SandboxEndpoint
+	5,   // 24: kandev.plugin.v1.CompileSandboxPolicyResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	18,  // 25: kandev.plugin.v1.CompileSandboxPolicyResponse.compiled:type_name -> kandev.plugin.v1.SandboxCompiledPolicy
+	385, // 26: kandev.plugin.v1.NormalizeSandboxApprovalRequest.service_binding_v2:type_name -> kandev.plugin.v1.SandboxServiceBindingV2
+	4,   // 27: kandev.plugin.v1.NormalizeSandboxApprovalRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	10,  // 28: kandev.plugin.v1.NormalizeSandboxApprovalRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
+	386, // 29: kandev.plugin.v1.NormalizeSandboxApprovalResponse.approval_v2:type_name -> kandev.plugin.v1.SandboxApprovalV2
+	5,   // 30: kandev.plugin.v1.NormalizeSandboxApprovalResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	27,  // 31: kandev.plugin.v1.NormalizeSandboxApprovalResponse.operation:type_name -> kandev.plugin.v1.SandboxApprovalOperation
+	30,  // 32: kandev.plugin.v1.SandboxStatusEvidence.process:type_name -> kandev.plugin.v1.SandboxProcessIdentity
+	4,   // 33: kandev.plugin.v1.NormalizeSandboxStatusRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	10,  // 34: kandev.plugin.v1.NormalizeSandboxStatusRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
+	30,  // 35: kandev.plugin.v1.NormalizeSandboxStatusRequest.process:type_name -> kandev.plugin.v1.SandboxProcessIdentity
+	387, // 36: kandev.plugin.v1.NormalizeSandboxStatusResponse.observations_v2:type_name -> kandev.plugin.v1.SandboxRuntimeObservationV2
+	5,   // 37: kandev.plugin.v1.NormalizeSandboxStatusResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	31,  // 38: kandev.plugin.v1.NormalizeSandboxStatusResponse.evidence:type_name -> kandev.plugin.v1.SandboxStatusEvidence
+	33,  // 39: kandev.plugin.v1.NormalizeSandboxStatusResponse.identity:type_name -> kandev.plugin.v1.SandboxRuntimeIdentity
+	388, // 40: kandev.plugin.v1.ReadSandboxReportRequest.chunk_v2:type_name -> kandev.plugin.v1.SandboxAuditChunkV2
+	389, // 41: kandev.plugin.v1.ReadSandboxReportRequest.trust_v2:type_name -> kandev.plugin.v1.SandboxAuditTrustV2
+	4,   // 42: kandev.plugin.v1.ReadSandboxReportRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	10,  // 43: kandev.plugin.v1.ReadSandboxReportRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
+	390, // 44: kandev.plugin.v1.ReadSandboxReportResponse.report_v2:type_name -> kandev.plugin.v1.SandboxReportV2
+	5,   // 45: kandev.plugin.v1.ReadSandboxReportResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	35,  // 46: kandev.plugin.v1.ReadSandboxReportResponse.records:type_name -> kandev.plugin.v1.SandboxDenialRecord
+	391, // 47: kandev.plugin.v1.ProposeSandboxRevisionRequest.selected_events_v2:type_name -> kandev.plugin.v1.SandboxAuditEventV2
+	4,   // 48: kandev.plugin.v1.ProposeSandboxRevisionRequest.context:type_name -> kandev.plugin.v1.SandboxRequestContext
+	10,  // 49: kandev.plugin.v1.ProposeSandboxRevisionRequest.policy:type_name -> kandev.plugin.v1.SandboxPolicySnapshot
+	35,  // 50: kandev.plugin.v1.ProposeSandboxRevisionRequest.selected_records:type_name -> kandev.plugin.v1.SandboxDenialRecord
+	11,  // 51: kandev.plugin.v1.ProposeSandboxRevisionRequest.runtime:type_name -> kandev.plugin.v1.SandboxRuntimeFacts
+	12,  // 52: kandev.plugin.v1.ProposeSandboxRevisionRequest.references:type_name -> kandev.plugin.v1.SandboxRuntimeReference
+	13,  // 53: kandev.plugin.v1.ProposeSandboxRevisionRequest.endpoints:type_name -> kandev.plugin.v1.SandboxEndpoint
+	392, // 54: kandev.plugin.v1.ProposeSandboxRevisionResponse.additions_v2:type_name -> kandev.plugin.v1.SandboxRevisionAdditionsV2
+	5,   // 55: kandev.plugin.v1.ProposeSandboxRevisionResponse.context:type_name -> kandev.plugin.v1.SandboxResponseContext
+	8,   // 56: kandev.plugin.v1.ProposeSandboxRevisionResponse.added_grants:type_name -> kandev.plugin.v1.SandboxGrants
+	18,  // 57: kandev.plugin.v1.ProposeSandboxRevisionResponse.compiled:type_name -> kandev.plugin.v1.SandboxCompiledPolicy
+	40,  // 58: kandev.plugin.v1.HostCapabilityContext.operations:type_name -> kandev.plugin.v1.HostOperationSupport
+	374, // 59: kandev.plugin.v1.HostCapabilityContext.limits:type_name -> kandev.plugin.v1.HostCapabilityContext.LimitsEntry
+	41,  // 60: kandev.plugin.v1.GetCapabilityContextResponse.context:type_name -> kandev.plugin.v1.HostCapabilityContext
+	0,   // 61: kandev.plugin.v1.HostCommandReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	0,   // 62: kandev.plugin.v1.HostCommandResult.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	44,  // 63: kandev.plugin.v1.HostCommandResult.receipt:type_name -> kandev.plugin.v1.HostCommandReceipt
+	45,  // 64: kandev.plugin.v1.UpdateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 65: kandev.plugin.v1.UpdateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	285, // 66: kandev.plugin.v1.CreateTaskExactRequest.task:type_name -> kandev.plugin.v1.CreateTaskRequest
+	45,  // 67: kandev.plugin.v1.CreateTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 68: kandev.plugin.v1.CreateTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	45,  // 69: kandev.plugin.v1.SetTaskLabelsExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 70: kandev.plugin.v1.SetTaskLabelsExactResponse.task:type_name -> kandev.plugin.v1.Task
+	45,  // 71: kandev.plugin.v1.AssignTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 72: kandev.plugin.v1.AssignTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	45,  // 73: kandev.plugin.v1.MoveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 74: kandev.plugin.v1.MoveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	45,  // 75: kandev.plugin.v1.ArchiveTaskExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	196, // 76: kandev.plugin.v1.ArchiveTaskExactResponse.task:type_name -> kandev.plugin.v1.Task
+	45,  // 77: kandev.plugin.v1.AddTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 78: kandev.plugin.v1.RemoveTaskRelationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 79: kandev.plugin.v1.SendTaskMessageExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 80: kandev.plugin.v1.TaskManagementClaimExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	64,  // 81: kandev.plugin.v1.TaskManagementClaimExactResponse.claim:type_name -> kandev.plugin.v1.TaskManagementClaim
+	69,  // 82: kandev.plugin.v1.TaskCompletionEvidence.subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	69,  // 83: kandev.plugin.v1.TaskCompletionCriterion.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	70,  // 84: kandev.plugin.v1.TaskCompletionCriterion.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
+	69,  // 85: kandev.plugin.v1.TaskCompletionCriterionInput.evidence_subject:type_name -> kandev.plugin.v1.TaskCompletionEvidenceSubject
+	71,  // 86: kandev.plugin.v1.TaskCompletionGateSnapshot.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterion
+	73,  // 87: kandev.plugin.v1.TaskCompletionGateSnapshot.blockers:type_name -> kandev.plugin.v1.TaskCompletionBlocker
+	72,  // 88: kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest.criteria:type_name -> kandev.plugin.v1.TaskCompletionCriterionInput
+	70,  // 89: kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest.evidence:type_name -> kandev.plugin.v1.TaskCompletionEvidence
+	45,  // 90: kandev.plugin.v1.TaskCompletionGateExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	74,  // 91: kandev.plugin.v1.TaskCompletionGateExactResponse.snapshot:type_name -> kandev.plugin.v1.TaskCompletionGateSnapshot
+	79,  // 92: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workspace_defaults:type_name -> kandev.plugin.v1.WorkspaceDefaultsUpdateExact
+	81,  // 93: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowCreateExact
+	82,  // 94: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowUpdateExact
+	83,  // 95: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowReorderExact
+	86,  // 96: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_create:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepCreateExact
+	87,  // 97: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_update:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact
+	88,  // 98: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.workflow_step_reorder:type_name -> kandev.plugin.v1.WorkspaceWorkflowStepReorderExact
+	89,  // 99: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_register:type_name -> kandev.plugin.v1.WorkspaceRepositoryRegisterExact
+	90,  // 100: kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest.repository_update:type_name -> kandev.plugin.v1.WorkspaceRepositoryUpdateExact
+	80,  // 101: kandev.plugin.v1.WorkspaceWorkflowCreateExact.configuration:type_name -> kandev.plugin.v1.WorkspaceWorkflowConfig
+	84,  // 102: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_start_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
+	84,  // 103: kandev.plugin.v1.WorkflowStepConfiguration.on_turn_complete_actions:type_name -> kandev.plugin.v1.WorkflowTransitionActionConfig
+	85,  // 104: kandev.plugin.v1.WorkspaceWorkflowStepCreateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
+	85,  // 105: kandev.plugin.v1.WorkspaceWorkflowStepUpdateExact.configuration:type_name -> kandev.plugin.v1.WorkflowStepConfiguration
+	45,  // 106: kandev.plugin.v1.WorkspaceAdministrationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	92,  // 107: kandev.plugin.v1.ExactSourceIssueCapabilities.transitions:type_name -> kandev.plugin.v1.SourceIssueTransition
+	45,  // 108: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	93,  // 109: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.item:type_name -> kandev.plugin.v1.ExactSourceIssueCapabilities
+	314, // 110: kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	0,   // 111: kandev.plugin.v1.SourceIssueWritebackReceipt.status:type_name -> kandev.plugin.v1.HostCommandStatus
+	45,  // 112: kandev.plugin.v1.SourceIssueWritebackExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	96,  // 113: kandev.plugin.v1.SourceIssueWritebackExactResponse.receipt:type_name -> kandev.plugin.v1.SourceIssueWritebackReceipt
+	45,  // 114: kandev.plugin.v1.IssueTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	325, // 115: kandev.plugin.v1.IssueTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	45,  // 116: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	325, // 117: kandev.plugin.v1.ResolveTaskDirectiveExactResponse.directive:type_name -> kandev.plugin.v1.TaskDirective
+	105, // 118: kandev.plugin.v1.EnsureManagedAgentConversationExactRequest.spec:type_name -> kandev.plugin.v1.ManagedAgentConversationSpec
+	45,  // 119: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	104, // 120: kandev.plugin.v1.EnsureManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	104, // 121: kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	104, // 122: kandev.plugin.v1.ListManagedAgentConversationsExactResponse.conversations:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	45,  // 123: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	104, // 124: kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	45,  // 125: kandev.plugin.v1.DeleteManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	1,   // 126: kandev.plugin.v1.ManagedAgentInputReceipt.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	2,   // 127: kandev.plugin.v1.ManagedAgentInputReceipt.state:type_name -> kandev.plugin.v1.ManagedAgentInputState
+	1,   // 128: kandev.plugin.v1.EnqueueManagedAgentInputExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	45,  // 129: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	116, // 130: kandev.plugin.v1.EnqueueManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	116, // 131: kandev.plugin.v1.GetManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	116, // 132: kandev.plugin.v1.ListManagedAgentInputsExactResponse.inputs:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	45,  // 133: kandev.plugin.v1.CancelManagedAgentInputExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	116, // 134: kandev.plugin.v1.CancelManagedAgentInputExactResponse.input:type_name -> kandev.plugin.v1.ManagedAgentInputReceipt
+	1,   // 135: kandev.plugin.v1.DispatchManagedAgentConversationExactRequest.origin:type_name -> kandev.plugin.v1.ManagedAgentInputOrigin
+	45,  // 136: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	3,   // 137: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.dispatch_status:type_name -> kandev.plugin.v1.ManagedAgentDispatchStatus
+	104, // 138: kandev.plugin.v1.DispatchManagedAgentConversationExactResponse.conversation:type_name -> kandev.plugin.v1.ManagedAgentConversationDescriptor
+	127, // 139: kandev.plugin.v1.ManagedConversationSchedule.triggers:type_name -> kandev.plugin.v1.ManagedConversationScheduleTrigger
+	128, // 140: kandev.plugin.v1.ListManagedConversationSchedulesExactResponse.schedules:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	128, // 141: kandev.plugin.v1.CreateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	128, // 142: kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	45,  // 143: kandev.plugin.v1.ManagedConversationScheduleExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	128, // 144: kandev.plugin.v1.ManagedConversationScheduleExactResponse.schedule:type_name -> kandev.plugin.v1.ManagedConversationSchedule
+	45,  // 145: kandev.plugin.v1.EnsureTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 146: kandev.plugin.v1.StopTaskRunExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 147: kandev.plugin.v1.RecoverSessionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 148: kandev.plugin.v1.CancelPendingTaskTransitionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	144, // 149: kandev.plugin.v1.GetSessionModeContextExactResponse.available_modes:type_name -> kandev.plugin.v1.SessionModeOption
+	45,  // 150: kandev.plugin.v1.SetSessionModeExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	45,  // 151: kandev.plugin.v1.RespondPermissionExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	269, // 152: kandev.plugin.v1.RespondPermissionExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	277, // 153: kandev.plugin.v1.AnswerClarificationExactRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	45,  // 154: kandev.plugin.v1.AnswerClarificationExactResponse.result:type_name -> kandev.plugin.v1.HostCommandResult
+	269, // 155: kandev.plugin.v1.AnswerClarificationExactResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	393, // 156: kandev.plugin.v1.Event.payload:type_name -> google.protobuf.Struct
+	393, // 157: kandev.plugin.v1.AgentToolRequest.arguments:type_name -> google.protobuf.Struct
+	157, // 158: kandev.plugin.v1.AgentToolRequest.context:type_name -> kandev.plugin.v1.AgentToolContext
+	393, // 159: kandev.plugin.v1.AgentToolResponse.structured_content:type_name -> google.protobuf.Struct
+	375, // 160: kandev.plugin.v1.WebhookRequest.headers:type_name -> kandev.plugin.v1.WebhookRequest.HeadersEntry
+	376, // 161: kandev.plugin.v1.WebhookResponse.headers:type_name -> kandev.plugin.v1.WebhookResponse.HeadersEntry
+	162, // 162: kandev.plugin.v1.PluginActionRequest.context:type_name -> kandev.plugin.v1.VerifiedActionContext
+	377, // 163: kandev.plugin.v1.PluginActionResponse.headers:type_name -> kandev.plugin.v1.PluginActionResponse.HeadersEntry
+	166, // 164: kandev.plugin.v1.SearchEntityReferencesResponse.candidates:type_name -> kandev.plugin.v1.EntityReferenceCandidate
+	393, // 165: kandev.plugin.v1.EntityReferenceCandidate.attributes:type_name -> google.protobuf.Struct
+	393, // 166: kandev.plugin.v1.AuthorizeEntityReferenceRequest.reference:type_name -> google.protobuf.Struct
+	393, // 167: kandev.plugin.v1.GetStateResponse.value:type_name -> google.protobuf.Struct
+	393, // 168: kandev.plugin.v1.SetStateRequest.value:type_name -> google.protobuf.Struct
+	181, // 169: kandev.plugin.v1.ListStateResponse.entries:type_name -> kandev.plugin.v1.StateEntry
+	393, // 170: kandev.plugin.v1.StateEntry.value:type_name -> google.protobuf.Struct
+	393, // 171: kandev.plugin.v1.GetConfigResponse.config:type_name -> google.protobuf.Struct
+	393, // 172: kandev.plugin.v1.EmitEventRequest.payload:type_name -> google.protobuf.Struct
+	197, // 173: kandev.plugin.v1.Task.repositories:type_name -> kandev.plugin.v1.TaskRepository
+	393, // 174: kandev.plugin.v1.Task.metadata:type_name -> google.protobuf.Struct
+	198, // 175: kandev.plugin.v1.Task.pull_requests:type_name -> kandev.plugin.v1.TaskPullRequest
+	199, // 176: kandev.plugin.v1.Task.depends_on:type_name -> kandev.plugin.v1.TaskDependencyRef
+	199, // 177: kandev.plugin.v1.Task.blocks:type_name -> kandev.plugin.v1.TaskDependencyRef
+	200, // 178: kandev.plugin.v1.ListTasksRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	194, // 179: kandev.plugin.v1.ListTasksRequest.page:type_name -> kandev.plugin.v1.Page
+	196, // 180: kandev.plugin.v1.ListTasksResponse.tasks:type_name -> kandev.plugin.v1.Task
+	195, // 181: kandev.plugin.v1.ListTasksResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	196, // 182: kandev.plugin.v1.GetTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	194, // 183: kandev.plugin.v1.ListTaskStepTransitionsRequest.page:type_name -> kandev.plugin.v1.Page
+	205, // 184: kandev.plugin.v1.ListTaskStepTransitionsResponse.items:type_name -> kandev.plugin.v1.TaskStepTransition
+	195, // 185: kandev.plugin.v1.ListTaskStepTransitionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	194, // 186: kandev.plugin.v1.ListWorkspacesRequest.page:type_name -> kandev.plugin.v1.Page
+	208, // 187: kandev.plugin.v1.ListWorkspacesResponse.workspaces:type_name -> kandev.plugin.v1.Workspace
+	195, // 188: kandev.plugin.v1.ListWorkspacesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	194, // 189: kandev.plugin.v1.ListWorkflowsRequest.page:type_name -> kandev.plugin.v1.Page
+	211, // 190: kandev.plugin.v1.ListWorkflowsResponse.workflows:type_name -> kandev.plugin.v1.Workflow
+	195, // 191: kandev.plugin.v1.ListWorkflowsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	194, // 192: kandev.plugin.v1.ListWorkflowTransitionGroupsRequest.page:type_name -> kandev.plugin.v1.Page
+	214, // 193: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.items:type_name -> kandev.plugin.v1.WorkflowTransitionGroup
+	195, // 194: kandev.plugin.v1.ListWorkflowTransitionGroupsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	217, // 195: kandev.plugin.v1.ListWorkflowStepsResponse.steps:type_name -> kandev.plugin.v1.WorkflowStep
+	194, // 196: kandev.plugin.v1.ListAgentProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	220, // 197: kandev.plugin.v1.ListAgentProfilesResponse.profiles:type_name -> kandev.plugin.v1.AgentProfile
+	195, // 198: kandev.plugin.v1.ListAgentProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	194, // 199: kandev.plugin.v1.ListExecutorProfilesRequest.page:type_name -> kandev.plugin.v1.Page
+	223, // 200: kandev.plugin.v1.ListExecutorProfilesResponse.profiles:type_name -> kandev.plugin.v1.ExecutorProfile
+	195, // 201: kandev.plugin.v1.ListExecutorProfilesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	378, // 202: kandev.plugin.v1.ExecutorProfileSnapshot.config:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.ConfigEntry
+	379, // 203: kandev.plugin.v1.ExecutorProfileSnapshot.secret_values:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot.SecretValuesEntry
+	228, // 204: kandev.plugin.v1.ExecutorProviderError.fields:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	230, // 205: kandev.plugin.v1.ExecutorResourceDescriptor.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	226, // 206: kandev.plugin.v1.ValidateExecutorProfileRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	227, // 207: kandev.plugin.v1.ValidateExecutorProfileRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	228, // 208: kandev.plugin.v1.ValidateExecutorProfileResponse.field_errors:type_name -> kandev.plugin.v1.ExecutorProviderFieldError
+	230, // 209: kandev.plugin.v1.ValidateExecutorProfileResponse.capabilities:type_name -> kandev.plugin.v1.ExecutorProviderCapabilities
+	229, // 210: kandev.plugin.v1.ValidateExecutorProfileResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 211: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	227, // 212: kandev.plugin.v1.ProvisionExecutorEnvironmentRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	231, // 213: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	229, // 214: kandev.plugin.v1.ProvisionExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 215: kandev.plugin.v1.RecoverExecutorOperationRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	227, // 216: kandev.plugin.v1.RecoverExecutorOperationRequest.profile:type_name -> kandev.plugin.v1.ExecutorProfileSnapshot
+	231, // 217: kandev.plugin.v1.RecoverExecutorOperationResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	229, // 218: kandev.plugin.v1.RecoverExecutorOperationResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 219: kandev.plugin.v1.AttachExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	231, // 220: kandev.plugin.v1.AttachExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	231, // 221: kandev.plugin.v1.AttachExecutorEnvironmentResponse.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	229, // 222: kandev.plugin.v1.AttachExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 223: kandev.plugin.v1.InspectExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	231, // 224: kandev.plugin.v1.InspectExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	229, // 225: kandev.plugin.v1.InspectExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 226: kandev.plugin.v1.ResolveExecutorConnectionRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	231, // 227: kandev.plugin.v1.ResolveExecutorConnectionRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	380, // 228: kandev.plugin.v1.ExecutorConnectionLease.http_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.HttpHeadersEntry
+	381, // 229: kandev.plugin.v1.ExecutorConnectionLease.websocket_headers:type_name -> kandev.plugin.v1.ExecutorConnectionLease.WebsocketHeadersEntry
+	243, // 230: kandev.plugin.v1.ResolveExecutorConnectionResponse.lease:type_name -> kandev.plugin.v1.ExecutorConnectionLease
+	229, // 231: kandev.plugin.v1.ResolveExecutorConnectionResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 232: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	231, // 233: kandev.plugin.v1.DestroyExecutorEnvironmentRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	229, // 234: kandev.plugin.v1.DestroyExecutorEnvironmentResponse.error:type_name -> kandev.plugin.v1.ExecutorProviderError
+	226, // 235: kandev.plugin.v1.CheckpointExecutorResourceRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	231, // 236: kandev.plugin.v1.CheckpointExecutorResourceRequest.resource:type_name -> kandev.plugin.v1.ExecutorResourceDescriptor
+	226, // 237: kandev.plugin.v1.ReportExecutorProgressRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	226, // 238: kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest.context:type_name -> kandev.plugin.v1.ExecutorProviderRequestContext
+	194, // 239: kandev.plugin.v1.ListRepositoriesRequest.page:type_name -> kandev.plugin.v1.Page
+	253, // 240: kandev.plugin.v1.ListRepositoriesResponse.repositories:type_name -> kandev.plugin.v1.Repository
+	195, // 241: kandev.plugin.v1.ListRepositoriesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	257, // 242: kandev.plugin.v1.ListSessionsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	194, // 243: kandev.plugin.v1.ListSessionsRequest.page:type_name -> kandev.plugin.v1.Page
+	256, // 244: kandev.plugin.v1.ListSessionsResponse.sessions:type_name -> kandev.plugin.v1.Session
+	195, // 245: kandev.plugin.v1.ListSessionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	257, // 246: kandev.plugin.v1.ListSessionCodeStatsRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	194, // 247: kandev.plugin.v1.ListSessionCodeStatsRequest.page:type_name -> kandev.plugin.v1.Page
+	260, // 248: kandev.plugin.v1.ListSessionCodeStatsResponse.stats:type_name -> kandev.plugin.v1.SessionCodeStats
+	195, // 249: kandev.plugin.v1.ListSessionCodeStatsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	264, // 250: kandev.plugin.v1.ListMessagesRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	194, // 251: kandev.plugin.v1.ListMessagesRequest.page:type_name -> kandev.plugin.v1.Page
+	263, // 252: kandev.plugin.v1.ListMessagesResponse.messages:type_name -> kandev.plugin.v1.Message
+	195, // 253: kandev.plugin.v1.ListMessagesResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	267, // 254: kandev.plugin.v1.InteractionQuestion.options:type_name -> kandev.plugin.v1.InteractionOption
+	267, // 255: kandev.plugin.v1.Interaction.options:type_name -> kandev.plugin.v1.InteractionOption
+	268, // 256: kandev.plugin.v1.Interaction.questions:type_name -> kandev.plugin.v1.InteractionQuestion
+	270, // 257: kandev.plugin.v1.ListPendingInteractionsRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	194, // 258: kandev.plugin.v1.ListPendingInteractionsRequest.page:type_name -> kandev.plugin.v1.Page
+	269, // 259: kandev.plugin.v1.ListPendingInteractionsResponse.interactions:type_name -> kandev.plugin.v1.Interaction
+	195, // 260: kandev.plugin.v1.ListPendingInteractionsResponse.page_info:type_name -> kandev.plugin.v1.PageInfo
+	269, // 261: kandev.plugin.v1.GetInteractionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	269, // 262: kandev.plugin.v1.RespondToPermissionResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	277, // 263: kandev.plugin.v1.AnswerClarificationRequest.answers:type_name -> kandev.plugin.v1.ClarificationAnswer
+	269, // 264: kandev.plugin.v1.AnswerClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	269, // 265: kandev.plugin.v1.CancelClarificationResponse.interaction:type_name -> kandev.plugin.v1.Interaction
+	286, // 266: kandev.plugin.v1.CreateTaskRequest.repositories:type_name -> kandev.plugin.v1.PluginTaskRepository
+	288, // 267: kandev.plugin.v1.CreateTaskRequest.launch:type_name -> kandev.plugin.v1.PluginTaskLaunchOptions
+	393, // 268: kandev.plugin.v1.CreateTaskRequest.metadata:type_name -> google.protobuf.Struct
+	287, // 269: kandev.plugin.v1.PluginTaskRepository.remote:type_name -> kandev.plugin.v1.RemoteRepositoryDescriptor
+	196, // 270: kandev.plugin.v1.CreateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	196, // 271: kandev.plugin.v1.UpdateTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	196, // 272: kandev.plugin.v1.MoveTaskResponse.task:type_name -> kandev.plugin.v1.Task
+	196, // 273: kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse.tasks:type_name -> kandev.plugin.v1.Task
+	302, // 274: kandev.plugin.v1.EnsureAgentConversationRequest.spec:type_name -> kandev.plugin.v1.AgentConversationSpec
+	301, // 275: kandev.plugin.v1.EnsureAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	301, // 276: kandev.plugin.v1.DispatchAgentConversationResponse.conv_descriptor:type_name -> kandev.plugin.v1.AgentConversationDescriptor
+	382, // 277: kandev.plugin.v1.AutomationWebhookRequest.headers:type_name -> kandev.plugin.v1.AutomationWebhookRequest.HeadersEntry
+	314, // 278: kandev.plugin.v1.ExactReadPageInfo.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	208, // 279: kandev.plugin.v1.ExactWorkspaceObservation.workspace:type_name -> kandev.plugin.v1.Workspace
+	211, // 280: kandev.plugin.v1.ExactWorkflowObservation.workflow:type_name -> kandev.plugin.v1.Workflow
+	217, // 281: kandev.plugin.v1.ExactWorkflowStepObservation.step:type_name -> kandev.plugin.v1.WorkflowStep
+	196, // 282: kandev.plugin.v1.ExactTaskObservation.task:type_name -> kandev.plugin.v1.Task
+	256, // 283: kandev.plugin.v1.ExactSessionObservation.session:type_name -> kandev.plugin.v1.Session
+	269, // 284: kandev.plugin.v1.ExactInteractionObservation.interaction:type_name -> kandev.plugin.v1.Interaction
+	263, // 285: kandev.plugin.v1.ExactMessageObservation.message:type_name -> kandev.plugin.v1.Message
+	313, // 286: kandev.plugin.v1.ListWorkspacesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	316, // 287: kandev.plugin.v1.ListWorkspacesExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkspaceObservation
+	315, // 288: kandev.plugin.v1.ListWorkspacesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 289: kandev.plugin.v1.ListWorkflowsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	317, // 290: kandev.plugin.v1.ListWorkflowsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowObservation
+	315, // 291: kandev.plugin.v1.ListWorkflowsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 292: kandev.plugin.v1.ListWorkflowStepsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	318, // 293: kandev.plugin.v1.ListWorkflowStepsExactResponse.items:type_name -> kandev.plugin.v1.ExactWorkflowStepObservation
+	315, // 294: kandev.plugin.v1.ListWorkflowStepsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	200, // 295: kandev.plugin.v1.ListTasksExactRequest.filter:type_name -> kandev.plugin.v1.TaskFilter
+	313, // 296: kandev.plugin.v1.ListTasksExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	319, // 297: kandev.plugin.v1.ListTasksExactResponse.items:type_name -> kandev.plugin.v1.ExactTaskObservation
+	315, // 298: kandev.plugin.v1.ListTasksExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	319, // 299: kandev.plugin.v1.GetTaskExactResponse.item:type_name -> kandev.plugin.v1.ExactTaskObservation
+	314, // 300: kandev.plugin.v1.GetTaskExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	257, // 301: kandev.plugin.v1.ListSessionsExactRequest.filter:type_name -> kandev.plugin.v1.SessionFilter
+	313, // 302: kandev.plugin.v1.ListSessionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	320, // 303: kandev.plugin.v1.ListSessionsExactResponse.items:type_name -> kandev.plugin.v1.ExactSessionObservation
+	315, // 304: kandev.plugin.v1.ListSessionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	270, // 305: kandev.plugin.v1.ListPendingInteractionsExactRequest.filter:type_name -> kandev.plugin.v1.InteractionFilter
+	313, // 306: kandev.plugin.v1.ListPendingInteractionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	321, // 307: kandev.plugin.v1.ListPendingInteractionsExactResponse.items:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	315, // 308: kandev.plugin.v1.ListPendingInteractionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	321, // 309: kandev.plugin.v1.GetInteractionExactResponse.item:type_name -> kandev.plugin.v1.ExactInteractionObservation
+	314, // 310: kandev.plugin.v1.GetInteractionExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	264, // 311: kandev.plugin.v1.ListSanitizedMessagesExactRequest.filter:type_name -> kandev.plugin.v1.MessageFilter
+	313, // 312: kandev.plugin.v1.ListSanitizedMessagesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	322, // 313: kandev.plugin.v1.ListSanitizedMessagesExactResponse.items:type_name -> kandev.plugin.v1.ExactMessageObservation
+	315, // 314: kandev.plugin.v1.ListSanitizedMessagesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 315: kandev.plugin.v1.ListTaskInboxExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	324, // 316: kandev.plugin.v1.ListTaskInboxExactResponse.items:type_name -> kandev.plugin.v1.TaskInboxItem
+	315, // 317: kandev.plugin.v1.ListTaskInboxExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	325, // 318: kandev.plugin.v1.GetTaskDirectiveExactResponse.item:type_name -> kandev.plugin.v1.TaskDirective
+	314, // 319: kandev.plugin.v1.GetTaskDirectiveExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	313, // 320: kandev.plugin.v1.ListTaskDirectivesExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	325, // 321: kandev.plugin.v1.ListTaskDirectivesExactResponse.items:type_name -> kandev.plugin.v1.TaskDirective
+	315, // 322: kandev.plugin.v1.ListTaskDirectivesExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 323: kandev.plugin.v1.GetTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	323, // 324: kandev.plugin.v1.GetTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	315, // 325: kandev.plugin.v1.GetTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 326: kandev.plugin.v1.ListTaskRelationsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	323, // 327: kandev.plugin.v1.ListTaskRelationsExactResponse.items:type_name -> kandev.plugin.v1.TaskRelation
+	315, // 328: kandev.plugin.v1.ListTaskRelationsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 329: kandev.plugin.v1.ListPendingTaskTransitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	326, // 330: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.items:type_name -> kandev.plugin.v1.PendingTaskTransition
+	315, // 331: kandev.plugin.v1.ListPendingTaskTransitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 332: kandev.plugin.v1.ListChangeRequestEvidenceExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	327, // 333: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.items:type_name -> kandev.plugin.v1.ChangeRequestEvidence
+	315, // 334: kandev.plugin.v1.ListChangeRequestEvidenceExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	313, // 335: kandev.plugin.v1.ListTaskUsageExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	328, // 336: kandev.plugin.v1.ListTaskUsageExactResponse.items:type_name -> kandev.plugin.v1.TaskUsageObservation
+	315, // 337: kandev.plugin.v1.ListTaskUsageExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	364, // 338: kandev.plugin.v1.AutomationDefinitionObservation.triggers:type_name -> kandev.plugin.v1.AutomationTriggerObservation
+	363, // 339: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationDefinitionFilter
+	313, // 340: kandev.plugin.v1.ListAutomationDefinitionsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	365, // 341: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.items:type_name -> kandev.plugin.v1.AutomationDefinitionObservation
+	315, // 342: kandev.plugin.v1.ListAutomationDefinitionsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	368, // 343: kandev.plugin.v1.ListAutomationRunsExactRequest.filter:type_name -> kandev.plugin.v1.AutomationRunFilter
+	313, // 344: kandev.plugin.v1.ListAutomationRunsExactRequest.page:type_name -> kandev.plugin.v1.ExactReadPage
+	369, // 345: kandev.plugin.v1.ListAutomationRunsExactResponse.items:type_name -> kandev.plugin.v1.AutomationRunObservation
+	315, // 346: kandev.plugin.v1.ListAutomationRunsExactResponse.page_info:type_name -> kandev.plugin.v1.ExactReadPageInfo
+	369, // 347: kandev.plugin.v1.GetAutomationRunExactResponse.item:type_name -> kandev.plugin.v1.AutomationRunObservation
+	314, // 348: kandev.plugin.v1.GetAutomationRunExactResponse.receipt:type_name -> kandev.plugin.v1.HostReadReceipt
+	154, // 349: kandev.plugin.v1.Plugin.DeliverEvent:input_type -> kandev.plugin.v1.Event
+	159, // 350: kandev.plugin.v1.Plugin.HandleWebhook:input_type -> kandev.plugin.v1.WebhookRequest
+	309, // 351: kandev.plugin.v1.Plugin.DescribeAutomationCondition:input_type -> kandev.plugin.v1.AutomationConditionRequest
+	311, // 352: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:input_type -> kandev.plugin.v1.AutomationWebhookRequest
+	161, // 353: kandev.plugin.v1.Plugin.HandleAction:input_type -> kandev.plugin.v1.PluginActionRequest
+	164, // 354: kandev.plugin.v1.Plugin.SearchEntityReferences:input_type -> kandev.plugin.v1.SearchEntityReferencesRequest
+	167, // 355: kandev.plugin.v1.Plugin.AuthorizeEntityReference:input_type -> kandev.plugin.v1.AuthorizeEntityReferenceRequest
+	169, // 356: kandev.plugin.v1.Plugin.ResolveGitCredential:input_type -> kandev.plugin.v1.ResolveGitCredentialRequest
+	171, // 357: kandev.plugin.v1.Plugin.GetGitCredentialBinding:input_type -> kandev.plugin.v1.GitCredentialBindingRequest
+	156, // 358: kandev.plugin.v1.Plugin.InvokeAgentTool:input_type -> kandev.plugin.v1.AgentToolRequest
+	232, // 359: kandev.plugin.v1.Plugin.ValidateExecutorProfile:input_type -> kandev.plugin.v1.ValidateExecutorProfileRequest
+	234, // 360: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:input_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentRequest
+	236, // 361: kandev.plugin.v1.Plugin.RecoverExecutorOperation:input_type -> kandev.plugin.v1.RecoverExecutorOperationRequest
+	238, // 362: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:input_type -> kandev.plugin.v1.AttachExecutorEnvironmentRequest
+	240, // 363: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:input_type -> kandev.plugin.v1.InspectExecutorEnvironmentRequest
+	242, // 364: kandev.plugin.v1.Plugin.ResolveExecutorConnection:input_type -> kandev.plugin.v1.ResolveExecutorConnectionRequest
+	245, // 365: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:input_type -> kandev.plugin.v1.DestroyExecutorEnvironmentRequest
+	19,  // 366: kandev.plugin.v1.Plugin.DescribeSandboxProvider:input_type -> kandev.plugin.v1.DescribeSandboxProviderRequest
+	25,  // 367: kandev.plugin.v1.Plugin.CompileSandboxPolicy:input_type -> kandev.plugin.v1.CompileSandboxPolicyRequest
+	28,  // 368: kandev.plugin.v1.Plugin.NormalizeSandboxApproval:input_type -> kandev.plugin.v1.NormalizeSandboxApprovalRequest
+	32,  // 369: kandev.plugin.v1.Plugin.NormalizeSandboxStatus:input_type -> kandev.plugin.v1.NormalizeSandboxStatusRequest
+	36,  // 370: kandev.plugin.v1.Plugin.ReadSandboxReport:input_type -> kandev.plugin.v1.ReadSandboxReportRequest
+	38,  // 371: kandev.plugin.v1.Plugin.ProposeSandboxRevision:input_type -> kandev.plugin.v1.ProposeSandboxRevisionRequest
+	42,  // 372: kandev.plugin.v1.Host.GetCapabilityContext:input_type -> kandev.plugin.v1.GetCapabilityContextRequest
+	46,  // 373: kandev.plugin.v1.Host.UpdateTaskExact:input_type -> kandev.plugin.v1.UpdateTaskExactRequest
+	48,  // 374: kandev.plugin.v1.Host.CreateTaskExact:input_type -> kandev.plugin.v1.CreateTaskExactRequest
+	50,  // 375: kandev.plugin.v1.Host.SetTaskLabelsExact:input_type -> kandev.plugin.v1.SetTaskLabelsExactRequest
+	52,  // 376: kandev.plugin.v1.Host.AssignTaskExact:input_type -> kandev.plugin.v1.AssignTaskExactRequest
+	54,  // 377: kandev.plugin.v1.Host.MoveTaskExact:input_type -> kandev.plugin.v1.MoveTaskExactRequest
+	56,  // 378: kandev.plugin.v1.Host.ArchiveTaskExact:input_type -> kandev.plugin.v1.ArchiveTaskExactRequest
+	58,  // 379: kandev.plugin.v1.Host.AddTaskRelationExact:input_type -> kandev.plugin.v1.AddTaskRelationExactRequest
+	60,  // 380: kandev.plugin.v1.Host.RemoveTaskRelationExact:input_type -> kandev.plugin.v1.RemoveTaskRelationExactRequest
+	62,  // 381: kandev.plugin.v1.Host.SendTaskMessageExact:input_type -> kandev.plugin.v1.SendTaskMessageExactRequest
+	100, // 382: kandev.plugin.v1.Host.IssueTaskDirectiveExact:input_type -> kandev.plugin.v1.IssueTaskDirectiveExactRequest
+	102, // 383: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:input_type -> kandev.plugin.v1.ResolveTaskDirectiveExactRequest
+	65,  // 384: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:input_type -> kandev.plugin.v1.AcquireTaskManagementClaimExactRequest
+	66,  // 385: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:input_type -> kandev.plugin.v1.ReleaseTaskManagementClaimExactRequest
+	67,  // 386: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:input_type -> kandev.plugin.v1.TransferTaskManagementClaimExactRequest
+	75,  // 387: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:input_type -> kandev.plugin.v1.SetTaskCompletionCriteriaExactRequest
+	76,  // 388: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:input_type -> kandev.plugin.v1.VerifyTaskCompletionCriterionExactRequest
+	78,  // 389: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:input_type -> kandev.plugin.v1.ApplyWorkspaceAdministrationExactRequest
+	94,  // 390: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:input_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactRequest
+	97,  // 391: kandev.plugin.v1.Host.CommentSourceIssueExact:input_type -> kandev.plugin.v1.CommentSourceIssueExactRequest
+	98,  // 392: kandev.plugin.v1.Host.TransitionSourceIssueExact:input_type -> kandev.plugin.v1.TransitionSourceIssueExactRequest
+	106, // 393: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:input_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactRequest
+	108, // 394: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:input_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactRequest
+	110, // 395: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:input_type -> kandev.plugin.v1.ListManagedAgentConversationsExactRequest
+	112, // 396: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:input_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactRequest
+	114, // 397: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:input_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactRequest
+	117, // 398: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:input_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactRequest
+	119, // 399: kandev.plugin.v1.Host.GetManagedAgentInputExact:input_type -> kandev.plugin.v1.GetManagedAgentInputExactRequest
+	121, // 400: kandev.plugin.v1.Host.ListManagedAgentInputsExact:input_type -> kandev.plugin.v1.ListManagedAgentInputsExactRequest
+	123, // 401: kandev.plugin.v1.Host.CancelManagedAgentInputExact:input_type -> kandev.plugin.v1.CancelManagedAgentInputExactRequest
+	125, // 402: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:input_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactRequest
+	129, // 403: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:input_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactRequest
+	131, // 404: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.CreateManagedConversationScheduleExactRequest
+	132, // 405: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:input_type -> kandev.plugin.v1.UpdateManagedConversationScheduleExactRequest
+	133, // 406: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:input_type -> kandev.plugin.v1.SetManagedConversationScheduleEnabledExactRequest
+	134, // 407: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:input_type -> kandev.plugin.v1.DeleteManagedConversationScheduleExactRequest
+	136, // 408: kandev.plugin.v1.Host.EnsureTaskRunExact:input_type -> kandev.plugin.v1.EnsureTaskRunExactRequest
+	138, // 409: kandev.plugin.v1.Host.StopTaskRunExact:input_type -> kandev.plugin.v1.StopTaskRunExactRequest
+	140, // 410: kandev.plugin.v1.Host.RecoverSessionExact:input_type -> kandev.plugin.v1.RecoverSessionExactRequest
+	142, // 411: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:input_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactRequest
+	145, // 412: kandev.plugin.v1.Host.GetSessionModeContextExact:input_type -> kandev.plugin.v1.GetSessionModeContextExactRequest
+	147, // 413: kandev.plugin.v1.Host.SetSessionModeExact:input_type -> kandev.plugin.v1.SetSessionModeExactRequest
+	150, // 414: kandev.plugin.v1.Host.RespondPermissionExact:input_type -> kandev.plugin.v1.RespondPermissionExactRequest
+	152, // 415: kandev.plugin.v1.Host.AnswerClarificationExact:input_type -> kandev.plugin.v1.AnswerClarificationExactRequest
+	329, // 416: kandev.plugin.v1.Host.ListWorkspacesExact:input_type -> kandev.plugin.v1.ListWorkspacesExactRequest
+	331, // 417: kandev.plugin.v1.Host.ListWorkflowsExact:input_type -> kandev.plugin.v1.ListWorkflowsExactRequest
+	333, // 418: kandev.plugin.v1.Host.ListWorkflowStepsExact:input_type -> kandev.plugin.v1.ListWorkflowStepsExactRequest
+	335, // 419: kandev.plugin.v1.Host.ListTasksExact:input_type -> kandev.plugin.v1.ListTasksExactRequest
+	337, // 420: kandev.plugin.v1.Host.GetTaskExact:input_type -> kandev.plugin.v1.GetTaskExactRequest
+	339, // 421: kandev.plugin.v1.Host.ListSessionsExact:input_type -> kandev.plugin.v1.ListSessionsExactRequest
+	341, // 422: kandev.plugin.v1.Host.ListPendingInteractionsExact:input_type -> kandev.plugin.v1.ListPendingInteractionsExactRequest
+	343, // 423: kandev.plugin.v1.Host.GetInteractionExact:input_type -> kandev.plugin.v1.GetInteractionExactRequest
+	345, // 424: kandev.plugin.v1.Host.ListSanitizedMessagesExact:input_type -> kandev.plugin.v1.ListSanitizedMessagesExactRequest
+	347, // 425: kandev.plugin.v1.Host.ListTaskInboxExact:input_type -> kandev.plugin.v1.ListTaskInboxExactRequest
+	349, // 426: kandev.plugin.v1.Host.GetTaskDirectiveExact:input_type -> kandev.plugin.v1.GetTaskDirectiveExactRequest
+	351, // 427: kandev.plugin.v1.Host.ListTaskDirectivesExact:input_type -> kandev.plugin.v1.ListTaskDirectivesExactRequest
+	353, // 428: kandev.plugin.v1.Host.GetTaskRelationsExact:input_type -> kandev.plugin.v1.GetTaskRelationsExactRequest
+	355, // 429: kandev.plugin.v1.Host.ListTaskRelationsExact:input_type -> kandev.plugin.v1.ListTaskRelationsExactRequest
+	357, // 430: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:input_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactRequest
+	359, // 431: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:input_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactRequest
+	361, // 432: kandev.plugin.v1.Host.ListTaskUsageExact:input_type -> kandev.plugin.v1.ListTaskUsageExactRequest
+	366, // 433: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:input_type -> kandev.plugin.v1.ListAutomationDefinitionsExactRequest
+	370, // 434: kandev.plugin.v1.Host.ListAutomationRunsExact:input_type -> kandev.plugin.v1.ListAutomationRunsExactRequest
+	372, // 435: kandev.plugin.v1.Host.GetAutomationRunExact:input_type -> kandev.plugin.v1.GetAutomationRunExactRequest
+	173, // 436: kandev.plugin.v1.Host.GetState:input_type -> kandev.plugin.v1.GetStateRequest
+	175, // 437: kandev.plugin.v1.Host.SetState:input_type -> kandev.plugin.v1.SetStateRequest
+	177, // 438: kandev.plugin.v1.Host.DeleteState:input_type -> kandev.plugin.v1.DeleteStateRequest
+	179, // 439: kandev.plugin.v1.Host.ListState:input_type -> kandev.plugin.v1.ListStateRequest
+	190, // 440: kandev.plugin.v1.Host.RevealSecret:input_type -> kandev.plugin.v1.RevealSecretRequest
+	192, // 441: kandev.plugin.v1.Host.EmitEvent:input_type -> kandev.plugin.v1.EmitEventRequest
+	184, // 442: kandev.plugin.v1.Host.GetSecret:input_type -> kandev.plugin.v1.GetSecretRequest
+	186, // 443: kandev.plugin.v1.Host.SetSecret:input_type -> kandev.plugin.v1.SetSecretRequest
+	188, // 444: kandev.plugin.v1.Host.DeleteSecret:input_type -> kandev.plugin.v1.DeleteSecretRequest
+	182, // 445: kandev.plugin.v1.Host.GetConfig:input_type -> kandev.plugin.v1.GetConfigRequest
+	201, // 446: kandev.plugin.v1.Host.ListTasks:input_type -> kandev.plugin.v1.ListTasksRequest
+	203, // 447: kandev.plugin.v1.Host.GetTask:input_type -> kandev.plugin.v1.GetTaskRequest
+	206, // 448: kandev.plugin.v1.Host.ListTaskStepTransitions:input_type -> kandev.plugin.v1.ListTaskStepTransitionsRequest
+	209, // 449: kandev.plugin.v1.Host.ListWorkspaces:input_type -> kandev.plugin.v1.ListWorkspacesRequest
+	212, // 450: kandev.plugin.v1.Host.ListWorkflows:input_type -> kandev.plugin.v1.ListWorkflowsRequest
+	218, // 451: kandev.plugin.v1.Host.ListWorkflowSteps:input_type -> kandev.plugin.v1.ListWorkflowStepsRequest
+	215, // 452: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:input_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsRequest
+	221, // 453: kandev.plugin.v1.Host.ListAgentProfiles:input_type -> kandev.plugin.v1.ListAgentProfilesRequest
+	224, // 454: kandev.plugin.v1.Host.ListExecutorProfiles:input_type -> kandev.plugin.v1.ListExecutorProfilesRequest
+	247, // 455: kandev.plugin.v1.Host.CheckpointExecutorResource:input_type -> kandev.plugin.v1.CheckpointExecutorResourceRequest
+	249, // 456: kandev.plugin.v1.Host.ReportExecutorProgress:input_type -> kandev.plugin.v1.ReportExecutorProgressRequest
+	251, // 457: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:input_type -> kandev.plugin.v1.ReadExecutorRuntimeArtifactRequest
+	254, // 458: kandev.plugin.v1.Host.ListRepositories:input_type -> kandev.plugin.v1.ListRepositoriesRequest
+	258, // 459: kandev.plugin.v1.Host.ListSessions:input_type -> kandev.plugin.v1.ListSessionsRequest
+	261, // 460: kandev.plugin.v1.Host.ListSessionCodeStats:input_type -> kandev.plugin.v1.ListSessionCodeStatsRequest
+	265, // 461: kandev.plugin.v1.Host.ListMessages:input_type -> kandev.plugin.v1.ListMessagesRequest
+	271, // 462: kandev.plugin.v1.Host.ListPendingInteractions:input_type -> kandev.plugin.v1.ListPendingInteractionsRequest
+	273, // 463: kandev.plugin.v1.Host.GetInteraction:input_type -> kandev.plugin.v1.GetInteractionRequest
+	282, // 464: kandev.plugin.v1.Host.InvokeUtilityAgent:input_type -> kandev.plugin.v1.InvokeUtilityAgentRequest
+	283, // 465: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:input_type -> kandev.plugin.v1.InvokeUtilityAgentWithOptionsRequest
+	285, // 466: kandev.plugin.v1.Host.CreateTask:input_type -> kandev.plugin.v1.CreateTaskRequest
+	290, // 467: kandev.plugin.v1.Host.UpdateTask:input_type -> kandev.plugin.v1.UpdateTaskRequest
+	292, // 468: kandev.plugin.v1.Host.MoveTask:input_type -> kandev.plugin.v1.MoveTaskRequest
+	294, // 469: kandev.plugin.v1.Host.SendMessage:input_type -> kandev.plugin.v1.SendMessageRequest
+	296, // 470: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:input_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeRequest
+	298, // 471: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:input_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeRequest
+	303, // 472: kandev.plugin.v1.Host.EnsureAgentConversation:input_type -> kandev.plugin.v1.EnsureAgentConversationRequest
+	305, // 473: kandev.plugin.v1.Host.DispatchAgentConversation:input_type -> kandev.plugin.v1.DispatchAgentConversationRequest
+	307, // 474: kandev.plugin.v1.Host.DeleteAgentConversation:input_type -> kandev.plugin.v1.DeleteAgentConversationRequest
+	275, // 475: kandev.plugin.v1.Host.RespondToPermission:input_type -> kandev.plugin.v1.RespondToPermissionRequest
+	278, // 476: kandev.plugin.v1.Host.AnswerClarification:input_type -> kandev.plugin.v1.AnswerClarificationRequest
+	280, // 477: kandev.plugin.v1.Host.CancelClarification:input_type -> kandev.plugin.v1.CancelClarificationRequest
+	155, // 478: kandev.plugin.v1.Plugin.DeliverEvent:output_type -> kandev.plugin.v1.EventAck
+	160, // 479: kandev.plugin.v1.Plugin.HandleWebhook:output_type -> kandev.plugin.v1.WebhookResponse
+	310, // 480: kandev.plugin.v1.Plugin.DescribeAutomationCondition:output_type -> kandev.plugin.v1.AutomationConditionResponse
+	312, // 481: kandev.plugin.v1.Plugin.VerifyAutomationWebhook:output_type -> kandev.plugin.v1.AutomationWebhookResponse
+	163, // 482: kandev.plugin.v1.Plugin.HandleAction:output_type -> kandev.plugin.v1.PluginActionResponse
+	165, // 483: kandev.plugin.v1.Plugin.SearchEntityReferences:output_type -> kandev.plugin.v1.SearchEntityReferencesResponse
+	168, // 484: kandev.plugin.v1.Plugin.AuthorizeEntityReference:output_type -> kandev.plugin.v1.AuthorizeEntityReferenceResponse
+	170, // 485: kandev.plugin.v1.Plugin.ResolveGitCredential:output_type -> kandev.plugin.v1.ResolveGitCredentialResponse
+	172, // 486: kandev.plugin.v1.Plugin.GetGitCredentialBinding:output_type -> kandev.plugin.v1.GitCredentialBindingResponse
+	158, // 487: kandev.plugin.v1.Plugin.InvokeAgentTool:output_type -> kandev.plugin.v1.AgentToolResponse
+	233, // 488: kandev.plugin.v1.Plugin.ValidateExecutorProfile:output_type -> kandev.plugin.v1.ValidateExecutorProfileResponse
+	235, // 489: kandev.plugin.v1.Plugin.ProvisionExecutorEnvironment:output_type -> kandev.plugin.v1.ProvisionExecutorEnvironmentResponse
+	237, // 490: kandev.plugin.v1.Plugin.RecoverExecutorOperation:output_type -> kandev.plugin.v1.RecoverExecutorOperationResponse
+	239, // 491: kandev.plugin.v1.Plugin.AttachExecutorEnvironment:output_type -> kandev.plugin.v1.AttachExecutorEnvironmentResponse
+	241, // 492: kandev.plugin.v1.Plugin.InspectExecutorEnvironment:output_type -> kandev.plugin.v1.InspectExecutorEnvironmentResponse
+	244, // 493: kandev.plugin.v1.Plugin.ResolveExecutorConnection:output_type -> kandev.plugin.v1.ResolveExecutorConnectionResponse
+	246, // 494: kandev.plugin.v1.Plugin.DestroyExecutorEnvironment:output_type -> kandev.plugin.v1.DestroyExecutorEnvironmentResponse
+	24,  // 495: kandev.plugin.v1.Plugin.DescribeSandboxProvider:output_type -> kandev.plugin.v1.DescribeSandboxProviderResponse
+	26,  // 496: kandev.plugin.v1.Plugin.CompileSandboxPolicy:output_type -> kandev.plugin.v1.CompileSandboxPolicyResponse
+	29,  // 497: kandev.plugin.v1.Plugin.NormalizeSandboxApproval:output_type -> kandev.plugin.v1.NormalizeSandboxApprovalResponse
+	34,  // 498: kandev.plugin.v1.Plugin.NormalizeSandboxStatus:output_type -> kandev.plugin.v1.NormalizeSandboxStatusResponse
+	37,  // 499: kandev.plugin.v1.Plugin.ReadSandboxReport:output_type -> kandev.plugin.v1.ReadSandboxReportResponse
+	39,  // 500: kandev.plugin.v1.Plugin.ProposeSandboxRevision:output_type -> kandev.plugin.v1.ProposeSandboxRevisionResponse
+	43,  // 501: kandev.plugin.v1.Host.GetCapabilityContext:output_type -> kandev.plugin.v1.GetCapabilityContextResponse
+	47,  // 502: kandev.plugin.v1.Host.UpdateTaskExact:output_type -> kandev.plugin.v1.UpdateTaskExactResponse
+	49,  // 503: kandev.plugin.v1.Host.CreateTaskExact:output_type -> kandev.plugin.v1.CreateTaskExactResponse
+	51,  // 504: kandev.plugin.v1.Host.SetTaskLabelsExact:output_type -> kandev.plugin.v1.SetTaskLabelsExactResponse
+	53,  // 505: kandev.plugin.v1.Host.AssignTaskExact:output_type -> kandev.plugin.v1.AssignTaskExactResponse
+	55,  // 506: kandev.plugin.v1.Host.MoveTaskExact:output_type -> kandev.plugin.v1.MoveTaskExactResponse
+	57,  // 507: kandev.plugin.v1.Host.ArchiveTaskExact:output_type -> kandev.plugin.v1.ArchiveTaskExactResponse
+	59,  // 508: kandev.plugin.v1.Host.AddTaskRelationExact:output_type -> kandev.plugin.v1.AddTaskRelationExactResponse
+	61,  // 509: kandev.plugin.v1.Host.RemoveTaskRelationExact:output_type -> kandev.plugin.v1.RemoveTaskRelationExactResponse
+	63,  // 510: kandev.plugin.v1.Host.SendTaskMessageExact:output_type -> kandev.plugin.v1.SendTaskMessageExactResponse
+	101, // 511: kandev.plugin.v1.Host.IssueTaskDirectiveExact:output_type -> kandev.plugin.v1.IssueTaskDirectiveExactResponse
+	103, // 512: kandev.plugin.v1.Host.ResolveTaskDirectiveExact:output_type -> kandev.plugin.v1.ResolveTaskDirectiveExactResponse
+	68,  // 513: kandev.plugin.v1.Host.AcquireTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	68,  // 514: kandev.plugin.v1.Host.ReleaseTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	68,  // 515: kandev.plugin.v1.Host.TransferTaskManagementClaimExact:output_type -> kandev.plugin.v1.TaskManagementClaimExactResponse
+	77,  // 516: kandev.plugin.v1.Host.SetTaskCompletionCriteriaExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	77,  // 517: kandev.plugin.v1.Host.VerifyTaskCompletionCriterionExact:output_type -> kandev.plugin.v1.TaskCompletionGateExactResponse
+	91,  // 518: kandev.plugin.v1.Host.ApplyWorkspaceAdministrationExact:output_type -> kandev.plugin.v1.WorkspaceAdministrationExactResponse
+	95,  // 519: kandev.plugin.v1.Host.GetSourceIssueCapabilitiesExact:output_type -> kandev.plugin.v1.GetSourceIssueCapabilitiesExactResponse
+	99,  // 520: kandev.plugin.v1.Host.CommentSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	99,  // 521: kandev.plugin.v1.Host.TransitionSourceIssueExact:output_type -> kandev.plugin.v1.SourceIssueWritebackExactResponse
+	107, // 522: kandev.plugin.v1.Host.EnsureManagedAgentConversationExact:output_type -> kandev.plugin.v1.EnsureManagedAgentConversationExactResponse
+	109, // 523: kandev.plugin.v1.Host.GetManagedAgentConversationStatusExact:output_type -> kandev.plugin.v1.GetManagedAgentConversationStatusExactResponse
+	111, // 524: kandev.plugin.v1.Host.ListManagedAgentConversationsExact:output_type -> kandev.plugin.v1.ListManagedAgentConversationsExactResponse
+	113, // 525: kandev.plugin.v1.Host.SetManagedAgentConversationPausedExact:output_type -> kandev.plugin.v1.SetManagedAgentConversationPausedExactResponse
+	115, // 526: kandev.plugin.v1.Host.DeleteManagedAgentConversationExact:output_type -> kandev.plugin.v1.DeleteManagedAgentConversationExactResponse
+	118, // 527: kandev.plugin.v1.Host.EnqueueManagedAgentInputExact:output_type -> kandev.plugin.v1.EnqueueManagedAgentInputExactResponse
+	120, // 528: kandev.plugin.v1.Host.GetManagedAgentInputExact:output_type -> kandev.plugin.v1.GetManagedAgentInputExactResponse
+	122, // 529: kandev.plugin.v1.Host.ListManagedAgentInputsExact:output_type -> kandev.plugin.v1.ListManagedAgentInputsExactResponse
+	124, // 530: kandev.plugin.v1.Host.CancelManagedAgentInputExact:output_type -> kandev.plugin.v1.CancelManagedAgentInputExactResponse
+	126, // 531: kandev.plugin.v1.Host.DispatchManagedAgentConversationExact:output_type -> kandev.plugin.v1.DispatchManagedAgentConversationExactResponse
+	130, // 532: kandev.plugin.v1.Host.ListManagedConversationSchedulesExact:output_type -> kandev.plugin.v1.ListManagedConversationSchedulesExactResponse
+	135, // 533: kandev.plugin.v1.Host.CreateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	135, // 534: kandev.plugin.v1.Host.UpdateManagedConversationScheduleExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	135, // 535: kandev.plugin.v1.Host.SetManagedConversationScheduleEnabledExact:output_type -> kandev.plugin.v1.ManagedConversationScheduleExactResponse
+	45,  // 536: kandev.plugin.v1.Host.DeleteManagedConversationScheduleExact:output_type -> kandev.plugin.v1.HostCommandResult
+	137, // 537: kandev.plugin.v1.Host.EnsureTaskRunExact:output_type -> kandev.plugin.v1.EnsureTaskRunExactResponse
+	139, // 538: kandev.plugin.v1.Host.StopTaskRunExact:output_type -> kandev.plugin.v1.StopTaskRunExactResponse
+	141, // 539: kandev.plugin.v1.Host.RecoverSessionExact:output_type -> kandev.plugin.v1.RecoverSessionExactResponse
+	143, // 540: kandev.plugin.v1.Host.CancelPendingTaskTransitionExact:output_type -> kandev.plugin.v1.CancelPendingTaskTransitionExactResponse
+	146, // 541: kandev.plugin.v1.Host.GetSessionModeContextExact:output_type -> kandev.plugin.v1.GetSessionModeContextExactResponse
+	148, // 542: kandev.plugin.v1.Host.SetSessionModeExact:output_type -> kandev.plugin.v1.SetSessionModeExactResponse
+	151, // 543: kandev.plugin.v1.Host.RespondPermissionExact:output_type -> kandev.plugin.v1.RespondPermissionExactResponse
+	153, // 544: kandev.plugin.v1.Host.AnswerClarificationExact:output_type -> kandev.plugin.v1.AnswerClarificationExactResponse
+	330, // 545: kandev.plugin.v1.Host.ListWorkspacesExact:output_type -> kandev.plugin.v1.ListWorkspacesExactResponse
+	332, // 546: kandev.plugin.v1.Host.ListWorkflowsExact:output_type -> kandev.plugin.v1.ListWorkflowsExactResponse
+	334, // 547: kandev.plugin.v1.Host.ListWorkflowStepsExact:output_type -> kandev.plugin.v1.ListWorkflowStepsExactResponse
+	336, // 548: kandev.plugin.v1.Host.ListTasksExact:output_type -> kandev.plugin.v1.ListTasksExactResponse
+	338, // 549: kandev.plugin.v1.Host.GetTaskExact:output_type -> kandev.plugin.v1.GetTaskExactResponse
+	340, // 550: kandev.plugin.v1.Host.ListSessionsExact:output_type -> kandev.plugin.v1.ListSessionsExactResponse
+	342, // 551: kandev.plugin.v1.Host.ListPendingInteractionsExact:output_type -> kandev.plugin.v1.ListPendingInteractionsExactResponse
+	344, // 552: kandev.plugin.v1.Host.GetInteractionExact:output_type -> kandev.plugin.v1.GetInteractionExactResponse
+	346, // 553: kandev.plugin.v1.Host.ListSanitizedMessagesExact:output_type -> kandev.plugin.v1.ListSanitizedMessagesExactResponse
+	348, // 554: kandev.plugin.v1.Host.ListTaskInboxExact:output_type -> kandev.plugin.v1.ListTaskInboxExactResponse
+	350, // 555: kandev.plugin.v1.Host.GetTaskDirectiveExact:output_type -> kandev.plugin.v1.GetTaskDirectiveExactResponse
+	352, // 556: kandev.plugin.v1.Host.ListTaskDirectivesExact:output_type -> kandev.plugin.v1.ListTaskDirectivesExactResponse
+	354, // 557: kandev.plugin.v1.Host.GetTaskRelationsExact:output_type -> kandev.plugin.v1.GetTaskRelationsExactResponse
+	356, // 558: kandev.plugin.v1.Host.ListTaskRelationsExact:output_type -> kandev.plugin.v1.ListTaskRelationsExactResponse
+	358, // 559: kandev.plugin.v1.Host.ListPendingTaskTransitionsExact:output_type -> kandev.plugin.v1.ListPendingTaskTransitionsExactResponse
+	360, // 560: kandev.plugin.v1.Host.ListChangeRequestEvidenceExact:output_type -> kandev.plugin.v1.ListChangeRequestEvidenceExactResponse
+	362, // 561: kandev.plugin.v1.Host.ListTaskUsageExact:output_type -> kandev.plugin.v1.ListTaskUsageExactResponse
+	367, // 562: kandev.plugin.v1.Host.ListAutomationDefinitionsExact:output_type -> kandev.plugin.v1.ListAutomationDefinitionsExactResponse
+	371, // 563: kandev.plugin.v1.Host.ListAutomationRunsExact:output_type -> kandev.plugin.v1.ListAutomationRunsExactResponse
+	373, // 564: kandev.plugin.v1.Host.GetAutomationRunExact:output_type -> kandev.plugin.v1.GetAutomationRunExactResponse
+	174, // 565: kandev.plugin.v1.Host.GetState:output_type -> kandev.plugin.v1.GetStateResponse
+	176, // 566: kandev.plugin.v1.Host.SetState:output_type -> kandev.plugin.v1.SetStateResponse
+	178, // 567: kandev.plugin.v1.Host.DeleteState:output_type -> kandev.plugin.v1.DeleteStateResponse
+	180, // 568: kandev.plugin.v1.Host.ListState:output_type -> kandev.plugin.v1.ListStateResponse
+	191, // 569: kandev.plugin.v1.Host.RevealSecret:output_type -> kandev.plugin.v1.RevealSecretResponse
+	193, // 570: kandev.plugin.v1.Host.EmitEvent:output_type -> kandev.plugin.v1.EmitEventResponse
+	185, // 571: kandev.plugin.v1.Host.GetSecret:output_type -> kandev.plugin.v1.GetSecretResponse
+	187, // 572: kandev.plugin.v1.Host.SetSecret:output_type -> kandev.plugin.v1.SetSecretResponse
+	189, // 573: kandev.plugin.v1.Host.DeleteSecret:output_type -> kandev.plugin.v1.DeleteSecretResponse
+	183, // 574: kandev.plugin.v1.Host.GetConfig:output_type -> kandev.plugin.v1.GetConfigResponse
+	202, // 575: kandev.plugin.v1.Host.ListTasks:output_type -> kandev.plugin.v1.ListTasksResponse
+	204, // 576: kandev.plugin.v1.Host.GetTask:output_type -> kandev.plugin.v1.GetTaskResponse
+	207, // 577: kandev.plugin.v1.Host.ListTaskStepTransitions:output_type -> kandev.plugin.v1.ListTaskStepTransitionsResponse
+	210, // 578: kandev.plugin.v1.Host.ListWorkspaces:output_type -> kandev.plugin.v1.ListWorkspacesResponse
+	213, // 579: kandev.plugin.v1.Host.ListWorkflows:output_type -> kandev.plugin.v1.ListWorkflowsResponse
+	219, // 580: kandev.plugin.v1.Host.ListWorkflowSteps:output_type -> kandev.plugin.v1.ListWorkflowStepsResponse
+	216, // 581: kandev.plugin.v1.Host.ListWorkflowTransitionGroups:output_type -> kandev.plugin.v1.ListWorkflowTransitionGroupsResponse
+	222, // 582: kandev.plugin.v1.Host.ListAgentProfiles:output_type -> kandev.plugin.v1.ListAgentProfilesResponse
+	225, // 583: kandev.plugin.v1.Host.ListExecutorProfiles:output_type -> kandev.plugin.v1.ListExecutorProfilesResponse
+	248, // 584: kandev.plugin.v1.Host.CheckpointExecutorResource:output_type -> kandev.plugin.v1.CheckpointExecutorResourceResponse
+	250, // 585: kandev.plugin.v1.Host.ReportExecutorProgress:output_type -> kandev.plugin.v1.ReportExecutorProgressResponse
+	252, // 586: kandev.plugin.v1.Host.ReadExecutorRuntimeArtifact:output_type -> kandev.plugin.v1.ExecutorRuntimeArtifactChunk
+	255, // 587: kandev.plugin.v1.Host.ListRepositories:output_type -> kandev.plugin.v1.ListRepositoriesResponse
+	259, // 588: kandev.plugin.v1.Host.ListSessions:output_type -> kandev.plugin.v1.ListSessionsResponse
+	262, // 589: kandev.plugin.v1.Host.ListSessionCodeStats:output_type -> kandev.plugin.v1.ListSessionCodeStatsResponse
+	266, // 590: kandev.plugin.v1.Host.ListMessages:output_type -> kandev.plugin.v1.ListMessagesResponse
+	272, // 591: kandev.plugin.v1.Host.ListPendingInteractions:output_type -> kandev.plugin.v1.ListPendingInteractionsResponse
+	274, // 592: kandev.plugin.v1.Host.GetInteraction:output_type -> kandev.plugin.v1.GetInteractionResponse
+	284, // 593: kandev.plugin.v1.Host.InvokeUtilityAgent:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	284, // 594: kandev.plugin.v1.Host.InvokeUtilityAgentWithOptions:output_type -> kandev.plugin.v1.InvokeUtilityAgentResponse
+	289, // 595: kandev.plugin.v1.Host.CreateTask:output_type -> kandev.plugin.v1.CreateTaskResponse
+	291, // 596: kandev.plugin.v1.Host.UpdateTask:output_type -> kandev.plugin.v1.UpdateTaskResponse
+	293, // 597: kandev.plugin.v1.Host.MoveTask:output_type -> kandev.plugin.v1.MoveTaskResponse
+	295, // 598: kandev.plugin.v1.Host.SendMessage:output_type -> kandev.plugin.v1.SendMessageResponse
+	297, // 599: kandev.plugin.v1.Host.PreviewPluginOwnedTaskTree:output_type -> kandev.plugin.v1.PreviewPluginOwnedTaskTreeResponse
+	299, // 600: kandev.plugin.v1.Host.DeletePluginOwnedTaskTree:output_type -> kandev.plugin.v1.DeletePluginOwnedTaskTreeResponse
+	304, // 601: kandev.plugin.v1.Host.EnsureAgentConversation:output_type -> kandev.plugin.v1.EnsureAgentConversationResponse
+	306, // 602: kandev.plugin.v1.Host.DispatchAgentConversation:output_type -> kandev.plugin.v1.DispatchAgentConversationResponse
+	308, // 603: kandev.plugin.v1.Host.DeleteAgentConversation:output_type -> kandev.plugin.v1.DeleteAgentConversationResponse
+	276, // 604: kandev.plugin.v1.Host.RespondToPermission:output_type -> kandev.plugin.v1.RespondToPermissionResponse
+	279, // 605: kandev.plugin.v1.Host.AnswerClarification:output_type -> kandev.plugin.v1.AnswerClarificationResponse
+	281, // 606: kandev.plugin.v1.Host.CancelClarification:output_type -> kandev.plugin.v1.CancelClarificationResponse
+	478, // [478:607] is the sub-list for method output_type
+	349, // [349:478] is the sub-list for method input_type
+	349, // [349:349] is the sub-list for extension type_name
+	349, // [349:349] is the sub-list for extension extendee
+	0,   // [0:349] is the sub-list for field type_name
 }
 
 func init() { file_kandev_plugin_v1_plugin_proto_init() }
@@ -31061,6 +31201,7 @@ func file_kandev_plugin_v1_plugin_proto_init() {
 	if File_kandev_plugin_v1_plugin_proto != nil {
 		return
 	}
+	file_kandev_plugin_v1_sandbox_v2_proto_init()
 	file_kandev_plugin_v1_plugin_proto_msgTypes[10].OneofWrappers = []any{
 		(*SandboxArgument_Literal)(nil),
 		(*SandboxArgument_RuntimeReference)(nil),

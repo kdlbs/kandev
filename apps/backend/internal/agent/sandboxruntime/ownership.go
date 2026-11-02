@@ -179,7 +179,7 @@ func (p *Prepared) Close() error {
 }
 
 func sameProviderBinding(a, b plugins.SandboxProviderBinding) bool {
-	return a.PluginID == b.PluginID && a.InstallationID == b.InstallationID && a.ProviderKey == b.ProviderKey && a.Version == b.Version && a.PackageDigest == b.PackageDigest && a.InstalledAt.Equal(b.InstalledAt)
+	return a.ProtocolVersion() == b.ProtocolVersion() && a.PluginID == b.PluginID && a.InstallationID == b.InstallationID && a.ProviderKey == b.ProviderKey && a.Version == b.Version && a.PackageDigest == b.PackageDigest && a.InstalledAt.Equal(b.InstalledAt)
 }
 
 func (p *Prepared) persistSupervisor(ctx context.Context, agentctlIdentity string, owner *contract.ProcessOwner) error {

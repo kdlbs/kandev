@@ -20,7 +20,7 @@ func reportIntegrity(value string) int {
 	switch value {
 	case reportIntegrityComplete:
 		return 2
-	case "partial":
+	case reportIntegrityPartial:
 		return 1
 	case reportIntegrityUnverified:
 		return 0
@@ -30,11 +30,11 @@ func reportIntegrity(value string) int {
 }
 
 func validReportEnvelope(data ReportData) bool {
-	if !slices.Contains([]string{"available", "unavailable", "unsupported"}, data.Status) ||
+	if !slices.Contains([]string{reportStatusAvailable, "unavailable", reportStatusUnsupported}, data.Status) ||
 		reportIntegrity(data.Integrity) < 0 || len(data.Sources) > 32 || len(data.Records) > 1000 || len(data.SupportedClasses) > 3 {
 		return false
 	}
-	if data.Status == "unsupported" && (len(data.Sources) != 0 || len(data.Records) != 0) {
+	if data.Status == reportStatusUnsupported && (len(data.Sources) != 0 || len(data.Records) != 0) {
 		return false
 	}
 	if !validReportClasses(data.SupportedClasses) || !validReportCompleteness(data) {
@@ -67,7 +67,7 @@ func validReportData(data ReportData, captured time.Time) bool {
 func validReportClasses(classes []string) bool {
 	seen := map[string]bool{}
 	for _, class := range classes {
-		if seen[class] || !slices.Contains([]string{"filesystem", "network", "command"}, class) {
+		if seen[class] || !slices.Contains([]string{reportClassFilesystem, "network", "command"}, class) {
 			return false
 		}
 		seen[class] = true
@@ -82,7 +82,7 @@ func validReportCompleteness(data ReportData) bool {
 	if !data.Complete {
 		return true
 	}
-	if data.Status != "available" || data.Integrity != reportIntegrityComplete || len(data.Sources) == 0 {
+	if data.Status != reportStatusAvailable || data.Integrity != reportIntegrityComplete || len(data.Sources) == 0 {
 		return false
 	}
 	for _, source := range data.Sources {
@@ -105,7 +105,7 @@ func validDenialRecord(record DenialRecord, captured time.Time) bool {
 		return false
 	}
 	switch record.Kind {
-	case "filesystem":
+	case reportClassFilesystem:
 		return record.Operation == filesystemRead || record.Operation == filesystemWrite
 	case "network":
 		return record.Operation == "connect"

@@ -13,7 +13,7 @@ func TestSandboxProviderFixtureIsGenericAndCannotAttestConfinement(t *testing.T)
 	t.Cleanup(func() { require.NoError(t, plugin.Close()) })
 	provider, ok := any(plugin).(pluginsdk.SandboxProviderPlugin)
 	require.True(t, ok, "fixture must implement the optional sandbox provider contract")
-	for _, key := range []string{"fixture-alpha", "fixture-beta"} {
+	for _, key := range []string{fixtureSandboxAlpha, fixtureSandboxBeta} {
 		t.Run(key, func(t *testing.T) {
 			ctx := context.Background()
 			identity := &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, ProviderKey: key, OperationId: "operation-1", AttemptId: "attempt-1"}

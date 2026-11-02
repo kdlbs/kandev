@@ -3,6 +3,7 @@ syntax = "proto3";
 package kandev.plugin.v1;
 
 import "google/protobuf/struct.proto";
+import "kandev/plugin/v1/sandbox_v2.proto";
 
 option go_package = "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1;pluginv1";
 
@@ -93,6 +94,7 @@ message SandboxPolicySource {
 }
 
 message SandboxPolicySnapshot {
+  SandboxPolicyV2 policy_v2 = 100;
   string policy_id = 1;
   uint64 revision = 2;
   string digest = 3;
@@ -152,6 +154,7 @@ message SandboxOverrideConstraints {
 }
 
 message SandboxCompiledPolicy {
+  SandboxPolicyV2 effective_policy_v2 = 100;
   repeated SandboxArgument prefix = 1;
   repeated SandboxArtifact artifacts = 2;
   SandboxGrants effective_grants = 3;
@@ -180,6 +183,7 @@ message SandboxApprovalWire {
 }
 
 message SandboxProviderDescription {
+  SandboxCapabilitiesV2 capabilities_v2 = 100;
   string display_name = 1;
   string provider_version = 2;
   string runtime_version = 3;
@@ -233,12 +237,14 @@ message SandboxApprovalOperation {
 }
 
 message NormalizeSandboxApprovalRequest {
+  SandboxServiceBindingV2 service_binding_v2 = 100;
   SandboxRequestContext context = 1;
   SandboxPolicySnapshot policy = 2;
   bytes verified_event = 3;
 }
 
 message NormalizeSandboxApprovalResponse {
+  SandboxApprovalV2 approval_v2 = 100;
   SandboxResponseContext context = 1;
   SandboxApprovalOperation operation = 2;
 }
@@ -260,6 +266,9 @@ message SandboxStatusEvidence {
 }
 
 message NormalizeSandboxStatusRequest {
+  // Core supplies only the path already read below the attempt's private root.
+  string source_relative_path_v2 = 100;
+  string provider_session_id_v2 = 101;
   SandboxRequestContext context = 1;
   SandboxPolicySnapshot policy = 2;
   SandboxProcessIdentity process = 3;
@@ -275,6 +284,7 @@ message SandboxRuntimeIdentity {
 }
 
 message NormalizeSandboxStatusResponse {
+  repeated SandboxRuntimeObservationV2 observations_v2 = 100;
   SandboxResponseContext context = 1;
   SandboxStatusEvidence evidence = 2;
   SandboxRuntimeIdentity identity = 3;
@@ -290,6 +300,8 @@ message SandboxDenialRecord {
 }
 
 message ReadSandboxReportRequest {
+  SandboxAuditChunkV2 chunk_v2 = 100;
+  SandboxAuditTrustV2 trust_v2 = 101;
   SandboxRequestContext context = 1;
   SandboxPolicySnapshot policy = 2;
   bytes audit = 3;
@@ -297,6 +309,7 @@ message ReadSandboxReportRequest {
 }
 
 message ReadSandboxReportResponse {
+  SandboxReportV2 report_v2 = 100;
   SandboxResponseContext context = 1;
   repeated SandboxDenialRecord records = 2;
   string next_cursor = 3;
@@ -305,6 +318,7 @@ message ReadSandboxReportResponse {
 }
 
 message ProposeSandboxRevisionRequest {
+  repeated SandboxAuditEventV2 selected_events_v2 = 100;
   SandboxRequestContext context = 1;
   SandboxPolicySnapshot policy = 2;
   repeated SandboxDenialRecord selected_records = 3;
@@ -314,6 +328,7 @@ message ProposeSandboxRevisionRequest {
 }
 
 message ProposeSandboxRevisionResponse {
+  SandboxRevisionAdditionsV2 additions_v2 = 100;
   SandboxResponseContext context = 1;
   SandboxGrants added_grants = 2;
   repeated string source_record_ids = 3;

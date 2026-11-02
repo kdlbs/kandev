@@ -11,6 +11,11 @@ import (
 )
 
 const SandboxProviderProtocolMajor = 1
+const SandboxProviderProtocolMajorV2 = 2
+
+func SupportedSandboxProviderProtocol(major int) bool {
+	return major == SandboxProviderProtocolMajor || major == SandboxProviderProtocolMajorV2
+}
 
 var sandboxProviderKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
@@ -56,7 +61,7 @@ func (m *Manifest) validateSandboxProviders() []error {
 			errs = append(errs, fmt.Errorf("sandbox provider key must be a unique lowercase identifier"))
 		}
 		seen[p.Key] = true
-		if p.ProtocolMajor != SandboxProviderProtocolMajor {
+		if !SupportedSandboxProviderProtocol(p.ProtocolMajor) {
 			errs = append(errs, fmt.Errorf("sandbox provider protocol major is unsupported"))
 		}
 		if !validSandboxProviderDisplayName(p.DisplayName) {

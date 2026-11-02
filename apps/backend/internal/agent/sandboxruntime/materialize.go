@@ -106,7 +106,7 @@ func materializedPrefix(arguments []*pluginsdk.SandboxArgument, files *contract.
 }
 
 func (p *Prepared) operation() *pluginsdk.SandboxRequestContext {
-	return &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, InstallationId: p.binding.InstallationID, ProviderKey: p.binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: p.request.AttemptId, ExecutionId: p.request.ExecutionId, Generation: p.request.Generation}
+	return &pluginsdk.SandboxRequestContext{ProtocolMajor: p.binding.ProtocolVersion(), InstallationId: p.binding.InstallationID, ProviderKey: p.binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: p.request.AttemptId, ExecutionId: p.request.ExecutionId, Generation: p.request.Generation}
 }
 
 func (p *Prepared) discard() {

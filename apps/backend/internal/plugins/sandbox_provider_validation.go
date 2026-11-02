@@ -22,7 +22,7 @@ const (
 var errSandboxProviderReply = errors.New("plugins: invalid sandbox provider reply")
 
 func validateSandboxCompilation(req *pluginsdk.CompileSandboxPolicyRequest, compiled *pluginsdk.SandboxCompiledPolicy) error {
-	if req == nil || req.Policy == nil || compiled == nil || compiled.EffectiveGrants == nil ||
+	if req == nil || req.Policy == nil || compiled == nil || (compiled.EffectiveGrants == nil && req.GetContext().GetProtocolMajor() != 2) ||
 		!proto.Equal(req.Policy.Grants, compiled.EffectiveGrants) || proto.Size(compiled) > maxSandboxMessageBytes {
 		return errSandboxProviderReply
 	}
@@ -113,6 +113,9 @@ func privateSandboxReference(key string) bool {
 }
 
 func validSandboxRequestPayload(request proto.Message) bool {
+	if value, ok := request.(sandboxRequest); ok && value.GetContext().GetProtocolMajor() == 2 {
+		return validSandboxV2Request(request)
+	}
 	compile, ok := request.(*pluginsdk.CompileSandboxPolicyRequest)
 	if !ok {
 		return true
