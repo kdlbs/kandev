@@ -109,3 +109,8 @@ locale checks, desktop and phone subagent E2E, changed-file Go lint, docs/spec
 validation, the backend Go build, and production Vite build passed. Task 04 remains
 blocked on atomic notice and inbox-cursor persistence; notices are not advertised
 or handled.
+
+Settled and resumed Claude subagent card updates no longer record or publish a new
+running background-work observation; the shared `isSubagentPresentationUpdate` check
+guards both the background accounting and observation paths, with a regression test
+covering the async launch and both presentation updates.
