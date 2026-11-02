@@ -275,6 +275,7 @@ func probeModeConfigOptions(options acp.SessionConfigSelectOptions) []acp.Sessio
 	modeCategory := acp.SessionConfigOptionCategoryMode
 	return []acp.SessionConfigOption{{Select: &acp.SessionConfigOptionSelect{
 		Id:           "mode",
+		Name:         "Mode",
 		Category:     &modeCategory,
 		Type:         "select",
 		CurrentValue: "build",
@@ -406,6 +407,14 @@ func TestProbeACPSessionWithContextUsesConfigOptionsModeAdvertisement(t *testing
 				Grouped: &groupedModes,
 			}),
 			wantCalls: []string{"plan"},
+		},
+		{
+			name: "grouped mode option skips an unadvertised mode",
+			mode: "reviewer",
+			configOptions: probeModeConfigOptions(acp.SessionConfigSelectOptions{
+				Grouped: &groupedModes,
+			}),
+			failSetMode: true,
 		},
 		{
 			name: "empty mode option skips an unadvertised mode",
