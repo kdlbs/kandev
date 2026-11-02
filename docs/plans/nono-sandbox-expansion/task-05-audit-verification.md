@@ -149,3 +149,14 @@ binding, invalid digests, future timestamps, and non-final receipts. Full
 SQLite/PostgreSQL policy/runtime/common race suites pass. Operator trust/job storage, host
 verification dispatch, the desktop/phone action, and final acceptance remain
 unfinished.
+
+Operator trust storage now passes its scoped verification. Scope is derived from the
+authorized captured attempt. SQLite/PostgreSQL tests cover an unconfigured
+scope, public-key parsing without a Nono-specific algorithm restriction,
+private-key rejection, token/read-only rejection, stale writes, explicit
+revocation, immutable history, and restart. Fresh schema, replay, conflict, transaction, and timestamp conformance pass on
+both engines. Previous-stable upgrades and replay pass on both engines. The
+owning-store descriptor includes both trust tables. The previous-stable manifest
+already records the entire sandbox store as absent, so no historical fixture
+or manifest exception was changed. SQL guard and scoped lint pass. No trust HTTP route or verification job is
+exposed by this storage checkpoint.

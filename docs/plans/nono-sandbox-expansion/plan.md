@@ -171,7 +171,7 @@ Design validation passed on 2026-10-30:
 - All work-order dependency references, 15 new documents' local links, and verification-block shell syntax passed.
 - `git diff --check`: passed. All new artifacts are visible in the specification catalog or plan directory.
 
-Task-level results are recorded in each work order. Tasks 01-04 passed their required checks. Tasks 05-10 remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
+Task-level results are recorded in each work order. Tasks 01-04 passed their required checks. Task 05 is in progress. Tasks 06-10 remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
 
 Leave this package unstaged and uncommitted for review. After a later explicit implementation request, use TDD per work order. Update host PR #4769 and companion PR #2 within existing authorization after their affected checks pass. A production plugin release additionally requires the public compatible SDK dependency and independent package validation. No merge is authorized.
 
@@ -185,4 +185,4 @@ The user explicitly requested implementation of this package. Implementation fol
 
 ## Foundation delivery checkpoint (2026-11-02)
 
-Tasks 01 and 02 are complete. Host foundation `7545c750c150` is pushed to the existing feature branch/PR. Task 03 is complete: independent facts, captured launch receipts, runtime metadata, SQLite/PostgreSQL persistence, localized desktop/phone UI, and rendered expiry checks passed. Task 04 is complete: typed reports, bounded frozen source reads, preserved successful-read age, SQLite/PostgreSQL history, real filesystem/proxy records, and desktop/phone inspection and learning regressions passed. Task 05 is next. GitHub reports new conflicts against moving main; integration is required before final managed acceptance. No PR merge is authorized.
+Tasks 01 and 02 are complete. Host foundation `7545c750c150` is pushed to the existing feature branch/PR. Task 03 is complete: independent facts, captured launch receipts, runtime metadata, SQLite/PostgreSQL persistence, localized desktop/phone UI, and rendered expiry checks passed. Task 04 is complete: typed reports, bounded frozen source reads, preserved successful-read age, SQLite/PostgreSQL history, real filesystem/proxy records, and desktop/phone inspection and learning regressions passed. Task 05 is in progress: the explicit verifier SDK, native Nono verification, and final-artifact retention are checked and pushed. Operator trust storage passes SQLite/PostgreSQL and upgrade checks. Verification-job persistence, host dispatch, and desktop/phone verification remain unfinished. GitHub reports new conflicts against moving main; integration is required before final managed acceptance. No PR merge is authorized.

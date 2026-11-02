@@ -61,7 +61,10 @@ func (s *Service) initSchema() error {
 	if err = s.initReports(); err != nil {
 		return err
 	}
-	return s.initLearning()
+	if err = s.initLearning(); err != nil {
+		return err
+	}
+	return s.initAuditTrust()
 }
 
 func (s *Service) Publish(ctx context.Context, policy Policy, expected int64) (*Revision, error) {

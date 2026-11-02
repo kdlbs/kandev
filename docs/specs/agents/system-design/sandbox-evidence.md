@@ -62,6 +62,8 @@ Verify the recorded event chain and final root against immutable metadata. If th
 
 Core stores trust configuration with operator, version, and provenance. It sends only the expected public key and bounded declared artifact bytes to the provider verifier. Private keys never enter the plugin RPC or public DTO. Missing signatures remain unsigned, not invalid. Missing final metadata or interruption remains incomplete. A changed trust revision produces a separate verification record; revocation removes a current trusted-signer claim while preserving historical verification.
 
+Trust scope comes from the authorized attempt's organization, workspace, provider installation, and provider key. The client cannot supply another scope. An unconfigured scope trusts no key. An operator can publish a public-key revision or an explicit revocation, using the expected current version. Revisions retain operator identity, original time, canonical public-key fingerprint, and source. A stale write fails. Revocation clears the current key without deleting earlier revisions. Core accepts a single SPKI public-key PEM and leaves algorithm support to the provider. Private keys, extra PEM blocks, and unrelated text are rejected.
+
 This phase consumes existing signed bundles. It does not enable Nono platform enrollment, remote audit delivery, or automatically provision signing keys. Those are separate deployment contracts. The implementation must validate Nono's exact DSSE encoding and signing algorithm using upstream fixtures and an independent mutation test, rather than implementing a generic arbitrary-algorithm verifier.
 
 ## Learning
