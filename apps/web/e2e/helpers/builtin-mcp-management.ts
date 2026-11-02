@@ -43,6 +43,10 @@ export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: b
     await expect(page.getByTestId("builtin-mcp-package-configuration")).toBeFocused();
     await activate(page.getByTestId("builtin-mcp-package-diagnostics"), touch);
     await chooseBuiltin(page, "diagnostics", "Blocked", touch);
+    await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
     const save = page
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes", exact: true });
@@ -60,6 +64,10 @@ export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: b
     await page.reload();
     await activate(page.getByTestId("builtin-mcp-package-diagnostics"), touch);
     await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toContainText("Blocked");
+    await expect(page.getByTestId("builtin-mcp-choice-diagnostics")).toHaveAttribute(
+      "data-settings-dirty",
+      "false",
+    );
     await assertNoDocumentHorizontalOverflow(page, "built-in package detail");
   } finally {
     await api.deleteWorkspace(workspace.id, workspace.name);
@@ -99,7 +107,7 @@ export async function checkBuiltinTask(page: Page, api: ApiClient, seed: SeedDat
       async () => (await builtinView(api, "tasks", task.id)).preferences?.packages.configuration,
     )
     .toBe("on");
-  await expect(save).toBeDisabled();
+  await expect(save).toHaveCount(0);
   await activate(explorer.getByRole("button", { name: "Back", exact: true }), touch);
   await activate(explorer.getByTestId("builtin-mcp-package-walkthroughs"), touch);
   await chooseBuiltin(page, "walkthroughs", "Off", touch);

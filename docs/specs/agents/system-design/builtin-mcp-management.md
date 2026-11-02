@@ -22,37 +22,22 @@ continues to own connection/tool observations. The
 records alternatives. This revised draft replaces workspace-only group pruning
 with the selectable native packages requested on 2026-10-24.
 
-Source baseline is actual parent #3293 merge
-`0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`. Verified source facts:
+The historical source baseline is parent #3293 merge
+`0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`. Its single native server and
+surface-specific registrations motivated this package contract. Current owners:
 
-- `internal/mcp/server/server.go:profileToolGroups` composes named groups from
-  backend surfaces/capabilities. Configuration and task registrations share
-  canonical discovery/task names. Automation composes and prunes a fixed set.
-- `internal/mcp/profile.Context` carries surface, capabilities, providers, and
-  managed/coordinator policies. It has no operator package selection today.
-  `Server.SetMode`, `SetProfile`, and plugin rebuilds can replace registration.
-- `Executor.resolveTaskSessionMCPProfile` selects the actual surface, title
-  ownership, question mode, and canvas capability. `McpProfile` crosses launch,
-  executor, agentctl create/configure, and persisted instance boundaries.
-- `internal/mcp/scope/principal.go:ScopePrincipal` derives task/session identity
-  and surface from stored records. `configurationPrincipalSurface` uses the
-  session marker. Ordinary tasks must not gain that marker for package selection.
-- `guardedMCPDispatcher` in `handlers/automation_authorization.go` applies
-  automation/coordinator checks. The new package boundary needs a separate
-  execution-bound check; hiding tools alone does not guard raw backend actions.
-- `config.injectKandevMcpServerAtHost`, API route wiring, ACP transport, passthrough
-  config generation, and `process.manager_permission_policy.go` assume one
-  injected `kandev` endpoint. Permission parsing accepts letters, digits, `_`
-  and `-`, but not dots. Use exact hyphenated package identities.
-- `sysprompt.FormatKandevContextWithOptions` and Kandev/Office templates currently
-  require rich output unconditionally. Walkthrough has both template references
-  and a UI request hook. All must consume bound package availability.
-- Catalog services live in `internal/agent/mcpconfig`; settings owns persistence
-  and HTTP handlers. Web `mcp-settings.tsx` and `McpServerExplorer` provide the
-  existing settings and desktop/touch navigation patterns.
+- `internal/mcp/profile` and `internal/mcp/server`: surfaces, capabilities,
+  canonical tool membership, registration, and package dispatch.
+- `internal/orchestrator/executor`, agent runtime, and agentctl: launch profiles,
+  process injection, accepted bindings, routes, and permission normalization.
+- `internal/mcp/scope` and guarded backend dispatch: authenticated identity,
+  resource access, automation/coordinator restrictions, and configuration context.
+- `internal/agent/mcpconfig`, settings persistence/handlers, and web MCP settings
+  and explorer: human choices, persistence, and responsive management.
+- `internal/sysprompt`, Office guidance, and walkthrough callers: instructions and
+  actions constrained by bound package availability.
 
-All backend paths above are relative to `apps/backend`; web paths below are
-relative to `apps/web`. Proposed types/routes/test names are explicitly new.
+Backend paths are relative to `apps/backend`; web paths are relative to `apps/web`.
 
 | Requirement | Design sections |
 | --- | --- |
@@ -481,6 +466,21 @@ Existing authorized task creation can save these choices before the first start.
 Session Connections lists actual package entries; selecting one shows desired,
 bound, and observed state with an authorized Manage action.
 
+Connections also shows a separate next-process-start change list for desired
+packages that differ from a valid accepted manifest. Each addition or removal
+names the package and opens its existing Customize detail. A pending addition
+does not create an attachment row, health state, or observed tool count. Unknown
+or foreign acceptance cannot produce a claimed change comparison. Package rows
+in Customize show their effective choice and inheritance without opening detail.
+
+Task package editing reuses the settings change-aware treatment: changed fields
+and their framed group carry the shared dirty attributes, and one compact save
+surface appears only while edits remain unsaved. Its Reset discards local edits;
+reset-to-default stages a separate draft. Successful saves clear dirty styling
+and refresh next-start feedback, while failed saves retain the draft. In an
+explorer the save surface belongs to that panel, outside its content scroller,
+and never portals into an unrelated configuration-chat save host.
+
 Phone uses one full-height detail in the existing settings shell or explorer
 drawer, with list > package detail > tool detail in the same surface. Back returns
 one level and Close returns focus to the invoker. Fixed navigation/save controls
@@ -511,5 +511,4 @@ starts, workspace switches, qualified names, transport and permission provenance
 UI/E2E tests prove regular-task Configuration opt-in, configuration-chat defaults,
 workspace blocking, optional pruning, truthful evidence, and desktop/phone parity.
 The [plan](../../../plans/builtin-mcp-management/plan.md) maps criteria to tests
-and the three sequential work orders. No production or permanent tests change
-at this design checkpoint.
+and the three sequential work orders.

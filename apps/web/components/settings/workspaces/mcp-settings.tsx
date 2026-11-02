@@ -482,6 +482,7 @@ function useBuiltinWorkspacePages(workspaceId: string) {
     ) : null,
     list: (
       <BuiltinPackageList
+        scope="workspaces"
         returnFocus={returnFocus.current}
         editor={builtin}
         onSelect={setBuiltinId}

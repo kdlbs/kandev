@@ -14,7 +14,12 @@ these packages to themselves.
 1. Open the MCP button beside the task's chat composer, then **Customize**.
 2. Open **Built-in** and select a package.
 3. Choose **Inherit workspace policy**, **On**, or **Off**.
-4. Select **Save task choices**.
+4. Select **Save changes**.
+
+Package rows show their effective On or Off value and whether they inherit
+workspace policy. Changed choices use the settings change highlight. The compact
+save bar appears while edits are unsaved; its **Reset** restores saved choices.
+**Reset all packages to defaults** stages a separate change that still needs Save.
 
 In **New Task**, expand **Built-in** to choose packages before the first start.
 Those choices are saved as part of task creation. A rejected choice prevents that
@@ -74,6 +79,10 @@ with **Current process accepted**. These are separate from connection status and
 observed tools. A selected package is not proof of a healthy connection, and
 acceptance is not proof that `tools/list` succeeded. Missing tool counts are
 unknown, not zero. One package's evidence does not describe another package.
+
+Connections also lists pending package additions and removals under **Next process
+start**. Select a pending package to review its choice. An added package stays
+separate from the current process's connections until a new process accepts it.
 
 If a Walkthrough request is unavailable, inspect its task choice and current
 process acceptance. After changing the choice, start a new process. Refresh

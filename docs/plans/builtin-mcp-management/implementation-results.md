@@ -1,5 +1,24 @@
 # Built-in MCP implementation results
 
+## User-reported package save feedback
+
+Fixed two UI-02 omissions found during isolated manual testing: saved future
+package additions now appear separately from current agent connections, and
+task choices use settings dirty-field/group styling with the shared compact
+Reset/Save surface. Effective package values are visible in the package list.
+Returning to implicit inheritance clears dirty state. Saving keeps the current
+agent's accepted manifest intact.
+
+Rebased onto main `c060076d6723a611ebc260371aa80b555442e589`, preserving both
+upstream fixture improvements and this branch's synchronization guards. The
+normal and gated follow-up paths pass 20 race repetitions; Go lint is clean.
+Post-rebase validation: 69 focused frontend tests, nine desktop browser journeys,
+seven phone journeys, full typecheck, changed-file ESLint, i18n, public-doc and
+spec validation. Browser retries are disabled and suites run sequentially.
+The preview's web assets were updated without restarting its backend or changing
+the user's saved task preferences. Exact-head remote CI remains pending the
+checkpoint push. Earlier CI receipts below describe their recorded heads.
+
 Status: all three work orders are complete, 2026-10-25. This record supersedes
 only the completion claims in the historical partial publication checkpoint.
 

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { BuiltinMCPManifest, BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
-import { builtinPackageState } from "./builtin-mcp-view-model";
+import { builtinPackageState, builtinPendingPackages } from "./builtin-mcp-view-model";
 const manifest: BuiltinMCPManifest = {
   version: 1,
   catalog_version: 1,
@@ -46,6 +46,37 @@ it("does not infer acceptance from desired selection", () => {
     bound: undefined,
     pending: false,
   });
+});
+
+it("lists a future addition and removal without manufacturing attachment evidence", () => {
+  const value = view();
+  value.desired = {
+    ...manifest,
+    packages: ["core", "configuration"],
+    origins: { core: "required", configuration: "task" },
+  };
+  expect(builtinPendingPackages(value)).toEqual([
+    { id: "configuration", action: "add" },
+    { id: "walkthroughs", action: "remove" },
+  ]);
+  expect(value.bound?.manifest.packages).toEqual(["core", "walkthroughs"]);
+  expect(value.history).toBeUndefined();
+});
+it("does not compare unknown, foreign or legacy package acceptance", () => {
+  const unknown = view();
+  delete unknown.bound;
+  expect(builtinPendingPackages(unknown)).toEqual([]);
+  const foreign = view();
+  foreign.bound!.execution_id = "foreign";
+  expect(builtinPendingPackages(foreign)).toEqual([]);
+  const wrongDesiredOwner = view();
+  wrongDesiredOwner.desired!.task_id = "foreign";
+  expect(builtinPendingPackages(wrongDesiredOwner)).toEqual([]);
+});
+it("does not claim package changes for revision-only saves", () => {
+  const value = view();
+  value.desired = { ...manifest, task_revision: 4 };
+  expect(builtinPendingPackages(value)).toEqual([]);
 });
 it.each(["session", "task", "workspace", "execution"])(
   "rejects acceptance owned by another %s",

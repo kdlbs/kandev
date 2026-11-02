@@ -25,7 +25,7 @@ const choicesOf = (scope: Scope, value: BuiltinMCPSnapshot): Choices =>
   scope === "workspaces" ? value.policy.packages : (value.preferences?.packages ?? {});
 const sameChoices = (a: Choices, b: Choices) =>
   [...new Set([...Object.keys(a), ...Object.keys(b)])].every(
-    (id) => a[id as BuiltinMCPPackage] === b[id as BuiltinMCPPackage],
+    (id) => (a[id as BuiltinMCPPackage] ?? "inherit") === (b[id as BuiltinMCPPackage] ?? "inherit"),
   );
 function assertOwner(value: BuiltinMCPSnapshot, scope: Scope, id: string, workspace: string) {
   if (

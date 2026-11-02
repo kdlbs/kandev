@@ -155,6 +155,54 @@ need clear labels. All seven locales are required; generate Traditional Chinese.
 
 ## Results
 
+### User-reported save feedback correction (2026-11-02)
+
+Reopened under the existing approved UI-02 scope and AC-003.3, AC-004.1 through
+.5. The isolated task accepted the Configuration preference, but Connections
+rendered only the retained process's original attachment rows. The package list
+also omitted effective choices, and the task editor used an always-visible
+footer without the shared dirty-field and dirty-group treatment.
+
+Sequential repair: first prove missing pending-addition feedback and the clean
+editor's visible Save action with desktop browser regressions. Then show separate
+next-start additions/removals beside actual connections, retain actual-only
+health/tool evidence, show effective choices in package rows, and reuse the
+settings dirty-field/group styling and compact change-aware save surface inside
+the explorer. Phone retains one scrolling body and reachable fixed save actions.
+Reset in that save surface discards the local edit; reset-to-default remains a
+separate draft operation. Do not restart agents or alter the user's seeded task.
+
+Targeted checks: the existing desktop and phone management specs, including
+`shows a saved package addition` and `shows change-aware package controls`;
+built-in view-model, management-hook and session-hook Vitest tests; web typecheck,
+changed-file lint, i18n check, and public/spec validation. These repairs use the
+existing reviewed design package and do not change package authority or timing.
+
+UI-02 correction: Connections shows a labelled next-start change list, followed
+by actual current-process servers. Selecting a pending package opens its existing
+Customize detail. Customize shows effective On/Off in each row, green highlights
+only on changed controls/groups, and a compact Unsaved changes / Reset / Save
+surface while dirty. The phone uses the same data and actions in its full-height
+drawer, with the save surface outside the content scroller.
+
+The earlier completed results below remain historical evidence.
+
+Repair results: both desktop regressions first failed on the expected missing
+pending row and always-visible Save control. The inheritance hook test first
+failed because implicit Inherit remained dirty. After correction and rebase,
+69 focused frontend tests pass; nine desktop browser cases pass (seven management
+journeys plus queue/history conflict fixtures), and seven phone cases pass,
+including 320px save controls and a dirty draft preserved across 767px and back.
+All browser checks use one worker and no retries. Typecheck, changed-file ESLint,
+i18n, public-doc validators, and specification checks pass. Mock-agent timing
+checks pass 20 race repetitions and Go lint reports zero issues.
+
+The rebase preserves main's longer ungated follow-up observation window and its
+content-settlement/snapshot fixture, plus this branch's explicit follow-up release
+gate and transactional pause/claim fencing. The ungated fake-clock test now waits
+for the final output, so its goroutine drains. The isolated preview receives only
+new web assets; task 1's preference revision and running agent remain unchanged.
+
 Completed. Workspace policy, task customization and
 initial creation choices, package evidence, Walkthrough guards, localization, and
 public docs are implemented. Tests use domain hooks and pure view models plus

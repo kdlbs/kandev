@@ -1,5 +1,6 @@
 import {
   builtinPackageState,
+  builtinPendingPackages,
   builtinSelectionKey,
   isReservedBuiltinName,
 } from "./builtin-mcp-view-model";
@@ -18,6 +19,41 @@ type EvidenceContext = {
 };
 const Context = createContext<EvidenceContext | null>(null);
 export const BuiltinSessionEvidenceProvider = Context.Provider;
+
+export function BuiltinPendingPackages() {
+  const { t } = useTranslation();
+  const context = useContext(Context);
+  const changes = builtinPendingPackages(context?.view);
+  if (!context || changes.length === 0) return null;
+  return (
+    <section className="mb-4 space-y-2" data-testid="builtin-mcp-pending-changes">
+      <h3 className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {t("settings:builtinMcp.desired")}
+      </h3>
+      <p className="px-2 text-xs text-muted-foreground">{t("settings:builtinMcp.pending")}</p>
+      {changes.map(({ id, action }) => (
+        <Button
+          key={id}
+          type="button"
+          variant="outline"
+          data-testid={`builtin-mcp-pending-${id}`}
+          className={controlSizingClassName(
+            "standard",
+            "h-auto min-h-7 w-full justify-between gap-2 whitespace-normal px-2 py-2 text-left max-md:h-auto [@media(pointer:coarse)]:h-auto",
+          )}
+          onClick={() => context.manage(id)}
+        >
+          <span className="min-w-0 break-words">
+            {t(`settings:builtinMcp.packages.${id}.label`)}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {t(action === "add" ? "settings:mcpPendingAdd" : "settings:mcpPendingRemove")}
+          </span>
+        </Button>
+      ))}
+    </section>
+  );
+}
 
 export function BuiltinSessionEvidence({ server }: { server: MCPAttachmentServer }) {
   const { t } = useTranslation();

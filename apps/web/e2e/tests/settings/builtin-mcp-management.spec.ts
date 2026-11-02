@@ -4,6 +4,10 @@ import {
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  checkBuiltinPendingAddition,
+  checkBuiltinDirtyFeedback,
+} from "../../helpers/builtin-mcp-save-feedback";
+import {
   activate,
   builtinView,
   checkBuiltinTask,
@@ -71,4 +75,19 @@ test.afterEach(async ({ backend }, testInfo) => {
 
 test("Back from package detail does not submit a new task", async ({ testPage }) => {
   await checkBuiltinCreationBack(testPage, false);
+});
+
+test("shows a saved package addition separately from current connections", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinPendingAddition(testPage, apiClient, seedData, false);
+});
+test("shows change-aware package controls only for unsaved edits", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinDirtyFeedback(testPage, apiClient, seedData, false);
 });

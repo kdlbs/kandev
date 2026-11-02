@@ -25,6 +25,28 @@ export function builtinSelectionKey(value: boolean | undefined) {
   return value ? "settings:builtinMcp.selected" : "settings:builtinMcp.notSelected";
 }
 
+export function builtinPendingPackages(view: BuiltinMCPSessionView | undefined) {
+  if (
+    !view?.desired ||
+    view.desired.workspace_id !== view.workspace_id ||
+    view.desired.task_id !== view.task_id
+  )
+    return [];
+  const ids: BuiltinMCPPackage[] = [
+    "core",
+    "configuration",
+    "rich-output",
+    "walkthroughs",
+    "diagnostics",
+  ];
+  return ids.flatMap((id) => {
+    const state = builtinPackageState(view, id);
+    return state.pending
+      ? [{ id, action: state.desired ? ("add" as const) : ("remove" as const) }]
+      : [];
+  });
+}
+
 export function isReservedBuiltinName(value: string): boolean {
   const name = value.trim().toLowerCase();
   return (

@@ -13,6 +13,17 @@ legacy_specs: []
 
 # Implementation plan: Selectable built-in MCP packages
 
+## Active UI-02 save-feedback remediation (2026-11-02)
+
+Work order 03 was reopened for the user's PR findings: Configuration saves but
+has no visible next-start addition in Connections, and task controls omit the
+settings change-aware treatment. The existing approved requirements and design
+own this repair. No package authority or process-start behavior changes. See
+[work order 03](task-03-management-experience.md#user-reported-save-feedback-correction-2026-11-02)
+for the diagnosed cause, regression checks, and desktop/phone composition.
+The repair is complete and locally verified. Earlier checkpoints remain historical
+evidence; exact-head remote CI is pending publication of this checkpoint.
+
 ## Checkpoint and verified baseline
 
 Design approved by the user; implementation explicitly authorized with "go for it"

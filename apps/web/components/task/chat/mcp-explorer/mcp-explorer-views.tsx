@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { BuiltinPackageSelector, type BuiltinPackageSelection } from "./builtin-package-selector";
 import { BuiltinSessionEvidenceProvider } from "./builtin-session-evidence";
 import type { BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
+import { BuiltinPackageSave } from "./builtin-package-save";
 
 export type ExplorerViewsProps = {
   builtin?: BuiltinPackageSelection;
@@ -88,9 +89,6 @@ export function ExplorerViews({
                 />
               </div>
             )}
-            <h3 className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {t("task:mcpCurrentAgent")}
-            </h3>
             <div className="min-h-0 flex-1">{children}</div>
           </div>
         </TabsContent>
@@ -123,22 +121,25 @@ function CustomizationBody({
   assignmentActive: boolean;
 }) {
   return (
-    <div
-      data-testid="mcp-customization-scroll"
-      className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1"
-    >
-      <div className="mx-auto max-w-2xl pb-1">
-        {builtin && <BuiltinPackageSelector {...builtin} />}
-        {!builtin?.selected && (
-          <MCPSessionSelectionBody
-            {...selection}
-            assignmentActive={assignmentActive}
-            query={query}
-            onQueryChange={onQueryChange}
-            testId="mcp-session-customization"
-          />
-        )}
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        data-testid="mcp-customization-scroll"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+      >
+        <div className="mx-auto max-w-2xl pb-1">
+          {builtin && <BuiltinPackageSelector {...builtin} />}
+          {!builtin?.selected && (
+            <MCPSessionSelectionBody
+              {...selection}
+              assignmentActive={assignmentActive}
+              query={query}
+              onQueryChange={onQueryChange}
+              testId="mcp-session-customization"
+            />
+          )}
+        </div>
       </div>
+      {builtin && <BuiltinPackageSave {...builtin} />}
     </div>
   );
 }

@@ -15,12 +15,7 @@ export type BuiltinPackageSelection = {
   select: (id: BuiltinMCPPackage | null) => void;
   onSaved: () => void;
 };
-export function BuiltinPackageSelector({
-  editor,
-  selected,
-  select,
-  onSaved,
-}: BuiltinPackageSelection) {
+export function BuiltinPackageSelector({ editor, selected, select }: BuiltinPackageSelection) {
   const { t } = useTranslation();
   const returnFocus = useRef<BuiltinMCPPackage | null>(null);
   if (selected) returnFocus.current = selected;
@@ -39,37 +34,15 @@ export function BuiltinPackageSelector({
       )}
       <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.taskTiming")}</p>
       {editor.view?.can_edit && (
-        <div className="sticky bottom-0 flex flex-wrap gap-2 border-t bg-background py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <Button
-            data-testid="builtin-mcp-save"
-            className={controlSizingClassName("standard")}
-            disabled={!editor.dirty || editor.pending || Boolean(editor.error)}
-            onClick={() => {
-              void editor
-                .save()
-                .then(onSaved)
-                .catch(() => undefined);
-            }}
-          >
-            {t("settings:builtinMcp.save")}
-          </Button>
-          <Button
-            variant="outline"
-            className={controlSizingClassName("standard")}
-            disabled={!editor.dirty || editor.pending}
-            onClick={editor.discard}
-          >
-            {t("settings:builtinMcp.discard")}
-          </Button>
-          <Button
-            variant="ghost"
-            className={controlSizingClassName("standard")}
-            disabled={editor.pending}
-            onClick={editor.reset}
-          >
-            {t("settings:builtinMcp.reset")}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          className={controlSizingClassName("standard")}
+          disabled={editor.pending}
+          onClick={editor.reset}
+        >
+          {t("settings:builtinMcp.reset")}
+        </Button>
       )}
     </div>
   );

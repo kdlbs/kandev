@@ -40,6 +40,15 @@ beforeEach(() => {
 });
 
 describe("built-in MCP management drafts", () => {
+  it("clears dirty state when an optional task choice returns to implicit inheritance", async () => {
+    const { result } = renderHook(() => useBuiltinMCPManagement("tasks", "task", "ws"));
+    await waitFor(() => expect(result.current.view).not.toBeNull());
+    act(() => result.current.setChoice("configuration", "on"));
+    expect(result.current.dirty).toBe(true);
+    act(() => result.current.setChoice("configuration", "inherit"));
+    expect(result.current.dirty).toBe(false);
+    expect(api.preferences).not.toHaveBeenCalled();
+  });
   it("saves explicit task consent with both captured revisions", async () => {
     const saved = snapshot();
     saved.preferences!.revision = 3;

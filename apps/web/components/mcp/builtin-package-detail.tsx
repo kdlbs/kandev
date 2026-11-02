@@ -7,6 +7,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import type { BuiltinMCPDescriptor, BuiltinMCPPackage } from "@/lib/types/builtin-mcp";
 import type { useBuiltinMCPManagement } from "@/hooks/domains/workspace/use-builtin-mcp-management";
 import { BuiltinMCPError } from "./builtin-package-list";
+import { builtinPackageChoice } from "./builtin-package-choice";
 export { BuiltinPackageList } from "./builtin-package-list";
 
 export type BuiltinMCPEditor = ReturnType<typeof useBuiltinMCPManagement>;
@@ -39,14 +40,15 @@ function PackageChoice({
   const view = editor.view!;
   const restriction = packageRestriction(editor, item);
   if (restriction) return <p className="rounded-md bg-muted p-3 text-sm">{t(restriction)}</p>;
-  const choice = editor.draft[item.id] ?? "inherit";
+  const { choice, enabled, dirty } = builtinPackageChoice(view, editor.draft, scope, item.id);
   const blocked = view.policy.packages[item.id] === "blocked";
   const choices = packageChoices(scope, item.id);
-  const enabled =
-    !blocked &&
-    (choice === "on" || (choice === "inherit" && view.policy.packages[item.id] === "default"));
   return (
-    <div className="space-y-3">
+    <div
+      className="space-y-3 rounded-md border border-transparent p-3"
+      data-settings-dirty={dirty}
+      data-settings-dirty-level="container"
+    >
       <label className="block text-sm font-medium" htmlFor={`builtin-choice-${item.id}`}>
         {t(
           scope === "tasks"
@@ -62,6 +64,7 @@ function PackageChoice({
         <SelectTrigger
           id={`builtin-choice-${item.id}`}
           data-testid={`builtin-mcp-choice-${item.id}`}
+          data-settings-dirty={dirty}
           className={controlSizingClassName("standard", "w-full")}
         >
           <SelectValue />

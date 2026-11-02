@@ -3,6 +3,10 @@ import {
   checkBuiltinCreationBack,
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
+import {
+  checkBuiltinPendingAddition,
+  checkBuiltinDirtyFeedback,
+} from "../../helpers/builtin-mcp-save-feedback";
 import { checkBuiltinTask, checkBuiltinWorkspace } from "../../helpers/builtin-mcp-management";
 
 test("saves built-in policy on a phone", async ({ testPage, apiClient }) => {
@@ -63,4 +67,19 @@ test("keeps translated detail usable across phone and touch widths", async ({
 
 test("Back from package detail does not submit a new task", async ({ testPage }) => {
   await checkBuiltinCreationBack(testPage, true);
+});
+
+test("shows a saved package addition separately from current connections on a phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinPendingAddition(testPage, apiClient, seedData, true);
+});
+test("shows change-aware package controls only for unsaved edits on a phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await checkBuiltinDirtyFeedback(testPage, apiClient, seedData, true);
 });
