@@ -529,5 +529,9 @@
   "tierPreviewExcluded": "Excluded: {{reason}}",
   "dynamicTierCandidatesDescription": "Tiers run in saved order. Within each tier, candidates use its configured selection mode. Switching candidates still follows the configured error action.",
   "tierModeRoundRobin": "Round-robin",
+  "tierModeHeadroom": "Headroom",
+  "tierModePace": "Pace to reset",
+  "tierModeConsumptionRate": "Consumption rate",
+  "tierUsageUnknownHint": "Ranks with observed provider usage only. Until a usage snapshot is observed, capacity stays unknown.",
   "tierRoundRobinDescription": "Task/session selections rotate within this tier after the last committed choice. Utility, review and taskless Office calls do not advance this history."
 }

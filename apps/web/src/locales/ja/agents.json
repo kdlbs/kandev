@@ -529,5 +529,9 @@
   "tierPreviewExcluded": "除外: {{reason}}",
   "dynamicTierCandidatesDescription": "グループは保存された順に進み、各グループ内では設定した選択方式を使います。候補の切り替えには、設定済みのエラー動作が適用されます。",
   "tierModeRoundRobin": "ラウンドロビン",
+  "tierModeHeadroom": "残り余裕",
+  "tierModePace": "リセットまでのペース",
+  "tierModeConsumptionRate": "消費速度",
+  "tierUsageUnknownHint": "観測されたプロバイダー使用量のみで順位付けします。使用量スナップショットが観測されるまで、容量は不明です。",
   "tierRoundRobinDescription": "タスクとセッションの選択は、このグループの最後に確定した候補の次から循環します。ユーティリティ、レビュー、タスクなしの Office 呼び出しは履歴を進めません。"
 }

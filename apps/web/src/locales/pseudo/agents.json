@@ -529,5 +529,9 @@
   "tierPreviewExcluded": "Ēxćĺũďēď: {{reason}}",
   "dynamicTierCandidatesDescription": "Ţĩēŕś ŕũń ĩń śàvēď ōŕďēŕ. Ŵĩţĥĩń ēàćĥ ţĩēŕ, ćàńďĩďàţēś ũśē ĩţś ćōńƒĩĝũŕēď śēĺēćţĩōń ḿōďē. Śŵĩţćĥĩńĝ ćàńďĩďàţēś śţĩĺĺ ƒōĺĺōŵś ţĥē ćōńƒĩĝũŕēď ēŕŕōŕ àćţĩōń.",
   "tierModeRoundRobin": "Ŕōũńď-ŕōƀĩń",
+  "tierModeHeadroom": "Héádroom",
+  "tierModePace": "Pácé tó rését",
+  "tierModeConsumptionRate": "Cónsúmptíón ráté",
+  "tierUsageUnknownHint": "Ránks wíth óbsérvéd próvídér úságé ónly. Úntíl á úságé snápshót ís óbsérvéd, cápácíty stáys únknówn.",
   "tierRoundRobinDescription": "Ţàśķ/śēśśĩōń śēĺēćţĩōńś ŕōţàţē ŵĩţĥĩń ţĥĩś ţĩēŕ àƒţēŕ ţĥē ĺàśţ ćōḿḿĩţţēď ćĥōĩćē. Ũţĩĺĩţŷ, ŕēvĩēŵ àńď ţàśķĺēśś Ōƒƒĩćē ćàĺĺś ďō ńōţ àďvàńćē ţĥĩś ĥĩśţōŕŷ."
 }

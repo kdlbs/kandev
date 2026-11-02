@@ -529,5 +529,9 @@
   "tierPreviewExcluded": "已排除：{{reason}}",
   "dynamicTierCandidatesDescription": "候選組按儲存的順序推進，組內按設定的選擇模式選擇候選。候選切換仍遵循設定的錯誤操作。",
   "tierModeRoundRobin": "輪流選擇",
+  "tierModeHeadroom": "剩餘餘量",
+  "tierModePace": "至重設的節奏",
+  "tierModeConsumptionRate": "消耗速率",
+  "tierUsageUnknownHint": "僅按已觀測的提供者使用量排序。在觀測到使用量快照之前，容量未知。",
   "tierRoundRobinDescription": "任務和工作階段從該組最後一次已提交選擇的下一項開始輪換。工具、審查和無任務的 Office 呼叫不會推進此歷史。"
 }

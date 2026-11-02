@@ -220,6 +220,7 @@ func (e *Engine) selectContext(
 			return RouteDecision{}, err
 		}
 		e.states[sessionID] = nextState
+		e.logTierSelection(profile, sessionID, generation, reason, candidate.ID, plan.observe, now)
 		return decision, nil
 	}
 	nextState := RouteState{
@@ -265,6 +266,9 @@ const probeLeaseDuration = 30 * time.Second
 
 func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
+		return false
+	}
+	if e.orderedTiers && normalizedCandidateUsage(candidate.Usage, now).Limited {
 		return false
 	}
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {

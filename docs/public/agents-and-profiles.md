@@ -603,23 +603,35 @@ default. In the dynamic profile editor, select **=** between adjacent candidates
 to join or split their tier. Move and remove controls retain candidate identity
 and saved selection metadata.
 
-Each tier head offers saved order, configured cost or random selection, plus
-same-tier-next or next-tier failure direction. Configure each candidate's cost
-class separately: free sorts before subscription, then metered, then unknown;
-equal classes keep saved row order. This is configured classification, not an
-estimate of provider prices or a change to billing identity. Random chooses
-among eligible candidates in that tier. Tier order always takes precedence.
-Existing
-failure policies still decide retries, waits and whether to continue; fallback
-does not return to an earlier tier or an already tried candidate in the same
-failure chain. A verified successful turn ends that chain. Turning tiers off
-restores flat routing while retaining the saved groups.
+Each tier head offers saved order, configured cost, random, round-robin or a
+provider-usage mode, plus same-tier-next or next-tier failure direction.
+Configure each candidate's cost class separately: free sorts before subscription,
+then metered, then unknown; equal classes keep saved row order. This is
+configured classification, not an estimate of provider prices or a change to
+billing identity. Random chooses among eligible candidates in that tier. Tier
+order always takes precedence. Existing failure policies still decide retries,
+waits and whether to continue; fallback does not return to an earlier tier or an
+already tried candidate in the same failure chain. A verified successful turn
+ends that chain. Turning tiers off restores flat routing while retaining the
+saved groups.
+
+Round-robin rotates committed task and session choices within a tier after the
+last choice. Utility and taskless Office calls advance the same native history;
+review-run ownership stays with the existing review lane.
+
+The provider-usage modes use only the last reading observed through **Provider
+usage and limits**. They never fetch usage during selection or preview. Headroom
+ranks measured remaining capacity, pace divides it by the measured burn until
+the proved reset, and consumption rate ranks the slower burner. Without a
+comparable reading the candidate stays unknown; unknown ranks above a measured
+exhausted window and below measured remaining capacity. A rate needs two
+comparable readings of the same provider, account and window with an unchanged
+reset.
 
 Use **Preview new selection** to inspect the current saved or unsaved draft.
 Preview does not save, claim a runtime slot or start an agent. Its random result
 is a sample, not a reservation of the next choice; active sessions are unchanged.
-Round-robin, usage-pace ranking and keep-model reevaluation remain later
-increments. Their stored metadata is retained, and unsupported modes are not
+Keep-model reevaluation remains a later increment. Unsupported modes are not
 silently executed as saved order.
 
 Each candidate has a policy for two shared provider-error classes:

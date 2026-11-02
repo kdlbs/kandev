@@ -48,6 +48,11 @@ type ProfileExecutionResolver struct {
 	engine          *dynamic.Engine
 	bindingResolver *dynamic.CredentialBindingResolver
 	enabled         atomic.Bool
+	// candidateUsage reads the last observed provider usage for one concrete
+	// profile. It never fetches; an absent observation leaves the candidate
+	// unknown, which the engine ranks below measured capacity but above a
+	// measured exhausted allowance.
+	candidateUsage func(string) dynamic.CandidateUsage
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -61,6 +66,13 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 }
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
+
+// SetCandidateUsageLookup supplies the last observed provider usage per
+// concrete profile. The resolver only reads it while composing candidates, so
+// the lookup must not perform provider I/O.
+func (r *ProfileExecutionResolver) SetCandidateUsageLookup(lookup func(string) dynamic.CandidateUsage) {
+	r.candidateUsage = lookup
+}
 
 // Enabled reports the effective dynamic-agent-routing flag value this
 // resolver was constructed or last set with. Callers outside this package
@@ -865,6 +877,9 @@ func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context,
 		candidate := dynamic.Candidate{
 			ID: route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+		}
+		if r.candidateUsage != nil {
+			candidate.Usage = r.candidateUsage(route.ExecutionProfileID)
 		}
 		if route.RulesJSON != "" {
 			var selection struct {

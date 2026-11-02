@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // reasonPolicySkip is the route reason for a selection that skipped a candidate by policy.
@@ -82,6 +83,12 @@ func deriveOrderedTiers(candidates []Candidate) ([]orderedTier, error) {
 type orderedPlan struct {
 	rows  func(func(Candidate, error) bool)
 	chain SelectionChain
+	// observe builds the ranked facts of every remaining candidate in stored
+	// order for the selection log. It is nil unless a tier ranks by usage, so
+	// an order-only profile pays nothing and logs nothing. It reuses the
+	// availability observed before this selection, so a probe acquired by the
+	// decision itself cannot change what the log reports.
+	observe func() []TierPreviewEntry
 }
 
 func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profile Profile, generation int64, excluded, preferred, reason string) (orderedPlan, error) {
@@ -111,10 +118,60 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 	if continuing || fallback {
 		start = orderedStartIndex(tiers, current, excluded != "")
 	}
-	unavailable := e.tierAvailability(profile, e.now())
-	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred, unavailable, e.tierPick, func() (map[string]int64, error) {
-		return e.tierSelectionHistory(ctx, profile.ID, tiers[start:])
-	})}, nil
+	now := e.now()
+	unavailable := e.tierAvailability(profile, now)
+	remaining := tiers[start:]
+	return orderedPlan{
+		chain: chain,
+		rows: orderedRemainingRows(remaining, chain.TriedCandidateIDs, preferred, unavailable, e.tierPick, func() (map[string]int64, error) {
+			return e.tierSelectionHistory(ctx, profile.ID, remaining)
+		}, now),
+		observe: tierObservationLog(remaining, chain.TriedCandidateIDs, preferred, unavailable, now),
+	}, nil
+}
+
+// tierObservationLog returns the stored-order facts of every candidate the plan
+// could still reach. Round-robin history is deliberately not read again: the
+// log reports the saved order, not a second rotation.
+func tierObservationLog(
+	tiers []orderedTier,
+	tried []string,
+	preferred string,
+	unavailable map[string]string,
+	now time.Time,
+) func() []TierPreviewEntry {
+	if !anyUsageTier(tiers) {
+		return nil
+	}
+	excluded := make(map[string]bool, len(tried))
+	for _, id := range tried {
+		excluded[id] = true
+	}
+	// Stored-order facts must not draw a second random sample; the log reports
+	// the order the decision saw, not a new selection.
+	storedOrder := func(int) int { return 0 }
+	return func() []TierPreviewEntry {
+		entries := make([]TierPreviewEntry, 0)
+		for index, tier := range tiers {
+			for _, row := range rankTierRows(tier, index+1, excluded, preferred, unavailable, storedOrder, nil, now) {
+				entries = append(entries, row.entry)
+			}
+		}
+		return entries
+	}
+}
+
+func usageTierMode(mode string) bool {
+	return mode == tierModePace || mode == tierModeHeadroom || mode == tierModeConsumptionRate
+}
+
+func anyUsageTier(tiers []orderedTier) bool {
+	for _, tier := range tiers {
+		if usageTierMode(tier.mode) {
+			return true
+		}
+	}
+	return false
 }
 
 func retainedSelectionChain(state RouteState, profileID string, generation int64) (SelectionChain, bool) {
@@ -130,7 +187,7 @@ func retainedSelectionChain(state RouteState, profileID string, generation int64
 
 // Traverse lazily so an unreached round-robin tier cannot block an earlier
 // eligible tier. One reached traversal shares a single history observation.
-func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, pick func(int) int, readHistory func() (map[string]int64, error)) func(func(Candidate, error) bool) {
+func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, pick func(int) int, readHistory func() (map[string]int64, error), now time.Time) func(func(Candidate, error) bool) {
 	return func(yield func(Candidate, error) bool) {
 		tried := make(map[string]bool, len(triedIDs))
 		for _, id := range triedIDs {
@@ -148,7 +205,7 @@ func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred stri
 				}
 				historyLoaded = true
 			}
-			for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, pick, history) {
+			for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, pick, history, now) {
 				if row.entry.Eligible && !yield(row.candidate, nil) {
 					return
 				}

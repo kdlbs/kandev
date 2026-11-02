@@ -529,5 +529,9 @@
   "tierPreviewExcluded": "Excluído: {{reason}}",
   "dynamicTierCandidatesDescription": "Os grupos seguem a ordem guardada. Em cada grupo, os candidatos usam o modo de seleção configurado. A mudança de candidato continua a seguir a ação de erro configurada.",
   "tierModeRoundRobin": "Rotação sequencial",
+  "tierModeHeadroom": "Margem",
+  "tierModePace": "Ritmo ate a reposicao",
+  "tierModeConsumptionRate": "Taxa de consumo",
+  "tierUsageUnknownHint": "Ordena apenas com a utilizacao observada do fornecedor. Ate ser observado um instantaneo, a capacidade e desconhecida.",
   "tierRoundRobinDescription": "As seleções de tarefas e sessões rodam neste grupo após a última escolha confirmada. Chamadas utilitárias, revisões e Office sem tarefa não avançam este histórico."
 }

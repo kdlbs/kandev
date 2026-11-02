@@ -50,12 +50,24 @@ commit. Independent backends can rank the same observation before committing:
 unique choice across backends is not established by ordinal allocation alone.
 An RR read failure is an error; other modes and feature OFF do not read history.
 
+Provider-usage tiers (headroom, pace and consumption rate) reuse the last provider
+reading observed through the existing `features.providerUsageLimits` snapshot. The
+resolver receives a lookup keyed by concrete profile; it never fetches, probes a
+model or changes a circuit. The adapter takes P2's opaque `account_id` grouping,
+the most constraining observed window, its utilization, proved reset and fetch
+time, and computes a consumption rate only from two comparable reads with an
+unchanged reset. A missing, stale or unobserved reading stays unknown. A measured
+exhausted window is unavailable; unknown ranks above exhausted but below measured
+remaining capacity. Preview exposes the same usage facts without fetching, and a
+selection log records candidate, tier, mode, remaining, rate, reset and pace score
+without account references, provider text or credentials.
+
 Utility/review/taskless Office synthetic `utility:` routes retain their existing
-state/attempt no-op storage contract: `dynamic_route_attempts.session_id` requires
-an actual `task_sessions` FK owner. They can read task/session history but do not
-advance it. The original common RR requirement needs a subsequent native owner
-bridge preserving that FK and each domain's actual owner; no fake task session,
-FK removal or duplicate ledger is introduced here.
+state/attempt storage contract through the native owner bridge below: the attempt
+row carries either the original task-session FK or a native route key, never a
+fake task session or duplicate ledger. Utility and taskless Office callers
+advance RR history; review-run ownership requires the existing G2 review wiring
+and is not claimed connected here.
 
 `PolicyStateJSON.selection_chain` holds the logical profile, initial generation,
 tried concrete IDs and last selected candidate. Same-candidate retries preserve
@@ -100,8 +112,9 @@ fence late responses. No timer, ledger or queue is added.
 AC-001.1/.5: Editor, storage and ranking. AC-001.2/.3: Runtime and chain.
 AC-001.4: Feature/storage boundary. AC-001.6: Read-only preview. No operating
 configuration or installed-runtime change. AC-001.7 covers task/session RR and
-legacy unknown initialization. Common transient-owner RR, cross-backend choice,
-pace and keep-model remain original later increments.
+legacy unknown initialization. AC-001.8 covers provider-usage modes and their
+unknown handling. Cross-backend choice and keep-model remain original later
+increments.
 
 
 ## Native owner journal bridge
@@ -124,4 +137,4 @@ and delayed recovery exclude native rows; native owners retain their recovery.
 This increment wires utility and taskless Office callers. Review-run ownership
 requires composition with the existing G2 review wiring and is not yet claimed
 connected. PostgreSQL runtime evidence and independent-backend unique choice,
-pace, keep-model and installed acceptance remain distinct original work.
+keep-model and installed acceptance remain distinct original work.

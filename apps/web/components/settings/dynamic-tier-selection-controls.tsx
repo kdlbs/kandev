@@ -78,6 +78,55 @@ function SelectionField({
   );
 }
 
+function TierHeadFields({
+  candidate,
+  onChange,
+}: {
+  candidate: DynamicAgentCandidate;
+  onChange: (candidate: DynamicAgentCandidate) => void;
+}) {
+  const { t } = useTranslation();
+  const selection = candidate.policies.selection;
+  const mode = selection?.tier?.mode ?? "order";
+  return (
+    <>
+      <SelectionField
+        label={t("agents:tierSelectionMode")}
+        value={mode}
+        options={[
+          ["order", t("agents:tierModeOrder")],
+          ["cost", t("agents:tierModeCost")],
+          ["random", t("agents:tierModeRandom")],
+          ["round_robin", t("agents:tierModeRoundRobin")],
+          ["headroom", t("agents:tierModeHeadroom")],
+          ["pace", t("agents:tierModePace")],
+          ["consumption_rate", t("agents:tierModeConsumptionRate")],
+        ]}
+        onChange={(value) => onChange(withTierSelection(candidate, "mode", value))}
+      />
+      <SelectionField
+        label={t("agents:tierFailureDirection")}
+        value={selection?.tier?.on_failure ?? "same_tier_next"}
+        options={[
+          ["same_tier_next", t("agents:tierSameTierNext")],
+          ["next_tier", t("agents:tierNextTier")],
+        ]}
+        onChange={(value) => onChange(withTierSelection(candidate, "on_failure", value))}
+      />
+      {mode === "round_robin" && (
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {t("agents:tierRoundRobinDescription")}
+        </p>
+      )}
+      {["headroom", "pace", "consumption_rate"].includes(mode) && (
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {t("agents:tierUsageUnknownHint")}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function DynamicTierSelectionControls({
   candidate,
   head,
@@ -96,35 +145,7 @@ export function DynamicTierSelectionControls({
       className="grid min-w-0 gap-3 sm:grid-cols-2"
       data-testid={`tier-selection-${candidate.executionProfileId}`}
     >
-      {head && (
-        <>
-          <SelectionField
-            label={t("agents:tierSelectionMode")}
-            value={selection?.tier?.mode ?? "order"}
-            options={[
-              ["order", t("agents:tierModeOrder")],
-              ["cost", t("agents:tierModeCost")],
-              ["random", t("agents:tierModeRandom")],
-              ["round_robin", t("agents:tierModeRoundRobin")],
-            ]}
-            onChange={(value) => onChange(withTierSelection(candidate, "mode", value))}
-          />
-          <SelectionField
-            label={t("agents:tierFailureDirection")}
-            value={selection?.tier?.on_failure ?? "same_tier_next"}
-            options={[
-              ["same_tier_next", t("agents:tierSameTierNext")],
-              ["next_tier", t("agents:tierNextTier")],
-            ]}
-            onChange={(value) => onChange(withTierSelection(candidate, "on_failure", value))}
-          />
-          {selection?.tier?.mode === "round_robin" && (
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              {t("agents:tierRoundRobinDescription")}
-            </p>
-          )}
-        </>
-      )}
+      {head && <TierHeadFields candidate={candidate} onChange={onChange} />}
       <SelectionField
         label={t("agents:tierConfiguredCost")}
         value={cost}

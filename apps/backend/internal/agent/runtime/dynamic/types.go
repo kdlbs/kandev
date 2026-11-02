@@ -47,6 +47,7 @@ type Candidate struct {
 	BindingKey    string
 	Rules         map[string]Action
 	Policies      routingpolicy.Document
+	Usage         CandidateUsage `json:"-"`
 	SelectionJSON json.RawMessage
 }
 

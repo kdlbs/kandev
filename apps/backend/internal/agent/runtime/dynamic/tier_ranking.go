@@ -33,13 +33,21 @@ type TierPreview struct {
 }
 
 type TierPreviewEntry struct {
-	CandidateID string `json:"candidate_id"`
-	Tier        int    `json:"tier"`
-	Mode        string `json:"mode"`
-	CostClass   string `json:"cost_class"`
-	Eligible    bool   `json:"eligible"`
-	Reason      string `json:"reason,omitempty"`
-	Selected    bool   `json:"selected"`
+	CandidateID           string   `json:"candidate_id"`
+	Tier                  int      `json:"tier"`
+	Mode                  string   `json:"mode"`
+	CostClass             string   `json:"cost_class"`
+	Eligible              bool     `json:"eligible"`
+	Reason                string   `json:"reason,omitempty"`
+	Selected              bool     `json:"selected"`
+	UsageKnown            bool     `json:"usage_known"`
+	RemainingPct          *float64 `json:"remaining_pct,omitempty"`
+	ConsumptionRateKnown  bool     `json:"consumption_rate_known"`
+	ConsumptionPctPerHour *float64 `json:"consumption_pct_per_hour,omitempty"`
+	// resetAt is the proved reset behind the remaining reading. It is kept
+	// internal because the preview's public shape is unchanged by this work.
+	resetAt      time.Time
+	resetAtKnown bool
 }
 
 func candidateCost(candidate Candidate) string {
@@ -74,22 +82,37 @@ func configuredCostRank(cost string) int {
 
 // rankTierRows is pure: disabled/health/chain exclusions precede a random draw.
 // It never changes the source rows or probes a provider.
-func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, pick func(int) int, history map[string]int64) []rankedTierRow {
+func tierEligibilityReason(candidate Candidate, excluded map[string]bool, preferred string, unavailable map[string]string) string {
+	switch {
+	case !candidate.Enabled:
+		return "disabled"
+	case excluded[candidate.ID] && candidate.ID != preferred:
+		return "tried"
+	case preferred != "" && candidate.ID != preferred:
+		return "not_requested"
+	default:
+		return unavailable[candidate.ID]
+	}
+}
+
+func tierHasEligibleRows(tier orderedTier, excluded map[string]bool, preferred string, unavailable map[string]string) bool {
+	for _, candidate := range tier.rows {
+		if tierEligibilityReason(candidate, excluded, preferred, unavailable) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, pick func(int) int, history map[string]int64, now time.Time) []rankedTierRow {
 	rows := make([]rankedTierRow, 0, len(tier.rows))
 	for _, candidate := range tier.rows {
-		reason := unavailable[candidate.ID]
-		switch {
-		case !candidate.Enabled:
-			reason = "disabled"
-		case excluded[candidate.ID] && candidate.ID != preferred:
-			reason = "tried"
-		case preferred != "" && candidate.ID != preferred:
-			reason = "not_requested"
-		}
+		reason := tierEligibilityReason(candidate, excluded, preferred, unavailable)
 		rows = append(rows, rankedTierRow{candidate: candidate, entry: TierPreviewEntry{
 			CandidateID: candidate.ID, Tier: number, Mode: tier.mode, CostClass: candidateCost(candidate), Eligible: reason == "", Reason: reason,
 		}})
 	}
+	applyTierUsage(rows, now)
 	if tier.mode == tierModeCost {
 		sort.SliceStable(rows, func(i, j int) bool {
 			return configuredCostRank(rows[i].entry.CostClass) < configuredCostRank(rows[j].entry.CostClass)
@@ -101,7 +124,7 @@ func rankTierRows(tier orderedTier, number int, excluded map[string]bool, prefer
 	if tier.mode == tierModeRoundRobin {
 		rows = rotateRoundRobinRows(rows, history)
 	}
-	return rows
+	return rankUsageRows(rows, tier.mode, now)
 }
 
 func promoteRandomTierRow(rows []rankedTierRow, pick func(int) int) {
@@ -155,6 +178,10 @@ func (r *CircuitRegistry) selectionAvailability(candidate Candidate, now time.Ti
 func (e *Engine) tierAvailability(profile Profile, now time.Time) map[string]string {
 	result := make(map[string]string, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
+		if normalizedCandidateUsage(candidate.Usage, now).Limited {
+			result[candidate.ID] = "usage_limited"
+			continue
+		}
 		result[candidate.ID] = e.circuits.selectionAvailability(candidate, now)
 	}
 	return result
@@ -175,22 +202,22 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 	if err != nil {
 		return preview, err
 	}
-	history, err := e.tierSelectionHistory(ctx, profile.ID, tiers)
-	if err != nil {
-		return preview, err
+	unavailable := e.tierAvailability(profile, preview.ObservedAt)
+	var history map[string]int64
+	var loaded bool
+	for index, tier := range tiers {
+		unreached := tier.mode == tierModeRoundRobin && !loaded && preview.CandidateID != ""
+		if tier.mode == tierModeRoundRobin && !loaded && !unreached && tierHasEligibleRows(tier, nil, "", unavailable) {
+			history, err = e.tierSelectionHistory(ctx, profile.ID, []orderedTier{tier})
+			if err != nil {
+				preview.State = "observation_unknown"
+				return preview, err
+			}
+			loaded = true
+		}
+		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, e.tierPick, history, preview.ObservedAt), unreached)
 	}
 	preview.State = "no_candidates"
-	unavailable := e.tierAvailability(profile, preview.ObservedAt)
-	for index, tier := range tiers {
-		for _, row := range rankTierRows(tier, index+1, nil, "", unavailable, e.tierPick, history) {
-			entry := row.entry
-			if entry.Eligible && preview.CandidateID == "" {
-				entry.Selected = true
-				preview.CandidateID = entry.CandidateID
-			}
-			preview.Considered = append(preview.Considered, entry)
-		}
-	}
 	if len(preview.Considered) > 0 {
 		preview.State = "no_eligible"
 	}
@@ -198,4 +225,19 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 		preview.State = "selected"
 	}
 	return preview, nil
+}
+
+func (p *TierPreview) appendTierRows(rows []rankedTierRow, unreached bool) {
+	for _, row := range rows {
+		entry := row.entry
+		if unreached && entry.Eligible {
+			entry.Eligible = false
+			entry.Reason = "not_reached"
+		}
+		if entry.Eligible && p.CandidateID == "" {
+			entry.Selected = true
+			p.CandidateID = entry.CandidateID
+		}
+		p.Considered = append(p.Considered, entry)
+	}
 }

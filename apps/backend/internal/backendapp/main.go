@@ -1369,9 +1369,13 @@ func startGatewayAndServe(
 			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 		}
 		if cfg.Features.ProviderUsageLimits {
+			tierUsage := newTierUsageSnapshot()
 			allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
-			agentSettingsController.SetProfileUsageProvider(allowances)
+			agentSettingsController.SetProfileUsageProvider(&tierUsageRecordingProvider{next: allowances, sink: tierUsage})
 			lifecycleMgr.SetProviderTurnAdmission(allowances)
+			if cfg.Features.DynamicProfileTiers && services.DynamicProfileResolver != nil {
+				services.DynamicProfileResolver.SetCandidateUsageLookup(tierUsage.Lookup)
+			}
 		}
 	}
 
