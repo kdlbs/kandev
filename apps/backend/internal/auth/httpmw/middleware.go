@@ -46,7 +46,7 @@ func Middleware(svc *auth.Service) gin.HandlerFunc {
 			c.Next()
 			return
 		} else if err != nil {
-			abortAuthenticationUnavailable(c)
+			authn.AbortAuthenticationUnavailable(c)
 			return
 		}
 		path := c.Request.URL.Path
@@ -300,21 +300,6 @@ func ResolveRequest(c *gin.Context, svc *auth.Service) (authn.Identity, bool, er
 		}
 	}
 	return authn.Identity{}, false, lookupErr
-}
-
-// authUnavailableCode is the stable machine-readable response code for a
-// credential verification dependency that could not be read. Clients treat it
-// as retryable and keep the existing browser session.
-const authUnavailableCode = "persistence_unavailable"
-
-// abortAuthenticationUnavailable returns the stable 503 contract without a
-// challenge header: the credential was not rejected, so clearing the cookie or
-// sending the browser to login would discard a session that may still be valid.
-func abortAuthenticationUnavailable(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-		"error": "authentication temporarily unavailable",
-		"code":  authUnavailableCode,
-	})
 }
 
 // BearerToken extracts an Authorization bearer credential.

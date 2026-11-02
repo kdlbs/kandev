@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -471,27 +472,21 @@ func TestCredentialLookupDiagnostics(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("diagnostic entries = %d, want one per failed read (2): %+v", len(entries), entries)
 	}
-	seenOperations := map[string]bool{}
-	for _, entry := range entries {
+	want := []map[string]any{
+		{"credential_kind": "session", "operation": "account_read", "category": "store_error"},
+		{"credential_kind": "pat", "operation": "organization_read", "category": "store_error"},
+	}
+	for index, entry := range entries {
 		if entry.Message != "auth.credential_lookup_failed" {
 			t.Fatalf("log message = %q", entry.Message)
 		}
 		fields := entry.ContextMap()
-		if len(fields) != 3 {
-			t.Fatalf("diagnostic fields = %#v, want credential_kind/operation/category only", fields)
+		if !reflect.DeepEqual(fields, want[index]) {
+			t.Fatalf("diagnostic fields = %#v, want %#v", fields, want[index])
 		}
-		value := fmt.Sprint(fields)
-		if containsSecretMarker(value) {
+		if value := fmt.Sprint(fields); containsSecretMarker(value) {
 			t.Fatalf("diagnostic leaked raw error text: %#v", fields)
 		}
-		operation, _ := fields["operation"].(string)
-		if operation == "" {
-			t.Fatalf("diagnostic missing operation: %#v", fields)
-		}
-		seenOperations[operation] = true
-	}
-	if !seenOperations["account_read"] || !seenOperations["organization_read"] {
-		t.Fatalf("operations = %#v, want account_read and organization_read", seenOperations)
 	}
 }
 

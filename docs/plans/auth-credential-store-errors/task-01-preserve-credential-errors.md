@@ -93,7 +93,7 @@ git ls-files -m -o --exclude-standard -z -- 'apps/backend/*.go' | xargs -0 -r ba
 git diff --check
 ```
 
-Record the first command's RED result before production edits and its GREEN result afterward.
+Record the historical RED evidence from the temporary diagnostic test and the permanent regression's GREEN result after implementation.
 The backendapp suite covers startup wiring; the command-package compile catches broader typed call-site breakage.
 
 ## Files likely touched

@@ -150,8 +150,8 @@ func TestLoginFlow(t *testing.T) {
 	if err := f.svc.Logout(ctx, identity.SessionID, identity.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := f.svc.ResolveSessionToken(ctx, token, ""); ok {
-		t.Fatal("session must be dead after logout")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, token, ""); ok || err != nil {
+		t.Fatalf("session must be invalid with nil error after logout: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -190,8 +190,8 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	if _, ok, _ := f.svc.ResolveSessionToken(ctx, tokenA, ""); !ok {
 		t.Fatal("current session must survive password change")
 	}
-	if _, ok, _ := f.svc.ResolveSessionToken(ctx, tokenB, ""); ok {
-		t.Fatal("other sessions must be revoked")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, tokenB, ""); ok || err != nil {
+		t.Fatalf("revoked session must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := f.svc.Login(ctx, "admin@x.dev", "newpass12345", "", ""); err != nil {
 		t.Fatalf("login with new password: %v", err)
@@ -262,11 +262,11 @@ func TestAdminUserManagement(t *testing.T) {
 	if _, err := f.svc.AdminSetRoleStatus(ctx, member.ID, "", "disabled"); err != nil {
 		t.Fatalf("disable member: %v", err)
 	}
-	if _, ok, _ := f.svc.ResolveSessionToken(ctx, memberToken, ""); ok {
-		t.Fatal("disabled member session must fail")
+	if _, ok, err := f.svc.ResolveSessionToken(ctx, memberToken, ""); ok || err != nil {
+		t.Fatalf("disabled member session must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
-	if _, ok, _ := f.svc.ResolveBearer(ctx, pat); ok {
-		t.Fatal("disabled member PAT must fail")
+	if _, ok, err := f.svc.ResolveBearer(ctx, pat); ok || err != nil {
+		t.Fatalf("disabled member PAT must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 	if _, _, err := f.svc.Login(ctx, "m@x.dev", "memberpass123", "", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("disabled member login: %v", err)
@@ -275,8 +275,8 @@ func TestAdminUserManagement(t *testing.T) {
 
 func TestResolveBearerIgnoresNonPAT(t *testing.T) {
 	f := newServiceFixture(t, false)
-	if _, ok, _ := f.svc.ResolveBearer(context.Background(), "eyJhbGciOiJIUzI1NiJ9.agent.jwt"); ok {
-		t.Fatal("non-PAT bearer must not resolve")
+	if _, ok, err := f.svc.ResolveBearer(context.Background(), "eyJhbGciOiJIUzI1NiJ9.agent.jwt"); ok || err != nil {
+		t.Fatalf("non-PAT bearer must be invalid with nil error: ok=%v err=%v", ok, err)
 	}
 }
 

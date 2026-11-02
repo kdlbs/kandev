@@ -154,6 +154,7 @@ Exact commands and owned files appear in each work order.
 - Task 01 command compile: `go test -trimpath -tags fts5 ./cmd/kandev -run '^$' -count=1` passed.
 - Task 01 changed-file lint: `bash scripts/lint-go-changed` reported 0 issues.
 - Review remediation: `go test -trimpath -tags fts5 ./internal/auth -run 'Test(CredentialLookupFailures|ResolveUserIdentity)' -count=1` passed, including disabled accounts with retained credentials and all three `ResolveUserIdentity` organization outcomes.
+- PR fixup: centralized the 503 response in `authn`, tightened diagnostic tuple assertions and invalid-credential error checks, clarified the public fallback wording, and added causal waits for both browser responses. The affected Go suites, Vitest, and both browser scenarios passed again.
 - Task 02 client tests: `pnpm exec vitest run lib/api/client.test.ts` passed 17 tests.
 - Task 02 changed-file lint: `pnpm exec eslint` reported 0 errors and 0 warnings.
 - Task 02 browser continuity: the managed `auth` desktop spec and `mobile-chrome` phone spec each passed their scenario.

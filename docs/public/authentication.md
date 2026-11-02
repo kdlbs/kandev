@@ -81,7 +81,7 @@ Content-Type: application/json
 
 A `503` does not carry `WWW-Authenticate`, does not clear the session cookie, and does not revoke the credential. Keep the browser session and retry the request after storage recovers: the same cookie or PAT authenticates again without another login. The same contract applies to WebSocket upgrades, `?token=<PAT>` query credentials, and port-preview forwarding.
 
-Requests that carry an unreadable session or PAT receive `503` even on a public or deferred path, so an outage is not projected as an anonymous user or rewritten as a `401` downstream. Credentialless health and readiness probes, and requests without a Kandev session or PAT, keep their existing behavior.
+Requests whose session or PAT lookup remains unresolved after credential fallback receive `503` even on a public or deferred path, so an outage is not projected as an anonymous user or rewritten as a `401` downstream. A successfully verified fallback credential still authenticates the request. Credentialless health and readiness probes, and requests without a Kandev session or PAT, keep their existing behavior.
 
 Operators can find failed verification reads in the backend log under the `auth.credential_lookup_failed` event. Its bounded fields identify the credential kind, lookup operation, and error category; raw tokens, cookies, hashes, database URLs, headers, and database error text are never logged.
 

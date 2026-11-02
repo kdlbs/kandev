@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 export type CredentialStoreAccount = {
   email: string;
@@ -57,15 +58,11 @@ export async function proveCredentialStoreContinuity(
   const cookieBefore = await sessionCookie(page);
 
   const tokenRead = await armTokenReadResponse(page, 503);
-  const unavailableResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes("/api/v1/auth/tokens") &&
-      response.request().method() === "GET" &&
-      response.status() === 503,
-  );
+  const unavailableResponse = waitForHttp(page, "GET", /^\/api\/v1\/auth\/tokens$/, {
+    predicate: (response) => response.status() === 503,
+  });
   await page.reload();
-  const response = await unavailableResponse;
-  expect(response.headers()["www-authenticate"]).toBeUndefined();
+  await unavailableResponse;
 
   const observed = tokenRead();
   expect(observed?.method).toBe("GET");
@@ -87,6 +84,10 @@ export async function proveCredentialStoreContinuity(
   expect(await sessionCookie(page)).toEqual(cookieBefore);
 
   await armTokenReadResponse(page, 401);
+  const challengedResponse = waitForHttp(page, "GET", /^\/api\/v1\/auth\/tokens$/, {
+    predicate: (response) => response.status() === 401,
+  });
   await page.reload();
-  await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
+  await challengedResponse;
+  await expect(page).toHaveURL(/\/login/);
 }

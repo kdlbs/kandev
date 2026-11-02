@@ -107,7 +107,7 @@ func (g *Gateway) requireConnectionAuth() gin.HandlerFunc {
 			if token := c.Query("token"); token != "" && policy.ResolveToken != nil {
 				_, ok, err := policy.ResolveToken(c.Request.Context(), token)
 				if err != nil {
-					abortAuthUnavailable(c)
+					authn.AbortAuthenticationUnavailable(c)
 					return
 				}
 				if ok {
@@ -120,7 +120,7 @@ func (g *Gateway) requireConnectionAuth() gin.HandlerFunc {
 		if token := c.Query("token"); token != "" && policy.ResolveToken != nil {
 			identity, ok, err := policy.ResolveToken(c.Request.Context(), token)
 			if err != nil {
-				abortAuthUnavailable(c)
+				authn.AbortAuthenticationUnavailable(c)
 				return
 			}
 			if ok {
@@ -135,16 +135,6 @@ func (g *Gateway) requireConnectionAuth() gin.HandlerFunc {
 		}
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 	}
-}
-
-// abortAuthUnavailable returns the shared 503 contract without a challenge
-// header: the query credential was not rejected, only unverifiable, so the
-// upgrade must stop before a downstream handler rewrites it as a 401.
-func abortAuthUnavailable(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-		"error": "authentication temporarily unavailable",
-		"code":  "persistence_unavailable",
-	})
 }
 
 // resolvePortProxyCapability authenticates a /port-proxy/ request via the
