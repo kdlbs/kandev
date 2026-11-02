@@ -307,3 +307,28 @@ management-hook tests; full TypeScript checking; changed-file ESLint/Prettier;
 documentation, specification, public-page and whitespace checks. Work order 03
 records exact commands, host environment setup, review IDs, and the original
 failing CI run. No full local E2E suite or merge is performed.
+
+
+### Ambient-environment CI cleanup follow-up
+
+Run 41456338052 at head 93f82770208e exposed
+`TestGitOperatorCreatePRPublishesEmptyRemoteBaseBeforeProviderRequest`: TempDir
+cleanup found a nonempty `.git` directory. The fixture created a WorkspaceTracker
+but did not register Stop. Git operations trigger asynchronous status enrichment;
+Stop cancels and joins those observations before TempDir removes the repository.
+The shared empty-remote fixture now registers `t.Cleanup(tracker.Stop)` immediately
+after construction. This is a test-only ownership fix, with no production change.
+
+The exact test passed 20 local race-enabled attempts before the fix, so the local
+run does not claim a deterministic reproduction of the CI scheduling race. After
+the cleanup fix, the affected empty-remote cohort passes 20 race-enabled attempts
+under the same poisoned GitLab environment. Go lint reports zero issues.
+
+```bash
+env -u KANDEV_INTERNAL_CONFIG_FILE -u KANDEV_INTERNAL_CONFIG_HOME_FILE -u KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG KANDEV_GITLAB_HOST=https://gitlab.ambient-ci.invalid GITLAB_HOST=https://gitlab.ambient-ci.invalid GITLAB_TOKEN=glpat-ambient-ci-not-a-real-token GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./internal/agentctl/server/process -run 'EmptyRemote|PublishesEmptyRemote' -count=20 -timeout=5m
+bash scripts/lint-go-changed apps/backend/internal/agentctl/server/process/git_empty_remote_test.go
+```
+
+CI log: `/tmp/kandev-4762-ambient-job.txt`; local results:
+`/tmp/kandev-4762-empty-base-{red,green,lint}.log`. The file named red contains
+the original passing local repeat run; the failure evidence is the CI log.
