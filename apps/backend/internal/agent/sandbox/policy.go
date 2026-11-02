@@ -56,6 +56,7 @@ type Service struct {
 	approvalGuard      func(context.Context, *Attempt, *Approval) error
 	compileLearning    LearningCompiler
 	refreshReport      func(context.Context, string, string) (*Report, error)
+	enqueueAudit       func(context.Context, string, string, AuditVerificationRequest) (*AuditVerification, error)
 	db                 *sqlx.DB
 	enabled            bool
 	protectedRoots     []string

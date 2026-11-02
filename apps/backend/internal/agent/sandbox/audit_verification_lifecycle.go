@@ -16,6 +16,24 @@ const (
 	auditVerificationRestarted   = "restarted"
 )
 
+func (s *Service) FailOwnedAuditVerification(ctx context.Context, org, id, epoch, failure string) (*AuditVerification, error) {
+	if !validAuditVerificationFailure(failure) {
+		return nil, contract.ErrInvalidPolicy
+	}
+	record, err := s.readAuditVerification(ctx, org, id)
+	if err != nil {
+		return nil, err
+	}
+	if record.OwnerEpoch != epoch {
+		return nil, ErrConflict
+	}
+	job := record.Verification
+	if job.State != auditVerificationPending && job.State != auditVerificationRunning {
+		return job, nil
+	}
+	return s.FinishAuditVerification(ctx, org, id, epoch, job.Version, nil, failure)
+}
+
 func (s *Service) ReadAuditVerificationKey(ctx context.Context, org, id, epoch string, expected int64) ([]byte, error) {
 	record, err := s.ownedAuditVerification(ctx, org, id, epoch, expected)
 	if err != nil {

@@ -52,8 +52,12 @@ func newSandboxRuntime(cfg *config.Config, policies *policy.Service, providers *
 		return nil, errSandboxRuntimeUnavailable
 	}
 	manager := sandboxruntime.NewManager(policies, providers, base)
+	if err := manager.InitializeAuditVerifications(context.Background()); err != nil {
+		return nil, errors.Join(errSandboxRuntimeUnavailable, err, manager.Close())
+	}
 	policies.SetReportRefresher(manager.RefreshReport)
 	policies.SetLearningCompiler(manager.CompileLearning)
+	policies.SetAuditVerifier(manager.EnqueueAuditVerification)
 	return manager, nil
 }
 

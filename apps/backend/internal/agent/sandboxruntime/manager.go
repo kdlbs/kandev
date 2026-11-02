@@ -4,6 +4,7 @@ package sandboxruntime
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
 	"sync"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -26,6 +27,7 @@ type PrepareRequest struct {
 }
 
 type Manager struct {
+	audit     auditJobState
 	policies  *policy.Service
 	providers *plugins.Service
 	base      string
@@ -62,7 +64,7 @@ type Prepared struct {
 
 func NewManager(policies *policy.Service, providers *plugins.Service, base string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{policies: policies, providers: providers, base: base, ctx: ctx, cancel: cancel, attempts: map[string]*Prepared{}}
+	m := &Manager{audit: auditJobState{epoch: uuid.NewString(), jobs: map[string]*auditJob{}}, policies: policies, providers: providers, base: base, ctx: ctx, cancel: cancel, attempts: map[string]*Prepared{}}
 	m.channels = policy.NewApprovalChannels(policies, m.normalizeApproval, m.VerifyLive)
 	return m
 }
@@ -70,6 +72,8 @@ func NewManager(policies *policy.Service, providers *plugins.Service, base strin
 func (p *Prepared) Launch() *contract.Launch { return p.launch.Clone() }
 
 func (m *Manager) Close() error {
+	m.audit.admission.Lock()
+	defer m.audit.admission.Unlock()
 	m.mu.Lock()
 	m.closed = true
 	pending := make([]*Prepared, 0, len(m.attempts))
@@ -78,7 +82,13 @@ func (m *Manager) Close() error {
 	}
 	m.mu.Unlock()
 	m.cancel()
+	m.audit.wait.Wait()
 	err := m.channels.Close()
+	m.mu.Lock()
+	if m.audit.persistenceFailed {
+		err = errors.Join(err, policy.ErrConflict)
+	}
+	m.mu.Unlock()
 	for _, attempt := range pending {
 		err = errors.Join(err, attempt.Close())
 	}

@@ -18,7 +18,7 @@ func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, r
 	if err != nil {
 		return err
 	}
-	request := &pluginsdk.SandboxRequestContext{ProtocolMajor: 1, InstallationId: binding.InstallationID,
+	request := &pluginsdk.SandboxRequestContext{ProtocolMajor: binding.ProtocolVersion(), InstallationId: binding.InstallationID,
 		ProviderKey: binding.ProviderKey, OperationId: uuid.NewString(), AttemptId: uuid.NewString(),
 		ExecutionId: uuid.NewString(), Generation: 1}
 	described, err := providers.DescribeSandboxProvider(ctx, binding, &pluginsdk.DescribeSandboxProviderRequest{

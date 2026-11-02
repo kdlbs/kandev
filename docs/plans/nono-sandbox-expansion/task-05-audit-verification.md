@@ -171,18 +171,41 @@ are alive. The stopped-retry test preserves sibling allocations and the work
 directory. Full SQLite/PostgreSQL policy/runtime/common race suites and scoped
 Go lint pass after these changes.
 
-Verification jobs must still cancel and join before session archive removal.
-Backend restart must interrupt pending jobs without automatically verifying
-again. Job persistence, the operator API, host dispatch, and the desktop/phone
-action remain required. Tasks 06-10 remain pending.
+Verification jobs cancel and join before session archive removal. Backend
+restart interrupts pending jobs without automatically verifying again. The
+desktop/phone action and facts projection remain required. Tasks 06-10 remain
+pending.
 
-Verification-job storage is now being checked. Focused SQLite/PostgreSQL tests
+Verification-job storage is committed and pushed at `798f9ca8a90b`. Focused SQLite/PostgreSQL tests
 cover operator-only admission, expected report/artifact/trust guards, request
 idempotence, one active job per attempt, epoch/version-fenced claims and results,
 session/artifact/signer/trust replay rejection, restart interruption, corrupt-row
 refusal, input-key ownership, and historical preservation after key revocation.
 The job table is in the owning startup descriptor. Previous-stable upgrade and
 replay checks pass on both engines without changing historical fixtures. Full
-policy, SQL guard, and owning-store checks pass. Runtime dispatch, cancellation
-and joining, HTTP routes, facts projection, and desktop/phone UI are not yet
-connected. No verifier starts from these store reads or schema initialization.
+policy, SQL guard, and owning-store checks pass. No verifier starts from store
+reads or schema initialization.
+
+The runtime dispatch and operator API checkpoint is implemented. An actual
+packaged Nono run verifies its retained unsigned final chain and ledger,
+preserves the normalized report, and returns the original completed job on a
+repeated request. Restart interrupts a separately admitted old-epoch job.
+There are at most four active workers, with a 30-second job deadline. Refused
+work records `limit_exceeded` without starting. Shutdown closes admission,
+cancels and joins workers, and reports a failed persistence write. Session
+cleanup cancels and joins only its selected attempts before deleting artifacts.
+Mutation controls fail if the capacity or cleanup fence is removed.
+
+Browser routes expose versioned trust changes, explicit verification, job reads,
+and bounded history pages. Tests cover member/token/foreign-session refusal,
+unknown input, stale trust writes, no runtime, absent feature routes, private
+error sanitization, rechecked session access, and read-only history. SQLite and
+PostgreSQL history tests cover page ordering, cursor boundaries, and distinct
+results. A reversed cursor comparison fails the mutation control on both
+engines. The backend factory initializes recovery before binding dispatch.
+Its packaged-provider test also exposed and fixed a generic availability
+check that sent protocol 1 to a protocol 2 installation.
+
+This checkpoint still does not complete Task 05. Facts projection, the shared
+desktop/phone verification view, and its browser acceptance remain required.
+Current-pair managed acceptance remains Task 10.

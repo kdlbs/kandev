@@ -109,4 +109,18 @@ func runAuditVerificationLifecycle(t *testing.T, database *sqlx.DB) {
 	require.NoError(t, err)
 	require.False(t, history.SignerTrustedNow)
 	require.Equal(t, completed, history.Verification, "revocation preserves the original mathematical result and time")
+	request.RequestID = uuid.NewString()
+	request.ExpectedTrustVersion = trust.Version + 1
+	cancelJob, err := restarted.BeginAuditVerification(ctx, "session", attempt.ID, request, newEpoch)
+	require.NoError(t, err)
+	_, err = restarted.FailOwnedAuditVerification(ctx, "org", cancelJob.ID, uuid.NewString(), "cancelled")
+	require.ErrorIs(t, err, ErrConflict)
+	cancelled, err := restarted.FailOwnedAuditVerification(ctx, "org", cancelJob.ID, newEpoch, "cancelled")
+	require.NoError(t, err)
+	require.Equal(t, "interrupted", cancelled.State)
+	require.Equal(t, "cancelled", cancelled.FailureCode)
+	require.Equal(t, cancelJob.RequestedAt, cancelled.RequestedAt)
+	again, err := restarted.FailOwnedAuditVerification(ctx, "org", cancelJob.ID, newEpoch, "cancelled")
+	require.NoError(t, err)
+	require.Equal(t, cancelled, again)
 }

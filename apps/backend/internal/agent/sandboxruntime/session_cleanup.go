@@ -10,11 +10,14 @@ import (
 // CleanupSessionState requires the caller's session-deletion admission fence.
 // All attempts are checked before any retained child allocation is removed.
 func (m *Manager) CleanupSessionState(ctx context.Context, taskID, sessionID string) error {
+	m.audit.admission.Lock()
+	defer m.audit.admission.Unlock()
 	if taskID == "" || sessionID == "" {
 		return policy.ErrConflict
 	}
 	states := map[string]*contract.AgentStateSnapshot{}
 	var archives []*policy.FinalAuditReceipt
+	selected := map[auditAttemptKey]bool{}
 	cursor := policy.CleanupCursor{}
 	for {
 		page, err := m.policies.SessionCleanupAttempts(ctx, taskID, sessionID, cursor)
@@ -39,8 +42,12 @@ func (m *Manager) CleanupSessionState(ctx context.Context, taskID, sessionID str
 			if receipt != nil {
 				archives = append(archives, receipt)
 			}
+			selected[auditAttemptKey{org: attempt.Snapshot.OrgID, attempt: attempt.ID}] = true
 			cursor = policy.CleanupCursor{OrgID: attempt.Snapshot.OrgID, AttemptID: attempt.ID}
 		}
+	}
+	if err := m.cancelAuditJobs(ctx, selected); err != nil {
+		return err
 	}
 	return m.removeSessionArtifacts(ctx, states, archives)
 }

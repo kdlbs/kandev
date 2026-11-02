@@ -25,7 +25,7 @@ func StoreAuditArchive(ctx context.Context, base, binding string, archive *Audit
 	if !validRuntimeDirectory(base) || !validLaunchDigest(binding) || archive == nil || !validStoredSources(archive.Sources, archive.Digest) {
 		return "", ErrInvalidPolicy
 	}
-	key := storedAuditKey(binding, archive.Digest)
+	key := AuditArchiveKey(binding, archive.Digest)
 	if _, err := os.Lstat(filepath.Join(base, key)); err == nil {
 		read, loadErr := LoadAuditArchive(ctx, base, base, key, binding, archive.Digest)
 		if loadErr != nil {
@@ -75,7 +75,7 @@ func LoadAuditArchive(ctx context.Context, base, scratch, key, binding, artifact
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if !validRuntimeDirectory(base) || !validRuntimeDirectory(scratch) || !validLaunchDigest(key) || !validLaunchDigest(binding) || !validLaunchDigest(artifact) || key != storedAuditKey(binding, artifact) {
+	if !validRuntimeDirectory(base) || !validRuntimeDirectory(scratch) || !validLaunchDigest(key) || !validLaunchDigest(binding) || !validLaunchDigest(artifact) || key != AuditArchiveKey(binding, artifact) {
 		return nil, ErrInvalidPolicy
 	}
 	root, err := openStoredAuditRoot(base, key)
@@ -100,7 +100,8 @@ func LoadAuditArchive(ctx context.Context, base, scratch, key, binding, artifact
 	return result, nil
 }
 
-func storedAuditKey(binding, artifact string) string {
+// AuditArchiveKey returns the opaque address of a captured artifact set.
+func AuditArchiveKey(binding, artifact string) string {
 	return runtimeDigest([]byte(binding + "\x00" + artifact))
 }
 
@@ -118,7 +119,7 @@ func RemoveAuditArchive(ctx context.Context, base, binding, artifact string) err
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	return root.RemoveAll(storedAuditKey(binding, artifact))
+	return root.RemoveAll(AuditArchiveKey(binding, artifact))
 }
 
 func writeStoredAuditSource(ctx context.Context, directory string, index int, archive *AuditArchive) error {

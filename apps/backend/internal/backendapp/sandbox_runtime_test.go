@@ -77,6 +77,8 @@ func TestSandboxBackendFactoryCapturesLocalExecutionAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, runtime)
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	_, err = runtime.EnqueueAuditVerification(ctx, "session", "not-captured", policy.AuditVerificationRequest{})
+	require.ErrorIs(t, err, contract.ErrInvalidPolicy, "startup must initialize audit dispatch before admitting requests")
 	factory := sandboxRuntimeFactory{runtime: runtime, policies: policies, tasks: h.taskRepo, config: cfg}
 	t.Run("admission captures only current server selection", func(t *testing.T) {
 		admission := sandboxLaunchAdmission{policies: policies, tasks: h.taskRepo, runtime: runtime}

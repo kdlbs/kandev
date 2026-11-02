@@ -70,6 +70,23 @@ Verification requests name the expected final report, retained artifact set, tru
 
 Job completion and audit validity are separate results. A completed verification can find an unsigned, incomplete, invalid, or untrusted audit. Core checks result binding to the captured session, artifact set, and selected key revision. A trusted signature also requires a valid finalized chain and matching observed signer. Current signer trust is computed from the current operator key revision. Revocation changes that current claim while preserving the original result and timestamps.
 
+The runtime owns at most four verification workers with a 30-second job deadline.
+Workers use the runtime context after authenticated admission. Browser disconnect
+does not abandon an admitted job. Shutdown closes admission, cancels workers,
+and joins them after bounded result persistence. A persistence failure prevents
+further admission and makes shutdown report a conflict. Session deletion shares
+the admission fence, cancels and joins only the selected attempts' workers, then
+removes their archives. A failed persistence write preserves the archives.
+
+Browser API routes use the authorized session and attempt under
+`/api/v1/sandbox/sessions/:id/attempts/:attempt/audit`. `GET` and `PUT /trust`
+read and publish operator trust. `POST /verifications` admits an explicit job.
+`GET /verifications/:verification` reads a result, and `GET /verifications`
+reads a page of at most 20 entries with an opaque ID cursor. All responses use
+`no-store`. Writes require a real operator browser session. Reads retain normal
+session and workspace authorization. Access is checked again after dispatch
+before a job is returned. Reads never invoke a verifier.
+
 This phase consumes existing signed bundles. It does not enable Nono platform enrollment, remote audit delivery, or automatically provision signing keys. Those are separate deployment contracts. The implementation must validate Nono's exact DSSE encoding and signing algorithm using upstream fixtures and an independent mutation test, rather than implementing a generic arbitrary-algorithm verifier.
 
 ## Learning

@@ -3,8 +3,10 @@
 package sandboxruntime
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	policy "github.com/kandev/kandev/internal/agent/sandbox"
@@ -13,6 +15,64 @@ import (
 	contract "github.com/kandev/kandev/internal/common/sandbox"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAuditSessionCleanupCancelsAndJoinsOnlyItsWorkers(t *testing.T) {
+	packagePath := os.Getenv("KANDEV_TEST_SANDBOX_PACKAGE")
+	if packagePath == "" {
+		t.Skip("set KANDEV_TEST_SANDBOX_PACKAGE to a dedicated provider package")
+	}
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "operator", OrgID: "org", Role: authn.RoleAdmin, SessionID: "browser"})
+	providers, policies, selection := runtimeFixture(t, ctx, packagePath)
+	selection.TaskID = "task"
+	bindings, err := providers.ListSandboxProviders(ctx)
+	require.NoError(t, err)
+	binding := bindings[0].Binding
+	revision, err := policies.Publish(ctx, policy.Policy{ID: "session", Name: "Session", InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey,
+		Grants: contract.Grants{Filesystem: []contract.FilesystemGrant{{Reference: contract.ReferenceWorkDir, Writable: true}}}}, 0)
+	require.NoError(t, err)
+	_, err = policies.PutBinding(ctx, policy.Binding{Scope: policy.ScopeExecutor, TargetID: selection.ExecutorID, Executor: &policy.ExecutorPolicy{
+		Mode: policy.ModeRequired, InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey, CeilingRevisionID: revision.ID,
+		DefaultRevisionID: revision.ID, EligibleRevisionIDs: []string{revision.ID}}}, 0)
+	require.NoError(t, err)
+	base := t.TempDir()
+	manager := NewManager(policies, providers, base)
+	prepared, err := manager.Prepare(ctx, PrepareRequest{Selection: selection, SessionID: "session", ExecutionID: "execution", Generation: 1, WorkDir: t.TempDir(), Arguments: []string{"agent"}})
+	require.NoError(t, err)
+	attemptID := prepared.Launch().AttemptID
+	require.NoError(t, prepared.Close())
+	require.NoError(t, manager.Close())
+	func() {
+		manager := NewManager(policies, providers, base)
+		cancelled, release := make(chan struct{}), make(chan struct{})
+		var releaseOnce sync.Once
+		defer func() { releaseOnce.Do(func() { close(release) }); require.NoError(t, manager.Close()) }()
+		selected, cancelSelected := context.WithCancel(manager.ctx)
+		other, cancelOther := context.WithCancel(manager.ctx)
+		job := &auditJob{orgID: "org", attemptID: attemptID, cancel: cancelSelected, done: make(chan struct{})}
+		sibling := &auditJob{orgID: "org", attemptID: "another-attempt", cancel: cancelOther, done: make(chan struct{})}
+		manager.audit.jobs["selected"], manager.audit.jobs["sibling"] = job, sibling
+		manager.audit.wait.Add(2)
+		go func() {
+			defer manager.audit.wait.Done()
+			defer close(job.done)
+			<-selected.Done()
+			close(cancelled)
+			<-release
+		}()
+		go func() { defer manager.audit.wait.Done(); defer close(sibling.done); <-other.Done() }()
+		cleaned := make(chan error, 1)
+		go func() { cleaned <- manager.CleanupSessionState(ctx, "task", "session") }()
+		select {
+		case <-cancelled:
+		case err := <-cleaned:
+			t.Fatalf("session cleanup returned without joining its audit worker: %v", err)
+		}
+		require.NoError(t, other.Err(), "cleanup must preserve unrelated workers")
+		releaseOnce.Do(func() { close(release) })
+		require.NoError(t, <-cleaned)
+		require.NoError(t, other.Err())
+	}()
+}
 
 func TestSandboxSessionStateCleanupRequiresStoppedAttempts(t *testing.T) {
 	packagePath := os.Getenv("KANDEV_TEST_SANDBOX_PACKAGE")

@@ -207,6 +207,7 @@ func runSandboxRuntimeApproval(t *testing.T, providerUnavailable bool) {
 	}
 	retainedAudit := assertRuntimeFinalArchive(t, ctx, prepared, report)
 	if !providerUnavailable {
+		assertRuntimeAuditVerification(t, ctx, prepared, report)
 		assertRuntimeLearning(t, ctx, manager, policies, report, outside)
 	}
 	// A new attempt for the same agent session must retain its explicit state grant.

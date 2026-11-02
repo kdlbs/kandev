@@ -18,6 +18,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine) {
 	group := router.Group("/api/v1/sandbox", authn.RequireRealIdentity())
 	s.registerApprovalRoutes(group)
 	s.registerLearningRoutes(group)
+	s.registerAuditRoutes(group)
 	group.GET("/sessions/:id/attempts/:attempt/report", s.readReportHTTP)
 	s.registerCatalogRoutes(group)
 	group.POST("/policies", s.publishHTTP)

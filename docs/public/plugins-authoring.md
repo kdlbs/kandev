@@ -1064,6 +1064,13 @@ Negotiate typed reports separately with `capabilities_v2.report_schemas: ["kande
 
 Audit verification uses the explicit `verify_audit_v2` request field. Keep verification separate from ordinary report collection. A request can omit `trust_v2` to inspect unsigned or untrusted artifacts. When trust is present, bind the same expected public key, fingerprint, and trust revision to every chunk. Return verification only after the last source. Keep the observed `signer_key_fingerprint` separate from the expected key fingerprint. An artifact's embedded key does not establish operator trust. Never accept or return private signing keys.
 
+Core owns verification jobs and retained input files. It checks the captured
+provider package and runtime before dispatch. It admits at most four jobs,
+with a 30-second deadline per job. Handle RPC cancellation and remove temporary
+verification files when the call ends. A repeated operator request returns its
+stored job. Backend restart interrupts abandoned jobs without executing them
+again. Verification history remains independent of current signer trust.
+
 Use major 2 source kind `audit_final` for finalization metadata. Core collects it after confirmed stop. Audit event logs remain append-only. Rewrites, truncation, replacement, aliases, or missing prior files invalidate a refresh. Current persistent birth-identity checks require Linux statx support. Keep previous evidence visible when a new collection is unavailable.
 
 Partial or redacted events can be reported with `exact_target: false`. They cannot authorize access or supply revision additions. Partial command events must omit raw argv and executable/resource details. Return closed `reason_code` values instead of private error text: `permission_denied`, `approval_denied`, `approval_timeout`, `approval_granted`, `authentication_failed`, `upstream_unavailable`, `unsupported_protocol`, `command_failed`, or `other`. The empty code preserves compatibility.
