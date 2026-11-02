@@ -136,9 +136,9 @@ regression before production edits:
 After implementation, run these commands sequentially from repository root:
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts hooks/use-processed-messages.test.ts hooks/use-task-pending-input.test.tsx hooks/use-late-clarification-message.test.tsx)
-(cd apps/web && pnpm exec eslint lib/utils/pending-clarification.ts lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts hooks/use-processed-messages.test.ts hooks/use-task-pending-input.test.tsx e2e/helpers/clarification.ts e2e/tests/chat/clarification-lifecycle-turn-shadow.spec.ts e2e/tests/chat/mobile-clarification.spec.ts)
-(cd apps/web && pnpm exec prettier --check lib/utils/pending-clarification.ts lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts hooks/use-processed-messages.test.ts hooks/use-task-pending-input.test.tsx e2e/helpers/clarification.ts e2e/tests/chat/clarification-lifecycle-turn-shadow.spec.ts e2e/tests/chat/mobile-clarification.spec.ts)
+(cd apps/web && pnpm exec vitest run lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts lib/utils/pending-clarification-permission.test.ts hooks/use-processed-messages.test.ts hooks/use-processed-messages.clarification.test.ts hooks/use-task-pending-input.test.tsx hooks/use-late-clarification-message.test.tsx)
+(cd apps/web && pnpm exec eslint lib/utils/pending-clarification.ts lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts lib/utils/pending-clarification-permission.test.ts hooks/use-processed-messages.test.ts hooks/use-processed-messages.clarification.test.ts hooks/use-task-pending-input.test.tsx e2e/helpers/clarification.ts e2e/tests/chat/clarification-lifecycle-turn-shadow.spec.ts e2e/tests/chat/mobile-clarification.spec.ts)
+(cd apps/web && pnpm exec prettier --check lib/utils/pending-clarification.ts lib/utils/pending-clarification.test.ts lib/utils/pending-clarification-scope.test.ts lib/utils/pending-clarification-permission.test.ts hooks/use-processed-messages.test.ts hooks/use-processed-messages.clarification.test.ts hooks/use-task-pending-input.test.tsx e2e/helpers/clarification.ts e2e/tests/chat/clarification-lifecycle-turn-shadow.spec.ts e2e/tests/chat/mobile-clarification.spec.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/clarification-lifecycle-turn-shadow.spec.ts tests/chat/clarification.spec.ts)
@@ -160,7 +160,6 @@ before marking results complete.
 - `apps/web/lib/utils/pending-clarification.ts`
 - `apps/web/lib/utils/pending-clarification.test.ts`
 - `apps/web/lib/utils/pending-clarification-scope.test.ts`
-- `apps/web/lib/utils/pending-clarification-detached.test.ts`
 - `apps/web/lib/utils/pending-clarification-permission.test.ts`
 - `apps/web/hooks/use-processed-messages.test.ts`
 - `apps/web/hooks/use-processed-messages.clarification.test.ts`
@@ -219,8 +218,8 @@ Implementation completed on 2026-11-02.
 - The seeded desktop and phone matrices pass for answered and rejected outcomes
   before and after reload, including opening and closing A's historical answer
   surface without a tool-response call.
-- Focused suites: 8 files, 132 tests. Broader `lib/utils` and `hooks` suites:
-  586 files, 5,695 tests. Desktop E2E: 32 tests. Phone E2E: 15 tests.
+- Focused suites: 7 files, 132 tests. Broader `lib/utils` and `hooks` suites:
+  585 files, 5,695 tests. Desktop E2E: 32 tests. Phone E2E: 15 tests.
 - Typecheck, ESLint, Prettier, and `i18n:ratchet` passed. Catalog validation,
   36 specification-linter tests, and full specification lint passed.
-- Work remains unstaged and uncommitted.
+- Implementation is committed in this PR.

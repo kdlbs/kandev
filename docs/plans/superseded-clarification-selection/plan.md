@@ -292,7 +292,8 @@ Investigation completed on 2026-11-02:
 - Delivery-coverage preflight passed with the planned selector path as a trigger.
   One changed work order had complete requirement, acceptance, plan, and design references.
 - Relative Markdown link targets exist. The design remains within its 32 KiB limit.
-- Package diff checks passed. Only the design and two delivery files changed.
+- Package diff checks passed. Only the design and two delivery files were part
+  of that documentation package.
 
 Implementation completed on 2026-11-02:
 
@@ -304,17 +305,19 @@ Implementation completed on 2026-11-02:
   `does not reactivate an older detached bundle after the current bundle is answered`
   failed before the fix with `old-question` selected and passed afterward. The
   rejected equivalent and sparse-history matrix also pass.
-- Focused selector and chat-state suites passed: 8 files, 132 tests. Broader
-  `lib/utils` and `hooks` suites passed: 586 files, 5,695 tests.
+- Focused selector and chat-state suites passed: 7 files, 132 tests. Broader
+  `lib/utils` and `hooks` suites passed: 585 files, 5,695 tests.
 - Web typecheck passed. ESLint reported no errors on the changed files, and
   Prettier passed.
 - The rendered matrix passed in the managed Docker E2E runner: desktop 32 tests
   across the lifecycle-shadow and clarification specs, phone 15 tests in the
-  mobile clarification spec. Both answered and rejected fixtures passed before
+  mobile clarification spec (managed `mobile-chrome` emulation only; no
+  physical-device validation was available, so physical-device issue closure
+  remains a separate gate). Both answered and rejected fixtures passed before
   and after reload.
 - `pnpm run i18n:ratchet` passed. Catalog validation, all 36 specification-linter
   tests, and full specification lint passed.
-- Implementation remains unstaged and uncommitted.
+- Implementation is committed in this PR.
 
 ## Related delivery records
 

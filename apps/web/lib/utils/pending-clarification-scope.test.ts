@@ -8,6 +8,8 @@ const OLD_PENDING_ID = "pending-old";
 const CURRENT_PENDING_ID = "pending-current";
 const OLD_QUESTION_ID = "old-question";
 const CURRENT_QUESTION_ID = "current-question";
+const DETACHED_METADATA = { agent_disconnected: true };
+const CURRENT_ACTIVITY_ID = "current-activity";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -55,13 +57,11 @@ const CLEAN_CURRENT_SCOPE = {
 describe("superseded detached clarification selection", () => {
   it("does not reactivate an older detached bundle after the current bundle is answered", () => {
     const messages = [
-      clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, {
-        agent_disconnected: true,
-      }),
+      clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, DETACHED_METADATA),
       clarificationMessage(CURRENT_QUESTION_ID, CURRENT_TURN_ID, CURRENT_PENDING_ID, {
         status: "answered",
       }),
-      message({ id: "current-activity", turn_id: CURRENT_TURN_ID }),
+      message({ id: CURRENT_ACTIVITY_ID, turn_id: CURRENT_TURN_ID }),
     ];
 
     expect(selection(messages, CLEAN_CURRENT_SCOPE)).toEqual({ selected: null, bundle: [] });
@@ -69,13 +69,11 @@ describe("superseded detached clarification selection", () => {
 
   it("does not reactivate an older detached bundle after the current bundle is rejected", () => {
     const messages = [
-      clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, {
-        agent_disconnected: true,
-      }),
+      clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, DETACHED_METADATA),
       clarificationMessage(CURRENT_QUESTION_ID, CURRENT_TURN_ID, CURRENT_PENDING_ID, {
         status: "rejected",
       }),
-      message({ id: "current-activity", turn_id: CURRENT_TURN_ID }),
+      message({ id: CURRENT_ACTIVITY_ID, turn_id: CURRENT_TURN_ID }),
     ];
 
     expect(selection(messages, CLEAN_CURRENT_SCOPE)).toEqual({ selected: null, bundle: [] });
@@ -85,15 +83,31 @@ describe("superseded detached clarification selection", () => {
     "does not infer older turn ownership after newer-turn messages disappear (projection %s)",
     (pendingAction) => {
       const messages = [
-        clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, {
-          agent_disconnected: true,
-        }),
+        clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, DETACHED_METADATA),
       ];
 
       expect(selection(messages, { currentTurnId: CURRENT_TURN_ID, pendingAction })).toEqual({
         selected: null,
         bundle: [],
       });
+    },
+  );
+
+  it.each(["answered", "rejected"] as const)(
+    "does not fall back to the older detached bundle while projection still says clarification (%s)",
+    (status) => {
+      const messages = [
+        clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, DETACHED_METADATA),
+        clarificationMessage(CURRENT_QUESTION_ID, CURRENT_TURN_ID, CURRENT_PENDING_ID, { status }),
+        message({ id: CURRENT_ACTIVITY_ID, turn_id: CURRENT_TURN_ID }),
+      ];
+      const scope = {
+        currentTurnId: CURRENT_TURN_ID,
+        currentTurnCompleted: false,
+        pendingAction: "clarification",
+      } as const;
+
+      expect(selection(messages, scope)).toEqual({ selected: null, bundle: [] });
     },
   );
 });
@@ -104,9 +118,7 @@ describe("current detached clarification authority", () => {
       CURRENT_QUESTION_ID,
       CURRENT_TURN_ID,
       CURRENT_PENDING_ID,
-      {
-        agent_disconnected: true,
-      },
+      DETACHED_METADATA,
     );
     const scope = {
       currentTurnId: CURRENT_TURN_ID,
@@ -125,9 +137,7 @@ describe("current detached clarification authority", () => {
       CURRENT_QUESTION_ID,
       CURRENT_TURN_ID,
       CURRENT_PENDING_ID,
-      {
-        agent_disconnected: true,
-      },
+      DETACHED_METADATA,
     );
     const scope = {
       currentTurnId: CURRENT_TURN_ID,
@@ -146,9 +156,7 @@ describe("current detached clarification authority", () => {
       CURRENT_QUESTION_ID,
       CURRENT_TURN_ID,
       CURRENT_PENDING_ID,
-      {
-        agent_disconnected: true,
-      },
+      DETACHED_METADATA,
     );
 
     expect(selection([detached], CLEAN_CURRENT_SCOPE)).toEqual({ selected: null, bundle: [] });
@@ -178,11 +186,14 @@ describe("current detached clarification authority", () => {
   });
 
   it("uses the newest message turn as the fallback when only the projection is available", () => {
-    const olderDetached = clarificationMessage(OLD_QUESTION_ID, OLD_TURN_ID, OLD_PENDING_ID, {
-      agent_disconnected: true,
-    });
+    const olderDetached = clarificationMessage(
+      OLD_QUESTION_ID,
+      OLD_TURN_ID,
+      OLD_PENDING_ID,
+      DETACHED_METADATA,
+    );
     const newerActivity = message({
-      id: "current-activity",
+      id: CURRENT_ACTIVITY_ID,
       turn_id: CURRENT_TURN_ID,
       created_at: "2026-05-02T00:01:00Z",
     });
