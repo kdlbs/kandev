@@ -50,7 +50,7 @@ WAITING_FOR_INPUT only for a manual prompt relaunch.
 
 The work order owns `dynamic_failed_retry.go` and its test,
 `dynamic_launch.go`, `service.go`, and `task_operations.go` in
-`apps/backend/internal/orchestrator/`, the new acceptance criterion `.24` in
+`apps/backend/internal/orchestrator/`, the new acceptance criterion `.28` in
 `docs/specs/agents/requirements/dynamic-agent-routing.md`, and the failure-mode
 entry in `docs/specs/agents/system-design/dynamic-agent-routing-02.md`.
 

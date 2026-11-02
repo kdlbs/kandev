@@ -10,6 +10,7 @@ export * from "./domains/turn-changes-api";
 export * from "./domains/conversation-usage-api";
 export * from "./domains/workspace-api";
 export * from "./domains/settings-api";
+export * from "./domains/push-api";
 export * from "./domains/quick-terminal-api";
 export * from "./domains/agent-update-api";
 export * from "./domains/process-api";

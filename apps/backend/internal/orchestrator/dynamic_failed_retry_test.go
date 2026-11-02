@@ -18,7 +18,7 @@ import (
 // conversation and workspace resume. An explicit Retry must turn that stranded
 // claim into a resumable route instead of answering "recovery pending" forever.
 //
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28
 func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 	ctx := context.Background()
 	const (
@@ -107,7 +107,7 @@ func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 // failed session for the retried prompt. Automatic relaunches and stale
 // generations still refuse a terminal session.
 //
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28
 func TestResetDynamicRelaunchSessionForRecoveryReopensOnlyManualFailedRetry(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
@@ -147,7 +147,7 @@ func TestResetDynamicRelaunchSessionForRecoveryReopensOnlyManualFailedRetry(t *t
 
 // The retried prompt reschedules a task whose previous attempt failed.
 //
-// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.24
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.28
 func TestScheduleTaskForSessionAdmitsRetryOfFailedTask(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -818,7 +818,7 @@ func (si *SchedulerIntegration) launchAgent(
 		return false
 	}
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return false
 		}
@@ -890,6 +890,29 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 			zap.String("run_id", runID), zap.String("session_id", sessionID))
 		IncLoopSessionPersistFailed(workspaceID)
 	}
+}
+
+type circuitSuspensionSignal interface {
+	CircuitSuspendedUntil() time.Time
+}
+
+// deferCircuitSuspension preserves retry budget when no provider call was made.
+func (si *SchedulerIntegration) deferCircuitSuspension(ctx context.Context, run *runsmodels.Run, launchErr error) bool {
+	var signal circuitSuspensionSignal
+	if run == nil || !errors.As(launchErr, &signal) {
+		return false
+	}
+	until := signal.CircuitSuspendedUntil()
+	var err error
+	if until.IsZero() {
+		err = si.svc.repo.ParkRunForProviderCapacity(ctx, run.ID, routing.StatusBlockedActionRequired, time.Time{})
+	} else {
+		err = si.svc.repo.ScheduleRetry(ctx, run.ID, until, run.RetryCount)
+	}
+	if err != nil {
+		si.logger.Error("failed to defer circuit-suspended run", zap.String("run_id", run.ID), zap.Error(err))
+	}
+	return true
 }
 
 type sessionRecoveryRequiredSignal interface {
@@ -1092,7 +1115,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return true, false
 		}

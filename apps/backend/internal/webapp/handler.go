@@ -115,7 +115,7 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
-	w.Header().Set("Cache-Control", h.cacheControl)
+	h.setAssetHeaders(w, name)
 	seeker, ok := file.(io.ReadSeeker)
 	if !ok {
 		data, readErr := io.ReadAll(file)
@@ -128,6 +128,29 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	}
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), seeker)
 	return true
+}
+
+// revalidatedAssets are fixed-URL files that must never be served from a stale
+// HTTP cache: browsers decide on a new service worker or app manifest by
+// refetching these, and a day-old copy delays every deploy by a day.
+var revalidatedAssets = map[string]bool{
+	"sw.js":                true,
+	"manifest.webmanifest": true,
+	"offline.html":         true,
+}
+
+func (h *Handler) setAssetHeaders(w http.ResponseWriter, name string) {
+	if !revalidatedAssets[name] {
+		w.Header().Set("Cache-Control", h.cacheControl)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	if name == "sw.js" {
+		// The worker lives at the origin root, so its default scope already is
+		// "/"; the header makes that explicit and survives path rewriting proxies.
+		w.Header().Set("Service-Worker-Allowed", "/")
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	}
 }
 
 func assetName(requestPath string) string {

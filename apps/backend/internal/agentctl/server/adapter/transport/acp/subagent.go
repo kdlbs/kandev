@@ -62,6 +62,8 @@ type SubagentTaskResult struct {
 // subagent metadata frame. The common normalizer owns payload construction;
 // dialects only describe the data observed on the wire.
 type subagentFrame struct {
+	provider     string
+	name         string
 	description  string
 	prompt       string
 	subagentType string

@@ -290,6 +290,7 @@ func (a *Adapter) sendPrompt(
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
+	a.settleClaudeSubagents(sessionID, promptGeneration, stopReason, a.promptTurnWasHandedOff(turn))
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
