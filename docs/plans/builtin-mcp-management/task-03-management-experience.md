@@ -252,3 +252,42 @@ bash scripts/lint-go-changed apps/backend/internal/agentctl/server/process/git_e
 CI log: `/tmp/kandev-4762-ambient-job.txt`; local results:
 `/tmp/kandev-4762-empty-base-{red,green,lint}.log`. The file named red contains
 the original passing local repeat run; the failure evidence is the CI log.
+
+
+### Queue follow-up CI fixture follow-up
+
+The same head also failed E2E shard 22/28 in run 41456337865:
+`queue-after-background-followup.spec.ts` missed its short busy window. The mock
+completed the follow-up on a fixed timer while the browser was still checking or
+submitting queue state. CI reported either an empty durable queue after submit
+or an already-direct composer. The exact focused local run passed, so this is a
+scheduling-sensitive fixture defect, not evidence that the CI failure disappeared.
+
+The existing file-release helper now optionally holds this mock follow-up using
+`KANDEV_E2E_ASYNC_FOLLOWUP_RELEASE_FILE`. The test owns the marker and releases it
+only after the durable queue and chip are observed. Cleanup releases the marker
+and restores backend environment even after failure. The spec now has zero
+retries. No production agent, orchestration, or queue behavior changed.
+
+A fake-clock regression failed before the gate because the follow-up finished
+without release. It now passes, including the ungated default. The exact browser
+case passes five sequential repetitions with retries disabled after fresh builds.
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./cmd/mock-agent -run 'AsyncFollowup|AwaitFile' -count=20 -timeout=2m
+pnpm --dir apps/web e2e:run --host --project chromium tests/chat/queue-after-background-followup.spec.ts -- --retries=0 --repeat-each=5
+bash scripts/lint-go-changed apps/backend/cmd/mock-agent/async_followup.go apps/backend/cmd/mock-agent/async_followup_test.go
+pnpm --dir apps/web exec eslint --max-warnings 0 e2e/tests/chat/queue-after-background-followup.spec.ts
+```
+
+The browser command uses the same clean host environment, Nix library path, and
+resource bounds recorded above. Logs: `/tmp/kandev-4762-followup-gate-{red,green}.log`,
+`/tmp/kandev-4762-queue-followup-{red,green}.log`, and
+`/tmp/kandev-4762-followup-{lint,eslint}.log`. The mock-only rebuild was rejected
+by the freshness guard; the successful run rebuilt all required artifacts through
+the managed runner.
+
+The first complete remote run finished with 83 passed, 16 skipped, 1 neutral,
+and 4 failed checks. These represent the two leaf failures above plus their
+backend/E2E aggregate gates. No other leaf failure or unresolved review thread
+was reported. Both fixes are included in the next published checkpoint.
