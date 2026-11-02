@@ -165,7 +165,7 @@ Tests added or updated:
 - `turn-changes-history-mixed.spec.ts` is unchanged and still proves the usable partial card.
 - `docs/public/tasks-and-workflows.md` now explains that unavailable or failed summaries have no card and that partial summaries with usable changes remain.
 
-Verification executed from the repository root:
+Verification executed from the repository root, with package commands run from `apps/web` as shown:
 
 - `pnpm exec vitest run lib/turn-changes/projection.test.ts lib/turn-changes/history-scope.test.ts components/task/historical-turn-diff-viewer-controls.test.tsx`: 35 passed.
 - Turn-change-related Vitest sweep across 12 files: 86 passed.
@@ -176,3 +176,7 @@ Verification executed from the repository root:
 - `pnpm e2e:run --no-build --project mobile-chrome ...`: 3 passed.
 - Captured desktop and phone UI-01 screenshots with `CAPTURE_PR_ASSETS=1`: the earlier healthy card remains, the reply is visible, and no unavailable card, footer, action, or reserved spacing follows it.
 - `node --test scripts/validate-public-docs.test.mjs`: 63 passed. `node scripts/validate-public-docs.mjs`: 54 pages. `python3 scripts/list-docs.py validate`: 425 decisions and 1885 specifications. `python3 scripts/lint-spec-files.test.py`: 36 passed. `python3 scripts/lint-spec-files.py --all`, the coverage preflight, and `git diff --check`: passed.
+
+### Review remediation (2026-11-02)
+
+Addressed the current-head review findings. The superseded packages now describe this visibility package as completed. The public how-to separates usable partial cards from hidden unavailable or failed summaries and keeps expiry guidance in its own paragraph. The core design drops the failure-row anchor wording. The phone conflict scenario resets the shared seed checkout before seeding. The linked presentation requirement and core system design advance to `active` and `current`. Re-ran the phone conflict scenario (1 passed), ESLint on the changed spec, and the public-doc/specification validations.

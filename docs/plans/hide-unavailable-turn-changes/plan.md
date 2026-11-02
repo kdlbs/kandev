@@ -157,6 +157,8 @@ Implementation results (2026-11-02):
 - Focused Vitest: 35 passed across the three work-order files; 86 passed across 12 turn-change files. Typecheck and `rich-output:check` passed with an increased Node heap. ESLint on all changed TypeScript files reported zero warnings.
 - `node --test scripts/validate-public-docs.test.mjs` (63 passed), `node scripts/validate-public-docs.mjs` (54 pages), `python3 scripts/list-docs.py validate` (425 decisions, 1885 specifications), `python3 scripts/lint-spec-files.test.py` (36 passed), `python3 scripts/lint-spec-files.py --all`, the coverage preflight, and `git diff --check` passed.
 
+Review remediation (2026-11-02): superseded packages now describe this package as completed, the public how-to separates partial cards from hidden unavailable or failed summaries, the core design drops failure-row anchor wording, the phone conflict scenario resets the shared seed checkout, and the linked presentation requirement and core system design advance to `active` and `current`. The phone conflict scenario, ESLint, and documentation/specification checks passed again.
+
 ## Risks
 
 - Changing the history projection would remove diagnostics. Change only transcript eligibility.

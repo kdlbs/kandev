@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 created: 2026-10-07
 requirements:
@@ -291,7 +291,7 @@ Partial pagination cannot nominate an earlier assistant message as final.
 Add a separate terminal changes render item to `use-processed-messages` or an equivalent shared projection.
 Its output sits immediately after the final assistant row and outside any `turn_group` tool disclosure.
 Keep its stable key and measurement in native/virtualized transcript handling.
-Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVisible`; history retains `projectTurnChangeSummary`. No-final-reply cancellation gets a terminal row with its outcome.
+Eligible pending rows use the same anchor. Chat uses `isTurnChangeCardVisible`; history retains `projectTurnChangeSummary`. No-final-reply cancellation gets a terminal row with its outcome.
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
@@ -331,7 +331,7 @@ Revision updates, reconnect, and reload reevaluate the same predicate.
 Retain existing pending, expired, zero-file, and capture-preference behavior.
 
 The [visibility plan](../../../plans/hide-unavailable-turn-changes/plan.md)
-owns this pending presentation change and its desktop/phone regression evidence.
+owns this completed presentation change and its desktop/phone regression evidence.
 
 The transcript ResizeObserver handles late summaries and asynchronous file rows without new observers or layout polling. Native scroll cannot revoke bottom-follow ownership without reader intent. Explicit navigation releases reconcile viewport geometry. Resize events blocked by history loading retry on the next render under existing follow guards.
 

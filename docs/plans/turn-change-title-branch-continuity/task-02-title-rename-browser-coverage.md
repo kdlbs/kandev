@@ -28,7 +28,7 @@ system_design:
 
 # Task 02: Prove transcript and historical review behavior
 
-The pending [unavailable-card visibility work order](../hide-unavailable-turn-changes/task-01-hide-unavailable-cards.md)
+The completed [unavailable-card visibility work order](../hide-unavailable-turn-changes/task-01-hide-unavailable-cards.md)
 replaces this task's visible branch-switch card expectation.
 Its backend assertions and other browser flows remain relevant. The results below describe the original delivery.
 

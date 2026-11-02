@@ -48,7 +48,7 @@ system_design:
 
 # Task 05: Preserve PR styling and integrate corrected turn data
 
-The pending [unavailable-card visibility work order](../hide-unavailable-turn-changes/task-01-hide-unavailable-cards.md)
+The completed [unavailable-card visibility work order](../hide-unavailable-turn-changes/task-01-hide-unavailable-cards.md)
 replaces this task's unavailable transcript-card expectation, preview, and browser assertions.
 The completed status and results below describe the original delivery. Historical diagnostics remain available.
 

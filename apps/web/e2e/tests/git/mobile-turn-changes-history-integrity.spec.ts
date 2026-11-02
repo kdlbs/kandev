@@ -130,11 +130,13 @@ test.describe("mobile turn change history integrity", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
     prCapture,
   }) => {
     const restorePreference = await enableTurnChangedFiles(apiClient);
     const ws = watchWs(testPage);
     try {
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
       const { session, sessionId } = await seedTurnHistoryConflictTask(
         testPage,
         apiClient,

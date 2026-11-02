@@ -14,7 +14,7 @@ legacy_specs: []
 
 # Fix plan: Turn continuity after a generated-branch rename
 
-The pending [unavailable-card visibility package](../hide-unavailable-turn-changes/plan.md)
+The completed [unavailable-card visibility package](../hide-unavailable-turn-changes/plan.md)
 replaces this package's visible branch-switch card expectation and corresponding browser assertion.
 Branch-switch history remains unavailable. The completed status and results below describe the original delivery.
 
