@@ -231,3 +231,40 @@ The final affected Go lint run passes with zero issues. Receipt:
 `/tmp/kandev-4762-rebase-go-lint-green-oct30.log`. Specification lint and the
 cached diff whitespace check also pass. These are local verification results;
 new GitHub checks are not treated as complete before publication.
+
+
+## Main rebase and discovery parity: 2 November 2026
+
+Rebased the four task commits onto verified main
+`0392429c7bec1fc7df41d71220006f22f26d20e0`. Backup
+`backup/builtin-mcp-before-rebase-20261102` preserves prior published head
+`35a0c6045720125b623558efd4755e7e232cd723`.
+
+The resolutions preserve resource-circuit identity alongside built-in bindings,
+workspace collaboration alongside package policy, both required-store additions,
+and both built-in intent and the observed turn-error stamp in message replay
+identity. All eight locale catalogs retain webhook and package entries.
+
+The default-union regression exposed a pre-existing package ownership gap:
+`list_executors_kandev` was available to ordinary tasks in the combined catalog
+but assigned to Configuration. It now belongs to Core with shared discovery.
+Executor mutation tools remain in Configuration. Existing visibility and launch
+authorization checks are unchanged. The regression now compares tool names for
+clear diagnostics, and explicitly checks Core discovery and configuration-chat
+membership. The design and public package guide reflect the corrected ownership.
+
+Configuration chats receive Core and Configuration through the shared package
+resolver and native package endpoints. Configuration-specific registration and
+schema/authorization rules remain; this change does not claim their removal.
+Retained legacy processes keep the combined server until their next normal start.
+
+Validation passes: focused race-enabled checks in seven backend packages,
+including package parity, configuration defaults, executor-discovery integration,
+lifecycle metadata, persistence catalog, and message replay. The initial parity
+failure and final correction are captured in
+`/tmp/kandev-4762-parity-red-nov2.log` and
+`/tmp/kandev-4762-parity-green-nov2.log`. The other package results are in
+`/tmp/kandev-4762-rebase-tests-nov2.log`. Full web typecheck, localization, locale
+formatting, specification and documentation catalog checks pass. The four
+conflicted Go packages pass affected lint with zero issues. No browser suite or
+GitHub CI waiter runs for this rebase; UI logic is unchanged.

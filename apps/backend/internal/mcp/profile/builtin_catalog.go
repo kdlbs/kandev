@@ -79,7 +79,7 @@ var builtinToolPackages = map[string]PackageID{
 	"get_shared_prompt_kandev":                      PackageConfiguration,
 	"create_shared_prompt_kandev":                   PackageConfiguration,
 	"update_shared_prompt_kandev":                   PackageConfiguration,
-	"list_executors_kandev":                         PackageConfiguration,
+	"list_executors_kandev":                         PackageCore,
 	"create_executor_profile_kandev":                PackageConfiguration,
 	"update_executor_profile_kandev":                PackageConfiguration,
 	"delete_executor_profile_kandev":                PackageConfiguration,

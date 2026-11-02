@@ -32,8 +32,9 @@ and resources. Each operation still needs its normal permissions.
 | Walkthroughs | `kandev-walkthroughs` | On | Regular tasks only |
 | Diagnostics | `kandev-diagnostics` | On | Regular tasks only |
 
-Core supplies lifecycle, plans, questions, and coordination tools. Rich Output
-supplies native charts, comparisons, checks, and file previews. Walkthroughs
+Core supplies shared discovery, lifecycle, plans, questions, and coordination
+tools. Regular tasks can discover visible executors without enabling Configuration.
+Rich Output supplies native charts, comparisons, checks, and file previews. Walkthroughs
 supplies guided explanations of changes. Diagnostics supplies diagnostic bundles.
 The package detail lists registered tools and eligible contexts; profile
 capabilities can restrict the tools further.

@@ -34,6 +34,7 @@ func TestBuiltinCoreDoesNotExposeOptionalTools(t *testing.T) {
 	s := NewWithProfile(backend, "session", "task", 10005, log, "", false, packageTestProfile(mcpprofile.PackageCore, mcpprofile.PackageRichOutput))
 	t.Cleanup(func() { require.NoError(t, s.Close(context.Background())) })
 	names := getRegisteredToolNames(s)
+	require.Contains(t, names, "list_executors_kandev")
 	require.Contains(t, names, "step_complete_kandev")
 	require.Contains(t, names, "ask_user_question_kandev")
 	require.NotContains(t, names, "show_rich_output_kandev")
@@ -156,7 +157,11 @@ func TestBuiltinDefaultUnionParity(t *testing.T) {
 					actual[name] = tool
 				}
 			}
-			require.Len(t, actual, len(baseline.mcpServer.ListTools()))
+			actualNames := make([]string, 0, len(actual))
+			for name := range actual {
+				actualNames = append(actualNames, name)
+			}
+			require.ElementsMatch(t, registeredPackageNames(baseline.mcpServer), actualNames)
 			for name, want := range baseline.mcpServer.ListTools() {
 				require.Contains(t, actual, name)
 				expectedJSON, err := json.Marshal(want.Tool)
@@ -309,9 +314,9 @@ func TestBuiltinConfigurationMembership(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"list_workspaces_kandev", "list_workflows_kandev", "list_workflow_steps_kandev", "list_repositories_kandev", "list_agents_kandev", "list_executor_profiles_kandev",
 		"list_tasks_kandev", "move_task_kandev", "delete_task_kandev", "archive_task_kandev", "update_task_state_kandev", "get_task_conversation_kandev",
-		"transfer_task_kandev", "ask_user_question_kandev", "list_task_sessions_kandev",
+		"transfer_task_kandev", "ask_user_question_kandev", "list_task_sessions_kandev", "list_executors_kandev",
 	}, s.BuiltinCatalog()[mcpprofile.PackageCore], "new configuration definitions must have reviewed package ownership")
-	require.Len(t, s.BuiltinCatalog()[mcpprofile.PackageConfiguration], 30)
+	require.Len(t, s.BuiltinCatalog()[mcpprofile.PackageConfiguration], 29)
 }
 
 // @covers AC-AGENTS-BUILTIN-MCP-002.4

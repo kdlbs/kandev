@@ -129,14 +129,14 @@ Configuration's exact initial set, with the `_kandev` suffix on every name:
 - MCP: `get_mcp_config`, `update_mcp_config`.
 - Shared prompts: `list_shared_prompts`, `get_shared_prompt`,
   `create_shared_prompt`, `update_shared_prompt`.
-- Executors: `list_executors`, `create_executor_profile`,
+- Executors: `create_executor_profile`,
   `update_executor_profile`, `delete_executor_profile`.
 - Settings: `search_settings`, `describe_setting`, `get_settings`,
   `update_settings`, `list_settings_resources`.
 - Automation setup: `create_automation`.
 
 Common discovery (`list_workspaces`, `list_workflows`, `list_workflow_steps`,
-`list_repositories`, `list_agents`, `list_executor_profiles`, all suffixed
+`list_repositories`, `list_agents`, `list_executors`, `list_executor_profiles`, all suffixed
 `_kandev`) belongs to Core with its existing surface-specific schemas and scope.
 Configuration task management (`list_tasks`, `move_task`, `delete_task`,
 `archive_task`, `update_task_state`, `get_task_conversation`, `list_task_sessions`) stays Core under its
