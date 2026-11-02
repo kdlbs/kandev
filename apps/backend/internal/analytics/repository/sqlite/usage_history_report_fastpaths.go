@@ -114,8 +114,8 @@ func reportUTCMonthCurrencyEdgeSource(predicate usageReportQuery, postgres bool)
 	 AND c.calendar='UTC' AND c.coverage_kind='point' AND c.usage_date=u.utc_date
 	 AND c.coverage_start>=u.start_at AND c.coverage_start<u.end_at OFFSET 0) c
 	 JOIN usage_projection_applied a ON a.scope_id=c.scope_id AND a.generation=c.generation AND a.work_key=c.work_key AND a.build_id=c.build_id
-	 JOIN usage_report_calendar local ON c.coverage_start>=local.start_at AND c.coverage_start<local.end_at
-	 WHERE u.full_month=0`,
+	 CROSS JOIN LATERAL (SELECT l.period,l.end_at FROM usage_report_calendar l WHERE l.start_at<=c.coverage_start ORDER BY l.start_at DESC LIMIT 1) local
+	 WHERE u.full_month=0 AND c.coverage_start<local.end_at`,
 		args: predicate.args,
 	}
 }
