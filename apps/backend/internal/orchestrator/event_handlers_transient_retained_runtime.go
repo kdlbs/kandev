@@ -249,8 +249,21 @@ func (s *Service) finishRetainedRetryWithoutDispatch(
 	data.RecoveryAttemptsStarted = entry.started
 	entry.mu.Unlock()
 	settlementCtx := context.WithoutCancel(ctx)
-	if err := s.persistRetainedTurnFailureMessage(settlementCtx, data, data.TurnID); err != nil {
+	recoveryReason := ""
+	if disposition == recoveryDispositionRefused {
+		recoveryReason = s.continuationRefusalReason(settlementCtx, data)
+		if recoveryReason == "" && entry.continuationPolicy == continuationPolicyAgentManagedPendingLive {
+			recoveryReason = continuationRefusalUnsupportedRestore
+		}
+	}
+	messageID, err := s.persistRetainedTurnFailureMessage(settlementCtx, data, data.TurnID, recoveryReason)
+	if err != nil {
 		s.logger.Warn("failed to persist retained provider failure after retry refusal",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if err := s.recordTaskTurnErrorAttention(settlementCtx, data, data.TurnID, messageID); err != nil {
+		s.logger.Warn("failed to record task turn-error attention after retry refusal",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}

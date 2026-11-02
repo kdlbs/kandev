@@ -277,6 +277,63 @@ func TestWorkflowAttention_DeniedReadIsUnknown(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.6
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.10
+func TestWorkflowAttention_UnavailableJobEvidenceIsUnknown(t *testing.T) {
+	pr := &PR{
+		Number: 40, State: "open", HeadSHA: "head-sha", HeadBranch: "feature",
+		RepoOwner: "acme", RepoName: "widget",
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	}
+	runs := make([]WorkflowRun, 0, 8)
+	for index := 0; index < 8; index++ {
+		runs = append(runs, WorkflowRun{
+			ID: int64(100 + index), RunAttempt: 1, WorkflowID: int64(10 + index),
+			Name: "CI " + string(rune('A'+index)), Event: "pull_request",
+			Status: "completed", Conclusion: "action_required",
+			HeadSHA: pr.HeadSHA, HeadBranch: pr.HeadBranch,
+			HeadRepoOwner: pr.HeadRepoOwner, HeadRepoName: pr.HeadRepoName,
+		})
+	}
+	reads := 0
+	readJobs := func(_ context.Context, runID int64, _ int) ([]WorkflowJob, error) {
+		reads++
+		if runID == runs[len(runs)-1].ID {
+			return nil, &AdmissionDeferredError{Delay: time.Second, Reason: "test pacing"}
+		}
+		return nil, nil
+	}
+
+	attention := classifyWorkflowAttentionWithJobs(context.Background(), "acme", "widget", pr, runs, readJobs)
+	if attention.State != WorkflowAttentionUnknown || attention.HeadSHA != pr.HeadSHA || len(attention.Runs) != 0 {
+		t.Fatalf("attention = %#v, want unknown with no runs", attention)
+	}
+	if reads != len(runs) {
+		t.Fatalf("job reads = %d, want %d before the deferred read", reads, len(runs))
+	}
+
+	previous := &TaskPR{
+		HeadSHA: pr.HeadSHA,
+		WorkflowAttention: &WorkflowAttention{
+			State:      WorkflowAttentionApprovalRequired,
+			HeadSHA:    pr.HeadSHA,
+			ObservedAt: time.Now().UTC().Add(-time.Minute),
+			Runs:       []WorkflowAttentionRun{{RunID: 100, Name: "CI A", Reason: workflowAttentionApprovalRequiredReason}},
+		},
+	}
+	resolved := resolveTaskPRWorkflowAttention(previous, &PRStatus{
+		PR:                         pr,
+		WorkflowAttention:          attention,
+		WorkflowAttentionPopulated: true,
+	}, pr.HeadSHA)
+	if resolved == nil || resolved.State != WorkflowAttentionApprovalRequired || !resolved.Stale {
+		t.Fatalf("resolved attention = %#v, want stale preserved approval", resolved)
+	}
+	if !resolved.ObservedAt.Equal(previous.WorkflowAttention.ObservedAt) {
+		t.Fatalf("observed_at = %v, want %v", resolved.ObservedAt, previous.WorkflowAttention.ObservedAt)
+	}
+}
+
 func TestWorkflowAttention_UnknownPreservesSameHeadAndClearsOnHeadChange(t *testing.T) {
 	previous := &TaskPR{
 		HeadSHA: "old-head",

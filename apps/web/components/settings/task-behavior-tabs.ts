@@ -12,6 +12,7 @@ export const TASK_BEHAVIOR_TARGET_TABS: Readonly<Record<string, TaskBehaviorTab>
   [targets.agentTabCloseBehavior]: "conversation",
   [targets.transcriptNavigation]: "conversation",
   [targets.messageTimeDisplay]: "conversation",
+  [targets.promptSuggestions]: "conversation",
   [targets.sessionCapacity]: "runtime",
   [targets.messageQueue]: "runtime",
 };
@@ -26,6 +27,8 @@ const CONTRIBUTOR_TABS: Readonly<Record<string, TaskBehaviorTab>> = {
   "general-transcript-navigation": "conversation",
   "general-message-time-display": "conversation",
   "general-todo-list-panel": "conversation",
+  "general-prompt-suggestions": "conversation",
+  "general-prompt-suggestion-profile": "conversation",
   "system-session-capacity": "runtime",
   "system-message-queue": "runtime",
   "general-task-sleep-inhibition": "runtime",

@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-10-07
+updated: 2026-10-29
 owners:
   - kandev
 requirements:
@@ -21,17 +22,15 @@ executor pipeline retain repository admission, branch policies, and materializat
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-PROJECT-REPOSITORIES-001` | Selection, resolution, persistence, launch, and failure |
+| `AC-TASKS-PROJECT-REPOSITORIES-001.10` through `.13` | Workspace-verified remote admission |
 
-## Current evidence
+## Creation boundary
 
 `NewTaskDialog.handleCreate` sends `project_id` without `repositories`.
 `Service.prepareTaskForCreation` inherits parent repositories and then performs
-repository preflight. No project source lookup exists there.
-
-A temporary Go reproduction used `setupOfficeTest`, real Office migrations,
-a project, and a registered local Git repository containing `README.md`.
-`CreateTask` succeeded but `ListTaskRepositories` returned nil.
-The implementation plan retains the exact command and failure evidence.
+`prepareProjectRepositorySources` before repository preflight.
+All generated remote inputs pass through `preflightRepositoryInputs` before resolution or persistence.
+The project stores source strings, so provider inference cannot depend on picker metadata.
 
 ## Project read adapter
 
@@ -94,7 +93,68 @@ Resolve all selected entries. A mixture of valid and invalid entries must fail.
 | Registered local Git path | Reuse workspace repository ID | Service regression with real Git fixture | Creation error |
 | Unregistered local Git path | Normal validated find-or-create | Service integration test | Creation error |
 | Built-in remote URL | Existing provider origin and namespace resolver | Table tests without network access | Existing provider validation error |
-| Plugin-owned or unknown URL | Existing preflight only, without forged trust | Refusal test | Creation error if unsupported |
+| Plugin-owned remote URL | Server discovery through active workspace inspection | Project and plugin-discovery tests | Typed refusal without writes |
+| Unknown or ambiguous URL | No unique verified candidate | Refusal tests | Creation error before writes |
+
+## Workspace-verified remote admission
+
+`preflightRepositoryInputs` owns shared admission for generated project URLs, explicit task inputs, replacement, and standalone remote registration.
+Keep `parseRemoteRepositoryURL` strict for unknown hosts without a provider hint.
+Provider recognition comes from a verified workspace connection or the
+[plugin discovery contract](../../plugins/system-design/repository-url-discovery.md).
+
+Apply these routes before any repository resolution:
+
+1. Saved IDs, local inputs, and trusted Host descriptors retain their existing admission paths. A saved repository ID short-circuits URL and provider admission even when the request also carries remote metadata; `resolveRepoInputID` still enforces workspace ownership and refuses a foreign ID.
+2. Explicit built-in providers use their current parser and origin verifier. Never reinterpret a failed explicit selection.
+3. Explicit plugin providers use `ResolveRepositorySelection` for that manifest owner only.
+4. Unhinted public built-in URLs retain their existing provider meaning and verification.
+5. Other unhinted URLs use `resolveWorkspaceRemoteProvider` to collect verified candidates before choosing one.
+
+The new helper lives in `internal/task/service/workspace_remote_provider.go`.
+For GitHub and GitLab candidates, parse with the existing explicit provider hint and call the workspace-owned origin verifier.
+An invalid parse or origin mismatch contributes no candidate.
+Preserve genuine unavailable failures for final error selection.
+GitLab compares exact scheme, host, and port and requires its configured authentication method.
+Only this verifier sets `TrustedRemote`. It reads connection metadata without credentials or provider network calls.
+
+Also call `RepositorySelectionResolver.DiscoverRepositorySelections` for plugin candidates.
+Its result separates candidates and ordinary provider failure from fatal operation errors.
+An operation error aborts admission before candidate selection. A candidate failure participates in final error selection only without a unique match.
+The backend adapter maps every validated plugin descriptor without rebuilding its clone URL.
+Validate each result through a discovery-specific wrapper around `trustResolvedRepositorySelection`.
+That wrapper supplies the discovered provider from server authority before applying the existing scope and immutable-ID pinning checks.
+Do not weaken the explicit-selection provider equality check.
+Task branches, checkout selectors, and policies remain caller-owned.
+
+After the candidate pass completes, accept exactly one valid candidate.
+Reject two or more as an invalid, ambiguous selection, even if a candidate is built-in.
+One completed valid candidate can succeed despite an unrelated candidate's ordinary inspection error.
+With no candidate, prefer unavailable over invalid, then not-found. All ordinary no-matches produce invalid selection.
+Caller cancellation, a discovery deadline, or changed plugin eligibility invalidates the entire discovery attempt.
+Do not accept an incomplete candidate set in those cases.
+
+This replaces GitHub-first precedence only for ambiguous, unhinted custom-host URLs.
+Explicit provider selections keep their selected provider.
+Carry the verified input back into `inputs[index]` before resolution.
+Keep origin proof scoped to that input and preflight call. Do not transfer trust across aliases or later requests.
+
+Explicit GitLab hints require origin verification even when parsing succeeds.
+Skip URL verification for saved IDs and local inputs.
+Registration consumes the same verified preflight result without its former second standalone origin call.
+The lower resolver retains `untrusted GitLab origin` refusal for direct unverified inputs.
+
+All inputs complete preflight before any repository resolution starts.
+A rejected source fails the complete list in either source order.
+Later resolution errors retain the existing repository-row lifecycle described below.
+This adds no transaction, schema, clone path, credential policy, or provider-default lookup.
+Plugin discovery can perform the existing bounded provider inspection calls.
+
+Public provider behavior, GitHub Enterprise host identity, and configured GitLab HTTP origins remain supported.
+No new built-in custom-host GitLab SSH/SCP parser support is added.
+Plugin input syntax stays provider-owned, and returned clone descriptors retain the existing HTTPS contract.
+See the [discovery decision](../../../decisions/2026-10-29-provider-owned-repository-url-discovery.md)
+and [Enterprise host design](../../integrations/system-design/github-enterprise-hosts.md#workflow-consumers-and-capabilities).
 
 ## Persistence and publication
 
@@ -134,6 +194,15 @@ Office desktop and phone forms keep their existing composition and payload.
 Backend source selection supplies parity without a new picker or new copy.
 Browser evidence covers persisted attachments on both viewports.
 
+`ProjectRepositoryPicker` already offers literal custom URLs through `shouldShowCustomEntry`.
+It does not call `looksLikeSupportedRemoteURL` from the separate workspace-source picker.
+Keep both frontend paths unchanged for this correction.
+Use the current project editor and New Task form in desktop and phone regressions.
+Configure GitLab in the Office workspace, which differs from the base E2E seed workspace.
+Browser success proves admission and persistence, not live self-managed checkout or authentication.
+Use the real packaged repository fixture to prove provider discovery from a bare source URL.
+No browser provider ID or inspected descriptor is submitted by the project form.
+
 Public documentation can describe project-source inheritance during implementation.
 The design package alone does not advertise this behavior as shipped.
 
@@ -142,8 +211,10 @@ The design package alone does not advertise this behavior as shipped.
 - [Explicit local repository trust](../../../decisions/2026-07-20-explicit-local-repository-trust.md)
 - [Provider-neutral remote repositories](../../../decisions/2026-07-20-provider-neutral-remote-repositories.md)
 
-These existing boundaries are reused. No new ADR is required for this correction.
+Provider trust remains unchanged. Bare-URL discovery follows
+[provider-owned discovery](../../../decisions/2026-10-29-provider-owned-repository-url-discovery.md).
 
 ## Implementation plans
 
 - [Office project repository context](../../../plans/office-project-repository-context/plan.md)
+- [Provider-neutral project-source admission](../../../plans/office-project-self-managed-gitlab/plan.md)

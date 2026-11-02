@@ -5,14 +5,18 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { dwell } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 import {
   createOverrideTask,
   deleteFixtureTasks,
   seedWorkflowAgentOverrideFixture,
+  previewWorkflowMove,
   waitForNewWorkflowProfileSession,
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
+
+test.use({ trace: "retain-on-failure" });
 
 useRegularMode();
 
@@ -41,6 +45,9 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
   }) => {
     test.setTimeout(150_000);
     const fixture = await seedWorkflowAgentOverrideFixture(apiClient, seedData, "Mobile Overrides");
+    await apiClient.updateWorkflowStep(fixture.implementStep.id, {
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
     const createdTaskIds: string[] = [];
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -175,13 +182,46 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
       await expect
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(replacementSessionId);
+      // Reuse must follow the bound session and its current model, not its profile default.
+      await apiClient.setSessionModel(replacementSessionId, "mock-smart");
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      // Confirm the replacement runtime model before parking its session.
+      await expect
+        .poll(async () => {
+          const { session } = await apiClient.getTaskSession(replacementSessionId);
+          const runtime = session.metadata?.runtime_config as { model?: string } | undefined;
+          return { state: session.state, model: runtime?.model };
+        })
+        .toEqual({ state: "WAITING_FOR_INPUT", model: "mock-slow" });
       await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.reviewStep.id);
       await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.reviewStep.id);
       await expect
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(initialSessionId);
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      await waitForSessionDone(
+        apiClient,
+        runtimeTask.id,
+        initialSessionId,
+        "The resumed initial session must be idle before workflow progression is available",
+        45_000,
+      );
+
+      const actualPreview = await previewWorkflowMove(
+        apiClient,
+        runtimeTask.id,
+        fixture.workflow.id,
+        fixture.prStep.id,
+      );
+      expect(actualPreview.recipient).toEqual(
+        expect.objectContaining({
+          session_id: replacementSessionId,
+          profile_id: fixture.profileB.id,
+        }),
+      );
+      expect(actualPreview.model.after).toEqual(
+        expect.objectContaining({ known: true, id: "mock-smart" }),
+      );
 
       await tabletTestPage.reload();
       await tabletSession.waitForLoad();
@@ -193,18 +233,22 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
       const actualTopbarRow = actualTabletDrawer.getByTestId(
         `workflow-step-disclosure-row-${fixture.prStep.id}`,
       );
-      await expect(actualTopbarRow.getByTestId("workflow-move-preview")).toContainText("mock-slow");
+      await expect(actualTopbarRow.getByTestId("workflow-move-preview")).toContainText(
+        "mock-smart",
+      );
       await tabletTestPage.keyboard.press("Escape");
 
       await testPage.reload();
       await phoneSession.waitForLoad();
+      // Reload can restore the parked runtime after the earlier API idle check.
+      await phoneSession.waitForChatIdle({ timeout: 45_000, requireEditable: true });
       const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
       await expect(actualAboveChatButton).toBeVisible();
       await longPress(testPage, actualAboveChatButton);
       const actualAboveChatOptions = testPage.getByTestId("workflow-move-options");
       await expect(actualAboveChatOptions).toBeVisible();
       await expect(actualAboveChatOptions.getByTestId("workflow-move-preview")).toContainText(
-        "mock-slow",
+        "mock-smart",
       );
       await actualAboveChatOptions.getByRole("button", { name: "Cancel", exact: true }).click();
       await assertNoDocumentHorizontalOverflow(tabletTestPage);

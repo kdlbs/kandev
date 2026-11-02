@@ -187,6 +187,8 @@ export type ProfileLaunchSettingsRequest = {
   env_vars: { key: string; value?: string; secret_id?: string }[];
   cli_flags: CLIFlag[];
   command_prefix: string;
+  /** Draft selection for a capability or model probe. Omit to use the saved value. */
+  copilot_selected_plugins?: string[];
 };
 
 export type ProfileCapabilityRequest = {
@@ -244,6 +246,7 @@ export type ModelDiscovery = {
 export type DynamicModelsResponse = {
   agent_name: string;
   status: CapabilityStatus;
+  reason_code?: string;
   models: ModelEntry[];
   current_model_id?: string;
   modes?: ModeEntry[];
@@ -270,6 +273,7 @@ export type AgentModelConfigResponse = {
   agent_name: string;
   model: string;
   status: CapabilityStatus;
+  reason_code?: string;
   config_options: ConfigOptionEntry[];
   error: string | null;
   context_revision?: string;
@@ -363,12 +367,21 @@ export type ListAvailableAgentsResponse = {
 
 // Clarification request types (for ask_user_question feature)
 export type ClarificationOption = {
+  images?: QuestionImage[];
   option_id: string;
   label: string;
   description: string;
 };
 
+export type QuestionImage = {
+  id: string;
+  path: string;
+  repo?: string;
+  alt: string;
+};
+
 export type ClarificationQuestion = {
+  images?: QuestionImage[];
   id: string;
   title: string;
   prompt: string;

@@ -15,6 +15,7 @@ import {
   type MouseEvent,
   type ReactElement,
   type ReactNode,
+  type ComponentType,
 } from "react";
 import type { Components, ExtraProps } from "react-markdown";
 import { useTranslation } from "react-i18next";
@@ -39,6 +40,66 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import type { TaskMentionReference } from "@/lib/tasks/task-mention-references";
+import { TaskMentionChip } from "./task-mention-components";
+import { protectTaskMentionMarkdown } from "@/lib/tasks/task-mention-markdown";
+import { normalizeCached } from "@/lib/markdown/normalize-cache";
+
+const EMPTY_TASK_REFERENCES: readonly TaskMentionReference[] = [];
+type MentionPresentation = {
+  interactive: boolean;
+  tasks?: ReadonlyMap<string, TaskMentionReference>;
+};
+
+export function prepareTaskMentionContent(
+  source: string,
+  references: readonly TaskMentionReference[] = EMPTY_TASK_REFERENCES,
+) {
+  const normalized = references.length ? normalizeCached(source) : source;
+  const names = buildPromptMentionNames(references.map((reference) => reference.title));
+  return protectTaskMentionMarkdown(
+    normalized,
+    names.length ? splitMarkdownPromptMentionSegments(normalized, names) : [],
+    references,
+  );
+}
+
+type MentionBlockProps = { children?: ReactNode; node?: ExtraProps["node"] };
+
+export function withTaskMentionTokens(
+  components: Components | undefined,
+  tokens: ReadonlyMap<string, TaskMentionReference>,
+): Components | undefined {
+  if (tokens.size === 0) return components;
+  const base = components ?? buildEntityReferenceMarkdownComponents([]);
+  const result: Record<string, (props: MentionBlockProps) => ReactNode> = {};
+  const names = buildPromptMentionNames([...tokens.keys()]);
+  for (const tag of [
+    "p",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "td",
+    "th",
+  ] as const) {
+    const Renderer = (base[tag] ?? tag) as ComponentType<MentionBlockProps> | string;
+    result[tag] = ({ children, node, ...props }: MentionBlockProps) => {
+      const rendered = renderChildrenWithPromptMentions(children, names, `task-${tag}`, {
+        interactive: true,
+        tasks: tokens,
+      });
+      return typeof Renderer === "string"
+        ? createElement(Renderer, props, rendered)
+        : createElement(Renderer, { ...props, node }, rendered);
+    };
+  }
+  return { ...base, ...result };
+}
 
 type PromptMentionMarkdownTag =
   | "a"
@@ -108,7 +169,7 @@ export function usePromptMentionMarkdownComponents(
       return entityReferences.length === 0 ? undefined : baseComponents;
     }
     const renderChildren = (children: ReactNode, keyPrefix: string, interactive = true) =>
-      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix, interactive);
+      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix, { interactive });
     return {
       ...baseComponents,
       a: ({ children, node, ...props }: MarkdownChildrenProps<"a">) => {
@@ -171,7 +232,7 @@ function renderChildrenWithPromptMentions(
   children: ReactNode,
   promptNames: string[],
   keyPrefix: string,
-  interactive = true,
+  presentation: MentionPresentation = { interactive: true },
   precedingCharacter?: string,
 ): ReactNode[] {
   let previousCharacter = precedingCharacter;
@@ -183,7 +244,7 @@ function renderChildrenWithPromptMentions(
         child,
         promptNames,
         childKeyPrefix,
-        interactive,
+        presentation,
         previousCharacter,
       );
     } else if (!isValidElement(child)) {
@@ -203,7 +264,7 @@ function renderChildrenWithPromptMentions(
               element.props.children,
               promptNames,
               childKeyPrefix,
-              interactive,
+              presentation,
               previousCharacter,
             ),
           }),
@@ -222,7 +283,10 @@ function getVisibleText(node: ReactNode): string {
     return String(node);
   }
   if (!isValidElement(node)) return "";
-  const element = node as ReactElement<{ children?: ReactNode }>;
+  const element = node as ReactElement<{ children?: ReactNode; reference?: TaskMentionReference }>;
+  if (element.type === TaskMentionChip && element.props.reference) {
+    return `@${element.props.reference.title}`;
+  }
   return Children.toArray(element.props.children).map(getVisibleText).join("");
 }
 
@@ -569,6 +633,10 @@ function matchMarkdownPromptMention(
     return null;
   }
   const closingMarker = marker === "[" ? "]" : marker;
+  const whole = matchPromptMention(` ${content.slice(index)}`, 1, promptNames);
+  if (whole && content[index + whole.end - 1] === closingMarker) {
+    return { start: index, end: index + whole.end - 1, name: whole.name };
+  }
   for (let closingIndex = index + 1; closingIndex < content.length; closingIndex += 1) {
     if (content[closingIndex] !== closingMarker) continue;
     if (isEscapedMarkdownCharacter(content, closingIndex)) continue;
@@ -604,15 +672,26 @@ export function renderTextWithPromptMentions(
   text: string,
   promptNames: string[],
   keyPrefix: string,
-  interactive = true,
+  presentation: boolean | MentionPresentation = true,
   precedingCharacter?: string,
 ) {
+  const { interactive, tasks } =
+    typeof presentation === "boolean" ? { interactive: presentation } : presentation;
   const occurrences = new Map<string, number>();
   return splitMarkdownPromptMentionSegments(text, promptNames, precedingCharacter).map(
     (segment) => {
       if (segment.kind === "text") return segment.value;
       const occurrence = occurrences.get(segment.name) ?? 0;
       occurrences.set(segment.name, occurrence + 1);
+      const task = tasks?.get(segment.name);
+      if (task && interactive) {
+        return (
+          <TaskMentionChip
+            key={promptMentionKey(keyPrefix, segment, occurrence)}
+            reference={task}
+          />
+        );
+      }
       return (
         <PromptMentionChip
           key={promptMentionKey(keyPrefix, segment, occurrence)}
@@ -801,21 +880,36 @@ function PromptMentionHoverPreview({
   onOpenChange,
   onToggle,
 }: PromptMentionHoverPreviewProps) {
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  // A close revokes delayed opens until fresh trigger intent.
+  const allowDelayedOpen = useRef(true);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) allowDelayedOpen.current = false;
+    if (!nextOpen || allowDelayedOpen.current) onOpenChange(nextOpen);
+  };
+  const handleToggle = () => {
+    allowDelayedOpen.current = !open;
+    onToggle();
+  };
+  const handleNewIntent = () => {
+    allowDelayedOpen.current = true;
+  };
   const handleClick = (event: MouseEvent) => {
     event.stopPropagation();
-    onToggle();
+    handleToggle();
   };
   const handleKeyDown = (event: KeyboardEvent) => {
     if (!focusable || (event.key !== "Enter" && event.key !== " ")) return;
     event.preventDefault();
     event.stopPropagation();
-    onToggle();
+    handleToggle();
   };
 
   return (
-    <HoverCard open={open} onOpenChange={onOpenChange} openDelay={300} closeDelay={0}>
+    <HoverCard open={open} onOpenChange={handleOpenChange} openDelay={300} closeDelay={0}>
       <HoverCardTrigger asChild>
         <span
+          ref={triggerRef}
           data-testid="custom-prompt-mention"
           data-prompt-name={name}
           tabIndex={focusable ? 0 : undefined}
@@ -824,13 +918,23 @@ function PromptMentionHoverPreview({
           aria-label={focusable ? label : undefined}
           title={labelClassName ? label : undefined}
           className={className}
+          onPointerEnter={handleNewIntent}
+          onFocus={handleNewIntent}
           onClick={handleClick}
           onKeyDown={handleKeyDown}
         >
           <PromptMentionLabel value={value} className={labelClassName} />
         </span>
       </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
+      <HoverCardContent
+        side="top"
+        align="start"
+        className="w-80 max-h-80 overflow-y-auto"
+        onPointerDownOutside={(event) => {
+          // Trigger activation owns its toggle, including closing an open preview.
+          if (triggerRef.current?.contains(event.target as Node)) event.preventDefault();
+        }}
+      >
         <PromptPreview content={content} />
       </HoverCardContent>
     </HoverCard>

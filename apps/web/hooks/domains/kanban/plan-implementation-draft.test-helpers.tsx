@@ -32,6 +32,7 @@ import {
 } from "@/lib/local-storage";
 import { setWebSocketClient } from "@/lib/ws/connection";
 import type { WebSocketClient } from "@/lib/ws/client";
+import type { MCPSelectionResponse } from "@/lib/types/http-mcp";
 
 export const TASK = "implementation-task";
 export const FIRST = "planning-session";
@@ -314,11 +315,47 @@ export async function clickImplement(fresh = false, header = false) {
   await flush();
 }
 
+function readMCPFixture(
+  url: string,
+  init: RequestInit | undefined,
+  selections: ReadonlyMap<string, MCPSelectionResponse>,
+): Response | null {
+  if (init?.method && init.method !== "GET") return null;
+  const request = new URL(url, "http://localhost:3000");
+  if (request.pathname === "/api/v1/workspaces/workspace/mcp-servers")
+    return Response.json({ servers: [] });
+  const selection = selections.get(request.pathname);
+  if (selection && request.searchParams.get("workspace_id") === "workspace")
+    return Response.json(selection);
+  return null;
+}
+
 function setupFetch(unexpected: string[], serverPlanMode: Map<string, boolean>) {
+  const mcpSelections = new Map<string, MCPSelectionResponse>([
+    ...sessions.map((session): [string, MCPSelectionResponse] => [
+      `/api/v1/task-sessions/${session.id}/mcp-selections`,
+      {
+        workspace_id: "workspace",
+        scope: "task_session",
+        owner_id: session.id,
+        definition_ids: [],
+      },
+    ]),
+    [
+      `/api/v1/tasks/${TASK}/mcp-selections`,
+      { workspace_id: "workspace", scope: "task", owner_id: TASK, definition_ids: [] },
+    ],
+    [
+      `/api/v1/agent-profiles/${PROFILE}/mcp-selections`,
+      { workspace_id: "workspace", scope: "profile", owner_id: PROFILE, definition_ids: [] },
+    ],
+  ]);
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string | URL | Request) => {
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      const mcpResponse = readMCPFixture(url, init, mcpSelections);
+      if (mcpResponse) return mcpResponse;
       if (url.includes("/mcp-config")) return Response.json({ enabled: false, servers: {} });
       if (url.endsWith("/turns")) return Response.json({ turns: [] });
       const session = sessions.find((s) => url.endsWith(`/task-sessions/${s.id}`));

@@ -17,7 +17,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/httpmw"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
@@ -113,6 +115,7 @@ func (s *Server) Router() http.Handler {
 func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", s.handleHealth)
+	s.router.GET("/identity", s.handleInstanceIdentity)
 
 	// Agent control
 	api := s.router.Group("/api/v1")
@@ -120,11 +123,13 @@ func (s *Server) setupRoutes() {
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
+		api.GET("/runtime/storage", s.handleRuntimeStorage)
 		api.GET("/info", s.handleInfo)
 		api.GET("/system/metrics", s.handleSystemMetrics)
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -172,6 +177,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
+		api.GET("/workspace/image-preview", s.handleQuestionImage)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
@@ -237,6 +243,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/turn-changes/delete", s.handleGitTurnCheckpointDelete)
 		api.POST("/git/turn-changes/compare", s.handleGitTurnCheckpointCompare)
 		api.POST("/git/turn-changes/export", s.handleGitTurnCheckpointExport)
+		api.POST("/git/turn-changes/archive", s.handleGitTurnCheckpointArchive)
 		api.GET("/git/turn-changes/scopes", s.handleGitTurnCheckpointScopes)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
@@ -258,6 +265,7 @@ func (s *Server) setupRoutes() {
 
 	// Utility agent routes
 	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)
@@ -415,16 +423,19 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	DeliveryHealth process.DeliveryHealth `json:"delivery_health"`
-	AgentStatus    string                 `json:"agent_status"`
-	ProcessInfo    map[string]interface{} `json:"process_info"`
-	Uptime         string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth          `json:"delivery_health"`
+	RuntimeStorage *streams.RuntimeStorageSnapshot `json:"runtime_storage,omitempty"`
+	AgentStatus    string                          `json:"agent_status"`
+	ProcessInfo    map[string]interface{}          `json:"process_info"`
+	Uptime         string                          `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
+	runtimeStorage := s.procMgr.CachedRuntimeStorage()
 	c.JSON(http.StatusOK, StatusResponse{
 		AgentStatus:    string(s.procMgr.Status()),
 		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		RuntimeStorage: runtimeStorage,
 		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }
@@ -480,12 +491,13 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	Command         string            `json:"command"`
-	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs      `json:"continue_args"`
-	Env             map[string]string `json:"env,omitempty"`
-	ReplaceEnv      bool              `json:"replace_env,omitempty"`
+	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Command         string             `json:"command"`
+	AgentArgs       optionalArgs       `json:"agent_args"`
+	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs       `json:"continue_args"`
+	Env             map[string]string  `json:"env,omitempty"`
+	ReplaceEnv      bool               `json:"replace_env,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on
@@ -514,9 +526,20 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
 			Success: false,
-			Error:   "invalid request: " + err.Error(),
+			Error:   "invalid agent configuration",
 		})
 		return
+	}
+
+	if !req.LaunchWrapper.IsZero() {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for launch wrappers"})
+			return
+		}
+		if !req.AgentArgs.Present || req.LaunchWrapper.Validate() != nil {
+			c.JSON(http.StatusBadRequest, AgentConfigureResponse{Error: "invalid launch wrapper configuration"})
+			return
+		}
 	}
 
 	if !req.AgentArgs.Present && req.Command == "" {
@@ -529,12 +552,12 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 
 	var configureErr error
 	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
 	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.LaunchWrapper)
 	}
 	if configureErr != nil {
-		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))
+		s.logger.Error("failed to configure agent", zap.Error(configureErr))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
 			Error:   configureErr.Error(),
@@ -542,7 +565,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("agent configured", zap.String("command", req.Command))
+	s.logger.Info("agent configured")
 	c.JSON(http.StatusOK, AgentConfigureResponse{
 		Success: true,
 		Message: "agent configured",

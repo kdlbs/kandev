@@ -77,15 +77,18 @@ test.describe("Task creation with branch policies", () => {
       await expect(option).toContainText("Policy");
       await expectPolicyOptionUsesOneLine(option, policy.name);
       const policyInfo = testPage.getByTestId(`branch-policy-option-info-${policy.id}`);
-      await policyInfo.hover();
       const policyTooltip = testPage.getByRole("tooltip").filter({
         hasText: "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
       });
+      const branchSearch = dialog.getByPlaceholder("Search branches...", { exact: true });
+      await expect(branchSearch).toBeFocused();
+      for (let tab = 0; tab < 2; tab += 1) {
+        if (await policyInfo.evaluate((element) => element === document.activeElement)) break;
+        await testPage.keyboard.press("Tab");
+      }
+      await expect(policyInfo).toBeFocused();
       await expect(policyTooltip).toHaveCount(1);
       await expect(policyTooltip).toBeVisible();
-      await testPage.mouse.move(0, 0);
-      await policyInfo.focus();
-      await expect(policyInfo).toBeFocused();
       await expect(policyInfo).toHaveAttribute(
         "aria-label",
         "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",

@@ -285,7 +285,7 @@ func (s *Service) startSilentRestoreCandidate(
 		CandidateExecutionID: checkpoint.CandidateExecutionID,
 		OnExecutionAllocated: callback,
 	}
-	commitWhenReady := func(readyCtx context.Context, _ *resumeAttempt, execution *executor.TaskExecution) error {
+	commitWhenReady := func(readyCtx context.Context, startup *resumeAttempt, execution *executor.TaskExecution) error {
 		if execution == nil || execution.AgentExecutionID != checkpoint.CandidateExecutionID {
 			return errors.New("silent restart recovery resumed a different execution")
 		}
@@ -293,9 +293,15 @@ func (s *Service) startSilentRestoreCandidate(
 		if getErr != nil {
 			return getErr
 		}
-		return s.finishLaunchedSilentRestoreCandidateLocked(
+		if err := s.finishLaunchedSilentRestoreCandidateLocked(
 			readyCtx, store, attemptID, checkpoint, inputs, running,
-		)
+		); err != nil {
+			return err
+		}
+		if !s.resumeAttemptStore().markPromptReady(startup) {
+			return ErrResumeAttemptCancelled
+		}
+		return nil
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
 	ownedResumeCtx = context.WithValue(ownedResumeCtx, silentRestoreStartupContextKey{}, true)

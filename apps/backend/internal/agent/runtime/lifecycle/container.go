@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -61,6 +62,7 @@ type ContainerConfig struct {
 	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
 	McpServers                     []McpServerConfig
 	McpMode                        string
+	PromptSuggestions              bool
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
@@ -82,6 +84,7 @@ type ContainerConfig struct {
 	DeliveryStreamID            string
 	DeliveryIncarnationID       string
 	DeliveryHarnessGeneration   uint64
+	OpenCodePluginRuntime       *agentctltypes.OpenCodePluginRuntime
 	// OnProgress streams preparation progress for this launch. The remote
 	// runtime seeds container inputs during the launch rather than before it,
 	// so its warnings reach the user through the launch's own callback rather
@@ -144,6 +147,7 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
+		PromptSuggestions:          config.PromptSuggestions,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
@@ -158,6 +162,7 @@ func buildContainerCreateInstanceRequest(
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  config.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      config.OpenCodePluginRuntime,
 	}
 }
 

@@ -84,6 +84,7 @@ function useThreadDeck(
   snapshots: Record<string, WorkflowSnapshotData>,
   workspaceId: string | null | undefined,
   requestedTaskId: string | null,
+  initialSnapshotsReady: boolean,
 ) {
   const removals = useAppStore((state) => state.taskRemoval.operationsByToken);
   const storedThreadViews = useAppStore((state) => state.threadViews);
@@ -112,14 +113,17 @@ function useThreadDeck(
   );
   // Ranking decides where a column first appears; after that the slot is the
   // reader's, so replying to a thread cannot slide it across the deck.
-  const threads = useStableThreadOrder(
-    query.stableCandidates,
-    `${query.fingerprint}:${requestedTaskId ?? ""}:${threadViews.orderResetGeneration}`,
-    {
-      resetThreads: query.admittedCandidates,
-      maxItems: query.effectiveView.maxColumns,
-    },
-  );
+  const orderResetKey = [
+    workspaceId ?? "",
+    query.fingerprint,
+    requestedTaskId ?? "",
+    threadViews.orderResetGeneration,
+    initialSnapshotsReady ? "ready" : "loading",
+  ].join(":");
+  const threads = useStableThreadOrder(query.stableCandidates, orderResetKey, {
+    resetThreads: query.admittedCandidates,
+    maxItems: query.effectiveView.maxColumns,
+  });
   return { query, threads };
 }
 
@@ -157,7 +161,7 @@ export function ThreadsPageClient() {
     requestedWorkspaceId && (workspaces.length === 0 || requestedWorkspaceIsKnown)
       ? requestedWorkspaceId
       : activeWorkspaceId;
-  useAllWorkflowSnapshots(scopedWorkspaceId);
+  const { initialSnapshotsReady } = useAllWorkflowSnapshots(scopedWorkspaceId);
 
   const scopedSnapshots = useMemo(
     () => scopeSnapshotsToWorkspace(snapshots, workflows, scopedWorkspaceId),
@@ -170,7 +174,12 @@ export function ThreadsPageClient() {
 
   const requestedTaskId = searchParams.get("taskId");
   const requestedSessionId = searchParams.get("sessionId");
-  const { query, threads } = useThreadDeck(scopedSnapshots, scopedWorkspaceId, requestedTaskId);
+  const { query, threads } = useThreadDeck(
+    scopedSnapshots,
+    scopedWorkspaceId,
+    requestedTaskId,
+    initialSnapshotsReady,
+  );
 
   const handleOpenTask = useCallback((taskId: string) => router.push(linkToTask(taskId)), [router]);
   const handleInvalidRequestedSession = useCallback(

@@ -58,6 +58,11 @@ task.
   mutations.
 - **AC-WORKSPACES-REPOSITORY-SETS-001.7:** A mutation shall update other open
   clients through the repository-set event stream.
+  A deletion received before the initial list completes shall remain effective
+  after that response arrives. New Task, New Subtask, and repository settings
+  shall recover the complete current list, including every surviving set,
+  without requiring the user to reopen the surface. A failed recovery shall
+  leave the list eligible for a later retry without restoring deleted sets.
 - **AC-WORKSPACES-REPOSITORY-SETS-001.8:** Set writes shall be atomic. A
   rejected name, member, order, or saved base shall not cause a partial write.
 - **AC-WORKSPACES-REPOSITORY-SETS-001.9:** HTTP PATCH and WebSocket update

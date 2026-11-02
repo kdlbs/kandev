@@ -177,6 +177,9 @@ func TestPassiveFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
 	client := &fallbackProbeClient{Client: NewMockClient()}
 	configureTestWorkspaceAuth(t, svc, client, testWorkspaceID)
 	watches := seedSearchingFallbackWatches(t, store, 5)
+	if err := svc.UpdatePRWatchBranchIfSearching(ctx, watches[1].ID, watches[0].Branch); err != nil {
+		t.Fatalf("share second watch target: %v", err)
+	}
 	watches[1].Branch = watches[0].Branch
 
 	if err := svc.refreshWatchesPerWatch(context.Background(), testWorkspaceID, watches); err != nil {

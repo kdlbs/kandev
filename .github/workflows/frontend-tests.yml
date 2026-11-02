@@ -44,6 +44,13 @@ jobs:
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
       run: ${{ steps.detect.outputs.run }}
+      timing_digest: ${{ steps.timing-snapshot.outputs.digest }}
+      timing_run_id: ${{ steps.timing-snapshot.outputs.run_id }}
+      timing_attempt: ${{ steps.timing-snapshot.outputs.attempt }}
+      timing_compatibility_hash: ${{ steps.timing-snapshot.outputs.compatibility_hash }}
+      timing_profile_producer_run_id: ${{ steps.timing-snapshot.outputs.profile_producer_run_id }}
+      timing_profile_producer_attempt: ${{ steps.timing-snapshot.outputs.profile_producer_attempt }}
+      timing_artifact_name: ${{ steps.timing-snapshot.outputs.artifact_name }}
 
     steps:
       - name: Checkout code
@@ -86,6 +93,7 @@ jobs:
             apps/backend/go.mod
             apps/backend/go.sum
             .github/workflows/frontend-tests.yml
+            .github/scripts/frontend-timings.*
             .github/scripts/changed-paths.py
             .github/scripts/runner-plan.py
             .github/actions/plan-external-runners/**
@@ -126,6 +134,49 @@ jobs:
           # change to one would skip every job and still report success.
           git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
+
+      - name: Prepare frontend timing profile cache
+        if: steps.detect.outputs.run == 'true'
+        run: mkdir -p .github/cache/frontend-timing-profile "${{ runner.temp }}/frontend-timing-input"
+
+      - name: Restore frontend timing profile
+        if: steps.detect.outputs.run == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: .github/cache/frontend-timing-profile
+          key: frontend-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/pnpm-lock.yaml', 'apps/web/vitest.config.ts', 'apps/web/scripts/vitest-project-selection.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: frontend-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/pnpm-lock.yaml', 'apps/web/vitest.config.ts', 'apps/web/scripts/vitest-project-selection.ts') }}-
+
+      - name: Freeze frontend timing input
+        id: timing-snapshot
+        if: steps.detect.outputs.run == 'true'
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          COMPATIBILITY_HASH: ${{ hashFiles('apps/pnpm-lock.yaml', 'apps/web/vitest.config.ts', 'apps/web/scripts/vitest-project-selection.ts') }}
+          TIMING_PROFILE: .github/cache/frontend-timing-profile/profile.json
+          TIMING_INPUT_DIR: ${{ runner.temp }}/frontend-timing-input
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cp .github/scripts/frontend-timings.mjs "${TIMING_INPUT_DIR}/frontend-timings.mjs"
+          node .github/scripts/frontend-timings.mjs snapshot \
+            --profile "${TIMING_PROFILE}" \
+            --compatibility-hash "${COMPATIBILITY_HASH}" \
+            --source-sha "${SOURCE_SHA}" \
+            --run-id "${RUN_ID}" \
+            --attempt "${RUN_ATTEMPT}" \
+            --output "${TIMING_INPUT_DIR}/frontend-timing-input.json"
+
+      - name: Upload frozen frontend timing input
+        if: steps.detect.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.timing-snapshot.outputs.artifact_name }}
+          path: ${{ runner.temp }}/frontend-timing-input/
+          if-no-files-found: error
+          retention-days: 14
 
   frontend:
     name: Run Frontend Lint and Build
@@ -280,7 +331,7 @@ jobs:
         run: pnpm --filter @kandev/web typecheck
 
       - name: Verify standalone plugin SDK contract
-        run: pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck
+        run: pnpm --filter @kdlbs/plugin-sdk test && pnpm --filter @kdlbs/plugin-sdk typecheck
 
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these five checks scan components/app/hooks/lib
@@ -403,6 +454,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Download frozen frontend timing input
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          name: ${{ needs.changes.outputs.timing_artifact_name }}
+          path: ${{ runner.temp }}/frontend-timing-input
+
       - name: Mark workspace safe for git
         shell: bash
         working-directory: ${{ github.workspace }}
@@ -441,9 +498,18 @@ jobs:
           NODE_ENV: production
           NODE_COMPILE_CACHE: ${{ runner.temp }}/kandev-node-compile-cache
           FRONTEND_TEST_SHARD: ${{ matrix.shard }}
+          KANDEV_FRONTEND_TIMINGS_ENABLED: "1"
+          FRONTEND_TIMING_INPUT_FILE: ${{ runner.temp }}/frontend-timing-input/frontend-timing-input.json
+          FRONTEND_TIMING_ASSIGNMENT_FILE: ${{ runner.temp }}/frontend-timing-assignment-${{ matrix.shard }}.json
+          FRONTEND_TIMING_REPORT_FILE: frontend-timing-${{ matrix.shard }}.json
+          FRONTEND_TIMING_SOURCE_SHA: ${{ github.sha }}
+          FRONTEND_TIMING_COMPATIBILITY_HASH: ${{ needs.changes.outputs.timing_compatibility_hash }}
+          FRONTEND_TIMING_SNAPSHOT_DIGEST: ${{ needs.changes.outputs.timing_digest }}
+          FRONTEND_TIMING_SNAPSHOT_RUN_ID: ${{ needs.changes.outputs.timing_run_id }}
+          FRONTEND_TIMING_SNAPSHOT_ATTEMPT: ${{ needs.changes.outputs.timing_attempt }}
         run: >-
           pnpm --filter @kandev/web run test --shard="${FRONTEND_TEST_SHARD}/2"
-          --reporter=default --reporter=json
+          --reporter=default --reporter=json --reporter=./scripts/vitest-ci-reporter.ts
           --outputFile="test-results-${FRONTEND_TEST_SHARD}.json"
 
       - name: Upload frontend test report
@@ -451,7 +517,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-test-results-${{ matrix.shard }}
-          path: apps/web/test-results-${{ matrix.shard }}.json
+          path: |
+            apps/web/test-results-${{ matrix.shard }}.json
+            apps/web/frontend-timing-${{ matrix.shard }}.json
           if-no-files-found: error
           retention-days: 14
 
@@ -493,3 +561,60 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Checkout source for local actions
+        if: needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' && needs.frontend_tests.result == 'success'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download frozen frontend timing input
+        if: needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' && needs.frontend_tests.result == 'success'
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          name: ${{ needs.changes.outputs.timing_artifact_name }}
+          path: ${{ runner.temp }}/frontend-timing-input
+
+      - name: Download frontend shard reports
+        if: needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' && needs.frontend_tests.result == 'success'
+        uses: ./.github/actions/download-artifact-retry
+        with:
+          pattern: frontend-test-results-*
+          path: ${{ runner.temp }}/frontend-reports
+          merge-multiple: false
+
+      - name: Reconcile frontend shard evidence
+        if: needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' && needs.frontend_tests.result == 'success'
+        env:
+          REPORTS_DIR: ${{ runner.temp }}/frontend-reports
+          SOURCE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SNAPSHOT_DIGEST: ${{ needs.changes.outputs.timing_digest }}
+          SNAPSHOT_RUN_ID: ${{ needs.changes.outputs.timing_run_id }}
+          SNAPSHOT_ATTEMPT: ${{ needs.changes.outputs.timing_attempt }}
+          COMPATIBILITY_HASH: ${{ needs.changes.outputs.timing_compatibility_hash }}
+          TIMING_PROFILE_OUTPUT: .github/cache/frontend-timing-profile/profile.json
+          TIMING_HELPER: ${{ runner.temp }}/frontend-timing-input/frontend-timings.mjs
+        run: |
+          set -euo pipefail
+          node "${TIMING_HELPER}" reconcile \
+            --reports-dir "${REPORTS_DIR}" \
+            --source-sha "${SOURCE_SHA}" \
+            --run-id "${RUN_ID}" \
+            --attempt "${RUN_ATTEMPT}" \
+            --snapshot-digest "${SNAPSHOT_DIGEST}" \
+            --snapshot-run-id "${SNAPSHOT_RUN_ID}" \
+            --snapshot-attempt "${SNAPSHOT_ATTEMPT}" \
+            --compatibility-hash "${COMPATIBILITY_HASH}" \
+            --profile-output "${TIMING_PROFILE_OUTPUT}"
+
+      - name: Publish verified frontend timing profile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.run == 'true' && needs.frontend.result == 'success' && needs.frontend_tests.result == 'success' && success()
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .github/cache/frontend-timing-profile
+          key: frontend-timings-v1-${{ runner.os }}-${{ runner.arch }}-${{ needs.changes.outputs.timing_compatibility_hash }}-${{ github.run_id }}-${{ github.run_attempt }}

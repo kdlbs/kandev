@@ -24,12 +24,15 @@
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "handleE2ECreateAutomation", "rule": "raw-placeholder", "reason": "The E2E seed endpoint operates on the SQLite task repository"},
     {"file": "internal/coordinator/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/db/sqlite_backup.go", "symbol": "copySQLiteConnections", "rule": "sqlite-catalog", "reason": "Native SQLite backup uses source page size to bound each copy step in bytes"},
+    {"file": "internal/db/sqlite_backup.go", "symbol": "pinSQLiteWALSnapshot", "rule": "sqlite-catalog", "reason": "The native SQLite WAL backup pins its source view with SQLite journal and schema queries"},
     {"file": "internal/db/schema.go", "symbol": "tableExistsQuery", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "TableColumns", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "ColumnExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "IndexExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "IndexDefinitionContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware index definition inspection helper"},
     {"file": "internal/db/sqlite.go", "symbol": "applyWriterPragmas", "rule": "sqlite-catalog", "reason": "The SQLite-only writer connection hook bounds the WAL file size"},
+    {"file": "internal/db/durability_barrier.go", "symbol": "commit", "rule": "sqlite-catalog", "reason": "The barrier runs only on the SQLite writer connection; the repository short-circuits PostgreSQL"},
+    {"file": "internal/db/durability_barrier.go", "symbol": "commitDurabilityBarrierGeneration", "rule": "raw-placeholder", "reason": "The barrier upserts one kandev_meta generation on the SQLite writer connection only"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "The SQLite branch is the explicit dialect boundary for the schema probe"},
     {"file": "internal/delivery/store.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "The placeholder is in the explicit SQLite branch of the schema probe"},
     {"file": "internal/github/store.go", "symbol": "createTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
@@ -92,7 +95,6 @@
     {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "CountEligibleTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
     {"file": "internal/office/repository/sqlite/loop_health.go", "symbol": "ListOverdueOrStrandedTriggers", "rule": "boolean-integer", "reason": "The Office SQLite schema stores trigger enabled as an INTEGER flag"},
     {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "hasFTSTable", "rule": "sqlite-catalog", "reason": "SQLite-only FTS inspection"},
-    {"file": "internal/office/repository/sqlite/tasks.go", "symbol": "ListUnstartedTasks", "rule": "sqlite-date-function", "reason": "The Office repository is explicitly SQLite-only"},
     {"file": "internal/orchestrator/messagequeue/repository_sqlite.go", "symbol": "NewSQLiteRepository", "rule": "sqlite-catalog", "reason": "The SQLite message queue repository is explicitly SQLite-only"},
     {"file": "internal/persistence/meta.go", "symbol": "hasUserTables", "rule": "sqlite-catalog", "reason": "This helper inspects a SQLite database candidate"},
     {"file": "internal/persistence/provider.go", "symbol": "provideSQLite", "rule": "sqlite-catalog", "reason": "SQLite-only database cleanup runs PRAGMA optimize before close"},
@@ -140,6 +142,7 @@
     {"file": "internal/utility/store/sqlite.go", "symbol": "migrateTemplatePlaceholders", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "NormalizeEmptyBuiltinBinding", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "DeleteAgent", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/workflowsync/store.go", "symbol": "RecordSyncFailure", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"},
     {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"}
   ]
 }

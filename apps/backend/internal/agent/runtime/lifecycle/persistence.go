@@ -600,3 +600,22 @@ type executorRunningCASWriter interface {
 		expectedUpdatedAt time.Time,
 	) error
 }
+
+type executorRunningOwnerCASWriter interface {
+	RepairExecutorRunningDeadIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) error
+}
+
+type executorRunningOwnerAbsentWriter interface {
+	ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx context.Context,
+		sessionID string,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) error
+}

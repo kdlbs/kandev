@@ -58,7 +58,6 @@ const sessionsTableDDL = `
 CREATE TABLE IF NOT EXISTS task_sessions (
 	id TEXT PRIMARY KEY,
 	task_id TEXT NOT NULL,
-	agent_execution_id TEXT NOT NULL DEFAULT '',
 	agent_profile_id TEXT,
 	state TEXT NOT NULL DEFAULT 'CREATED',
 	started_at TIMESTAMP NOT NULL,

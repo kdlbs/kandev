@@ -59,6 +59,29 @@ func TestProfileMCPSelectionConversionsPreserveExplicitValues(t *testing.T) {
 	}
 }
 
+func TestCopilotPluginSelectionContractConversion(t *testing.T) {
+	var create dto.ProfileCreateRequest
+	if err := json.Unmarshal([]byte(`{"agent_id":"agent-1","name":"Profile","copilot_selected_plugins":["installed:m/p"]}`), &create); err != nil {
+		t.Fatal(err)
+	}
+	convertedCreate := CreateProfileRequestFromDTO(create)
+	if convertedCreate.CopilotSelectedPlugins == nil || len(*convertedCreate.CopilotSelectedPlugins) != 1 {
+		t.Fatalf("create conversion = %#v", convertedCreate.CopilotSelectedPlugins)
+	}
+	var patch dto.ProfileUpdateRequest
+	if err := json.Unmarshal([]byte(`{"id":"profile-1","copilot_selected_plugins":[]}`), &patch); err != nil {
+		t.Fatal(err)
+	}
+	convertedPatch := UpdateProfileRequestFromDTO(patch)
+	if convertedPatch.CopilotSelectedPlugins == nil || len(*convertedPatch.CopilotSelectedPlugins) != 0 {
+		t.Fatalf("explicit empty conversion = %#v", convertedPatch.CopilotSelectedPlugins)
+	}
+	omitted := UpdateProfileRequestFromDTO(dto.ProfileUpdateRequest{ID: "profile-1"})
+	if omitted.CopilotSelectedPlugins != nil {
+		t.Fatalf("omitted conversion = %#v, want nil", omitted.CopilotSelectedPlugins)
+	}
+}
+
 func TestProfileCreateContractConversionCopiesAllFields(t *testing.T) {
 	request := dto.ProfileCreateRequest{
 		AgentID: "agent-1", Name: "Profile", Model: "model", FallbackModel: "fallback",

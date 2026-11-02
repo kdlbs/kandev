@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import type { ThreadCandidate } from "@/lib/threads/thread-view-query";
+import { effectiveThreadSort, type ThreadCandidate } from "@/lib/threads/thread-view-query";
 import type {
   ThreadFilterClause,
   ThreadSortSpec,
@@ -19,10 +19,10 @@ import { ThreadsViewFilterRow } from "./threads-view-filter-row";
 import { EditorActions, SectionLabel } from "./threads-view-editor-actions";
 import {
   MAX_THREAD_VIEW_FILTERS,
-  THREAD_SORT_OPTIONS,
   createThreadFilterClause,
+  threadSortOptionsForScope,
 } from "./threads-view-filter-registry";
-import { MAX_THREAD_VIEW_COLUMNS } from "./threads-view-editor-utils";
+import { MAX_THREAD_VIEW_COLUMNS, threadTaskScopeModeUpdate } from "./threads-view-editor-utils";
 import { threadViewName } from "@/lib/state/slices/ui/thread-view-builtins";
 import { ThreadsViewDisplay } from "./threads-view-display";
 
@@ -208,7 +208,7 @@ function EditorSections({
         current={current}
         invalid={invalidSelectedScope}
         mobile={mobile}
-        onChange={(scope) => onUpdate({ taskScope: scope })}
+        onModeChange={(mode) => onUpdate(threadTaskScopeModeUpdate(current, mode))}
         onOpenPicker={onOpenPicker}
       />
       <ThreadFilterSection
@@ -232,6 +232,7 @@ function EditorSections({
       />
       <ThreadSortSection
         sort={current.sort}
+        scopeMode={current.taskScope.mode}
         mobile={mobile}
         onChange={(sort) => onUpdate({ sort })}
         onReapplySort={onReapplySort}
@@ -377,32 +378,22 @@ function TaskScopeSection({
   current,
   invalid,
   mobile,
-  onChange,
+  onModeChange,
   onOpenPicker,
 }: {
   current: Pick<ThreadView, "taskScope">;
   invalid: boolean;
   mobile: boolean;
-  onChange: (scope: ThreadTaskScope) => void;
+  onModeChange: (mode: ThreadTaskScope["mode"]) => void;
   onOpenPicker: () => void;
 }) {
   const { t } = useTranslation();
-  const setMode = (mode: ThreadTaskScope["mode"]) => {
-    onChange(
-      mode === "all"
-        ? { mode: "all", taskIds: [] }
-        : {
-            mode: "selected",
-            taskIds: current.taskScope.mode === "selected" ? [...current.taskScope.taskIds] : [],
-          },
-    );
-  };
   return (
     <div className="space-y-2 border-b p-2">
       <SectionLabel>{t("threads:taskScope")}</SectionLabel>
       <Select
         value={current.taskScope.mode}
-        onValueChange={(value) => setMode(value as ThreadTaskScope["mode"])}
+        onValueChange={(value) => onModeChange(value as ThreadTaskScope["mode"])}
       >
         <SelectTrigger
           className={`${mobile ? "h-11" : "h-9"} w-full text-xs`}
@@ -501,11 +492,13 @@ function ThreadFilterSection({
 
 function ThreadSortSection({
   sort,
+  scopeMode,
   mobile,
   onChange,
   onReapplySort,
 }: {
   sort: ThreadSortSpec;
+  scopeMode: ThreadTaskScope["mode"];
   mobile: boolean;
   onChange: (sort: ThreadSortSpec) => void;
   onReapplySort: () => void;
@@ -516,8 +509,8 @@ function ThreadSortSection({
       <SectionLabel>{t("threads:sort")}</SectionLabel>
       <div className="flex items-center gap-1">
         <TypedSortPicker
-          value={sort}
-          options={THREAD_SORT_OPTIONS.map((option) => ({
+          value={effectiveThreadSort(sort, scopeMode)}
+          options={threadSortOptionsForScope(scopeMode).map((option) => ({
             key: option.key,
             label: t(option.labelKey),
             description: t(option.descriptionKey),

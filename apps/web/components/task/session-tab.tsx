@@ -33,7 +33,7 @@ import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
 import { clearHiddenSessionPanel, hideSessionPanel } from "./dockview-hidden-session-panels";
 import { useSessionTabDelete } from "./use-session-tab-delete";
-import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
+import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
 import {
   countVisibleSessionPanels,
   shouldShowSessionTabCloseAction,
@@ -343,7 +343,7 @@ function SessionTabBody({
         onCommit={onCommitRename}
         onCancel={onCancelRename}
         testId="session-tab-rename-input"
-        maxLength={MAX_SESSION_NAME_LENGTH}
+        limitValue={limitSessionName}
       />
     );
   }

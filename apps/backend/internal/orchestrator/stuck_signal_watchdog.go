@@ -432,6 +432,9 @@ func (s *Service) stuckSignalCandidate(
 		}
 		return nil, models.PendingStepCompletionSignal{}, false
 	case stuckSignalReclaimable:
+		if _, matches := s.matchingStepCompletionSignal(ctx, task.ID, signal.StepID, session); !matches {
+			return nil, models.PendingStepCompletionSignal{}, false
+		}
 		return task, signal, true
 	default:
 		return nil, models.PendingStepCompletionSignal{}, false
@@ -571,7 +574,7 @@ func (s *Service) stuckSignalStillPending(ctx context.Context, sessionID, stepID
 	if latest.State != models.TaskSessionStateRunning && latest.State != models.TaskSessionStateStarting {
 		return nil, false
 	}
-	if latestSignal, stillPending := models.LoadPendingStepSignal(latest.Metadata); !stillPending || latestSignal.StepID != stepID {
+	if _, stillPending := s.matchingStepCompletionSignal(ctx, latest.TaskID, stepID, latest); !stillPending {
 		return nil, false
 	}
 	return latest, true

@@ -571,6 +571,9 @@ test-scripts:
 	@python3 .github/scripts/lint-action-pinning_test.py
 	@python3 .github/scripts/notify-release-contributors_test.py
 	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
+	@python3 .github/scripts/discord-release-content_test.py
+	@python3 .github/scripts/announce-discord-release_test.py
+	@python3 .github/scripts/announce-discord-release-workflow-contract_test.py
 	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh

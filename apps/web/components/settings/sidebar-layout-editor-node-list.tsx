@@ -29,6 +29,11 @@ import {
 import type { SidebarLayout, SidebarLayoutNode } from "@/lib/sidebar/layout-types";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
+import {
+  sidebarEditorNodes,
+  sidebarNodeSiblings,
+  isIntegrationPlugin,
+} from "@/lib/sidebar/integration-plugin-layout";
 import { generateUUID } from "@/lib/utils";
 import type { DraftOperation } from "./sidebar-layout-editor-types";
 import { SidebarLayoutNodeEditor } from "./sidebar-layout-editor-node-item";
@@ -219,55 +224,67 @@ function SidebarLayoutNodeList({
   const sections = draft.nodes.filter(isEditableGroup);
   return (
     <>
-      {draft.nodes.map((node, index) => (
-        <SidebarLayoutNodeEditor
-          key={node.id}
-          node={node}
-          index={index}
-          total={draft.nodes.length}
-          projected={projected.nodes.find((item) => item.id === node.id)}
-          sections={sections}
-          catalog={catalog}
-          loading={catalogLoading}
-          catalogError={catalogError}
-          canvasError={canvasError}
-          readOnly={readOnly}
-          pickerOpen={pickerNodeId === node.id}
-          query={pickerQuery}
-          onQueryChange={setPickerQuery}
-          onToggle={() =>
-            onApply((current) => toggleNodeVisibility(current, node.id, !node.visible))
-          }
-          onMove={(position) => onApply((current) => moveSection(current, node.id, position))}
-          onRemove={() => onApply((current) => removeShortcutSection(current, node.id))}
-          onSetNameDraft={onSetNameDraft}
-          onCommitName={onCommitName}
-          onOpenPicker={() => setPickerNodeId(node.id)}
-          onClosePicker={() => setPickerNodeId(null)}
-          onAdd={(entry) => {
-            if (
-              onApply((current) =>
-                addShortcut(current, node.id, { id: generateUUID(), target: entry.target }),
-              )
-            ) {
-              setPickerQuery("");
-            }
-          }}
-          onRemoveShortcut={(shortcutId) =>
-            onApply((current) => removeShortcut(current, node.id, shortcutId))
-          }
-          onMoveShortcut={(shortcutId, position) =>
-            onApply((current) => moveShortcut(current, shortcutId, node.id, node.id, position))
-          }
-          onMoveShortcutToSection={(shortcutId, destinationNodeId) =>
-            onApply((current) =>
-              moveShortcutToSection(current, shortcutId, node.id, destinationNodeId),
-            )
-          }
-          onFocus={() => onSetFocusedNodeId(node.id)}
-          t={t}
-        />
-      ))}
+      {sidebarEditorNodes(draft.nodes).map((node) => {
+        const siblings = sidebarNodeSiblings(draft.nodes, node.id);
+        return (
+          <div key={node.id} className={isIntegrationPlugin(node) ? "ml-4" : undefined}>
+            <SidebarLayoutNodeEditor
+              node={node}
+              index={siblings.findIndex((item) => item.id === node.id)}
+              total={siblings.length}
+              projected={projected.nodes.find((item) => item.id === node.id)}
+              sections={sections}
+              catalog={catalog}
+              loading={catalogLoading}
+              catalogError={catalogError}
+              canvasError={canvasError}
+              readOnly={readOnly}
+              pickerOpen={pickerNodeId === node.id}
+              query={pickerQuery}
+              onQueryChange={setPickerQuery}
+              onToggle={() =>
+                onApply((current) => toggleNodeVisibility(current, node.id, !node.visible))
+              }
+              onMove={(position) =>
+                onApply((current) =>
+                  moveSection(
+                    current,
+                    node.id,
+                    current.nodes.findIndex((item) => item.id === siblings[position]?.id),
+                  ),
+                )
+              }
+              onRemove={() => onApply((current) => removeShortcutSection(current, node.id))}
+              onSetNameDraft={onSetNameDraft}
+              onCommitName={onCommitName}
+              onOpenPicker={() => setPickerNodeId(node.id)}
+              onClosePicker={() => setPickerNodeId(null)}
+              onAdd={(entry) => {
+                if (
+                  onApply((current) =>
+                    addShortcut(current, node.id, { id: generateUUID(), target: entry.target }),
+                  )
+                ) {
+                  setPickerQuery("");
+                }
+              }}
+              onRemoveShortcut={(shortcutId) =>
+                onApply((current) => removeShortcut(current, node.id, shortcutId))
+              }
+              onMoveShortcut={(shortcutId, position) =>
+                onApply((current) => moveShortcut(current, shortcutId, node.id, node.id, position))
+              }
+              onMoveShortcutToSection={(shortcutId, destinationNodeId) =>
+                onApply((current) =>
+                  moveShortcutToSection(current, shortcutId, node.id, destinationNodeId),
+                )
+              }
+              onFocus={() => onSetFocusedNodeId(node.id)}
+              t={t}
+            />
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -317,7 +334,7 @@ export function SidebarLayoutNodesCard({
           }}
         >
           <SortableContext
-            items={draft.nodes.map((node) => nodeDragId(node.id))}
+            items={sidebarEditorNodes(draft.nodes).map((node) => nodeDragId(node.id))}
             strategy={verticalListSortingStrategy}
           >
             <SidebarLayoutNodeList

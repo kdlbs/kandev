@@ -15,8 +15,9 @@
 # ---------------------------------------------------------------------------
 FROM golang:1.26-bookworm AS go-builder
 
-WORKDIR /build
+WORKDIR /build/apps/backend
 
+COPY pluginsdk/ /build/pluginsdk/
 COPY apps/backend/go.mod apps/backend/go.sum ./
 RUN go mod download
 

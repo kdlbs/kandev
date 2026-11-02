@@ -1,5 +1,5 @@
-import type { SliceCreator } from "@/lib/state/slice-creator";
-
+import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
+import type { TaskOverviewState } from "../task-overview-types";
 import type { Draft } from "immer";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 import { generateUUID } from "@/lib/utils";
@@ -10,6 +10,7 @@ import {
   recordTaskRemovalResult,
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
+import { journalSnapshotTaskStages } from "./snapshot-task-stages";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import {
   acknowledgeWorkflowSessionFocus,
@@ -22,6 +23,7 @@ import {
   type WorkflowSessionFocusStart,
 } from "@/lib/state/workflow-session-focus";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { recordRetainedSidebarStatusSummary } from "./sidebar-status-summary";
 import {
   WORKSPACE_CONTEXT_COLLECTIONS,
   type WorkspaceContextCollection,
@@ -166,6 +168,7 @@ type TaskActions = Pick<
   | "setActiveSession"
   | "setActiveSessionAuto"
   | "clearActiveSession"
+  | "recordSidebarStatusSummary"
   | "beginWorkflowSessionFocus"
   | "bindWorkflowSessionFocus"
   | "reconcileWorkflowSessionFocus"
@@ -419,6 +422,10 @@ function createWorkflowSessionFocusActions(
 function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskActions {
   return {
     ...createWorkflowSessionFocusActions(set, get),
+    recordSidebarStatusSummary: (workspaceId, taskId, summary) =>
+      set((draft) => {
+        recordRetainedSidebarStatusSummary(draft, workspaceId, taskId, summary);
+      }),
     setActiveTask: (taskId) =>
       set((draft) => {
         draft.workflowSessionFocus = cancelWorkflowSessionFocus(draft.workflowSessionFocus);
@@ -502,7 +509,11 @@ function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskAction
   };
 }
 
-export const createKanbanSlice: SliceCreator<KanbanSlice> = (set, get) => ({
+type KanbanStore = KanbanSlice & { taskOverview?: TaskOverviewState };
+export const createKanbanSlice: (
+  set: SliceSet<KanbanStore>,
+  get: () => KanbanStore,
+) => KanbanSlice = (set, get) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
   ...createTaskActions(set, get),
@@ -535,14 +546,16 @@ export const createKanbanSlice: SliceCreator<KanbanSlice> = (set, get) => ({
       }
       draft.workflows.items = reordered;
     }),
-  setWorkflowSnapshot: (workflowId, data) =>
+  setWorkflowSnapshot: (workflowId, data, options) =>
     set((draft) => {
+      if (draft.taskOverview && !options?.stageClaimsReconciled)
+        draft.taskOverview = journalSnapshotTaskStages(
+          draft.taskOverview,
+          data.tasks,
+          get().kanbanMulti.snapshots[workflowId]?.tasks,
+        );
       draft.kanbanMulti.snapshots[workflowId] = data;
-      // Seed this workflow's steps into orderRevisionByStepId even when it
-      // is not the currently-active board (hydrate() only walks the active
-      // kanban.steps), so a task.reordered WS event for a background
-      // "All Workflows" column is still gated on a real revision rather
-      // than the no-recorded-revision fallback.
+      // Background workflow reorders require the snapshot's real step revisions.
       draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
         draft.kanbanMulti.orderRevisionByStepId,
         data.steps,

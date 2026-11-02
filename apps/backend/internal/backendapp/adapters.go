@@ -323,6 +323,9 @@ var _ interface {
 	InspectDeliveryRecordEvidence(context.Context, runtimeapi.DeliveryRecordEvidenceRequest) (*runtimeapi.DeliveryRecordEvidence, error)
 	ReadDeliveryRecordSubmission(context.Context, runtimeapi.DeliveryRecordSubmissionRequest) (*runtimeapi.DeliveryRecordSubmission, error)
 } = (*lifecycleAdapter)(nil)
+var _ interface {
+	RuntimeStorageObservation(string) (runtimeapi.RuntimeStorageObservation, bool)
+} = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
 func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *logger.Logger) *lifecycleAdapter {
@@ -1088,6 +1091,14 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID string) bool {
+	return a.mgr.IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	return a.mgr.MarkPassthroughRunningWithContext(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
 	return a.mgr.PreparePassthroughRunning(sessionID)
 }
@@ -1823,8 +1834,18 @@ func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
 	return err
 }
 
+// SessionMessageCreatedAt resolves the persisted message's immutable creation
+// time, including when an idempotent replay returns an existing row.
+func (a *messageCreatorAdapter) SessionMessageCreatedAt(ctx context.Context, messageID string) (time.Time, bool) {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil || message == nil || message.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return message.CreatedAt.UTC(), true
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
-func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -1833,8 +1854,13 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
-	if decision != nil {
-		metadata["permission_decision"] = decision
+	presentation := messageOptions.Presentation
+	if presentation == "" {
+		presentation = models.PermissionPresentationInteractive
+	}
+	metadata[models.PermissionPresentationMetadataKey] = string(presentation)
+	if messageOptions.Decision != nil {
+		metadata["permission_decision"] = messageOptions.Decision
 		metadata["status"] = string(models.PermissionStatusApproved)
 	}
 
@@ -1861,6 +1887,12 @@ func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Conte
 		return "", err
 	}
 	return msg.ID, nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// transcript row's presentation.
+func (a *messageCreatorAdapter) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return a.svc.UpdatePermissionPresentation(ctx, request)
 }
 
 // UpdatePermissionMessage updates a permission message's status
@@ -1897,8 +1929,25 @@ func clarificationQuestionData(question clarification.Question, options []interf
 		"prompt":  question.Prompt,
 		"options": options,
 	}
+	if len(question.Images) > 0 {
+		data["images"] = question.Images
+	}
 	if question.AllowCustomText != nil {
 		data["allow_custom_text"] = *question.AllowCustomText
+	}
+	return data
+}
+
+func clarificationOptionsData(options []clarification.Option) []interface{} {
+	data := make([]interface{}, len(options))
+	for j, opt := range options {
+		item := map[string]interface{}{
+			"option_id": opt.ID, "label": opt.Label, "description": opt.Description,
+		}
+		if len(opt.Images) > 0 {
+			item["images"] = opt.Images
+		}
+		data[j] = item
 	}
 	return data
 }
@@ -1907,14 +1956,7 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 	ids := make([]string, 0, len(questions))
 	total := len(questions)
 	for i, question := range questions {
-		options := make([]interface{}, len(question.Options))
-		for j, opt := range question.Options {
-			options[j] = map[string]interface{}{
-				"option_id":   opt.ID,
-				"label":       opt.Label,
-				"description": opt.Description,
-			}
-		}
+		options := clarificationOptionsData(question.Options)
 
 		questionData := clarificationQuestionData(question, options)
 

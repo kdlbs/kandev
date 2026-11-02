@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getLocalRepositoryStatusAction } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
@@ -544,7 +545,18 @@ export function useDefaultSelectionsEffect(
  * `useRowBranchAutoSelect`; this effect just keeps the surfaced error banner
  * in sync with the first row's URL.
  */
-export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
+export function useGitHubUrlErrorEffect(
+  fs: DialogFormState,
+  open: boolean,
+  workspaceId: string | null = null,
+) {
+  const configuredHost = useOptionalAppStore(
+    (state) =>
+      workspaceId
+        ? state.githubStatus.byWorkspaceId[workspaceId]?.status?.automation?.github_host
+        : undefined,
+    undefined,
+  );
   const { useRemote, setGitHubUrlError } = fs;
   const firstUrl = fs.remoteRepos[0]?.url ?? "";
   useEffect(() => {
@@ -564,13 +576,13 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
       setGitHubUrlError(null);
       return;
     }
-    const parsed = parseGitHubAnyUrl(trimmed);
+    const parsed = parseGitHubAnyUrl(trimmed, configuredHost ?? fs.remoteRepos[0]?.providerHost);
     if (!parsed) {
       setGitHubUrlError(t("task:invalidGitHubUrl"));
       return;
     }
     setGitHubUrlError(null);
-  }, [open, useRemote, firstUrl, setGitHubUrlError]);
+  }, [configuredHost, open, useRemote, firstUrl, setGitHubUrlError]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
@@ -624,7 +636,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
     editingTaskExecutorProfileId,
   );
-  useGitHubUrlErrorEffect(fs, open);
+  useGitHubUrlErrorEffect(fs, open, workspaceId);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

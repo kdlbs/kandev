@@ -266,10 +266,10 @@ func (s *Store) CreateAppRegistrationImportPreparation(
 	}
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO github_app_import_preparations (
-			registration_id, workspace_id, user_id, public_base_url, expires_at, consumed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+			registration_id, workspace_id, user_id, public_base_url, github_host, expires_at, consumed_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		preparation.RegistrationID, preparation.WorkspaceID, preparation.UserID,
-		preparation.PublicBaseURL, preparation.ExpiresAt, preparation.ConsumedAt, preparation.CreatedAt)
+		preparation.PublicBaseURL, defaultAuthFlowHost(preparation.GitHubHost), preparation.ExpiresAt, preparation.ConsumedAt, preparation.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (s *Store) GetAppRegistrationImportPreparation(
 ) (*AppRegistrationImportPreparation, error) {
 	var preparation AppRegistrationImportPreparation
 	err := s.ro.GetContext(ctx, &preparation, s.ro.Rebind(`
-		SELECT registration_id, workspace_id, user_id, public_base_url,
+		SELECT registration_id, workspace_id, user_id, public_base_url, github_host,
 			expires_at, consumed_at, created_at
 		FROM github_app_import_preparations WHERE registration_id = ?`), registrationID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -634,10 +634,10 @@ func (s *Store) CreateDeploymentAppRegistrationFlow(
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO github_app_registration_flows (
 			state_hash, registration_id, workspace_id, user_id, owner_type, owner_login,
-			display_name, visibility, public_base_url, manifest_revision, expires_at, consumed_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			display_name, visibility, public_base_url, github_host, manifest_revision, expires_at, consumed_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		flow.StateHash, flow.RegistrationID, flow.WorkspaceID, flow.UserID, flow.OwnerType,
-		flow.OwnerLogin, flow.DisplayName, flow.Visibility, flow.PublicBaseURL,
+		flow.OwnerLogin, flow.DisplayName, flow.Visibility, flow.PublicBaseURL, defaultAuthFlowHost(flow.GitHubHost),
 		flow.ManifestRevision, flow.ExpiresAt, flow.ConsumedAt, flow.CreatedAt)
 	if err != nil {
 		return err
@@ -652,7 +652,7 @@ func (s *Store) GetDeploymentAppRegistrationFlow(
 	var flow DeploymentAppRegistrationFlow
 	err := s.ro.GetContext(ctx, &flow, s.ro.Rebind(`
 		SELECT state_hash, registration_id, workspace_id, user_id, owner_type, owner_login,
-			display_name, visibility, public_base_url, manifest_revision, expires_at, consumed_at, created_at
+			display_name, visibility, public_base_url, github_host, manifest_revision, expires_at, consumed_at, created_at
 		FROM github_app_registration_flows WHERE state_hash = ?`), stateHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

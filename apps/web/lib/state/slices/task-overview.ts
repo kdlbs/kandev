@@ -1,7 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "../app-state-types";
 import { generateUUID } from "@/lib/utils";
-import { reconcileTaskOverviewRead } from "./task-overview-merge";
+import { reconcileTaskOverviewRead, recordAcceptedTaskStages } from "./task-overview-merge";
 import { emptyTaskOverviewState, type TaskOverviewSlice } from "./task-overview-types";
 
 export const createTaskOverviewSlice: StateCreator<AppState, [], [], TaskOverviewSlice> = (
@@ -39,12 +39,19 @@ export const createTaskOverviewSlice: StateCreator<AppState, [], [], TaskOvervie
     }));
     return id;
   },
-  finishTaskOverviewRead: (id) =>
+  finishTaskOverviewRead: (id, acceptedTasks = []) =>
     set((state) => {
-      if (!state.taskOverview.reads[id]) return state;
+      const read = state.taskOverview.reads[id];
+      if (!read) return state;
       const reads = { ...state.taskOverview.reads };
       delete reads[id];
-      return { taskOverview: { ...state.taskOverview, reads } };
+      return {
+        taskOverview: recordAcceptedTaskStages(
+          { ...state.taskOverview, reads },
+          read,
+          acceptedTasks,
+        ),
+      };
     }),
   retainTaskOverviews: (owner, tasks, readId) => {
     let accepted = false;

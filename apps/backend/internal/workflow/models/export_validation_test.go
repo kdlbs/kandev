@@ -78,3 +78,32 @@ func TestValidateRejectsInvalidGenericStepPositions(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateStageTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		stageType StageType
+		wantError string
+	}{
+		{name: "omitted legacy value"},
+		{name: "work", stageType: StageTypeWork},
+		{name: "review", stageType: StageTypeReview},
+		{name: "approval", stageType: StageTypeApproval},
+		{name: "custom", stageType: StageTypeCustom},
+		{name: "hold", stageType: StageTypeHold},
+		{name: "unsupported", stageType: "unknown", wantError: "unsupported stage type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			export := validExportForAdditionalValidation()
+			export.Workflows[0].Steps[0].StageType = tt.stageType
+
+			err := export.Validate()
+			if tt.wantError == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantError)
+		})
+	}
+}

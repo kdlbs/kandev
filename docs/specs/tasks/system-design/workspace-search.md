@@ -4,6 +4,7 @@ system: tasks
 created: 2026-10-14
 requirements:
   - REQ-TASKS-WORKSPACE-SEARCH-001
+  - REQ-TASKS-WORKSPACE-SEARCH-002
 owners:
   - kandev
 ---
@@ -12,16 +13,71 @@ owners:
 
 ## Purpose and boundaries
 
-Tasks owns the workspace-list match set and its total. The correction is local
-to `searchTasks` and `taskSearchSelectQuery` in
+Tasks owns the workspace-list match set and its total. Literal matching is
+local to `searchTasks` and `taskSearchSelectQuery` in
 `apps/backend/internal/task/repository/sqlite/task.go`, which also serves
-PostgreSQL. Existing public request and response shapes remain unchanged.
+PostgreSQL. Idle command-panel eligibility uses an additive opt-in request
+parameter; the response shape and existing requests stay unchanged.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-WORKSPACE-SEARCH-001` | Literal predicate, Count and page consistency, Consumer wiring, Verification |
+| `REQ-TASKS-WORKSPACE-SEARCH-002` | Idle command-panel eligibility, Verification |
+
+## Idle command-panel eligibility
+
+The idle hook currently requests twenty workspace rows and filters loaded step
+IDs afterward, so hidden rows can exhaust the page. For a settled selected
+workflow, add an opt-in `command_panel_visible=true` to the existing workspace
+list request, together with the selected `workflow_id`. It is an idle-only
+contract: reject the option without a workflow ID or with a nonempty query.
+The existing default list and all search requests remain unchanged. The hook
+obtains the workflow ID from the same Kanban state that owns its loaded steps;
+when steps are not loaded it keeps the existing ordinary-list fallback. If the
+workflow identity is temporarily unavailable, preserve the existing local
+fallback until the identity is available, rather than inventing an identity.
+
+The authorized service passes the opt-in to a narrowly scoped repository
+capability, following the optional `workspaceArchiveModeLister` pattern rather
+than changing the positional `TaskRepository.ListTasksByWorkspace` interface
+and its unrelated mocks. An unavailable capability must fail the opt-in
+request, never silently return an unfiltered page. Reuse the existing list
+filter, hydration, and DTO path. For the opt-in, the repository adds a bound
+`EXISTS` predicate against `workflow_steps` for the task's step and selected
+workflow with `show_in_command_panel` enabled. Apply it to both COUNT and
+SELECT before LIMIT/OFFSET, and retain the existing default ordering and all
+other filters; do not create a second listing implementation. Missing steps do
+not qualify in this loaded-workflow path. No schema or index migration is
+required: step identity is keyed. Both SQLite and PostgreSQL use the existing
+portable integer representation. `queryAllTasks` currently uses an unaliased
+COUNT and an aliased SELECT plus `rewriteFilterForAlias`; build the correlated
+predicate with the correct outer alias in each query, rather than allowing
+string rewriting to bind an inner step column to the wrong table.
+
+Request page one of twenty eligible rows once for either scope, sort that
+window by the existing client step-position map, then slice to five or twenty.
+Retain the existing abort controller, response guard, and active-only defensive
+check. Search uses neither the new option nor this eligibility predicate; it
+keeps its active then archived fallback and conversation merge.
+
+The existing sidebar query has a step filter, but its tree ordering and
+configuration-task exclusions differ from workspace-list semantics; it is not
+interchangeable. Increasing over-fetch or walking all pages would not bound
+work and does not guarantee a correct first eligible page.
+
+This changes shared result data inside an existing surface, not composition,
+navigation, touch handling, scrolling, or breakpoint behavior. The mobile-parity
+state/data exception applies: an independently authored rendered component test
+and repository/handler tests cover the shared path. The existing phone entry
+is navigation menu > Search tasks, with the same task result action; see
+`mobile-command-palette-scopes.spec.ts`. Documentation assessment: the additive
+`GET /api/v1/workspaces/:id/tasks` option is internal UI transport; that list
+route is not documented as a supported public API in `docs/public`, the root
+README, or the screenshot catalog. Other documented REST routes have separate
+contracts. No public API reference needs a new parameter entry; the existing
+`docs/public/workflow-tips.md` describes user-facing step visibility.
 
 ## Literal predicate
 
@@ -86,7 +142,8 @@ changes. No layout, navigation, touch, or viewport-dependent behavior changes.
 
 Public documentation assessment: no public operator change. Existing search
 and command-panel instructions do not advertise SQL wildcard syntax, and the
-correction introduces no operation, option, response field, or terminology.
+literal-search correction introduces no operation, option, response field, or
+terminology.
 The literal text contract is recorded here and in its paired requirement.
 
 ## Persistence and failure behavior
@@ -110,6 +167,19 @@ Add an environment-gated real PostgreSQL counterpart using
 inspection or schema replay alone does not prove this behavior. Register
 database cleanup before any subsequent fatal path. An unset DSN is a reported
 skip, not evidence of a PostgreSQL pass.
+
+For the idle eligibility correction, test mixed hidden and visible steps with
+at least twenty newer hidden rows, totals and page boundaries, all-hidden,
+default-list controls, workspace isolation, and archived, ephemeral,
+configuration and automation-origin controls. Exercise the actual HTTP/service
+opt-in and authorization, including invalid combinations. Repeat the relevant
+repository behavior against an environment-gated real PostgreSQL database.
+Independently author a rendered hook/command-list regression with a valid
+paginated API fake, real command primitives and English catalogs: verify the
+older eligible task is selectable after settlement, plus an ordinary first-page
+control. Cover five/twenty limits, empty-step fallback and unchanged search,
+archive and abort paths in focused hook tests. Do not copy external private
+qualification fixtures.
 
 ## Related specifications
 

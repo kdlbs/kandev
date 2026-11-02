@@ -27,6 +27,16 @@ func (m *Manager) ProcessGeneration() uint64 {
 	return m.startupGeneration
 }
 
+// ProcessManagerID identifies this process manager lifetime. ProcessGeneration
+// is local to a manager, so retained events also need this identity when a new
+// manager starts its counter again at one.
+func (m *Manager) ProcessManagerID() string {
+	if m == nil {
+		return ""
+	}
+	return m.processManagerID
+}
+
 // ManagedStartupEvidence waits briefly for the current child exit record and
 // returns it only when the caller names the exact process generation.
 func (m *Manager) ManagedStartupEvidence(ctx context.Context, generation uint64) *types.ManagedStartupEvidence {

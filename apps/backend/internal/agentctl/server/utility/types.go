@@ -6,6 +6,7 @@ package utility
 import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -224,6 +225,7 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
+	LaunchWrapper launchwrapper.Spec `json:"launch_wrapper,omitzero"`
 	// Protocol selects the one-shot inference transport. Empty means ACP.
 	Protocol agent.Protocol `json:"protocol,omitempty"`
 	// Command is the protocol command for one-shot inference.

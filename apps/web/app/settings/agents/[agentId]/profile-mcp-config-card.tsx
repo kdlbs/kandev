@@ -17,10 +17,12 @@ import { SettingsCard } from "@/components/settings/settings-card";
 // call time. Components in this file use the `useTranslation()` hook.
 import { t as translate } from "@/lib/i18n";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
+import { ProfileMCPSelectionCard } from "./profile-mcp-selection-card";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
 type ProfileMcpConfigCardProps = {
   profileId: string;
+  workspaceId?: string | null;
   supportsMcp: boolean;
   /**
    * Whether the profile is in CLI passthrough mode. When true (and
@@ -394,7 +396,22 @@ function McpProfileHint({
   );
 }
 
-export function ProfileMcpConfigCard({
+export function ProfileMcpConfigCard(props: ProfileMcpConfigCardProps) {
+  const canManage = useIsAdmin();
+  if (!props.supportsMcp) return null;
+  if (!props.draftState && props.profileId && !props.profileId.startsWith("draft-")) {
+    return (
+      <ProfileMCPSelectionCard
+        profileId={props.profileId}
+        workspaceId={props.workspaceId}
+        legacyEditor={canManage ? <LegacyProfileMcpConfigCard {...props} /> : undefined}
+      />
+    );
+  }
+  return <LegacyProfileMcpConfigCard {...props} />;
+}
+
+function LegacyProfileMcpConfigCard({
   profileId,
   supportsMcp,
   cliPassthrough,

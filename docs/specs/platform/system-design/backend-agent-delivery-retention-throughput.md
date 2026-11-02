@@ -35,6 +35,16 @@ waits. A protected frontier that advances can continue; wrapping without forward
 progress drains the phase queue and returns to idle cadence. Persisted repository
 progress makes restart safe; this scheduling hint is process-local and disposable.
 
+A batch deadline halves that phase's process-local candidate ceiling, down to one,
+for subsequent attempts. It never raises the configured ceiling or the 50-candidate
+event ceiling. Other phases keep their own limits. Failed transactions still count
+as failures and use the existing retry backoff; parent cancellation and other errors
+do not reduce the ceiling. A new worker starts from the configured limits. This
+allows a heavy page to make progress within the unchanged transaction and byte
+budgets without weakening its eligibility proofs or persisting tuning state.
+Batch-failure logs include the phase, previous and next candidate ceilings, and
+the repository error; pass snapshots retain their aggregate failure accounting.
+
 Configured interval becomes the idle/recheck interval, not a minimum delay between
 productive passes. No additional setting or runtime flag is introduced. Aggregate
 structured pass logs include continuation_pending and existing failure/busy counts, without IDs.

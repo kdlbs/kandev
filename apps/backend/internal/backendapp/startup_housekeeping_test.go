@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/startup"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"testing"
 	"time"
 )

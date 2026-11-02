@@ -33,6 +33,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
 
 type SessionRow = {
   id: string;
@@ -143,6 +144,20 @@ function StateBadge({
   );
 }
 
+type SessionActionsMenuProps = {
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  taskId: string;
+  state: TaskSessionState | null;
+  isPrimary: boolean;
+  onSetPrimary: () => void;
+  onStop: () => void;
+  onResume: () => void;
+  onRestart: () => void;
+  isRestarting: boolean;
+  onAskDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
+};
+
 /** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
 function SessionActionsMenu({
   triggerRef,
@@ -156,35 +171,24 @@ function SessionActionsMenu({
   isRestarting,
   onAskDelete,
   onHandoffProfile,
-}: {
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  taskId: string;
-  state: TaskSessionState | null;
-  isPrimary: boolean;
-  onSetPrimary: () => void;
-  onStop: () => void;
-  onResume: () => void;
-  onRestart: () => void;
-  isRestarting: boolean;
-  onAskDelete: () => void;
-  onHandoffProfile: (profileId: string) => void;
-}) {
+}: SessionActionsMenuProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
+  const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           ref={triggerRef}
           variant="ghost"
           size="icon-sm"
           className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          onClick={(e) => e.stopPropagation()}
+          {...triggerProps}
           aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -30,6 +31,7 @@ type QuickChatSession struct {
 	Kind           string
 	Name           string
 	AgentProfileID string
+	CreationID     string
 	Session        *models.TaskSession
 
 	createdAt time.Time
@@ -76,7 +78,11 @@ func (s *Service) ListQuickChatSessions(ctx context.Context, workspaceID string)
 		if primary == nil || primary.ID == "" {
 			continue
 		}
-		items = append(items, newQuickChatSession(task, primary))
+		item := newQuickChatSession(task, primary)
+		if identity, ok := authn.IdentityFromContext(ctx); ok {
+			item.CreationID, _ = QuickChatCreationIDForPrincipal(identity.UserID, task.ExternalID)
+		}
+		items = append(items, item)
 	}
 	sortQuickChatSessions(items)
 	return items, nil

@@ -630,7 +630,7 @@ func userSettingsDomain() DomainDescriptor {
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
 		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
-		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
+		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
 		"mcp_task_agent_profile_default", "MCP task profile", "string", "show_anchored_prompt_bar", "anchored prompt bar", "boolean", "show_scroll_to_last_prompt", "scroll to last prompt", "boolean",
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_turn_changed_files", "turn changed files", "boolean",
@@ -768,6 +768,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.cli_flags", "cli_flags", "CLI flags", "array", "Complete replacement list of validated CLI flags.", true),
 			profileWritableSensitive("agent_profile.env_vars", "env_vars", "Environment variables", "array", "Complete replacement list. Secret values remain references.", true),
 			profileWritable("agent_profile.command_prefix", "command_prefix", "Command prefix", "string", "Optional validated launcher prefix.", false),
+			profileWritable("agent_profile.copilot_selected_plugins", "copilot_selected_plugins", "Copilot plugins", "array", "Stable Copilot plugin identities loaded by new local/worktree processes. Omitted updates preserve the committed selection.", true),
 			profileWritable("agent_profile.dynamic", "dynamic", "Dynamic routing", "object", "Versioned dynamic routing document.", true),
 		},
 	}

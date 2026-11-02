@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
+import type { TaskMentionReference } from "@/lib/tasks/task-mention-references";
+import { prepareTaskMentionContent, withTaskMentionTokens } from "./prompt-mention-components";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
@@ -24,6 +26,7 @@ type UserMessageBodyOptions = {
   content: string;
   rawContent?: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -96,22 +99,32 @@ function CoordinatorAboutTag({ id }: { id: string }) {
 function UserMessageMarkdown({
   content,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
 }: {
   content: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
+  const prepared = useMemo(
+    () => prepareTaskMentionContent(content, taskMentions),
+    [content, taskMentions],
+  );
+  const components = useMemo(
+    () => withTaskMentionTokens(promptMentionComponents, prepared.tokens),
+    [promptMentionComponents, prepared.tokens],
+  );
   return (
     <div className="markdown-body markdown-body-user max-w-none">
       <MemoizedMarkdown
-        content={content}
+        content={prepared.content}
         taskId={taskId}
-        components={promptMentionComponents}
+        components={components}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
       />
@@ -124,6 +137,7 @@ function CollapsedInstructions({
   testId,
   instructions,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
@@ -132,6 +146,7 @@ function CollapsedInstructions({
   testId: string;
   instructions: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -156,6 +171,7 @@ function CollapsedInstructions({
             <UserMessageMarkdown
               content={preview}
               promptMentionComponents={promptMentionComponents}
+              taskMentions={taskMentions}
               taskId={taskId}
               worktreePath={worktreePath}
               onOpenFile={onOpenFile}
@@ -171,6 +187,7 @@ function MessageSegments({
   content,
   downloadSource = content,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
@@ -178,6 +195,7 @@ function MessageSegments({
   content: string;
   downloadSource?: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -214,6 +232,7 @@ function MessageSegments({
                 <UserMessageMarkdown
                   content={previewContent}
                   promptMentionComponents={promptMentionComponents}
+                  taskMentions={taskMentions}
                   taskId={taskId}
                   worktreePath={worktreePath}
                   onOpenFile={onOpenFile}
@@ -234,6 +253,7 @@ function MessageSegments({
             testId={isMove ? "workflow-move-instructions-toggle" : "workflow-instructions-toggle"}
             instructions={segment.content}
             promptMentionComponents={promptMentionComponents}
+            taskMentions={taskMentions}
             taskId={taskId}
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
@@ -249,6 +269,7 @@ function CoordinatorAboutMessage({
   remainder,
   content,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
@@ -257,6 +278,7 @@ function CoordinatorAboutMessage({
   remainder: string;
   content: string;
   promptMentionComponents?: Components;
+  taskMentions?: readonly TaskMentionReference[];
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
@@ -267,6 +289,7 @@ function CoordinatorAboutMessage({
         content={remainder}
         downloadSource={content}
         promptMentionComponents={promptMentionComponents}
+        taskMentions={taskMentions}
         taskId={taskId}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}
@@ -283,6 +306,7 @@ export function renderUserMessageBody({
   content,
   rawContent,
   promptMentionComponents,
+  taskMentions,
   taskId,
   worktreePath,
   onOpenFile,
@@ -310,6 +334,7 @@ export function renderUserMessageBody({
           remainder={coordinatorPrefix.remainder}
           content={content}
           promptMentionComponents={promptMentionComponents}
+          taskMentions={taskMentions}
           taskId={taskId}
           worktreePath={worktreePath}
           onOpenFile={onOpenFile}
@@ -320,6 +345,7 @@ export function renderUserMessageBody({
       <MessageSegments
         content={content}
         promptMentionComponents={promptMentionComponents}
+        taskMentions={taskMentions}
         taskId={taskId}
         worktreePath={worktreePath}
         onOpenFile={onOpenFile}

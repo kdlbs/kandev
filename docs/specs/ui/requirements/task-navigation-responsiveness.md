@@ -101,7 +101,12 @@ without redundant reads or data from another navigation context.
   request coalescing. Current-session success, empty and failed reads, and
   optimistic mark, unmark and reset behavior SHALL retain their existing
   semantics. Desktop and phone SHALL receive the same session-owned review
-  state through their existing surfaces and result interface.
+  state through their existing surfaces and result interface. An initial review
+  snapshot SHALL NOT replace intervening local mark/unmark intent for affected
+  files, whether the action is pending or acknowledged; unrelated snapshot rows
+  SHALL still load. Reset SHALL keep the session clear against that older
+  snapshot. A failed mark SHALL retain the existing local rollback behavior;
+  ignoring older read data SHALL NOT turn an accepted action into a failure.
 
 - **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.15:** When a multiple-selection
   file move settles with some accepted renames and some failed outcomes, the
@@ -158,3 +163,5 @@ Comparable isolated measurements assess actual navigation improvement.
 - [Session file-review reader ownership](../../../plans/session-file-review-reader-ownership/plan.md)
 - [Preserve successful file moves](../../../plans/preserve-successful-file-moves/plan.md)
 - [Dev-server command ownership](../../../plans/dev-server-command-ownership/plan.md)
+
+- [Session file-review snapshot reconciliation](../../../plans/session-file-review-snapshot-reconciliation/plan.md)

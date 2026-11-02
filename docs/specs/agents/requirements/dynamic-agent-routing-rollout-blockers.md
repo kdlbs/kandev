@@ -42,6 +42,13 @@ repair.
 - Before a cross-provider launch, the conductor builds and persists a bounded
   continuation package. The downstream adapter delivers that package in the
   replacement prompt and never reuses the predecessor ACP identity.
+- Newly constructed continuation context and durable relaunch prompts exclude
+  transcript rows already recorded for work still owned by the session queue.
+  Pending entries, retained reservations, and unaccepted ordinary dispatch
+  claims keep their existing delivery owner. An unreadable queue or claim
+  inventory aborts reconstruction; it does not attest that the queue is empty.
+  Explicit caller prompts, saved continuation packages, and in-memory retry
+  prompts retain their existing authority.
 - Launch fallback walks every eligible candidate once, subject to route
   generation fencing. A failure of one successor does not strand a configured
   third candidate.

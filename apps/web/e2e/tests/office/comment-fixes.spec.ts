@@ -120,7 +120,7 @@ test.describe("Office task comments", () => {
       timeout: 10_000,
     });
     await expect(testPage.getByText("Turn 2 — answering your follow-up.")).toBeVisible();
-    await expect(testPage.getByText("tell me the date")).toBeVisible();
+    await expect(testPage.getByText("tell me the date", { exact: true })).toBeVisible();
 
     // Sanity: chat entries appear in chronological order.
     const html = await testPage.locator('[data-testid="task-chat-entries"]').innerHTML();

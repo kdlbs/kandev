@@ -161,14 +161,12 @@ for (const authenticated of [false, true]) {
         session_id: sessionId,
         content: "/e2e:diff-update-modify",
       });
+      const changedFile = path.join(clone.candidate, "diff_update_test.txt");
       await expect
-        .poll(() => fs.existsSync(path.join(clone.candidate, "diff_update_test.txt")), {
+        .poll(() => (fs.existsSync(changedFile) ? fs.readFileSync(changedFile, "utf8") : ""), {
           timeout: 30_000,
         })
-        .toBe(true);
-      expect(fs.readFileSync(path.join(clone.candidate, "diff_update_test.txt"), "utf8")).toContain(
-        "SECOND_MODIFICATION",
-      );
+        .toContain("SECOND_MODIFICATION");
       const file = await adoptionWS<{ content: string }>(
         page,
         backend.baseUrl,

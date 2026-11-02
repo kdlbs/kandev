@@ -7,7 +7,6 @@ test.describe("System Logs page", () => {
     testPage,
     prCapture,
   }) => {
-    test.setTimeout(45_000);
     await testPage.goto("/settings/system/data-storage?tab=logs");
 
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");

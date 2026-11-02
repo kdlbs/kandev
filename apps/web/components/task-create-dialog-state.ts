@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- task-create form state owns one complete reset and hydration contract. */
+
 "use client";
 
 /* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
@@ -89,6 +91,12 @@ function useWorkflowAgentProfileState() {
 function useTaskDependencyState() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
   return { blockedBy, setBlockedBy };
+}
+
+function useTaskMCPSelectionState() {
+  const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
+  const [mcpServerIdsDirty, setMcpServerIdsDirty] = useState(false);
+  return { mcpServerIds, setMcpServerIds, mcpServerIdsDirty, setMcpServerIdsDirty };
 }
 
 function useFreshBranchState() {
@@ -241,6 +249,7 @@ export function useDialogFormState(
   const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
   const dependencies = useTaskDependencyState();
+  const mcpSelections = useTaskMCPSelectionState();
   const branchesByUrl = useBranchesByURL(workspaceId);
   const prInfoByUrl = usePRInfoByURL(workspaceId);
 
@@ -256,6 +265,8 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setMcpServerIds: mcpSelections.setMcpServerIds,
+      setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,
@@ -321,6 +332,7 @@ export function useDialogFormState(
     ...remoteRepos,
     ...freshBranch,
     ...dependencies,
+    ...mcpSelections,
     branchesByUrl,
     prInfoByUrl,
     clearDraft,

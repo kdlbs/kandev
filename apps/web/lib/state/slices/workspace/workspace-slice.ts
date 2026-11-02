@@ -176,12 +176,12 @@ function createRepositorySetActions(
       }),
     removeRepositorySet: (workspaceId, setId) =>
       set((draft) => {
+        bumpRepositorySetRevision(draft, workspaceId);
         const sets = draft.repositorySets.itemsByWorkspaceId[workspaceId];
         if (!sets) return;
         draft.repositorySets.itemsByWorkspaceId[workspaceId] = sets.filter(
           (candidate) => candidate.id !== setId,
         );
-        bumpRepositorySetRevision(draft, workspaceId);
       }),
     invalidateRepositorySets: (workspaceId) =>
       set((draft) => {

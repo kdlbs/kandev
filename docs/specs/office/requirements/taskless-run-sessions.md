@@ -32,9 +32,10 @@ event wake without creating a task merely to host its own execution.
 - **AC-OFFICE-TASKLESS-001.6:** After backend restart, unfinished attempts shall be reconciled against runtime evidence before replacement launch. A possibly live predecessor shall block a replacement until it is stopped or proven absent. Interrupted work shall have an explicit outcome; no taskless attempt shall remain claimed indefinitely solely because it has no task.
 - **AC-OFFICE-TASKLESS-001.7:** A taskless session shall retain its workspace and capability boundaries. Task-specific decision tools shall reject it without a task context. Failed ownership lookup shall reject launch or access, never broaden authority.
 - **AC-OFFICE-TASKLESS-001.8:** Existing task-bound launches and their task/session lifecycle shall retain their behavior. Historical unsupported taskless failures shall remain history and shall not be automatically replayed.
+- **AC-OFFICE-TASKLESS-001.9:** A permission request raised during a taskless turn shall be answered without a human, because no task or session surface exists to answer it. When the execution profile the attempt launched with auto-approves permissions, Office shall approve the request. That is the routed profile when provider routing selected one, otherwise the Office agent's own profile, consistent with the execution-configuration rule in [agents-03](../system-design/agents-03.md). Otherwise Office shall reject it, or cancel it when no reject option is offered. Each decision shall be recorded on the run; a failed record shall not withhold the answer. The turn shall then continue to its own outcome, and the run shall not stay claimed waiting for an answer: when the answer cannot be delivered after bounded retries, Office shall stop the execution. A request from a superseded attempt shall not be answered on behalf of a newer attempt.
 
 The implementation and coverage in this change focus on `.1` to `.4`, `.7` and
-`.8`. Criteria `.5` and `.6` remain requirements and are outstanding follow-up
+`.8`; the taskless permission repair adds `.9`. Criteria `.5` and `.6` remain requirements and are outstanding follow-up
 work; this change does not implement their lifecycle or recovery behavior.
 
 ## Out of scope
