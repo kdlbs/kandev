@@ -206,3 +206,19 @@ of 8rem and 20dvh, with rows aligned at the top and excess rows scrolling
 inside it. All 11 phone cases passed after this change. Targeted ESLint and
 specification validation passed. This preserves the existing frame and action
 contract; no new public copy or provider behavior is introduced.
+
+The next CI round exposed two stale assertions in
+`mobile-ci-automation-options.spec.ts`: they still measured the outer drawer
+wrapper instead of the details scroller. Both failed locally with retries
+disabled before updating the selector. The review also identified clipping at
+240px viewport height. The compact composition uses full height, hides the
+decorative handle, preserves the accessible title, and reserves room for the
+close button. The existing phone cases verify single and multiple PRs, the
+full action bounds, hit testing, and dismissal at 320x240. Live association
+updates now assert both horizontal and vertical action coordinates.
+
+All 17 cases in `mobile-pr-ci-chip.spec.ts` and
+`mobile-ci-automation-options.spec.ts` passed. The two compact cases passed
+again with footer bounds and at least 44px of scrolling details space.
+Shared component tests passed:
+seven suites, 88 tests. No localization or public terminology changed.

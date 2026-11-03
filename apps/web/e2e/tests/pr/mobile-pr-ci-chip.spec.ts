@@ -13,11 +13,38 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { makePRCheckRun, makePRWorkflowRun } from "../../helpers/pr-checks";
+import type { Locator, Page } from "@playwright/test";
 
 const OWNER = "acme";
 const REPO = "demo";
 const PR_NUMBER = 99;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
+
+async function expectCompactAction(page: Page, drawer: Locator) {
+  await page.setViewportSize({ width: 320, height: 240 });
+  await waitForFiniteAnimations(drawer);
+  const link = drawer.getByTestId("pr-popover-pr-link");
+  const bounds = await link.boundingBox();
+  const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
+  expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(240);
+  const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
+  expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+  expect(
+    await drawer.getByTestId("pr-popover-scroll-body").evaluate((element) => element.clientHeight),
+  ).toBeGreaterThanOrEqual(44);
+  expect(
+    await link.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return (
+        document
+          .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          ?.closest("a") === element
+      );
+    }),
+  ).toBe(true);
+}
 
 type SeedTaskArgs = {
   apiClient: ApiClient;
@@ -209,6 +236,7 @@ test.describe("mobile PR CI chip drawer", () => {
       const popup = await opened;
       await expect(popup).toHaveURL(PR_URL);
       await popup.close();
+      await expectCompactAction(testPage, drawer);
       await session.prStatusChipDrawerClose().tap();
       await expect(drawer).toBeHidden();
     } finally {
@@ -780,6 +808,12 @@ test.describe("mobile PR CI chip drawer", () => {
         checks_passing: 1,
       });
     };
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: 110,
+      checks: [{ name: "Build", status: "completed", conclusion: "success", html_url: "" }],
+    });
     await associate(100);
     const session = await openTask(testPage, taskId);
     await session.tapPRStatusChip();
@@ -791,7 +825,9 @@ test.describe("mobile PR CI chip drawer", () => {
     for (let number = 101; number <= 110; number++) await associate(number);
     const tabs = drawer.getByTestId("pr-multi-popover-tabs");
     await expect(tabs.getByRole("tab")).toHaveCount(12);
-    expect(Math.abs((await link.boundingBox())!.y - before!.y)).toBeLessThanOrEqual(1);
+    const after = await link.boundingBox();
+    expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
     const body = drawer.getByTestId("pr-popover-scroll-body");
     expect(await body.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(44);
     expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
@@ -813,6 +849,7 @@ test.describe("mobile PR CI chip drawer", () => {
         );
       }),
     ).toBe(true);
+    await expectCompactAction(testPage, drawer);
     await session.prStatusChipDrawerClose().tap();
   });
 });

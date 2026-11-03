@@ -136,6 +136,14 @@ stays open. Growing from two linked PRs to twelve initially moved the action
 all 11 phone cases passed again. Extra selector space for short lists is
 intentional so later updates cannot move the action.
 
+The compact fallback uses the full viewport at 320px height or less and combines
+drawer chrome around the existing PR header. The phone regression covers
+single and multiple PRs at 320x240, including the actual link hit target and
+close action. The lifecycle and merge-queue phone tests now measure the inner
+details scroller. All 17 cases across the two affected phone files passed;
+the two compact cases passed again with footer bounds and at least 44px of
+scrolling details space.
+
 Implementation and follow-up changes are committed through normal hooks.
 Publication and automated review are tracked separately from this work order.
 

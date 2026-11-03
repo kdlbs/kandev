@@ -162,6 +162,7 @@ export function ChangeRequestPopoverHeader({
   return (
     <div
       data-testid="pr-popover-header"
+      data-slot="change-request-popover-header"
       className={cn(
         "flex items-center justify-between gap-2 border-b border-border/50 pb-2",
         className,
