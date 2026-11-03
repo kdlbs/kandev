@@ -31,9 +31,11 @@ func emitAsyncFollowup(e *emitter, releasePath string) {
 		// in the foreground turn.
 		background.metadataOnlyToolUpdate("async-followup-check")
 
+		time.Sleep(time.Second)
 		if !waitForAsyncFollowupRelease(background, releasePath) {
 			return
 		}
+		background.text("Background follow-up still running.")
 		background.completeTool("async-followup-work", "follow-up work complete")
 		background.text("Background follow-up finished.")
 	}()

@@ -7196,11 +7196,15 @@ func (s *Service) resetAgentContextWithError(
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 	resetGuard := s.lockCancelInFlightGuard(sessionID)
+	keepResetBlocked := s.isSessionResetInProgress(sessionID)
 	s.setSessionResetInProgress(sessionID, true)
 	defer func() {
 		// Publish the end of reset while the same guard is still held. A prompt
-		// that acquires the guard after this point observes a settled marker.
-		s.setSessionResetInProgress(sessionID, false)
+		// that acquires the guard after this point observes a settled marker. A
+		// refused identity commit keeps the marker set until a later reset repairs it.
+		if !keepResetBlocked {
+			s.setSessionResetInProgress(sessionID, false)
+		}
 		resetGuard.release()
 	}()
 
@@ -7261,25 +7265,35 @@ func (s *Service) resetAgentContextWithError(
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(resetErr))
-		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
+		reconciled, reconcileErr := s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
+		if reconcileErr != nil {
+			s.logger.Error("failed to reconcile partial context reset",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(reconcileErr))
+			if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" && liveACPSessionID != previousACPSessionID {
+				keepResetBlocked = true
+			}
+			resetErr = errors.Join(resetErr, fmt.Errorf("reconcile partial context reset: %w", reconcileErr))
+		} else if reconciled {
+			keepResetBlocked = false
+		}
 		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
-	// Clear the old resume token only after the provider reset succeeds. This
-	// keeps a valid recovery token when the runtime reset fails. A fresh ACP
-	// session event can race this clear, so persist the lifecycle manager's
-	// current session ID again below after the clear.
-	if err := s.clearResumeToken(ctx, sessionID); err != nil {
-		s.logger.Error("failed to clear resume token after context reset",
+	if err := s.replaceResetResumeToken(ctx, taskID, session, executionID, previousACPSessionID); err != nil {
+		s.logger.Error("failed to replace resume token after context reset",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return settleFailure(executionID, fmt.Errorf("clear resume token after context reset: %w", err))
+		if liveACPSessionID := s.currentACPSessionID(sessionID); liveACPSessionID != "" && liveACPSessionID != previousACPSessionID {
+			keepResetBlocked = true
+		}
+		return settleFailure(executionID, err)
 	}
-	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
-	}
+	keepResetBlocked = false
 
 	// Clear the remaining persisted state (ACP session metadata, context window)
 	// after the provider reset succeeds. The token is handled explicitly above.
@@ -7408,27 +7422,31 @@ func (s *Service) reconcileFailedContextReset(
 	session *models.TaskSession,
 	executionID string,
 	previousACPSessionID string,
-) {
+) (bool, error) {
 	liveACPSessionID := s.currentACPSessionID(session.ID)
 	if liveACPSessionID == "" || liveACPSessionID == previousACPSessionID {
-		return
+		return false, nil
 	}
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if err != nil {
-		s.logger.Warn("failed to inspect execution after partial context reset",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("agent_execution_id", executionID),
-			zap.Error(err))
-		return
+		return false, fmt.Errorf("inspect execution after partial context reset: %w", err)
 	}
-	if running.AgentExecutionID != executionID {
-		return
+	if running == nil || running.AgentExecutionID != executionID {
+		return false, fmt.Errorf("execution changed during partial context reset")
 	}
 
-	s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "")
+	rebound, err := s.rebindResetNativeSession(
+		ctx, taskID, session, executionID, previousACPSessionID, liveACPSessionID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("rebind resume identity after partial context reset: %w", err)
+	}
+	if !rebound && !s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "") {
+		return false, errResetNativeRebindRefused
+	}
 	s.clearPersistedResetState(ctx, session.ID, session)
+	return true, nil
 }
 
 // clearPersistedResetState clears the durable, DB-backed session state that a
