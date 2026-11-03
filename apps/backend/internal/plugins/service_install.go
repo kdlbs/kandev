@@ -134,6 +134,10 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	if rec.InstallationID == "" {
 		rec.InstallationID = uuid.NewString()
 	}
+	// Every admitted installation replacement starts a new policy version,
+	// including replacement by the same package version. Automation tool
+	// approvals from the previous record therefore require review.
+	rec.AgentToolPolicyVersion = uuid.NewString()
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)

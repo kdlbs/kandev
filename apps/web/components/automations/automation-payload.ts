@@ -2,6 +2,7 @@ import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
   AutomationRepository,
+  AutomationPluginToolSelection,
   ContinuationPolicy,
   ManagedConversationDestination,
   RepositoryMode,
@@ -45,6 +46,7 @@ export type FormState = {
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
   retryPolicy: RetryPolicy;
+  pluginTools: AutomationPluginToolSelection[];
 };
 
 export function retryPolicyAfterModeChange(
@@ -212,12 +214,14 @@ export function buildCreatePayload(
       enabled: trigger.enabled,
     })),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    plugin_tools: form.pluginTools,
   };
 }
 
 export function buildUpdatePayload(
   form: FormState,
   repositories: AutomationRepository[],
+  pluginTools?: AutomationPluginToolSelection[],
 ): UpdateAutomationRequest {
   return {
     name: form.name,
@@ -238,6 +242,7 @@ export function buildUpdatePayload(
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    ...(pluginTools !== undefined ? { plugin_tools: pluginTools } : {}),
   };
 }
 

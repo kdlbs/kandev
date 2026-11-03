@@ -361,6 +361,12 @@ func (s *Service) SetAgentToolCatalogListener(listener AgentToolCatalogListener)
 	s.agentToolCatalogListener = listener
 }
 
+// NotifyAgentToolCatalogChanged forwards an external invalidation (an
+// automation selection change) through the existing catalog listener path.
+func (s *Service) NotifyAgentToolCatalogChanged() {
+	s.notifyAgentToolCatalogChanged()
+}
+
 func (s *Service) notifyAgentToolCatalogChanged() {
 	s.mu.Lock()
 	listener := s.agentToolCatalogListener

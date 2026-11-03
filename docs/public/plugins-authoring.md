@@ -363,6 +363,30 @@ The workspace must grant `host.v2.write:managed_agent_tools`. The broker exposes
 only that instance's selected tools and rejects native tools, ambient MCP
 servers, and other plugins for the restricted turn.
 
+A tool that targets `automation` is opt-in per private automation:
+
+```yaml
+agent_tools:
+  - name: complete_report
+    description: Record a completed report.
+    surfaces: [automation]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [report]
+      properties:
+        report: { type: string }
+```
+
+Declaring the surface does not grant access. The workspace owner selects exact
+tools in the automation editor, and saving that selection approves the plugin
+installation and policy version that were displayed. The handler receives the
+trusted task, session, workspace, and surface identity; it must accept the
+`automation` surface explicitly. A plugin reinstall or configuration save
+invalidates earlier approvals. Automation tools have no managed-conversation
+capability requirement and receive no additional Host API capability.
+
+
 Managed tool calls are not available on any agent provider yet. Kandev rejects
 the launch before creating an execution until an adapter passes the complete
 restriction tests and a real provider smoke. Do not treat the manifest surface

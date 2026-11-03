@@ -43,11 +43,19 @@ func (r *Registry) Load(s store.Store) error {
 	byID := make(map[string]*store.Record, len(records))
 	var migrationErrs []error
 	for _, rec := range records {
-		if rec.InstallationID == "" {
-			migrated := cloneRecord(rec)
+		migrated := cloneRecord(rec)
+		changed := false
+		if migrated.InstallationID == "" {
 			migrated.InstallationID = uuid.NewString()
+			changed = true
+		}
+		if migrated.AgentToolPolicyVersion == "" {
+			migrated.AgentToolPolicyVersion = uuid.NewString()
+			changed = true
+		}
+		if changed {
 			if err := s.Save(migrated); err != nil {
-				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin record identity for %s: %w", rec.ID, err))
 			} else {
 				rec = migrated
 			}

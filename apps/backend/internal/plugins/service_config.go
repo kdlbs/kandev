@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -39,6 +40,26 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
 		return err
 	}
+	// An admitted configuration save invalidates every earlier automation tool
+	// approval before any configuration effect. Secret-only saves and masked
+	// round trips deliberately rotate too, avoiding secret hashing or config
+	// comparison rules. A later write failure leaves the new version in place;
+	// an old approval is never restored while changed configuration may be
+	// effective.
+	if err := s.rotateAgentToolPolicyVersion(rec); err != nil {
+		return err
+	}
+	catalogNotified := false
+	notifyCatalog := func() {
+		if catalogNotified {
+			return
+		}
+		catalogNotified = true
+		s.notifyAgentToolCatalogChanged()
+	}
+	// The policy version is already durable, so every later failure path must
+	// still invalidate consumers even when configuration was not written.
+	defer notifyCatalog()
 	stored, removedSecrets, rollbackVault, err := s.storeConfigSecrets(ctx, rec, merged)
 	if err != nil {
 		return err
@@ -65,8 +86,21 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// is set, and so whether its agent tools are listed. Signal before the
 	// restart so the catalog is recomputed even when the plugin is not
 	// running or fails to restart.
-	s.notifyAgentToolCatalogChanged()
+	notifyCatalog()
 	return s.restartForConfigChange(rec)
+}
+
+// rotateAgentToolPolicyVersion persists a fresh approval boundary before a
+// configuration write. Persistence must succeed first: otherwise changed
+// configuration could become effective under an approval that was meant to be
+// invalidated.
+func (s *Service) rotateAgentToolPolicyVersion(rec *store.Record) error {
+	rec.AgentToolPolicyVersion = uuid.NewString()
+	if err := s.store.Save(rec); err != nil {
+		return fmt.Errorf("plugins: persist agent tool policy version: %w", err)
+	}
+	s.registry.Add(rec)
+	return nil
 }
 
 // errSecretVaultRequired is returned by storeConfigSecrets when a plugin
