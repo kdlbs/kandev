@@ -1,4 +1,7 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import {
   activeSessionId,
   expectCleanSupersededProjection,
@@ -8,6 +11,8 @@ import {
   type SupersededClarificationStatus,
 } from "../../helpers/clarification";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForSessionState } from "../../helpers/session";
+import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 import { expectClarificationReferencePopup } from "../../helpers/clarification-markdown";
@@ -852,4 +857,128 @@ test.describe("Mobile superseded detached clarification stays history", () => {
       await expectCleanSupersededProjection(apiClient, fixture.sessionId);
     });
   }
+});
+
+test.describe("question draft navigation", () => {
+  test.describe.configure({ retries: 1, timeout: 180_000 });
+
+  async function createPendingClarificationTask(
+    apiClient: ApiClient,
+    seedData: SeedData,
+    title: string,
+  ) {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-multi",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("clarification task has no session");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification task should block on its questions",
+      timeout: 60_000,
+    });
+    return { ...task, sessionId: task.session_id };
+  }
+
+  async function openTaskFromPicker(testPage: Page, taskId: string) {
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+    await expect(sheet).toBeVisible();
+    await sheet.locator(`[data-task-row-id="${taskId}"]`).tap();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}(?:\\?|$)`));
+  }
+
+  test("retains and submits phone answers across task-picker navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const first = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Mobile Draft Navigation First",
+    );
+    const second = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Mobile Draft Navigation Second",
+    );
+
+    await testPage.goto(`/t/${first.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").tap();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await session.clarificationInput().fill("Use Go and TypeScript");
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+
+    let respondRequests = 0;
+    testPage.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      if (/^\/api\/v1\/clarification\/[^/]+\/respond$/.test(new URL(request.url()).pathname)) {
+        respondRequests += 1;
+      }
+    });
+
+    await openTaskFromPicker(testPage, second.id);
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await openTaskFromPicker(testPage, first.id);
+
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+    expect(respondRequests).toBe(0);
+    await session.clarificationStep(0).tap();
+    await expect(session.clarificationOption("PostgreSQL")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    await session.clarificationStep(1).tap();
+    await session.clarificationStep(2).tap();
+    await session.clarificationOption("Docker").tap();
+    await expect(session.clarificationSubmit()).toBeEnabled();
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    const responded = waitForHttp(testPage, "POST", /^\/api\/v1\/clarification\/[^/]+\/respond$/);
+    await session.clarificationSubmit().tap();
+    await responded;
+    await expect(session.idleInput()).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(first.sessionId);
+        return messages
+          .filter((message) => message.type === "clarification_request")
+          .map((message) => message.metadata?.status);
+      })
+      .toEqual(["answered", "answered", "answered"]);
+    const { messages } = await apiClient.listSessionMessages(first.sessionId);
+    expect(
+      messages.find(
+        (message) =>
+          message.type === "clarification_request" && message.metadata?.question_id === "language",
+      )?.metadata?.response,
+    ).toMatchObject({ custom_text: "Use Go and TypeScript" });
+
+    await openTaskFromPicker(testPage, second.id);
+    await openTaskFromPicker(testPage, first.id);
+    await expect(session.idleInput()).toBeVisible();
+    await expect(session.clarificationOverlay()).toHaveCount(0);
+  });
 });

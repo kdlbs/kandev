@@ -215,3 +215,6 @@ func processInWindowsOwnedJob(process windows.Handle, name string) bool {
 	ok, _, _ := isProcessInJob.Call(uintptr(process), uintptr(job), uintptr(unsafe.Pointer(&member)))
 	return ok != 0 && member != 0
 }
+
+// OwnedGroupTerminated is unverifiable on Windows, which has no POSIX process groups.
+func OwnedGroupTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
