@@ -14,6 +14,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
@@ -93,6 +94,7 @@ type AgentExecution struct {
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID      string
 	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	AuthPolicy                *acpcompat.AuthPolicy
 	ContainerID               string
 	ContainerIP               string   // IP address of the container for agentctl communication
 	WorkspacePath             string   // Path to the workspace (worktree or repository path)
@@ -1256,6 +1258,11 @@ func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentc
 	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
+	return ae.replaceAgentctlClientLocked(client)
+}
+
+// replaceAgentctlClientLocked publishes under the caller's source write lease.
+func (ae *AgentExecution) replaceAgentctlClientLocked(client *agentctl.Client) *agentctl.Client {
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -1732,7 +1739,12 @@ type LaunchRequest struct {
 	TaskDescription           string              // Task description to send via ACP prompt
 	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                       map[string]string   // Additional env vars
-	WorkspaceLayout           string
+	// AuthPolicy is the internal child-process authentication contract for
+	// eligible host-local providers. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	WorkspaceLayout string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

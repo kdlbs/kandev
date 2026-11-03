@@ -526,6 +526,13 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+For a mode defined in a repository, open **Start mode**, type its exact ID,
+select the custom entry, and save the profile. The host probe runs outside the
+task repository, so it may omit that mode and show options for the host default.
+At task startup, the selected executor must confirm the requested mode before
+the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
+agent's default.
+
 ### View provider usage
 
 Enable **Provider usage and limits** in **Settings > System > Feature Toggles**
@@ -685,14 +692,15 @@ destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
-resume, or message the session.
+resume, or use Send Now on the session.
 
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity
 full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
-and message delivery keep manual admission.
+and **Send Now** keep manual admission. Ordinary message delivery waits for
+capacity through the same ceiling.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

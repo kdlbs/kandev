@@ -635,7 +635,9 @@ For a new capture, Kandev compares the turn with its captured history. If the br
 
 Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+Some captures are partial or unavailable. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. A turn whose summary is unavailable or failed has no card, even when it retained file entries or a history comparison. Partial summaries with usable changes keep their card, label the state, and identify the affected repositories. The selected historical diff still explains why an unavailable comparison has no totals.
+
+Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
@@ -667,6 +669,13 @@ The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
+
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
 
 What a job row can show depends on the agent runtime:
 
@@ -1049,12 +1058,20 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit             | Scope and effect                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
+| Limit             | Scope and effect                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior.                          |
+| **Session limit** | Caps automatic agent starts and new message turns across the instance. When reached, Kandev keeps the selected destination or pending message and retries later.                                                  |
 
-The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
+The session limit is off by default. Explicit **Start**, **Resume**, and
+**Send Now** can override it. Ordinary messages, including chat and
+`message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
+input in the existing prompt queue and starts one new turn when capacity
+becomes available. After a backend restart, later authorized session activity
+re-registers the pending queue. Auto-run OFF keeps that input pending. Set a positive limit
+in **Settings → Preferences → Task Behavior → Runtime**.
+`KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
+limit. Change the environment variable and restart Kandev.
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 

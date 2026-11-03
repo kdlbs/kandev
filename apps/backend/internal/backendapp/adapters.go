@@ -1598,6 +1598,20 @@ func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID
 	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
+// ReserveMessageTurn reserves a bounded message-turn slot before a direct
+// request is acknowledged.
+func (w *orchestratorWrapper) ReserveMessageTurn(
+	ctx context.Context, taskID, sessionID, incarnationID string,
+) (*orchestrator.MessageTurnReservation, bool) {
+	return w.svc.ReserveMessageTurn(ctx, taskID, sessionID, incarnationID)
+}
+
+// RegisterMessageCapacityWait records a queue head blocked by the session
+// ceiling for the shared capacity sweep.
+func (w *orchestratorWrapper) RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string) {
+	w.svc.RegisterMessageCapacityWait(ctx, taskID, sessionID, entryID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)

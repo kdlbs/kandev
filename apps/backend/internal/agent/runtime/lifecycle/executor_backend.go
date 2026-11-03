@@ -14,6 +14,7 @@ import (
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -719,7 +720,12 @@ type ExecutorCreateRequest struct {
 	// OpenAI-compatible gateway right after initialize. Resolved from the
 	// launching profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	// AuthPolicy is the internal child-process authentication contract for an
+	// eligible host-local provider. Nil preserves existing behavior.
+	AuthPolicy *acpcompat.AuthPolicy
+	// LocalRuntimeEnv pins a validated host-local helper after environment merge.
+	LocalRuntimeEnv map[string]string
+	AgentConfig     agents.Agent // Agent type info needed by runtimes
 	// ManagedRuntimeVersion is the effective exact version resolved for this
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
@@ -942,6 +948,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		OfficeAgentProfileID:       req.OfficeAgentProfileID,
 		promptTurnID:               req.PromptTurnID,
 		AgentID:                    agentID,
+		AuthPolicy:                 req.AuthPolicy,
 		ContainerID:                ri.ContainerID,
 		ContainerIP:                ri.ContainerIP,
 		WorkspacePath:              workspacePath,

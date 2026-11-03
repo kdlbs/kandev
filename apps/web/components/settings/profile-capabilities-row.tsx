@@ -139,11 +139,13 @@ function ModelAndModePickers({
 }: ModelAndModePickersProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
+  const showModePicker =
+    hasModes || Boolean(profile.mode) || Boolean(currentModeId) || !disableUnverifiedModels;
 
   return (
     <div
       className={
-        hasModes
+        showModePicker
           ? "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
           : "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:max-w-xl"
       }
@@ -171,7 +173,7 @@ function ModelAndModePickers({
           />
         </div>
       </div>
-      {hasModes && (
+      {showModePicker && (
         <div
           data-testid="profile-mode-field"
           className={`col-span-2 row-start-2 min-w-0 md:col-span-1 md:col-start-2 md:row-start-1 ${gapCls}`}
@@ -189,7 +191,9 @@ function ModelAndModePickers({
         </div>
       )}
       {showRefresh && (
-        <div className={`col-start-2 row-start-1 shrink-0 ${hasModes ? "md:col-start-3" : ""}`}>
+        <div
+          className={`col-start-2 row-start-1 shrink-0 ${showModePicker ? "md:col-start-3" : ""}`}
+        >
           <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
         </div>
       )}
