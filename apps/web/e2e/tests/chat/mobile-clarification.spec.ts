@@ -924,13 +924,22 @@ test.describe("question draft navigation", () => {
     await session.clarificationInput().fill("Use Go and TypeScript");
     await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
 
+    let respondRequests = 0;
+    testPage.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      if (/^\/api\/v1\/clarification\/[^/]+\/respond$/.test(new URL(request.url()).pathname)) {
+        respondRequests += 1;
+      }
+    });
+
     await openTaskFromPicker(testPage, second.id);
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await openTaskFromPicker(testPage, first.id);
 
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
     await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+    expect(respondRequests).toBe(0);
     await session.clarificationStep(0).tap();
     await expect(session.clarificationOption("PostgreSQL")).toHaveAttribute(
       "data-selected",
@@ -949,7 +958,7 @@ test.describe("question draft navigation", () => {
     const responded = waitForHttp(testPage, "POST", /^\/api\/v1\/clarification\/[^/]+\/respond$/);
     await session.clarificationSubmit().tap();
     await responded;
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible();
 
     await expect
       .poll(async () => {
@@ -969,7 +978,7 @@ test.describe("question draft navigation", () => {
 
     await openTaskFromPicker(testPage, second.id);
     await openTaskFromPicker(testPage, first.id);
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible();
     await expect(session.clarificationOverlay()).toHaveCount(0);
   });
 });

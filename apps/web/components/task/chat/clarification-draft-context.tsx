@@ -15,6 +15,7 @@ import type { ClarificationAnswer } from "@/lib/types/http";
 import { useOptionalAppStore, useOptionalAppStoreApi } from "@/components/state-provider";
 import {
   answerDraftGeneration,
+  answerDraftIdentity,
   canRetainAnswerDrafts,
   readAnswerDraft,
   retireAnswerDraft,
@@ -26,6 +27,14 @@ import {
 export type ClarificationDraftQuestion = {
   id: string;
   optionIds: readonly string[];
+};
+
+export type ClarificationDraftOptions = {
+  questions?: readonly ClarificationDraftQuestion[];
+  /** Total questions announced by the bundle metadata. */
+  questionTotal?: number;
+  /** Only active pending forms use the shared navigation cache. */
+  mode?: "active" | "late";
 };
 
 type ClarificationPanelSize = { desktop: number | null; phone: number | null };
@@ -125,16 +134,34 @@ function clampIndex(index: number, questionCount: number): number {
   return Math.max(0, Math.min(index, questionCount - 1));
 }
 
+// Until every announced question has arrived, answers for questions that are
+// not in the current message list are retained. They restore once the bundle
+// is complete instead of being filtered out and written back to the cache.
+function isBundleComplete(
+  questions: readonly ClarificationDraftQuestion[],
+  questionTotal: number | undefined,
+): boolean {
+  return questionTotal === undefined || questions.length >= questionTotal;
+}
+
+function bundleLength(
+  questions: readonly ClarificationDraftQuestion[],
+  questionTotal: number | undefined,
+): number {
+  return Math.max(questions.length, questionTotal ?? 0);
+}
+
 function restoreAnswers(
   answers: readonly ClarificationAnswer[],
   questions: readonly ClarificationDraftQuestion[],
+  complete: boolean,
 ): readonly ClarificationAnswer[] {
   const optionIdsByQuestion = new Map(
     questions.map((question) => [question.id, question.optionIds]),
   );
   return answers.filter((answer) => {
     const optionIds = optionIdsByQuestion.get(answer.question_id);
-    if (!optionIds) return false;
+    if (!optionIds) return !complete;
     return (answer.selected_options ?? []).every((optionId) => optionIds.includes(optionId));
   });
 }
@@ -142,11 +169,12 @@ function restoreAnswers(
 function restoreCustomDrafts(
   customDrafts: Record<string, string>,
   questions: readonly ClarificationDraftQuestion[],
+  complete: boolean,
 ): Record<string, string> {
   const questionIds = new Set(questions.map((question) => question.id));
   const restored: Record<string, string> = {};
   for (const [questionId, text] of Object.entries(customDrafts)) {
-    if (questionIds.has(questionId)) restored[questionId] = text;
+    if (questionIds.has(questionId) || !complete) restored[questionId] = text;
   }
   return restored;
 }
@@ -154,12 +182,17 @@ function restoreCustomDrafts(
 function restoreDraft(
   draft: RetainedAnswerDraft,
   questions: readonly ClarificationDraftQuestion[] | undefined,
+  questionTotal: number | undefined,
 ): RetainedAnswerDraft {
   if (!questions) return draft;
+  const complete = isBundleComplete(questions, questionTotal);
   return {
-    customDrafts: restoreCustomDrafts(draft.customDrafts, questions),
-    answers: restoreAnswers(draft.answers, questions),
-    activeIndex: clampIndex(draft.activeIndex, questions.length),
+    customDrafts: restoreCustomDrafts(draft.customDrafts, questions, complete),
+    answers: restoreAnswers(draft.answers, questions, complete),
+    activeIndex: clampIndex(
+      draft.activeIndex,
+      complete ? questions.length : bundleLength(questions, questionTotal),
+    ),
   };
 }
 
@@ -211,11 +244,18 @@ function nextDraftState(
 function visibleDraft(
   state: DraftState,
   questions: readonly ClarificationDraftQuestion[] | undefined,
+  questionTotal: number | undefined,
 ): { customDrafts: Record<string, string>; activeIndex: number } {
   if (!questions) return { customDrafts: state.customDrafts, activeIndex: state.activeIndex };
+  const complete = isBundleComplete(questions, questionTotal);
   return {
-    customDrafts: restoreCustomDrafts(state.customDrafts, questions),
-    activeIndex: clampIndex(state.activeIndex, questions.length),
+    customDrafts: complete
+      ? restoreCustomDrafts(state.customDrafts, questions, true)
+      : state.customDrafts,
+    activeIndex: clampIndex(
+      state.activeIndex,
+      complete ? questions.length : bundleLength(questions, questionTotal),
+    ),
   };
 }
 
@@ -231,21 +271,38 @@ function persistedAnswers(
   state: DraftState,
   answers: Record<string, ClarificationAnswer>,
   consumedAnswers: boolean,
+  questions: readonly ClarificationDraftQuestion[] | undefined,
+  questionTotal: number | undefined,
 ): readonly ClarificationAnswer[] {
-  if (state.staleAnswers === answers) return state.pendingAnswers;
   const liveAnswers = Object.values(answers);
-  if (liveAnswers.length > 0) return liveAnswers;
-  return consumedAnswers ? [] : state.pendingAnswers;
+  let base: readonly ClarificationAnswer[];
+  if (state.staleAnswers !== answers && liveAnswers.length > 0) {
+    base = liveAnswers;
+  } else {
+    base = consumedAnswers ? [] : state.pendingAnswers;
+  }
+  if (!questions || isBundleComplete(questions, questionTotal)) return base;
+  const known = new Set(questions.map((question) => question.id));
+  const retained = state.pendingAnswers.filter(
+    (answer) =>
+      !known.has(answer.question_id) &&
+      !base.some((candidate) => candidate.question_id === answer.question_id),
+  );
+  return retained.length > 0 ? [...base, ...retained] : base;
 }
 
 function hasMeaningfulCustomText(customDrafts: Record<string, string>): boolean {
   return Object.values(customDrafts).some((text) => text.trim().length > 0);
 }
 
-function draftWriteContext(context: DraftContextValue | null, bundleKey: string | null) {
+function draftWriteContext(
+  context: DraftContextValue | null,
+  bundleKey: string | null,
+  mode: "active" | "late" | undefined,
+) {
   const identity =
-    context?.taskId && bundleKey && context.retain
-      ? JSON.stringify([context.taskId, bundleKey])
+    context?.taskId && bundleKey && context.retain && (mode ?? "active") === "active"
+      ? answerDraftIdentity(context.taskId, bundleKey)
       : null;
   return {
     identity,
@@ -261,17 +318,23 @@ export function useClarificationDraft(
   bundleKey: string | null,
   answers: Record<string, ClarificationAnswer>,
   settled: boolean,
-  questions?: readonly ClarificationDraftQuestion[],
+  options?: ClarificationDraftOptions,
 ) {
   const context = useContext(DraftContext);
-  const { identity, scopeKey, owner, generation } = draftWriteContext(context, bundleKey);
+  const questions = options?.questions;
+  const questionTotal = options?.questionTotal;
+  const { identity, scopeKey, owner, generation } = draftWriteContext(
+    context,
+    bundleKey,
+    options?.mode,
+  );
   const saved = useMemo(
     () => (identity && owner ? readAnswerDraft(owner, identity) : undefined),
     [identity, owner, generation],
   );
   const restored = useMemo(
-    () => (saved ? restoreDraft(saved, questions) : undefined),
-    [saved, questions],
+    () => (saved ? restoreDraft(saved, questions, questionTotal) : undefined),
+    [saved, questions, questionTotal],
   );
   const [state, setState] = useState(() => draftStateFor(scopeKey, generation, restored, answers));
   const adjusted = nextDraftState(state, scopeKey, generation, restored, answers);
@@ -291,8 +354,14 @@ export function useClarificationDraft(
   }, []);
 
   const consumedAnswers = liveAnswersConsumed(state, answers);
-  const answersToPersist = persistedAnswers(state, answers, consumedAnswers);
-  const { customDrafts, activeIndex } = visibleDraft(state, questions);
+  const answersToPersist = persistedAnswers(
+    state,
+    answers,
+    consumedAnswers,
+    questions,
+    questionTotal,
+  );
+  const { customDrafts, activeIndex } = visibleDraft(state, questions, questionTotal);
   const hasContent =
     hasMeaningfulCustomText(customDrafts) || answersToPersist.length > 0 || activeIndex > 0;
   useEffect(() => {

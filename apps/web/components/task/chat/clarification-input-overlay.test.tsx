@@ -14,7 +14,11 @@ import {
 } from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
 import { ClarificationDraftProvider } from "./clarification-draft-context";
-import { readAnswerDraft } from "@/lib/clarification/answer-draft-cache";
+import {
+  answerDraftIdentity,
+  clearAnswerDrafts,
+  readAnswerDraft,
+} from "@/lib/clarification/answer-draft-cache";
 import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
 
 /* eslint-disable max-lines -- overlay lifecycle regressions share one deterministic harness. */
@@ -843,7 +847,11 @@ describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
 });
 
 const DRAFT_DATA_ACTIVE = "data-active";
-type RetainedViewOptions = { taskId?: string; onResolved?: () => void };
+type RetainedViewOptions = {
+  taskId?: string;
+  onResolved?: () => void;
+  mode?: "active" | "late";
+};
 
 function retainedBundle(pendingId = "p1") {
   return [
@@ -863,6 +871,7 @@ function retainedView() {
           messages={messages}
           onResolved={options.onResolved ?? onResolved}
           onDismiss={onDismiss}
+          mode={options.mode}
           shortcutScopeRef={scopeRef}
         />
       </div>
@@ -879,6 +888,10 @@ function enterRetainedAnswers() {
 }
 
 describe("ClarificationInputOverlay — retained answer drafts", () => {
+  beforeEach(() => {
+    clearAnswerDrafts(mockStore);
+  });
+
   it("restores keyed selections, unfinished custom text, and the question after unmount", async () => {
     const { view } = retainedView();
     const bundle = retainedBundle();
@@ -964,11 +977,60 @@ describe("ClarificationInputOverlay — retained answer drafts", () => {
     expect(body.answers.find((answer) => answer.question_id === "q2")?.custom_text).toBe("Use Go");
   });
 
+  it("retains answers for questions that have not arrived yet", async () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle("p-partial");
+    const { rerender } = render(view(bundle));
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), {
+      target: { value: "  Use Go\n" },
+    });
+
+    // A partial bundle must not filter the not-yet-arrived answer out of the
+    // cache before the remaining question renders.
+    rerender(view([bundle[0]]));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true"),
+    );
+    rerender(<div />);
+    rerender(view(bundle));
+
+    await vi.waitFor(() =>
+      expect(screen.getAllByTestId(TESTID_STEP)[1].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true"),
+    );
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("  Use Go\n");
+    fireEvent.click(screen.getAllByTestId(TESTID_STEP)[0]);
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).toBe("true");
+  });
+});
+
+describe("ClarificationInputOverlay — retained answer draft isolation", () => {
+  beforeEach(() => {
+    clearAnswerDrafts(mockStore);
+  });
+
+  it("keeps late-answer forms out of the shared navigation cache", () => {
+    const { view } = retainedView();
+    const bundle = retainedBundle("p-late");
+    const { rerender } = render(view(bundle, { taskId: "task-late", mode: "late" }));
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    fireEvent.change(screen.getByTestId(TESTID_INPUT), {
+      target: { value: "late draft" },
+    });
+
+    rerender(<div />);
+    rerender(view(bundle, { taskId: "task-late", mode: "late" }));
+
+    expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute(DRAFT_DATA_ACTIVE)).toBe("true");
+    expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+    expect(screen.getByTestId(TESTID_OPTION).getAttribute(DATA_SELECTED)).not.toBe("true");
+  });
+
   it("does not retain an empty form mount", () => {
     const { view } = retainedView();
     render(view(retainedBundle("p-empty"), { taskId: "task-empty" }));
 
-    const identity = JSON.stringify(["task-empty", JSON.stringify(["s1", "p-empty", "active"])]);
+    const identity = answerDraftIdentity("task-empty", JSON.stringify(["s1", "p-empty", "active"]));
     expect(readAnswerDraft(mockStore, identity)).toBeUndefined();
   });
 });

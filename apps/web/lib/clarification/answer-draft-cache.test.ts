@@ -112,6 +112,20 @@ describe("answer draft cache", () => {
     expect(readAnswerDraft(store, identity("task-8"))).toEqual(draft("8"));
   });
 
+  it("does not refresh recency for an unchanged write", () => {
+    const store = createAppStore();
+    const generation = answerDraftGeneration(store);
+    for (let index = 0; index < MAX_RETAINED_ANSWER_DRAFTS; index += 1) {
+      writeAnswerDraft(store, identity(`task-${index}`), generation, draft(`${index}`));
+    }
+
+    writeAnswerDraft(store, identity("task-0"), generation, draft("0"));
+    writeAnswerDraft(store, identity("task-8"), generation, draft("8"));
+
+    expect(readAnswerDraft(store, identity("task-0"))).toBeUndefined();
+    expect(readAnswerDraft(store, identity("task-1"))).toEqual(draft("1"));
+  });
+
   it("refreshes recency on an edit", () => {
     const store = createAppStore();
     const generation = answerDraftGeneration(store);

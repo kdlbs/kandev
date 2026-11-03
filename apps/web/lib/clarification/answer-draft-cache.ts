@@ -24,6 +24,36 @@ type DraftCache = {
 
 const caches = new WeakMap<object, DraftCache>();
 
+/** Exact cache identity for one task and one bundle/form-mode key. */
+export function answerDraftIdentity(taskId: string, bundleKey: string): string {
+  return JSON.stringify([taskId, bundleKey]);
+}
+
+function sameAnswers(
+  left: readonly ClarificationAnswer[],
+  right: readonly ClarificationAnswer[],
+): boolean {
+  if (left.length !== right.length) return false;
+  const byQuestion = new Map(left.map((answer) => [answer.question_id, answer]));
+  return right.every((answer) => {
+    const other = byQuestion.get(answer.question_id);
+    if (!other) return false;
+    return (
+      other.custom_text === answer.custom_text &&
+      (other.selected_options ?? []).join("\u0000") ===
+        (answer.selected_options ?? []).join("\u0000")
+    );
+  });
+}
+
+function sameDraft(left: RetainedAnswerDraft, right: RetainedAnswerDraft): boolean {
+  if (left.activeIndex !== right.activeIndex) return false;
+  const leftKeys = Object.keys(left.customDrafts);
+  if (leftKeys.length !== Object.keys(right.customDrafts).length) return false;
+  if (leftKeys.some((key) => left.customDrafts[key] !== right.customDrafts[key])) return false;
+  return sameAnswers(left.answers, right.answers);
+}
+
 function cacheFor(owner: object): DraftCache {
   const existing = caches.get(owner);
   if (existing) return existing;
@@ -63,6 +93,10 @@ export function writeAnswerDraft(
 ): boolean {
   const cache = cacheFor(owner);
   if (cache.generation !== generation) return false;
+  const existing = cache.drafts.get(identity);
+  // An unchanged render is not an access: keep the entry where it is so the
+  // recency bound reflects reads and edits rather than mount re-renders.
+  if (existing && sameDraft(existing, draft)) return true;
   cache.drafts.delete(identity);
   cache.drafts.set(identity, draft);
   while (cache.drafts.size > MAX_RETAINED_ANSWER_DRAFTS) {

@@ -235,7 +235,7 @@ Implementation turn, 2026-11-03:
   coverage preflight, `git diff --check`, and the final status review passed.
 - Review remediation preserved the raw custom draft during restoration and
   restored fresh-edit retention after an authority generation change. Focused
-  suites then reported 163 tests. Details are in the work order.
+  suites then reported 166 tests. Details are in the work order.
 
 Design turn, 2026-11-03:
 

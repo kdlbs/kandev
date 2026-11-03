@@ -1443,7 +1443,7 @@ test.describe("question draft navigation", () => {
   }
 
   async function enterDraft(session: SessionPage) {
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await session.clarificationOption("PostgreSQL").click();
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
     await session.clarificationInput().fill("Use Go and TypeScript");
@@ -1451,7 +1451,7 @@ test.describe("question draft navigation", () => {
   }
 
   async function expectRestoredDraft(session: SessionPage, activeQuestion = 1) {
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationStep(activeQuestion)).toHaveAttribute("data-active", "true");
     await session.clarificationStep(0).click();
     await expect(session.clarificationOption("PostgreSQL")).toHaveAttribute(
@@ -1486,7 +1486,7 @@ test.describe("question draft navigation", () => {
 
     await session.sidebarTaskItem("Draft Navigation Second").click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}$`));
-    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
     await session.sidebarTaskItem("Draft Navigation First").click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
     await expectRestoredDraft(session);
@@ -1543,7 +1543,7 @@ test.describe("question draft navigation", () => {
     const responded = waitForHttp(testPage, "POST", /^\/api\/v1\/clarification\/[^/]+\/respond$/);
     await session.clarificationSubmit().click();
     await responded;
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible();
     expect(responses.count).toBe(1);
 
     const databaseOption = await clarificationOptionId(
@@ -1581,7 +1581,7 @@ test.describe("question draft navigation", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}$`));
     await session.sidebarTaskItem("Draft Submit First").click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}$`));
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible();
     await expect(session.clarificationOverlay()).toHaveCount(0);
     expect(responses.count).toBe(1);
   });

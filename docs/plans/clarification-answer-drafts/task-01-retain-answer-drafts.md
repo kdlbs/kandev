@@ -236,7 +236,7 @@ Implemented on 2026-11-03.
 Verification passed:
 
 - `cd apps/web && pnpm exec vitest run` over the eight work-order files: 161 tests
-  before remediation and 163 after the two added regressions.
+  and 166 after the review remediation and regression additions.
 - `cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`.
 - `cd apps/web && pnpm exec eslint --max-warnings 0` over every changed source,
   test, and spec file.
@@ -274,11 +274,34 @@ Review round on 2026-11-03 addressed two P2 findings in the draft retention path
   unmounting, verifies the old draft is cleared, enters fresh answers, and
   verifies only the fresh draft survives a provider remount.
 
-Focused verification passed after remediation:
+Code review follow-up on the PR also:
 
-- `cd apps/web && pnpm exec vitest run lib/clarification/answer-draft-cache.test.ts
-  components/task/chat/clarification-draft-context.test.tsx
-  components/task/chat/clarification-input-overlay.test.tsx`: 56 tests.
-- `cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm exec tsc --noEmit`.
-- `cd apps/web && pnpm exec eslint --max-warnings 0` over the changed draft,
-  overlay, and test files.
+- Retained answers for questions that have not arrived yet while a bundle is
+  still loading, instead of filtering them out and writing the partial list back.
+- Limited shared navigation retention to active pending forms; late-answer forms
+  keep their bundle-local scope and host-owned admission state.
+- Skip cache recency refreshes for unchanged writes.
+- Reset the shared overlay test cache between tests and use the exported draft
+  identity helper rather than duplicating the key format.
+- Corrected the design's restoration-validation wording.
+- Removed explicit UI assertion budgets from the navigation E2E tests and
+  counted clarification responses during phone navigation.
+
+Post-remediation gate set passed:
+
+- `cd apps/web && pnpm exec vitest run` over the eight work-order files: 166 tests.
+- `cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`.
+- `cd apps/web && pnpm exec eslint --max-warnings 0` over every changed source,
+  test, and spec file, including `lib/state/store.ts`.
+- `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet`.
+- `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/clarification.spec.ts`:
+  30 passed.
+- `cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome tests/chat/mobile-clarification.spec.ts`:
+  16 passed.
+- `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/clarification-resize.spec.ts`:
+  4 passed.
+- `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`,
+  `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`,
+  `python3 scripts/lint-spec-files.py --all`.
+- The delivery-package coverage preflight returned `covered` with no errors.
+- `git diff --check`.

@@ -152,9 +152,9 @@ It does not add drafts to hydration, server messages, or browser storage.
 
 Each entry has an exact identity: task ID, source session ID, pending ID,
 and form mode. It stores custom-text drafts, answers keyed by question ID,
-and the active question index. It also records the source question identities
-needed to validate restoration. It contains no image bytes, DOM nodes, or
-component instances.
+and the active question index. Restoration validates those entries against the
+current bundle's question and option identities. The cache contains no image
+bytes, DOM nodes, or component instances.
 
 The cache holds at most eight entries across tasks. Reads and edits refresh
 recency. Admission of a ninth entry removes the oldest entry. Empty form

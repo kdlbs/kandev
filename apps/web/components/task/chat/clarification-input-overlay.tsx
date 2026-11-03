@@ -101,6 +101,10 @@ function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
   });
 }
 
+function readQuestionTotal(message: Message | undefined): number | undefined {
+  return (message?.metadata as ClarificationRequestMetadata | undefined)?.question_total;
+}
+
 function readSharedContext(message: Message | undefined): string | null {
   const context = (message?.metadata as ClarificationRequestMetadata | undefined)?.context;
   return context?.trim() ? context : null;
@@ -720,7 +724,11 @@ export function ClarificationInputOverlay({
     draftKey,
     group.answers,
     group.submitState === "ok" || group.submitState === "expired",
-    draftQuestions,
+    {
+      questions: draftQuestions,
+      questionTotal: readQuestionTotal(sortedMessages[0]),
+      mode,
+    },
   );
   useClarificationAuthorityReset(generation, group.answers, group.clearAnswer);
   const restoredAnswers = lateMode
