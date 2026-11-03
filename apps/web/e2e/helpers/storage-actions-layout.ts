@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import type { SystemJob } from "../../lib/types/system";
 import { mockStorageAnalysisBarsOverview } from "./storage-maintenance";
 
+/** Exposes operation requests while tests control the jobs' shared polled state. */
 export async function mockStorageActionJobs(page: Page) {
   await mockStorageAnalysisBarsOverview(page);
   let state: SystemJob["state"] = "succeeded";
@@ -30,6 +31,7 @@ export async function mockStorageActionJobs(page: Page) {
   return { requests, setState: (next: SystemJob["state"]) => (state = next) };
 }
 
+/** Measures the section, action cells, and labels in one browser layout pass. */
 async function readActionLayout(page: Page) {
   return page.getByTestId("storage-actions").evaluate((row) => {
     const box = (element: Element) => {
@@ -66,6 +68,7 @@ async function readActionLayout(page: Page) {
   });
 }
 
+/** Checks available-width composition, readable labels, and full-width wrappers. */
 export async function expectStorageActionsFit(page: Page) {
   await expect(page.getByTestId("storage-actions")).toBeVisible();
   await expect
@@ -107,6 +110,7 @@ export async function expectStorageActionsFit(page: Page) {
   expect(gap).toBeGreaterThanOrEqual(11);
 }
 
+/** Requires the action center to hit the button or one of its descendants. */
 export async function expectStorageActionHitTarget(page: Page, id: string) {
   const button = page.getByTestId(id);
   await button.evaluate((element) => element.scrollIntoView({ block: "center" }));

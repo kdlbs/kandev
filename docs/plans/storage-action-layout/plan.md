@@ -155,6 +155,8 @@ semantics without duplicating the browser geometry checks.
 | 001.9 | The keyboard case checks action order, focus retention, and both mocked requests after resizing. |
 | 001.10 | The phone case activates both mocked operations with taps after resizing. |
 | 001.11 | The phone case measures separate full-width rows with Analyze first. |
+| 001.12 | Desktop and phone state cases check stable translated button names. |
+| 001.13 | The Portuguese desktop case and English phone case check the active spinner's accessible status. |
 
 All shortened criterion numbers refer to
 `REQ-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001`.
@@ -262,6 +264,13 @@ PR review corrections split the acceptance criteria into individual behaviors
 and aligned the verification commands with the passing local runs. The test
 annotations and design mappings follow the expanded criteria. Documentation
 validation and focused lint passed again. Production behavior did not change.
+
+A later accessibility review found an English spinner label in translated
+actions. The actions now retain stable translated names and expose translated
+active statuses. Desktop and phone regressions passed, along with all 127
+Storage unit tests, typecheck, lint, formatting, and language checks. The
+work-order results record the failing assertion and passing commands. CI and
+the requested review watch remain external delivery checks.
 
 ## Documentation impact
 

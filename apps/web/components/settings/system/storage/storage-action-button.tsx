@@ -10,6 +10,7 @@ type Props = ComponentProps<typeof Button> & {
   fullWidth?: boolean;
 };
 
+/** Keeps disabled tooltip wrappers aligned with opt-in full-width controls. */
 export function StorageActionButton({
   disabledReason,
   disabled,

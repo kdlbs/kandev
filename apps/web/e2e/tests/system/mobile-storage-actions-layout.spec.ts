@@ -10,6 +10,8 @@ import { setStoreRole } from "../../helpers/session-store";
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.10
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
 test("stacks actions with usable touch targets", async ({ testPage, prCapture }) => {
   await testPage.emulateMedia({ colorScheme: "dark" });
   const jobs = await mockStorageActionJobs(testPage);
@@ -31,6 +33,14 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute("data-job-state", "queued");
   await testPage.getByTestId("storage-run-now").tap();
   await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute("data-job-state", "queued");
+  await expect(testPage.getByTestId("storage-analyze")).toHaveAccessibleName("Analyze");
+  await expect(testPage.getByTestId("storage-analyze").getByRole("status")).toHaveAccessibleName(
+    "Analyzing...",
+  );
+  await expect(testPage.getByTestId("storage-run-now")).toHaveAccessibleName("Run now");
+  await expect(testPage.getByTestId("storage-run-now").getByRole("status")).toHaveAccessibleName(
+    "Cleaning...",
+  );
   await testPage.setViewportSize({ width: 393, height: 851 });
   await expectStorageActionsFit(testPage);
   jobs.setState("succeeded");

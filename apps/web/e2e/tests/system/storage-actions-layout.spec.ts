@@ -49,6 +49,8 @@ test("fits actions inside a constrained Storage section", async ({ testPage, prC
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.3
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.6
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
 test("contains job labels and disabled wrappers", async ({ testPage, prCapture }) => {
   const jobs = await mockStorageActionJobs(testPage);
   await testPage.setViewportSize({ width: 1024, height: 900 });
@@ -68,10 +70,19 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
       "queued",
     );
     await testPage.getByTestId("storage-run-now").click();
+    const actions = [
+      { id: "storage-analyze", name: "Analisar", status: "A analisar..." },
+      { id: "storage-run-now", name: "Executar agora", status: "A limpar..." },
+    ];
     for (const state of ["queued", "running", "failed"] as const) {
       jobs.setState(state);
-      for (const id of ["storage-analyze", "storage-run-now"]) {
-        await expect(testPage.getByTestId(id)).toHaveAttribute("data-job-state", state);
+      for (const action of actions) {
+        const button = testPage.getByTestId(action.id);
+        await expect(button).toHaveAttribute("data-job-state", state);
+        if (state !== "failed") {
+          await expect(button.getByRole("status")).toHaveAccessibleName(action.status);
+        }
+        await expect(button).toHaveAccessibleName(action.name);
       }
       await expectStorageActionsFit(testPage);
     }

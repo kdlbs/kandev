@@ -58,6 +58,10 @@ controls, clipped labels, or horizontal page scrolling.
   a resize.
 - **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11:** On phones below 768 CSS
   pixels, Analyze shall precede Run now in separate full-width rows.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12:** Each action shall retain
+  its translated idle label as its accessible name through job-state changes.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13:** Active spinners shall
+  expose the translated operation status instead of a generic English label.
 
 ## Out of scope
 

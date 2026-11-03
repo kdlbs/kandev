@@ -29,6 +29,7 @@ import { SettingsTarget } from "../../settings-target";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 import { TemporaryArtifactsDialog } from "./storage-confirmation-dialogs";
 
+/** Uses the translated active label for the spinner's live status. */
 function StorageJobButtonContent({
   job,
   idleLabel,
@@ -47,7 +48,7 @@ function StorageJobButtonContent({
   let icon = idleIcon;
   let label = idleLabel;
   if (job?.state === "queued" || job?.state === "running") {
-    icon = <Spinner className="size-4" />;
+    icon = <Spinner className="size-4" aria-label={activeLabel} />;
     label = activeLabel;
   } else if (job?.state === "succeeded") {
     icon = <IconCheck className="size-4" />;
@@ -64,6 +65,7 @@ function StorageJobButtonContent({
   );
 }
 
+/** Keeps action identity stable while job labels and available space change. */
 function StorageActions({
   controller,
   disabledReason,
@@ -99,6 +101,7 @@ function StorageActions({
               disabledReason ?? (analysisActive ? t("system:storageAnalysisRunning") : undefined)
             }
             onClick={() => void controller.analyze()}
+            aria-label={t("system:storageAnalyze")}
             data-testid="storage-analyze"
             data-job-state={controller.analysisJob?.state}
           >
@@ -120,6 +123,7 @@ function StorageActions({
               disabledReason ?? (cleanupActive ? t("system:storageCleanupRunning") : undefined)
             }
             onClick={() => void controller.runNow()}
+            aria-label={t("system:storageRunNow")}
             data-testid="storage-run-now"
             data-job-state={controller.cleanupJob?.state}
           >

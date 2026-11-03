@@ -19,6 +19,8 @@ acceptance_criteria:
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.9
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.10
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
 system_design:
   - ../../specs/system-page/system-design/storage-action-layout.md
 ---
@@ -253,3 +255,26 @@ Only documentation and test annotations changed. Documentation validation,
 focused lint, formatting, and diff checks passed again.
 
 Final specification, reference, and diff validation is recorded in the plan.
+
+### Accessibility review follow-up
+
+CodeRabbit found that active spinners exposed the default English label.
+They now expose the existing translated operation label. Each button keeps
+its translated idle name through state changes. Existing catalogs cover all
+locales. The button and geometry helpers also have brief invariant comments.
+
+The Portuguese browser regression first failed with `Loading` instead of
+`A analisar...`. Its RED log is `/tmp/kandev-run.e2e.IWIo4ttI.log`.
+The extended desktop and phone cases now check stable button names and
+translated active statuses. Both suites passed without retries:
+
+| Command from the repository root, with the Verification environment | Result |
+| --- | --- |
+| `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project chromium tests/system/storage-actions-layout.spec.ts tests/system/storage-maintenance.spec.ts` | 13 passed in 1.3 minutes. Log: `/tmp/kandev-run.e2e.d9DUrqmI.log`. |
+| `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/system/mobile-storage-actions-layout.spec.ts tests/system/mobile-storage-maintenance.spec.ts` | Nine passed in 46.3 seconds. Log: `/tmp/kandev-run.e2e.5aSazten.log`. |
+
+The phone run reused the current desktop build. No production edits followed
+that build. All 127 Storage unit tests passed again. Typecheck, focused lint,
+formatting, the i18n ratchet, and the full i18n check passed. Specification and
+documentation-reference checks passed. CI and the review watch remain external
+delivery checks until the current PR head is terminal.
