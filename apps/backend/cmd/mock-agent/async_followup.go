@@ -30,14 +30,12 @@ func emitAsyncFollowup(e *emitter) {
 		// in the foreground turn.
 		background.metadataOnlyToolUpdate("async-followup-check")
 
-		time.Sleep(time.Second)
+		// Keep the tool active while the test opens queue mode and submits a
+		// message. Completing the tool first marks the follow-up idle, even if
+		// the mock process then stays silent.
+		time.Sleep(30 * time.Second)
 		background.completeTool("async-followup-work", "follow-up work complete")
 		background.text("Background follow-up finished.")
-
-		// Keep the follow-up turn open long enough for loaded CI workers to open
-		// queue mode and submit a message while it runs.
-		time.Sleep(15 * time.Second)
-		background.text("Background follow-up still running.")
 	}()
 }
 
