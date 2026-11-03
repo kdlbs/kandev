@@ -21,6 +21,7 @@ acceptance_criteria:
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.14
 system_design:
   - ../../specs/system-page/system-design/storage-action-layout.md
 ---
@@ -259,9 +260,10 @@ Final specification, reference, and diff validation is recorded in the plan.
 ### Accessibility review follow-up
 
 CodeRabbit found that active spinners exposed the default English label.
-They now expose the existing translated operation label. Each button keeps
-its translated idle name through state changes. Existing catalogs cover all
-locales. The button and geometry helpers also have brief invariant comments.
+The initial fix translated that label and stabilized each button's name.
+The final component keeps one persistent translated status beside each button
+and hides the decorative spinner. Existing catalogs cover all locales.
+The button and geometry helpers also have brief invariant comments.
 
 The Portuguese browser regression first failed with `Loading` instead of
 `A analisar...`. Its RED log is `/tmp/kandev-run.e2e.IWIo4ttI.log`.
@@ -278,3 +280,28 @@ that build. All 127 Storage unit tests passed again. Typecheck, focused lint,
 formatting, the i18n ratchet, and the full i18n check passed. Specification and
 documentation-reference checks passed. CI and the review watch remain external
 delivery checks until the current PR head is terminal.
+
+### Terminal status review follow-up
+
+The next review found that terminal results lost their live announcement when
+the spinner disappeared. `StorageJobButton` now owns both the button and its
+persistent status region. One derived label supplies the visible text and the
+announcement through queued, running, failed, and succeeded states.
+
+The new regression failed because no status region remained after failure.
+Its RED log is `/tmp/kandev-run.e2e.Cf1iZ5pi.log`. The desktop loop also checks
+the visible Portuguese failure labels requested in the aggregate review.
+Phone coverage checks failures, retries, and completion announcements.
+
+Both Verification browser commands passed again after the final production edit:
+
+- Desktop: 13 passed in 1.3 minutes. Log: `/tmp/kandev-run.e2e.jCoH6LZF.log`.
+- Phone/tablet: nine passed in 33.9 seconds, reusing the current build.
+  Log: `/tmp/kandev-run.e2e.7v45CXv9.log`.
+- All 127 Storage unit tests, typecheck, focused lint, formatting, the i18n
+  ratchet, catalog validation, specification lint, and reference checks passed.
+
+The change adds only a visually hidden announcement outside each control.
+Visible labels, geometry, and operation behavior retain their existing contract.
+The published screenshots remain visually accurate. Remote CI and the final
+review watch remain pending until the pushed head has terminal evidence.

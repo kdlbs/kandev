@@ -156,7 +156,8 @@ semantics without duplicating the browser geometry checks.
 | 001.10 | The phone case activates both mocked operations with taps after resizing. |
 | 001.11 | The phone case measures separate full-width rows with Analyze first. |
 | 001.12 | Desktop and phone state cases check stable translated button names. |
-| 001.13 | The Portuguese desktop case and English phone case check the active spinner's accessible status. |
+| 001.13 | The Portuguese desktop case and English phone case check one live region per action through active states. |
+| 001.14 | The state cases check announced failure and completion text outside stable button names. |
 
 All shortened criterion numbers refer to
 `REQ-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001`.
@@ -271,6 +272,14 @@ active statuses. Desktop and phone regressions passed, along with all 127
 Storage unit tests, typecheck, lint, formatting, and language checks. The
 work-order results record the failing assertion and passing commands. CI and
 the requested review watch remain external delivery checks.
+
+The final accessibility follow-up keeps the translated status in a persistent
+region beside each button. Completion and failure remain available after the
+spinner disappears. The Portuguese state loop checks the visible failure text
+as well as the announcement. All 22 browser tests and 127 unit tests passed
+again, with typecheck, lint, formatting, language, and documentation checks.
+Only hidden announcements changed in this follow-up, so the published layouts
+remain accurate. Remote CI and review completion are still pending.
 
 ## Documentation impact
 

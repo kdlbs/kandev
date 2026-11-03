@@ -51,6 +51,7 @@ test("fits actions inside a constrained Storage section", async ({ testPage, prC
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.14
 test("contains job labels and disabled wrappers", async ({ testPage, prCapture }) => {
   const jobs = await mockStorageActionJobs(testPage);
   await testPage.setViewportSize({ width: 1024, height: 900 });
@@ -71,17 +72,32 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
     );
     await testPage.getByTestId("storage-run-now").click();
     const actions = [
-      { id: "storage-analyze", name: "Analisar", status: "A analisar..." },
-      { id: "storage-run-now", name: "Executar agora", status: "A limpar..." },
+      {
+        id: "storage-analyze",
+        control: "storage-analyze-control",
+        name: "Analisar",
+        status: "A analisar...",
+        failed: "A análise falhou",
+      },
+      {
+        id: "storage-run-now",
+        control: "storage-cleanup-control",
+        name: "Executar agora",
+        status: "A limpar...",
+        failed: "A limpeza falhou",
+      },
     ];
     for (const state of ["queued", "running", "failed"] as const) {
       jobs.setState(state);
       for (const action of actions) {
         const button = testPage.getByTestId(action.id);
         await expect(button).toHaveAttribute("data-job-state", state);
-        if (state !== "failed") {
-          await expect(button.getByRole("status")).toHaveAccessibleName(action.status);
-        }
+        const label = state === "failed" ? action.failed : action.status;
+        const status = testPage.getByTestId(action.control).getByRole("status");
+        await expect(button).toHaveText(label);
+        await expect(status).toHaveText(label);
+        await expect(status).toHaveCount(1);
+        await expect(button.getByRole("status")).toHaveCount(0);
         await expect(button).toHaveAccessibleName(action.name);
       }
       await expectStorageActionsFit(testPage);
@@ -91,6 +107,12 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
     await expect(testPage.getByTestId("storage-analyze")).toHaveText("Análise concluída");
     await testPage.getByTestId("storage-run-now").click();
     await expect(testPage.getByTestId("storage-run-now")).toHaveText("Limpeza concluída");
+    await expect(testPage.getByTestId("storage-analyze-control").getByRole("status")).toHaveText(
+      "Análise concluída",
+    );
+    await expect(testPage.getByTestId("storage-cleanup-control").getByRole("status")).toHaveText(
+      "Limpeza concluída",
+    );
     await expectStorageActionsFit(testPage);
     await prCapture.screenshot("translated-completed", {
       caption: "Portuguese completion labels fit the same Storage action cells",

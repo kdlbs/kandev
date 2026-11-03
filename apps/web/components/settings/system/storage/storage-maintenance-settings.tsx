@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
@@ -29,14 +29,15 @@ import { SettingsTarget } from "../../settings-target";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 import { TemporaryArtifactsDialog } from "./storage-confirmation-dialogs";
 
-/** Uses the translated active label for the spinner's live status. */
-function StorageJobButtonContent({
+/** Keeps one live job status outside a button with a stable accessible name. */
+function StorageJobButton({
   job,
   idleLabel,
   activeLabel,
   successLabel,
   failedLabel,
   idleIcon,
+  ...buttonProps
 }: {
   job?: SystemJob;
   idleLabel: string;
@@ -44,11 +45,11 @@ function StorageJobButtonContent({
   successLabel: string;
   failedLabel: string;
   idleIcon: ReactNode;
-}) {
+} & ComponentProps<typeof StorageActionButton>) {
   let icon = idleIcon;
   let label = idleLabel;
   if (job?.state === "queued" || job?.state === "running") {
-    icon = <Spinner className="size-4" aria-label={activeLabel} />;
+    icon = <Spinner className="size-4" aria-hidden="true" />;
     label = activeLabel;
   } else if (job?.state === "succeeded") {
     icon = <IconCheck className="size-4" />;
@@ -59,8 +60,13 @@ function StorageJobButtonContent({
   }
   return (
     <>
-      {icon}
-      <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
+      <StorageActionButton {...buttonProps} aria-label={idleLabel} data-job-state={job?.state}>
+        {icon}
+        <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
+      </StorageActionButton>
+      <span role="status" className="sr-only">
+        {job ? label : null}
+      </span>
     </>
   );
 }
@@ -93,7 +99,7 @@ function StorageActions({
         data-testid="storage-actions-buttons"
       >
         <div className="flex min-w-0" data-testid="storage-analyze-control">
-          <StorageActionButton
+          <StorageJobButton
             variant="outline"
             fullWidth
             className="h-auto min-h-7 whitespace-normal py-1 max-md:h-auto max-md:min-h-11 [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11"
@@ -101,41 +107,31 @@ function StorageActions({
               disabledReason ?? (analysisActive ? t("system:storageAnalysisRunning") : undefined)
             }
             onClick={() => void controller.analyze()}
-            aria-label={t("system:storageAnalyze")}
             data-testid="storage-analyze"
-            data-job-state={controller.analysisJob?.state}
-          >
-            <StorageJobButtonContent
-              job={controller.analysisJob}
-              idleLabel={t("system:storageAnalyze")}
-              activeLabel={t("system:storageAnalyzing")}
-              successLabel={t("system:storageAnalysisComplete")}
-              failedLabel={t("system:storageAnalysisFailed")}
-              idleIcon={<IconRefresh className="size-4" />}
-            />
-          </StorageActionButton>
+            job={controller.analysisJob}
+            idleLabel={t("system:storageAnalyze")}
+            activeLabel={t("system:storageAnalyzing")}
+            successLabel={t("system:storageAnalysisComplete")}
+            failedLabel={t("system:storageAnalysisFailed")}
+            idleIcon={<IconRefresh className="size-4" />}
+          />
         </div>
         <div className="flex min-w-0" data-testid="storage-cleanup-control">
-          <StorageActionButton
+          <StorageJobButton
             fullWidth
             className="h-auto min-h-7 whitespace-normal py-1 max-md:h-auto max-md:min-h-11 [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11"
             disabledReason={
               disabledReason ?? (cleanupActive ? t("system:storageCleanupRunning") : undefined)
             }
             onClick={() => void controller.runNow()}
-            aria-label={t("system:storageRunNow")}
             data-testid="storage-run-now"
-            data-job-state={controller.cleanupJob?.state}
-          >
-            <StorageJobButtonContent
-              job={controller.cleanupJob}
-              idleLabel={t("system:storageRunNow")}
-              activeLabel={t("system:storageCleaning")}
-              successLabel={t("system:storageCleanupComplete")}
-              failedLabel={t("system:storageCleanupFailed")}
-              idleIcon={<IconPlayerPlay className="size-4" />}
-            />
-          </StorageActionButton>
+            job={controller.cleanupJob}
+            idleLabel={t("system:storageRunNow")}
+            activeLabel={t("system:storageCleaning")}
+            successLabel={t("system:storageCleanupComplete")}
+            failedLabel={t("system:storageCleanupFailed")}
+            idleIcon={<IconPlayerPlay className="size-4" />}
+          />
         </div>
       </div>
     </SettingsTarget>

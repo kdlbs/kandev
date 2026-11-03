@@ -41,7 +41,7 @@ disabled reason. Full-width buttons therefore need to size that wrapper too.
 | 001.1, 001.2, 001.11 | Available-width layout |
 | 001.3, 001.6, 001.7, 001.8 | Button and wrapper geometry |
 | 001.4, 001.5, 001.9, 001.10 | Controls and interaction |
-| 001.12, 001.13 | Controls and interaction |
+| 001.12, 001.13, 001.14 | Controls and interaction |
 
 All criteria in this table belong to
 `REQ-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001`.
@@ -94,11 +94,16 @@ icons. Preserve the outline Analyze button, primary Run now button, focus
 rings, border radius, and colors. Keep each existing translated state label
 and icon. This layout change adds no animation or copy.
 
-Set each action's accessible name to its translated idle label. The spinner
-retains its existing `role="status"` and uses the translated active label as
-its accessible name. This supplies one live status per active action without
-adding a generic English announcement. Reuse the existing translations in
-every locale.
+Set each action's accessible name to its translated idle label. Render one
+persistent, visually hidden `role="status"` region beside each button.
+Keep the region empty before a job starts. Then render the same translated
+label as the button through active, succeeded, and failed states. This keeps
+the terminal outcome available after the spinner disappears.
+
+`StorageJobButton` owns the button and its status region. It derives the
+visible and announced label once. Hide its decorative spinner from the
+accessibility tree to prevent duplicate announcements. Reuse the existing
+translations in every locale.
 
 Keep Analyze before Run now in DOM order. Preserve the current handlers,
 disabled reasons, `data-testid` values, and `data-job-state` attributes.

@@ -12,6 +12,7 @@ import { setStoreRole } from "../../helpers/session-store";
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.14
 test("stacks actions with usable touch targets", async ({ testPage, prCapture }) => {
   await testPage.emulateMedia({ colorScheme: "dark" });
   const jobs = await mockStorageActionJobs(testPage);
@@ -34,19 +35,36 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   await testPage.getByTestId("storage-run-now").tap();
   await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute("data-job-state", "queued");
   await expect(testPage.getByTestId("storage-analyze")).toHaveAccessibleName("Analyze");
-  await expect(testPage.getByTestId("storage-analyze").getByRole("status")).toHaveAccessibleName(
+  await expect(testPage.getByTestId("storage-analyze-control").getByRole("status")).toHaveText(
     "Analyzing...",
   );
   await expect(testPage.getByTestId("storage-run-now")).toHaveAccessibleName("Run now");
-  await expect(testPage.getByTestId("storage-run-now").getByRole("status")).toHaveAccessibleName(
+  await expect(testPage.getByTestId("storage-cleanup-control").getByRole("status")).toHaveText(
     "Cleaning...",
   );
   await testPage.setViewportSize({ width: 393, height: 851 });
   await expectStorageActionsFit(testPage);
+  jobs.setState("failed");
+  for (const [id, control, label] of [
+    ["storage-analyze", "storage-analyze-control", "Analysis failed"],
+    ["storage-run-now", "storage-cleanup-control", "Cleanup failed"],
+  ]) {
+    await expect(testPage.getByTestId(id)).toHaveText(label);
+    await expect(testPage.getByTestId(control).getByRole("status")).toHaveText(label);
+  }
+  await expectStorageActionsFit(testPage);
   jobs.setState("succeeded");
+  await testPage.getByTestId("storage-analyze").tap();
+  await testPage.getByTestId("storage-run-now").tap();
   await expect(testPage.getByTestId("storage-analyze")).toHaveText("Analysis complete");
   await expect(testPage.getByTestId("storage-run-now")).toHaveText("Cleanup complete");
-  expect(jobs.requests).toEqual({ analyze: 1, run: 1 });
+  await expect(testPage.getByTestId("storage-analyze-control").getByRole("status")).toHaveText(
+    "Analysis complete",
+  );
+  await expect(testPage.getByTestId("storage-cleanup-control").getByRole("status")).toHaveText(
+    "Cleanup complete",
+  );
+  expect(jobs.requests).toEqual({ analyze: 2, run: 2 });
   await expectStorageActionsFit(testPage);
   await testPage.getByTestId("system-page-title").scrollIntoViewIfNeeded();
   await prCapture.screenshot("phone-completed", {

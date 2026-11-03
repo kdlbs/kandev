@@ -60,8 +60,10 @@ controls, clipped labels, or horizontal page scrolling.
   pixels, Analyze shall precede Run now in separate full-width rows.
 - **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.12:** Each action shall retain
   its translated idle label as its accessible name through job-state changes.
-- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13:** Active spinners shall
-  expose the translated operation status instead of a generic English label.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.13:** Each active action shall
+  expose its translated operation status through one persistent live region.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.14:** Each action shall retain
+  its translated terminal result in its live region after the job finishes.
 
 ## Out of scope
 
