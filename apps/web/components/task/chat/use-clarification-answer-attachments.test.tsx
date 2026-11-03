@@ -385,6 +385,21 @@ describe("useClarificationAnswerAttachments remounts and abandoned uploads", () 
     );
     await waitFor(() => expect(API.remove).toHaveBeenCalledWith("att-abandoned"));
   });
+
+  it("releases an abandoned file-backed draft after the idle window", async () => {
+    const view = renderHook();
+    fireEvent.click(screen.getByTestId("add"));
+    await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
+
+    vi.useFakeTimers();
+    try {
+      view.unmount();
+      act(() => vi.advanceTimersByTime(15 * 60 * 1000));
+      expect(API.remove).toHaveBeenCalledWith("att-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("useClarificationAnswerAttachments retained drafts", () => {

@@ -488,7 +488,14 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	serialized, err := SerializeResponse(resp)
+	if err != nil {
+		h.logger.Error("failed to serialize clarification wait response",
+			zap.String("pending_id", pendingID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errClarificationInternal})
+		return
+	}
+	c.JSON(http.StatusOK, json.RawMessage(serialized))
 }
 
 // RespondBody is the request body for responding to a clarification request.

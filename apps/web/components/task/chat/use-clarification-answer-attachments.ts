@@ -34,6 +34,9 @@ export type ClarificationAnswerAttachmentController = {
 };
 
 const MAX_CACHED_BUNDLES = 8;
+// Unmounted, unsubmitted drafts stay reusable for a while, then release their
+// staged files so abandoned bundles cannot hold memory for the page lifetime.
+const IDLE_STORE_TTL_MS = 15 * 60 * 1000;
 
 type AttachmentFeedback = {
   count: () => void;
@@ -59,6 +62,7 @@ type AttachmentStore = {
   workspacePromise: Promise<string | null> | null;
   uploads: Map<string, Promise<void>>;
   listeners: Set<() => void>;
+  idleTimer: ReturnType<typeof setTimeout> | null;
   disposed: boolean;
   snapshot: StoreSnapshot;
   subscribe: (listener: () => void) => () => void;
@@ -77,6 +81,10 @@ function publish(store: AttachmentStore) {
 
 function disposeStore(store: AttachmentStore) {
   store.disposed = true;
+  if (store.idleTimer) {
+    clearTimeout(store.idleTimer);
+    store.idleTimer = null;
+  }
   store.generation += 1;
   store.listeners.clear();
   for (const list of Object.values(store.files)) {
@@ -129,14 +137,30 @@ function createStore(key: string, taskId: string | null): AttachmentStore {
     workspacePromise: null,
     uploads: new Map(),
     listeners: new Set(),
+    idleTimer: null,
     disposed: false,
     snapshot: { files: {}, processing: 0, generation: 0 },
     subscribe: (listener) => {
       store.listeners.add(listener);
-      return () => store.listeners.delete(listener);
+      if (store.idleTimer) {
+        clearTimeout(store.idleTimer);
+        store.idleTimer = null;
+      }
+      return () => {
+        store.listeners.delete(listener);
+        scheduleIdleDispose(store);
+      };
     },
   };
   return store;
+}
+
+function scheduleIdleDispose(store: AttachmentStore) {
+  if (store.disposed || store.listeners.size > 0 || store.idleTimer) return;
+  store.idleTimer = setTimeout(() => {
+    store.idleTimer = null;
+    if (!store.disposed && store.listeners.size === 0) disposeStore(store);
+  }, IDLE_STORE_TTL_MS);
 }
 
 function setFiles(store: AttachmentStore, files: AnswerAttachmentFiles) {

@@ -9,6 +9,7 @@ import type { Message } from "@/lib/types/http";
 import { fetchTaskSession, listTaskSessionMessages } from "@/lib/api/domains/session-api";
 import {
   formatLateClarificationMessage,
+  orderedLateClarificationAnswers,
   type LateClarificationSnapshot,
 } from "@/lib/clarification/late-clarification-message";
 import { generateUUID } from "@/lib/utils";
@@ -162,7 +163,7 @@ async function hydrateSourceSession({
 }
 
 function snapshotAttachments(snapshot: LateClarificationSnapshot) {
-  return snapshot.answers.flatMap((answer) =>
+  return orderedLateClarificationAnswers(snapshot.messages, snapshot.answers).flatMap((answer) =>
     (answer.attachments ?? []).map((attachment) => ({
       type: attachment.type,
       attachment_id: attachment.attachment_id,

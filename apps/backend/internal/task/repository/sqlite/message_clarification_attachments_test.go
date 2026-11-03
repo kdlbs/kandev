@@ -156,6 +156,13 @@ func TestCompleteActiveClarificationBundleWithAttachmentsAdoptsCanonicalSet(t *t
 	if len(released) != 1 || released[0] != "att-log" {
 		t.Fatalf("released = %v, want [att-log]", released)
 	}
+	removed, getErr := repo.GetMessageAttachment(ctx, "att-log")
+	if getErr != nil {
+		t.Fatalf("GetMessageAttachment(att-log): %v", getErr)
+	}
+	if removed.State != models.AttachmentStateExpired {
+		t.Fatalf("removed attachment state = %q, want expired", removed.State)
+	}
 	retriedByQuestion := messagesByQuestionID(retried)
 	assertManifest(t, retriedByQuestion["q1"], "att-image")
 	if _, ok := retriedByQuestion["q2"].Metadata["attachments"]; ok {

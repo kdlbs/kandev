@@ -78,10 +78,6 @@ func (m *recordingAnswerMaterializer) MaterializeAnswerAttachments(
 }
 
 func TestMaterializationUsesPostClaimDeliveryBudget(t *testing.T) {
-	previousPreClaimTimeout := clarificationPreClaimTimeout
-	clarificationPreClaimTimeout = 30 * time.Millisecond
-	t.Cleanup(func() { clarificationPreClaimTimeout = previousPreClaimTimeout })
-
 	const pendingID = "pending-post-claim-materialization"
 	message := resolverDeliveryMessage(pendingID, "message-post-claim", "turn-1")
 	store := NewStore(time.Minute)
@@ -126,7 +122,9 @@ func TestMaterializationUsesPostClaimDeliveryBudget(t *testing.T) {
 	if err != nil || !claimed || resolution == nil {
 		t.Fatalf("ResolveBundle = %#v, %v, %v", resolution, claimed, err)
 	}
-	if materializer.deadlineRemained < time.Second {
+	// The pre-claim gate is generous; the materializer must receive a strictly
+	// longer post-claim budget instead of inheriting the pre-claim deadline.
+	if materializer.deadlineRemained <= clarificationPreClaimTimeout+time.Second {
 		t.Fatalf("materialization deadline = %v, want the post-claim delivery budget", materializer.deadlineRemained)
 	}
 	if len(resolution.Response.Answers) != 1 ||

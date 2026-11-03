@@ -122,6 +122,94 @@ func (r *Repository) selectClarificationAnswerAttachments(
 	return selection, nil
 }
 
+func (r *Repository) clarificationAttachmentQueueTablePresent(
+	ctx context.Context,
+	plan *clarificationAttachmentPlan,
+) (bool, error) {
+	if plan == nil {
+		return false, nil
+	}
+	present, err := r.tableExistsContext(ctx, "queued_messages")
+	if err != nil {
+		return false, fmt.Errorf("probe queue attachment references: %w", err)
+	}
+	return present, nil
+}
+
+// completeClarificationClaim adopts the submitted file set, writes the terminal
+// manifests, and expires removed files before the response transaction commits.
+func (r *Repository) completeClarificationClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv string,
+	messages []*models.Message,
+	status string,
+	responses map[string]interface{},
+	plan *clarificationAttachmentPlan,
+	queueTablePresent bool,
+) ([]string, error) {
+	var manifests map[string][]models.ClarificationAnswerAttachment
+	var released []string
+	var err error
+	if plan != nil {
+		manifests, released, err = r.adoptClarificationAnswerAttachments(ctx, tx, messages, status, plan)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := r.completeClaimedClarificationMessagesWithManifests(
+		ctx, tx, drv, messages, status, responses, manifests,
+	); err != nil {
+		return nil, err
+	}
+	if plan != nil {
+		if err := r.expireRemovedClarificationAnswerAttachments(
+			ctx, tx, plan.scope, released, queueTablePresent,
+		); err != nil {
+			return nil, err
+		}
+	}
+	return released, nil
+}
+
+// expireRemovedClarificationAnswerAttachments marks removed retry files expired
+// in the same transaction that drops their manifests. The existing expired
+// sweep can then reclaim their bytes even if the process stops before the
+// best-effort post-commit release runs. Queue and surviving transcript
+// references keep a file claimed.
+func (r *Repository) expireRemovedClarificationAnswerAttachments(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	scope models.ClarificationAttachmentScope,
+	ids []string,
+	queueTablePresent bool,
+) error {
+	if len(ids) == 0 || scope.TaskID == "" || scope.SessionID == "" {
+		return nil
+	}
+	referenced, err := referencedAttachmentIDsTx(
+		ctx, r, tx, scope.TaskID, scope.SessionID, queueTablePresent,
+	)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if _, keep := referenced[id]; keep {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET state = ?, updated_at = ?
+			WHERE id = ? AND task_id = ? AND session_id = ? AND state = ?
+		`), models.AttachmentStateExpired, now, id, scope.TaskID, scope.SessionID,
+			models.AttachmentStateClaimed); err != nil {
+			return fmt.Errorf("expire removed clarification answer attachment %q: %w", id, err)
+		}
+	}
+	return nil
+}
+
 func clarificationMessagesByQuestion(messages []*models.Message) (map[string]*models.Message, error) {
 	out := make(map[string]*models.Message, len(messages))
 	for _, message := range messages {

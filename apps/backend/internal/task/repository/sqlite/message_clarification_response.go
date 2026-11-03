@@ -352,6 +352,10 @@ func (r *Repository) completeActiveClarificationBundle(
 	if status != clarificationStatusAnswered && status != clarificationStatusRejected {
 		return nil, false, nil, fmt.Errorf("invalid clarification terminal status %q", status)
 	}
+	queueTablePresent, err := r.clarificationAttachmentQueueTablePresent(ctx, plan)
+	if err != nil {
+		return nil, false, nil, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, false, nil, err
@@ -380,17 +384,10 @@ func (r *Repository) completeActiveClarificationBundle(
 	if int64(len(messages)) != claimedRows {
 		return nil, false, nil, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
 	}
-	var manifests map[string][]models.ClarificationAnswerAttachment
-	var released []string
-	if plan != nil {
-		manifests, released, err = r.adoptClarificationAnswerAttachments(ctx, tx, messages, status, plan)
-		if err != nil {
-			return nil, false, nil, err
-		}
-	}
-	if err := r.completeClaimedClarificationMessagesWithManifests(
-		ctx, tx, drv, messages, status, responses, manifests,
-	); err != nil {
+	released, err := r.completeClarificationClaim(
+		ctx, tx, drv, messages, status, responses, plan, queueTablePresent,
+	)
+	if err != nil {
 		return nil, false, nil, err
 	}
 	if err := tx.Commit(); err != nil {
