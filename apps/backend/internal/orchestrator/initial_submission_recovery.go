@@ -546,6 +546,7 @@ func (s *Service) replayInitialPromptSubmission(
 		return err
 	}
 	options := promptTaskOptions{
+		capacityIntent:                  turnCapacityOverride,
 		resumeAttempt:                   attempt,
 		firstLaunchPromptContext:        true,
 		preserveInitialSubmissionReplay: true,

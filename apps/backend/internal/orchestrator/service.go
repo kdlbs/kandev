@@ -1274,6 +1274,10 @@ type Service struct {
 	// session launches. Its initial effective capacity is resolved by the
 	// composition root and can be changed by the install Settings service.
 	sessionCeiling *sessionCeilingController
+	// messageCapacityWaits tracks process-local queue heads blocked only by
+	// the session ceiling. It starts empty after restart by design.
+	messageCapacityWaits     *messageCapacityWaitRegistry
+	messageCapacityWaitsOnce sync.Once
 
 	// ceilingSweeper is the single background goroutine that expires stale
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
@@ -1902,6 +1906,7 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
+		messageCapacityWaits:         newMessageCapacityWaitRegistry(),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
@@ -4572,16 +4577,13 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
-		go func(profileID string) {
-			_, launchErr := s.startCreatedSessionWithComposedPrompt(
-				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", "", true, false, false, false, nil, nil, false,
-			)
-			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
-				s.logger.Warn("failed to start session for durable queued prompt",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(launchErr))
-			}
-		}(session.AgentProfileID)
+		// Starting a CREATED session consumes a new slot. Register the accepted
+		// head for bounded startup instead of observing capacity and racing
+		// another start; the sweep acquires the actual ticket. The exported
+		// registration keeps a fallback wait when identity resolution is
+		// transiently unavailable.
+		s.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
+		s.signalCeilingSweep()
 		return
 	}
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)

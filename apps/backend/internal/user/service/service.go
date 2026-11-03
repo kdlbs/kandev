@@ -78,6 +78,8 @@ type UpdateUserSettingsRequest struct {
 	ConfirmTaskArchive                *bool
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
+	UnreadTaskDot                     *bool
+	UnreadTaskDotHideDelaySeconds     *int
 	AgentGeneratedTaskTitles          *bool
 	PromptSuggestions                 *bool
 	AutoFocusNewTasks                 *bool
@@ -465,6 +467,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if err := applySidebarHoverSettings(settings, req); err != nil {
 		return err
 	}
+	if err := applyUnreadTaskDotHideDelay(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -748,6 +753,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
+	}
+	if req.UnreadTaskDot != nil {
+		settings.UnreadTaskDot = *req.UnreadTaskDot
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
@@ -1255,6 +1263,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
+		"unread_task_dot":                          settings.UnreadTaskDot,
+		"unread_task_dot_hide_delay_seconds":       settings.UnreadTaskDotHideDelaySeconds,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"prompt_suggestions":                       settings.PromptSuggestions,
 		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,

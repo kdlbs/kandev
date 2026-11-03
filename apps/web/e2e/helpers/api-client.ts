@@ -1525,6 +1525,8 @@ export class ApiClient {
     prevent_auto_start_agent_on_open?: boolean;
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
+    unread_task_dot?: boolean;
+    unread_task_dot_hide_delay_seconds?: number;
     agent_generated_task_titles?: boolean;
     message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";

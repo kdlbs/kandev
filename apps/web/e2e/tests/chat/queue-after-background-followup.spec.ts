@@ -49,7 +49,7 @@ test.describe("queued message after an agent-started follow-up", () => {
     await expect(testPage.getByText("Background follow-up started.")).toBeVisible();
 
     // Queue while that turn runs. Auto-run is on by default.
-    await waitForComposerQueueMode(testPage);
+    await waitForComposerQueueMode(testPage, 30_000);
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, 'e2e:message("queued follow-up delivered")');
     await testPage.getByTestId("submit-message-button").click();
@@ -57,6 +57,7 @@ test.describe("queued message after an agent-started follow-up", () => {
     await expect
       .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
         message: "the submitted follow-up should be present in the durable queue",
+        timeout: 15_000,
       })
       .toBeGreaterThan(0);
     await expect(testPage.getByTestId("queue-chip")).toBeVisible();

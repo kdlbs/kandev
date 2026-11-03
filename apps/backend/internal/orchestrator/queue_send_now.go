@@ -760,6 +760,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 
 	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
+			capacityIntent:         turnCapacityOverride,
 			claimEntryID:           claim.Dispatch.ID,
 			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
 			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),

@@ -1,6 +1,10 @@
 import { resetSeedRepositoryCheckout, test, expect } from "../../fixtures/test-base";
 import { seedUntrackedFileTask, waitForDiffText } from "./diff-update-helpers";
-import { pauseTurnFileContent, resumeTurnFileContent } from "../../helpers/turn-changes-history";
+import {
+  pauseTurnFileContent,
+  resumeTurnFileContent,
+  waitForTurnFileContentSettled,
+} from "../../helpers/turn-changes-history";
 import {
   enableTurnChangedFiles,
   readTurnChangeHistory,
@@ -25,6 +29,11 @@ test.describe("paused turn content preservation", () => {
       const history = await readTurnChangeHistory(apiClient, sessionId);
       const changeSetId = history.change_sets?.[0]?.id;
       expect(changeSetId).toBeTruthy();
+      await waitForTurnFileContentSettled(
+        `${backend.tmpDir}/kandev.db`,
+        changeSetId!,
+        "untracked_test.txt",
+      );
       const paused = pauseTurnFileContent(
         `${backend.tmpDir}/kandev.db`,
         changeSetId!,
@@ -44,6 +53,12 @@ test.describe("paused turn content preservation", () => {
         "pending",
       );
 
+      const pausedContent = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/task-sessions/${sessionId}/turn-changes/${changeSetId}/files/${paused.fileID}/content?variant=canonical_patch`,
+      );
+      expect(pausedContent.status).toBe(404);
+
       const card = await reloadUntilTurnCard(testPage, session);
       await expect(card).toBeVisible({ timeout: 30_000 });
       const pendingFile = card.getByRole("button", { name: /untracked_test\.txt/ });
@@ -54,13 +69,7 @@ test.describe("paused turn content preservation", () => {
       await waitForDiffText(testPage, "INITIAL_CONTENT");
       await session.showSessionContext();
 
-      resumeTurnFileContent(
-        `${backend.tmpDir}/kandev.db`,
-        changeSetId!,
-        paused.fileID,
-        paused.repositoryChangeID,
-        paused.links,
-      );
+      resumeTurnFileContent(`${backend.tmpDir}/kandev.db`, changeSetId!, paused);
       const reloadedCard = await reloadUntilTurnCard(testPage, session);
       await expect(reloadedCard).toBeVisible({ timeout: 30_000 });
       await reloadedCard.getByRole("button", { name: /E2E-Repo/ }).click();
@@ -68,6 +77,7 @@ test.describe("paused turn content preservation", () => {
       await expect(savedFile).toBeVisible();
       await savedFile.click();
       await waitForDiffText(testPage, "INITIAL_CONTENT");
+      await waitForTurnChangeCount(apiClient, sessionId, 1);
     } finally {
       await restorePreference();
     }
