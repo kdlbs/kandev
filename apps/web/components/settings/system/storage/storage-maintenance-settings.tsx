@@ -21,7 +21,7 @@ import {
 } from "./storage-gating";
 import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
-import { storageGoCacheResultSummary } from "./storage-go-cache-result";
+import { storageGoCacheResultSummary } from "./storage-run-summary";
 import { StoragePolicyCard } from "./storage-policy-card-root";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";

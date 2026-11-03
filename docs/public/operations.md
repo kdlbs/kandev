@@ -331,6 +331,16 @@ time, not an exact promise. The first scheduled or full manual maintenance run t
 quarantine provider after the deadline performs the purge. That provider still must pass the idle
 gate and avoid preemption. A run that cleans only the Go cache does not purge quarantine entries.
 
+**Maintenance history** lists each run with a localized status and trigger. **Incomplete** means the
+run reached its bounded entry limit and can continue on a later run. **Partial** means some cleanup
+succeeded before a genuine error. **Failed** means no successful cleanup was recorded. The expanded
+result shows removed and remaining bytes, or an unknown remaining size, and one explanation per
+distinct issue. Skipped resources are reported separately and do not turn bounded progress into a
+failure.
+
+**Technical details** opens the original diagnostic message and raw result JSON. It is collapsed by
+default. Long diagnostics scroll inside that disclosure instead of widening the page.
+
 Go-cache cleanup uses a separate policy. When managed-cache use is enabled, new host-local
 executions share the selected Go build-cache path. The displayed physical size includes Go's `fuzz`
 corpus, while the cleanup-eligible size and trigger exclude it.
