@@ -222,3 +222,9 @@ All 17 cases in `mobile-pr-ci-chip.spec.ts` and
 again with footer bounds and at least 44px of scrolling details space.
 Shared component tests passed:
 seven suites, 88 tests. No localization or public terminology changed.
+
+The queue-follow-up CI case failed on both attempts because its mock agent
+completed the active tool before the delay intended to let CI queue a message.
+After integrating current main, the existing delay now precedes tool completion.
+The focused browser case passed with retries disabled, and the mock-agent
+package passed with the race detector. Production queue logic is unchanged.
