@@ -7,6 +7,8 @@ import { MessageSendError } from "@/lib/chat/message-send-error";
 import { findPendingClarification } from "@/lib/utils/pending-clarification";
 import type { Message } from "@/lib/types/http";
 import { fetchTaskSession, listTaskSessionMessages } from "@/lib/api/domains/session-api";
+import { isStaleSessionStateEvent } from "@/lib/session-state";
+import { captureTaskSessionHydrationEpoch } from "@/lib/state/slices/session/hydration-epochs";
 import {
   formatLateClarificationMessage,
   orderedLateClarificationAnswers,
@@ -135,12 +137,14 @@ async function hydrateSourceSession({
     throw new MessageSendError("session-unavailable", unavailableMessage);
   }
 
-  const needsSession = cachedSession === undefined;
+  // Admission derives direct-vs-queue from the source session state, and a
+  // cached row can lag the backend, so the session is always read fresh. The
+  // transcript is only loaded when this client has none for the session.
   const needsMessages = !Object.prototype.hasOwnProperty.call(state.messages.bySession, sessionId);
-  if (!needsSession && !needsMessages) return;
+  const hydrationEpochAtRequestStart = captureTaskSessionHydrationEpoch(state, sessionId);
 
   const [sessionResponse, messagesResponse] = await Promise.all([
-    needsSession ? fetchTaskSession(sessionId, { cache: "no-store" }) : null,
+    fetchTaskSession(sessionId, { cache: "no-store" }),
     needsMessages
       ? listTaskSessionMessages(sessionId, { limit: 100, sort: "asc" }, { cache: "no-store" })
       : null,
@@ -150,7 +154,10 @@ async function hydrateSourceSession({
     if (sessionResponse.session.task_id !== taskId) {
       throw new MessageSendError("session-unavailable", unavailableMessage);
     }
-    storeApi.getState().setTaskSession(sessionResponse.session);
+    const current = storeApi.getState().taskSessions.items[sessionId];
+    if (!isStaleSessionStateEvent(current, sessionResponse.session.updated_at)) {
+      storeApi.getState().setTaskSession(sessionResponse.session, hydrationEpochAtRequestStart);
+    }
   }
   if (messagesResponse) {
     const messages = messagesResponse.messages ?? [];
