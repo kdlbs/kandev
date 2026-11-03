@@ -1,7 +1,7 @@
 ---
 id: "06-network-approvals"
 title: "Deliver exact connection approvals and policy envelopes"
-status: pending
+status: in_progress
 wave: 6
 depends_on: 
   - "05-audit-verification"
@@ -112,8 +112,24 @@ Plain allow_domain strips ports and upstream CONNECT bypasses the new approval b
 
 ## Results
 
-Pending implementation. Preliminary pinned-runtime probes on 2026-11-03 confirmed native CONNECT callbacks contain the network operation, exact port, PID zero, request ID, and runtime session ID. Two sequential allowed connections generated distinct callbacks. A different port and the callback endpoint were denied.
+Implementation in progress. Preliminary pinned-runtime probes on 2026-11-03 confirmed native CONNECT callbacks contain the network operation, exact port, PID zero, request ID, and runtime session ID. Two sequential allowed connections generated distinct callbacks. A different port and the callback endpoint were denied.
 
 The default kernel TCP-port restriction allowed a direct connection to an owned server at `127.0.0.2` on the proxy port, without a callback. Repeating the probe with `--isolate net` blocked that bypass while preserving approved CONNECT traffic. Native v2 mode must require network namespace isolation and refuse startup when it is unavailable. No all-port loopback option or external-enforcement fallback is permitted. The v1 relay path is unchanged. The full DNS/alias/IPv6, concurrency, MCP, operator, and packaged acceptance matrix is still pending.
 
 Temporary owned evidence: `/tmp/nono-task06-network-probe.py`, `/tmp/nono-task06-network-probe-result.json`, and `/tmp/nono-task06-network-netns-result.json`. These probes do not prove host integration or authorize capability activation.
+
+The same owned alternate-address probe also reached the unapproved destination through the legacy relay mode when isolation was absent. Its positive controls established two allowed CONNECT tunnels through the relay; network isolation blocked the direct bypass while retaining those tunnels. Require namespace isolation for new Nono launches with any proxy access, including the legacy relay and logical MCP. This hardens the existing path; it does not replace it with native approvals or migrate saved policy revisions. Filesystem-only blocked-network policies do not need a proxy namespace. Add permanent compiled-policy and real-runtime regressions before changing the compiler.
+
+Host rebase checkpoint `c87e576f6018` and public plugin SDK pin `f35f5aa87` are pushed to their existing draft PRs. The independent SDK consumer, plugin validation/package verification, and rebuilt packaged host/runtime tests pass. No merge or release is authorized.
+
+### Network isolation slice (2026-11-03)
+
+The provider compiler now requests `linux.isolate.network` whenever a new launch has a TCP or logical MCP grant. It leaves unrestricted namespace loopback disabled and retains the existing upstream relay. Blocked-network filesystem policies do not request the proxy namespace. Saved policy revisions and captured attempts are unchanged.
+
+RED: `TestCompileRequiresNetworkNamespaceForProxyAccess` failed for TCP and MCP. `TestPinnedRuntimeEnforcesProxyDestinations` failed because an owned `127.0.0.2` listener on the proxy port received one unapproved child request. The fixture verifies host reachability before releasing the child, exchanges only the public proxy port, and checks zero forbidden requests after the process exits.
+
+GREEN: both regressions pass after the compiler change, including permitted proxy work and ordinary filesystem/network denials. `TestPinnedRuntimeRefusesProxyWhenNamespacesAreUnavailable` installs a seccomp filter only in the owned test process tree. It denies `unshare`, verifies that the proxy launch fails before the child marker exists, and pairs this with a successful blocked-network control. It changes no host namespace settings.
+
+Final checks: `NONO_ACCEPTANCE_BINARY=/tmp/nono-expansion-runtime-081/nono make validate verify-package` passed (full provider race tests, 13.0s, runtime packaging and release negatives). The independent public SDK consumer passed. Host common/policy race suites passed with SQLite/PostgreSQL. The rebuilt packaged runtime suite passed uncached with `go test -trimpath -race -p=4 ./internal/agent/sandboxruntime -count=1` (78.7s), including approval, private MCP, retained state, report, and cleanup checks. A cached run was not used as package acceptance evidence. Public documentation checks passed (63 tests, 54 published pages).
+
+This slice is complete. Task 06 remains in progress: schema 2, explicit migration, approval envelopes, service actors, native TCP decisions, desktop/phone review, and the full DNS/alias/IPv6/concurrency/MCP conformance matrix remain pending. Current-pair managed acceptance remains Task 10.
