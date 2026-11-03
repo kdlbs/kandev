@@ -200,6 +200,25 @@ The spec restores guard scope and connection rationale and links receipt terms
 to their defining section. Normal commit hooks must pass before publication.
 Remote CI and review resolution remain external verification for the pushed head.
 
+## CI integration follow-up
+
+The complete backend and frontend workflows passed after the review correction.
+Browser CI exposed a timing failure in the existing background follow-up fixture.
+The screenshot showed that the follow-up finished before the browser could
+enter queue mode. The focused test passed locally on its first attempt.
+
+The branch merges the upstream fixture correction from main. It holds the mock
+tool open until the browser writes a release marker after queue admission.
+The merged handler,
+orchestrator, and mock-agent race tests pass (2.753, 6.911, and 1.152 seconds).
+The merged background follow-up test passed without retries in 14.7 seconds.
+Desktop Send/Run passed against the same fresh build in 12.6 seconds.
+Phone Send/Run passed without retries in 15.6 seconds.
+
+Kubernetes 1.34 compatibility also failed while Kind loaded the fixture image,
+before the application test started. Fresh CI must recheck that setup failure.
+CI and review evidence from the previous head is historical.
+
 ## Risks
 
 - Moving notification must preserve initial-brief contender and replay behavior.

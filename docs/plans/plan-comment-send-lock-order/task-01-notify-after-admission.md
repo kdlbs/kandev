@@ -200,3 +200,17 @@ and review resolution remain external verification for the pushed head.
 The design now states the process-local SQLite guard, cross-process PostgreSQL
 lock, writer-connection rationale, and exact notification lock order. It links
 receipt tokens and delivery-attempt validation to their defining section.
+
+## CI integration follow-up
+
+The branch merges the upstream background follow-up fixture correction. The
+mock tool now stays active until the browser writes a release marker after
+queue admission. This removes the timing window seen in CI. The merged
+handler, orchestrator, and mock-agent race tests pass (2.753, 6.911, and 1.152
+seconds). The merged background follow-up test passed without retries in 14.7
+seconds. Desktop Send/Run passed against the same fresh build in 12.6 seconds.
+Phone Send/Run passed without retries in 15.6 seconds.
+
+The previous backend and frontend workflows passed. Kubernetes 1.34 setup
+failed while Kind loaded the fixture image. Fresh CI must recheck that failure.
+CI and review evidence for the previous head is historical.

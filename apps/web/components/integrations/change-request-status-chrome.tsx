@@ -130,6 +130,7 @@ export function ChangeRequestStatusDrawerContent({
   children,
   footer,
   closeLabel,
+  fixedContent = false,
 }: {
   testId: string;
   headerTestId?: string;
@@ -140,14 +141,34 @@ export function ChangeRequestStatusDrawerContent({
   children: ReactNode;
   footer?: ReactNode;
   closeLabel?: string;
+  fixedContent?: boolean;
 }) {
   return (
-    <DrawerContent data-testid={testId} className="max-h-[80dvh] flex flex-col">
+    <DrawerContent
+      data-testid={testId}
+      className={cn(
+        "max-h-[80dvh] flex flex-col",
+        fixedContent && [
+          "h-[80dvh] data-[vaul-drawer-direction=bottom]:max-h-[80dvh]",
+          "[@media(max-height:480px)]:h-dvh [@media(max-height:480px)]:max-h-dvh [@media(max-height:480px)]:data-[vaul-drawer-direction=bottom]:max-h-dvh [@media(max-height:480px)]:data-[vaul-drawer-direction=bottom]:mt-0",
+          "[@media(max-height:480px)]:pt-[calc(0.5rem+env(safe-area-inset-top,0px))] [@media(max-height:480px)]:pr-[calc(0.5rem+env(safe-area-inset-right,0px))] [@media(max-height:480px)]:pl-[calc(0.5rem+env(safe-area-inset-left,0px))]",
+          "[@media(max-height:480px)]:[&>div:first-child]:hidden [@media(max-height:480px)]:[&_[data-slot=change-request-popover-header]]:pr-12 [@media(max-height:480px)]:[&_[role=tablist]]:pr-12",
+        ],
+      )}
+    >
       <DrawerHeader
         data-testid={headerTestId}
-        className="flex flex-row items-center justify-between border-b py-2"
+        className={cn(
+          "flex shrink-0 flex-row items-center justify-between border-b py-2",
+          fixedContent &&
+            "[@media(max-height:480px)]:h-0 [@media(max-height:480px)]:border-0 [@media(max-height:480px)]:p-0",
+        )}
       >
-        <DrawerTitle className="text-sm">{title}</DrawerTitle>
+        <DrawerTitle
+          className={cn("text-sm", fixedContent && "[@media(max-height:480px)]:sr-only")}
+        >
+          {title}
+        </DrawerTitle>
         <DrawerDescription className="sr-only">{description}</DrawerDescription>
         <DrawerClose asChild>
           <Button
@@ -155,7 +176,11 @@ export function ChangeRequestStatusDrawerContent({
             variant="ghost"
             size="icon-sm"
             aria-label={closeLabel ?? t("integrations:closePullRequestStatus")}
-            className="cursor-pointer"
+            className={cn(
+              "cursor-pointer",
+              fixedContent &&
+                "min-h-12 min-w-12 [@media(max-height:480px)]:absolute [@media(max-height:480px)]:top-[calc(0.5rem+env(safe-area-inset-top,0px))] [@media(max-height:480px)]:right-[calc(0.5rem+env(safe-area-inset-right,0px))] [@media(max-height:480px)]:z-10",
+            )}
           >
             <IconX className="h-4 w-4" />
           </Button>
@@ -163,7 +188,12 @@ export function ChangeRequestStatusDrawerContent({
       </DrawerHeader>
       <div
         data-testid={bodyTestId}
-        className="flex-1 min-h-0 overflow-y-auto p-3"
+        className={cn(
+          "flex-1 min-h-0 p-3",
+          fixedContent
+            ? "flex flex-col overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom))] [@media(max-height:480px)]:p-2 [@media(max-height:480px)]:pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+            : "overflow-y-auto",
+        )}
         data-vaul-no-drag
       >
         {children}
