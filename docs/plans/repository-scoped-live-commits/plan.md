@@ -62,7 +62,7 @@ GREEN: all 38 focused store/handler tests passed. Changed-file ESLint and
 Prettier checks passed. Typecheck passed with an 8 GiB Node heap after the
 default 4 GiB heap exhausted memory. No type errors remained.
 
-The rebuilt browser scenario passed. Its final capture run passed in 10.5 s,
+The rebuilt browser scenario passed. Its final capture run passed in 9.7 s,
 with both desktop and Pixel 5 views receiving both live commits. Two fresh
 synthetic screenshots were inspected and compressed. The desktop capture closes
 the terminal before capture to exclude the host username.
@@ -75,3 +75,6 @@ Its new regression failed before selecting the leading row within each
 repository, then passed with the correction. The affected tests, lint, browser
 scenario, and typecheck passed again. The PR documentation evaluator also passed
 after the work order declared its sibling plan, dependency list, and wave.
+The final test uses the shared `watchWs` decoder and arms both repository waits
+before creating commits. The acceptance criterion is limited to repository
+isolation; the existing branch-to-scope mapping remains unchanged.

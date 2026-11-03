@@ -3,8 +3,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import type { GitCommitCreatedEvent } from "../../../lib/types/git-events";
 
 // @covers AC-TASKS-MULTI-BRANCH-001.2
 test("keeps live commits from both repositories visible on desktop and phone", async ({
@@ -39,23 +41,7 @@ test("keeps live commits from both repositories visible on desktop and phone", a
       }),
     );
   }
-  const observedCommits = new Set<string>();
-  testPage.on("websocket", (socket) => {
-    if (!socket.url().endsWith("/ws")) return;
-    socket.on("framereceived", ({ payload }) => {
-      const frame = JSON.parse(String(payload)) as {
-        action?: string;
-        payload?: { type?: string; commit?: { commit_sha?: string } };
-      };
-      if (
-        frame.action === "session.git.event" &&
-        frame.payload?.type === "commit_created" &&
-        frame.payload.commit?.commit_sha
-      ) {
-        observedCommits.add(frame.payload.commit.commit_sha);
-      }
-    });
-  });
+  const watcher = watchWs(testPage);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Update account settings",
@@ -101,6 +87,17 @@ test("keeps live commits from both repositories visible on desktop and phone", a
     const mobilePanel = mobile.getByTestId("mobile-changes-panel");
     await expect(mobilePanel).toBeVisible();
 
+    const commitEvents = repoPaths.map((repoPath) =>
+      watcher.waitForEvent("session.git.event", {
+        where: (payload) => {
+          const event = payload as GitCommitCreatedEvent | undefined;
+          return (
+            event?.type === "commit_created" &&
+            event.commit.repository_name === path.basename(repoPath)
+          );
+        },
+      }),
+    );
     const messages = ["fix: validate account settings", "fix: refresh account settings form"];
     const commits = repoPaths.map((repoPath, index) => {
       fs.writeFileSync(path.join(repoPath, "README.md"), `Account settings revision ${index}\n`);
@@ -108,9 +105,10 @@ test("keeps live commits from both repositories visible on desktop and phone", a
       git(repoPath, "commit", "-m", messages[index]);
       return git(repoPath, "rev-parse", "HEAD");
     });
-    await expect
-      .poll(() => commits.every((sha) => observedCommits.has(sha)), { timeout: 15_000 })
-      .toBe(true);
+    const received = await Promise.all(commitEvents);
+    expect(
+      received.map((frame) => (frame.payload as GitCommitCreatedEvent).commit.commit_sha).sort(),
+    ).toEqual([...commits].sort());
     for (const sha of commits) {
       const row = `commit-row-${sha.slice(0, 7)}`;
       await expect(desktop.changes.getByTestId(row)).toBeVisible();

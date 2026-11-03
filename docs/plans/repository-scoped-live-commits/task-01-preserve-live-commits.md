@@ -30,7 +30,7 @@ Owned files:
 
 ## Acceptance
 
-1. Different repository or branch scopes cannot replace each other's commits,
+1. Different repository scopes cannot replace each other's commits,
    even with matching parent or commit SHAs.
 2. Same-scope amendments and missing/empty root names retain existing behavior.
 3. Open desktop and phone Changes views display both real live commits without
@@ -73,8 +73,8 @@ The compatibility risk and excluded behavior are recorded in the plan.
   unit tests, and E2E test. Prettier and typecheck passed.
 - The default 4 GiB Node heap was insufficient for typecheck. The documented
   8 GiB rerun passed without source changes.
-- The rebuilt browser test passed. The final screenshot run rebuilt the revised
-  source and passed in 10.5 s. Desktop and Pixel 5 each displayed both
+- The rebuilt browser test passed. The final screenshot run reused that build
+  with `--no-build` and passed in 9.7 s. Desktop and Pixel 5 each displayed both
   live commits without reload or PR association.
 - Fresh desktop and phone screenshots were inspected and compressed. Capture
   closes the desktop terminal to exclude the host username.
@@ -86,3 +86,7 @@ The compatibility risk and excluded behavior are recorded in the plan.
 - The PR documentation evaluator rejected missing `depends_on`, `wave`, and
   `plan` metadata. Adding those fields produced `status: covered` with no errors
   from the same local evaluator.
+- The final E2E observer uses `watchWs` to ignore unrelated payloads and arm
+  both repository waits before creating commits. ESLint and the browser test
+  passed after that test-only change. The criterion describes repository
+  isolation without claiming new branch mapping coverage.
