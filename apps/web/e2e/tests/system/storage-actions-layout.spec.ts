@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   expectStorageActionHitTarget,
   expectStorageActionsFit,
+  expectStorageActionStatusNodesRetained,
+  markStorageActionStatusNodes,
   mockStorageActionJobs,
 } from "../../helpers/storage-actions-layout";
 import { setStoreRole } from "../../helpers/session-store";
@@ -64,6 +66,7 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
   await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
   try {
     await testPage.goto("/settings/system/storage");
+    await markStorageActionStatusNodes(testPage);
     jobs.setState("queued");
     await testPage.getByTestId("storage-analyze").click();
     await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
@@ -101,6 +104,7 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
         await expect(button).toHaveAccessibleName(action.name);
       }
       await expectStorageActionsFit(testPage);
+      await expectStorageActionStatusNodesRetained(testPage);
     }
     jobs.setState("succeeded");
     await testPage.getByTestId("storage-analyze").click();
@@ -114,6 +118,7 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
       "Limpeza concluída",
     );
     await expectStorageActionsFit(testPage);
+    await expectStorageActionStatusNodesRetained(testPage);
     await prCapture.screenshot("translated-completed", {
       caption: "Portuguese completion labels fit the same Storage action cells",
     });
@@ -121,6 +126,7 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
     await expect(testPage.getByTestId("storage-analyze")).toBeDisabled();
     await expect(testPage.getByTestId("storage-run-now")).toBeDisabled();
     await expectStorageActionsFit(testPage);
+    await expectStorageActionStatusNodesRetained(testPage);
   } finally {
     await setStoreRole(testPage, "admin");
     await testPage.context().clearCookies({ name: "kandev_locale" });

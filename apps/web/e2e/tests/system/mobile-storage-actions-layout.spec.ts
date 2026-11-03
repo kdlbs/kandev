@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   expectStorageActionHitTarget,
   expectStorageActionsFit,
+  expectStorageActionStatusNodesRetained,
+  markStorageActionStatusNodes,
   mockStorageActionJobs,
 } from "../../helpers/storage-actions-layout";
 import { setStoreRole } from "../../helpers/session-store";
@@ -18,6 +20,7 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   const jobs = await mockStorageActionJobs(testPage);
   await testPage.goto("/settings/system/storage");
   await expectStorageActionsFit(testPage);
+  await markStorageActionStatusNodes(testPage);
   await prCapture.screenshot("phone", {
     caption: "Phone Storage places Analyze and Run now in separate full-width rows",
   });
@@ -44,6 +47,7 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   );
   await testPage.setViewportSize({ width: 393, height: 851 });
   await expectStorageActionsFit(testPage);
+  await expectStorageActionStatusNodesRetained(testPage);
   jobs.setState("failed");
   for (const [id, control, label] of [
     ["storage-analyze", "storage-analyze-control", "Analysis failed"],
@@ -53,6 +57,7 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
     await expect(testPage.getByTestId(control).getByRole("status")).toHaveText(label);
   }
   await expectStorageActionsFit(testPage);
+  await expectStorageActionStatusNodesRetained(testPage);
   jobs.setState("succeeded");
   await testPage.getByTestId("storage-analyze").tap();
   await testPage.getByTestId("storage-run-now").tap();
@@ -66,6 +71,7 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   );
   expect(jobs.requests).toEqual({ analyze: 2, run: 2 });
   await expectStorageActionsFit(testPage);
+  await expectStorageActionStatusNodesRetained(testPage);
   await testPage.getByTestId("system-page-title").scrollIntoViewIfNeeded();
   await prCapture.screenshot("phone-completed", {
     caption: "Both Storage results stay readable inside phone-sized action rows",
@@ -73,6 +79,7 @@ test("stacks actions with usable touch targets", async ({ testPage, prCapture })
   await setStoreRole(testPage, "member");
   await expect(testPage.getByTestId("storage-analyze")).toBeDisabled();
   await expectStorageActionsFit(testPage);
+  await expectStorageActionStatusNodesRetained(testPage);
 });
 
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.1

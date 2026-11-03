@@ -2,6 +2,27 @@ import { expect, type Page } from "@playwright/test";
 import type { SystemJob } from "../../lib/types/system";
 import { mockStorageAnalysisBarsOverview } from "./storage-maintenance";
 
+const STATUS_CONTROLS = ["storage-analyze-control", "storage-cleanup-control"];
+
+/** Marks idle live regions before their first job update. */
+export async function markStorageActionStatusNodes(page: Page) {
+  for (const id of STATUS_CONTROLS) {
+    const status = page.getByTestId(id).getByRole("status");
+    await expect(status).toHaveText("");
+    await status.evaluate((node, value) => node.setAttribute("data-retained-node", value), id);
+  }
+}
+
+/** Checks that job and viewport updates preserve each marked live region. */
+export async function expectStorageActionStatusNodesRetained(page: Page) {
+  for (const id of STATUS_CONTROLS) {
+    await expect(page.getByTestId(id).getByRole("status")).toHaveAttribute(
+      "data-retained-node",
+      id,
+    );
+  }
+}
+
 /** Exposes operation requests while tests control the jobs' shared polled state. */
 export async function mockStorageActionJobs(page: Page) {
   await mockStorageAnalysisBarsOverview(page);

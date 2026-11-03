@@ -305,3 +305,21 @@ The change adds only a visually hidden announcement outside each control.
 Visible labels, geometry, and operation behavior retain their existing contract.
 The published screenshots remain visually accurate. Remote CI and the final
 review watch remain pending until the pushed head has terminal evidence.
+
+### Live-region retention coverage
+
+The browser cases now mark each idle status node before the first operation.
+They verify the marker after active, failed, completed, and permission updates.
+The phone case also retains the marker through viewport changes. A replacement
+node cannot satisfy this check by rendering the same text.
+
+Only test helpers, assertions, and delivery records changed. The product code
+is unchanged from the terminal-status fix. The focused checks passed:
+
+| Command from the repository root, with the Verification environment | Result |
+| --- | --- |
+| `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/system/storage-actions-layout.spec.ts` | Three passed in 10.9 seconds. Log: `/tmp/kandev-run.e2e.7gTzepGW.log`. |
+| `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/system/mobile-storage-actions-layout.spec.ts` | Two passed in 7.0 seconds. Log: `/tmp/kandev-run.e2e.EtgxgA3l.log`. |
+
+Both runs used the current production build. Focused lint and formatting passed.
+Remote CI and the final review watch remain pending.

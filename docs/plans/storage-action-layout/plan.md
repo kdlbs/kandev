@@ -156,7 +156,7 @@ semantics without duplicating the browser geometry checks.
 | 001.10 | The phone case activates both mocked operations with taps after resizing. |
 | 001.11 | The phone case measures separate full-width rows with Analyze first. |
 | 001.12 | Desktop and phone state cases check stable translated button names. |
-| 001.13 | The Portuguese desktop case and English phone case check one live region per action through active states. |
+| 001.13 | The desktop and phone cases check one live region per action. A DOM marker proves that the same region survives job and viewport updates. |
 | 001.14 | The state cases check announced failure and completion text outside stable button names. |
 
 All shortened criterion numbers refer to
@@ -280,6 +280,11 @@ as well as the announcement. All 22 browser tests and 127 unit tests passed
 again, with typecheck, lint, formatting, language, and documentation checks.
 Only hidden announcements changed in this follow-up, so the published layouts
 remain accurate. Remote CI and review completion are still pending.
+
+A final test follow-up marks each idle live region before the first operation.
+The browser cases verify that each marker survives job states and phone
+resizes. All three desktop and two phone/tablet layout cases passed again.
+The product code is unchanged from the terminal-status fix.
 
 ## Documentation impact
 
