@@ -276,6 +276,10 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 		if err := validateCreateProfileRequest(profileReq); err != nil {
 			return nil, err
 		}
+		mode, envVars := devinProfilePermissionDefaults(agentConfig.ID(), profileReq.Mode, profileReq.EnvVars)
+		if err := validateDevinProfilePermissionIntent(agentConfig.ID(), mode, envVars); err != nil {
+			return nil, err
+		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
 		if profileReq.CLIFlags == nil {
 			cliFlags = seedCLIFlags(agentConfig)
@@ -290,9 +294,9 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			RequireExactModel:       profileReq.RequireExactModel,
 			CursorMCPAuthEnabled:    cursorMCPAuthEnabled(profileReq.CursorMCPAuthEnabled),
 			CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(profileReq.CursorPluginsMCPEnabled),
-			Mode:                    profileReq.Mode,
+			Mode:                    mode,
 			CLIFlags:                cliFlags,
-			EnvVars:                 envVarsFromDTO(profileReq.EnvVars),
+			EnvVars:                 envVarsFromDTO(envVars),
 			CommandPrefix:           strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {

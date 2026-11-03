@@ -1,3 +1,5 @@
+import type { ModelCatalog } from "@kandev/types/model-catalog";
+
 export type AuthMethodInfoPayload = {
   id: string;
   name: string;
@@ -49,6 +51,7 @@ export type ConfigOptionPayload = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  catalog?: ModelCatalog;
 };
 
 export type SessionModelsPayload = {

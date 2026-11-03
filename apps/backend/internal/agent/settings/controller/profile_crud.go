@@ -188,6 +188,10 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
+	mode, envVars := devinProfilePermissionDefaults(agent.Name, req.Mode, req.EnvVars)
+	if err := validateDevinProfilePermissionIntent(agent.Name, mode, envVars); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:                 req.AgentID,
 		Name:                    req.Name,
@@ -196,7 +200,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		FallbackModel:           strings.TrimSpace(req.FallbackModel),
 		AutoFallback:            req.AutoFallback,
 		RequireExactModel:       req.RequireExactModel,
-		Mode:                    req.Mode,
+		Mode:                    mode,
 		ConfigOptions:           profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:           req.AllowIndexing,
 		AutoApprove:             req.AutoApprove,
@@ -208,7 +212,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CopilotSelectedPlugins:  copilotPlugins,
 		Enabled:                 true,
 		CLIFlags:                cliFlags,
-		EnvVars:                 envVarsFromDTO(req.EnvVars),
+		EnvVars:                 envVarsFromDTO(envVars),
 		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
 		ProviderKind:            req.ProviderKind,
 		ProviderBaseURL:         req.ProviderBaseURL,
@@ -649,6 +653,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
+	}
+	if req.Mode != nil || req.EnvVars != nil {
+		agentName, agentErr := c.agentNameForProfile(ctx, profile)
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if err := validateDevinProfilePermissionIntent(agentName, profile.Mode, envVarsToDTO(profile.EnvVars)); err != nil {
+			return nil, err
+		}
 	}
 	profile.UserModified = true
 	if dynamic != nil {

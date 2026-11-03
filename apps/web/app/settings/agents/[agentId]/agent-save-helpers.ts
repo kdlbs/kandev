@@ -45,6 +45,7 @@ const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> =
   ["mcp_selected_servers", "mcpSelectedServers"],
   ["copilot_selected_plugins", "copilotSelectedPlugins"],
   ["cli_flags", "cliFlags"],
+  ["env_vars", "envVars"],
   ["command_prefix", "commandPrefix"],
   ["provider_kind", "providerKind"],
 ];

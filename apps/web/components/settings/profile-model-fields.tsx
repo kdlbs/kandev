@@ -9,6 +9,7 @@ import {
   configOptionToModelOptions,
   isModelConfigOption,
   ModelConfigSelector,
+  type ModelConfigSelectorProps,
   type ModelSelectorOption,
   type SelectConfigOption,
   usableConfigOptions,
@@ -91,6 +92,15 @@ function CustomProviderModelInput({
   );
 }
 
+function withProfileConfigValues(configOptions: SelectConfigOption[], profile: ProfileFormData) {
+  return configOptions.map((option) => ({
+    ...option,
+    currentValue: isModelConfigOption(option)
+      ? profile.model || option.currentValue
+      : profile.config_options?.[option.id] || option.currentValue,
+  }));
+}
+
 export function ModelPicker({
   profile,
   models,
@@ -104,6 +114,8 @@ export function ModelPicker({
   configOptionsLoading,
   keepOpenOnModelChange,
   discovery,
+  resolveConfigurationOptions,
+  onConfigurationApply,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -118,6 +130,10 @@ export function ModelPicker({
   keepOpenOnModelChange?: boolean;
   /** Present only for host-CLI agent types; enables the custom model entry. */
   discovery?: ModelDiscovery;
+  /** Resolves a candidate model's provider options without mutating the draft. */
+  resolveConfigurationOptions?: ModelConfigSelectorProps["resolveConfigurationOptions"];
+  /** Applies the exact model plus its chosen provider options to the draft. */
+  onConfigurationApply?: ModelConfigSelectorProps["onConfigurationApply"];
 }) {
   const { t } = useTranslation();
   if (profile.provider_kind === "openai_compatible") {
@@ -162,12 +178,7 @@ export function ModelPicker({
   if (modelIsGone) {
     modelOptions.unshift(goneModelOption(profile.model, allowCustomModel, goneModelLabel));
   }
-  const selectedConfigOptions = configOptions.map((option) => ({
-    ...option,
-    currentValue: isModelConfigOption(option)
-      ? profile.model || option.currentValue
-      : profile.config_options?.[option.id] || option.currentValue,
-  }));
+  const selectedConfigOptions = withProfileConfigValues(configOptions, profile);
 
   const modelIsUnavailable = modelIsGone && !allowCustomModel;
 
@@ -189,6 +200,8 @@ export function ModelPicker({
         keepOpenOnModelChange={keepOpenOnModelChange}
         triggerClassName={modelIsUnavailable ? "text-destructive" : undefined}
         allowCustomModel={allowCustomModel}
+        resolveConfigurationOptions={resolveConfigurationOptions}
+        onConfigurationApply={onConfigurationApply}
       />
     </div>
   );
@@ -227,6 +240,7 @@ export function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption
       currentValue: option.current_value,
       category: option.category,
       options: option.options,
+      catalog: option.catalog,
     })),
   );
 }

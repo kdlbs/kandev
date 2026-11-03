@@ -424,6 +424,38 @@ After you edit launch settings, choose **Refresh models** to check the current d
 The provider returns the model catalog. Discovery success does not confirm
 catalog completeness or account access to every model.
 
+### Create the first profile for a newly installed agent
+
+If you install an agent CLI after Kandev started, **Settings > Agents** can list it
+as available before any profile row exists. Open its card and create the profile
+as usual. Model discovery and dependent option resolution use the complete draft,
+so the model list, modes, and dependent options work before the first Save.
+Saving persists the agent and its first profile together. Discovery alone does
+not create a profile, change an existing one, or start a task session.
+
+### Model groups and composed selections
+
+Some providers advertise models under native groups instead of one flat list.
+The picker keeps the supplied group names, order, and descriptions. Search matches
+model labels, exact values, group paths, and, for a composed family, its
+dimension labels and values.
+
+A composed family opens a focused view with one row per supplied dimension. When
+the exact model resolves, the view also shows that model's real provider options,
+such as Thinking or Speed, so the whole configuration can be reviewed before the
+single **Use configuration** action. Only a complete combination that resolves to
+exactly one currently advertised model can be applied. Selecting a dimension keeps
+the rest of your draft visible; values that can no longer complete a pairing are
+marked and must be replaced before applying. Thinking, Speed, Effort, and other
+provider options remain separate controls and keep the selected model's
+authoritative option snapshot. Kandev does not guess pairings from model names:
+a family renders as composed only when the provider supplies verified
+relationships, so an unqualified family stays an ordinary group.
+
+On a phone the picker opens as one sheet with internal Back navigation, one
+vertical scroll region, and a fixed Apply action. Closing the sheet without
+applying leaves your saved configuration unchanged.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
@@ -919,6 +951,32 @@ from targeting a replacement prompt that reused a provider pending ID. Kandev re
 which option before delivery and rejects concurrent or replayed answers. It does not expose hidden
 environment values, headers, raw MCP arguments, or option metadata. See
 [Resolve a live agent permission request](automation-and-mcp.md#resolve-a-live-agent-permission-request).
+
+### Devin permissions and sandbox
+
+New Devin profiles start in **Smart** mode with **Devin sandbox** set to
+**Disabled**, which stores an explicit `DEVIN_SANDBOX=false` entry. Existing
+profiles keep their saved values, including an inherited setting that has no
+entry. Smart availability varies by account and rollout; when the current
+capability snapshot does not advertise it, the editor shows Smart as unavailable
+and asks for an advertised mode instead of substituting Code, Ask, or Plan.
+
+The sandbox control has three values:
+
+- **Use CLI settings**: no profile entry. Devin applies its own policy and the
+  profile keeps its explicit mode.
+- **Disabled**: explicit `DEVIN_SANDBOX=false`.
+- **Enabled**: explicit `DEVIN_SANDBOX=true` and **Autonomous** mode. Kandev
+  validates the pair and refuses a contradictory Smart or Bypass mode before the
+  provider starts.
+
+Install or update Devin with the official command
+`curl -fsSL https://cli.devin.ai/install.sh | bash`. Sandbox execution needs the
+provider's own prerequisites on the host; a missing prerequisite fails visibly
+and Kandev does not retry without the sandbox. The ACP Start mode controls
+structured sessions only. With terminal passthrough enabled, the native terminal
+keeps Devin's own permission behavior. Kandev **Auto-approve all permissions**
+remains independent and only answers approval requests the provider still sends.
 
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
