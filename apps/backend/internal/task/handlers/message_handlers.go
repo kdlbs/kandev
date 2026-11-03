@@ -969,8 +969,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		req.canvasGuidanceResolved = canvasGuidanceResolved
 		req.includeCanvasGuidance = includeCanvasGuidance
 	}
+	initialBriefRequest := req
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
-		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		ctx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 		initialTaskBriefEligible,
 	)
 	// Reserve the new turn before the request is acknowledged. A refusal turns
@@ -1098,14 +1099,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				Attachments: queuedMessageAttachments(req.Attachments), Metadata: queueMetadata,
 				QueuedBy: messagequeue.QueuedByUser,
 			}
-			created, createErr := h.service.CreateQueuedMessageIdempotent(
+			return h.service.CreateQueuedMessageIdempotent(
 				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
-			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
-				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
-			}
-			return created, createErr
 		}
 		if req.ClientMessageID != "" {
 			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
@@ -1153,7 +1149,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
-			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			admissionCtx, initialBriefRequest, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
 			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
@@ -1170,6 +1166,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
+	}
+	// Queue notification must run outside the session admission gate.
+	if atomicQueuedTaskFeedback && (createRequest.InitialTaskBrief == nil ||
+		createRequest.InitialTaskBrief.Selected || message.PromptIndex == 1) {
+		queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
 	}
 	req.Content = message.Content
 	req.deliverySubmissionID = message.ID

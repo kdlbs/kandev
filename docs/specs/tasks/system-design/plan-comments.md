@@ -245,15 +245,18 @@ enabled because comment ownership is independent of session availability.
 
 ## Atomic acceptance
 
-Direct-message and durable-queue repositories already insert inside database
-transactions. Direct delivery acquires a task-scoped admission lease before
-its exact preflight and keeps it across task-state and turn-start hooks through
-the final transaction. Plan-comment mutations and plan deletion join the same
-lease, so a successful preflight cannot become stale only after irreversible
-hooks run. SQLite uses a process-local task guard. PostgreSQL pairs that guard
-with an advisory lock shared across backend processes; its writer pool must
-allow at least two connections because the lease owns one while hooks and the
-final transaction use another.
+Direct delivery holds a task admission lease from exact preflight through
+task-state hooks, turn-start hooks, and the final transaction. Comment mutations
+and plan deletion use the same lease. SQLite uses a local guard. PostgreSQL adds
+a shared advisory lock and requires at least two writer connections: one for
+the lease and another for hooks and acceptance.
+
+Call `NotifyQueuedUserPrompt` with the caller context after
+`WithInitialTaskBriefAdmission` returns. Lifecycle drains take the cancellation
+guard before the session gate. Keep commit and brief tracking inside admission.
+Rebuild stale briefs from the original submission. Retained comment receipts
+use their ownership token and delivery marker, not ordinary queue dispatch
+claims. Agent admission still negotiates delivery and persists durable submissions.
 
 Comment-bearing variants then extend the final transaction boundary in this
 order:
@@ -581,6 +584,7 @@ correctness boundary.
 
 ## Implementation plans
 
+- [Plan comment Send lock order](../../../plans/plan-comment-send-lock-order/plan.md)
 - [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
