@@ -1,0 +1,111 @@
+---
+id: "01-parallel-reads"
+title: "Parallelize independent UI reads"
+status: done
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-UI-TASK-NAVIGATION-RESPONSIVENESS-001
+  - REQ-UI-COMPOSER-FILE-SEARCH-OWNERSHIP-001
+acceptance_criteria:
+  - AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+  - AC-UI-COMPOSER-FILE-SEARCH-OWNERSHIP-001.6
+system_design:
+  - ../../specs/ui/system-design/task-navigation-responsiveness.md
+  - ../../specs/ui/system-design/composer-file-search-ownership.md
+---
+
+# Task 01: Parallelize independent UI reads
+
+## Summary
+
+Start independent reads together in diff expansion, saved-file restoration,
+mention lookup, and accepted-message refreshes. Preserve the existing ownership
+and fallback contracts referenced above.
+
+## In scope
+
+- Parallel read admission with existing response guards and error handling.
+- Four-file restoration batches with stable panel and result order.
+- Deferred-request regression coverage at the existing production boundaries.
+
+## Out of scope
+
+New product behavior, backend changes, write ordering, generic concurrency
+frameworks, persistent caches, and visual or responsive layout changes.
+
+## Acceptance
+
+1. Independent requests start before the first response settles.
+2. Restored files retain saved order, omit failed center-panel reads, and reject
+   old-session Dockview writes after a session switch.
+3. Diff error precedence, composer fallback, and accepted-message refresh
+   behavior remain compatible with their existing callers.
+
+## Verification
+
+Run from the repository root:
+
+```bash
+(cd apps/web && pnpm exec vitest run \
+  components/diff/use-expandable-diff.test.ts \
+  components/task/task-center-panel-restoration.test.ts \
+  hooks/use-message-handler.plan-comments.test.ts \
+  hooks/use-file-editors.open-action.test.tsx \
+  components/task/chat/tiptap-input-file-search-ownership.test.tsx \
+  hooks/use-message-handler.test.ts \
+  hooks/use-file-editors.test.tsx \
+  hooks/use-file-editors.mutation-ownership.test.tsx \
+  hooks/use-file-rename-continuity.test.tsx \
+  hooks/use-file-rename-promotion.test.tsx \
+  components/task/task-center-panel-mutation-ownership.test.tsx \
+  components/diff/diff-viewer.test.tsx \
+  components/task/chat/composer-disclosure.test.tsx)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
+(cd apps/web && pnpm run i18n:ratchet)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```
+
+Normal commit hooks run changed-file ESLint and formatting.
+
+## Files likely touched
+
+- `apps/web/components/diff/use-expandable-diff.ts` and its test.
+- `apps/web/hooks/use-file-editors.ts` and its open-action test.
+- `apps/web/components/task/task-center-panel-restoration.ts` and its test.
+- `apps/web/components/task/chat/tiptap-input.tsx` and its file-search ownership test.
+- `apps/web/hooks/use-message-handler.ts` and its plan-comments test.
+
+## Dependencies
+
+None. Existing UI ownership and fallback requirements remain authoritative.
+
+## Risks
+
+Late responses can target a retired session. Parallel failures can change error
+precedence. The tests use controlled responses to exercise both boundaries.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- [Task navigation design](../../specs/ui/system-design/task-navigation-responsiveness.md),
+  scope and stale-response protection.
+- [Composer search design](../../specs/ui/system-design/composer-file-search-ownership.md),
+  settlement and current fallback.
+- [Plan](plan.md).
+
+## Results
+
+Seven concurrency cases failed on the sequential implementation and passed
+after the refactor. The changed suites passed 61 tests and the related suites
+passed 107 tests, for 168 distinct passing cases. Typecheck, changed-file ESLint,
+and the i18n ratchet passed. The affected message suite passed 19 tests after
+commit-hook formatting. Catalog validation and specification lint passed. The documentation coverage
+preflight passed against the actual PR file list plus these two new records.
+Hosted CI and review completion remain pending. No browser E2E or latency
+benchmark was run.
