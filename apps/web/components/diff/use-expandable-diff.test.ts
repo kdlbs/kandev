@@ -86,6 +86,32 @@ async function loadAndSettle(loadContent: () => Promise<void>) {
 }
 
 describe("useExpandableDiff", () => {
+  it("starts both file reads before either completes and preserves current-file error priority", async () => {
+    let rejectCurrent!: (error: Error) => void;
+    requestFileContentMock.mockReturnValue(
+      new Promise((_, reject) => {
+        rejectCurrent = reject;
+      }),
+    );
+    requestFileContentAtRefMock.mockRejectedValue(new Error("base denied"));
+    const { result } = renderHook(() =>
+      useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL }),
+    );
+    let loading!: Promise<void>;
+    act(() => {
+      loading = result.current.loadContent();
+    });
+    const baseStarted = requestFileContentAtRefMock.mock.calls.length;
+    await act(async () => {
+      rejectCurrent(new Error("current denied"));
+      await loading;
+    });
+    expect(baseStarted).toBe(1);
+    expect(result.current.error).toBe("current denied");
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.metadata).toBe(PARTIAL);
+  });
+
   it("returns the partial fileDiffMetadata before content is loaded", () => {
     const { result } = renderHook(() =>
       useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL }),

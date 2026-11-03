@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileContentResponse } from "@/lib/types/backend";
 import type { FileEditorState } from "@/lib/state/dockview-store";
@@ -63,6 +63,8 @@ const mocks = vi.hoisted(() => {
   resetDockState();
 
   return {
+    savedTabs: [] as Array<{ path: string; name: string }>,
+    sessionId: "sess-1",
     fakeClient,
     appStore,
     toast,
@@ -80,7 +82,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { tasks: { activeSessionId: string } }) => unknown) =>
-    selector({ tasks: { activeSessionId: "sess-1" } }),
+    selector({ tasks: { activeSessionId: mocks.sessionId } }),
   useAppStoreApi: () => mocks.appStore,
 }));
 
@@ -93,7 +95,7 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
 }));
 
 vi.mock("@/lib/local-storage", () => ({
-  getOpenFileTabs: () => [],
+  getOpenFileTabs: () => mocks.savedTabs,
   setOpenFileTabs: vi.fn(),
   getActiveTabForSession: () => "chat",
   setActiveTabForSession: vi.fn(),
@@ -225,4 +227,32 @@ describe("useFileEditors open actions", () => {
       repo: undefined,
     });
   });
+});
+
+it("restores four editor files concurrently and rejects writes after a session switch", async () => {
+  mocks.requestFileContent.mockReset();
+  mocks.resetDockState();
+  mocks.sessionId = "restore-concurrency";
+  mocks.savedTabs = Array.from({ length: 6 }, (_, index) => ({
+    path: `restored-${index}.ts`,
+    name: `restored-${index}.ts`,
+  }));
+  const pending = mocks.savedTabs.map(() => defer<FileContentResponse>());
+  mocks.requestFileContent.mockImplementation(
+    (_client, _session, path) => pending[Number(path.match(/\d+/)[0])].promise,
+  );
+  const view = renderHook(() => useFileEditors());
+  const started = mocks.requestFileContent.mock.calls.length;
+  const saved = [...mocks.savedTabs];
+  mocks.savedTabs = [];
+  mocks.sessionId = "replacement-session";
+  view.rerender();
+  await act(async () => {
+    pending.forEach((read, index) => read.resolve(fileResponse(saved[index].path, "old session")));
+  });
+  expect(started).toBe(4);
+  expect(mocks.requestFileContent).toHaveBeenCalledTimes(4);
+  expect(mocks.getDockState().openFiles.size).toBe(0);
+  view.unmount();
+  mocks.sessionId = "sess-1";
 });

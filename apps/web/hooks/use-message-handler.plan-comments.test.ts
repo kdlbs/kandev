@@ -494,3 +494,66 @@ describe("useMessageHandler direct admission identity", () => {
     expect(admissions[1]?.[1]?.client_message_id).not.toBe(admissions[0]?.[1]?.client_message_id);
   });
 });
+
+describe("accepted message refresh concurrency", () => {
+  it.each(["direct", "queued", "recovered"])(
+    "refreshes independent snapshots together after %s acceptance",
+    async (mode) => {
+      const payload = {
+        message: "Review both",
+        planCommentRefs: [{ id: COMMENT_ID, version: 2 }],
+        previewFeedbackRefs: [{ id: PREVIEW_ID, version: 3 }],
+      } as never;
+      const { result } = renderMessageHandler();
+      selectedSession(
+        mode === "direct" ? "WAITING_FOR_INPUT" : "RUNNING",
+        mode === "direct" ? undefined : "generating",
+      );
+      if (mode === "recovered") {
+        queueMock.mockRejectedValueOnce(new Error("uncertain admission"));
+        await expect(result.current.handleSendMessage(payload)).rejects.toThrow(
+          "uncertain admission",
+        );
+        const id = queueMock.mock.calls[0][0].clientQueueId;
+        getWebSocketClientMock.mockReturnValue({
+          request: vi.fn().mockResolvedValue({
+            messages: [
+              {
+                id,
+                session_id: SESSION_ID,
+                task_id: TASK_ID,
+                author_type: "user",
+                content: "Review both",
+                type: "message",
+                created_at: "2026-08-01T18:00:00Z",
+              },
+            ],
+          }),
+        });
+        selectedSession("WAITING_FOR_INPUT");
+      }
+      let resolveComments!: (value: unknown) => void;
+      getTaskPlanCommentsMock.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveComments = resolve;
+        }),
+      );
+      let send!: ReturnType<typeof result.current.handleSendMessage>;
+      await act(async () => {
+        send = result.current.handleSendMessage(payload);
+      });
+      const previewStarted = getTaskPreviewFeedbackMock.mock.calls.length;
+      const snapshot = { task_id: TASK_ID, plan_id: "plan-1", revision: 9, comments: [] };
+      await act(async () => {
+        resolveComments(snapshot);
+        await send;
+      });
+      expect(previewStarted).toBe(1);
+      expect(setTaskPlanCommentsMock).toHaveBeenCalledWith(TASK_ID, snapshot);
+      expect(setTaskPreviewFeedbackMock).toHaveBeenCalledWith(
+        TASK_ID,
+        expect.objectContaining({ revision: 4 }),
+      );
+    },
+  );
+});

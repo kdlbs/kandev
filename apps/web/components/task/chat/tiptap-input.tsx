@@ -173,13 +173,15 @@ function useMentionItems(
         lastFileSearchRef.current === owner &&
         owner.lookup === lookup &&
         storeReadScopeIdentity(storeApi) === scope;
-      const allItems = await loadTaskMentionItems(
-        storeApi.getState(),
-        taskIdRef.current,
-        workspace,
-        query,
-        { signal: controller.signal, isCurrent },
-      );
+      const [allItems, files] = await Promise.all([
+        loadTaskMentionItems(storeApi.getState(), taskIdRef.current, workspace, query, {
+          signal: controller.signal,
+          isCurrent,
+        }),
+        owner.sessionId
+          ? fetchFileResults(owner.sessionId, query, owner, isCurrent).catch(() => [])
+          : Promise.resolve([]),
+      ]);
       if (!isCurrent()) return [];
       allItems.push({
         id: "__plan__",
@@ -197,20 +199,14 @@ function useMentionItems(
           onSelect: () => {},
         });
       }
-      if (owner.sessionId) {
-        try {
-          const files = await fetchFileResults(owner.sessionId, query, owner, isCurrent);
-          if (!isCurrent()) return [];
-          for (const filePath of files) {
-            allItems.push({
-              id: filePath,
-              kind: "file",
-              label: filePath,
-              description: t("task:file"),
-              onSelect: () => {},
-            });
-          }
-        } catch {}
+      for (const filePath of files) {
+        allItems.push({
+          id: filePath,
+          kind: "file",
+          label: filePath,
+          description: t("task:file"),
+          onSelect: () => {},
+        });
       }
       return isCurrent() ? rankMentionItems(allItems, query, workspace) : [];
     },

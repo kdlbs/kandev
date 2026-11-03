@@ -469,3 +469,35 @@ describe("TipTapInput current file fallbacks", () => {
     expect(screen.getByTestId(MENU).textContent).toBe(fallback);
   });
 });
+
+it("starts file search while task mentions are pending", async () => {
+  let resolveTasks!: (response: Response) => void;
+  const tasks = new Promise<Response>((resolve) => {
+    resolveTasks = resolve;
+  });
+  const fetchMock = vi.fn(() => tasks);
+  vi.stubGlobal("fetch", fetchMock);
+  const ref = createRef<TipTapInputHandle>();
+  render(
+    <StateProvider initialState={initialState}>
+      <TipTapInput
+        ref={ref}
+        sessionId="alpha"
+        workspaceId="workspace-1"
+        value=""
+        onChange={() => {}}
+      />
+    </StateProvider>,
+  );
+  await flush();
+  await query(ref);
+  expect(fetchMock).toHaveBeenCalled();
+  const started = DeferredSocket.current.searches().length;
+  await act(async () => {
+    resolveTasks(new Response(JSON.stringify({ tasks: [], total: 0 }), { status: 200 }));
+  });
+  await flush();
+  await reply(0, [CURRENT_FILE]);
+  expect(started).toBe(1);
+  menuHas(CURRENT_FILE);
+});
