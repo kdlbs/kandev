@@ -74,7 +74,9 @@ and is not claimed connected here.
 `PolicyStateJSON.selection_chain` holds the logical profile, initial generation,
 tried concrete IDs and last selected candidate. Same-candidate retries preserve
 the chain. Permitted cross-candidate fallback starts at the failed candidate's
-tier and excludes tried IDs. The existing narrow unclassified path uses the same
+tier and excludes tried IDs. If the failed candidate no longer exists in saved
+order and no tried candidate locates a tier, the chain fails closed instead of
+restarting at the first tier. The existing narrow unclassified path uses the same
 ordered search and preserves its workflow fencing. Policy counter carry/reset
 preserves the independent chain. Verified current output/effects end a chain
 through a separate generation-fenced method, never the general counter helper.

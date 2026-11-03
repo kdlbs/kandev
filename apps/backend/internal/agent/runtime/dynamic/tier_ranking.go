@@ -210,6 +210,13 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 		return preview, err
 	}
 	unavailable := e.tierAvailability(profile, preview.ObservedAt)
+	// A preview sample must not draw from the execution random source. With no
+	// explicit preview picker, use a local source seeded for this observation.
+	pick := e.tierPreviewPick
+	if pick == nil {
+		seed := uint64(preview.ObservedAt.UnixNano())
+		pick = rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)).IntN
+	}
 	var history map[string]int64
 	var loaded bool
 	for index, tier := range tiers {
@@ -222,7 +229,7 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 			}
 			loaded = true
 		}
-		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, e.tierPreviewPick, history, preview.ObservedAt), unreached)
+		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, pick, history, preview.ObservedAt), unreached)
 	}
 	preview.State = "no_candidates"
 	if len(preview.Considered) > 0 {

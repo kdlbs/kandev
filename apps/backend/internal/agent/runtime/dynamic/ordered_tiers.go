@@ -116,7 +116,7 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 	}
 	start := 0
 	if continuing || fallback {
-		start = orderedStartIndex(tiers, current, excluded != "")
+		start = orderedStartIndex(tiers, current, excluded != "", chain.TriedCandidateIDs)
 	}
 	now := e.now()
 	unavailable := e.tierAvailability(profile, now)
@@ -214,19 +214,45 @@ func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred stri
 	}
 }
 
-func orderedStartIndex(tiers []orderedTier, current string, skipping bool) int {
+func locateTier(tiers []orderedTier, id string) (int, string, bool) {
 	for index, tier := range tiers {
 		for _, candidate := range tier.rows {
-			if candidate.ID != current {
-				continue
+			if candidate.ID == id {
+				return index, tier.direction, true
 			}
-			if skipping && tier.direction == orderedNextTier {
-				return index + 1
-			}
-			return index
 		}
 	}
-	return 0
+	return 0, "", false
+}
+
+func orderedStartIndex(tiers []orderedTier, current string, skipping bool, tried []string) int {
+	if index, direction, ok := locateTier(tiers, current); ok {
+		if skipping && direction == orderedNextTier {
+			return index + 1
+		}
+		return index
+	}
+	// The selected candidate may have been deleted from the saved order. Resume
+	// at the furthest tier that still holds a tried candidate so the durable
+	// chain cannot reopen an earlier tier.
+	best, bestDirection := -1, ""
+	for _, id := range tried {
+		if index, direction, ok := locateTier(tiers, id); ok && index > best {
+			best, bestDirection = index, direction
+		}
+	}
+	if best < 0 {
+		if len(tried) == 0 {
+			return 0
+		}
+		// The chain's position is not established in the current saved order.
+		// Fail closed instead of restarting at the first tier.
+		return len(tiers)
+	}
+	if skipping && bestDirection == orderedNextTier {
+		return best + 1
+	}
+	return best
 }
 
 func (c SelectionChain) withCandidate(id string) SelectionChain {

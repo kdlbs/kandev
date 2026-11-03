@@ -139,3 +139,22 @@ func TestPreviewUsesAnIndependentRandomPicker(t *testing.T) {
 		t.Fatal("preview did not use its own picker")
 	}
 }
+
+func TestOrderedStartIndexDoesNotReopenAnEarlierTier(t *testing.T) {
+	tiers := []orderedTier{
+		{head: "a", mode: orderedTierMode, direction: orderedSameTier, rows: []Candidate{{ID: "a"}}},
+		{head: "b", mode: orderedTierMode, direction: orderedSameTier, rows: []Candidate{{ID: "b"}}},
+		{head: "c", mode: orderedTierMode, direction: orderedSameTier, rows: []Candidate{{ID: "c"}}},
+	}
+	tiers[1].rows = []Candidate{{ID: "x"}}
+	if got := orderedStartIndex(tiers, "b", true, []string{"b"}); got != len(tiers) {
+		t.Fatalf("deleted current start = %d, want a fail-closed %d", got, len(tiers))
+	}
+	if got := orderedStartIndex(tiers, "b", true, []string{"a"}); got != 0 {
+		t.Fatalf("existing tried start = %d, want 0", got)
+	}
+	tiers[0].direction = orderedNextTier
+	if got := orderedStartIndex(tiers, "a", true, nil); got != 1 {
+		t.Fatalf("next-tier start = %d, want 1", got)
+	}
+}
