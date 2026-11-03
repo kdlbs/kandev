@@ -5,19 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 import type { FileAttachment } from "./chat/file-attachment";
 
-const {
-  mockCreateTask,
-  mockReplaceTaskUrl,
-  mockSetActiveTask,
-  mockSetActiveSession,
-  mockHasPendingAttachmentUploads,
-} = vi.hoisted(() => ({
-  mockCreateTask: vi.fn(),
-  mockReplaceTaskUrl: vi.fn(),
-  mockSetActiveTask: vi.fn(),
-  mockSetActiveSession: vi.fn(),
-  mockHasPendingAttachmentUploads: vi.fn(),
-}));
+const { mockCreateTask, mockRouterReplace, mockSetActiveSession, mockHasPendingAttachmentUploads } =
+  vi.hoisted(() => ({
+    mockCreateTask: vi.fn(),
+    mockRouterReplace: vi.fn(),
+    mockSetActiveSession: vi.fn(),
+    mockHasPendingAttachmentUploads: vi.fn(),
+  }));
 
 const mockToast = vi.fn();
 const mockEnhancePrompt = vi.fn();
@@ -37,14 +31,13 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   createTask: mockCreateTask,
 }));
 
-vi.mock("@/lib/links", () => ({
-  replaceTaskUrl: mockReplaceTaskUrl,
+vi.mock("@/lib/routing/client-router", () => ({
+  useRouter: () => ({ replace: mockRouterReplace }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      setActiveTask: mockSetActiveTask,
       setActiveSession: mockSetActiveSession,
     }),
 }));
@@ -254,6 +247,9 @@ describe("useSubtaskSubmit", () => {
     vi.clearAllMocks();
     mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockCreateTask.mockResolvedValue({ id: CREATED_TASK_ID, session_id: CREATED_SESSION_ID });
+    mockRouterReplace.mockImplementation((_href: string, options: { onNavigated: () => void }) =>
+      options.onNavigated(),
+    );
   });
 
   it("sends the auto-title contract without a title", async () => {
@@ -270,11 +266,13 @@ describe("useSubtaskSubmit", () => {
     );
     expect(mockCreateTask.mock.calls[0][0]).not.toHaveProperty("title");
     expect(opts.onClose).toHaveBeenCalledOnce();
-    expect(mockSetActiveTask).toHaveBeenCalledWith(CREATED_TASK_ID);
     expect(mockSetActiveSession).toHaveBeenCalledWith(CREATED_TASK_ID, CREATED_SESSION_ID);
-    expect(mockReplaceTaskUrl).toHaveBeenCalledWith(CREATED_TASK_ID);
+    expect(mockRouterReplace).toHaveBeenCalledWith(
+      `/t/${CREATED_TASK_ID}?sessionId=${CREATED_SESSION_ID}`,
+      { scroll: false, onNavigated: expect.any(Function) },
+    );
     expect(onClose.mock.invocationCallOrder[0]).toBeLessThan(
-      mockReplaceTaskUrl.mock.invocationCallOrder[0],
+      mockRouterReplace.mock.invocationCallOrder[0],
     );
   });
 
