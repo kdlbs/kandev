@@ -86,11 +86,11 @@ Private `acp-debug/` captures contain consent state and diagnostic data. They mu
 | Boundary | Existing location | Planned responsibility |
 | --- | --- | --- |
 | Agent declaration | `internal/agent/agents/antigravity_acp.go` | Preserve identity, base arguments, skills, resume, and remote metadata. Declare the subscription default. |
-| Native bundle helper | Proposed `internal/agent/antigravityruntime/` | Trusted artifact records, bounded installation, filesystem validation, and local resolution. No generic native package manager. |
+| Native bundle helper | `internal/agent/antigravityruntime/` | Trusted artifact records, bounded installation, filesystem validation, and local resolution. No generic native package manager. |
 | Install orchestration | `internal/agent/settings/controller/agent_install.go`, `install_job.go` | Reuse job status, output, cancellation, maintenance interlock, and operator authorization. Accept a typed Go action for this local bundle. |
 | Launch selection | `internal/agent/runtime/lifecycle/command.go`, `internal/agent/hostutility/manager.go` | Resolve the same absolute bundle executable on local paths. Preserve remote command behavior. |
 | Wire compatibility | `internal/agentctl/acpcompat/`, `server/adapter/transport/acp/dialect.go` | Pure Antigravity client-info, auth-method, URL, question, and error translation helpers. |
-| ACP/process ownership | `internal/agentctl/server/adapter/transport/acp/`, `server/process/` | Execute RPCs, observe stderr safely, maintain auth state, and manage process generations. |
+| ACP/process ownership | `internal/agentctl/server/adapter/transport/acp/`, `internal/agentctl/server/process/` | Execute RPCs, observe stderr safely, maintain auth state, and manage process generations. |
 | Sessionless setup | `internal/agent/hostutility/`, `agent/capabilities/handlers/` | Own one bounded local sign-in attempt using existing authenticated agentctl instances and client methods. |
 | Product UI | Settings card and task auth guidance | Install/sign-in/retry state, phone presentation, and capability refresh. |
 | Errors and usage | Existing routing errors, task events, and usage contracts | Consume provider observations without adding a new policy engine. |
@@ -203,6 +203,8 @@ The policy covers task initialize, capability probes, model resolution probes, u
 Registered-agent acpdbg also uses the provider identity and local runtime policy; arbitrary raw `--exec` remains diagnostic.
 Do not globally rename Kandev or report `zed` as the product or task owner.
 This is a compatibility assumption about the vendor's client allowlist, not a guarantee of third-party model entitlement.
+The override is scoped to the Antigravity agent only; disabling that agent is the kill switch.
+No separate global identity flag is introduced because the vendor allowlist is the only reason for the override.
 
 Preserve `initialize` data before attempting authentication or `session/new`.
 On an unauthenticated result, probes return advertised auth methods and `auth_required`, without an empty successful catalog.

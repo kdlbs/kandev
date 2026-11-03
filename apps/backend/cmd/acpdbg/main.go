@@ -458,6 +458,10 @@ func probeOne(ctx context.Context, shared *sharedFlags, spec acpdbg.AgentSpec) m
 		AgentID: spec.ID,
 		Status:  "failed",
 	}
+	if spec.ResolveError != "" {
+		entry.Error = spec.ResolveError
+		return entry
+	}
 	jsonlPath := resolveJSONLPath(shared, spec.ID, "probe")
 	entry.JSONL = jsonlPath
 

@@ -3,6 +3,7 @@ package acpcompat
 import (
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +115,7 @@ func parseAntigravityErrorText(env *AntigravityErrorEnvelope, text string) {
 	parseAntigravityReason(env, text)
 	parseAntigravityResetEvidence(env, text)
 	if env.Message == "" {
-		env.Message = firstAntigravityLine(text)
+		env.Message = boundAntigravityMessage(firstAntigravityLine(text))
 	}
 }
 
@@ -127,7 +128,7 @@ func parseAntigravityAPIError(env *AntigravityErrorEnvelope, text string) {
 		env.HTTPStatus = antigravityInt(match[1])
 	}
 	if env.Message == "" {
-		env.Message = match[2]
+		env.Message = boundAntigravityMessage(match[2])
 	}
 	if env.Status == "" {
 		env.Status = match[3]
@@ -169,9 +170,7 @@ func mergeAntigravityData(env *AntigravityErrorEnvelope, data any, depth int) {
 	}
 	switch value := data.(type) {
 	case map[string]any:
-		for key, entry := range value {
-			mergeAntigravityField(env, strings.ToLower(strings.TrimSpace(key)), entry, depth)
-		}
+		mergeAntigravityMap(env, value, depth)
 	case string:
 		trimmed := strings.TrimSpace(value)
 		if strings.HasPrefix(trimmed, "{") {
@@ -195,6 +194,30 @@ func mergeAntigravityData(env *AntigravityErrorEnvelope, data any, depth int) {
 			mergeAntigravityData(env, decoded, depth+1)
 		}
 	}
+}
+
+func mergeAntigravityMap(env *AntigravityErrorEnvelope, value map[string]any, depth int) {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, nested := range []bool{false, true} {
+		for _, key := range keys {
+			if antigravityNestedErrorField(key) != nested {
+				continue
+			}
+			mergeAntigravityField(env, strings.ToLower(strings.TrimSpace(key)), value[key], depth)
+		}
+	}
+}
+
+func antigravityNestedErrorField(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "error", "details", "cause", "data":
+		return true
+	}
+	return false
 }
 
 func mergeAntigravityField(env *AntigravityErrorEnvelope, key string, value any, depth int) {

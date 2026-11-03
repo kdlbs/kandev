@@ -412,7 +412,7 @@ func TestAntigravityOutcomeEvidenceUnavailable(t *testing.T) {
 		other := createAntigravityJournal(t, root, "other-session", antigravityStepsSchema)
 		dbPath := filepath.Join(root, acpcompat.AntigravityConversationsDir, antigravityOutcomeSessionID+".db")
 		if err := os.Symlink(other, dbPath); err != nil {
-			t.Fatalf("symlink fixture: %v", err)
+			t.Skipf("symlink fixture unavailable: %v", err)
 		}
 		fake := &antigravityOutcomeAgent{sessionID: antigravityOutcomeSessionID, version: acpcompat.AntigravityQuotaRefusalVersion}
 		a := newAntigravityOutcomeFixture(t, fake, root)

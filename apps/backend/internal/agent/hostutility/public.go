@@ -97,7 +97,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
-			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
@@ -454,6 +454,7 @@ func (m *Manager) ExecutePromptWithMCP(
 			WorkDir:         inst.workDir,
 			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,

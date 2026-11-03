@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
@@ -270,7 +271,8 @@ func setupAntigravityNativeUsageAgent(
 		t.Fatalf("Connect: %v", err)
 	}
 	fake.conn = acpsdk.NewAgentSideConnection(fake, a2cW, c2aR)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if err := a.Initialize(ctx); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
@@ -291,6 +293,8 @@ func TestAntigravityNativeUsageCommand(t *testing.T) {
 		"| 5-hour | 42% | in 3 hours |\n"
 	fake := &antigravityNativeUsageAgent{markdown: markdown, size: 200_000, used: 40_000}
 	a, sessionID := setupAntigravityNativeUsageAgent(t, fake)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Establish the session's occupancy baseline before the command runs, so
 	// the unchanged frame it reports cannot be billed as new prompt growth.
@@ -300,7 +304,7 @@ func TestAntigravityNativeUsageCommand(t *testing.T) {
 	}
 	drainEvents(a)
 
-	if err := a.Prompt(context.Background(), "/usage", nil, 9); err != nil {
+	if err := a.Prompt(ctx, "/usage", nil, 9); err != nil {
 		t.Fatalf("Prompt: %v", err)
 	}
 

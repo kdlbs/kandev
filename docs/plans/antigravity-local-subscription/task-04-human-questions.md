@@ -1,7 +1,7 @@
 ---
 id: "04-human-questions"
 title: "Preserve native human questions"
-status: done
+status: in_progress
 wave: 3
 depends_on:
   - 02-subscription-policy
@@ -121,3 +121,5 @@ Implemented.
 - Added `TestAntigravityHumanInputNeverAutoApproves`, `TestAntigravityPermissionOptionsPreserved`, and `TestAntigravityDebuggerHumanQuestion` with other-provider and ordinary-tool controls.
 
 Verification: targeted backend and race tests passed; changed-Go lint 0 issues. Live model-generated question observation remains Task 07 evidence.
+
+Desktop and phone question E2E specs remain open; deterministic manager, ACP, and acpdbg coverage is complete.

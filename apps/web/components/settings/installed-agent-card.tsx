@@ -338,7 +338,7 @@ export function InstalledAgentCard(props: Props) {
             configured={configured}
             probing={probing}
             authRequired={authRequired}
-            loginAvailable={loginAvailable}
+            loginAvailable={loginAvailable || antigravityAgent}
             onAuthClick={handleAuthClick}
             runtime={props.runtimeUpdate}
             status={props.runtimeUpdateStatus}

@@ -14,10 +14,11 @@ import (
 
 // AgentSpec is the minimal info acpdbg needs to spawn a registered agent.
 type AgentSpec struct {
-	ID          string
-	DisplayName string
-	Command     []string
-	Env         []string
+	ID           string
+	DisplayName  string
+	Command      []string
+	Env          []string
+	ResolveError string
 }
 
 // ListACPAgents returns every enabled inference agent whose runtime
@@ -38,13 +39,17 @@ func ListACPAgents(reg *registry.Registry) []AgentSpec {
 		if cfg == nil || cfg.Command.IsEmpty() {
 			continue
 		}
-		command, env := resolveAgentLaunch(ia, cfg.Command.Args())
-		out = append(out, AgentSpec{
+		command, env, resolveErr := resolveAgentLaunch(ia, cfg.Command.Args())
+		spec := AgentSpec{
 			ID:          ag.ID(),
 			DisplayName: ag.DisplayName(),
 			Command:     command,
 			Env:         env,
-		})
+		}
+		if resolveErr != nil {
+			spec.ResolveError = resolveErr.Error()
+		}
+		out = append(out, spec)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -52,29 +57,29 @@ func ListACPAgents(reg *registry.Registry) []AgentSpec {
 
 // LookupAgent returns the spec for a single agent ID, or an error if the
 // agent is not registered or not ACP-capable.
-func resolveAgentLaunch(ia agents.InferenceAgent, base []string) ([]string, []string) {
+func resolveAgentLaunch(ia agents.InferenceAgent, base []string) ([]string, []string, error) {
 	resolver, ok := ia.(agents.LocalRuntimeAgent)
 	if !ok {
-		return base, nil
+		return base, nil, nil
 	}
 	command, values, err := resolver.ResolveLocalRuntime(context.Background())
 	if err != nil {
-		return base, nil
+		return base, nil, err
 	}
 	env := acpcompat.MergeEnvMap(os.Environ(), values)
 	harness := acpcompat.EnvValue(env, acpcompat.AntigravityHarnessPathEnv)
 	prepared, err := acpcompat.PrepareLocalAntigravityEnv(env, harness)
 	if err != nil {
-		return command.Args(), env
+		return command.Args(), nil, err
 	}
-	return command.Args(), prepared
+	return command.Args(), prepared, nil
 }
 
 func LookupAgent(reg *registry.Registry, agentID string) (AgentSpec, error) {
 	for _, spec := range ListACPAgents(reg) {
 		if spec.ID == agentID {
-			if spec.ID == acpcompat.AntigravityAgentID && spec.Env == nil {
-				return AgentSpec{}, fmt.Errorf("agent %q has no complete local runtime", agentID)
+			if spec.ResolveError != "" {
+				return AgentSpec{}, fmt.Errorf("agent %q has no complete local runtime: %s", agentID, spec.ResolveError)
 			}
 			return spec, nil
 		}

@@ -1903,6 +1903,13 @@ func isModelConfigID(configID string, cachedConfig []streams.ConfigOption) bool 
 
 // Authenticate triggers ACP session/authenticate for a given auth method.
 func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
+	var policy *acpcompat.AuthPolicy
+	if a.cfg != nil {
+		policy = a.cfg.AuthPolicy
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && methodID != policy.MethodID {
+		return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
+	}
 	a.mu.RLock()
 	conn := a.acpConn
 	a.mu.RUnlock()
@@ -1910,10 +1917,7 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
-	if policy := a.cfg.AuthPolicy; policy != nil && acpcompat.IsAntigravity(a.agentID) {
-		if methodID != policy.MethodID {
-			return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
-		}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) {
 		return a.authenticateAntigravity(ctx, policy)
 	}
 

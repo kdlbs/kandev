@@ -210,7 +210,7 @@
   "antigravityLoginCancel": "Cancel",
   "antigravityLoginStart": "Sign in with Google",
   "antigravityLoginAgain": "Sign in again",
-  "antigravityLoginCatalogUnavailable": "Signed in, but model discovery failed. Retry model discovery.",
+  "antigravityLoginCatalogUnavailable": "Signed in, but model discovery failed. Close and retry from the agent card.",
   "antigravityLoginStartError": "Could not start Google sign-in.",
   "antigravityLoginStatusError": "Could not read Google sign-in status.",
   "antigravityLoginCancelError": "Could not cancel Google sign-in.",

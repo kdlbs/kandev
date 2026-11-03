@@ -2267,6 +2267,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	m.runSkillDeploy(ctx, req, &reqWithWorktree)
 
 	// 7. Build runtime request and create instance (agent not started yet)
+	if policy, localEnv, err := m.applyLocalRuntimeCommand(
+		ctx, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime(), nil, nil,
+	); err != nil {
+		return nil, err
+	} else {
+		reqWithWorktree.AuthPolicy = policy
+		reqWithWorktree.LocalRuntimeEnv = localEnv
+	}
 	var runtimeProgress PrepareProgressCallback
 	if shouldPrepareEnvironment(req) {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())

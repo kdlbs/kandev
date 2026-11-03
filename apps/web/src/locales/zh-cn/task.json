@@ -2633,7 +2633,7 @@
   "conversationUsage.estimatedCount_one": "{{count}} 个预估事件",
   "conversationUsage.estimatedCount_other": "{{count}} 个预估事件",
   "conversationUsage.subscriptionEstimateNotice": "此估算不是额外的 Google 订阅账单。",
-  "conversationUsage.subscriptionNativeUsageNotice": "使用 /usage 查看原生账户额度报告。",
+  "conversationUsage.subscriptionNativeUsageNotice": "使用 {{command}} 查看原生账户额度报告。",
   "allowNetworkAccess": "允许网络访问",
   "approveWithCommandPolicy": "按命令规则批准",
   "blockNetworkAccess": "阻止网络访问",

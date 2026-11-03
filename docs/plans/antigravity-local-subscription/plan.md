@@ -322,19 +322,21 @@ Run desktop and mobile separately with their owning projects. The managed runner
 
 - [x] [Task 01: Install and resolve the official local runtime](task-01-local-runtime.md)
 - [x] [Task 02: Unify subscription launch and ACP readiness](task-02-subscription-policy.md)
-- [x] [Task 03: Complete local Google sign-in](task-03-google-sign-in.md)
-- [x] [Task 04: Preserve native human questions](task-04-human-questions.md)
-- [x] [Task 05: Preserve provider and current-turn failures](task-05-provider-failures.md)
-- [x] [Task 06: Report native usage honestly](task-06-native-usage.md)
+- [ ] [Task 03: Complete local Google sign-in](task-03-google-sign-in.md)
+- [ ] [Task 04: Preserve native human questions](task-04-human-questions.md)
+- [ ] [Task 05: Preserve provider and current-turn failures](task-05-provider-failures.md)
+- [ ] [Task 06: Report native usage honestly](task-06-native-usage.md)
 - [ ] [Task 07: Qualify the native subscription path and document setup](task-07-native-qualification.md)
 
 The graph is `01 -> 02 -> 03`, with 04/05/06 depending on 02, and 07 depending on all preceding work.
 Execution remains sequential in the primary session unless the user later authorizes delegation.
 Waves describe prerequisites; they do not authorize subagents or persistent Kandev tasks.
+Tasks 03-06 have complete production and deterministic test coverage but remain `in_progress`
+until their planned browser E2E specs are added and run.
 
 ## Verification results
 
-Product implementation: Tasks 01-06 implemented. Task 07 remains blocked on live native qualification.
+Product implementation: Tasks 01-02 complete; Tasks 03-06 implementation complete with browser E2E still open; Task 07 remains blocked on live native qualification.
 Research handshakes and current-code tests do not establish live subscription inference.
 After implementation, record every required command and result in its work order and reconcile the final plan status.
 Do not mark Task 07 passed while platform or authenticated native evidence is missing.

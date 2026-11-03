@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -18,6 +19,10 @@ func TestAntigravityLoginAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "default", Role: authn.RoleAdmin, Synthetic: true})
+		c.Next()
+	})
 	RegisterRoutes(router, nil, log, "test-interlock")
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/antigravity-acp/login", nil)
@@ -34,8 +39,8 @@ func TestAntigravityLoginAuthorization(t *testing.T) {
 	request.Header.Set("X-Kandev-Interim-Settings-Interlock", "test-interlock")
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusUnauthorized && recorder.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want an authorization rejection", recorder.Code)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the handler's 503 for a nil host utility", recorder.Code)
 	}
 
 	handlers := &Handlers{hostUtility: nil, logger: log}

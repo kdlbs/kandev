@@ -210,7 +210,7 @@
   "antigravityLoginCancel": "キャンセル",
   "antigravityLoginStart": "Google でサインイン",
   "antigravityLoginAgain": "もう一度サインイン",
-  "antigravityLoginCatalogUnavailable": "サインインしましたが、モデル検出に失敗しました。再試行してください。",
+  "antigravityLoginCatalogUnavailable": "サインインしましたが、モデル検出に失敗しました。閉じてエージェントカードから再試行してください。",
   "antigravityLoginStartError": "Google サインインを開始できませんでした。",
   "antigravityLoginStatusError": "Google サインインの状態を読み取れませんでした。",
   "antigravityLoginCancelError": "Google サインインをキャンセルできませんでした。",

@@ -286,6 +286,7 @@ func writeFakeHarness(t *testing.T, dir, name string) {
 
 func TestAntigravityACP_LocalRuntimeEnvironment(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	t.Setenv("ANTIGRAVITY_HARNESS_PATH", "")
 	binDir := t.TempDir()
 	server := writeFakeAntigravityBinary(t, binDir)
 	writeFakeHarness(t, binDir, wantAntigravityHarnessNames()[0])

@@ -191,7 +191,7 @@
   "antigravityLoginCancel": "Cancelar",
   "antigravityLoginStart": "Iniciar sessão com Google",
   "antigravityLoginAgain": "Iniciar sessão novamente",
-  "antigravityLoginCatalogUnavailable": "Sessão iniciada, mas a descoberta de modelos falhou. Tente novamente.",
+  "antigravityLoginCatalogUnavailable": "Sessão iniciada, mas a descoberta de modelos falhou. Feche e tente novamente a partir do cartão do agente.",
   "antigravityLoginStartError": "Não foi possível iniciar o início de sessão Google.",
   "antigravityLoginStatusError": "Não foi possível ler o estado do início de sessão Google.",
   "antigravityLoginCancelError": "Não foi possível cancelar o início de sessão Google.",

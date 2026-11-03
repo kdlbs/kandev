@@ -84,8 +84,10 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 		return nil
 	}
 	// A provider-native human question is never answered on the user's behalf.
-	// Leave it pending instead of resolving reject/cancel.
+	// A taskless run has no UI to answer it, so stop the execution instead of
+	// holding the run's concurrency slot indefinitely.
 	if request.HumanInput {
+		s.stopTasklessExecution(ctx, run.ID, request, "office_human_input_required")
 		return nil
 	}
 	decision, optionID, optionKind := decideTasklessPermission(request)
@@ -167,8 +169,25 @@ func tasklessPermissionAnswerCompleted(err error) bool {
 	return err == nil || runtimeapi.IsNotFound(err) || runtimeapi.IsTerminalPermissionError(err)
 }
 
-func (s *Service) answerTasklessPermission(
-	ctx context.Context, request *tasklessPermissionRequest, decision, optionID string,
+func (s *Service) stopTasklessExecution(
+	ctx context.Context,
+	runID string,
+	request *tasklessPermissionRequest,
+	reason string,
+) {
+	if s.runStopper == nil {
+		return
+	}
+	if err := s.runStopper.Stop(ctx, request.AgentExecutionID, reason); err != nil && !runtimeapi.IsNotFound(err) {
+		s.logger.Error("stop taskless execution failed",
+			zap.String("run_id", runID),
+			zap.String("execution_id", request.AgentExecutionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) answerTasklessPermission(ctx context.Context, request *tasklessPermissionRequest, decision, optionID string,
 ) error {
 	if decision == permissionDecisionCancelled {
 		return s.runPermissions.CancelRunPermission(ctx, request.AgentExecutionID, request.RequestID, request.PendingID)

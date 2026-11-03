@@ -1574,7 +1574,7 @@
   "conversationUsage.estimatedCount_one": "{{count}} 件の推定イベント",
   "conversationUsage.estimatedCount_other": "{{count}} 件の推定イベント",
   "conversationUsage.subscriptionEstimateNotice": "この見積もりは Google サブスクリプションへの追加請求ではありません。",
-  "conversationUsage.subscriptionNativeUsageNotice": "ネイティブのアカウント利用枠レポートは /usage で確認できます。",
+  "conversationUsage.subscriptionNativeUsageNotice": "ネイティブアカウントの利用枠レポートには {{command}} を使用してください。",
   "allowNetworkAccess": "ネットワークアクセスを許可",
   "approveWithCommandPolicy": "コマンドルールを適用して承認",
   "blockNetworkAccess": "ネットワークアクセスをブロック",

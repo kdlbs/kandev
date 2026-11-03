@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 func TestAntigravityManagedCommandAdmission(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KANDEV_HOME_DIR", home)
-	artifact, err := antigravityruntime.ArtifactFor("linux", "amd64")
+	artifact, err := antigravityruntime.ArtifactFor(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +56,18 @@ func TestAntigravityManagedCommandAdmission(t *testing.T) {
 	if got != server {
 		t.Fatalf("admitted command = %q, want managed %q", got, server)
 	}
+	untrusted := &InferenceConfigDTO{Command: []string{filepath.Join(conflictDir, artifact.ServerName)}}
+	if _, errText := resolveSpawnCommandContext(context.Background(), untrusted); errText == "" {
+		t.Fatal("untrusted absolute runtime path was admitted")
+	}
 }
 
 func TestAntigravityUtilityEnvironmentPolicy(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	cfg := &InferenceConfigDTO{
 		AuthPolicy: acpcompat.AntigravityAuthPolicy(false),

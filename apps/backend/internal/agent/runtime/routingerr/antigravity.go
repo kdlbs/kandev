@@ -228,7 +228,9 @@ func antigravityQuotaEvidence(in AntigravityFailure, status, reason, message str
 		return true
 	}
 	if strings.Contains(message, "quota") &&
-		antigravityMessageMatches(message, "exhausted", "exceeded", "reached", "out of") {
+		antigravityMessageMatches(message,
+			"quota exceeded", "quota exhausted", "quota reached",
+			"usage limit", "billing quota") {
 		return true
 	}
 	if strings.Contains(message, "usage limit") &&

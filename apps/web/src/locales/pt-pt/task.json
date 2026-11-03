@@ -2633,7 +2633,7 @@
   "conversationUsage.estimatedCount_one": "{{count}} evento estimado",
   "conversationUsage.estimatedCount_other": "{{count}} eventos estimados",
   "conversationUsage.subscriptionEstimateNotice": "Esta estimativa não é uma fatura adicional da subscrição Google.",
-  "conversationUsage.subscriptionNativeUsageNotice": "Use /usage para ver o relatório nativo de limites da conta.",
+  "conversationUsage.subscriptionNativeUsageNotice": "Use {{command}} para o relatório de limite da conta nativa.",
   "allowNetworkAccess": "Permitir acesso à rede",
   "approveWithCommandPolicy": "Aprovar com regra de comandos",
   "blockNetworkAccess": "Bloquear acesso à rede",

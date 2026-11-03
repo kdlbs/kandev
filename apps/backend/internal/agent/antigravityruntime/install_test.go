@@ -12,10 +12,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestResolveAntigravityBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable bits")
+	}
 	t.Run("manual complete install", func(t *testing.T) {
 		dir := t.TempDir()
 		server := filepath.Join(dir, "agy_acp_server.par")
@@ -86,6 +90,9 @@ func TestResolveAntigravityBundle(t *testing.T) {
 }
 
 func TestInstallAntigravityBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable bits")
+	}
 	t.Run("installs and is idempotent", func(t *testing.T) {
 		archive := buildArchive(t, map[string]string{
 			"agy_acp_server.par":    "server",
@@ -137,11 +144,19 @@ func TestInstallAntigravityBundle(t *testing.T) {
 			SHA256: "deadbeef", CompressedLimit: 1 << 20, ExpandedLimit: 1 << 20,
 			ServerName: "agy_acp_server.par", HarnessNames: []string{"localharness_external"},
 		}
+		home := t.TempDir()
+		sentinel := filepath.Join(ManagedRoot(home), "existing-bundle")
+		if err := os.MkdirAll(sentinel, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		_, err := Install(context.Background(), InstallOptions{
-			GOOS: "linux", GOARCH: "amd64", HomeDir: t.TempDir(), Artifact: &artifact,
+			GOOS: "linux", GOARCH: "amd64", HomeDir: home, Artifact: &artifact,
 		})
 		if !errors.Is(err, ErrDigestMismatch) {
 			t.Fatalf("error = %v, want ErrDigestMismatch", err)
+		}
+		if _, statErr := os.Stat(sentinel); statErr != nil {
+			t.Fatalf("existing bundle was disturbed: %v", statErr)
 		}
 	})
 
@@ -188,6 +203,9 @@ func TestInstallAntigravityBundle(t *testing.T) {
 }
 
 func TestInstallAntigravityCancellationDoesNotPublish(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses POSIX executable bits")
+	}
 	archive := buildArchive(t, map[string]string{
 		"agy_acp_server.par":    "server",
 		"localharness_external": "harness",
@@ -229,6 +247,15 @@ func TestInstallAntigravityCancellationDoesNotPublish(t *testing.T) {
 			}
 			if _, statErr := os.Stat(ManagedDestination(opts.HomeDir, artifact)); !errors.Is(statErr, os.ErrNotExist) {
 				t.Fatalf("cancelled install published destination: %v", statErr)
+			}
+			entries, readErr := os.ReadDir(ManagedRoot(opts.HomeDir))
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("read managed root: %v", readErr)
+			}
+			for _, entry := range entries {
+				if len(entry.Name()) >= len(".staging-") && entry.Name()[:len(".staging-")] == ".staging-" {
+					t.Fatalf("cancelled install left staging entry %s", entry.Name())
+				}
 			}
 		})
 	}

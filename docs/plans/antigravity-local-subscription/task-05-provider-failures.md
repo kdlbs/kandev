@@ -1,7 +1,7 @@
 ---
 id: "05-provider-failures"
 title: "Preserve provider and current-turn failures"
-status: done
+status: in_progress
 wave: 3
 depends_on:
   - 02-subscription-policy
@@ -123,3 +123,5 @@ Implemented with a live-schema caveat.
 Verification: targeted and race tests passed; changed-Go lint 0 issues.
 
 The exact vendor 1.4.5 journal location and schema were not re-qualified against a live runtime in this environment. Task 07 must confirm or correct the schema before claiming live hidden-error detection.
+
+Desktop and phone failure-rendering E2E specs remain open; deterministic classification and outcome coverage is complete.

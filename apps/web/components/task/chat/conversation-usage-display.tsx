@@ -335,7 +335,7 @@ function SubscriptionCostDisclosure() {
         {t("task:conversationUsage.subscriptionEstimateNotice")}
       </p>
       <p className="text-xs text-muted-foreground">
-        {t("task:conversationUsage.subscriptionNativeUsageNotice")}
+        {t("task:conversationUsage.subscriptionNativeUsageNotice", { command: "/usage" })}
       </p>
     </section>
   );

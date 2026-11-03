@@ -29,12 +29,13 @@ import (
 // pick up the final state on reload before they evict.
 
 const (
-	jobOutputRingSize  = 64 * 1024
-	jobRetention       = 5 * time.Minute
-	jobMaxParallel     = 4
-	jobHardTimeout     = 5 * time.Minute
-	outputFlushPeriod  = 50 * time.Millisecond
-	outputFlushMaxSize = 4 * 1024
+	jobOutputRingSize     = 64 * 1024
+	jobRetention          = 5 * time.Minute
+	jobMaxParallel        = 4
+	jobHardTimeout        = 5 * time.Minute
+	installJobHardTimeout = 20 * time.Minute
+	outputFlushPeriod     = 50 * time.Millisecond
+	outputFlushMaxSize    = 4 * 1024
 )
 
 // InstallJob tracks a single install attempt.
@@ -233,7 +234,7 @@ func (s *JobStore) run(job *InstallJob, action InstallAction, ref MaintenanceJob
 	s.semaphore <- struct{}{}
 	defer func() { <-s.semaphore }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), jobHardTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), installJobHardTimeout)
 	s.mu.Lock()
 	job.cancel = cancel
 	job.Status = dto.InstallJobStatusRunning
@@ -299,7 +300,7 @@ func (s *JobStore) broadcast(action string, payload dto.InstallJobDTO) {
 
 func formatJobError(ctx context.Context, err error) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("install timed out after %s", jobHardTimeout)
+		return fmt.Sprintf("install timed out after %s", installJobHardTimeout)
 	}
 	return err.Error()
 }

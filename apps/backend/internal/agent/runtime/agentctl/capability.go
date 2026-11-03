@@ -22,6 +22,12 @@ func (c *Client) RequireCapability(ctx context.Context, capability string) error
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf(
+				"agentctl does not support %s; update the execution runtime before retrying",
+				capability,
+			)
+		}
 		return fmt.Errorf("read agentctl identity: status %d", resp.StatusCode)
 	}
 	var identity struct {

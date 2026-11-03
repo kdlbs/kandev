@@ -128,9 +128,9 @@ function LoginBody({ login }: { login: Login }) {
           {t("agents:antigravityLoginCatalogUnavailable")}
         </p>
       )}
-      {error && (
+      {(error || snapshot?.error) && (
         <p className="text-destructive" role="alert">
-          {error}
+          {error ?? snapshot?.error}
         </p>
       )}
     </div>

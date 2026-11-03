@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 const (
@@ -198,27 +199,35 @@ func (m *Manager) runAntigravityLogin(ctx context.Context, attempt *antigravityL
 	defer attempt.cancel()
 	inst, ia, err := m.createAntigravityLoginInstance(ctx, attempt)
 	if err != nil {
-		attempt.finish("failed", "setup_failed", sanitizeLoginError(err))
+		finishLoginError(attempt, ctx, "setup_failed", err)
 		return
 	}
 	attempt.setInstance(inst)
 	defer m.cleanupLoginInstance(inst)
 	if err := m.configureAntigravityLoginInstance(ctx, inst, ia, attempt); err != nil {
-		attempt.finish("failed", "setup_failed", sanitizeLoginError(err))
+		finishLoginError(attempt, ctx, "setup_failed", err)
 		return
 	}
 	attempt.update("waiting_for_browser", "", "", "")
 	if err := m.authenticateAntigravityLogin(ctx, inst, attempt); err != nil {
 		if ctx.Err() != nil {
-			attempt.finish("cancelled", "cancelled", "Antigravity sign-in was cancelled")
+			finishLoginCancellation(attempt, ctx)
 			return
 		}
 		attempt.finish("failed", "auth_failed", sanitizeLoginError(err))
 		return
 	}
+	if err := ctx.Err(); err != nil {
+		finishLoginCancellation(attempt, ctx)
+		return
+	}
 	attempt.update("checking", "", "", "")
 	caps, err := m.Refresh(ctx, agents.AntigravityACPAgentID)
 	if err != nil || caps.Status != StatusOK {
+		if ctx.Err() != nil {
+			finishLoginCancellation(attempt, ctx)
+			return
+		}
 		attempt.finish("succeeded", "catalog_unavailable", "Signed in, but model discovery failed. Retry model discovery.")
 		return
 	}
@@ -358,11 +367,27 @@ func (m *Manager) cleanupLoginInstance(inst *instance) {
 	m.deleteInstance(ctx, inst)
 }
 
+func finishLoginError(attempt *antigravityLoginAttempt, ctx context.Context, code string, err error) {
+	if ctx.Err() != nil {
+		finishLoginCancellation(attempt, ctx)
+		return
+	}
+	attempt.finish("failed", code, sanitizeLoginError(err))
+}
+
+func finishLoginCancellation(attempt *antigravityLoginAttempt, ctx context.Context) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		attempt.finish("expired", "expired", "Antigravity sign-in expired")
+		return
+	}
+	attempt.finish("cancelled", "cancelled", "Antigravity sign-in was cancelled")
+}
+
 func sanitizeLoginError(err error) string {
 	if err == nil {
 		return ""
 	}
-	message := err.Error()
+	message := streams.SanitizeProviderMessage(acpcompat.RedactConsentURLs(err.Error()))
 	if len(message) > 512 {
 		message = message[:512]
 	}

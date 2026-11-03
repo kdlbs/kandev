@@ -212,22 +212,25 @@ func TestTasklessPermission_CancelsWithoutRejectOption(t *testing.T) {
 	}
 }
 
-// A native human question must stay pending: Office has no authority to
-// select an offered option, and rejecting or cancelling would invent an
-// answer the person never gave.
-func TestTasklessPermission_LeavesHumanQuestionPending(t *testing.T) {
+// A native human question must never be answered on the user's behalf. A
+// taskless run has no UI to answer it, so Office stops the execution instead
+// of holding the run's concurrency slot indefinitely.
+func TestTasklessPermission_StopsHumanQuestionExecution(t *testing.T) {
 	f := newTasklessPermissionFixture(t)
 
 	f.publish(t, f.request(func(p *lifecycle.PermissionRequestEventPayload) {
 		p.HumanInput = true
 	}))
 
-	if len(f.resolver.resolved) != 0 || len(f.resolver.canceled) != 0 || len(f.stopper.executionIDs) != 0 {
-		t.Fatalf("human question was answered: resolved=%v canceled=%v stopped=%v",
-			f.resolver.resolved, f.resolver.canceled, f.stopper.executionIDs)
+	if len(f.resolver.resolved) != 0 || len(f.resolver.canceled) != 0 {
+		t.Fatalf("human question was answered: resolved=%v canceled=%v",
+			f.resolver.resolved, f.resolver.canceled)
+	}
+	if len(f.stopper.executionIDs) != 1 || f.stopper.executionIDs[0] != "execution-run-session-1" {
+		t.Fatalf("stopped executions = %v, want the run's execution", f.stopper.executionIDs)
 	}
 	if decisions := f.decisions(t); len(decisions) != 0 {
-		t.Fatalf("decision events = %v, want none for a pending human question", decisions)
+		t.Fatalf("decision events = %v, want none for a human question", decisions)
 	}
 }
 

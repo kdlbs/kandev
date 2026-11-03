@@ -1372,7 +1372,9 @@ func resolveSpawnCommandContext(ctx context.Context, cfg *InferenceConfigDTO) (s
 		if antigravityruntime.IsManagedServerPath(ctx, command) {
 			return command, ""
 		}
-		return "", fmt.Sprintf("command %q is not a vetted managed ACP runtime", command)
+		if base := filepath.Base(command); base == "agy_acp_server.par" || base == "agy_acp_server.exe" {
+			return "", fmt.Sprintf("command %q is not a vetted managed ACP runtime", command)
+		}
 	}
 	resolved := resolveProbeCommand(command)
 	if resolved == "" {
@@ -1414,6 +1416,8 @@ type stderrBuffer struct {
 // consent returns the channel that receives the first validated Google consent
 // URL observed on stderr.
 func (b *stderrBuffer) consent() <-chan string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.consentOnce.Do(func() {
 		b.consentCh = make(chan string, 1)
 	})

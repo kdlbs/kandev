@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -29,15 +30,19 @@ func TestAntigravityLocalLaunchPolicy(t *testing.T) {
 func TestAntigravityCommandLocality(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	dir := t.TempDir()
-	server := filepath.Join(dir, "agy_acp_server.par")
+	serverName, harnessName := "agy_acp_server.par", "localharness_external"
+	if runtime.GOOS == "windows" {
+		serverName, harnessName = "agy_acp_server.exe", "localharness_external.exe"
+	}
+	server := filepath.Join(dir, serverName)
 	if err := os.WriteFile(server, []byte("server"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "localharness_external"), []byte("harness"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, harnessName), []byte("harness"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	args := []string{"agy_acp_server.par", "--uid="}
+	args := []string{serverName, "--uid="}
 	m := &Manager{}
 	policy, _, err := m.applyLocalRuntimeCommand(context.Background(), agents.NewAntigravityACP(),
 		agentruntime.RuntimeStandalone, args, nil)

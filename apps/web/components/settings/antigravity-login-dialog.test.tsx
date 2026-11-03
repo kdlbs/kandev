@@ -52,8 +52,9 @@ describe("AntigravityLoginDialog", () => {
     startAntigravityLogin.mockResolvedValue(active);
     cancelAntigravityLogin.mockResolvedValue({ ...active, state: "cancelled" });
     copyToClipboard.mockResolvedValue(true);
+    const onOpenChange = vi.fn();
 
-    render(<AntigravityLoginDialog open onOpenChange={vi.fn()} />);
+    render(<AntigravityLoginDialog open onOpenChange={onOpenChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
     await waitFor(() => expect(startAntigravityLogin).toHaveBeenCalled());
@@ -65,6 +66,7 @@ describe("AntigravityLoginDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(cancelAntigravityLogin).toHaveBeenCalledWith("attempt-1"));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("renders one phone action group with copy and cancel", async () => {

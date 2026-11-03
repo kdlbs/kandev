@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestAntigravityDebuggerPolicy(t *testing.T) {
 func TestAntigravityDebuggerManagedRuntime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KANDEV_HOME_DIR", home)
-	artifact, err := antigravityruntime.ArtifactFor("linux", "amd64")
+	artifact, err := antigravityruntime.ArtifactFor(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,10 @@ func TestAntigravityDebuggerManagedRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", t.TempDir())
-	command, env := resolveAgentLaunch(agents.NewAntigravityACP(), []string{"agy_acp_server.par"})
+	command, env, err := resolveAgentLaunch(agents.NewAntigravityACP(), []string{"agy_acp_server.par"})
+	if err != nil {
+		t.Fatalf("resolveAgentLaunch: %v", err)
+	}
 	if command[0] != server {
 		t.Fatalf("debugger command = %v, want managed %s", command, server)
 	}

@@ -123,9 +123,14 @@ export function useAntigravityLogin({
   const [copied, setCopied] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const snapshotRef = useRef<AntigravityLoginSnapshot | null>(null);
+  const onCompleteRef = useRef(onComplete);
   const generationRef = useRef(0);
   const completedRef = useRef(false);
   const startPromiseRef = useRef<Promise<boolean> | null>(null);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   const applySnapshot = useCallback((next: AntigravityLoginSnapshot | null) => {
     snapshotRef.current = next;
@@ -145,19 +150,19 @@ export function useAntigravityLogin({
       setError(null);
       if (next.state === "succeeded" && !completedRef.current) {
         completedRef.current = true;
-        onComplete?.();
+        onCompleteRef.current?.();
       }
     } catch (err) {
       if (generation !== generationRef.current) return;
       if (isMissingAttempt(err)) {
         attemptIdRef.current = null;
         applySnapshot(null);
-        setError(t("agents:antigravityLoginExpired"));
+        setError(requestedAttempt ? t("agents:antigravityLoginExpired") : null);
         return;
       }
       setError(t("agents:antigravityLoginStatusError"));
     }
-  }, [applySnapshot, onComplete, t]);
+  }, [applySnapshot, t]);
 
   useEffect(() => {
     if (!open) return;

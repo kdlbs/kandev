@@ -133,8 +133,8 @@ func AntigravityCredentialEnvNames() []string {
 // ValidateLocalAntigravityEnvironment rejects profile inputs that would create
 // a task-specific native store. The expectedHome is the host user's home.
 func ValidateLocalAntigravityEnvironment(env map[string]string, expectedHome string) error {
-	if raw, ok := env["HOME"]; ok && raw != "" {
-		if !samePath(raw, expectedHome) {
+	if raw, ok := env["HOME"]; ok {
+		if raw == "" || !samePath(raw, expectedHome) {
 			return fmt.Errorf("antigravity personal subscription requires the shared user home %q, got HOME=%q", expectedHome, raw)
 		}
 	}
@@ -294,32 +294,43 @@ func ValidateConsentURL(raw string) (*url.URL, error) {
 	if !strings.HasPrefix(u.Path, "/o/oauth2/") {
 		return nil, errors.New("consent URL path is not a Google OAuth authorization path")
 	}
-	query := u.Query()
+	if err := validateConsentQuery(u.Query()); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func validateConsentQuery(query url.Values) error {
 	if query.Get("client_id") == "" || query.Get("state") == "" {
-		return nil, errors.New("consent URL is missing client_id or state")
+		return errors.New("consent URL is missing client_id or state")
 	}
 	redirect := query.Get("redirect_uri")
 	if redirect == "" {
-		return nil, errors.New("consent URL is missing redirect_uri")
+		return errors.New("consent URL is missing redirect_uri")
 	}
-	redirectURL, err := url.Parse(redirect)
+	return validateConsentRedirect(redirect)
+}
+
+func validateConsentRedirect(raw string) error {
+	redirectURL, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse consent redirect: %w", err)
+		return fmt.Errorf("parse consent redirect: %w", err)
 	}
 	if redirectURL.Scheme != "http" {
-		return nil, errors.New("consent redirect must use http loopback")
+		return errors.New("consent redirect must use http loopback")
 	}
 	if !isLoopbackHost(redirectURL.Hostname()) {
-		return nil, errors.New("consent redirect must target a loopback host")
+		return errors.New("consent redirect must target a loopback host")
 	}
 	port := redirectURL.Port()
 	if port == "" {
-		return nil, errors.New("consent redirect must name an ephemeral port")
+		return errors.New("consent redirect must name an ephemeral port")
 	}
-	if _, err := net.LookupPort("tcp", port); err != nil {
-		return nil, errors.New("consent redirect port is invalid")
+	portNumber, err := net.LookupPort("tcp", port)
+	if err != nil || portNumber < 1024 || portNumber > 65535 {
+		return errors.New("consent redirect port must be an unprivileged ephemeral port")
 	}
-	return u, nil
+	return nil
 }
 
 func isLoopbackHost(host string) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -86,10 +87,14 @@ func TestAntigravityLoginTerminalFence(t *testing.T) {
 func TestAntigravityLoginStartFencesUnfinishedAttempt(t *testing.T) {
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "agy_acp_server.par"), []byte("server"), 0o755); err != nil {
+	serverName, harnessName := "agy_acp_server.par", "localharness_external"
+	if runtime.GOOS == "windows" {
+		serverName, harnessName = "agy_acp_server.exe", "localharness_external.exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, serverName), []byte("server"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "localharness_external"), []byte("harness"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, harnessName), []byte("harness"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)

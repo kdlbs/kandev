@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
@@ -92,7 +93,10 @@ func Resolve(ctx context.Context, opts ResolveOptions) (*Bundle, error) {
 		homeDir = DefaultHomeDir()
 	}
 	artifact, artifactErr := ArtifactFor(goos, goarch)
-	if artifactErr == nil && homeDir != "" {
+	if artifactErr != nil {
+		return nil, artifactErr
+	}
+	if homeDir != "" {
 		dest := ManagedDestination(homeDir, artifact)
 		if info, err := os.Stat(dest); err == nil {
 			if !info.IsDir() {
@@ -191,9 +195,8 @@ func validateManagedBundle(ctx context.Context, dir string, artifact Artifact) (
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, fmt.Errorf("%w: parse manifest: %v", ErrInvalidManagedBundle, err)
 	}
-	if manifest.Version != artifact.Version || manifest.Digest != artifact.SHA256 ||
-		manifest.OS != artifact.OS || manifest.Arch != artifact.Arch {
-		return nil, fmt.Errorf("%w: manifest identity does not match the reviewed artifact", ErrInvalidManagedBundle)
+	if err := validateManifestIdentity(manifest, artifact); err != nil {
+		return nil, err
 	}
 	server := filepath.Join(dir, manifest.Server)
 	harness := filepath.Join(dir, manifest.Harness)
@@ -209,8 +212,22 @@ func validateManagedBundle(ctx context.Context, dir string, artifact Artifact) (
 	}, nil
 }
 
+func validateManifestIdentity(manifest Manifest, artifact Artifact) error {
+	if manifest.Version != artifact.Version || manifest.Digest != artifact.SHA256 ||
+		manifest.OS != artifact.OS || manifest.Arch != artifact.Arch {
+		return fmt.Errorf("%w: manifest identity does not match the reviewed artifact", ErrInvalidManagedBundle)
+	}
+	if manifest.Server != artifact.ServerName || filepath.Base(manifest.Server) != manifest.Server {
+		return fmt.Errorf("%w: manifest server name is not the reviewed entry", ErrInvalidManagedBundle)
+	}
+	if filepath.Base(manifest.Harness) != manifest.Harness || !slices.Contains(artifact.HarnessNames, manifest.Harness) {
+		return fmt.Errorf("%w: manifest harness name is not the reviewed entry", ErrInvalidManagedBundle)
+	}
+	return nil
+}
+
 func isRegularExecutable(path, goos string) bool {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}

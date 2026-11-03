@@ -258,7 +258,7 @@
   "antigravityLoginCancel": "取消",
   "antigravityLoginStart": "使用 Google 登入",
   "antigravityLoginAgain": "重新登入",
-  "antigravityLoginCatalogUnavailable": "已登入，但模型發現失敗。請重試模型發現。",
+  "antigravityLoginCatalogUnavailable": "已登入，但模型發現失敗。請關閉後從代理卡片重試。",
   "antigravityLoginStartError": "無法開始 Google 登入。",
   "antigravityLoginStatusError": "無法讀取 Google 登入狀態。",
   "antigravityLoginCancelError": "無法取消 Google 登入。",

@@ -204,7 +204,7 @@
   "antigravityLoginCancel": "취소",
   "antigravityLoginStart": "Google로 로그인",
   "antigravityLoginAgain": "다시 로그인",
-  "antigravityLoginCatalogUnavailable": "로그인했지만 모델 검색에 실패했습니다. 모델 검색을 다시 시도하세요.",
+  "antigravityLoginCatalogUnavailable": "로그인했지만 모델 검색에 실패했습니다. 닫고 에이전트 카드에서 다시 시도하세요.",
   "antigravityLoginStartError": "Google 로그인을 시작할 수 없습니다.",
   "antigravityLoginStatusError": "Google 로그인 상태를 읽을 수 없습니다.",
   "antigravityLoginCancelError": "Google 로그인을 취소할 수 없습니다.",

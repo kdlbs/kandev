@@ -451,22 +451,6 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 	// We can't use r.Request here because we want to drain update
 	// notifications while waiting for the response. Write directly and
 	// loop on the OOB channel + a pending response future.
-	if err := r.rec.Sent(req); err != nil {
-		return "", err
-	}
-
-	respCh, err := r.registerPending(promptID)
-	if err != nil {
-		return "", err
-	}
-	// Every exit path drops the waiter, including the ones that give up before
-	// a response arrives, so the map does not accumulate dead entries.
-	defer func() {
-		r.mu.Lock()
-		delete(r.pending, promptID)
-		r.mu.Unlock()
-	}()
-
 	var text strings.Builder
 
 	// drain consumes everything currently queued. Frames that arrived before
@@ -504,6 +488,22 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 	if drain(false) {
 		return text.String(), ErrHumanQuestionPending
 	}
+	if err := r.rec.Sent(req); err != nil {
+		return "", err
+	}
+
+	respCh, err := r.registerPending(promptID)
+	if err != nil {
+		return "", err
+	}
+	// Every exit path drops the waiter, including the ones that give up before
+	// a response arrives, so the map does not accumulate dead entries.
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, promptID)
+		r.mu.Unlock()
+	}()
+
 	if err := r.framer.Write(req); err != nil {
 		return "", err
 	}

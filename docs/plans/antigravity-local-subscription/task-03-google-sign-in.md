@@ -1,7 +1,7 @@
 ---
 id: "03-google-sign-in"
 title: "Complete local Google sign-in"
-status: done
+status: in_progress
 wave: 3
 depends_on:
   - 02-subscription-policy
@@ -146,3 +146,5 @@ Implemented.
 Verification: backend targeted tests, `go test -race` for host utility/auth status paths, web Vitest, typecheck, and i18n checks. Real Google consent and live model discovery remain Task 07 evidence.
 
 Review remediation: login attempts now fence terminal state until native cleanup completes, expire without retaining URLs, and reject a successor while cleanup is unfinished. Sign-in polling survives transient status failures, clears missing attempts after restart, fences stale responses, and closes only after confirmed cancellation. The phone sheet renders one action region.
+
+Browser setup E2E specs remain open; deterministic backend and component coverage is complete.

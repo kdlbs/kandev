@@ -1,7 +1,7 @@
 ---
 id: "06-native-usage"
 title: "Report native usage honestly"
-status: done
+status: in_progress
 wave: 3
 depends_on:
   - 02-subscription-policy
@@ -75,7 +75,7 @@ Run from the repository root after Task 01's pnpm bootstrap.
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/conversation-usage.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-antigravity-usage.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-conversation-usage.spec.ts)
 git diff --check
 ```
 
@@ -130,3 +130,5 @@ Implemented.
 Verification: targeted backend tests, web component tests, typecheck, i18n check, and changed-Go lint passed.
 
 Live native token scope and `/usage` content remain Task 07 evidence. Native usage is main-trajectory only; absent child-agent tokens are not a zero measurement.
+
+Antigravity usage E2E cases remain open; deterministic backend and component coverage is complete.

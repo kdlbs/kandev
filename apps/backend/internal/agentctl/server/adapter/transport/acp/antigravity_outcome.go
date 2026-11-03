@@ -80,8 +80,17 @@ type antigravityNativeFailure struct {
 // high-water index before a prompt. A nil boundary means the agent is not
 // Antigravity or the session identity is unusable.
 func (a *Adapter) captureAntigravityOutcomeBoundary(sessionID string) *antigravityOutcomeBoundary {
-	if a == nil || !acpcompat.IsAntigravity(a.agentID) || !antigravityValidSessionID(sessionID) {
+	if a == nil || !acpcompat.IsAntigravity(a.agentID) {
 		return nil
+	}
+	if !antigravityValidSessionID(sessionID) {
+		return &antigravityOutcomeBoundary{
+			sessionID: sessionID,
+			store: antigravityJournalStore{
+				state:  antigravityOutcomeUnavailable,
+				reason: "native session identity is not verifiable",
+			},
+		}
 	}
 	base, ok := a.antigravityJournalBase()
 	if !ok {

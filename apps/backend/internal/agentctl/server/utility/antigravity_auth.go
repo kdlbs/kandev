@@ -118,6 +118,10 @@ func applyAntigravityAuth(
 	select {
 	case err := <-done:
 		if err != nil {
+			var requestErr *acp.RequestError
+			if !errors.As(err, &requestErr) || requestErr.Code != -32000 {
+				return describeACPFailure(ctx, "authenticate", err)
+			}
 			message := "Antigravity personal sign-in is required"
 			if detail := streams.SanitizeProviderMessage(err.Error()); detail != "" {
 				message += ": " + detail

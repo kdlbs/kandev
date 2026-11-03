@@ -2040,9 +2040,11 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
 		if harness == "" {
-			if bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{}); err == nil {
-				harness = bundle.HarnessPath
+			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+			if err != nil {
+				return fmt.Errorf("resolve Antigravity harness: %w", err)
 			}
+			harness = bundle.HarnessPath
 		}
 		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
 		if err != nil {
@@ -3945,7 +3947,7 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		event = persisted
 	}
 
-	if !m.IsAttached() {
+	if !m.IsAttached() || pending.HumanInput {
 		m.sendUpdateBlocking(event)
 		return
 	}

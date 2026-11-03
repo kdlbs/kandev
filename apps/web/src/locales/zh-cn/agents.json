@@ -258,7 +258,7 @@
   "antigravityLoginCancel": "取消",
   "antigravityLoginStart": "使用 Google 登录",
   "antigravityLoginAgain": "重新登录",
-  "antigravityLoginCatalogUnavailable": "已登录，但模型发现失败。请重试模型发现。",
+  "antigravityLoginCatalogUnavailable": "已登录，但模型发现失败。请关闭后从代理卡片重试。",
   "antigravityLoginStartError": "无法开始 Google 登录。",
   "antigravityLoginStatusError": "无法读取 Google 登录状态。",
   "antigravityLoginCancelError": "无法取消 Google 登录。",

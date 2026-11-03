@@ -48,7 +48,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Bundle, error) {
 		return existing, err
 	}
 	root := ManagedRoot(homeDir)
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := ensureSafeDir(filepath.Dir(homeDir), root); err != nil {
 		return nil, fmt.Errorf("create antigravity runtime cache: %w", err)
 	}
 	staging, err := os.MkdirTemp(root, ".staging-")
@@ -84,7 +84,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Bundle, error) {
 	if err := writeManifest(bundleDir, artifact); err != nil {
 		return nil, err
 	}
-	return publishBundle(ctx, bundleDir, dest, artifact)
+	return publishBundle(ctx, bundleDir, dest, artifact, root)
 }
 
 func installTarget(opts InstallOptions) (Artifact, string, string, error) {
@@ -132,11 +132,11 @@ func existingBundle(ctx context.Context, dest string, artifact Artifact) (*Bundl
 	return validateManagedBundle(ctx, dest, artifact)
 }
 
-func publishBundle(ctx context.Context, bundleDir, dest string, artifact Artifact) (*Bundle, error) {
+func publishBundle(ctx context.Context, bundleDir, dest string, artifact Artifact, root string) (*Bundle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := ensureSafeDir(root, filepath.Dir(dest)); err != nil {
 		return nil, fmt.Errorf("create managed runtime parent: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -211,7 +211,7 @@ func extractArchive(ctx context.Context, archivePath, destDir string, artifact A
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		base, size, err := validateArchiveEntry(entry, expected, seen)
+		base, size, err := validateArchiveEntry(entry, expected, seen, artifact.ExpandedLimit)
 		if err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ func extractArchive(ctx context.Context, archivePath, destDir string, artifact A
 		if expanded > artifact.ExpandedLimit {
 			return fmt.Errorf("%w: expanded archive exceeds %d bytes", ErrSizeLimit, artifact.ExpandedLimit)
 		}
-		if err := extractEntry(ctx, entry, filepath.Join(destDir, base)); err != nil {
+		if err := extractEntry(ctx, entry, filepath.Join(destDir, base), artifact.ExpandedLimit); err != nil {
 			return err
 		}
 		if hook != nil {
@@ -249,6 +249,7 @@ func validateArchiveEntry(
 	entry *zip.File,
 	expected map[string]string,
 	seen map[string]bool,
+	expandedLimit int64,
 ) (string, int64, error) {
 	name := strings.ReplaceAll(entry.Name, "\\", "/")
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "../") || name == ".." {
@@ -267,11 +268,14 @@ func validateArchiveEntry(
 	if seen[base] {
 		return "", 0, fmt.Errorf("%w: duplicate entry %q", ErrUnsafeArchive, entry.Name)
 	}
+	if entry.UncompressedSize64 > uint64(expandedLimit) {
+		return "", 0, fmt.Errorf("%w: entry %q exceeds the expanded limit", ErrSizeLimit, entry.Name)
+	}
 	seen[base] = true
 	return base, int64(entry.UncompressedSize64), nil
 }
 
-func extractEntry(ctx context.Context, entry *zip.File, dest string) error {
+func extractEntry(ctx context.Context, entry *zip.File, dest string, expandedLimit int64) error {
 	source, err := entry.Open()
 	if err != nil {
 		return fmt.Errorf("%w: open entry %q: %v", ErrUnsafeArchive, entry.Name, err)
@@ -281,9 +285,13 @@ func extractEntry(ctx context.Context, entry *zip.File, dest string) error {
 	if err != nil {
 		return fmt.Errorf("create extracted file: %w", err)
 	}
-	if _, err := copyWithContext(ctx, file, source); err != nil {
+	if _, err := copyWithContext(ctx, file, io.LimitReader(source, expandedLimit+1)); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("extract entry %q: %w", entry.Name, err)
+	}
+	if written, err := file.Seek(0, io.SeekCurrent); err == nil && written > expandedLimit {
+		_ = file.Close()
+		return fmt.Errorf("%w: entry %q exceeds the expanded limit", ErrSizeLimit, entry.Name)
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close extracted entry %q: %w", entry.Name, err)
@@ -333,6 +341,36 @@ func writeManifest(bundleDir string, artifact Artifact) error {
 	}
 	if err := os.WriteFile(filepath.Join(bundleDir, ManifestName), raw, 0o644); err != nil {
 		return fmt.Errorf("write antigravity manifest: %w", err)
+	}
+	return nil
+}
+
+func ensureSafeDir(root, target string) error {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("path %s escapes %s", target, root)
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		if part == "." || part == "" {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.Mkdir(current, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("path component %s is not a real directory", current)
+		}
 	}
 	return nil
 }

@@ -20,7 +20,10 @@ type SubscriptionUsageProfile = {
 };
 
 function snapshotAgentName(session: SubscriptionUsageSession): string | null {
-  const agentName = session?.agent_profile_snapshot?.agent_name;
+  const snapshot = session?.agent_profile_snapshot;
+  const agentID = snapshot?.agent_id;
+  if (typeof agentID === "string") return agentID;
+  const agentName = snapshot?.agent_name;
   return typeof agentName === "string" ? agentName : null;
 }
 

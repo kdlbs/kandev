@@ -155,7 +155,9 @@ func (a *Adapter) sanitizeAntigravityStderr(line string) (string, bool) {
 	if a.cfg != nil && a.cfg.AuthPolicy != nil && strings.Contains(line, "accounts.google.com") {
 		return antigravityConsentRedaction, true
 	}
-	return line, true
+	// Provider stderr can contain paths, identifiers, URLs, or credentials.
+	// Structured failures arrive through ACP; keep only the redacted marker.
+	return "", false
 }
 
 func (a *Adapter) setAuthStatus(status streams.AuthStatus) {

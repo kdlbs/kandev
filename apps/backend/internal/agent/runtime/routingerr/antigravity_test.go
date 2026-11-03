@@ -145,6 +145,15 @@ func TestAntigravityErrorClassification(t *testing.T) {
 			if !tc.wantReset && classified.ResetHint != nil {
 				t.Fatalf("reset hint = %v, want unknown", classified.ResetHint)
 			}
+			if tc.failure.ResetHint != nil && !classified.ResetHint.Equal(*tc.failure.ResetHint) {
+				t.Fatalf("reset hint = %v, want %v", classified.ResetHint, tc.failure.ResetHint)
+			}
+			if tc.failure.ResetDelay > 0 {
+				want := tc.failure.OccurredAt.Add(tc.failure.ResetDelay)
+				if !classified.ResetHint.Equal(want) {
+					t.Fatalf("reset hint = %v, want %v", classified.ResetHint, want)
+				}
+			}
 			if got := Decide(ContextKanban, classified, now); got != tc.kanban {
 				t.Errorf("Kanban decision = %q, want %q", got, tc.kanban)
 			}
