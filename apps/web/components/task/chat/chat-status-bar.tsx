@@ -142,6 +142,8 @@ export type ChatStatusBarProps = {
   onJumpToLatest?: () => void;
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
+  /** Stable composer focus target when a dismissed chip no longer exists. */
+  onFocusComposer?: () => void;
 };
 
 export function ComposerCIStatus({
@@ -308,6 +310,16 @@ function ChatStatusBarActions({
   );
 }
 
+function useActiveAgentGoal(sessionId: string | null) {
+  const metadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  return useMemo(() => {
+    const goal = getAgentGoal(metadata);
+    return goal?.status === "active" ? goal : null;
+  }, [metadata]);
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -328,6 +340,7 @@ export function ChatStatusBar({
   onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
+  onFocusComposer,
 }: ChatStatusBarProps) {
   const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
@@ -339,13 +352,7 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const activeGoalMetadata = useAppStore((state) =>
-    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
-  );
-  const activeGoal = useMemo(() => {
-    const goal = getAgentGoal(activeGoalMetadata);
-    return goal?.status === "active" ? goal : null;
-  }, [activeGoalMetadata]);
+  const activeGoal = useActiveAgentGoal(sessionId);
   const { canShare, showConversationUsage, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -404,7 +411,11 @@ export function ChatStatusBar({
         <TaskDependencyChip taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-        <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+        <BackgroundWorkChip
+          sessionId={sessionId}
+          detailActive={detailActive}
+          onRequestComposerFocus={onFocusComposer}
+        />
         {queueChip}
       </ChatStatusBarActions>
     </div>

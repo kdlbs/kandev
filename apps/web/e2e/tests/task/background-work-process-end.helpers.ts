@@ -39,6 +39,10 @@ export async function expectProcessEndClearsBackgroundWork(
     const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
     return workloads.filter((w) => ["running", "waiting", "unknown"].includes(w.state)).length;
   };
+  const runningWorkloadCount = async (): Promise<number> => {
+    const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
+    return workloads.filter((w) => w.state === "running").length;
+  };
   // The provider shape may register more than one workload; only the fact that
   // work is active before the process ends matters here.
   await expect
@@ -71,15 +75,31 @@ export async function expectProcessEndClearsBackgroundWork(
     90_000,
   );
 
-  // The workload can no longer report completion, so it settles and the active
-  // count disappears instead of staying wrong for the new process. Poll the
-  // authoritative projection first, then assert the rendered chip.
+  // The workload can no longer report completion, so it settles and the
+  // running-only composer chip disappears instead of staying wrong for the new
+  // process. Poll the authoritative projection first, then assert the chip.
   await expect
-    .poll(activeWorkloadCount, {
-      message: "background workload should settle after the process ends",
+    .poll(runningWorkloadCount, {
+      message: "background workload should leave the running summary after the process ends",
       timeout: 60_000,
     })
     .toBe(0);
   await expect(activeChip).toHaveCount(0);
-  await expect(testPage.getByTestId("background-work-history-chip")).toBeVisible();
+  await expect(testPage.getByTestId("background-work-history-chip")).toHaveCount(0);
+
+  // History remains reachable through the independent desktop or phone entry.
+  if ((testPage.viewportSize()?.width ?? 0) < 768) {
+    await testPage.getByTestId("mobile-session-nav-panels").tap();
+    await testPage.getByTestId("mobile-background-work-open").tap();
+    await expect(testPage.getByTestId("background-work-mobile-panel")).toBeVisible();
+  } else {
+    await testPage.getByTestId("dockview-add-panel-btn").first().click();
+    await testPage.getByTestId("add-panel-background-work").click();
+    await expect(testPage.getByTestId("background-work-overview")).toBeVisible();
+  }
+  await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
+    "data-state",
+    "active",
+  );
+  await expect(testPage.getByTestId(/^background-workload-card-/).first()).toBeVisible();
 }

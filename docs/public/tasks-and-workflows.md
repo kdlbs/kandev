@@ -652,18 +652,30 @@ foreground-generating Claude turns retain the coarse queueing behavior.
 
 ### Inspect background work
 
-When an agent reports a background shell command, subagent, or monitor, Kandev
-adds a content-width chip directly above the message box. The chip counts the
-jobs that are running, waiting, or of unknown activity. Select it to open a
-summary. Selecting a job opens its own tab in the central area on desktop, or a
-full-height detail view on a phone. **View all** opens the Background Work
+When an agent reports a background shell command, subagent, or monitor that is
+still running, Kandev adds a content-width chip directly above the message box.
+The chip counts only running jobs. Select it to open a running-only summary.
+Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
+
+The overview has two tabs. **Active** lists running and waiting jobs. **History**
+lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
+count before you search, and search filters the selected tab. Long commands
+truncate in the list, while the detail view shows the complete command and wraps
+it inside the available width.
+
+Background Work stays reachable without the chip. On desktop, open it from the
+**+** panel menu. On a phone, open it from **Panels**. A job with unknown activity
+appears in History with its actual **Unknown** status and never implies
+completion. Unknown work can return to Active when new evidence arrives.
 
 Background inspection is standard behavior in the shipped profiles. Operators
 can disable it with the `features.agentBackgroundWork` runtime toggle
-(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
-job controls are unavailable, and existing chat behavior is unchanged. The
-toggle is separate from the Claude background prompt handoff experiment.
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, entries,
+reads, and job controls are unavailable, and existing chat behavior is
+unchanged. The toggle is separate from the Claude background prompt handoff
+experiment.
 
 The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
