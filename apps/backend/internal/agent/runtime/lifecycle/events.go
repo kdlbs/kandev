@@ -209,6 +209,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		AgentID:                execution.AgentID,
 		AgentProfileID:         execution.officeProfileID(),
 		ExecutionProfileID:     execution.AgentProfileID,
+		ResourceCircuitKey:     execution.resourceCircuitKey(),
 		ContainerID:            execution.ContainerID,
 		Status:                 string(execution.Status),
 		StartedAt:              execution.StartedAt,
@@ -431,6 +432,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		RunAttempt:                      execution.RunAttempt,
 		AgentProfileID:                  execution.officeProfileID(),
 		ExecutionProfileID:              execution.AgentProfileID,
+		ResourceCircuitKey:              execution.resourceCircuitKey(),
 		AgentType:                       execution.AgentID,
 		TaskID:                          execution.TaskID,
 		SessionID:                       execution.SessionID,
@@ -728,6 +730,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 

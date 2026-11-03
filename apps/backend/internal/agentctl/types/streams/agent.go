@@ -305,6 +305,9 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
+	// ToolStatusMissing retains ACP wire provenance for the local turn finalizer.
+	// It is not serialized because only the adapter consumes this evidence.
+	ToolStatusMissing bool `json:"-"`
 
 	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
 	// New producers leave this read-compatibility field unset.
@@ -373,6 +376,11 @@ type AgentEvent struct {
 
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
+
+	// PermissionHumanInput marks a provider-native question that only a person
+	// can answer. It is set by the host classification, never by the provider
+	// wire payload, and automatic consumers must leave it pending.
+	PermissionHumanInput bool `json:"permission_human_input,omitempty"`
 
 	// RequestedModeID is set on a session_mode event only when Kandev asked for
 	// a mode the agent did not end up in, or could not confirm. It is what makes

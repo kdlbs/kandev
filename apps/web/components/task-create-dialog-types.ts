@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   InitialWorkspaceLayout,
   CreateTaskResponse,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
@@ -189,8 +190,9 @@ export type TaskRemoteRepoRow = {
 export type StepType = {
   id: string;
   title: string;
-  /** Workflow that supplied these fallback-only steps. */
+  /** Workflow that supplied these steps. */
   workflowId?: string;
+  color?: string;
   position?: number;
   is_start_step?: boolean;
   prompt?: string;
@@ -198,6 +200,17 @@ export type StepType = {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   };
+  /** Fixed workflow profile that owns this step, when one is configured. */
+  agent_profile_id?: string;
+  /** Session recipient declared by the step, when one is configured. */
+  session_target?: WorkflowSessionTarget | null;
+};
+
+/** Selected-workflow step metadata shared by launch preview and replacement rows. */
+export type TaskCreateWorkflowStepsResult = {
+  status: "idle" | "loading" | "success" | "error";
+  steps: StepType[];
+  retry: () => void;
 };
 
 export type TaskCreateDialogInitialValues = {
@@ -344,7 +357,6 @@ export type DialogComputedArgs = {
 export type TaskCreateEffectsArgs = {
   open: boolean;
   workspaceId: string | null;
-  workflowId: string | null;
   effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
@@ -365,6 +377,8 @@ export type TaskCreateEffectsArgs = {
   lastUsedExecutorProfileId?: string | null;
   /** Backend-owned last-used branch. */
   lastUsedBranch?: string | null;
+  /** Complete selected-workflow steps owned by the task dialog observer. */
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"

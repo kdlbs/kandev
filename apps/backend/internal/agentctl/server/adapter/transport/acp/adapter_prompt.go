@@ -179,6 +179,11 @@ func (a *Adapter) sendPrompt(
 		zap.Int("content_blocks", len(contentBlocks)),
 		zap.Int("image_attachments", len(attachments)))
 
+	var antigravityBoundary *antigravityOutcomeBoundary
+	if expectSession == "" && !isAntigravityNonModelCommand(finalMessage) {
+		antigravityBoundary = a.captureAntigravityOutcomeBoundary(sessionID)
+	}
+
 	var resp acp.PromptResponse
 	var err error
 	go func() {
@@ -248,6 +253,12 @@ func (a *Adapter) sendPrompt(
 		disposition := a.promptFailureDisposition(
 			conn, sessionID, turn, promptGeneration, notificationsDrained,
 		)
+		if providerError, ok := a.antigravityPromptProviderError(normalizedErr); ok && disposition != "" {
+			a.sendRetainedPromptError(
+				sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
+			)
+			return nil
+		}
 		if a.agentID == codexAgentID &&
 			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
 			isGenericCodexPromptError(err) {
@@ -290,6 +301,7 @@ func (a *Adapter) sendPrompt(
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
 	notificationsDrained := a.syncNotifQueue()
+	a.settleClaudeSubagents(sessionID, promptGeneration, stopReason, a.promptTurnWasHandedOff(turn))
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
@@ -310,6 +322,32 @@ func (a *Adapter) sendPrompt(
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+
+	if antigravityBoundary != nil {
+		failure, unverified := a.checkAntigravityOutcome(antigravityBoundary, stopReason)
+		if failure == nil && unverified != "" {
+			failure = a.antigravityOutcomeUnverifiedFailure(unverified)
+		}
+		if failure != nil {
+			a.logger.Info("antigravity prompt ended with a current-turn failure",
+				zap.String("session_id", sessionID),
+				zap.Uint64("prompt_generation", promptGeneration),
+				zap.String("routing_code", string(failure.code)))
+			a.cancelAsyncTurnComplete(sessionID)
+			a.sendUpdate(AgentEvent{
+				Type:               streams.EventTypeError,
+				SessionID:          sessionID,
+				PromptGeneration:   promptGeneration,
+				Error:              failure.message,
+				ContinuationSafety: continuationSafety,
+				PromptFailureDisposition: a.promptFailureDisposition(
+					conn, sessionID, turn, promptGeneration, notificationsDrained,
+				),
+				ProviderError: failure.providerError,
+			})
+			return nil
+		}
+	}
 
 	if cursorRetriable, safeMessage, occurredAt, identityComplete := turn.cursorRetriableFailureDetails(); cursorRetriable {
 		if occurredAt.IsZero() {

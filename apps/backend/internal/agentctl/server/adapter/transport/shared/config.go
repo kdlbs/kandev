@@ -3,6 +3,7 @@ package shared
 import (
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 )
@@ -74,6 +75,10 @@ type Config struct {
 	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
 	// agent against an OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize.
+	AuthPolicy *acpcompat.AuthPolicy
 
 	// PromptSuggestions asks an agent with native next-prompt suggestions to
 	// emit them. Only dialects that support native suggestions act on it.

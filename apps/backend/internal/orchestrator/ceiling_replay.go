@@ -866,6 +866,9 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 	if _, ok := isSeam3Refusal(err); ok {
 		return ceilingReplayDeferredResult()
 	}
+	if IsMessageTurnCapacityRefusal(err) {
+		return ceilingReplayDeferredResult()
+	}
 	if accepted, ok := err.(interface{ DetachedResumeAccepted() bool }); ok && accepted.DetachedResumeAccepted() {
 		// agentctl accepted the prompt despite the reported error: the
 		// launch did happen, so this is not a ceiling matter any longer.

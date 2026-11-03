@@ -692,6 +692,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
+		"unreadTaskDot":                   settings.UnreadTaskDot,
+		"unreadTaskDotHideDelaySeconds":   settings.UnreadTaskDotHideDelaySeconds,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
 		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,

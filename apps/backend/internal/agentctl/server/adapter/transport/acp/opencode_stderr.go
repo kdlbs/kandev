@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -193,6 +194,10 @@ func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 // error-only stderr is an optional signal; malformed or late diagnostics are
 // dropped and a full prompt channel never applies backpressure to stderr.
 func (a *Adapter) ConsumeStderrLine(line string) {
+	if acpcompat.IsAntigravity(a.agentID) {
+		a.consumeAntigravityStderr(line)
+		return
+	}
 	if a.agentID != opencodeAgentID {
 		return
 	}
@@ -216,6 +221,9 @@ func (a *Adapter) ConsumeStderrLine(line string) {
 // generic process diagnostics. Unrecognized records are excluded because they
 // may contain private URLs, identifiers, paths, or credentials.
 func (a *Adapter) SanitizeStderrLine(line string) (string, bool) {
+	if acpcompat.IsAntigravity(a.agentID) {
+		return a.sanitizeAntigravityStderr(line)
+	}
 	if a.agentID != opencodeAgentID {
 		return line, true
 	}
