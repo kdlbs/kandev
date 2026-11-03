@@ -21,11 +21,17 @@ var (
 func agentGroupStatusClient(t *testing.T, agent *processidentity.Identity) *agentctl.Client {
 	t.Helper()
 	return ackTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/agent/delivery", r.URL.Path)
-		require.NoError(t, json.NewEncoder(w).Encode(agentctl.DeliveryStatus{
+		if r.URL.Path != "/api/v1/agent/delivery" {
+			t.Errorf("unexpected delivery request: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(agentctl.DeliveryStatus{
 			StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
 			SessionID:         "session", StreamID: "stream", AgentProcess: agent,
-		}))
+		}); err != nil {
+			t.Errorf("encode delivery status: %v", err)
+		}
 	})
 }
 

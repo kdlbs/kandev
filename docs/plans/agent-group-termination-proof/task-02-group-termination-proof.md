@@ -1,7 +1,7 @@
 ---
 id: "02-group-termination-proof"
 title: "Accept agent group termination as proof"
-status: done
+status: in_progress
 wave: 2
 depends_on: ["01-record-agent-group"]
 plan: "plan.md"
@@ -19,13 +19,14 @@ system_design:
 
 ## Summary
 
-Add `processidentity.OwnedGroupTerminated` and `OriginalOwnerTerminated(runtime, group)`, and
-use them in every original-owner termination check. A session whose recorded agent group
-has exited becomes recoverable while the shared agentctl keeps running.
+Add `processidentity.OwnedGroupTerminated` and `OriginalOwnerTerminated(identity)`, and
+use them in original-owner termination checks. An absent recorded agent group can supply
+termination proof while shared agentctl remains active. Independent admission checks still apply.
 
 ## In scope
 
-- Linux and Darwin group termination checks. Other platforms stay unverifiable.
+- Linux group absence proof. Darwin keeps runtime-session proof. Other platforms retain
+  their existing unverifiable result.
 - The call sites in `agentctl/journal/retained.go`, `agentctl/journal/retained_gap.go`,
   `lifecycle/delivery_record_evidence.go`, and `lifecycle/already_resumed_recovery.go`.
 
@@ -67,9 +68,9 @@ Task 01.
 
 ## Risks
 
-- A procfs race during the scan must count an exiting process as gone only on ESRCH or ENOENT.
-- Darwin process-group enumeration needs the same birth revalidation as session enumeration.
-  If that is unavailable, Darwin stays unverifiable.
+- A procfs snapshot cannot prove group absence. Linux uses the kernel group existence check.
+- Existing groups, reused IDs, and permission errors cannot prove termination.
+- Unreaped group members can delay proof. Darwin group inspection remains unsupported.
 
 ## Parallelism
 
@@ -94,3 +95,7 @@ Task 01.
 - `GOOS=darwin` and `GOOS=windows` `go vet` of the changed platform packages: passed.
 - `bash scripts/lint-go-changed <changed Go files>`: 0 issues.
 - `python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all`: passed.
+
+Review corrections add surviving-child, changed-birth, previous-boot, retained recovery, and
+history-gap regressions. These tests remain unrun under the review request. Independent recovery
+gates still need the follow-up recorded in `plan.md`.

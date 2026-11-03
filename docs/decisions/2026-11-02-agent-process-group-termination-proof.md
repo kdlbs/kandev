@@ -14,23 +14,29 @@ that state, a session whose agent already exited cannot prove termination: autom
 recovery never runs, and the UI offers only Retry connection and Stop. The operator has to
 kill the shared agentctl, and with it every other running agent.
 
-agentctl starts each agent child with `Setpgid`, so every agent owns a distinct process group
-inside the shared agentctl OS session.
+On Linux and Darwin, agentctl starts each persistent agent child with `Setpgid`.
+Each child owns a distinct process group inside the shared agentctl OS session.
 
 ## Decision
 
 Record the agent child's process-group birth identity in the durable prompt binding, as
-reported by agentctl's authenticated delivery descriptor. Original-owner termination is
-proven when the runtime's owned session has terminated, or when no process remains in the
-recorded agent group with a matching birth identity. Missing, malformed, or reused identities
-prove nothing. Bindings that predate the group identity keep the runtime-only rule.
+reported by agentctl's authenticated delivery descriptor. On Linux, original-owner termination
+is proven when the runtime's owned session has terminated or the recorded agent group no
+longer exists. Group proof requires a valid birth token. A different boot proves that the
+original group ended. On the same boot, a kernel existence check must report `ESRCH`.
+An existing group, including a reused group ID, does not prove termination.
+Missing or malformed identities prove nothing. Bindings without group evidence keep the
+runtime-only rule. Darwin retains runtime-session proof because group inspection is unsupported.
+Windows retains its existing unverifiable result.
 
 ## Consequences
 
-Recovery of one session no longer depends on unrelated sessions or on the agentctl lifetime.
-The agentctl delivery descriptor gains an additive field, so older peers fall back to the
-runtime-only rule. Descendants that leave the agent's process group are not covered by group
-proof. This matches the existing containment boundary, which signals only owned groups.
+Linux group evidence removes the shared runtime lifetime from the original-owner proof.
+Existing execution and recovery admission checks remain authoritative.
+The agentctl delivery descriptor gains an additive field, so older peers retain the
+runtime-only rule. The kernel check sends no signal. An unreaped group member can delay proof
+until the operating system removes the group. Descendants that leave the agent's process group
+are not covered by group proof. This matches the existing containment boundary, which signals only owned groups.
 
 ## Alternatives Considered
 

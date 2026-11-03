@@ -180,14 +180,6 @@ func readProcStat(pid int) (procStat, error) {
 }
 
 func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProcess, error) {
-	return liveProcessesSince(rootStartTime, func(stat procStat) bool { return stat.sessionID == sessionID })
-}
-
-func processesInOwnedGroup(groupID int, rootStartTime uint64) ([]ownedProcess, error) {
-	return liveProcessesSince(rootStartTime, func(stat procStat) bool { return stat.groupID == groupID })
-}
-
-func liveProcessesSince(rootStartTime uint64, member func(procStat) bool) ([]ownedProcess, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate processes: %w", err)
@@ -205,7 +197,7 @@ func liveProcessesSince(rootStartTime uint64, member func(procStat) bool) ([]own
 		if err != nil {
 			return nil, err
 		}
-		if !member(stat) || stat.startTime < rootStartTime || stat.state == 'Z' || stat.state == 'X' {
+		if stat.sessionID != sessionID || stat.startTime < rootStartTime || stat.state == 'Z' || stat.state == 'X' {
 			continue
 		}
 		processes = append(processes, ownedProcess{
@@ -285,14 +277,13 @@ func OwnedSessionTerminated(identity Identity) (bool, error) {
 	return len(processes) == 0, err
 }
 
-// Procfs can return ESRCH when a process exits after its stat file was opened.
-// OwnedGroupTerminated reports whether every process in the identity's group
-// that started at or after the leader's birth has exited.
+// OwnedGroupTerminated proves group absence through the kernel's process-group
+// lookup. A procfs snapshot cannot prove absence while members can fork and exit.
 func OwnedGroupTerminated(identity Identity) (bool, error) {
-	if identity.Validate() != nil || identity.GroupID != identity.PID {
+	if identity.Validate() != nil || identity.PID <= 1 || identity.GroupID != identity.PID {
 		return false, ErrUnverifiableIdentity
 	}
-	wantBoot, start, err := parseBirthToken(identity.BirthToken)
+	wantBoot, _, err := parseBirthToken(identity.BirthToken)
 	if err != nil {
 		return false, err
 	}
@@ -303,17 +294,14 @@ func OwnedGroupTerminated(identity Identity) (bool, error) {
 	if strings.TrimSpace(string(boot)) != wantBoot {
 		return true, nil
 	}
-	stat, err := readProcStat(identity.PID)
-	if err != nil && !processNoLongerExists(err) {
-		return false, err
+	err = syscall.Kill(-identity.GroupID, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true, nil
 	}
-	if err == nil && stat.startTime == start && stat.groupID == identity.GroupID && stat.state != 'Z' && stat.state != 'X' {
-		return false, nil
-	}
-	processes, err := processesInOwnedGroup(identity.GroupID, start)
-	return len(processes) == 0, err
+	return false, err
 }
 
+// Procfs can return ESRCH when a process exits after its stat file was opened.
 func processNoLongerExists(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }

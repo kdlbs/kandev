@@ -20,14 +20,15 @@ system_design:
 
 agentctl reports the agent child's process-group birth identity in the authenticated
 delivery descriptor. Lifecycle stores it in the durable prompt binding, the reconciliation
-identity, the recovery metadata, and the silent-restore checkpoint, next to the existing
+identity, the recovery metadata, and the silent-restore checkpoint, as optional fields on the existing
 runtime identity.
 
 ## In scope
 
 - An additive `agent_process` field on the agentctl delivery status, for a running agent child only.
-- Client decoding and an `OriginalAgentGroup` field in the binding, the identities, and the
-  recovery models, with JSON round-trip.
+- Shared descriptor decoding and copied client cache values.
+- Optional `AgentGroupID` and `AgentBirthToken` fields on `processidentity.Identity`, carried
+  through `original_runtime` in bindings and recovery models.
 
 ## Out of scope
 
@@ -38,7 +39,7 @@ runtime identity.
 1. A running local instance reports `agent_process` with PID = GroupID and a birth token. It
    is absent before start and after exit.
 2. A durable prompt binding and the recovery metadata created afterwards carry the group
-   identity. Older JSON without the field still decodes.
+   identity inside `original_runtime`. Older JSON without the optional fields still decodes.
 
 ## Verification
 
@@ -78,8 +79,9 @@ None.
 
 ## Results
 
-- agentctl: `process.Manager` records the child identity after `cmd.Start`, clears it after
-  `Wait`, and reports it as `agent_process` in `journal.RecoveryDescriptor`.
+- agentctl: `process.Manager` records the child identity after lifecycle installation and
+  adapter connection succeed. It clears the identity after `Wait` and reports it as
+  `agent_process` in `journal.RecoveryDescriptor`. Failed startup publishes no identity.
   `TestAgentProcessIdentityTracksRunningGroupLeader` passes.
 - lifecycle: `withAgentProcessGroup` adds the reported group to the prompt binding, and
   `boundAgentProcessGroup` reuses it for the reconciliation identity.
@@ -96,3 +98,6 @@ There is no separate `OriginalAgentGroup` field, so the existing `original_runti
 (bindings, recovery metadata, silent-restore checkpoints, journal requests) carries it
 unchanged. Darwin group proof returns `ErrUnverifiableIdentity`, so Darwin keeps the
 runtime-only rule.
+
+Review corrections add failed-startup and client-cache ownership regressions. These tests remain
+unrun under the review request. The original verification results do not cover these corrections.

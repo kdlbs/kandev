@@ -179,10 +179,14 @@ around payload inspection. Legacy bindings without process proof remain blocked.
 A local agentctl runtime is shared by every session and can outlive the backend, so its
 termination is not the only proof that one session's agent stopped writing. The binding also
 records the agent child's process-group birth identity, which agentctl reports in its
-authenticated delivery descriptor. Original-owner termination is proven when either the
-runtime's owned session has terminated or every process in that agent group has exited.
-Group evidence that is missing, malformed, or reused under a different birth token proves
-nothing. Bindings without group identity keep the runtime-only rule. Remote executors keep
+authenticated delivery descriptor. On Linux, original-owner termination is proven when either
+the runtime's owned session has terminated or the recorded agent group no longer exists.
+A valid group birth token names its boot. On the same boot, a kernel existence check must
+report `ESRCH`. A procfs snapshot cannot prove absence while members can fork and exit.
+An existing or reused group blocks group proof. Unreaped members can delay proof until the
+operating system removes the group. Missing or malformed evidence proves nothing.
+Darwin retains runtime-session proof. Windows retains its existing unverifiable result.
+Bindings without group identity keep the runtime-only rule. Remote executors keep
 their existing authenticated surviving-execution evidence. See
 [agent process-group termination proof](../../../decisions/2026-11-02-agent-process-group-termination-proof.md)
 and the delivery record

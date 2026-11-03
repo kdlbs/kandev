@@ -75,5 +75,8 @@ func OriginalOwnerTerminated(identity Identity) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if errors.Is(groupErr, ErrUnverifiableIdentity) {
+		return false, nil
+	}
 	return false, groupErr
 }

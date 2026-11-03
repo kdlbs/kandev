@@ -1922,7 +1922,6 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
 	processGeneration := m.beginManagedStartupGeneration()
-	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
 	m.watchOpenCodePluginReadiness()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
@@ -1958,6 +1957,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		m.status.Store(StatusError)
 		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
+
+	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.

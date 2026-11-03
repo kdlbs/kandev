@@ -1,6 +1,6 @@
 ---
 created: 2026-11-02
-status: implemented
+status: in_progress
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
 system_design:
@@ -60,9 +60,10 @@ define the group-level proof.
 
 - agentctl reports the agent child's process-group birth identity in its authenticated
   delivery descriptor. This is an additive field.
-- The durable prompt binding and the reconciliation identity record it as `OriginalAgentGroup`.
-- `processidentity.OwnedGroupTerminated` for Linux and Darwin. Other platforms return
-  `ErrUnverifiableIdentity`.
+- The durable prompt binding and reconciliation identity carry optional `AgentGroupID` and
+  `AgentBirthToken` fields on `original_runtime`.
+- `processidentity.OwnedGroupTerminated` provides Linux group proof. Darwin and other platforms
+  return `ErrUnverifiableIdentity` for group inspection and retain their prior runtime proof.
 - Every original-owner termination check accepts runtime-session termination OR
   agent-group termination.
 
@@ -76,41 +77,49 @@ define the group-level proof.
 ## Technical approach
 
 Work order 01, identity capture:
-- `internal/common/processidentity`: no change to `Identity`. Its `GroupID` and `BirthToken`
-  already describe a process group leader.
-- agentctl (`internal/agentctl/server/instance`, `internal/agentctl/server/api/delivery_protocol.go`):
-  after the agent process starts, capture `processidentity.Capture(pid)` and expose it as
-  `agent_process` in the delivery status of that instance. Omit it until the child is running.
-- The client (`internal/agent/runtime/agentctl`) decodes it on `DeliveryStatus`.
-- Lifecycle (`durable_prompt_turn_recovery.go`, `delivery_reconciliation.go`,
-  `delivery_record_identity.go`, and `models.AgentDeliveryRecovery` plus its silent-restore
-  checkpoint copy) adds an optional `original_agent_group` next to `original_runtime`. Only a
-  valid identity whose PID equals its GroupID is recorded.
+- `internal/common/processidentity.Identity` adds optional `AgentGroupID` and `AgentBirthToken`
+  fields. `WithAgentGroup` records only a group leader with a birth token.
+- `process.Manager` captures the child identity after lifecycle installation and adapter
+  connection succeed. It publishes `agent_process` in its delivery descriptor and clears it
+  after `Wait`. Failed startup publishes no child identity.
+- The client uses the shared `journal.RecoveryDescriptor` type and copies the child identity
+  at both cache boundaries.
+- Lifecycle stores the fields inside `original_runtime`. Existing prompt bindings, recovery
+  metadata, silent-restore checkpoints, and journal requests carry them without a new field.
 
 Work order 02, proof evaluation:
-- `processidentity.OwnedGroupTerminated(identity)` (Linux procfs scan, Darwin `processGroupsInSession`
-  equivalent). The group counts as terminated when no live process has that PGID with a start
-  time at or after the recorded birth. If the leader is alive, it returns `false`. Errors fail closed.
-- `processidentity.OriginalOwnerTerminated(runtime Identity, group *Identity)` in
-  `internal/common/processidentity`. It is shared code, so both agentctl's journal and
-  lifecycle can import it. Every call site listed in the root cause uses it.
+- Linux `OwnedGroupTerminated` requires a valid birth token and a group leader identity.
+  A previous boot proves termination. On the same boot, `kill(-pgid, 0)` must return `ESRCH`.
+  This operation sends no signal. Existing groups and permission errors cannot authorize
+  recovery. Unreaped members can delay proof until the operating system removes the group.
+- `OriginalOwnerTerminated(identity)` accepts runtime-session termination or Linux group
+  absence. Unsupported optional group evidence preserves a known runtime result.
+- Journal retained recovery, retained gap recovery, record evidence, and already-resumed
+  recovery use this shared helper. Independent admission checks still apply.
 
 | Runtime | Group identity | Proof |
 |---|---|---|
-| Local standalone (shared agentctl) | Recorded | Group exit or runtime exit |
-| Local standalone, legacy binding | Absent | Runtime exit only (unchanged) |
-| Docker/SSH/Sprites/K8s agentctl | Recorded inside the remote host | Unchanged: remote evidence rules apply, and local group proof is not consulted |
-| Windows | Any | Unverifiable (unchanged) |
+| Linux local standalone | Recorded | Group absence or runtime-session exit |
+| Darwin local standalone | Any | Runtime-session exit only |
+| Local legacy binding | Absent | Runtime-session exit only |
+| Remote executors | Any | Existing authenticated remote evidence |
+| Windows | Any | Unverifiable, unchanged |
 
 ## Tests
 
 | Criterion | Evidence |
 |---|---|
-| AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20, 006.21 | `processidentity/group_termination_linux_test.go`: `TestOwnedGroupTerminated`. Covers a live group, an exited group, a reused PID with a different birth, and a malformed identity. |
-| AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.17, 006.20 | `lifecycle/delivery_record_group_proof_test.go`: `TestOriginalOwnerTerminatedByAgentGroup`. The runtime is alive and the recorded group has exited, so reconstruction reports `process_terminated: true`. It fails on main. |
-| Legacy fallback | The same file: `TestOriginalOwnerLegacyBindingNeedsRuntimeExit`. |
-| Retained journal path | `agentctl/journal/retained_group_proof_test.go`: `TestRetainedRecoveryAcceptsAgentGroupTermination`. |
-| Capture | `agentctl/server/api` and `lifecycle` tests that assert the descriptor field and the binding round-trip. |
+| Live group, exited group, surviving child, changed birth, previous boot | `internal/common/processidentity/group_termination_linux_test.go`: `TestOwnedGroupTerminated`, `TestOwnedGroupTerminationRequiresNoSurvivingChild`, `TestOwnedGroupTerminationRejectsChangedBirth` |
+| Group proof and runtime-only binding | The same file: `TestOriginalOwnerTerminatedByAgentGroup` |
+| Unsupported optional group proof on Darwin | `internal/common/processidentity/group_termination_darwin_test.go`: `TestOriginalOwnerPreservesDarwinRuntimeOnlyProof` |
+| Retained reconstruction and ordinary retained recovery | `internal/agentctl/journal/retained_group_proof_linux_test.go`: `TestRetainedRecoveryAcceptsAgentGroupTermination` |
+| Retained history-gap recovery | The same file: `TestRetainedGapAcceptsAgentGroupTermination` |
+| Child identity lifecycle and failed startup | `internal/agentctl/server/process/agent_process_identity_linux_test.go`: `TestAgentProcessIdentityTracksRunningGroupLeader`, `TestAgentProcessIdentityAbsentAfterFailedStartup` |
+| Client cache ownership | `internal/agent/runtime/agentctl/client_delivery_agent_process_test.go`: `TestDeliveryDescriptorOwnsAgentProcessIdentity` |
+| Binding and reconciliation helper | `internal/agent/runtime/lifecycle/agent_process_group_test.go`: `TestWithAgentProcessGroupRecordsReportedAgentGroup`, `TestBoundAgentProcessGroupReusesPromptBinding` |
+
+Paths in this table are relative to `apps/backend/`. New review regressions remain unrun
+because the review request prohibits tests, builds, linters, and validation commands.
 
 ## E2E tests
 
@@ -120,9 +129,11 @@ harness. It is recorded as a follow-up for the E2E owner.
 ## Work orders
 
 - [x] [Task 01: Record the agent process group](task-01-record-agent-group.md)
-- [x] [Task 02: Accept agent group termination as proof](task-02-group-termination-proof.md)
+- [ ] [Task 02: Accept agent group termination as proof](task-02-group-termination-proof.md)
 
-## Verification results
+## Contributor verification results
+
+These results belong to the original contributor commit. They do not cover the later review fixes.
 
 - `go test -trimpath -race -count=1 ./internal/common/processidentity ./internal/agentctl/journal ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/... ./internal/orchestrator ./internal/task/models ./internal/task/repository/sqlite`: all `ok` (lifecycle 227s, sqlite 381s, process 319s).
 - `GOOS=darwin` and `GOOS=windows` `go vet` of the changed platform packages: passed.
@@ -136,10 +147,20 @@ There is no separate `OriginalAgentGroup` field, so the existing `original_runti
 unchanged. Darwin group proof returns `ErrUnverifiableIdentity`, so Darwin keeps the
 runtime-only rule.
 
+## Review follow-up
+
+The broader recovery path still has independent gates that do not use the recorded group.
+`historicalProcessTermination` treats a matching registered execution as live before it reaches
+group proof. `proveSilentRestoreSourceDead` still uses runtime-session proof for unknown
+standalone rows. Its live-row branch also blocks recovery. The existing review thread
+[4454081765](https://github.com/kdlbs/kandev/pull/5015#discussion_r4454081765) owns this blocker.
+A follow-up must cover both registered and removed instances and preserve successor protection.
+The focused review fixes do not change these admission rules.
+
 ## Risks
 
-- Process-group reuse after PID wraparound is guarded by the birth token. A missing birth
-  fails closed.
+- The birth token identifies the boot. Existing or reused group IDs cannot prove group
+  absence. A missing birth token fails closed.
 - Mixed-version agentctl peers omit the field. Recovery falls back to the runtime-only rule.
 - An agent that spawns helpers outside its group is not covered. Containment already shares
   that boundary.
