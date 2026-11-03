@@ -1,7 +1,7 @@
 ---
 id: "01-group-conflict-items-by-workspace"
 title: "Group delete-conflict items by workspace"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -111,4 +111,15 @@ None.
 
 ## Results
 
-Pending.
+- `go test ./internal/task/repository/sqlite/ -run 'TestAgentProfileBlockers' -count=1`: pass (new
+  `TestAgentProfileBlockersIncludeWorkspace` and `TestAgentProfileBlockersKeepTaskWithMissingWorkspace`
+  failed before the query change).
+- `go test ./internal/agent/settings/... -count=1`: delete-conflict tests pass; the only failures
+  (`TestOpenCodeInstallPreparesSelectedManagedRuntime`, `TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree`)
+  are local npm-cache/runtime environment failures and fail identically on the base commit.
+- `vitest run lib/settings/agent-profile-delete-conflict.test.ts components/settings/agent-profile-delete-dialog.test.tsx`:
+  19 passed (new grouping tests failed before implementation).
+- `pnpm run typecheck` (with `NODE_OPTIONS=--max-old-space-size=12288`) and `pnpm run i18n:check`: pass.
+- `pnpm e2e:run --docker --shards 1 --project chromium tests/settings/agent-profile-delete.spec.ts`:
+  6 passed. Host mode was unavailable locally (no Playwright browser on NixOS).
+- `bash scripts/lint-go-changed` on changed Go files: 0 issues; ESLint on changed TS files: clean.

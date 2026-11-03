@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: draft
+status: implemented
 requirements:
   - REQ-AGENTS-PROFILE-DELETE-WORKSPACES-001
 system_design:
@@ -150,11 +150,12 @@ conflict dialog and allows cancel" to assert the conflict dialog shows a
 
 ## Work orders
 
-- [ ] [Task 01: Group delete-conflict items by workspace](task-01-group-conflict-items-by-workspace.md)
+- [x] [Task 01: Group delete-conflict items by workspace](task-01-group-conflict-items-by-workspace.md)
 
 ## Verification results
 
-Pending.
+See [Task 01 results](task-01-group-conflict-items-by-workspace.md#results). All
+work-order checks pass; unrelated local environment failures are recorded there.
 
 ## Risks
 

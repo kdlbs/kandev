@@ -260,6 +260,76 @@ describe("AgentProfileDeleteConflictDialog", () => {
   });
 });
 
+describe("AgentProfileDeleteConflictDialog workspace groups", () => {
+  it("groups tasks and quick chats under workspace headings", () => {
+    renderConflictDialog({
+      activeSessions: [
+        {
+          task_id: "t1",
+          task_title: "Fix login",
+          is_ephemeral: false,
+          workspace_id: "ws-b",
+          workspace_name: "Backend",
+        },
+        {
+          task_id: "t2",
+          task_title: "Billing page",
+          is_ephemeral: false,
+          workspace_id: "ws-f",
+          workspace_name: "Frontend",
+        },
+        {
+          task_id: "q1",
+          task_title: "Quick question",
+          is_ephemeral: true,
+          workspace_id: "ws-b",
+          workspace_name: "Backend",
+        },
+      ],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const groups = screen.getAllByTestId("profile-conflict-workspace-group");
+    expect(
+      groups.map((g) => [
+        within(g).getByTestId("profile-conflict-workspace-name").textContent,
+        within(g)
+          .getAllByRole("listitem")
+          .map((li) => li.textContent),
+      ]),
+    ).toEqual([
+      ["Backend", ["Fix login"]],
+      ["Frontend", ["Billing page"]],
+      ["Backend", ["Quick question"]],
+    ]);
+  });
+
+  it("falls back to the store workspace name, then Unknown workspace", () => {
+    renderConflictDialog({
+      activeSessions: [
+        { task_id: "t1", task_title: "Known by store", is_ephemeral: false, workspace_id: "ws-1" },
+        {
+          task_id: "t2",
+          task_title: "Orphan",
+          is_ephemeral: false,
+          workspace_id: "ws-gone",
+          workspace_name: "",
+        },
+      ],
+      watchers: [],
+      routingTiers: [],
+      automations: [],
+    });
+
+    const names = screen
+      .getAllByTestId("profile-conflict-workspace-name")
+      .map((el) => el.textContent);
+    expect(names).toEqual(["Office Workspace", "Unknown workspace"]);
+  });
+});
+
 describe("AgentProfileDeleteConflictDialog layout", () => {
   it("keeps conflict details scrollable and decisions outside the scroll region", () => {
     renderConflictDialog({

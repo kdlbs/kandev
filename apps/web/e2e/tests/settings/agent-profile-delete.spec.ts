@@ -109,6 +109,14 @@ test.describe("Agent profile deletion", () => {
     await expect(conflictDialog.getByText("Active Task For Profile")).toBeVisible();
     await expect(conflictDialog.getByText("This profile is currently in use")).toBeVisible();
 
+    // The task is listed under the workspace that contains it.
+    const workspaceGroup = conflictDialog.getByTestId("profile-conflict-workspace-group");
+    await expect(workspaceGroup).toHaveCount(1);
+    await expect(workspaceGroup.getByTestId("profile-conflict-workspace-name")).toHaveText(
+      "E2E Workspace",
+    );
+    await expect(workspaceGroup.getByText("Active Task For Profile")).toBeVisible();
+
     // Cancel the deletion
     await conflictDialog.getByRole("button", { name: "Cancel" }).click();
 

@@ -146,4 +146,7 @@ type ActiveTaskInfo struct {
 	TaskID      string `json:"task_id"`
 	TaskTitle   string `json:"task_title"`
 	IsEphemeral bool   `json:"is_ephemeral"`
+	// WorkspaceName is empty when the workspace row no longer exists.
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
 }
