@@ -2632,6 +2632,8 @@
   "conversationUsage.responseCount_other": "{{count}} 個回應",
   "conversationUsage.estimatedCount_one": "{{count}} 個預估事件",
   "conversationUsage.estimatedCount_other": "{{count}} 個預估事件",
+  "conversationUsage.subscriptionEstimateNotice": "此估算不是額外的 Google 訂閲賬單。",
+  "conversationUsage.subscriptionNativeUsageNotice": "使用 /usage 查看原生帳戶額度報告。",
   "allowNetworkAccess": "允許網絡存取",
   "approveWithCommandPolicy": "按命令規則批准",
   "blockNetworkAccess": "阻止網絡存取",

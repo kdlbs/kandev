@@ -41,13 +41,16 @@ type tasklessPermissionOption struct {
 
 type tasklessPermissionRequest struct {
 	AgentLifecycleData
-	RequestID              string                     `json:"request_id"`
-	PendingID              string                     `json:"pending_id"`
-	Title                  string                     `json:"title"`
-	Options                []tasklessPermissionOption `json:"options"`
-	AutoApprovedOptionID   string                     `json:"auto_approved_option_id"`
-	AutoApprovedOptionKind string                     `json:"auto_approved_option_kind"`
-	AutoApprovalPending    bool                       `json:"auto_approval_pending"`
+	RequestID string                     `json:"request_id"`
+	PendingID string                     `json:"pending_id"`
+	Title     string                     `json:"title"`
+	Options   []tasklessPermissionOption `json:"options"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Office must leave it pending rather than resolving reject/cancel.
+	HumanInput             bool   `json:"human_input,omitempty"`
+	AutoApprovedOptionID   string `json:"auto_approved_option_id"`
+	AutoApprovedOptionKind string `json:"auto_approved_option_kind"`
+	AutoApprovalPending    bool   `json:"auto_approval_pending"`
 }
 
 // handleTasklessPermissionRequest answers a permission request of the current
@@ -78,6 +81,11 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 		s.recordTasklessPermissionDecision(
 			ctx, run.ID, request, permissionDecisionApproved, request.AutoApprovedOptionID, request.AutoApprovedOptionKind,
 		)
+		return nil
+	}
+	// A provider-native human question is never answered on the user's behalf.
+	// Leave it pending instead of resolving reject/cancel.
+	if request.HumanInput {
 		return nil
 	}
 	decision, optionID, optionKind := decideTasklessPermission(request)

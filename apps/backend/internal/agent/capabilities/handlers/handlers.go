@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -25,7 +27,12 @@ type Handlers struct {
 // `/api/v1/agents/...` to avoid a routing conflict with the existing settings
 // handler which uses `/api/v1/agents/:id/...` — Gin does not allow two
 // different wildcard names (:id vs :type) at the same path level.
-func RegisterRoutes(router *gin.Engine, hostUtility *hostutility.Manager, log *logger.Logger) {
+func RegisterRoutes(
+	router *gin.Engine,
+	hostUtility *hostutility.Manager,
+	log *logger.Logger,
+	interlockToken string,
+) {
 	h := &Handlers{
 		hostUtility: hostUtility,
 		logger:      log.WithFields(zap.String("component", "agent-capabilities-handlers")),
@@ -35,6 +42,13 @@ func RegisterRoutes(router *gin.Engine, hostUtility *hostutility.Manager, log *l
 	api.GET("/:type", h.get)
 	api.POST("/:type/probe", h.probe)
 	api.POST("/:type/prompt", h.prompt)
+	cfg := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
+	interlock := httpmw.InterimSettingsInterlock(interlockToken)
+	login := router.Group("/api/v1/antigravity-acp/login")
+	login.POST("", cfg, interlock, h.startAntigravityLogin)
+	login.GET("", cfg, h.getAntigravityLogin)
+	login.GET("/:attemptID", cfg, h.getAntigravityLogin)
+	login.DELETE("/:attemptID", cfg, interlock, h.cancelAntigravityLogin)
 }
 
 type capabilitiesResponse struct {

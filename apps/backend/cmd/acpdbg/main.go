@@ -497,6 +497,7 @@ func probeRunConfig(shared *sharedFlags, spec acpdbg.AgentSpec) acpdbg.RunConfig
 	return acpdbg.RunConfig{
 		AgentID:            spec.ID,
 		Command:            spec.Command,
+		Env:                spec.Env,
 		Workdir:            shared.workdir,
 		CaptureStderr:      shared.stderr,
 		ClientCapabilities: shared.clientCapabilities,
@@ -536,6 +537,7 @@ func resolveRunConfig(fs *flag.FlagSet, shared *sharedFlags, _ string) (acpdbg.R
 	}
 	cfg.AgentID = spec.ID
 	cfg.Command = spec.Command
+	cfg.Env = spec.Env
 	return cfg, nil
 }
 

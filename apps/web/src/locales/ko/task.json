@@ -2602,6 +2602,8 @@
   "conversationUsage.responseCount_other": "응답 {{count}}개",
   "conversationUsage.estimatedCount_one": "추정 이벤트 {{count}}개",
   "conversationUsage.estimatedCount_other": "추정 이벤트 {{count}}개",
+  "conversationUsage.subscriptionEstimateNotice": "이 추정치는 Google 구독에 대한 추가 청구가 아닙니다.",
+  "conversationUsage.subscriptionNativeUsageNotice": "네이티브 계정 한도 보고서는 /usage에서 확인하세요.",
   "allowNetworkAccess": "네트워크 접근 허용",
   "approveWithCommandPolicy": "명령 규칙으로 승인",
   "blockNetworkAccess": "네트워크 접근 차단",

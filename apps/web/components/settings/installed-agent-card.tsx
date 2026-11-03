@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useCollapsedAgentBlocks } from "@/hooks/domains/settings/use-collapsed-agent-blocks";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
+import { AntigravityLoginDialog } from "@/components/settings/antigravity-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
@@ -291,16 +292,19 @@ export function InstalledAgentCard(props: Props) {
   const agentHref = `/settings/agents/${encodeURIComponent(agent.name)}`;
   const [loginOpen, setLoginOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
+  const [antigravityLoginOpen, setAntigravityLoginOpen] = useState(false);
   const authRequired = capabilityStatus === "auth_required";
   const probing = capabilityStatus === "probing";
   const loginAvailable = Boolean(agent.login_command);
+  const antigravityAgent = agent.name === "antigravity-acp";
   const profileCount = savedAgent?.profiles.length ?? 0;
 
   // Either we have a registered login command (open the dedicated login PTY)
   // or we don't (open a plain host shell so the user can explore via
   // `<agent> --help`, run their own auth recipe, etc.).
   const handleAuthClick = () => {
-    if (loginAvailable) setLoginOpen(true);
+    if (antigravityAgent) setAntigravityLoginOpen(true);
+    else if (loginAvailable) setLoginOpen(true);
     else setShellOpen(true);
   };
 
@@ -370,6 +374,8 @@ export function InstalledAgentCard(props: Props) {
         shellOpen={shellOpen}
         setShellOpen={setShellOpen}
         loginAvailable={loginAvailable}
+        antigravityLoginOpen={antigravityLoginOpen}
+        setAntigravityLoginOpen={setAntigravityLoginOpen}
         onAuthComplete={onAuthComplete}
       />
     </Card>
@@ -418,6 +424,8 @@ function AuthDialogs({
   shellOpen,
   setShellOpen,
   loginAvailable,
+  antigravityLoginOpen,
+  setAntigravityLoginOpen,
   onAuthComplete,
 }: {
   agent: AgentDiscovery;
@@ -426,8 +434,19 @@ function AuthDialogs({
   shellOpen: boolean;
   setShellOpen: (open: boolean) => void;
   loginAvailable: boolean;
+  antigravityLoginOpen: boolean;
+  setAntigravityLoginOpen: (open: boolean) => void;
   onAuthComplete?: () => void;
 }) {
+  if (agent.name === "antigravity-acp") {
+    return (
+      <AntigravityLoginDialog
+        open={antigravityLoginOpen}
+        onOpenChange={setAntigravityLoginOpen}
+        onComplete={onAuthComplete}
+      />
+    );
+  }
   if (loginAvailable) {
     return (
       <AgentLoginDialog

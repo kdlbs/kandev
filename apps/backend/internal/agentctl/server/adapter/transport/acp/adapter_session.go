@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -1908,6 +1909,12 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if policy := a.cfg.AuthPolicy; policy != nil && acpcompat.IsAntigravity(a.agentID) {
+		if methodID != policy.MethodID {
+			return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
+		}
+		return a.authenticateAntigravity(ctx, policy)
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{

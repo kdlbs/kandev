@@ -42,6 +42,7 @@ import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import {
   dividerCursorForRenderedItems,
@@ -1533,6 +1534,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
+  const subscriptionUsage = useSessionSubscriptionUsage(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
     isOpen: search.isOpen,
@@ -1697,6 +1699,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
               statusTaskId={statusTaskId ?? taskIdHint}
               showAgentStartHint={showAgentStartHint}
               launchErrorOwned={launchErrorOwned}
+              subscriptionUsage={subscriptionUsage}
             />
           </div>
         </ComposerFooterAllocation>
@@ -1731,6 +1734,8 @@ type ChatFooterProps = {
   /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
   showAgentStartHint: boolean;
   launchErrorOwned: boolean;
+  /** Antigravity personal sessions show the subscription cost guidance. */
+  subscriptionUsage: boolean;
 };
 
 /**
@@ -1761,6 +1766,7 @@ function ChatFooter({
   statusTaskId,
   showAgentStartHint,
   launchErrorOwned,
+  subscriptionUsage,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -1775,6 +1781,7 @@ function ChatFooter({
             taskId={panelState.taskId ?? statusTaskId}
             sessionId={panelState.resolvedSessionId}
             detailActive={panelState.detailActive}
+            subscriptionBilling={subscriptionUsage}
           />
           <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
         </div>

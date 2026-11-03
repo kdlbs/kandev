@@ -78,6 +78,10 @@ function InstallButton({
  * run. Its own component so the two branches do not count against
  * InstallAgentCard's complexity ceiling.
  */
+export function canInstallAgent(agent: AvailableAgent): boolean {
+  return Boolean(agent.install_script || agent.supports_local_install);
+}
+
 function InstallAction({
   agent,
   status,
@@ -87,7 +91,7 @@ function InstallAction({
   status: InstallStatus;
   onInstall?: (name: string) => void;
 }) {
-  if (!agent.install_script || !onInstall) return null;
+  if (!canInstallAgent(agent) || !onInstall) return null;
   return <InstallButton agentName={agent.name} status={status} onInstall={onInstall} />;
 }
 

@@ -138,6 +138,26 @@ var providerRules = map[string][]rule{
 		mustRule("amp.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("amp.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 	},
+	// Antigravity's structured classifier emits these exact normalized
+	// prefixes. Matching them lets the existing Kanban and Office consumers
+	// recover the same category from the message without re-reading private
+	// native evidence.
+	"antigravity-acp": {
+		mustRule("antigravity.native.auth.v1", antigravityMessageRule(AntigravityAuthMessage), CodeAuthRequired, ConfHigh),
+		mustRule("antigravity.native.subscription.v1", antigravityMessageRule(AntigravitySubscriptionMessage), CodeSubscriptionRequired, ConfHigh),
+		mustRule("antigravity.native.model_access.v1", antigravityMessageRule(AntigravityModelAccessMessage), CodeModelUnavailable, ConfHigh),
+		mustRule("antigravity.native.quota.v1", antigravityMessageRule(AntigravityQuotaMessage), CodeQuotaLimited, ConfHigh),
+		mustRule("antigravity.native.throttle.v1", antigravityMessageRule(AntigravityThrottleMessage), CodeRateLimited, ConfHigh),
+		mustRule("antigravity.native.provider_overloaded.v1", antigravityMessageRule(AntigravityProviderOverloadedMessage), CodeProviderOverloaded, ConfHigh),
+		mustRule("antigravity.native.provider_failure.v1", antigravityMessageRule(AntigravityProviderMessage), CodeProviderUnavailable, ConfHigh),
+		mustRule("antigravity.native.unknown.v1", antigravityMessageRule(AntigravityUnknownMessage), CodeUnknownProvider, ConfMedium),
+		mustRule("antigravity.outcome.unverified.v1", antigravityMessageRule(AntigravityOutcomeUnverifiedMessage), CodeAgentRuntime, ConfHigh),
+	},
+}
+
+func antigravityMessageRule(message string) string {
+	return `(?im)^\s*(?:(?:Internal\s+error|API\s+Error|Error):\s*)?` +
+		regexp.QuoteMeta(message) + `\b`
 }
 
 func mustRule(id, pat string, code Code, conf Confidence) rule {

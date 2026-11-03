@@ -212,6 +212,25 @@ func TestTasklessPermission_CancelsWithoutRejectOption(t *testing.T) {
 	}
 }
 
+// A native human question must stay pending: Office has no authority to
+// select an offered option, and rejecting or cancelling would invent an
+// answer the person never gave.
+func TestTasklessPermission_LeavesHumanQuestionPending(t *testing.T) {
+	f := newTasklessPermissionFixture(t)
+
+	f.publish(t, f.request(func(p *lifecycle.PermissionRequestEventPayload) {
+		p.HumanInput = true
+	}))
+
+	if len(f.resolver.resolved) != 0 || len(f.resolver.canceled) != 0 || len(f.stopper.executionIDs) != 0 {
+		t.Fatalf("human question was answered: resolved=%v canceled=%v stopped=%v",
+			f.resolver.resolved, f.resolver.canceled, f.stopper.executionIDs)
+	}
+	if decisions := f.decisions(t); len(decisions) != 0 {
+		t.Fatalf("decision events = %v, want none for a pending human question", decisions)
+	}
+}
+
 func TestTasklessPermission_IgnoresStaleAndTaskOwnedRequests(t *testing.T) {
 	f := newTasklessPermissionFixture(t)
 

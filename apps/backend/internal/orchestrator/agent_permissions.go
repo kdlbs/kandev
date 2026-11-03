@@ -423,6 +423,12 @@ func (s *Service) ResolveUnattendedPermission(ctx context.Context, taskID, sessi
 	if live == nil {
 		return nil
 	}
+	// A provider-native human question is never answered on the user's behalf.
+	// An unattended turn must leave it pending until a person selects an
+	// offered option through the normal permission flow.
+	if live.HumanInput {
+		return nil
+	}
 	request := ResolveAgentPermissionRequest{
 		TaskID: taskID, SessionID: sessionID, RequestID: live.RequestID, PendingID: pendingID,
 		Source:           models.PermissionSourceCoordinatorWake,

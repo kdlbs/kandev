@@ -2632,6 +2632,8 @@
   "conversationUsage.responseCount_other": "{{count}} responses",
   "conversationUsage.estimatedCount_one": "{{count}} estimated event",
   "conversationUsage.estimatedCount_other": "{{count}} estimated events",
+  "conversationUsage.subscriptionEstimateNotice": "This estimate is not an additional Google subscription bill.",
+  "conversationUsage.subscriptionNativeUsageNotice": "Use /usage for the native account allowance report.",
   "allowNetworkAccess": "Allow network access",
   "approveWithCommandPolicy": "Approve with command rule",
   "blockNetworkAccess": "Block network access",
