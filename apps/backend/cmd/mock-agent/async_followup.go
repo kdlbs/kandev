@@ -31,13 +31,12 @@ func emitAsyncFollowup(e *emitter) {
 		background.metadataOnlyToolUpdate("async-followup-check")
 
 		time.Sleep(time.Second)
-		background.completeTool("async-followup-work", "follow-up work complete")
-		background.text("Background follow-up finished.")
-
-		// Keep the follow-up turn open long enough for loaded CI workers to open
-		// queue mode and submit a message while it runs.
+		// Keep the follow-up tool active long enough for loaded CI workers to
+		// submit a queued message before the turn completes.
 		time.Sleep(15 * time.Second)
 		background.text("Background follow-up still running.")
+		background.completeTool("async-followup-work", "follow-up work complete")
+		background.text("Background follow-up finished.")
 	}()
 }
 
