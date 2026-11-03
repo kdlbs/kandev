@@ -168,6 +168,8 @@ func validateAnswerAttachments(i int, a Answer, q Question, seen map[string]bool
 	return len(a.Attachments), total, nil
 }
 
+const answerAttachmentDeliveryModePath = "path"
+
 func validateAnswerAttachment(i int, attachment AnswerAttachment, seen map[string]bool) (int64, error) {
 	if strings.TrimSpace(attachment.AttachmentID) == "" {
 		return 0, newValidationError("answer %d contains an attachment without attachment_id", i+1)
@@ -179,7 +181,7 @@ func validateAnswerAttachment(i int, attachment AnswerAttachment, seen map[strin
 	if strings.TrimSpace(attachment.Path) != "" {
 		return 0, newValidationError("answer %d attachment %q must not supply a path", i+1, attachment.AttachmentID)
 	}
-	if attachment.DeliveryMode != "path" {
+	if attachment.DeliveryMode != answerAttachmentDeliveryModePath {
 		return 0, newValidationError("answer %d attachment %q must use path delivery", i+1, attachment.AttachmentID)
 	}
 	switch attachment.Type {

@@ -36,7 +36,7 @@ func TestHttpWaitForResponseStripsExecutorPaths(t *testing.T) {
 			SelectedOptions: []string{"opt1"},
 			Attachments: []AnswerAttachment{{
 				AttachmentID: "att-1", Type: "image", Name: "screen.png",
-				MimeType: "image/png", SizeBytes: 3, DeliveryMode: "path",
+				MimeType: "image/png", SizeBytes: 3, DeliveryMode: answerAttachmentDeliveryModePath,
 				Path: "/executor/.kandev/attachments/session/screen.png",
 			}},
 		}},

@@ -27,7 +27,7 @@ func TestAnswerAttachmentResponseRoundTrip(t *testing.T) {
 				Name:         "screenshot.png",
 				MimeType:     "image/png",
 				SizeBytes:    123,
-				DeliveryMode: "path",
+				DeliveryMode: answerAttachmentDeliveryModePath,
 				Path:         "/executor/private/screenshot.png",
 			}},
 		}},
@@ -66,7 +66,7 @@ func TestAnswerAttachmentResponseRoundTrip(t *testing.T) {
 	got := roundTripped.Answers[0].Attachments[0]
 	if got.AttachmentID != "att-1" || got.Name != "screenshot.png" ||
 		got.MimeType != "image/png" || got.SizeBytes != 123 ||
-		got.DeliveryMode != "path" {
+		got.DeliveryMode != answerAttachmentDeliveryModePath {
 		t.Fatalf("round-trip attachment = %+v", got)
 	}
 	if got.Path != "" {
@@ -109,7 +109,7 @@ func TestValidateOutcomeRejectsAnswerAttachmentShapes(t *testing.T) {
 			Name:         "log.txt",
 			MimeType:     "text/plain",
 			SizeBytes:    10,
-			DeliveryMode: "path",
+			DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}
 	if err := validateOutcome(questions, Outcome{Answers: []Answer{valid}}); err != nil {
@@ -124,13 +124,13 @@ func TestValidateOutcomeRejectsAnswerAttachmentShapes(t *testing.T) {
 		"duplicate id": {
 			QuestionID: "q1", SelectedOptions: []string{"opt-a"},
 			Attachments: []AnswerAttachment{
-				{AttachmentID: "att-1", Type: "image", Name: "a.png", MimeType: "image/png", DeliveryMode: "path"},
-				{AttachmentID: "att-1", Type: "image", Name: "b.png", MimeType: "image/png", DeliveryMode: "path"},
+				{AttachmentID: "att-1", Type: "image", Name: "a.png", MimeType: "image/png", DeliveryMode: answerAttachmentDeliveryModePath},
+				{AttachmentID: "att-1", Type: "image", Name: "b.png", MimeType: "image/png", DeliveryMode: answerAttachmentDeliveryModePath},
 			},
 		},
 		"attachment only": {
 			QuestionID:  "q1",
-			Attachments: []AnswerAttachment{{AttachmentID: "att-1", Type: "image", Name: "a.png", MimeType: "image/png", DeliveryMode: "path"}},
+			Attachments: []AnswerAttachment{{AttachmentID: "att-1", Type: "image", Name: "a.png", MimeType: "image/png", DeliveryMode: answerAttachmentDeliveryModePath}},
 		},
 	}
 	for name, answer := range cases {
@@ -177,7 +177,7 @@ func TestMaterializeRecordedAnswerAttachmentsReconstructsPaths(t *testing.T) {
 			Name:         "screen.png",
 			MimeType:     "image/png",
 			SizeBytes:    123,
-			DeliveryMode: "path",
+			DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}}}
 
@@ -239,7 +239,7 @@ func TestResumeDetachedClarificationCarriesAnswerAttachments(t *testing.T) {
 			Name:         "screen.png",
 			MimeType:     "image/png",
 			SizeBytes:    123,
-			DeliveryMode: "path",
+			DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}}
 	if err := resolver.resumeDetachedClarification(context.Background(), pendingID, answers, false, "", nil); err != nil {
@@ -251,7 +251,7 @@ func TestResumeDetachedClarificationCarriesAnswerAttachments(t *testing.T) {
 	if got := resumer.request.Attachments[0]; got.AttachmentID != "att-1" ||
 		got.Type != "image" || got.Name != "screen.png" ||
 		got.MimeType != "image/png" || got.SizeBytes != 123 ||
-		got.DeliveryMode != "path" {
+		got.DeliveryMode != answerAttachmentDeliveryModePath {
 		t.Fatalf("attachment = %+v", got)
 	}
 }

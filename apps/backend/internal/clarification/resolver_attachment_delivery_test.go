@@ -90,7 +90,7 @@ func TestMaterializationUsesPostClaimDeliveryBudget(t *testing.T) {
 		resolverDeliveryMessageCreator: baseCreator,
 		attachment: taskmodels.ClarificationAnswerAttachment{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		},
 	}
 	eventBus := &stubEventBus{}
@@ -116,7 +116,7 @@ func TestMaterializationUsesPostClaimDeliveryBudget(t *testing.T) {
 		SelectedOptions: []string{"yes"},
 		Attachments: []AnswerAttachment{{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}}})
 	if err != nil || !claimed || resolution == nil {
@@ -155,7 +155,7 @@ func TestMaterializationFailureRestoresClaim(t *testing.T) {
 		resolverDeliveryMessageCreator: baseCreator,
 		attachment: taskmodels.ClarificationAnswerAttachment{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		},
 	}
 	eventBus := &stubEventBus{}
@@ -180,7 +180,7 @@ func TestMaterializationFailureRestoresClaim(t *testing.T) {
 		SelectedOptions: []string{"yes"},
 		Attachments: []AnswerAttachment{{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}}})
 	if !claimed || err == nil {
@@ -215,7 +215,7 @@ func TestMaterializationRejectsSupersededConversationalTurn(t *testing.T) {
 		resolverDeliveryMessageCreator: baseCreator,
 		attachment: taskmodels.ClarificationAnswerAttachment{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		},
 	}
 	eventBus := &stubEventBus{}
@@ -238,7 +238,7 @@ func TestMaterializationRejectsSupersededConversationalTurn(t *testing.T) {
 		SelectedOptions: []string{"yes"},
 		Attachments: []AnswerAttachment{{
 			AttachmentID: "att-1", Type: "image", Name: "screen.png",
-			MimeType: "image/png", SizeBytes: 123, DeliveryMode: "path",
+			MimeType: "image/png", SizeBytes: 123, DeliveryMode: answerAttachmentDeliveryModePath,
 		}},
 	}}})
 	if !claimed || err == nil {
