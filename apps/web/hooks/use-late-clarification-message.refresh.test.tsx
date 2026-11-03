@@ -142,10 +142,9 @@ describe("late clarification refresh with live session updates", () => {
 
   it("accepts fresh activity when the live event preceded the refresh", async () => {
     const store = storeRef.current!;
-    store.getState().upsertTaskSessionFromEvent(
-      TASK_ID,
-      sourceSession({ foreground_activity: "generating" }),
-    );
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, sourceSession({ foreground_activity: "generating" }));
     const snapshot = sourceSnapshot("pending-before-refresh");
     fetchTaskSessionMock.mockResolvedValue({ session: sourceSession() });
     const hook = renderHook(() => useLateClarificationMessage(snapshot.messages[0]));
