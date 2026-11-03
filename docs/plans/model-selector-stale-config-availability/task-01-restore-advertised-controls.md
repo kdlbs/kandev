@@ -90,7 +90,7 @@ The managed E2E commands build fresh production assets and use isolated data.
 Run desktop and phone sequentially.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/model-selector.test.ts components/task/model-selector-stale-config.test.tsx components/task/model-selector-consecutive-switch.test.tsx lib/state/slices/session-runtime/session-model-hydration.test.ts lib/ssr/session-page-model-hydration.test.ts lib/ws/handlers/session-models-startup.test.ts lib/ws/handlers/session-models-confirmed-config.test.ts lib/ws/handlers/session-models-user-selection.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/model-selector.test.ts components/task/model-selector-stale-config-gate.test.ts components/task/model-selector-stale-config.test.tsx components/task/model-selector-consecutive-switch.test.tsx lib/state/slices/session-runtime/session-model-hydration.test.ts lib/ssr/session-page-model-hydration.test.ts lib/ws/handlers/session-models-startup.test.ts lib/ws/handlers/session-models-confirmed-config.test.ts lib/ws/handlers/session-models-user-selection.test.ts)
 node apps/web/scripts/generate-release-notes.mjs
 node apps/web/scripts/generate-changelog.mjs
 (cd apps/web && pnpm run typecheck)

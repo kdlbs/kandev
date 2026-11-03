@@ -133,7 +133,7 @@ to protect saved model labels from intermediate provider defaults.
 
 Both viewports recover the same model and option controls. Desktop retains the
 existing model picker. Phone retains the touch picker in the composer toolbar.
-The nearest shipped exemplar is `e2e/tests/chat/mobile-model-selector.spec.ts`.
+The nearest shipped exemplar is `apps/web/e2e/tests/chat/mobile-model-selector.spec.ts`.
 
 The repair changes availability inside existing composition. It does not change
 navigation, focus policy, scroll ownership, safe areas, or control sizing.
