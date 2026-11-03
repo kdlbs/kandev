@@ -86,6 +86,9 @@ jobs:
         env:
           PATTERNS: |
             apps/backend/**
+            pluginsdk/**
+            scripts/pluginsdk/**
+            .github/scripts/plugin-sdk-ci-contract_test.py
             apps/desktop/**
             apps/web/**
             apps/packages/**
@@ -166,18 +169,11 @@ jobs:
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-e2e-helpers-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            go-e2e-helpers-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
-            go-e2e-helpers-${{ runner.os }}-
-            go-e2e-build-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: e2e-helpers
+          save-mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'build' || 'none' }}
 
       - name: Compile remote platforms and diagnostic commands
         run: >-
@@ -512,12 +508,30 @@ jobs:
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Resolve pnpm store path
+        id: pnpm_store
+        shell: bash
+        continue-on-error: true
+        working-directory: apps
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -716,12 +730,30 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Resolve pnpm store path
+        id: pnpm_store
+        shell: bash
+        continue-on-error: true
+        working-directory: apps
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -1081,12 +1113,30 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Resolve pnpm store path
+        id: pnpm_store
+        shell: bash
+        continue-on-error: true
+        working-directory: apps
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -1222,19 +1272,37 @@ jobs:
         uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache-dependency-path: |
+            apps/backend/go.sum
+            pluginsdk/go.sum
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      # The desktop image uses /root as HOME, so this matches the store path
-      # used by the other container jobs.
+      - name: Resolve pnpm store path
+        id: pnpm_store
+        shell: bash
+        continue-on-error: true
+        working-directory: apps
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm_store.outputs.version }}-
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2

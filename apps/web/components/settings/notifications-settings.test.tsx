@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NotificationProvider } from "@/lib/types/http";
 import { NotificationsSettings } from "./notifications-settings";
@@ -193,5 +193,65 @@ describe("NotificationsSettings", () => {
     expect(screen.getAllByText("Saved Apprise").length).toBeGreaterThan(0);
     expect(screen.queryByDisplayValue("Changed Apprise")).toBeNull();
     expect(screen.queryByDisplayValue("json://changed")).toBeNull();
+  });
+});
+
+describe("NotificationsSettings webhook providers", () => {
+  it("offers a webhook provider form next to Apprise", () => {
+    render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByText("Webhooks")).toBeTruthy();
+    expect(screen.getByText("No webhook providers configured yet.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Webhook Provider" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Provider name"), {
+      target: { value: "GoClaw" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Webhook URL"), {
+      target: { value: "http://goclaw.local:18789/hooks/kandev/turn-finished" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Headers, one per line (Name: value)"), {
+      target: { value: "X-Tenant: acme" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Secret (optional)"), {
+      target: { value: "gateway-token" },
+    });
+
+    expect(screen.getByDisplayValue("GoClaw")).toBeTruthy();
+    expect(
+      screen.getByDisplayValue("http://goclaw.local:18789/hooks/kandev/turn-finished"),
+    ).toBeTruthy();
+  });
+
+  it("blocks duplicate webhook headers with an actionable message", () => {
+    render(
+      <SettingsSaveProvider>
+        <NotificationsSettings />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Webhook Provider" }));
+    fireEvent.change(screen.getByPlaceholderText("Webhook URL"), {
+      target: { value: "https://hooks.example.com/kandev" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Headers, one per line (Name: value)"), {
+      target: { value: "X-Tenant: acme\nx-tenant: other" },
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Webhook headers must use valid HTTP header names and must not repeat.",
+    );
+    expect(
+      (
+        within(screen.getByTestId("settings-floating-save")).getByRole("button", {
+          name: "Save changes",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
   });
 });

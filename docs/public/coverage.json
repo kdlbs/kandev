@@ -17,12 +17,16 @@
       ],
       "sources": [
         "apps/cli/bin/native-shim.js",
+        "apps/backend/internal/launcher/service.go",
+        "apps/backend/internal/launcher/service_shell.go",
         "apps/backend/internal/launcher/launcher.go",
         "apps/desktop/src-tauri/src/lib.rs",
         "apps/desktop/src-tauri/src/main.rs"
       ],
       "tests": [
         "apps/cli/bin/native-shim.test.mjs",
+        "apps/backend/internal/launcher/service_shell_test.go",
+        "apps/backend/internal/launcher/service_shell_darwin_test.go",
         "apps/desktop/e2e/desktop-launch-smoke.test.mjs",
         "apps/desktop/src-tauri/src/shell.rs"
       ]
@@ -409,7 +413,9 @@
         "apps/backend/internal/agent/agents/runtime_update_capability.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate.go",
         "apps/web/components/settings/agent-runtime-policies.tsx",
-        "apps/web/components/update-available-toast-bridge.tsx"
+        "apps/web/components/update-available-toast-bridge.tsx",
+        "apps/backend/internal/common/launchwrapper/prepare.go",
+        "apps/backend/internal/agentctl/server/utility/launch_wrapper.go"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -433,7 +439,11 @@
         "apps/backend/internal/agent/registry/runtime_update_coverage_test.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate_test.go",
         "apps/web/e2e/tests/settings/agent-runtime-notifications.spec.ts",
-        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts"
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts",
+        "apps/backend/internal/common/launchwrapper/prepare_test.go",
+        "apps/backend/internal/agentctl/server/utility/generic_wrapper_test.go",
+        "apps/web/e2e/tests/cli-mode/generic-launch-wrappers.spec.ts",
+        "apps/web/e2e/tests/cli-mode/mobile-generic-launch-wrappers.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",
@@ -464,6 +474,7 @@
       "stability": "stable",
       "docs": [
         "executors",
+        "automation-and-mcp",
         "remote-cloud-environment",
         "docker",
         "k8s"
@@ -473,6 +484,11 @@
         "apps/backend/internal/agent/kubernetes/config.go",
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes.go",
         "apps/backend/internal/kubernetes/handlers.go",
+        "apps/backend/internal/mcp/server/config_handlers.go",
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/handlers/handlers.go",
+        "apps/backend/internal/task/service/executor_provider_catalog.go",
+        "apps/backend/internal/task/service/service_requests.go",
         "apps/web/app/settings/executors/page.tsx",
         "apps/web/app/settings/executors/k8s/[executorId]/page.tsx",
         "k8s/executor-rbac.yaml"
@@ -480,6 +496,11 @@
       "tests": [
         "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_test.go",
         "apps/backend/internal/kubernetes/handlers_test.go",
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/task_executor_discovery_integration_test.go",
+        "apps/backend/internal/mcp/handlers/config_handlers_test.go",
+        "apps/backend/internal/mcp/handlers/handlers_test.go",
+        "apps/backend/internal/mcp/handlers/create_task_self_placement_inheritance_test.go",
         "apps/backend/internal/task/service/service_resources_kubernetes_test.go",
         "apps/web/components/settings/kubernetes-config.test.ts",
         "apps/web/e2e/tests/docker/docker-launch.spec.ts",
@@ -508,7 +529,8 @@
       "stability": "stable",
       "docs": [
         "integrations",
-        "configuration"
+        "configuration",
+        "workflow-sync"
       ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",
@@ -828,9 +850,18 @@
       ],
       "sources": [
         "Dockerfile",
-        "apps/backend/internal/launcher/service.go"
+        "apps/backend/internal/launcher/service.go",
+        "apps/backend/internal/launcher/service_shell.go",
+        "apps/backend/internal/launcher/service_metadata.go",
+        "apps/backend/internal/launcher/service_self_update.go",
+        "apps/backend/internal/system/updates/install_state.go"
       ],
       "tests": [
+        "apps/backend/internal/launcher/service_shell_test.go",
+        "apps/backend/internal/launcher/service_shell_darwin_test.go",
+        "apps/backend/internal/launcher/local_agent_path_test.go",
+        "apps/backend/internal/system/updates/apply_test.go",
+        "apps/backend/internal/system/updates/install_state_test.go",
         "apps/web/e2e/tests/docker/docker-launch.spec.ts"
       ]
     },
@@ -948,11 +979,15 @@
       ],
       "sources": [
         "apps/backend/internal/plugins/handlers.go",
-        "apps/backend/pkg/pluginsdk/host.go",
+        "pluginsdk/host.go",
+        "pluginsdk/cmd/kandev-sdk-check/main.go",
+        "scripts/release/publish-plugin-sdk.mjs",
         "apps/web/lib/plugins/host-api.ts"
       ],
       "tests": [
         "apps/backend/internal/plugins/service_test.go",
+        "pluginsdk/internal/compatibility/release_test.go",
+        "scripts/release/publish-plugin-sdk.test.mjs",
         "apps/backend/internal/plugins/manifest/manifest_test.go",
         "apps/web/lib/plugins/host-api.test.ts"
       ]

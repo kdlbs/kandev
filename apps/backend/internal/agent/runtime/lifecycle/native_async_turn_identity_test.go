@@ -218,3 +218,25 @@ func TestNativeMessageWithoutAnyGroupingIdentityUsesReplaySequence(t *testing.T)
 	require.NotEqual(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(execution, second))
 	require.Equal(t, canonicalAgentMessageID(execution, first), canonicalAgentMessageID(nil, first))
 }
+
+func TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", DeliveryStreamID: "stream"}
+	nativeFirst := agentctl.AgentEvent{
+		Type: "message_chunk", ProtocolMessageID: "native-message", DeliverySequence: 1,
+	}
+	nativeLater := nativeFirst
+	nativeLater.DeliverySequence = 17
+	require.Equal(t, canonicalAgentMessageID(execution, nativeFirst), canonicalAgentMessageID(execution, nativeLater),
+		"native protocol message identity is independent of delivery sequence")
+
+	reasoning := nativeFirst
+	reasoning.Type = "reasoning"
+	require.NotEqual(t, canonicalAgentMessageID(execution, nativeFirst), canonicalAgentMessageID(execution, reasoning),
+		"reasoning retains a separate canonical identity from assistant text")
+
+	replayed := nativeFirst
+	replayed.CanonicalMessageBaseID = "stable-base"
+	replayed.CanonicalMessageID = "agent-delivery-segment-already-resolved"
+	require.Equal(t, "stable-base", canonicalAgentMessageID(execution, replayed),
+		"retry and reconnect derive from the stable base instead of hashing a resolved ID")
+}

@@ -9,74 +9,49 @@ owners:
 
 ## Overview
 
-Agents can provide shared background with `ask_user_question_kandev.context`, but operators currently see only the individual question fields. Questions that depend on that background can therefore appear incomplete or confusing.
+Operators need shared decision context that remains readable while they answer a clarification.
 
 ## Requirements
 
 ### REQ-UI-CLARIFICATION-CONTEXT-001: Clarification Shared Context
 
-**Intent:** Agents can provide shared background with `ask_user_question_kandev.context`, but operators currently see only the individual question fields. Questions that depend on that background can therefore appear incomplete or confusing.
+**Intent:** Operators need shared decision context that remains readable while they answer a clarification.
 
 #### Acceptance criteria
 
 - **AC-UI-CLARIFICATION-CONTEXT-001.1:** A pending clarification bundle with non-empty shared context displays that context once above the active question card.
-- **AC-UI-CLARIFICATION-CONTEXT-001.2:** Shared context uses normal text presentation with spacing above it. It has no bordered, padded, or filled container.
+- **AC-UI-CLARIFICATION-CONTEXT-001.2:** Shared context uses lightweight Markdown presentation with spacing above it. It has no bordered, padded, or filled container.
 - **AC-UI-CLARIFICATION-CONTEXT-001.3:** Shared context remains visible while the operator moves between questions in a multi-question bundle.
 - **AC-UI-CLARIFICATION-CONTEXT-001.4:** Task chat, Quick Chat, and other surfaces that use the shared clarification overlay display the same context behavior on desktop and mobile.
 - **AC-UI-CLARIFICATION-CONTEXT-001.5:** Omitted or whitespace-only context does not create an empty context region.
-- **AC-UI-CLARIFICATION-CONTEXT-001.6:** The UI preserves line breaks in the agent-authored context and allows long text to wrap within the clarification surface.
+- **AC-UI-CLARIFICATION-CONTEXT-001.6:** The UI preserves paragraph boundaries and ordinary line breaks while rendering supported Markdown. Long text wraps within the clarification surface.
 - **AC-UI-CLARIFICATION-CONTEXT-001.7:** Agents can provide multiline shared background as explicit context paragraphs. The backend joins those paragraphs with blank lines while preserving the legacy single context string verbatim.
 - **AC-UI-CLARIFICATION-CONTEXT-001.8:** **GIVEN** an agent submits a multi-question clarification with non-empty shared context, **WHEN** the pending clarification appears, **THEN** the operator sees the context exactly once above the active question card.
 
-## Migrated source detail
+- **AC-UI-CLARIFICATION-CONTEXT-001.9:** Initial panels shall remain content-sized with the existing caps: 50% for task chat and Needs You, 35% for Quick Chat. User expansion shall exceed the initial cap when host space permits. Downward dragging shall shrink the panel. Host and viewport changes shall keep the panel and required controls reachable.
+- **AC-UI-CLARIFICATION-CONTEXT-001.10:** Collapse and reopen shall preserve answers and the selected height for the current bundle. A new bundle and explicit reset shall restore content sizing. Responsive changes shall not overwrite a desktop height preference.
+- **AC-UI-CLARIFICATION-CONTEXT-001.11:** Keyboard and touch users shall have visible expansion and reset controls. Phone targets shall measure at least 44px. Context and answers shall remain reachable through one active vertical scroll owner within the bounded clarification surface. Tables shall not cause document horizontal overflow. Safe areas and the software keyboard shall not obstruct required actions.
+- **AC-UI-CLARIFICATION-CONTEXT-001.12:** Agent guidance shall recommend 1-3 short sentences or a few brief bullets, aiming for about 100 words or fewer. It shall request self-contained questions and options. Detailed reports, logs, and repeated conversation shall belong in a normal assistant message before the question call. This guidance shall not reject or truncate valid context. The existing user-input barrier shall remain unchanged.
 
-## Why
+## Formatting contract
 
-Agents can provide shared background with `ask_user_question_kandev.context`,
-but operators currently see only the individual question fields. Questions
-that depend on that background can therefore appear incomplete or confusing.
+[Clarification Markdown](clarification-markdown.md) owns supported formatting and link safety.
+Pending context uses its context-specific policy. Context-only History summaries retain their existing literal presentation.
+Legacy storage remains verbatim, including literal escape sequences. Rendering does not infer escaped newlines.
 
-## What
+## Contract amendment
 
-- A pending clarification bundle with non-empty shared context displays that
-  context once above the active question card.
-- Shared context uses normal text presentation with spacing above it. It has no
-  bordered, padded, or filled container.
-- Shared context remains visible while the operator moves between questions in
-  a multi-question bundle.
-- Task chat, Quick Chat, and other surfaces that use the shared clarification
-  overlay display the same context behavior on desktop and mobile.
-- Omitted or whitespace-only context does not create an empty context region.
-- The UI preserves line breaks in the agent-authored context and allows long
-  text to wrap within the clarification surface.
-- Agents can provide multiline shared background as explicit context
-  paragraphs. The backend joins those paragraphs with blank lines while
-  preserving the legacy single context string verbatim.
-
-## Scenarios
-
-- **GIVEN** an agent submits a multi-question clarification with non-empty
-  shared context, **WHEN** the pending clarification appears, **THEN** the
-  operator sees the context exactly once above the active question card.
-- **GIVEN** a visible multi-question clarification with shared context,
-  **WHEN** the operator navigates to another question, **THEN** the same single
-  context region remains visible.
-- **GIVEN** an agent omits context or sends only whitespace, **WHEN** the
-  pending clarification appears, **THEN** the UI renders no context region and
-  preserves the existing question layout.
-- **GIVEN** a pending clarification with shared context on a phone viewport,
-  **WHEN** the operator views the question, **THEN** the context is visible,
-  wraps inside the overlay, and does not introduce horizontal page overflow.
-- **GIVEN** an agent submits multiple explicit context paragraphs, **WHEN** the
-  clarification is stored and displayed, **THEN** the operator sees those
-  paragraphs separated by blank lines.
-- **GIVEN** an agent submits a legacy context string containing literal escape
-  syntax, **WHEN** the clarification is stored and displayed, **THEN** the
-  literal text remains unchanged.
+Criteria .2 and .6 adopt Markdown presentation. Criteria .9 through .12 add usability and authoring guidance for issue #4810.
+The implementation is recorded in the [context usability plan](../../../plans/clarification-context-usability/plan.md).
 
 ## Out of scope
 
-- Changing the `ask_user_question_kandev` schema or backend message metadata.
-- Repeating shared context inside every question card.
-- Adding shared context to resolved clarification messages in chat history.
-- Changing clarification answer, skip, timeout, or carousel behavior.
+- Question schema shapes, persistence, permissions, answer delivery, and wait semantics.
+- Repeating context in each question or adding context to resolved chat messages.
+- Hard word limits, automatic summaries, and stored-text rewriting.
+
+## Implementation plans
+
+- [Original context rendering](../../../plans/clarification-context-rendering/plan.md).
+- [Explicit paragraphs](../../../plans/clarification-context-newlines/plan.md).
+- [Context usability](../../../plans/clarification-context-usability/plan.md).

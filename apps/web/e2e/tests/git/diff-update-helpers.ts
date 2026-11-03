@@ -12,12 +12,12 @@ type SeedTaskOptions = {
   completionText: string;
 };
 
-async function seedTaskWithScenario(
+export async function seedTaskWithScenario(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   options: SeedTaskOptions,
-): Promise<{ session: SessionPage; sessionId: string }> {
+): Promise<{ session: SessionPage; sessionId: string; taskId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     options.title,
@@ -43,7 +43,7 @@ async function seedTaskWithScenario(
   });
   await session.waitForChatIdle();
 
-  return { session, sessionId: task.session_id };
+  return { session, sessionId: task.session_id, taskId: task.id };
 }
 
 export async function closePreviewPanels(testPage: Page) {

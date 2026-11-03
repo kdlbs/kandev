@@ -36,6 +36,17 @@ type AgentctlStartupConfig struct {
 	// "disabled for this launch" answer agentctl must not second-guess with
 	// its own default.
 	AgentSurvivalEnabled bool `json:"agentSurvivalEnabled"`
+	// AgentBackgroundWorkEnabled carries the effective
+	// features.agentBackgroundWork runtime flag for this launch. As with
+	// AgentSurvivalEnabled, a managed launch always sets Configured=true, so
+	// false is a meaningful "disabled for this launch" answer and never an
+	// unresolved value. A backend older than this field omits it, which decodes
+	// as false and keeps the provider-neutral behavior.
+	AgentBackgroundWorkEnabled bool `json:"agentBackgroundWorkEnabled"`
+	// OpenCodePluginEnabled carries the effective features.opencodePlugin value
+	// for this launch. A backend older than this field omits it, which decodes
+	// as false and preserves the legacy launch.
+	OpenCodePluginEnabled bool `json:"opencodePluginEnabled"`
 	// PromptCancelJoinTimeout is the managed ACP cancellation acknowledgement bound.
 	// Zero preserves agentctl's built-in default for non-E2E launches.
 	PromptCancelJoinTimeout time.Duration `json:"promptCancelJoinTimeout"`
@@ -48,15 +59,17 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		return AgentctlStartupConfig{}
 	}
 	return AgentctlStartupConfig{
-		Configured:                true,
-		IdleTimeout:               c.Agentctl.IdleTimeout,
-		IdleReaperInterval:        c.Agentctl.IdleReaperInterval,
-		NotificationQueueCapacity: c.Agentctl.NotificationQueueCapacity,
-		OTLPEndpoint:              c.Observability.OTLPEndpoint,
-		UnownedPeriod:             c.Agentctl.UnownedPeriod,
-		DetachedEventLimit:        c.Agentctl.DetachedEventLimit,
-		AgentSurvivalEnabled:      c.Features.AgentSurvival,
-		PromptCancelJoinTimeout:   e2ePromptCancelJoinTimeout(),
+		Configured:                 true,
+		IdleTimeout:                c.Agentctl.IdleTimeout,
+		IdleReaperInterval:         c.Agentctl.IdleReaperInterval,
+		NotificationQueueCapacity:  c.Agentctl.NotificationQueueCapacity,
+		OTLPEndpoint:               c.Observability.OTLPEndpoint,
+		UnownedPeriod:              c.Agentctl.UnownedPeriod,
+		DetachedEventLimit:         c.Agentctl.DetachedEventLimit,
+		AgentSurvivalEnabled:       c.Features.AgentSurvival,
+		AgentBackgroundWorkEnabled: c.Features.AgentBackgroundWork,
+		OpenCodePluginEnabled:      c.Features.OpenCodePlugin,
+		PromptCancelJoinTimeout:    e2ePromptCancelJoinTimeout(),
 	}
 }
 

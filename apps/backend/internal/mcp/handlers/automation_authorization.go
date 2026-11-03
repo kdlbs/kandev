@@ -65,6 +65,8 @@ var automationSurfaceActions = map[string]struct{}{
 	ws.ActionMCPAnswerQuestion:              {},
 	ws.ActionMCPListPendingAgentPermissions: {},
 	ws.ActionMCPResolveAgentPermission:      {},
+	ws.ActionMCPListPluginTools:             {},
+	ws.ActionMCPInvokePluginTool:            {},
 }
 
 // ActionMCPArchiveTask is deliberately absent: a hidden automation_run task

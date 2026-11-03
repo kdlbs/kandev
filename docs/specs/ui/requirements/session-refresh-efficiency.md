@@ -69,7 +69,7 @@ status without issuing duplicate reads for the same task.
 
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-003.1:** After task identity and owned-session selection resolve, client navigation shall reveal the destination shell while optional resources remain pending. It shall not wait for agents, settings, workflow lists, repository enrichment, terminals, or PR feedback.
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-003.2:** Task identity reads from route and surface consumers shall share one outstanding request within the same store, authentication scope, and task. Switching A to B to A shall reject obsolete results.
-- **AC-UI-SESSION-REFRESH-EFFICIENCY-003.3:** The destination shall retain correct session selection, drafts, model state, message ordering, and recovery. Pending required data shall keep dependent actions disabled. Missing or unauthorized tasks shall retain the current recovery behavior.
+- **AC-UI-SESSION-REFRESH-EFFICIENCY-003.3:** The destination shall retain correct session selection, drafts, model state, message ordering, and recovery. Pending required data shall keep dependent actions disabled. Missing or unauthorized tasks shall retain the current recovery behavior. Optional enrichment based on earlier empty session membership shall not erase a session created or selected before that enrichment is applied.
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-003.4:** Desktop and phone shall retain their existing navigation, focus, and scroll behavior. A held optional request shall not prevent selecting another task or reading available destination content.
 
 ### REQ-UI-SESSION-REFRESH-EFFICIENCY-004: Bounded task-switch rendering

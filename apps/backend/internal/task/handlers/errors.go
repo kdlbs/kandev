@@ -137,6 +137,26 @@ func repositorySelectionHTTPStatus(err error) (int, bool) {
 	}
 }
 
+func quickChatCreateHTTPStatus(err error) (int, bool) {
+	var preAllocationErr *service.PreAllocationTaskCreateError
+	if !errors.As(err, &preAllocationErr) {
+		return 0, false
+	}
+	switch {
+	case errors.Is(err, service.ErrTaskReferenceNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound):
+		return http.StatusNotFound, true
+	case errors.Is(err, service.ErrInvalidRepositorySet),
+		errors.Is(err, service.ErrInvalidInitialWorkspaceLayout),
+		errors.Is(err, service.ErrInvalidWorkspaceRepositoryPlacement),
+		errors.Is(err, service.ErrInvalidWorkspaceSource):
+		return http.StatusBadRequest, true
+	}
+	if status, ok := repositorySelectionHTTPStatus(err); ok && status < http.StatusInternalServerError {
+		return status, true
+	}
+	return 0, false
+}
+
 func repositorySelectionWSCode(err error) (string, bool) {
 	var selectionErr *service.RepositorySelectionError
 	if !errors.As(err, &selectionErr) {

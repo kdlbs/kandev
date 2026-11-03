@@ -116,6 +116,7 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    mcp_server_ids?: string[];
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
@@ -134,6 +135,11 @@ export async function createTask(
     autopilot?: boolean;
     /** Task-only replacements for fixed workflow step agent profiles. */
     workflow_agent_overrides?: Record<string, string>;
+    /**
+     * Caller-supplied create-idempotency identity. The native dialog sends its
+     * retained submission identity so a retried request resolves to one task.
+     */
+    external_id?: string;
   },
   options?: ApiRequestOptions,
 ) {
@@ -520,6 +526,28 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
+/**
+ * The by-external-id GET route's body: the task plus whether that task's own
+ * required synchronous creation work settled. The route is read-only and
+ * returns archived tasks too, so it is the safe way to ask what holds an
+ * identity without risking a create.
+ */
+export type TaskByExternalIDLookup = Task & {
+  creation_complete: boolean;
+};
+
+export async function fetchTaskByExternalId(
+  workspaceId: string,
+  externalId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ external_id: externalId });
+  return fetchJson<TaskByExternalIDLookup>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/by-external-id?${query.toString()}`,
+    { ...options, cache: "no-store" },
+  );
+}
+
 export async function archiveTask(
   taskId: string,
   params?: { cascade?: boolean },
@@ -567,6 +595,7 @@ export async function listTasksByWorkspace(
     query?: string;
     includeArchived?: boolean;
     onlyArchived?: boolean;
+    commandPanelVisible?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -580,6 +609,7 @@ export async function listTasksByWorkspace(
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.onlyArchived) url.searchParams.set("only_archived", "true");
+  if (params.commandPanelVisible) url.searchParams.set("command_panel_visible", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

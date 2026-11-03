@@ -30,6 +30,7 @@ import {
   type FormState,
   DEFAULT_RETRY_POLICY,
   normalizeRetryPolicyForTaskMode,
+  canonicalPluginTools,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -39,6 +40,8 @@ import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
+import { AutomationPluginTools } from "./automation-plugin-tools";
+import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
 import {
   CreatedWebhookDialogHost,
   EditorFooter,
@@ -79,6 +82,7 @@ const defaultForm: FormState = {
   managedDestination: undefined,
   repositoryMode: "none",
   retryPolicy: DEFAULT_RETRY_POLICY,
+  pluginTools: [],
 };
 function formFromAutomation(a: Automation): FormState {
   return {
@@ -106,6 +110,7 @@ function formFromAutomation(a: Automation): FormState {
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
     retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
+    pluginTools: a.plugin_tools ?? [],
   };
 }
 
@@ -124,6 +129,7 @@ type SaveHandlerOpts = {
   isNew: boolean;
   workspaceId: string;
   form: FormState;
+  savedForm: FormState;
   currentId: string | null;
   // supportsMultiRepo mirrors what ConfigSection's picker rendered for this
   // save. See normalizeRepositorySelections.
@@ -138,6 +144,10 @@ type SaveHandlerOpts = {
   // Null when no webhook trigger was configured on the new automation.
   setCreatedWebhook: React.Dispatch<React.SetStateAction<CreatedWebhookDetails | null>>;
   onSaved: (form: FormState, triggers: AutomationTrigger[]) => void;
+  // onPluginToolsSaveFailed refreshes the options catalog after a rejected
+  // save so a changed policy is visible for explicit reselection without
+  // discarding other dirty fields.
+  onPluginToolsSaveFailed: () => void;
   triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
   router: ReturnType<typeof useRouter>;
 };
@@ -147,10 +157,16 @@ type SaveHandlerOpts = {
 // function-length lint cap; the save flow has gotten chunky now that it
 // registers discovered repos before persisting the automation.
 function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
-  const { isNew, workspaceId, form, currentId, create, update, supportsMultiRepo } = opts;
+  const { isNew, workspaceId, form, savedForm, currentId, create, update, supportsMultiRepo } =
+    opts;
   const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router, onSaved } =
     opts;
+  const { onPluginToolsSaveFailed } = opts;
   return async () => {
+    const pluginToolsChanged =
+      JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
+      JSON.stringify(canonicalPluginTools(savedForm.pluginTools));
+    const pluginToolsSubmitted = isNew ? form.pluginTools.length > 0 : pluginToolsChanged;
     setSaving(true);
     try {
       // The picker only ever *renders* repositorySelections[0] once the
@@ -194,12 +210,18 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           );
         }
       } else if (currentId) {
-        await update(currentId, buildUpdatePayload(form, repositories));
+        await update(
+          currentId,
+          buildUpdatePayload(form, repositories, pluginToolsChanged ? form.pluginTools : undefined),
+        );
         const persistedTriggers = await triggerActions.persistDrafts();
         promoteSelections();
         onSaved(formWithPromotedSelections, persistedTriggers);
       }
     } catch (err) {
+      if (pluginToolsSubmitted) {
+        onPluginToolsSaveFailed();
+      }
       // The interpolated value is an API/network diagnostic and stays English
       // by design — see docs/i18n.md ("interpolated value" limit).
       const msg = err instanceof Error ? err.message : String(err);
@@ -452,6 +474,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
   const triggerTypes = useTriggerTypeMetadata(workspaceId);
+  const pluginToolOptions = useAutomationPluginTools(
+    workspaceId,
+    form.taskMode === "automation_run",
+  );
 
   const { placeholders, defaultTaskTitle, activeTriggerInfo, conditionType } = useConditionMetadata(
     triggerActions.allTriggers,
@@ -471,12 +497,13 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
-      return key === "taskMode"
-        ? {
-            ...next,
-            retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
-          }
-        : next;
+      if (key === "taskMode") {
+        return {
+          ...next,
+          retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
+        };
+      }
+      return next;
     });
   }, []);
 
@@ -489,6 +516,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     isNew,
     workspaceId,
     form,
+    savedForm,
     currentId,
     supportsMultiRepo,
     create,
@@ -503,6 +531,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     discard,
     remove,
     onSaved: (nextSavedForm) => setSavedForm(nextSavedForm),
+    onPluginToolsSaveFailed: pluginToolOptions.reload,
   });
   const { dirtyBaseline, triggersDirty } = useEditorDirtyState(isNew, savedForm, triggerActions);
 
@@ -531,6 +560,21 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         savedForm={dirtyBaseline}
         updateField={updateField}
       />
+      {form.taskMode === "automation_run" ? (
+        <AutomationPluginTools
+          groups={pluginToolOptions.groups}
+          loading={pluginToolOptions.loading}
+          error={pluginToolOptions.error}
+          savedSelection={dirtyBaseline.pluginTools}
+          selection={form.pluginTools}
+          onChange={(value) => updateField("pluginTools", value)}
+          onRetry={pluginToolOptions.reload}
+          isDirty={
+            JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
+            JSON.stringify(canonicalPluginTools(dirtyBaseline.pluginTools))
+          }
+        />
+      ) : null}
       <Separator />
       <SettingsSection
         form={form}

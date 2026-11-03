@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-KEYBOARD-ACTIONS-001
   - REQ-TASKS-KEYBOARD-ACTIONS-002
+  - REQ-TASKS-KEYBOARD-ACTIONS-003
 ---
 
 # Task keyboard actions system design
@@ -18,6 +19,45 @@ No schema, public SDK, endpoint, or persistence changes are needed.
 | --- | --- |
 | REQ-TASKS-KEYBOARD-ACTIONS-001 | Scoped move submission |
 | REQ-TASKS-KEYBOARD-ACTIONS-002 | Task commands and nested navigation |
+| REQ-TASKS-KEYBOARD-ACTIONS-003 | Sidebar row keyboard ownership |
+
+## Sidebar row keyboard ownership
+
+`TaskRowItem` routes `TaskItem` selection to `dispatchSidebarRowClick`;
+`SelectedTaskRow` wraps it in `TaskItemWithContextMenu`. `TaskItem` currently
+prevents default on every bubbled Enter or Space before invoking the row
+handler, including keydowns from its real nested `TaskMenuButton`. That blocks
+native button activation and can navigate or alter selection. The button's
+click already stops propagation and dispatches a bubbling contextmenu to the
+existing menu. Leave that path intact.
+
+At the row keydown boundary, before `preventDefault`, leave events originating
+in a nested native button to that button, including events targeted at its
+descendants. Restrict the check to buttons within this row. Keep row and
+noninteractive descendant activation as it is; do not add a generic event
+framework or change `defaultPrevented`, repeat, or modifier semantics for
+row-owned events. The existing handler still prevents Enter/Space before its
+pending-removal check, and passes the original event to the selection adapter.
+The adapter retains archived navigation, Cmd/Ctrl toggle, Shift range, active
+selection toggle, and plain navigation. `SubtaskToggle` already stops keydown
+propagation. This boundary also covers the actual inline archive confirmation
+buttons without changing the shared confirmation component.
+
+The phone `MobileTaskList` uses the shared `TaskSwitcher` and row, inside the
+existing task-picker surface. It omits multi-selection handlers and retains
+navigation fallback. Its action menu uses the existing mobile sheet; phone
+archive uses the dialog. On non-phone coarse pointers, a simple resolved archive
+confirmation may instead be inline in the row; fine-pointer confirmation is
+outside it. No responsive composition or action policy changes.
+
+Rendered component regressions must use the real row and menu button with
+providers, exercise both keys and check that default remains available and row
+selection does not fire. An explicit button click must still produce the
+bubbling contextmenu; it is a wiring control, not proof of native keyboard
+activation. Preserve row-owned controls and cover actual inline confirmation
+when mounted through the shipped adapter. Separate Chromium Playwright evidence
+must use focused, reachable actual buttons and real keyboard presses on desktop
+and the phone picker; HappyDOM alone cannot prove browser native activation.
 
 ## Scoped move submission
 

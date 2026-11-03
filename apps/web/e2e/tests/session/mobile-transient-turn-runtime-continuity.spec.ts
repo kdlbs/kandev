@@ -16,6 +16,7 @@ import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
 
 test.setTimeout(300_000);
+test.use({ trace: "retain-on-failure" });
 
 async function waitForExecutionId(
   apiClient: Parameters<typeof createRetainedCapacityFixture>[1],
@@ -262,6 +263,7 @@ test("phone and desktop: one capacity episode exhausts after eleven dispatches a
 }) => {
   const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "exhaust");
   try {
+    const watchers = [watchWs(testPage), watchWs(desktopTestPage)];
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
@@ -284,7 +286,24 @@ test("phone and desktop: one capacity episode exhausts after eleven dispatches a
       30_000,
       "waiting for the task session execution identity",
     );
-    await driveCapacityRetries(backend, apiClient, fixture.sessionId, 11);
+    // Persistence can finish while either browser is still draining retry events.
+    const delivered = watchers.map((watcher) =>
+      watcher.waitForEvent("session.conversation.changed", {
+        timeout: 180_000,
+        where: (payload) =>
+          payload.session_id === fixture.sessionId &&
+          Array.isArray(payload.operations) &&
+          payload.operations.some(
+            (operation: { message?: { metadata?: Record<string, unknown> } }) =>
+              operation.message?.metadata?.runtime_retained === true &&
+              operation.message.metadata.recovery_disposition === "exhausted",
+          ),
+      }),
+    );
+    await Promise.all([
+      driveCapacityRetries(backend, apiClient, fixture.sessionId, 11),
+      ...delivered,
+    ]);
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "exhausted");
     assertRetainedFailureMessage(failure);
     expect(failure.metadata?.attempts_started).toBe(11);

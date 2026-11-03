@@ -136,7 +136,7 @@ function buildEditorExtensions(
   tableResizeEnabled: boolean,
 ) {
   return [
-    StarterKit.configure({ codeBlock: false }),
+    StarterKit.configure({ codeBlock: false, link: false, underline: false }),
     createCodeBlockWithMermaid(lowlight, taskId),
     Markdown.configure({ html: true, transformPastedText: true, transformCopiedText: true }),
     Placeholder.configure({ placeholder }),

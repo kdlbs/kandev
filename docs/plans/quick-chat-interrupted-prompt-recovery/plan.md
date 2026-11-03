@@ -82,6 +82,10 @@ implements only the added Resume and workspace-access acceptance criteria.
 
 PR publication and remote check status belong to the external task handoff.
 
+PR #4754 CI exposed concurrent completion between background recovery and explicit
+Resume. The [work order 02 follow-up](task-02-manual-resume.md#pr-ci-follow-up-concurrent-resolution)
+records its deterministic regression, transactional repair, and focused validation.
+
 ## Risks
 
 - Do not turn automatic session open into explicit recovery authorization.

@@ -30,6 +30,9 @@ type PromptContext struct {
 	// prompt body. Office runs build their prompt from a template rather than
 	// the durable step, so move instructions ride on the run payload.
 	OneTimeInstructions string
+	RoutineID           string
+	RoutineName         string
+	RoutineDescription  string
 
 	// Task fields
 	TaskID          string
@@ -143,6 +146,9 @@ func BuildPrompt(pc *PromptContext) string {
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
 	}
 	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
+	if pc.RoutineID != "" {
+		prompt += fmt.Sprintf("\n\n## Routine work contract\n\nRoutine: %s (%s)\n\n%s\n\nPreserve the target, evidence locations, and result references above. Reuse existing work; do not replay completed tasks. Record a result reference or the exact blocker; a successful wake is not completion of the routine's work.", pc.RoutineName, pc.RoutineID, pc.RoutineDescription)
+	}
 	prompt = appendMissedTicksSection(prompt, pc)
 	prompt = appendHandoffSection(prompt, pc.HandoffContext)
 	return appendRuntimeContext(prompt, pc)

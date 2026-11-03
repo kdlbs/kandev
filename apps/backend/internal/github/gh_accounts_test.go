@@ -293,7 +293,7 @@ func TestResolveGHAccountTokenDoesNotFallBackAfterNamedAccountFailure(t *testing
 
 func TestResolveGHAccountTokenRejectsUnsupportedHost(t *testing.T) {
 	runner := &fakeGHAccountRunner{output: "must-not-run"}
-	if _, err := resolveGHAccountToken(context.Background(), runner, "git.example.com", "alice"); err == nil {
+	if _, err := resolveGHAccountToken(context.Background(), runner, "https://git.example.com/api/v3", "alice"); err == nil {
 		t.Fatal("expected unsupported host error")
 	}
 	if len(runner.args) != 0 {
@@ -306,6 +306,9 @@ func TestGitHubCLIEnvironmentStripsAmbientTokens(t *testing.T) {
 		"PATH=/bin",
 		"GH_TOKEN=gh-secret",
 		"github_token=github-secret",
+		"GH_ENTERPRISE_TOKEN=enterprise-secret",
+		"GITHUB_ENTERPRISE_TOKEN=enterprise-secret",
+		"GH_HOST=wrong.example.com",
 		"HOME=/tmp/home",
 	})
 	want := []string{"PATH=/bin", "HOME=/tmp/home"}
@@ -314,5 +317,18 @@ func TestGitHubCLIEnvironmentStripsAmbientTokens(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(got, "\n"), "secret") {
 		t.Fatal("filtered environment contains token material")
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-ENTERPRISE-001.1
+func TestResolveGHAccountTokenEnterpriseNamedAccount(t *testing.T) {
+	runner := &modernGHTokenRunner{}
+	_, err := resolveGHAccountToken(context.Background(), runner, "HTTPS://Git.Example.com:443/", "alice")
+	if err != nil {
+		t.Fatalf("resolve Enterprise token: %v", err)
+	}
+	want := []string{"auth", "token", "--hostname", "git.example.com", "--user", "alice"}
+	if !reflect.DeepEqual(runner.args[1], want) {
+		t.Fatalf("args = %v, want %v", runner.args, want)
 	}
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogTrigger } from "@kandev/ui/dialog";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -8,12 +8,17 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/types";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { ExplorerViews, type ExplorerViewsProps } from "./mcp-explorer-views";
 import { McpExplorerHeader } from "./mcp-explorer-header";
 import { McpServerList } from "./mcp-server-list";
 import { McpStatusTooltip } from "./mcp-status-presentation";
 import { McpToolDetail } from "./mcp-tool-detail";
 import { McpToolList } from "./mcp-tool-list";
 import { useMcpExplorerNavigation } from "./use-mcp-explorer-navigation";
+
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+import { isHandledApiError } from "@/lib/api/client";
+import { mcpSelectionInitialView } from "./mcp-selection-presentation";
 
 type Navigation = ReturnType<typeof useMcpExplorerNavigation>;
 
@@ -82,12 +87,14 @@ function DesktopExplorer({
   open,
   setOpen,
   navigation,
+  views,
 }: {
   trigger: ReactNode;
   servers: MCPAttachmentServer[];
   open: boolean;
   setOpen: (open: boolean) => void;
   navigation: Navigation;
+  views: ExplorerViewsProps;
 }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -96,7 +103,7 @@ function DesktopExplorer({
           <DialogTrigger asChild>{trigger}</DialogTrigger>
         </TooltipTrigger>
         <TooltipContent>
-          <McpStatusTooltip servers={servers} />
+          <McpStatusTooltip servers={servers} selectionState={views.selection?.state} />
         </TooltipContent>
       </Tooltip>
       <DialogContent
@@ -107,7 +114,9 @@ function DesktopExplorer({
       >
         <McpExplorerHeader onClose={() => setOpen(false)} mobile={false} />
         <div className="min-h-0 overflow-hidden text-[13px] leading-5">
-          <ExplorerBody servers={servers} navigation={navigation} touch={false} />
+          <ExplorerViews {...views} touch={false}>
+            <ExplorerBody servers={servers} navigation={navigation} touch={false} />
+          </ExplorerViews>
         </div>
       </DialogContent>
     </Dialog>
@@ -117,13 +126,32 @@ function DesktopExplorer({
 export function McpServerExplorer({
   trigger,
   servers,
+  selection,
 }: {
   trigger: ReactNode;
   servers: MCPAttachmentServer[];
+  selection?: TaskSessionMCPSelection | null;
 }) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const touch = isMobile || !isFinePointer;
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"connections" | "customize">("connections");
+  const [query, setQuery] = useState("");
+  const handled = isHandledApiError(selection?.error);
+  useEffect(() => {
+    setOpen(false);
+    setQuery("");
+    setView("connections");
+  }, [selection?.contextKey]);
+  useEffect(() => {
+    if (handled) setOpen(false);
+  }, [handled]);
+  const changeOpen = (next: boolean) => {
+    if (next && handled) return;
+    if (next) setView(mcpSelectionInitialView(selection?.state));
+    setOpen(next);
+  };
+  const views = { selection, view, onViewChange: setView, query, onQueryChange: setQuery };
   const navigation = useMcpExplorerNavigation({ servers, open, touch });
   if (!touch) {
     return (
@@ -131,24 +159,27 @@ export function McpServerExplorer({
         trigger={trigger}
         servers={servers}
         open={open}
-        setOpen={setOpen}
+        setOpen={changeOpen}
         navigation={navigation}
+        views={views}
       />
     );
   }
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={changeOpen}>
       <DrawerTrigger asChild>{trigger}</DrawerTrigger>
       <DrawerContent
         data-testid="mcp-server-explorer"
         className={cn(
           "flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]",
-          isMobile ? "h-[100dvh] !max-h-[100dvh]" : "max-h-[80dvh]",
+          isMobile ? "h-[100dvh] !max-h-[100dvh]" : "h-[80dvh] !max-h-[80dvh]",
         )}
       >
         <McpExplorerHeader onClose={() => setOpen(false)} mobile />
         <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4 text-[13px] leading-5">
-          <ExplorerBody servers={servers} navigation={navigation} touch />
+          <ExplorerViews {...views} touch>
+            <ExplorerBody servers={servers} navigation={navigation} touch />
+          </ExplorerViews>
         </div>
       </DrawerContent>
     </Drawer>

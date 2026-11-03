@@ -40,6 +40,11 @@ function withFixture<T>(files: Record<string, string>, callback: (root: string) 
   }
 }
 
+it("runs the Git helper in the node project", async () => {
+  const { matchingProjects } = await loadSelection();
+  expect(matchingProjects("e2e/helpers/git-helper.test.ts")).toEqual([NODE_PROJECT]);
+});
+
 describe("Vitest project selection", () => {
   it("keeps every test file in exactly one project", async () => {
     const selection = await loadSelection();

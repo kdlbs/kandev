@@ -281,3 +281,38 @@ it("rejects late probe responses if launch settings changed in flight", async ()
   // Old response was rejected because launch settings changed
   expect(result.current.models).toEqual([]);
 });
+
+it("carries a changed draft Copilot selection into the capability probe", async () => {
+  const saved = { ...savedProfile, copilot_selected_plugins: [] };
+  const savedSettings = { ...savedLaunchSettings, copilot_selected_plugins: [] };
+  const draft = { ...saved, copilot_selected_plugins: ["installed:m/p"] };
+  probeAgentProfileMock.mockResolvedValueOnce(
+    capabilityResponse([{ id: "plugin-model", name: "Plugin model" }], "rev-selection"),
+  );
+
+  const { result } = renderHook(() =>
+    useProfileCapabilityDiscovery(MOCK_AGENT_NAME, draft, {
+      profileId: PROFILE_ID_A,
+      savedLaunchSettings: savedSettings,
+      supportsDynamicModels: true,
+    }),
+  );
+
+  expect(probeAgentProfileMock).not.toHaveBeenCalled();
+  expect(result.current.discoveryState).toBe("stale");
+
+  await act(async () => {
+    await result.current.refresh();
+  });
+
+  expect(probeAgentProfileMock).toHaveBeenCalledWith(MOCK_AGENT_NAME, {
+    profile_id: PROFILE_ID_A,
+    launch_settings: {
+      env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "saved", secret_id: undefined }],
+      cli_flags: [{ flag: "--catalog", enabled: true, description: "catalog" }],
+      command_prefix: "npx --",
+      copilot_selected_plugins: ["installed:m/p"],
+    },
+    refresh: true,
+  } satisfies ProfileCapabilityRequest);
+});

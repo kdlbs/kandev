@@ -140,6 +140,29 @@ func (s *Service) buildBackgroundWorkloadModel(
 
 	applyWorkloadOutputBounds(work, obs.Output, obs.OutputTruncated, obs.OutputOffset, existing)
 
+	// Source and parent identity are immutable once observed. A later state
+	// update (for example the unknown settlement that has no turn context)
+	// must not erase the launch association.
+	if existing != nil {
+		if work.SourceCallID == "" {
+			work.SourceCallID = existing.SourceCallID
+		}
+		if work.SourceMessageID == "" {
+			work.SourceMessageID = existing.SourceMessageID
+		}
+		if work.ParentWorkID == nil && existing.ParentWorkID != nil {
+			work.ParentWorkID = existing.ParentWorkID
+		}
+	}
+
+	// Capability declarations are adapter evidence. Keep the recorded one when
+	// an update does not carry a new declaration.
+	if encoded := streams.EncodeWorkloadCapabilities(obs.Capabilities); encoded != "" {
+		work.Capabilities = encoded
+	} else if existing != nil {
+		work.Capabilities = existing.Capabilities
+	}
+
 	if existing != nil {
 		reconcileExistingWorkload(work, existing, obs)
 	} else if work.Revision == 0 {
@@ -155,21 +178,33 @@ func (s *Service) RecordBackgroundWorkloadObservation(
 	obs streams.WorkloadRunObservation,
 	taskID, sessionID string,
 ) error {
+	_, err := s.RecordBackgroundWorkloadObservationWithResult(ctx, obs, taskID, sessionID)
+	return err
+}
+
+// RecordBackgroundWorkloadObservationWithResult records an observation and
+// returns the committed projection, so publishers can carry the durable
+// revision, output, and exit status instead of the adapter's raw frame.
+func (s *Service) RecordBackgroundWorkloadObservationWithResult(
+	ctx context.Context,
+	obs streams.WorkloadRunObservation,
+	taskID, sessionID string,
+) (streams.WorkloadRunObservation, error) {
 	if s.backgroundWork == nil {
-		return nil
+		return obs, nil
 	}
 	workID := strings.TrimSpace(obs.WorkID)
 	if workID == "" {
-		return nil
+		return obs, nil
 	}
 	existing, err := s.backgroundWork.GetBackgroundWorkload(ctx, sessionID, workID)
 	if err != nil {
-		return err
+		return streams.WorkloadRunObservation{}, err
 	}
 
 	work := s.buildBackgroundWorkloadModel(obs, existing, taskID, sessionID, workID)
 	if err := s.backgroundWork.UpsertBackgroundWorkload(ctx, work); err != nil {
-		return err
+		return streams.WorkloadRunObservation{}, err
 	}
 
 	if obs.RunID != "" {
@@ -184,10 +219,20 @@ func (s *Service) RecordBackgroundWorkloadObservation(
 			FinishedAt:     obs.FinishedAt,
 		}
 		if err := s.backgroundWork.UpsertBackgroundRun(ctx, run); err != nil {
-			return err
+			return streams.WorkloadRunObservation{}, err
 		}
 	}
-	return nil
+	return committedWorkloadObservation(work), nil
+}
+
+// committedWorkloadObservation projects the durable row back onto the
+// observation contract for publication.
+func committedWorkloadObservation(work *models.BackgroundWorkload) streams.WorkloadRunObservation {
+	obs := settledWorkloadObservation(work)
+	obs.Output = work.Output
+	obs.OutputTruncated = work.OutputTruncated
+	obs.OutputOffset = work.OutputOffset
+	return obs
 }
 
 // SettleOpenBackgroundWorkloads atomically ends open workloads and runs after
@@ -233,6 +278,9 @@ func settledWorkloadObservation(work *models.BackgroundWorkload) streams.Workloa
 	}
 	if work.ParentWorkID != nil {
 		obs.ParentWorkID = *work.ParentWorkID
+	}
+	if capabilities, ok := streams.DecodeWorkloadCapabilities(work.Capabilities); ok {
+		obs.Capabilities = streams.ApplyWorkloadActionAvailability(capabilities, obs.State)
 	}
 	return obs
 }

@@ -38,6 +38,7 @@ type CapabilitiesRowProps = {
   currentModelId: string | undefined;
   currentModeId: string | undefined;
   status: ModelConfig["status"];
+  reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
   disableUnverifiedModels: boolean;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -48,6 +49,7 @@ type CapabilitiesRowProps = {
   modelConfig: ModelConfig;
   configOptions: SelectConfigOption[];
   configStatus: ModelConfig["status"];
+  configReasonCode?: string;
   configError: string | null;
   configIsLoading: boolean;
   onRetryConfig: () => Promise<void>;
@@ -68,6 +70,7 @@ function StatusOrAuthMessage({
   isLoading,
   onRefresh,
   error,
+  reasonCode,
   discoveryState,
 }: {
   agentName: string;
@@ -75,6 +78,7 @@ function StatusOrAuthMessage({
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   error: string | null;
+  reasonCode?: string;
   discoveryState: ProfileDiscoveryStatus;
 }) {
   if (status === "auth_required" || status === "not_installed") {
@@ -89,7 +93,7 @@ function StatusOrAuthMessage({
       />
     );
   }
-  return <CapabilityStatusMessage status={discoveryState} />;
+  return <CapabilityStatusMessage status={discoveryState} reasonCode={reasonCode} />;
 }
 
 type ModelAndModePickersProps = {
@@ -135,11 +139,13 @@ function ModelAndModePickers({
 }: ModelAndModePickersProps) {
   const { t } = useTranslation();
   const hasModes = modes.length > 0;
+  const showModePicker =
+    hasModes || Boolean(profile.mode) || Boolean(currentModeId) || !disableUnverifiedModels;
 
   return (
     <div
       className={
-        hasModes
+        showModePicker
           ? "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
           : "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:max-w-xl"
       }
@@ -167,7 +173,7 @@ function ModelAndModePickers({
           />
         </div>
       </div>
-      {hasModes && (
+      {showModePicker && (
         <div
           data-testid="profile-mode-field"
           className={`col-span-2 row-start-2 min-w-0 md:col-span-1 md:col-start-2 md:row-start-1 ${gapCls}`}
@@ -185,7 +191,9 @@ function ModelAndModePickers({
         </div>
       )}
       {showRefresh && (
-        <div className={`col-start-2 row-start-1 shrink-0 ${hasModes ? "md:col-start-3" : ""}`}>
+        <div
+          className={`col-start-2 row-start-1 shrink-0 ${showModePicker ? "md:col-start-3" : ""}`}
+        >
           <RefreshCapabilitiesButton onRefresh={onRefresh} isLoading={isLoading} error={error} />
         </div>
       )}
@@ -202,6 +210,7 @@ function CapabilitiesRowContent({
   currentModelId,
   currentModeId,
   status,
+  reasonCode,
   discoveryState,
   onChange,
   isCompact,
@@ -211,6 +220,7 @@ function CapabilitiesRowContent({
   modelConfig,
   configOptions,
   configStatus,
+  configReasonCode,
   configError,
   configIsLoading,
   onRetryConfig,
@@ -240,7 +250,7 @@ function CapabilitiesRowContent({
         supportsDynamicModels={modelConfig.supports_dynamic_models}
         isLoading={isLoading}
         onRefresh={onRefresh}
-        error={error}
+        error={status === "unsupported" && reasonCode === "policy_unverified" ? null : error}
         showRefresh={showRefresh}
         labelCls={labelCls}
         gapCls={gapCls}
@@ -248,6 +258,7 @@ function CapabilitiesRowContent({
       <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
         status={configStatus}
+        reasonCode={configReasonCode}
         error={configError}
         isLoading={configIsLoading}
         onRetry={onRetryConfig}
@@ -262,6 +273,7 @@ function CapabilitiesRowContent({
         isLoading={isLoading}
         onRefresh={onRefresh}
         error={error}
+        reasonCode={reasonCode}
         discoveryState={discoveryState}
       />
     </div>
@@ -307,6 +319,7 @@ export function ProfileCapabilitiesSection({
       currentModelId={capabilities.currentModelId}
       currentModeId={capabilities.currentModeId}
       status={capabilities.status}
+      reasonCode={capabilities.reasonCode}
       discoveryState={discoveryState}
       disableUnverifiedModels={discoveryState !== "ready"}
       agentName={agentName}
@@ -318,6 +331,7 @@ export function ProfileCapabilitiesSection({
       modelConfig={modelConfig}
       configOptions={configOptions}
       configStatus={configStatus}
+      configReasonCode={result.configReasonCode}
       configError={configError}
       configIsLoading={configIsLoading}
       onRetryConfig={refreshModelConfig}

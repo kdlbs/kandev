@@ -53,9 +53,24 @@ test.describe("property pickers", () => {
       workflow_id: officeSeed.workflowId,
     });
     await gotoTaskPage(testPage, task.id, "Picker Status Task");
+    await testPage.route(`**/api/v1/office/tasks/${task.id}`, async (route) => {
+      if (route.request().method() === "PATCH") {
+        await injectLatency(250, "keep the optimistic status visible before persistence");
+      }
+      await route.continue();
+    });
 
+    const savedStatus = waitForHttp(
+      testPage,
+      "PATCH",
+      new RegExp(`^/api/v1/office/tasks/${task.id}$`),
+      {
+        predicate: (response) => response.ok(),
+      },
+    );
     await testPage.getByTestId("status-picker-trigger").click();
     await testPage.getByTestId("status-picker-option-in_progress").click();
+    await savedStatus;
 
     // The trigger label should reflect the new value.
     await expect(testPage.getByTestId("status-picker-trigger")).toContainText(/In Progress/i, {

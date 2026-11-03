@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	mcpregistry "github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/registry"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -68,6 +69,7 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/retention"
@@ -140,6 +142,7 @@ func buildSessionDataProvider(
 	taskRepo *sqliterepo.Repository,
 	lifecycleMgr *lifecycle.Manager,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	log *logger.Logger,
 ) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
@@ -149,7 +152,9 @@ func buildSessionDataProvider(
 		}
 
 		var result []*ws.Message
-		result = appendSessionStateMessageWithCancellation(sessionID, session, cancellationProvider, result)
+		result = appendSessionStateMessageWithCancellation(
+			sessionID, session, cancellationProvider, runtimeStorageProvider, result,
+		)
 		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
@@ -445,7 +450,7 @@ func appendAgentctlStatusMessage(
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
-	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
+	return appendSessionStateMessageWithCancellation(sessionID, session, nil, nil, result)
 }
 
 func cancellationPendingSnapshot(
@@ -462,6 +467,7 @@ func appendSessionStateMessageWithCancellation(
 	sessionID string,
 	session *models.TaskSession,
 	cancellationProvider taskdto.CancellationPendingProvider,
+	runtimeStorageProvider taskdto.RuntimeStorageHealthProvider,
 	result []*ws.Message,
 ) []*ws.Message {
 	payload := map[string]interface{}{
@@ -477,6 +483,11 @@ func appendSessionStateMessageWithCancellation(
 		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
 		payload["cancellation_pending"] = pending
 		payload["cancellation_revision"] = revision
+	}
+	if runtimeStorageProvider != nil {
+		if health := runtimeStorageProvider.RuntimeStorageHealth(sessionID); health != nil {
+			payload["runtime_storage_health"] = health
+		}
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -1728,6 +1739,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.features.WorkspaceCollaboration {
+		taskhandlers.RegisterWorkspaceCollaborationRoutes(p.router, p.gateway.Dispatcher, p.taskSvc)
+	}
 	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
 	if p.services != nil && p.services.Org != nil {
 		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
@@ -1803,6 +1817,43 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
 }
 
+func configureMCPServices(
+	p routeParams,
+) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
+	if !ok {
+		return nil, nil, nil
+	}
+	mcpCatalog := mcpconfig.NewCatalogService(catalogRepo)
+	mcpCatalog.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	selectionRepo, ok := p.agentSettingsRepo.(mcpconfig.SelectionRepository)
+	if !ok {
+		return catalogRepo, mcpCatalog, nil
+	}
+	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
+	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	if profileReader, ok := p.agentSettingsRepo.(mcpUsageProfileReader); ok {
+		mcpSelectionService.SetUsageOwnerReader(mcpUsageOwnerReader(profileReader, p.taskSvc))
+	}
+	mcpSelectionService.SetAdditionValidator(mcpSelectionAdditionValidator(p))
+	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
+	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
+		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
+	}
+	if p.lifecycleMgr != nil {
+		mcpSelectionService.SetSessionMCPChangeNotifier(func(ctx context.Context, sessionID string) {
+			p.lifecycleMgr.RequestSessionMCPReconfiguration(ctx, sessionID)
+		})
+	}
+	mcpCatalog.SetSelectionRepository(selectionRepo)
+	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
+	if p.orchestratorSvc != nil {
+		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+	}
+	return catalogRepo, mcpCatalog, mcpSelectionService
+}
+
 // registerSecondaryRoutes registers workflow, agent settings, user, notification, editor,
 // prompt, clarification, MCP, and debug routes.
 func registerSecondaryRoutes(
@@ -1817,7 +1868,34 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
+	mcpCatalogRepo, mcpCatalog, mcpSelectionService := configureMCPServices(p)
+	var marketplace *mcpregistry.MarketplaceService
+	if cache, ok := p.agentSettingsRepo.(mcpregistry.CacheStore); ok && mcpCatalogRepo != nil {
+		client, clientErr := mcpregistry.NewClient(mcpregistry.DefaultRegistryURL, nil)
+		if clientErr == nil {
+			syncer := mcpregistry.NewSyncService(client, cache)
+			marketplace = mcpregistry.NewMarketplaceService(syncer, mcpCatalog)
+			if p.addCleanup != nil {
+				marketplaceCtx, cancelMarketplace := context.WithCancel(context.Background())
+				syncer.Start(marketplaceCtx, time.Hour)
+				p.addCleanup(func() error {
+					cancelMarketplace()
+					return nil
+				})
+			}
+		}
+	}
+	agentsettingshandlers.RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		p.router,
+		p.agentSettingsController,
+		p.gateway.Hub,
+		p.log,
+		p.interimSettingsInterlockToken,
+		mcpCatalogRepo,
+		p.taskSvc.AuthorizeWorkspaceAccess,
+		marketplace,
+		mcpSelectionService,
+	)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
@@ -1840,6 +1918,11 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered User handlers (HTTP + WebSocket)")
 
 	notificationhandlers.RegisterRoutes(p.router, p.notificationCtrl, p.log)
+	if p.notificationCtrl != nil {
+		if pushSvc := p.notificationCtrl.WebPush(); pushSvc != nil {
+			webpush.RegisterRoutes(p.router, pushSvc, p.notificationCtrl, notificationcontroller.CallerUserID, p.log)
+		}
+	}
 	p.log.Debug("Registered Notification handlers (HTTP)")
 
 	editorhandlers.RegisterRoutes(p.router, p.editorCtrl, p.log)
@@ -1851,7 +1934,7 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
+	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log, p.interimSettingsInterlockToken)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
 	clarification.RegisterRoutes(
@@ -1866,6 +1949,7 @@ func registerSecondaryRoutes(
 		p.taskSvc,
 		p.taskRepo,
 		p.features.NeedsYouInbox,
+		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr},
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
@@ -1981,6 +2065,8 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolCatalogNotifier(p.services.Plugins.NotifyAgentToolCatalogChanged)
 			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
 		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
@@ -2500,6 +2586,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+		mcpHandlers.SetAutomationPluginTools(p.services.Automation.Service)
 	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {

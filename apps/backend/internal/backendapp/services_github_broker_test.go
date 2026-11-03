@@ -12,7 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type fakePluginCredentialService struct {

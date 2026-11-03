@@ -13,6 +13,8 @@ function makeResetters(): FormResetters {
     setAgentProfileId: vi.fn(),
     setExecutorId: vi.fn(),
     setExecutorProfileId: vi.fn(),
+    setMcpServerIds: vi.fn(),
+    setMcpServerIdsDirty: vi.fn(),
     setSelectedWorkflowId: vi.fn(),
     setWorkflowAgentOverrides: vi.fn(),
     setFetchedSteps: vi.fn(),
@@ -61,5 +63,7 @@ describe("resetTaskForm canvas source preset", () => {
     expect(resetters.setPreferLocalExecutor).toHaveBeenCalledWith(false);
     expect(resetters.setWorkflowAgentOverrides).toHaveBeenCalledWith({});
     expect(resetters.setInitialWorkspaceLayout).toHaveBeenCalledWith("repository");
+    expect(resetters.setMcpServerIds).toHaveBeenCalledWith([]);
+    expect(resetters.setMcpServerIdsDirty).toHaveBeenCalledWith(false);
   });
 });
