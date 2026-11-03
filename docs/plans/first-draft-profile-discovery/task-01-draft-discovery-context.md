@@ -81,8 +81,9 @@ Preserve repository error propagation on the saved path.
 Use the existing optional-agent policy rather than a new enablement interpretation.
 
 Add `TestFirstDraftProfileDiscoveryEndpoints` in a new handler test file.
-Use the fake repository, registered agents, synthetic settings identity, and a healthy recording utility.
-Assert HTTP 200 and real returned capabilities for `/probe` and contextual `/resolve` without a parent.
+Use the fake repository, registered agents, and the synthetic settings identity to prove the route, auth, and draft-identity boundary.
+Assert HTTP 200 for `/probe` and contextual `/resolve` without a parent.
+The controller regression `TestFirstDraftProfileDiscoveryWithoutAgentRow` uses a healthy recording utility and asserts its calls plus the returned capability and option data, so execution is proven at that seam rather than through the HTTP fake.
 Assert 401 without identity, 403 without config authority, 400 for invalid launch input, and 404 for invalid targets.
 Preserve the existing contextual and context-free endpoint distinctions.
 
