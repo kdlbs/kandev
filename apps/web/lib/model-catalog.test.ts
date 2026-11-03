@@ -147,6 +147,17 @@ describe("resolveModelCatalogDraft", () => {
     ).toEqual({ status: "invalid", missing: [], invalid: ["lead"] });
   });
 
+  it("rejects draft keys that are not composition dimensions", () => {
+    if (!composition) throw new Error("fixture composition missing");
+    expect(
+      resolveModelCatalogDraft(
+        composition,
+        { lead: LEAD_A, sidekick: SIDEKICK_A, retired: "value" },
+        catalog,
+      ),
+    ).toEqual({ status: "invalid", missing: [], invalid: ["retired"] });
+  });
+
   it("never resolves an ambiguous or unadvertised model", () => {
     const ambiguous = {
       id: "ambiguous",

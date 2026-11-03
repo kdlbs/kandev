@@ -95,7 +95,7 @@ Run from the repository root.
 (cd apps/web && pnpm exec vitest run lib/apply-model-configuration.test.ts lib/state/slices/session-runtime/session-model-hydration.test.ts components/model-config-selector.test.tsx components/settings/profile-model-config.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator ./internal/task/service -run 'Test.*(GroupedCatalog|ComposedConfiguration|SessionModel|ConfigBaseline|Turn.*Config)' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/service -run 'Test.*(GroupedCatalog|ComposedConfiguration|SessionModel|ConfigBaseline|Turn.*Config)' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check

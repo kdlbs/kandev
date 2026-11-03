@@ -438,3 +438,24 @@ describe("ModelConfigSelector catalog viewport and availability", () => {
     expect(row.getAttribute("aria-disabled")).toBe(ARIA_TRUE);
   });
 });
+
+describe("ModelConfigSelector focus return", () => {
+  it("returns focus to the trigger after the picker closes", async () => {
+    const modelConfig = catalogModelOption();
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={configOptionToModelOptions(modelConfig)}
+          currentModel="pair-a"
+          configOptions={[modelConfig]}
+          onModelChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+    const trigger = screen.getByRole("button", { name: modelSettingsButtonName });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});

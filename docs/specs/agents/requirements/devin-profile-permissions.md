@@ -41,7 +41,7 @@ Existing profiles retain their saved choices.
   It shall require an explicit alternative choice rather than silently substitute another mode.
   An explicit unsupported mode shall prevent inference with a visible failure.
 - **AC-AGENTS-DEVIN-PERMISSIONS-001.4:** When the user enables the sandbox override, the profile shall request Autonomous behavior.
-  Smart and Bypass shall not remain simultaneous active selections.
+  An enabled sandbox override shall not retain Smart or Bypass as the active mode.
   Missing platform support, prerequisites, or provider support shall produce a visible failure without an unsandboxed retry.
 - **AC-AGENTS-DEVIN-PERMISSIONS-001.5:** Profile discovery, dependent option resolution, and subsequent host ACP task launches shall use the same saved or draft settings.
   The editor shall distinguish host discovery from support on a remote executor.

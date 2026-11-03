@@ -316,6 +316,9 @@ export function resolveModelCatalogDraft(
   draft: ModelCatalogDraft,
   catalog?: ModelCatalog,
 ): ModelCatalogResolution {
+  const dimensionIds = new Set(composition.dimensions.map((dimension) => dimension.id));
+  const unknown = Object.keys(draft).filter((key) => !dimensionIds.has(key));
+  if (unknown.length > 0) return { status: "invalid", missing: [], invalid: unknown };
   const missing: string[] = [];
   const invalid: string[] = [];
   for (const dimension of composition.dimensions) {

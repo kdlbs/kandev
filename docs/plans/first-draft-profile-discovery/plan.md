@@ -307,7 +307,6 @@ An ordinary model fallback is compatibility evidence, not a substitute for verif
 
 Execute remaining work sequentially in the primary session.
 Tasks 01, 02, 03, 05, and 06 plus the permission defaults/controls are implemented. Remaining gates: Task 04's Fusion qualification and Task 07's grouped/Fusion browser acceptance. Do not rerun completed tasks.
-Run Tasks 01, 02, 03, and 04, then the permission companion, then Tasks 05, 06, and 07.
 Task 04 blocks real Fusion composition until its evidence is complete.
 Other independent completed outcomes remain valid while that gate is unresolved.
 The completed profile-discovery, first-run setup, and generic-wrapper packages remain historical delivery records.

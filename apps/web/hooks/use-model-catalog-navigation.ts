@@ -182,6 +182,7 @@ export function useModelCatalogNavigation({
   const [activeDimensionId, setActiveDimensionId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, ModelCatalogDraft>>({});
   const [optionRetry, setOptionRetry] = useState(0);
+  const setDimension = useDraftDimensionSetter(setActiveGroupId, setDrafts);
 
   const activeComposition = activeGroupId ? catalogComposition(catalog, activeGroupId) : undefined;
   const draft = activeGroupId ? (drafts[activeGroupId] ?? {}) : {};
@@ -266,7 +267,7 @@ export function useModelCatalogNavigation({
     },
     openDimension: setActiveDimensionId,
     closeDimension: () => setActiveDimensionId(null),
-    setDimension: useDraftDimensionSetter(setActiveGroupId, setDrafts),
+    setDimension,
     apply,
     applyEnabled,
     candidateOptions,
