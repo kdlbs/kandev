@@ -86,7 +86,11 @@ test("desktop preserves the episode when the OpenCode continuation fails without
     await session.waitForLoad();
     await expectOpenCodeCapacityNotice(session);
 
-    await driveOpenCodeCapacityRetries(backend, apiClient, fixture.sessionId, 1, 11);
+    for (let attempt = 1; attempt <= 11; attempt++) {
+      const notice = await waitForCapacityRetry(apiClient, fixture.sessionId, attempt);
+      await expect(session.transientRetryCard()).toContainText(`Attempt ${attempt} of 11`);
+      await advanceCapacityRetries(backend, Number(notice!.metadata!.retry_in_seconds) + 1);
+    }
     const failure = await expectOpenCodeRetainedRefusal(apiClient, fixture.sessionId, "exhausted");
     expect(failure.metadata?.attempts_started).toBe(11);
     await expect(session.transientRetryCard()).toHaveCount(0);
