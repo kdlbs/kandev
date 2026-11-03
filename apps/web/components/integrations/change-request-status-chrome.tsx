@@ -130,6 +130,7 @@ export function ChangeRequestStatusDrawerContent({
   children,
   footer,
   closeLabel,
+  fixedContent = false,
 }: {
   testId: string;
   headerTestId?: string;
@@ -140,12 +141,19 @@ export function ChangeRequestStatusDrawerContent({
   children: ReactNode;
   footer?: ReactNode;
   closeLabel?: string;
+  fixedContent?: boolean;
 }) {
   return (
-    <DrawerContent data-testid={testId} className="max-h-[80dvh] flex flex-col">
+    <DrawerContent
+      data-testid={testId}
+      className={cn(
+        "max-h-[80dvh] flex flex-col",
+        fixedContent && "h-[80dvh] data-[vaul-drawer-direction=bottom]:max-h-[80dvh]",
+      )}
+    >
       <DrawerHeader
         data-testid={headerTestId}
-        className="flex flex-row items-center justify-between border-b py-2"
+        className="flex shrink-0 flex-row items-center justify-between border-b py-2"
       >
         <DrawerTitle className="text-sm">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{description}</DrawerDescription>
@@ -155,7 +163,7 @@ export function ChangeRequestStatusDrawerContent({
             variant="ghost"
             size="icon-sm"
             aria-label={closeLabel ?? t("integrations:closePullRequestStatus")}
-            className="cursor-pointer"
+            className={cn("cursor-pointer", fixedContent && "min-h-12 min-w-12")}
           >
             <IconX className="h-4 w-4" />
           </Button>
@@ -163,7 +171,12 @@ export function ChangeRequestStatusDrawerContent({
       </DrawerHeader>
       <div
         data-testid={bodyTestId}
-        className="flex-1 min-h-0 overflow-y-auto p-3"
+        className={cn(
+          "flex-1 min-h-0 p-3",
+          fixedContent
+            ? "flex flex-col overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+            : "overflow-y-auto",
+        )}
         data-vaul-no-drag
       >
         {children}

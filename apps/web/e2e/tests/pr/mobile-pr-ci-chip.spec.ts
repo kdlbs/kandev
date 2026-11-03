@@ -113,6 +113,93 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.2/.3/.4/.6
+  test("keeps the mobile PR action fixed through loading and scrolling", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPR({ apiClient, seedData, title: "Stable mobile PR action" });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: Array.from({ length: 24 }, (_, index) => ({
+        name: `Workflow ${index + 1} / test`,
+        status: "in_progress",
+        html_url: "",
+      })),
+    });
+    const gate = Promise.withResolvers<void>();
+    await testPage.route(
+      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`,
+      async (route) => {
+        await gate.promise;
+        await route.continue();
+      },
+    );
+    try {
+      const session = await openTask(testPage, taskId);
+      await session.tapPRStatusChip();
+      const drawer = session.prStatusChipDrawer();
+      await waitForFiniteAnimations(drawer);
+      const link = drawer.getByTestId("pr-popover-pr-link");
+      await expect(link).toBeVisible();
+      const before = await link.boundingBox();
+      const frameBefore = await drawer.boundingBox();
+      expect(before!.height).toBeGreaterThanOrEqual(44);
+      expect(before!.width).toBeGreaterThanOrEqual(44);
+      const response = testPage.waitForResponse(
+        (res) => new URL(res.url()).pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`,
+      );
+      gate.resolve();
+      await response;
+      await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(24);
+      const after = await link.boundingBox();
+      expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs((await drawer.boundingBox())!.height - frameBefore!.height),
+      ).toBeLessThanOrEqual(1);
+      const body = drawer.getByTestId("pr-popover-scroll-body");
+      expect(await body.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+      await body.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(drawer.getByTestId("pr-workflow-row").last()).toBeInViewport();
+      expect(Math.abs((await link.boundingBox())!.y - before!.y)).toBeLessThanOrEqual(1);
+      expect(
+        await drawer.evaluate(
+          (element) =>
+            Array.from(element.querySelectorAll("*")).filter(
+              (child) =>
+                getComputedStyle(child).overflowY === "auto" &&
+                child.scrollHeight > child.clientHeight,
+            ).length,
+        ),
+      ).toBe(1);
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      ).toBe(true);
+      expect((await drawer.boundingBox())!.y).toBeGreaterThanOrEqual(0);
+      await body.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await testPage.screenshot({ path: test.info().outputPath("stable-phone-drawer.png") });
+      await testPage.context().route(PR_URL, (route) => route.fulfill({ body: "PR destination" }));
+      const opened = testPage.waitForEvent("popup");
+      await testPage.touchscreen.tap(before!.x + before!.width / 2, before!.y + before!.height / 2);
+      const popup = await opened;
+      await expect(popup).toHaveURL(PR_URL);
+      await popup.close();
+      await session.prStatusChipDrawerClose().tap();
+      await expect(drawer).toBeHidden();
+    } finally {
+      gate.resolve();
+      await testPage.unrouteAll({ behavior: "wait" });
+    }
+  });
+
   test("keeps grouped PR event automations usable without tray overflow", async ({
     testPage,
     apiClient,
@@ -392,6 +479,7 @@ test.describe("mobile PR CI chip drawer", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 844 });
     const taskId = await seedTaskWithTwoPRs({
       apiClient,
       seedData,
@@ -411,6 +499,8 @@ test.describe("mobile PR CI chip drawer", () => {
     const removeFirst = session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER);
     await expect(removeFirst).toBeVisible();
     await waitForFiniteAnimations(session.prStatusChipDrawer());
+    const tabs = session.prStatusChipDrawer().getByTestId("pr-multi-popover-tabs");
+    expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
     await prCapture.screenshot("mobile-pr-unlink-drawer", {
       caption: "Mobile multi-PR drawer with visible unlink controls inside the tabs",
     });
