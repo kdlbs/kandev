@@ -1065,7 +1065,8 @@ The session limit is off by default. Explicit **Start**, **Resume**, and
 **Send Now** can override it. Ordinary messages, including chat and
 `message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
 input in the existing prompt queue and starts one new turn when capacity
-becomes available. Auto-run OFF keeps that input pending. Set a positive limit
+becomes available. After a backend restart, later authorized session activity
+re-registers the pending queue. Auto-run OFF keeps that input pending. Set a positive limit
 in **Settings → Preferences → Task Behavior → Runtime**.
 `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
 limit. Change the environment variable and restart Kandev.

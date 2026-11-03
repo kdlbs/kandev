@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -251,4 +252,35 @@ func TestCIAutomationIdlePromptQueuesAtCapacity(t *testing.T) {
 	require.Equal(t, 1, status.Count)
 	require.Equal(t, true, status.Entries[0].Metadata[metaKeyUserMessageRecorded],
 		"the deferred CI prompt must reuse its recorded transcript")
+}
+
+func TestQueuedMessageCapacityOverrideContinuesExplicitAction(t *testing.T) {
+	ctx := context.Background()
+	svc, manager, repo := capacityTestService(t, 1)
+	manager.promptDone = make(chan struct{})
+	seedTaskAndSession(t, repo, "clarify-task", "clarify-session", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "clarify-session", "clarify-task", "clarify-exec")
+	markTargetPromptReady(t, svc, "clarify-task", "clarify-session", "clarify-exec")
+	filler, refusal := svc.sessionCeiling.admitTurn(ctx, turnAdmissionRequest{
+		taskID: "filler-task", sessionID: "filler-session",
+		intent: turnCapacityBounded, seam: "filler",
+	})
+	require.Nil(t, refusal)
+	defer filler.release()
+
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "clarify-session", "clarify-task", "clarification answer", "",
+		messagequeue.QueuedByAgent, false, nil,
+		map[string]interface{}{metaKeyUserMessageRecorded: true, metaKeyCapacityOverride: true},
+	)
+	require.NoError(t, err)
+	require.True(t, svc.drainQueuedMessageForPromptableSession(ctx, "clarify-session"))
+	select {
+	case <-manager.promptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("trusted queued override must dispatch at full capacity")
+	}
+	manager.mu.Lock()
+	require.Equal(t, []string{"clarification answer"}, manager.capturedPrompts)
+	manager.mu.Unlock()
 }

@@ -366,13 +366,27 @@ func (s *Service) retryMessageCapacityWait(
 		}
 		return s.resumeCompletedSessionForCapacityWait(ctx, registry, wait, identity)
 	}
-	if !s.sessionCeiling.turnCapacityAvailable(ctx) {
+	if !s.sessionCeiling.turnCapacityAvailableForSession(ctx, identity.SessionID) {
 		return true
 	}
-	s.drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
+	outcome := s.drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIdentity(
 		ctx, identity.TaskID, identity.SessionID, &identity,
 	)
+	s.finishMessageCapacityWaitDrain(registry, wait, session, outcome)
 	return false
+}
+
+func (s *Service) finishMessageCapacityWaitDrain(
+	registry *messageCapacityWaitRegistry,
+	wait messageCapacityWait,
+	session *models.TaskSession,
+	outcome queueDrainOutcome,
+) {
+	if outcome != queueDrainSkipped || !isTerminalSessionState(session.State) {
+		return
+	}
+	s.releaseWaitStartup(registry, wait)
+	registry.remove(wait.key())
 }
 
 // settleMessageCapacityWaitStartup keeps a startup ticket until its session

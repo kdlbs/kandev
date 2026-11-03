@@ -195,7 +195,8 @@ func TestMessageTurnCapacityWait_CompletedResumeHonorsAutoRun(t *testing.T) {
 	require.Equal(t, 1, svc.messageCapacityWaitRegistry().len())
 
 	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "completed-session", true))
-	require.Zero(t, manager.launches.Load(), "enabling Auto-run must not bypass the sweep's ticket")
+	require.Zero(t, manager.launches.Load(),
+		"enabling Auto-run alone must not resume outside the capacity sweep")
 	require.Equal(t, 1, svc.messageCapacityWaitRegistry().len())
 }
 
@@ -228,15 +229,22 @@ func TestMessageTurnCapacityWait_StartupRaceTakesOneTicket(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	attemptsDone := make(chan struct{}, len(waits))
+	startupErrors := make(chan error, len(waits))
 	for _, wait := range waits {
 		wait := wait
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			session, err := repo.GetTaskSession(ctx, wait.sessionID)
-			require.NoError(t, err)
+			if err != nil {
+				startupErrors <- err
+				return
+			}
 			identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, wait.taskID, wait.sessionID)
-			require.NoError(t, err)
+			if err != nil {
+				startupErrors <- err
+				return
+			}
 			svc.startMessageCapacityWaitWithTicket(ctx, registry, wait, identity, session, startup)
 			attemptsDone <- struct{}{}
 		}()
@@ -255,6 +263,10 @@ func TestMessageTurnCapacityWait_StartupRaceTakesOneTicket(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
+	close(startupErrors)
+	for err := range startupErrors {
+		require.NoError(t, err)
+	}
 	require.Equal(t, int32(1), started.Load(), "exactly one startup may own the final slot")
 	for _, seeded := range sessions {
 		session, err := repo.GetTaskSession(ctx, seeded.sessionID)

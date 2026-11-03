@@ -75,6 +75,7 @@ func TestMessageTaskCapacity_ReportsQueuedAtFullCapacity(t *testing.T) {
 	require.Equal(t, "queued", out["status"])
 	require.Equal(t, primary.ID, out["session_id"])
 	require.Equal(t, 1, orch.promptAttempts)
+	require.Zero(t, orch.reserveCalls, "the idle prompt path refuses before a request reservation")
 
 	queue := fake.GetMessageQueue()
 	identity, err := queue.ResolveSessionIdentity(context.Background(), target.ID, primary.ID)
@@ -113,7 +114,10 @@ func TestMessageTaskCapacity_QueuesPinnedCompletedFollowUp(t *testing.T) {
 	var out map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &out))
 	require.Equal(t, "queued", out["status"])
+	require.Equal(t, 1, orch.reserveCalls)
 	require.Zero(t, orch.promptAttempts, "a completed follow-up must not launch during a capacity refusal")
+	require.Equal(t, target.ID, orch.registeredTaskID)
+	require.Equal(t, primary.ID, orch.registeredSession)
 
 	queue := fake.GetMessageQueue()
 	identity, err := queue.ResolveSessionIdentity(context.Background(), target.ID, primary.ID)

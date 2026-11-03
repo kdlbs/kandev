@@ -4513,10 +4513,10 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
 		// Starting a CREATED session consumes a new slot. Register the accepted
 		// head for bounded startup instead of observing capacity and racing
-		// another start; the sweep acquires the actual ticket.
-		if identity, resolveErr := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID); resolveErr == nil {
-			s.registerMessageCapacityWait(ctx, identity, "", time.Time{})
-		}
+		// another start; the sweep acquires the actual ticket. The exported
+		// registration keeps a fallback wait when identity resolution is
+		// transiently unavailable.
+		s.RegisterMessageCapacityWait(ctx, taskID, sessionID, "")
 		s.signalCeilingSweep()
 		return
 	}

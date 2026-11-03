@@ -134,6 +134,13 @@ func (s *Service) dispatchCIAutomationPromptToIdleSession(
 		if IsMessageTurnCapacityRefusal(promptErr) {
 			queuedParams := params
 			queuedParams.Metadata = copyCIQueuedMetadata(params.Metadata, turnID)
+			if params.OnQueued != nil {
+				// OnDirectAdmission already consumed this round. Record the
+				// queued receipt without incrementing the round again.
+				queuedParams.OnQueued = func(queueEntryID string, _ bool) error {
+					return params.OnQueued(queueEntryID, true)
+				}
+			}
 			result, queueErr := s.queueOrReplaceCIAutomationPrompt(
 				ctx, session, queuedParams, params.AllowNewRound,
 			)

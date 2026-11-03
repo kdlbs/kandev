@@ -1188,7 +1188,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		promptReferencesPrepared = initialTaskBrief.PromptReferencesPrepared
 		req.promptReferencesPrepared = promptReferencesPrepared
 	}
-	if initialTaskBriefQueued && h.orchestrator != nil && !atomicQueuedTaskFeedback {
+	if initialTaskBriefQueued && !capacityQueue && h.orchestrator != nil && !atomicQueuedTaskFeedback {
 		queueMetadata := meta.ToMap()
 		if queueMetadata == nil {
 			queueMetadata = make(map[string]interface{})

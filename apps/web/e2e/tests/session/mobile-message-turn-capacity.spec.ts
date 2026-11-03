@@ -92,6 +92,7 @@ test.describe("mobile: Message turns wait for session capacity", () => {
         force: true,
       });
       await dwell(
+        testPage,
         2_000,
         "negative-assertion",
         "No event announces that Auto-run OFF intentionally leaves the entry pending",

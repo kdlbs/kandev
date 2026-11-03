@@ -116,7 +116,7 @@ Run these commands from the repository root:
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestMessageTurnCapacity_WarmIdleRefusesAtLimit$' -count=1 -v)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator ./internal/orchestrator/messagequeue ./internal/orchestrator/queue ./internal/task/handlers ./internal/mcp/handlers -count=1)
 (cd apps/backend && GOMAXPROCS=2 go test -trimpath -tags fts5 -race ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers -run '^Test(MessageTurnCapacity|MessageCapacityAdmission|MessageTaskCapacity|CIAutomationIdlePrompt)' -count=1)
-bash scripts/lint-go-changed apps/backend/internal/orchestrator/message_turn_capacity*.go apps/backend/internal/orchestrator/service.go apps/backend/internal/orchestrator/session_ceiling.go apps/backend/internal/orchestrator/ceiling_release.go apps/backend/internal/orchestrator/ceiling_sweep.go apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/orchestrator/agent_delivery_submission.go apps/backend/internal/orchestrator/event_handlers_agent.go apps/backend/internal/orchestrator/event_handlers_workflow.go apps/backend/internal/orchestrator/queue_send_now.go apps/backend/internal/orchestrator/session_launch.go apps/backend/internal/orchestrator/peer_message_initial_launch.go apps/backend/internal/orchestrator/ceiling_seam3_integration_test.go apps/backend/internal/orchestrator/queue/queue.go apps/backend/internal/orchestrator/queue/queue_test.go apps/backend/internal/task/handlers/message_handlers.go apps/backend/internal/task/handlers/message_capacity_admission_test.go apps/backend/internal/mcp/handlers/handlers.go apps/backend/internal/mcp/handlers/message_task_capacity_test.go
+bash scripts/lint-go-changed $(git status --porcelain | awk '{print $2}' | grep '\.go$')
 git diff --check
 ```
 
@@ -144,6 +144,17 @@ All Go paths below are relative to `apps/backend/`.
 - `internal/orchestrator/queue_send_now.go`
 - `internal/orchestrator/session_launch.go`
 - `internal/orchestrator/peer_message_initial_launch.go`
+- `internal/orchestrator/queued_dispatch.go`
+- `internal/orchestrator/ci_automation_dispatch.go`
+- `internal/orchestrator/dynamic_launch.go`
+- `internal/orchestrator/ceiling_replay.go`
+- `internal/orchestrator/event_handlers_automation.go`
+- `internal/orchestrator/event_handlers_clarification.go`
+- `internal/orchestrator/event_handlers_transient.go`
+- `internal/orchestrator/event_handlers_transient_retained_runtime.go`
+- `internal/orchestrator/provider_interruption_dispatch.go`
+- `internal/orchestrator/initial_submission_recovery.go`
+- `internal/backendapp/adapters.go`
 - `internal/orchestrator/queue/queue.go` and `queue_test.go`
 - `internal/orchestrator/ceiling_seam3_integration_test.go`
 - `internal/task/handlers/message_handlers.go`
@@ -180,6 +191,8 @@ Implemented in the primary session.
 - Extended `message.add`, the agent-message handler, queued ordinary/lifecycle dispatch, and queued passthrough admission.
 - Added regression tests for warm and cold refusal, concurrent final-slot admission, released/expired ticket rejection, queue restoration and release, handler queue acceptance, steer-fallback queueing, agent-message queued responses, pinned completed follow-up intent, prompt_ensure replay deferral, bounded CI auto-fix queueing, CREATED/completed Auto-run gating, a three-contender startup race, and transient identity/snapshot/session reads.
 
+Red evidence came from the investigation's temporary reproduction, which failed at the intended provider-call assertion for both the manual and automatic warm paths. The permanent regression replaced that temporary test.
+
 Verification actually run:
 
 ```text
@@ -189,13 +202,20 @@ ok  github.com/kandev/kandev/internal/task/handlers
 ok  github.com/kandev/kandev/internal/mcp/handlers
 ok  github.com/kandev/kandev/internal/backendapp
 
+go test -trimpath -tags fts5 ./internal/orchestrator/messagequeue ./internal/orchestrator/queue -count=1
+ok  github.com/kandev/kandev/internal/orchestrator/messagequeue
+ok  github.com/kandev/kandev/internal/orchestrator/queue
+
 GOMAXPROCS=2 go test -trimpath -tags fts5 -race ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers -run '^Test(MessageTurnCapacity|MessageCapacityAdmission|MessageTaskCapacity|CIAutomationIdlePrompt)' -count=1
 ok  github.com/kandev/kandev/internal/orchestrator
 ok  github.com/kandev/kandev/internal/task/handlers
 ok  github.com/kandev/kandev/internal/mcp/handlers
 
-bash scripts/lint-go-changed <changed-go-files>
+bash scripts/lint-go-changed $(git status --porcelain | awk '{print $2}' | grep '\.go$')
 0 issues.
+
+git diff --check
+clean
 ```
 
 The desktop and phone rendered scenarios are recorded in Task 02.

@@ -161,7 +161,7 @@ func TestStartSessionForWorkflowStep_PreConsultationRefusalOverCeiling(t *testin
 // pre-consult gate (admitOrDeferWorkflowStepEnsure): that commit moved this
 // call site's recordManualOverrideIfAdmitted audit next to admission, mirroring
 // ensureSessionRunning's own move, but only ensureSessionRunning's half was
-// covered by a regression test (TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails,
+// covered by a regression test (TestPromptTask_ManualOverrideIsAuditedEvenWhenTheResumeFails,
 // reached through PromptTask's hardcoded manual origin).
 //
 // The pre-consult gate itself always admits with launchOriginAutomatic

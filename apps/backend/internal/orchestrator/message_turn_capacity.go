@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -17,6 +18,20 @@ import (
 // ErrMessageTurnCapacityExceeded is the stable sentinel a producer can match
 // when it must persist durable pending input instead of dispatching.
 var ErrMessageTurnCapacityExceeded = errors.New("session ceiling has no capacity for a new message turn")
+
+// metaKeyCapacityOverride marks a trusted internal queue entry that continues
+// an explicit execution action across a cancellation-and-requeue boundary.
+const metaKeyCapacityOverride = "capacity_override"
+
+// queuedMessageCapacityIntent preserves an explicit override only for entries
+// written by trusted internal continuation paths. Ordinary queue entries stay
+// bounded.
+func queuedMessageCapacityIntent(queuedMsg *messagequeue.QueuedMessage) turnCapacityIntent {
+	if queuedMsg != nil && boolField(queuedMsg.Metadata, metaKeyCapacityOverride) {
+		return turnCapacityOverride
+	}
+	return turnCapacityUnspecified
+}
 
 // turnCapacityIntent separates caller authority from capacity policy. Ordinary
 // message turns are bounded; only explicit Start, Resume, Send Now, legacy Run
@@ -379,6 +394,28 @@ func (c *sessionCeilingController) releaseTurn(token string) {
 	c.mu.Lock()
 	delete(c.turnReservations, token)
 	c.mu.Unlock()
+}
+
+// turnCapacityAvailableForSession reports whether this session can take a new
+// turn now. A session that already owns a counted row, launch reservation, or
+// turn ticket is admitted even when its own slot fills the ceiling.
+func (c *sessionCeilingController) turnCapacityAvailableForSession(ctx context.Context, sessionID string) bool {
+	if c == nil {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ceiling == unlimitedSessionCeiling {
+		return true
+	}
+	counted, err := c.countedRowsLocked(ctx)
+	if err != nil {
+		return false
+	}
+	if c.sessionOwnsCapacityLocked(sessionID, counted) {
+		return true
+	}
+	return c.populationLocked(counted) < c.ceiling
 }
 
 // turnCapacityAvailable reports whether a new message turn could be admitted

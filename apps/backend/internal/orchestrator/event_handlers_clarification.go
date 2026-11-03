@@ -607,7 +607,10 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 	}
 	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
 		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
-		map[string]interface{}{metaKeyUserMessageRecorded: true},
+		map[string]interface{}{
+			metaKeyUserMessageRecorded: true,
+			metaKeyCapacityOverride:    true,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)

@@ -652,16 +652,16 @@ When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
-the automatic session ceiling still applies unless you explicitly start or
-resume the session.
+the automatic session ceiling still applies unless you explicitly start,
+resume, or use Send Now on the session.
 
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity
 full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
-keeps manual admission. Ordinary message delivery waits for capacity through
-the same ceiling.
+and **Send Now** keep manual admission. Ordinary message delivery waits for
+capacity through the same ceiling.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

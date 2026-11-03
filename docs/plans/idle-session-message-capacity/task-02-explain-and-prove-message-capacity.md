@@ -147,7 +147,7 @@ Update the reference/explanation sections in:
 
 Search `README.md`, `docs/screenshots.md`, specifications, and decisions for stale
 manual-message wording. Historical delivery results remain historical.
-Public docs change during implementation, not during this design-only turn.
+Public docs were updated in this implementation.
 
 ## Verification
 
@@ -252,6 +252,8 @@ python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 All specification files passed
 ```
+
+Local PR-documentation coverage preflight passed with `status: covered` and both work orders linked. `git diff --check` was clean. Before the commit, `git status --short -- docs/plans/idle-session-message-capacity` reported the plan directory as untracked; the package was then committed.
 
 Desktop and mobile Playwright scenarios passed:
 
