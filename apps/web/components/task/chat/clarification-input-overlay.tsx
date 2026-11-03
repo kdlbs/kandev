@@ -30,7 +30,10 @@ import {
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { QuestionImages } from "./question-images";
-import { useClarificationDraft } from "./clarification-draft-context";
+import {
+  useClarificationAuthorityReset,
+  useClarificationDraft,
+} from "./clarification-draft-context";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -96,6 +99,10 @@ function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
     const bi = (b.metadata as ClarificationRequestMetadata | undefined)?.question_index ?? 0;
     return ai - bi;
   });
+}
+
+function readQuestionTotal(message: Message | undefined): number | undefined {
+  return (message?.metadata as ClarificationRequestMetadata | undefined)?.question_total;
 }
 
 function readSharedContext(message: Message | undefined): string | null {
@@ -697,12 +704,33 @@ export function ClarificationInputOverlay({
   const draftKey = group.pendingId
     ? JSON.stringify([sortedMessages[0]?.session_id, group.pendingId, mode])
     : null;
-  const { customDrafts, setCustomDrafts, rawActiveIndex, setActiveIndex, savedAnswers } =
-    useClarificationDraft(
-      draftKey,
-      group.answers,
-      group.submitState === "ok" || group.submitState === "expired",
-    );
+  const draftQuestions = useMemo(
+    () =>
+      sortedMessages.flatMap((message) => {
+        const meta = readSingleQuestionMeta(message);
+        if (!meta) return [];
+        return [{ id: meta.questionId, optionIds: meta.question.options.map((o) => o.option_id) }];
+      }),
+    [sortedMessages],
+  );
+  const {
+    customDrafts,
+    setCustomDrafts,
+    rawActiveIndex,
+    setActiveIndex,
+    savedAnswers,
+    generation,
+  } = useClarificationDraft(
+    draftKey,
+    group.answers,
+    group.submitState === "ok" || group.submitState === "expired",
+    {
+      questions: draftQuestions,
+      questionTotal: readQuestionTotal(sortedMessages[0]),
+      mode,
+    },
+  );
+  useClarificationAuthorityReset(generation, group.answers, group.clearAnswer);
   const restoredAnswers = lateMode
     ? (lateAnswerState?.snapshot?.answers ?? initialAnswers)
     : (initialAnswers ?? savedAnswers);
@@ -714,12 +742,21 @@ export function ClarificationInputOverlay({
     }
     setCustomDrafts((current) => {
       const next = { ...current };
+      let changed = false;
       for (const answer of restoredAnswers) {
-        if (answer.custom_text !== undefined) next[answer.question_id] = answer.custom_text;
+        if (answer.custom_text === undefined) continue;
+        // The retained raw draft is the user's exact unfinished text. An
+        // answer payload is trimmed before recording, so it only fills a
+        // question that has no raw draft of its own (including an explicitly
+        // empty one). Late-answer snapshots keep their existing overwrite.
+        if (!lateMode && Object.hasOwn(current, answer.question_id)) continue;
+        if (next[answer.question_id] === answer.custom_text) continue;
+        next[answer.question_id] = answer.custom_text;
+        changed = true;
       }
-      return next;
+      return changed ? next : current;
     });
-  }, [group.recordAnswer, initialAnswersKey, restoredAnswers]);
+  }, [group.recordAnswer, initialAnswersKey, lateMode, restoredAnswers]);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
