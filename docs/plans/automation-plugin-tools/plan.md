@@ -1,6 +1,6 @@
 ---
 created: 2026-11-02
-status: completed
+status: in_progress
 requirements:
   - REQ-OFFICE-AUTOMATION-PLUGIN-TOOLS-001
   - REQ-OFFICE-AUTOMATION-PLUGIN-TOOLS-002
@@ -20,7 +20,7 @@ Keep the fixed core MCP surface and hidden run history.
 
 Two sequential work orders deliver the backend boundary and then the editor with browser evidence.
 The [requirements](../../specs/office/requirements/automation-plugin-tools.md), [design](../../specs/office/system-design/automation-plugin-tools.md), and [decision](../../decisions/2026-11-02-automation-plugin-tool-selection.md) form the design package.
-Implementation is complete.
+Implementation is complete in code. The PostgreSQL and managed Playwright closure gates remain pending until those runs are recorded.
 
 ## Scope
 
@@ -133,20 +133,20 @@ Grouping, explicit selection, existing Save ownership, touch access, and stale b
 ## Tests
 
 All new tests follow TDD during implementation.
-These are planned names, not tests already run.
+These names reflect the implemented tests. Browser and PostgreSQL closure gates remain pending.
 
-| Acceptance criteria | Planned evidence |
+| Acceptance criteria | Evidence |
 | --- | --- |
-| 001.1, 001.3, 001.5, 001.6 | `internal/automation/plugin_tools_test.go`: `TestAutomationPluginToolsPersistence`, `TestAutomationPluginToolsUpdatePresence`, `TestAutomationPluginToolsExportExcludesAuthority` |
-| 001.2, 001.7 | Same file: `TestAutomationPluginToolsNativeSaveOnly`, `TestAutomationPluginToolsRejectStaleOptions`, native/MCP handler tests |
-| 001.4 | `internal/plugins/agent_tools_automation_test.go`: `TestAgentToolPolicyVersionLifecycle`, including secret-only save and version-persistence failure |
-| 002.1, 002.3 | `internal/mcp/handlers/plugin_tools_automation_test.go`: `TestAutomationPluginToolsInvocationScope`, `TestAutomationPluginToolsLiveRemoval`, `TestAutomationPluginToolsAuthorityReadFailure` |
-| 002.2 | `internal/mcp/server/server_automation_mode_test.go`: `TestAutomationPluginToolsGlobalPushCannotWiden`, `TestAutomationPluginToolsSelectionRefreshAtSameCatalogRevision`, `TestAutomationPluginToolsRefreshFailureClearsAccess` |
-| 002.4 | Existing fixed automation catalog tests plus `TestAutomationPluginToolsKeepAdministrativeRestrictions` |
-| 002.5, 002.6 | Fixture read/write integration plus `TestAutomationPluginToolsRecoveryUsesCurrentSelection`, browser run/history checks |
-| 003.1, 003.2, 003.4 | `components/automations/automation-plugin-tools.test.tsx`, existing `automation-payload.test.ts`, and `hooks/domains/settings/use-automation-plugin-tools.test.ts` |
-| 003.3 | Phone Playwright flow with measured hit targets, wrapped descriptions, and no horizontal overflow |
-| 003.5 | Locale checks plus translated/pseudo browser geometry coverage |
+| 001.1, 001.3, 001.5, 001.6 | `internal/automation/plugin_tools_test.go`: `TestAutomationPluginToolsPersistence`, `TestAutomationPluginToolsModeChangeClearsSelection`; `plugin_tools_postgres_test.go` covers replay and omitted updates |
+| 001.2, 001.7 | `internal/automation/plugin_tools_test.go`: `TestAutomationPluginToolsNativeSaveOnly`, `TestAutomationPluginToolsRejectStaleOptions`, `TestAutomationPluginToolsRejectSharedDispatcherMCPMutation` |
+| 001.4 | `internal/plugins/agent_tools_automation_test.go`: `TestAgentToolPolicyVersionLifecycle`; `internal/plugins/service_install_test.go` upgrade assertions |
+| 002.1, 002.3 | `internal/mcp/handlers/plugin_tools_automation_test.go`: `TestAutomationPluginToolsDiscoveryIsFiltered`, `TestAutomationPluginToolsInvocationScope`; `internal/plugins/agent_tools_automation_test.go`: `TestAutomationAgentToolInvocationRequiresExactCurrentApproval` |
+| 002.2 | `internal/mcp/server/server_automation_plugin_tools_test.go`: `TestAutomationPluginToolsGlobalPushCannotWiden`, `TestAutomationPluginToolsSelectionRefreshAtSameCatalogRevision`; `server_automation_plugin_tools_refresh_test.go`: delayed-response and invalidation tests |
+| 002.4 | Existing fixed automation catalog tests plus the shared MCP dispatcher regression |
+| 002.5, 002.6 | Fixture read/write implementation plus the desktop hidden-run Playwright spec |
+| 003.1, 003.2, 003.4 | `components/automations/automation-plugin-tools.test.tsx`, `automation-payload.test.ts`, and `hooks/domains/settings/use-automation-plugin-tools.test.ts` |
+| 003.3 | `apps/web/e2e/tests/settings/mobile-automation-plugin-tools.spec.ts` measures touch targets and horizontal overflow |
+| 003.5 | Locale checks plus pseudo catalog completeness |
 
 IDs in this table use the `AC-OFFICE-AUTOMATION-PLUGIN-TOOLS-` prefix.
 Keep full IDs in work orders and test coverage annotations where needed.
@@ -167,7 +167,8 @@ After explicit read-only reselection, the added tool remains denied.
   Measure actual 44-pixel targets and document containment.
   Use long translated descriptions and the pseudo locale for the changed region.
 
-Browser evidence covers AC-001.1, AC-001.2, AC-001.4, AC-001.5, AC-002.5, and AC-003.1 through AC-003.5.
+The specs are intended to cover AC-001.1, AC-001.2, AC-001.4, AC-001.5, AC-002.5, and AC-003.1 through AC-003.5.
+They have not yet been executed in the managed runner, so browser evidence remains a closure gate.
 Backend tests own forged identities, raw denied actions, and failed authority reads.
 
 ## Work orders

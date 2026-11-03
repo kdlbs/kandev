@@ -38,6 +38,25 @@ func TestAutomationPluginToolsPostgres(t *testing.T) {
 		t.Fatalf("stored plugin tools = %#v", stored.PluginTools)
 	}
 
+	original := stored.PluginTools[0]
+	if original.InstallationID != "installation-1" || original.PolicyVersion != "policy-1" {
+		t.Fatalf("stored selection identity = %#v", original)
+	}
+
+	if err := store.UpdateAutomation(ctx, automation.ID, &UpdateAutomationRequest{}); err != nil {
+		t.Fatalf("omitted update: %v", err)
+	}
+	unchanged, err := store.GetAutomation(ctx, automation.ID)
+	if err != nil || unchanged == nil {
+		t.Fatalf("get unchanged automation: %v", err)
+	}
+	if len(unchanged.PluginTools) != 1 ||
+		unchanged.PluginTools[0].InstallationID != original.InstallationID ||
+		unchanged.PluginTools[0].PolicyVersion != original.PolicyVersion ||
+		len(unchanged.PluginTools[0].ToolNames) != 2 {
+		t.Fatalf("omitted update changed plugin tools: %#v", unchanged.PluginTools)
+	}
+
 	empty := []plugintools.Selection{}
 	if err := store.UpdateAutomation(ctx, automation.ID, &UpdateAutomationRequest{PluginTools: &empty}); err != nil {
 		t.Fatalf("clear plugin tools: %v", err)
@@ -48,16 +67,5 @@ func TestAutomationPluginToolsPostgres(t *testing.T) {
 	}
 	if len(cleared.PluginTools) != 0 {
 		t.Fatalf("cleared plugin tools = %#v", cleared.PluginTools)
-	}
-
-	if err := store.UpdateAutomation(ctx, automation.ID, &UpdateAutomationRequest{}); err != nil {
-		t.Fatalf("omitted update: %v", err)
-	}
-	unchanged, err := store.GetAutomation(ctx, automation.ID)
-	if err != nil || unchanged == nil {
-		t.Fatalf("get unchanged automation: %v", err)
-	}
-	if unchanged.PluginTools == nil || len(unchanged.PluginTools) != 0 {
-		t.Fatalf("omitted update = %#v, want explicit empty selection", unchanged.PluginTools)
 	}
 }

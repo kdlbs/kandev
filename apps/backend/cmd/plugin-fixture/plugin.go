@@ -24,6 +24,7 @@ const (
 	secretProbeFileName          = "secret-probe.json"
 	writeProbeFileName           = "write-probe.json"
 	automationReportsFileName    = "automation-reports.jsonl"
+	automationFindingsFileName   = "automation-findings.jsonl"
 	automationListFindingsTool   = "list_findings"
 	automationCompleteReportTool = "complete_report"
 
@@ -76,6 +77,13 @@ type automationReportRecord struct {
 	Surface     string `json:"surface"`
 }
 
+type automationFindingsRecord struct {
+	TaskID      string `json:"task_id"`
+	SessionID   string `json:"session_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Surface     string `json:"surface"`
+}
+
 // webhookRecord is one recorded HandleWebhook delivery, appended as a JSON
 // line to webhooks.jsonl.
 type webhookRecord struct {
@@ -109,10 +117,18 @@ func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentT
 	value, _ := req.Arguments["value"].(string)
 	switch req.Name {
 	case automationListFindingsTool:
+		findings := []any{}
+		findingRecord := automationFindingsRecord{
+			TaskID: req.Context.TaskID, SessionID: req.Context.SessionID,
+			WorkspaceID: req.Context.WorkspaceID, Surface: req.Context.Surface,
+		}
+		if err := appendJSONLine(filepath.Join(p.dataDir, automationFindingsFileName), findingRecord); err != nil {
+			return nil, err
+		}
 		return &pluginsdk.AgentToolResult{
 			Text: "fixture findings: no open findings",
 			StructuredContent: map[string]any{
-				"findings": []any{}, fixtureTaskIDKey: req.Context.TaskID, "surface": req.Context.Surface,
+				"findings": findings, fixtureTaskIDKey: req.Context.TaskID, "surface": req.Context.Surface,
 			},
 		}, nil
 	case automationCompleteReportTool:

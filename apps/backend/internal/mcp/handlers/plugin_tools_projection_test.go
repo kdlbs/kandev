@@ -43,4 +43,5 @@ func TestHandleListPluginToolsProjectsAutomationSurfaceForOlderClients(t *testin
 	require.NoError(t, json.Unmarshal(response.Payload, &snapshot))
 	require.Len(t, snapshot.Tools, 1, "an unscoped ordinary pull must omit automation-only tools")
 	require.Equal(t, "mixed", snapshot.Tools[0].LocalName)
+	require.Equal(t, []string{plugintools.SurfaceKanban}, snapshot.Tools[0].Surfaces)
 }

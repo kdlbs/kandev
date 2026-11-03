@@ -6,6 +6,12 @@ import { installFixturePlugin, PLUGIN_ID, uninstallFixturePlugin } from "../help
 const LIST_FINDINGS = `kandev_kandev_plugin_e2e_list_findings`;
 const COMPLETE_REPORT = `kandev_kandev_plugin_e2e_complete_report`;
 
+async function saveChanges(testPage: Parameters<typeof installFixturePlugin>[0]): Promise<void> {
+  const saveBar = testPage.getByTestId("settings-floating-save");
+  await saveBar.getByRole("button", { name: "Save changes" }).click();
+  await expect(saveBar).toHaveAttribute("data-status", "saved", { timeout: 15_000 });
+}
+
 async function configureFixturePlugin(
   testPage: Parameters<typeof installFixturePlugin>[0],
 ): Promise<void> {
@@ -13,10 +19,7 @@ async function configureFixturePlugin(
   await testPage.goto(`/settings/plugins/${PLUGIN_ID}`);
   const tokenInput = testPage.getByTestId("plugin-config-field-api_token").locator("input");
   await tokenInput.fill("automation-plugin-tools-e2e");
-  await testPage
-    .getByTestId("settings-floating-save")
-    .getByRole("button", { name: "Save changes" })
-    .click();
+  await saveChanges(testPage);
   await expect(tokenInput).toHaveValue("********", { timeout: 15_000 });
 }
 
@@ -58,10 +61,7 @@ test.describe("Private automation plugin tools", () => {
     await writeRow.click();
     await expect(readRow.getByRole("checkbox")).toBeChecked();
     await expect(writeRow.getByRole("checkbox")).toBeChecked();
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
+    await saveChanges(testPage);
     await expect(readRow.getByRole("checkbox")).toBeChecked();
 
     await testPage.reload();
@@ -81,8 +81,21 @@ test.describe("Private automation plugin tools", () => {
       "data",
       "automation-reports.jsonl",
     );
+    const findingsPath = path.join(
+      backend.tmpDir,
+      ".kandev",
+      "plugins",
+      PLUGIN_ID,
+      "data",
+      "automation-findings.jsonl",
+    );
     const triggered = await apiClient.triggerAutomationManual(automation.id);
     expect(triggered.skipped).not.toBe(true);
+    await expect
+      .poll(() => (fs.existsSync(findingsPath) ? fs.readFileSync(findingsPath, "utf8") : ""), {
+        timeout: 120_000,
+      })
+      .toContain('"surface":"automation"');
     await expect
       .poll(() => (fs.existsSync(reportPath) ? fs.readFileSync(reportPath, "utf8") : ""), {
         timeout: 120_000,
@@ -94,10 +107,7 @@ test.describe("Private automation plugin tools", () => {
     await testPage.goto(`/settings/plugins/${PLUGIN_ID}`);
     const greeting = testPage.getByTestId("plugin-config-field-greeting").locator("input");
     await greeting.fill("changed during review");
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
+    await saveChanges(testPage);
     await expect(greeting).toHaveValue("changed during review", { timeout: 15_000 });
 
     await testPage.goto(
@@ -116,10 +126,7 @@ test.describe("Private automation plugin tools", () => {
 
     // Explicit read-only reselection restores only that tool.
     await testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).click();
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
+    await saveChanges(testPage);
     await testPage.reload();
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),

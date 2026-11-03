@@ -372,5 +372,6 @@
   "pluginToolsClear": "Clear",
   "pluginToolsRead": "Read",
   "pluginToolsWrite": "Write",
-  "pluginToolsClearedHint": "Save to remove plugin tool access."
+  "pluginToolsClearedHint": "Save to remove plugin tool access.",
+  "pluginToolsUnavailable": "Plugin unavailable"
 }

@@ -137,6 +137,9 @@ func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
 		}
+		if raw, present := payload["plugin_tools"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_tools cannot be null", nil)
+		}
 		var req UpdateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
@@ -417,7 +420,10 @@ func wsPluginToolOptions(svc *Service) func(ctx context.Context, msg *ws.Message
 		}
 		groups, err := svc.PluginToolOptions(ctx, workspaceID)
 		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace unavailable", nil)
+			if errors.Is(err, ErrAutomationNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace unavailable", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tool options", nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"groups": groups})
 	}

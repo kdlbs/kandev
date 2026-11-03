@@ -52,7 +52,7 @@ function staleSelectionNames(
   const names = new Set<string>();
   for (const saved of savedSelection) {
     const group = groups.find((candidate) => candidate.plugin_id === saved.plugin_id);
-    if (group && selectionMatchesGroup(saved, group)) continue;
+    if (!group || selectionMatchesGroup(saved, group)) continue;
     for (const name of saved.tool_names) names.add(name);
   }
   return [...names];
@@ -128,7 +128,7 @@ function PluginToolGroupSection({
     <div className="space-y-1" data-testid="plugin-tool-group">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{group.display_name}</p>
+          <p className="break-words whitespace-normal text-sm font-medium">{group.display_name}</p>
           <p className="truncate text-xs text-muted-foreground">{group.version}</p>
         </div>
         {showClear ? (
@@ -161,7 +161,7 @@ function PluginToolGroupSection({
             />
             <span className="min-w-0 flex-1">
               <span className="flex flex-wrap items-center gap-2">
-                <span className="text-sm">{tool.local_name}</span>
+                <span className="break-all text-sm">{tool.local_name}</span>
                 <Badge variant="secondary" className="shrink-0 text-[10px]">
                   {tool.read_only_hint
                     ? t("automations:pluginToolsRead")
@@ -191,14 +191,18 @@ function PluginToolStatus({
   const { t } = useTranslation();
   if (loading) {
     return (
-      <p className="text-xs text-muted-foreground" data-testid="automation-plugin-tools-loading">
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="automation-plugin-tools-loading"
+        role="status"
+      >
         {t("automations:pluginToolsLoading")}
       </p>
     );
   }
   if (error) {
     return (
-      <div className="space-y-2" data-testid="automation-plugin-tools-error">
+      <div className="space-y-2" data-testid="automation-plugin-tools-error" role="alert">
         <p className="text-xs text-destructive">{t("automations:pluginToolsLoadError")}</p>
         <Button type="button" variant="outline" size="sm" onClick={onRetry}>
           {t("automations:pluginToolsRetry")}
@@ -208,7 +212,11 @@ function PluginToolStatus({
   }
   if (empty) {
     return (
-      <p className="text-xs text-muted-foreground" data-testid="automation-plugin-tools-empty">
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="automation-plugin-tools-empty"
+        role="status"
+      >
         {t("automations:pluginToolsEmpty")}
       </p>
     );
@@ -238,8 +246,10 @@ function UnavailablePluginTools({
       data-testid={`plugin-tools-unavailable-${entry.plugin_id}`}
     >
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{entry.plugin_id}</p>
-        <p className="truncate text-xs text-muted-foreground">{entry.tool_names.join(", ")}</p>
+        <p className="break-words whitespace-normal text-sm font-medium">{entry.plugin_id}</p>
+        <p className="break-words whitespace-normal text-xs text-muted-foreground">
+          {t("automations:pluginToolsUnavailable")}: {entry.tool_names.join(", ")}
+        </p>
       </div>
       <Button
         type="button"
@@ -274,8 +284,8 @@ export function AutomationPluginTools({
   const unavailable = useMemo(() => {
     if (loading || error) return [];
     const groupIDs = new Set(groups.map((group) => group.plugin_id));
-    return savedSelection.filter((entry) => !groupIDs.has(entry.plugin_id));
-  }, [savedSelection, groups, loading, error]);
+    return selection.filter((entry) => !groupIDs.has(entry.plugin_id));
+  }, [selection, groups, loading, error]);
 
   return (
     <div
@@ -308,7 +318,7 @@ export function AutomationPluginTools({
         empty={!loading && !error && groups.length === 0}
         onRetry={onRetry}
       />
-      {!error
+      {!error && !loading
         ? groups.map((group) => (
             <PluginToolGroupSection
               key={group.plugin_id}

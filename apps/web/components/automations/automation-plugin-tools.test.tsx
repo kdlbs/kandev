@@ -138,10 +138,39 @@ describe("AutomationPluginTools", () => {
     ]);
   });
 
-  it("clears one plugin group", () => {
-    const { onChange } = renderTools();
+  it("clears one plugin group and preserves a sibling", () => {
+    const sibling: AutomationPluginToolGroup = {
+      ...groups[0],
+      plugin_id: "kandev-sibling",
+      display_name: "Kandev Sibling",
+      installation_id: "installation-2",
+      policy_version: "policy-sibling",
+      tools: [
+        ...groups[0].tools,
+        {
+          local_name: "sibling_tool",
+          description: "Sibling tool",
+          input_schema: { type: "object" },
+          read_only_hint: true,
+          destructive_hint: false,
+          idempotent_hint: false,
+          open_world_hint: false,
+        },
+      ],
+    };
+    const siblingSelection: AutomationPluginToolSelection = {
+      plugin_id: sibling.plugin_id,
+      installation_id: sibling.installation_id,
+      policy_version: sibling.policy_version,
+      tool_names: ["sibling_tool"],
+    };
+    const { onChange } = renderTools({
+      groups: [groups[0], sibling],
+      selection: [...saved, siblingSelection],
+      savedSelection: [...saved, siblingSelection],
+    });
     fireEvent.click(screen.getByTestId(`plugin-tools-clear-${PLUGIN_ID}`));
-    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onChange).toHaveBeenCalledWith([siblingSelection]);
   });
 
   it("shows review required for a stale saved selection without checking current tools", () => {

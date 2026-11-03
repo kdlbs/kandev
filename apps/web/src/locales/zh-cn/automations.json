@@ -372,5 +372,6 @@
   "pluginToolsClear": "清除",
   "pluginToolsRead": "读取",
   "pluginToolsWrite": "写入",
-  "pluginToolsClearedHint": "保存以移除插件工具访问权限。"
+  "pluginToolsClearedHint": "保存以移除插件工具访问权限。",
+  "pluginToolsUnavailable": "插件不可用"
 }

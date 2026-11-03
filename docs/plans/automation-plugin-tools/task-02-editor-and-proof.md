@@ -1,7 +1,7 @@
 ---
 id: "02-editor-and-proof"
 title: "Add editor controls and end-to-end proof"
-status: completed
+status: in_progress
 wave: 2
 depends_on:
   - "01-selection-and-enforcement"
@@ -146,7 +146,7 @@ Use the existing `e2e:mcp:` script support in `apps/backend/cmd/mock-agent/scrip
 
 ## Results
 
-Completed November 3, 2026.
+Implemented November 3, 2026. Managed Playwright execution remains pending.
 
 - Added typed selection/option APIs, the domain options hook, grouped inline checkboxes, review-required/previously-selected feedback, clear, and visible loading/empty/error states.
 - Refreshed options after a rejected save so a changed policy reaches review without discarding other dirty fields.

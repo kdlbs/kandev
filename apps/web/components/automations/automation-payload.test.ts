@@ -9,6 +9,7 @@ vi.mock("@/app/actions/workspaces", () => ({
 import {
   buildCreatePayload,
   buildUpdatePayload,
+  canonicalPluginTools,
   normalizeRetryPolicyForTaskMode,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
@@ -223,6 +224,22 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     ];
     expect(buildUpdatePayload(form, [], selection)).toMatchObject({ plugin_tools: selection });
     expect(buildUpdatePayload(form, [], [])).toMatchObject({ plugin_tools: [] });
+    expect(buildUpdatePayload(baseForm({ taskMode: "normal_task" }), [], selection)).toMatchObject({
+      plugin_tools: [],
+    });
+  });
+
+  it("compares plugin tool approvals without depending on tool order", () => {
+    const left = [
+      {
+        plugin_id: "kandev-security",
+        installation_id: "installation-1",
+        policy_version: "policy-1",
+        tool_names: ["list_findings", "complete_report"],
+      },
+    ];
+    const right = [{ ...left[0], tool_names: ["complete_report", "list_findings"] }];
+    expect(canonicalPluginTools(left)).toEqual(canonicalPluginTools(right));
   });
 });
 

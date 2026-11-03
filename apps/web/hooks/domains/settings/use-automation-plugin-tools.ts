@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getAutomationPluginToolOptions } from "@/lib/api/domains/automation-api";
 import type { AutomationPluginToolGroup } from "@/lib/types/automation";
 
@@ -24,6 +24,7 @@ export function useAutomationPluginTools(
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(false);
   const [request, setRequest] = useState(0);
+  const loadedWorkspace = useRef<string | null>(null);
 
   const reload = useCallback(() => setRequest((value) => value + 1), []);
 
@@ -33,6 +34,10 @@ export function useAutomationPluginTools(
       return;
     }
     let active = true;
+    if (loadedWorkspace.current !== workspaceId) {
+      loadedWorkspace.current = workspaceId;
+      setGroups([]);
+    }
     setLoading(true);
     setError(false);
     getAutomationPluginToolOptions(workspaceId).then(
@@ -51,6 +56,13 @@ export function useAutomationPluginTools(
       active = false;
     };
   }, [workspaceId, enabled, request]);
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+    const refreshOnFocus = () => reload();
+    window.addEventListener("focus", refreshOnFocus);
+    return () => window.removeEventListener("focus", refreshOnFocus);
+  }, [enabled, reload]);
 
   return { groups, loading, error, reload };
 }

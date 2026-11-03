@@ -57,6 +57,13 @@ type Service struct {
 	humanInteractionResponseAuthorizer    func(context.Context, string) error
 	mu                                    sync.Mutex
 	approvalEffectMu                      sync.Mutex
+	// agentToolPolicyMu serializes automation selection validation/write
+	// against plugin installation and configuration policy rotation.
+	agentToolPolicyMu sync.RWMutex
+	// recordPersistMu serializes whole-record registry snapshot writes so a
+	// policy rotation cannot revert a status, restart count, or auto-update
+	// change (and vice versa).
+	recordPersistMu sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and
 	// transitions into active one atomic reservation. Per-plugin lifecycle
 	// locks cannot protect two different IDs claiming the same identity.

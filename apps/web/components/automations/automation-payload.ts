@@ -49,6 +49,18 @@ export type FormState = {
   pluginTools: AutomationPluginToolSelection[];
 };
 
+/** Canonical form for comparing two approvals without tool-order noise. */
+export function canonicalPluginTools(
+  selection: AutomationPluginToolSelection[],
+): AutomationPluginToolSelection[] {
+  return selection
+    .map((entry) => ({
+      ...entry,
+      tool_names: [...entry.tool_names].sort(),
+    }))
+    .sort((left, right) => left.plugin_id.localeCompare(right.plugin_id));
+}
+
 export function retryPolicyAfterModeChange(
   policy: RetryPolicy,
   mode: RetryPolicy["mode"],
@@ -214,7 +226,7 @@ export function buildCreatePayload(
       enabled: trigger.enabled,
     })),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
-    plugin_tools: form.pluginTools,
+    plugin_tools: form.taskMode === "automation_run" ? form.pluginTools : [],
   };
 }
 
@@ -242,7 +254,9 @@ export function buildUpdatePayload(
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
-    ...(pluginTools !== undefined ? { plugin_tools: pluginTools } : {}),
+    ...(pluginTools !== undefined
+      ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
+      : {}),
   };
 }
 

@@ -40,6 +40,7 @@ Source: [discussion #4997 and its comment](https://github.com/kdlbs/kandev/discu
 - **AC-OFFICE-AUTOMATION-PLUGIN-TOOLS-001.3:** A selection shall apply only to its automation, workspace, plugin installation, and policy version.
 - **AC-OFFICE-AUTOMATION-PLUGIN-TOOLS-001.4:** A plugin installation update or admitted configuration save shall invalidate its earlier selections, including secret-only changes.
   Restarting an unchanged installation shall preserve valid selections.
+  A failed update may leave the new policy version in place, but changed configuration shall never become effective under an earlier policy version.
 - **AC-OFFICE-AUTOMATION-PLUGIN-TOOLS-001.5:** An omitted selection shall remain unchanged.
   An explicit empty selection shall remove access.
   An unrelated save shall not renew stale access.
@@ -92,6 +93,7 @@ Source: [discussion #4997 and its comment](https://github.com/kdlbs/kandev/discu
 
 ## Out of scope
 
+- Automatic exposure for plugins that do not declare the `automation` surface.
 - A separate approval service, approval queue, or permission settings page.
 - Wildcards, automatic approval of future tools, or a generic plugin action invoker.
 - Changes to the fixed core MCP catalog, task modes, scheduler, or run statuses.

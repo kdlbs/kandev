@@ -1,7 +1,7 @@
 ---
 id: "01-selection-and-enforcement"
 title: "Persist and enforce selected plugin tools"
-status: completed
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -126,7 +126,7 @@ None. Read the design's Policy version, Native save boundary, Discovery and live
 
 ## Results
 
-Completed November 3, 2026.
+Implemented November 3, 2026. PostgreSQL execution remains pending.
 
 - Added the shared selection/option/authorization types and exact automation tool enforcement.
 - Added the persisted `plugin_tools` column, native-only save intent, options action, stale rejection, export omission, and mode clearing.

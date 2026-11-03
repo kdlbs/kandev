@@ -372,5 +372,6 @@
   "pluginToolsClear": "지우기",
   "pluginToolsRead": "읽기",
   "pluginToolsWrite": "쓰기",
-  "pluginToolsClearedHint": "저장하면 플러그인 도구 액세스가 제거됩니다."
+  "pluginToolsClearedHint": "저장하면 플러그인 도구 액세스가 제거됩니다.",
+  "pluginToolsUnavailable": "플러그인을 사용할 수 없음"
 }

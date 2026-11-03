@@ -542,10 +542,11 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := validateManagedDestination(taskMode, req.ManagedDestination); err != nil {
 		return nil, err
 	}
-	pluginTools, err := s.pluginToolsForSave(ctx, req.WorkspaceID, req.PluginTools, hasNativePluginToolIntent(ctx), taskMode)
+	pluginTools, unlockPluginTools, err := s.pluginToolsForSave(ctx, req.WorkspaceID, req.PluginTools, hasNativePluginToolIntent(ctx), taskMode)
 	if err != nil {
 		return nil, err
 	}
+	defer unlockPluginTools()
 	var destinationInstallationID, destinationConversationID string
 	if taskMode == TaskModeManagedConversation {
 		if s.managedDestinationResolver == nil {
@@ -754,9 +755,11 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		if !hasNativePluginToolIntent(ctx) {
 			return nil, errors.New("plugin tools may only be changed by the native automation editor")
 		}
-		if _, err := s.pluginToolsForSave(ctx, existing.WorkspaceID, *req.PluginTools, true, taskMode); err != nil {
+		_, unlockPluginTools, err := s.pluginToolsForSave(ctx, existing.WorkspaceID, *req.PluginTools, true, taskMode)
+		if err != nil {
 			return nil, err
 		}
+		defer unlockPluginTools()
 	}
 	destinationInstallationID, destinationConversationID := "", ""
 	if taskMode == TaskModeManagedConversation {
@@ -956,12 +959,12 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
 		return err
 	}
 	disabled := false
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	if err := s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &disabled}); err != nil {
 		return err
 	}
 
-	unlock := s.automationRunLock(id)
-	defer unlock()
 	cleanupTaskIDs, err := s.hiddenAutomationTaskIDs(ctx, id)
 	if err != nil {
 		return err

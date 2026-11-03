@@ -6,6 +6,12 @@ import {
   uninstallFixturePlugin,
 } from "../../helpers/plugin-fixture";
 
+async function saveChanges(testPage: Parameters<typeof installFixturePlugin>[0]): Promise<void> {
+  const saveBar = testPage.getByTestId("settings-floating-save");
+  await saveBar.getByRole("button", { name: "Save changes" }).click();
+  await expect(saveBar).toHaveAttribute("data-status", "saved", { timeout: 15_000 });
+}
+
 async function configureFixturePlugin(
   testPage: Parameters<typeof installFixturePlugin>[0],
 ): Promise<void> {
@@ -13,10 +19,7 @@ async function configureFixturePlugin(
   await testPage.goto(`/settings/plugins/${PLUGIN_ID}`);
   const tokenInput = testPage.getByTestId("plugin-config-field-api_token").locator("input");
   await tokenInput.fill("automation-plugin-tools-mobile");
-  await testPage
-    .getByTestId("settings-floating-save")
-    .getByRole("button", { name: "Save changes" })
-    .click();
+  await saveChanges(testPage);
   await expect(tokenInput).toHaveValue("********", { timeout: 15_000 });
 }
 
@@ -54,20 +57,17 @@ test.describe("Mobile automation plugin tools", () => {
 
     await readRow.tap();
     await writeRow.tap();
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
+    await saveChanges(testPage);
     await testPage.reload();
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),
     ).toBeChecked({ timeout: 15_000 });
+    await expect(
+      testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-complete_report`).getByRole("checkbox"),
+    ).toBeChecked();
 
     await testPage.getByTestId(`plugin-tools-clear-${PLUGIN_ID}`).tap();
-    await testPage
-      .getByTestId("settings-floating-save")
-      .getByRole("button", { name: "Save changes" })
-      .click();
+    await saveChanges(testPage);
     await testPage.reload();
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),

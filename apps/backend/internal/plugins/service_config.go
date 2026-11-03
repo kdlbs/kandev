@@ -46,7 +46,8 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// comparison rules. A later write failure leaves the new version in place;
 	// an old approval is never restored while changed configuration may be
 	// effective.
-	if err := s.rotateAgentToolPolicyVersion(rec); err != nil {
+	rec, err = s.rotateAgentToolPolicyVersion(rec.ID)
+	if err != nil {
 		return err
 	}
 	catalogNotified := false
@@ -91,16 +92,27 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 }
 
 // rotateAgentToolPolicyVersion persists a fresh approval boundary before a
-// configuration write. Persistence must succeed first: otherwise changed
-// configuration could become effective under an approval that was meant to be
-// invalidated.
-func (s *Service) rotateAgentToolPolicyVersion(rec *store.Record) error {
-	rec.AgentToolPolicyVersion = uuid.NewString()
-	if err := s.store.Save(rec); err != nil {
-		return fmt.Errorf("plugins: persist agent tool policy version: %w", err)
+// configuration write. It re-reads the current record under the service and
+// policy write locks so a concurrent status or restart-count write is not
+// reverted, and it aborts before changing configuration if persistence fails.
+func (s *Service) rotateAgentToolPolicyVersion(id string) (*store.Record, error) {
+	s.agentToolPolicyMu.Lock()
+	defer s.agentToolPolicyMu.Unlock()
+	s.recordPersistMu.Lock()
+	defer s.recordPersistMu.Unlock()
+	previous, ok := s.registry.Get(id)
+	if !ok {
+		return nil, store.ErrNotFound
 	}
-	s.registry.Add(rec)
-	return nil
+	updated, ok := s.registry.SetAgentToolPolicyVersion(id, uuid.NewString())
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	if err := s.store.Save(updated); err != nil {
+		s.registry.Add(previous)
+		return nil, fmt.Errorf("plugins: persist agent tool policy version: %w", err)
+	}
+	return updated, nil
 }
 
 // errSecretVaultRequired is returned by storeConfigSecrets when a plugin

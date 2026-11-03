@@ -372,5 +372,6 @@
   "pluginToolsClear": "Limpar",
   "pluginToolsRead": "Leitura",
   "pluginToolsWrite": "Escrita",
-  "pluginToolsClearedHint": "Guarde para remover o acesso às ferramentas de plugins."
+  "pluginToolsClearedHint": "Guarde para remover o acesso às ferramentas de plugins.",
+  "pluginToolsUnavailable": "Plugin indisponível"
 }

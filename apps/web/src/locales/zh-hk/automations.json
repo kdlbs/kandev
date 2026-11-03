@@ -372,5 +372,6 @@
   "pluginToolsClear": "清除",
   "pluginToolsRead": "讀取",
   "pluginToolsWrite": "寫入",
-  "pluginToolsClearedHint": "儲存以移除外掛工具存取權限。"
+  "pluginToolsClearedHint": "儲存以移除外掛工具存取權限。",
+  "pluginToolsUnavailable": "外掛無法使用"
 }

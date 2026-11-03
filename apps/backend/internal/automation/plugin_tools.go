@@ -16,6 +16,10 @@ const maxAutomationPluginGroups = 16
 
 const emptyPluginToolsJSON = "[]"
 
+// ErrPluginToolOptionsUnavailable distinguishes a plugin catalog failure from
+// a workspace authorization failure in the native options action.
+var ErrPluginToolOptionsUnavailable = errors.New("automation: plugin tool options unavailable")
+
 func encodePluginTools(selections []plugintools.Selection) (string, error) {
 	normalized := plugintools.NormalizeSelection(selections)
 	encoded, err := json.Marshal(normalized)
@@ -34,6 +38,9 @@ func decodePluginTools(raw string) []plugintools.Selection {
 	}
 	var selections []plugintools.Selection
 	if err := json.Unmarshal([]byte(raw), &selections); err != nil {
+		return []plugintools.Selection{}
+	}
+	if err := validatePluginToolSelectionShape(selections); err != nil {
 		return []plugintools.Selection{}
 	}
 	for _, selection := range selections {
@@ -108,9 +115,13 @@ func (s *Service) PluginToolOptions(ctx context.Context, workspaceID string) ([]
 		return nil, fmt.Errorf("workspace_id is required")
 	}
 	if err := s.authorizeWs(ctx, workspaceID); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrAutomationNotFound, err)
 	}
-	return s.currentPluginToolOptions(ctx, workspaceID)
+	groups, err := s.currentPluginToolOptions(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrPluginToolOptionsUnavailable, err)
+	}
+	return groups, nil
 }
 
 func (s *Service) currentPluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, error) {
@@ -260,20 +271,42 @@ func matchingPluginSelection(selections []plugintools.Selection, groups []plugin
 	return plugintools.Selection{}, false
 }
 
-func (s *Service) pluginToolsForSave(ctx context.Context, workspaceID string, requested []plugintools.Selection, native bool, taskMode TaskMode) ([]plugintools.Selection, error) {
-	if len(requested) == 0 {
-		return []plugintools.Selection{}, nil
-	}
-	if !native {
-		return nil, errors.New("plugin tools may only be approved by the native automation editor")
-	}
-	return s.validatePluginToolSelection(ctx, workspaceID, requested, taskMode)
+type pluginToolOptionsLocker interface {
+	LockPluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, func(), error)
 }
 
-// validatePluginToolSelection normalizes and checks a save against current
-// plugin policy. Any unknown, stale, or foreign entry rejects the whole save
-// without changing stored access.
-func (s *Service) validatePluginToolSelection(ctx context.Context, workspaceID string, selections []plugintools.Selection, taskMode TaskMode) ([]plugintools.Selection, error) {
+func (s *Service) pluginToolsForSave(ctx context.Context, workspaceID string, requested []plugintools.Selection, native bool, taskMode TaskMode) ([]plugintools.Selection, func(), error) {
+	noop := func() {}
+	if len(requested) == 0 {
+		return []plugintools.Selection{}, noop, nil
+	}
+	if !native {
+		return nil, noop, errors.New("plugin tools may only be approved by the native automation editor")
+	}
+	groups, unlock, err := s.lockPluginToolOptions(ctx, workspaceID)
+	if err != nil {
+		return nil, noop, err
+	}
+	selections, err := validatePluginToolSelectionWithGroups(requested, taskMode, groups)
+	if err != nil {
+		unlock()
+		return nil, noop, err
+	}
+	return selections, unlock, nil
+}
+
+func (s *Service) lockPluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, func(), error) {
+	if locker, ok := s.pluginToolOptions.(pluginToolOptionsLocker); ok {
+		return locker.LockPluginToolOptions(ctx, workspaceID)
+	}
+	groups, err := s.currentPluginToolOptions(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return groups, func() {}, nil
+}
+
+func validatePluginToolSelectionWithGroups(selections []plugintools.Selection, taskMode TaskMode, groups []plugintools.OptionGroup) ([]plugintools.Selection, error) {
 	if taskMode != TaskModeAutomationRun {
 		if len(selections) > 0 {
 			return nil, errors.New("plugin tools are only available to private automations")
@@ -284,10 +317,6 @@ func (s *Service) validatePluginToolSelection(ctx context.Context, workspaceID s
 		return []plugintools.Selection{}, nil
 	}
 	if err := validatePluginToolSelectionShape(selections); err != nil {
-		return nil, err
-	}
-	groups, err := s.currentPluginToolOptions(ctx, workspaceID)
-	if err != nil {
 		return nil, err
 	}
 	if err := validatePluginToolSelectionAgainstOptions(selections, groups); err != nil {

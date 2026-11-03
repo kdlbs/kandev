@@ -38,6 +38,9 @@ func TestPluginToolCatalogRefresherProjectsAutomationSurface(t *testing.T) {
 		if len(got.Tools) != 1 {
 			t.Fatalf("pushed tools = %#v", got.Tools)
 		}
+		if got.Generation != want.Generation || got.Revision != want.Revision {
+			t.Fatalf("projection changed catalog identity: %#v", got)
+		}
 		if surfaces := got.Tools[0].Surfaces; len(surfaces) != 1 || surfaces[0] != plugintools.SurfaceKanban {
 			t.Fatalf("pushed surfaces = %#v", surfaces)
 		}

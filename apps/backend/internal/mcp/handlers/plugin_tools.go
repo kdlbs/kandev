@@ -181,7 +181,14 @@ func (h *Handlers) handleInvokeAutomationPluginTool(ctx context.Context, msg *ws
 	invocation.AutomationToolAuthorization = authorization
 	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, req.Arguments, invocation)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("plugin tool invocation failed: %v", err), nil)
+		if h.logger != nil {
+			h.logger.Warn("automation plugin tool invocation failed",
+				zap.String("plugin_id", req.PluginID),
+				zap.String("local_name", req.LocalName),
+				zap.String("automation_id", principal.AutomationID),
+				zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tool invocation failed", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 		"text": result.Text, "structured_content": result.StructuredContent, "is_error": result.IsError,

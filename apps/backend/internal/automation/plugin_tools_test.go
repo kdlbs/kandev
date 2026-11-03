@@ -234,6 +234,32 @@ func TestAutomationPluginToolsRejectSharedDispatcherMCPMutation(t *testing.T) {
 	}
 }
 
+func TestDecodePluginToolsRejectsMalformedStoredAuthority(t *testing.T) {
+	raw := `[{"plugin_id":"p","installation_id":"i","policy_version":"v","tool_names":["a"]},` +
+		`{"plugin_id":"p","installation_id":"i","policy_version":"v","tool_names":["b"]}]`
+	if got := decodePluginTools(raw); len(got) != 0 {
+		t.Fatalf("malformed stored selection = %#v", got)
+	}
+}
+
+func TestAutomationPluginToolsRejectNullUpdatePayload(t *testing.T) {
+	svc := newTestService(t)
+	logger := svc.logger
+	msg, err := ws.NewRequest("request-null", ws.ActionAutomationUpdate, map[string]any{
+		"id": "automation-1", "plugin_tools": nil,
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	response, err := wsUpdate(svc, logger)(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("wsUpdate: %v", err)
+	}
+	if response.Type != ws.MessageTypeError || !strings.Contains(string(response.Payload), "cannot be null") {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func containsMessage(payload []byte, want string) bool {
 	return strings.Contains(string(payload), want)
 }

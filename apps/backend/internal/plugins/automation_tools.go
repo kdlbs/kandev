@@ -16,7 +16,27 @@ import (
 // PluginToolOptions returns the current automation-capable tools of every
 // active, configured plugin. It is the only source of truth for both the
 // editor's checkboxes and the service-side validation of a saved selection.
-func (s *Service) PluginToolOptions(context.Context, string) ([]plugintools.OptionGroup, error) {
+func (s *Service) PluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, error) {
+	s.agentToolPolicyMu.RLock()
+	defer s.agentToolPolicyMu.RUnlock()
+	return s.pluginToolOptionsUnlocked(ctx, workspaceID)
+}
+
+// LockPluginToolOptions returns the current automation options while holding
+// the policy read lease. The automation service keeps that lease through its
+// own selection write so a concurrent plugin configuration save cannot rotate
+// the policy between validation and persistence.
+func (s *Service) LockPluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, func(), error) {
+	s.agentToolPolicyMu.RLock()
+	groups, err := s.pluginToolOptionsUnlocked(ctx, workspaceID)
+	if err != nil {
+		s.agentToolPolicyMu.RUnlock()
+		return nil, nil, err
+	}
+	return groups, s.agentToolPolicyMu.RUnlock, nil
+}
+
+func (s *Service) pluginToolOptionsUnlocked(context.Context, string) ([]plugintools.OptionGroup, error) {
 	records := s.configReadyAgentToolRecords()
 	groups := make([]plugintools.OptionGroup, 0, len(records))
 	for _, record := range records {
@@ -107,37 +127,15 @@ func (s *Service) invokeAutomationAgentTool(
 		return nil, err
 	}
 
-	dispatchLock := s.dispatchLocks.lockFor(pluginID)
-	dispatchLock.RLock()
-	defer dispatchLock.RUnlock()
-
-	record, err := s.Get(pluginID)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateAutomationToolRecord(record, authorization, pluginID); err != nil {
-		return nil, err
-	}
-	if !s.requiredConfigSet(record) {
-		return nil, fmt.Errorf("plugins: plugin %q configuration is not ready", pluginID)
-	}
-	declaration, err := findAgentTool(record.AgentTools, localName, manifest.AgentToolSurfaceAutomation)
-	if err != nil {
-		return nil, err
-	}
-	arguments, err = validateAgentToolArguments(pluginID, localName, declaration, arguments)
-	if err != nil {
-		return nil, err
-	}
-	remote, ok := s.pluginRemote(pluginID)
-	if !ok {
-		return nil, fmt.Errorf("plugins: plugin %q is not running", pluginID)
-	}
-	result, err = invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
-	if err != nil {
-		return nil, err
-	}
-	return validateAgentToolResult(pluginID, localName, declaration, result)
+	return s.invokeDeclaredAgentTool(ctx, pluginID, localName, arguments, invocation, manifest.AgentToolSurfaceAutomation, func(record *store.Record) error {
+		if err := validateAutomationToolRecord(record, authorization, pluginID); err != nil {
+			return err
+		}
+		if !s.requiredConfigSet(record) {
+			return fmt.Errorf("plugins: plugin %q configuration is not ready", pluginID)
+		}
+		return nil
+	})
 }
 
 func validateAutomationToolApproval(invocation AgentToolInvocationContext, pluginID, localName string) error {

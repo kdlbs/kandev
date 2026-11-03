@@ -372,5 +372,6 @@
   "pluginToolsClear": "クリア",
   "pluginToolsRead": "読み取り",
   "pluginToolsWrite": "書き込み",
-  "pluginToolsClearedHint": "保存するとプラグインツールへのアクセスが削除されます。"
+  "pluginToolsClearedHint": "保存するとプラグインツールへのアクセスが削除されます。",
+  "pluginToolsUnavailable": "プラグインを利用できません"
 }

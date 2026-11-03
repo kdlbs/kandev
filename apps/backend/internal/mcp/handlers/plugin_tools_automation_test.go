@@ -18,20 +18,27 @@ import (
 )
 
 type fakeAutomationPluginTools struct {
-	definitions   []plugintools.Definition
-	authorization *plugintools.AutomationAuthorization
-	err           error
+	definitions               []plugintools.Definition
+	authorization             *plugintools.AutomationAuthorization
+	err                       error
+	approvedAutomationID      string
+	approvedWorkspaceID       string
+	authorizationAutomationID string
+	authorizationWorkspaceID  string
+	authorizationPluginID     string
 }
 
 func (f *fakeAutomationPluginTools) PluginToolOptions(context.Context, string) ([]plugintools.OptionGroup, error) {
 	return nil, f.err
 }
 
-func (f *fakeAutomationPluginTools) ApprovedPluginTools(context.Context, string, string) ([]plugintools.Definition, error) {
+func (f *fakeAutomationPluginTools) ApprovedPluginTools(_ context.Context, automationID, workspaceID string) ([]plugintools.Definition, error) {
+	f.approvedAutomationID, f.approvedWorkspaceID = automationID, workspaceID
 	return f.definitions, f.err
 }
 
-func (f *fakeAutomationPluginTools) AutomationToolAuthorization(context.Context, string, string, string) (*plugintools.AutomationAuthorization, error) {
+func (f *fakeAutomationPluginTools) AutomationToolAuthorization(_ context.Context, automationID, workspaceID, pluginID string) (*plugintools.AutomationAuthorization, error) {
+	f.authorizationAutomationID, f.authorizationWorkspaceID, f.authorizationPluginID = automationID, workspaceID, pluginID
 	return f.authorization, f.err
 }
 
@@ -65,12 +72,13 @@ func automationHandlerFixture(t *testing.T) (*Handlers, context.Context, *plugin
 
 func TestAutomationPluginToolsDiscoveryIsFiltered(t *testing.T) {
 	h, ctx, _, workspaceID := automationHandlerFixture(t)
-	h.SetAutomationPluginTools(&fakeAutomationPluginTools{definitions: []plugintools.Definition{{
+	provider := &fakeAutomationPluginTools{definitions: []plugintools.Definition{{
 		PluginID: "kandev-security", LocalName: "list_findings",
 		ExposedName: plugintools.ExposedName("kandev-security", "list_findings"),
 		Description: "List findings", Surfaces: []string{plugintools.SurfaceAutomation},
 		InputSchema: json.RawMessage(`{"type":"object"}`),
-	}}})
+	}}}
+	h.SetAutomationPluginTools(provider)
 	response, err := h.handleListPluginTools(ctx, makeWSMessage(t, ws.ActionMCPListPluginTools, map[string]any{
 		"surface": manifest.AgentToolSurfaceAutomation,
 	}))
@@ -79,6 +87,8 @@ func TestAutomationPluginToolsDiscoveryIsFiltered(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Payload, &snapshot))
 	require.Len(t, snapshot.Tools, 1)
 	require.Equal(t, "list_findings", snapshot.Tools[0].LocalName)
+	require.Equal(t, "automation-1", provider.approvedAutomationID)
+	require.Equal(t, workspaceID, provider.approvedWorkspaceID)
 
 	forged, err := h.handleListPluginTools(ctx, makeWSMessage(t, ws.ActionMCPListPluginTools, map[string]any{
 		"surface": manifest.AgentToolSurfaceKanban,
@@ -103,7 +113,8 @@ func TestAutomationPluginToolsDiscoveryIsFiltered(t *testing.T) {
 
 func TestAutomationPluginToolsInvocationScope(t *testing.T) {
 	h, ctx, _, workspaceID := automationHandlerFixture(t)
-	h.SetAutomationPluginTools(&fakeAutomationPluginTools{})
+	provider := &fakeAutomationPluginTools{}
+	h.SetAutomationPluginTools(provider)
 
 	unapproved, err := h.handleInvokePluginTool(ctx, makeWSMessage(t, ws.ActionMCPInvokePluginTool, map[string]any{
 		"plugin_id": "kandev-security", "local_name": "list_findings", "invocation_id": "invocation-1",
@@ -113,11 +124,11 @@ func TestAutomationPluginToolsInvocationScope(t *testing.T) {
 	require.Equal(t, string(ws.MessageTypeError), string(unapproved.Type))
 	require.Contains(t, string(unapproved.Payload), "not approved")
 
-	h.SetAutomationPluginTools(&fakeAutomationPluginTools{authorization: &plugintools.AutomationAuthorization{
+	provider.authorization = &plugintools.AutomationAuthorization{
 		AutomationID: "automation-1", WorkspaceID: workspaceID, PluginID: "kandev-security",
 		InstallationID: "installation-1", PolicyVersion: "policy-1",
 		ToolNames: []string{"list_findings"},
-	}})
+	}
 	forgedSurface, err := h.handleInvokePluginTool(ctx, makeWSMessage(t, ws.ActionMCPInvokePluginTool, map[string]any{
 		"plugin_id": "kandev-security", "local_name": "list_findings", "invocation_id": "invocation-3",
 		"surface": manifest.AgentToolSurfaceKanban, "workspace_id": workspaceID,
@@ -140,5 +151,8 @@ func TestAutomationPluginToolsInvocationScope(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	require.Equal(t, string(ws.MessageTypeError), string(approved.Type))
-	require.Contains(t, string(approved.Payload), "not running")
+	require.Contains(t, string(approved.Payload), "plugin tool invocation failed")
+	require.Equal(t, "automation-1", provider.authorizationAutomationID)
+	require.Equal(t, workspaceID, provider.authorizationWorkspaceID)
+	require.Equal(t, "kandev-security", provider.authorizationPluginID)
 }

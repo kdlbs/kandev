@@ -122,6 +122,19 @@ func (r *Registry) SetStatus(id string, status Status) (*store.Record, bool) {
 	return cloneRecord(rec), true
 }
 
+// SetAgentToolPolicyVersion updates the policy boundary for id and returns a
+// copy. Callers persist the copy while holding the service policy write lock.
+func (r *Registry) SetAgentToolPolicyVersion(id, version string) (*store.Record, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	rec.AgentToolPolicyVersion = version
+	return cloneRecord(rec), true
+}
+
 // SetAutoUpdate updates the in-memory per-plugin auto-update override for id
 // and returns a copy of the updated record. ok is false if id is not
 // registered. Called by Service.SetPluginAutoUpdate, which persists the copy

@@ -30,6 +30,7 @@ import {
   type FormState,
   DEFAULT_RETRY_POLICY,
   normalizeRetryPolicyForTaskMode,
+  canonicalPluginTools,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -161,7 +162,8 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   const { onPluginToolsSaveFailed } = opts;
   return async () => {
     const pluginToolsChanged =
-      JSON.stringify(form.pluginTools) !== JSON.stringify(savedForm.pluginTools);
+      JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
+      JSON.stringify(canonicalPluginTools(savedForm.pluginTools));
     const pluginToolsSubmitted = isNew ? form.pluginTools.length > 0 : pluginToolsChanged;
     setSaving(true);
     try {
@@ -497,7 +499,6 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         return {
           ...next,
           retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
-          pluginTools: next.taskMode === "automation_run" ? prev.pluginTools : [],
         };
       }
       return next;
@@ -566,7 +567,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
           selection={form.pluginTools}
           onChange={(value) => updateField("pluginTools", value)}
           onRetry={pluginToolOptions.reload}
-          isDirty={JSON.stringify(form.pluginTools) !== JSON.stringify(dirtyBaseline.pluginTools)}
+          isDirty={
+            JSON.stringify(canonicalPluginTools(form.pluginTools)) !==
+            JSON.stringify(canonicalPluginTools(dirtyBaseline.pluginTools))
+          }
         />
       ) : null}
       <Separator />

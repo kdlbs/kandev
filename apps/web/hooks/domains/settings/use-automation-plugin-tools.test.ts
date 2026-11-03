@@ -54,7 +54,28 @@ describe("useAutomationPluginTools", () => {
     expect(result.current.groups).toEqual(groups);
   });
 
-  it("refreshes the displayed policy after a rejected save", async () => {
+  it("clears groups until the new workspace catalog resolves", async () => {
+    api.list.mockResolvedValueOnce(groups).mockImplementationOnce(() => new Promise(() => {}));
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) => useAutomationPluginTools(workspaceId, true),
+      { initialProps: { workspaceId: "workspace-1" } },
+    );
+    await waitFor(() => expect(result.current.groups).toEqual(groups));
+
+    rerender({ workspaceId: "workspace-2" });
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    expect(result.current.groups).toEqual([]);
+  });
+
+  it("refreshes the catalog when the window regains focus", async () => {
+    api.list.mockResolvedValue(groups);
+    renderHook(() => useAutomationPluginTools(WORKSPACE_ID, true));
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(1));
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+  });
+
+  it("refreshes the displayed policy on demand", async () => {
     const updated = groups.map((group) => ({ ...group, policy_version: "policy-2" }));
     api.list.mockResolvedValueOnce(groups).mockResolvedValueOnce(updated);
     const { result } = renderHook(() => useAutomationPluginTools(WORKSPACE_ID, true));
