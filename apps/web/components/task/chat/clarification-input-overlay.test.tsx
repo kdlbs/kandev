@@ -50,6 +50,7 @@ const TESTID_OPTION = "clarification-option";
 const TESTID_STEP = "clarification-step";
 const TESTID_SKIP = "clarification-skip";
 const TESTID_INPUT = "clarification-input";
+const TESTID_SIZE_TOGGLE = "clarification-panel-size-toggle";
 const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 const TESTID_RETRY = "clarification-retry";
 const DATA_SELECTED = "data-selected";
@@ -105,6 +106,9 @@ function renderOverlay(
         custom_text?: string;
       }[];
     }) => Promise<"sent" | "queued">;
+    onToggleSize: () => void;
+    sizeExpanded: boolean;
+    canExpandPanel: boolean;
   }> = {},
 ) {
   const scopeRef = createRef<HTMLDivElement>();
@@ -120,6 +124,9 @@ function renderOverlay(
         mode={overrides.mode}
         onLateAnswer={overrides.onLateAnswer}
         initialAnswers={overrides.initialAnswers}
+        onToggleSize={overrides.onToggleSize}
+        sizeExpanded={overrides.sizeExpanded}
+        canExpandPanel={overrides.canExpandPanel}
         shortcutScopeRef={scopeRef}
       />
     </div>,
@@ -681,6 +688,52 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
       expect(screen.getAllByTestId(TESTID_STEP)[0].getAttribute("data-active")).toBe("true"),
     );
     expect((screen.getByTestId(TESTID_INPUT) as HTMLTextAreaElement).value).toBe("");
+  });
+});
+
+describe("ClarificationInputOverlay — shared size control", () => {
+  const messages = [
+    clarMessage({ id: "m-size-1", questionId: "q1", index: 0, total: 2 }),
+    clarMessage({ id: "m-size-2", questionId: "q2", index: 1, total: 2 }),
+  ];
+
+  it("renders one action-specific size toggle and forwards its action", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: true });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE);
+    expect(screen.getAllByTestId(TESTID_SIZE_TOGGLE)).toHaveLength(1);
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows Restore as the next action while expanded and keeps it enabled without headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: true, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Restore");
+    expect(toggle.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Expand visible but disabled when the host has no usable headroom", () => {
+    const onToggleSize = vi.fn();
+    renderOverlay(messages, { onToggleSize, sizeExpanded: false, canExpandPanel: false });
+
+    const toggle = screen.getByTestId(TESTID_SIZE_TOGGLE) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-label")).toBe("Expand");
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(toggle.disabled).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(onToggleSize).not.toHaveBeenCalled();
   });
 });
 
