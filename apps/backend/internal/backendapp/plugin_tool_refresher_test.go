@@ -48,3 +48,39 @@ func TestPluginToolCatalogRefresherProjectsAutomationSurface(t *testing.T) {
 		t.Fatal("catalog notification was not pushed")
 	}
 }
+
+type pluginToolSubscriberFake struct {
+	refreshes int
+}
+
+func (f *pluginToolSubscriberFake) RefreshPluginTools(context.Context) error {
+	f.refreshes++
+	return nil
+}
+
+func TestPluginToolCatalogFanoutRefreshesSubscribersWithExecutions(t *testing.T) {
+	lifecycle := pluginToolLifecycleFake{calls: make(chan plugintools.Snapshot, 1)}
+	fanout := newPluginToolCatalogFanout(lifecycle, nil)
+	subscriber := &pluginToolSubscriberFake{}
+	unsubscribe := fanout.Subscribe(subscriber)
+
+	snapshot := plugintools.Snapshot{Generation: "g", Revision: 7}
+	if err := fanout.SetPluginToolsForAllExecutions(context.Background(), snapshot); err != nil {
+		t.Fatalf("fanout: %v", err)
+	}
+	if got := <-lifecycle.calls; got.Revision != snapshot.Revision {
+		t.Fatalf("execution revision = %d, want %d", got.Revision, snapshot.Revision)
+	}
+	if subscriber.refreshes != 1 {
+		t.Fatalf("subscriber refreshes = %d, want 1", subscriber.refreshes)
+	}
+
+	unsubscribe()
+	unsubscribe()
+	if err := fanout.SetPluginToolsForAllExecutions(context.Background(), snapshot); err != nil {
+		t.Fatalf("fanout after unsubscribe: %v", err)
+	}
+	if subscriber.refreshes != 1 {
+		t.Fatalf("unsubscribed server refreshed %d times", subscriber.refreshes)
+	}
+}

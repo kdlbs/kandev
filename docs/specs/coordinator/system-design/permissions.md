@@ -296,6 +296,19 @@ Reading the binding for a session, `BoundToolNames(task)`:
 | present and valid | its `ToolNames` |
 | present and invalid | error: refuse every action (`002.3`) |
 
+Version 2 of the binding adds `plugin_tools`, a separate list of exact
+instance-read references (`plugin_id`, `local_name`, `installation_id`,
+`policy_version`). Version 1 parses successfully with an empty plugin list, so
+an older conversation keeps its core tools and gains no plugin read. The
+coordinator service stamps version 2 at conversation creation from the
+active, configured catalog whose declaration includes the `coordinator`
+surface and satisfies `invocation_scope: instance` plus `read_only_hint: true`.
+Discovery intersects the live catalog with those exact references; invocation
+carries the exact reference into the plugin service, which revalidates the
+current installation and policy version under the same dispatch lease that
+covers the plugin RPC, and fails before the RPC when either changed
+(`AC-COORDINATOR-PERMISSIONS-002.7`).
+
 An invalid binding on an existing conversation task is not repaired by the
 conversation route: step 2 reuses the task, its session start fails closed in
 the executor branch, and the manager sees the phase-1 start-failure result.
@@ -316,7 +329,10 @@ executor's `resolveTaskSessionMCPProfile` coordinator branch fills from
 `BoundToolNames`. It registers each bound tool that has a handler in the running build,
 looked up in the coordinator tool catalog (`ToolForAction`'s table plus its
 handler registration); a bound name with no handler yet is skipped, not
-stubbed, and is still in the bound list and the auto-approved names. In the
+stubbed, and is still in the bound list and the auto-approved names. Bound
+plugin tools are registered by `registerPluginTools` from the backend-filtered
+snapshot, and the server rechecks each descriptor's exact installation and
+policy version against the same binding before registration. In the
 wave of task 02 the catalog holds the phase-1 seven; task 03 and task 04
 each add their tools' rows and handlers, and task 04 owns the end-state test
 that registered equals bound. The invariant this task tests is therefore:
@@ -499,12 +515,13 @@ of [Interleavings](#interleavings).
 
 The permission-policy rule of [copilot](copilot.md#permission-policy)
 changes one input: the allowed names are the session's bound names instead
-of the constant seven. agentctl receives them with the coordinator mode as a
-list in the instance configuration (`CoordinatorToolNames`), set by the
-executor from the same resolver output. Comparison stays by full qualified
-name, never by prefix (`002.4`). An instance built by the lifecycle alone
-(workspace-only restore) receives an empty list, so it auto-approves
-nothing; the agent start that follows goes through the resolvers.
+of the constant seven, plus the derived MCP names of its exact version-2
+plugin references. agentctl receives the binding with the coordinator mode in
+the instance configuration (`CoordinatorToolPolicy`), set by the executor from
+the same resolver output. Comparison stays by full qualified name, never by
+prefix (`002.4`). An instance built by the lifecycle alone (workspace-only
+restore) receives an empty list, so it auto-approves nothing; the agent start
+that follows goes through the resolvers.
 
 ## Security
 
