@@ -88,7 +88,7 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	if !isOrphanableDynamicSessionState(session.State) && !s.dynamicStartingRouteIsStranded(ctx, session) {
 		return
 	}
-	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
+	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, dynamicRouteOrphanedStartingReason)
 }
 
 // dynamicStartingRouteIsStranded reports true only for a WAITING_FOR_INPUT

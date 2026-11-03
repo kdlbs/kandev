@@ -209,7 +209,9 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		defer reportCreateInstanceProgress(req, &err)()
 	}
 
-	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
+	if reconnected, ok, reconnectErr := r.tryReconnect(baseCtx, dockerClient, req); reconnectErr != nil {
+		return nil, reconnectErr
+	} else if ok {
 		return reconnected, nil
 	}
 	if req.WorkspaceReuseRequired {
@@ -275,21 +277,26 @@ func reportCreateInstanceProgress(req *ExecutorCreateRequest, errPtr *error) fun
 	}
 }
 
-// tryReconnect returns (instance, true) if the request points at an existing
-// container that's healthy enough to resume; otherwise (nil, false) and the
-// caller falls back to provisioning a fresh container.
-func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool) {
+// tryReconnect returns (instance, true, nil) if the request points at an
+// existing container that's healthy enough to resume; otherwise
+// (nil, false, nil) and the caller falls back to provisioning a fresh
+// container. A blocked journal owner is an error: launching a fresh container
+// would abandon the retained workspace.
+func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.Client, req *ExecutorCreateRequest) (*ExecutorInstance, bool, error) {
 	if req.PreviousExecutionID == "" && strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyContainerID)) == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
 	if reconnectErr == nil {
-		return reconnected, true
+		return reconnected, true, nil
+	}
+	if errors.Is(reconnectErr, errReconnectOwnerBlocked) {
+		return nil, false, reconnectErr
 	}
 	r.logger.Info("could not reconnect to existing container",
 		zap.String("previous_execution_id", req.PreviousExecutionID),
 		zap.Error(reconnectErr))
-	return nil, false
+	return nil, false, nil
 }
 
 // seedSessionDir copies the agent's auth files and selected configuration
@@ -365,8 +372,12 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		return nil, err
 	}
 
+	instanceID := conn.instanceID
+	if instanceID == "" {
+		instanceID = req.InstanceID
+	}
 	client := agentctl.NewClient(conn.instanceHost, conn.instancePort, r.logger,
-		agentctl.WithExecutionID(req.InstanceID),
+		agentctl.WithExecutionID(instanceID),
 		agentctl.WithSessionID(req.SessionID),
 		agentctl.WithAuthToken(conn.authToken))
 
@@ -376,6 +387,8 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		zap.String("container_ip", containerIP),
 		zap.String("instance_host", conn.instanceHost),
 		zap.Int("instance_port", conn.instancePort),
+		zap.String("requested_instance_id", req.InstanceID),
+		zap.String("agentctl_instance_id", instanceID),
 		zap.Bool("reusing_process", conn.reusingProcess))
 
 	refreshedAuthToken := ""
@@ -383,18 +396,20 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		refreshedAuthToken = conn.authToken
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		ContainerID:   info.ID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
+		InstanceID:      req.InstanceID,
+		TaskID:          req.TaskID,
+		SessionID:       req.SessionID,
+		RuntimeName:     r.Name(),
+		Client:          client,
+		ContainerID:     info.ID,
+		ContainerIP:     containerIP,
+		WorkspacePath:   dockerWorkspacePath,
+		ReusedWorkspace: true,
 		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:             true,
-			MetadataKeyContainerID:          info.ID,
-			MetadataKeyReuseExistingProcess: conn.reusingProcess,
+			MetadataKeyIsRemote:                       true,
+			MetadataKeyContainerID:                    info.ID,
+			MetadataKeyReuseExistingProcess:           conn.reusingProcess,
+			MetadataKeyRemoteDockerAgentctlInstanceID: instanceID,
 		},
 		AuthToken: refreshedAuthToken,
 	}, nil
@@ -441,6 +456,10 @@ func (r *DockerExecutor) ensureContainerRunning(ctx context.Context, dockerClien
 // the user-facing client, the auth token in effect (which may have been
 // refreshed via re-handshake), and whether the agent subprocess is reusable.
 type reconnectAgentctlConn struct {
+	// instanceID is the agentctl instance that actually owns the endpoint. It
+	// can differ from the requested execution ID when a live same-session
+	// owner is adopted.
+	instanceID     string
 	instanceHost   string
 	instancePort   int
 	authToken      string
@@ -469,14 +488,14 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 
 	authToken := req.AuthToken
 	instanceID := reconnectInstanceID(req, req.PreviousExecutionID)
-	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
+	instancePort, reusingProcess, actualInstanceID, err := r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
 	if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
 		var handshakeErr error
 		authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
 		if handshakeErr != nil {
 			return reconnectAgentctlConn{}, fmt.Errorf("agentctl auth failed and re-handshake failed in container %s: %w", containerID, handshakeErr)
 		}
-		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
+		instancePort, reusingProcess, actualInstanceID, err = r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
 	}
 	if err != nil {
 		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
@@ -485,7 +504,11 @@ func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *dock
 	if err != nil {
 		return reconnectAgentctlConn{}, err
 	}
+	if actualInstanceID == "" {
+		actualInstanceID = instanceID
+	}
 	return reconnectAgentctlConn{
+		instanceID:     actualInstanceID,
 		instanceHost:   instanceHost,
 		instancePort:   resolvedInstancePort,
 		authToken:      authToken,
@@ -567,46 +590,76 @@ func (r *DockerExecutor) findExistingInstance(
 	req *ExecutorCreateRequest,
 	containerID string,
 	containerIP string,
-	prevExecutionID string,
+	requestedInstanceID string,
 	authToken string,
-) (int, bool, error) {
+) (port int, reusingProcess bool, instanceID string, err error) {
 	// Try to get the existing instance by its ID
-	instance, err := ctl.GetInstance(ctx, prevExecutionID)
+	instance, err := ctl.GetInstance(ctx, requestedInstanceID)
 	if err == nil && instance != nil && instance.Port > 0 {
 		if hasManagedGitHubBrokerEnv(req.Env) {
 			instanceHost, instancePort, resolveErr := r.resolveEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP)
 			if resolveErr != nil {
-				return 0, false, resolveErr
+				return 0, false, "", resolveErr
 			}
 			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 				agentctl.WithAuthToken(authToken))
 			defer client.Close()
 			if preflightErr := r.brokerPreflight(ctx, client, req.SessionID, req.Env); preflightErr != nil {
-				return 0, false, preflightErr
+				return 0, false, "", fmt.Errorf("%w: broker preflight for retained container: %w", errReconnectOwnerBlocked, preflightErr)
 			}
-			if deleteErr := ctl.DeleteInstance(ctx, prevExecutionID); deleteErr != nil {
-				return 0, false, fmt.Errorf("delete stale broker-backed instance: %w", deleteErr)
+			if deleteErr := ctl.DeleteInstance(ctx, requestedInstanceID); deleteErr != nil {
+				return 0, false, "", fmt.Errorf("%w: delete stale broker-backed instance: %w", errReconnectOwnerBlocked, deleteErr)
 			}
-			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
+			createdPort, createdReusing, createErr := createReconnectInstance(ctx, ctl, req, requestedInstanceID)
+			if createErr != nil {
+				return 0, false, "", fmt.Errorf("%w: %w", errReconnectOwnerBlocked, createErr)
+			}
+			return createdPort, createdReusing, requestedInstanceID, nil
 		}
 		// Instance exists, check if agent subprocess is running
 		instanceHost, instancePort, resolveErr := r.resolveEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP)
 		if resolveErr != nil {
-			return 0, false, resolveErr
+			return 0, false, "", resolveErr
 		}
 		client := agentctl.NewClient(instanceHost, instancePort, r.logger,
 			agentctl.WithAuthToken(authToken))
 		status, statusErr := client.GetStatus(ctx)
 		processRunning := statusErr == nil && status != nil && status.IsAgentRunning()
-		return instance.Port, processRunning, nil
+		return instance.Port, processRunning, instance.ID, nil
 	}
 	if err != nil && isAgentctlAuthError(err) {
-		return 0, false, err
+		return 0, false, "", err
+	}
+	if err != nil && !errors.Is(err, agentctl.ErrInstanceNotFound) {
+		return 0, false, "", fmt.Errorf("inspect requested agent instance: %w", err)
+	}
+
+	// The requested execution is absent, but the previous same-session
+	// instance may still own the journal. Reconcile that exact owner before
+	// creating a replacement; otherwise the second open waits on the first
+	// owner's bbolt lock until it times out.
+	if req.PreviousExecutionID != "" || req.SessionID != "" {
+		port, reusingProcess, actualInstanceID, handled, reconcileErr := r.reconcilePreviousJournalOwner(
+			ctx, dockerClient, ctl, req, containerID, containerIP,
+			requestedInstanceID, req.PreviousExecutionID, authToken,
+		)
+		if reconcileErr != nil {
+			return 0, false, "", fmt.Errorf("%w: %w", errReconnectOwnerBlocked, reconcileErr)
+		}
+		if handled {
+			return port, reusingProcess, actualInstanceID, nil
+		}
 	}
 
 	// Instance not found — create a new instance in the existing container
-	return createReconnectInstance(ctx, ctl, req, prevExecutionID)
+	createdPort, createdReusing, createErr := createReconnectInstance(ctx, ctl, req, requestedInstanceID)
+	if createErr != nil {
+		// The container is already retained. A failed replacement open is a
+		// blocked recovery, not a reason to launch a fresh container.
+		return 0, false, "", fmt.Errorf("%w: %w", errReconnectOwnerBlocked, createErr)
+	}
+	return createdPort, createdReusing, requestedInstanceID, nil
 }
 
 func createReconnectInstance(
@@ -673,6 +726,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
 		if path, err := durableJournalContainerPath(req); err == nil {

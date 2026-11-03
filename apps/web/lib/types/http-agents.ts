@@ -113,6 +113,7 @@ export type AgentProfileMcpConfig = {
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;
+  supports_local_install?: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
   available: boolean;
@@ -246,6 +247,7 @@ export type ModelDiscovery = {
 export type DynamicModelsResponse = {
   agent_name: string;
   status: CapabilityStatus;
+  reason_code?: string;
   models: ModelEntry[];
   current_model_id?: string;
   modes?: ModeEntry[];
@@ -272,6 +274,7 @@ export type AgentModelConfigResponse = {
   agent_name: string;
   model: string;
   status: CapabilityStatus;
+  reason_code?: string;
   config_options: ConfigOptionEntry[];
   error: string | null;
   context_revision?: string;
@@ -333,6 +336,7 @@ export type AvailableAgent = {
   display_name: string;
   description?: string;
   install_script?: string;
+  supports_local_install?: boolean;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];

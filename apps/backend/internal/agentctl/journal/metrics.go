@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const journalErrorUnknownLabel = "unknown"
+
 var (
 	deliverySubmissionsTotal          = expvar.NewMap("agent_delivery_submissions_total")
 	deliveryDuplicateSubmissionsTotal = expvar.NewMap("agent_delivery_duplicate_submissions_total")
@@ -18,27 +20,32 @@ var (
 )
 
 var boundedDeliveryLabels = map[string]struct{}{
-	"prepared":              {},
-	"accepted":              {},
-	"dispatching":           {},
-	"completed":             {},
-	"failed":                {},
-	"cancelled":             {},
-	"interrupted_unknown":   {},
-	"retired_submission":    {},
-	"same_hash":             {},
-	"hash_conflict":         {},
-	"cursor_expired":        {},
-	"sequence_conflict":     {},
-	"owner_mismatch":        {},
-	"journal_corrupt":       {},
-	"journal_newer_version": {},
-	"journal_full":          {},
-	"stream_full":           {},
-	"event_too_large":       {},
-	"replay_page_too_large": {},
-	"storage_unavailable":   {},
-	"unknown":               {},
+	"prepared":               {},
+	"accepted":               {},
+	"dispatching":            {},
+	"completed":              {},
+	"failed":                 {},
+	"cancelled":              {},
+	"interrupted_unknown":    {},
+	"retired_submission":     {},
+	"same_hash":              {},
+	"hash_conflict":          {},
+	"cursor_expired":         {},
+	"sequence_conflict":      {},
+	"owner_mismatch":         {},
+	"journal_corrupt":        {},
+	"journal_newer_version":  {},
+	"journal_full":           {},
+	"stream_full":            {},
+	"event_too_large":        {},
+	"replay_page_too_large":  {},
+	"storage_unavailable":    {},
+	"lock_timeout":           {},
+	"permission_denied":      {},
+	"filesystem_full":        {},
+	"disk_quota_exceeded":    {},
+	"io_failure":             {},
+	journalErrorUnknownLabel: {},
 }
 
 func RecordSubmission(outcome string) {
@@ -77,13 +84,16 @@ func boundedDeliveryLabel(value string) string {
 	if _, ok := boundedDeliveryLabels[value]; ok {
 		return value
 	}
-	return "unknown"
+	return journalErrorUnknownLabel
 }
 
 func classifyJournalError(err error) string {
+	if reason, ok := openErrorReason(err); ok {
+		return journalErrorLabelForOpenReason(reason)
+	}
 	switch {
 	case err == nil:
-		return "unknown"
+		return journalErrorUnknownLabel
 	case errors.Is(err, ErrJournalCorrupt):
 		return "journal_corrupt"
 	case errors.Is(err, ErrJournalNewerVersion):

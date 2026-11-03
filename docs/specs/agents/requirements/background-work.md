@@ -100,6 +100,10 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-007.3:** When OpenCode reports a job outcome, the system shall update that job once and retain its available output and exit status.
 - **AC-AGENTS-BACKGROUND-WORK-007.4:** When completion delivery or current liveness is unavailable, the system shall show that limitation without reporting successful completion or verified running activity.
 - **AC-AGENTS-BACKGROUND-WORK-007.5:** When a new foreground turn starts, jobs from earlier turns shall retain their identity and remain inspectable.
+- **AC-AGENTS-BACKGROUND-WORK-007.6:** When the supported v2 plugin reports an owned shell outcome, the workload shall retain its actual terminal state and available exit code.
+- **AC-AGENTS-BACKGROUND-WORK-007.7:** When that outcome arrives after a foreground response or during another turn, it shall settle the original job without changing that turn.
+- **AC-AGENTS-BACKGROUND-WORK-007.8:** When the plugin lacks output or live-activity evidence, the system shall retain those limitations. An unknown job can settle only from actual outcome evidence.
+- **AC-AGENTS-BACKGROUND-WORK-007.9:** When the plugin is absent, disabled, incompatible, or loses an outcome, ordinary ACP prompting and inspection shall retain their existing behavior.
 
 ### REQ-AGENTS-BACKGROUND-WORK-008: OpenCode automatic follow-up delivery
 
@@ -122,10 +126,23 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
 - **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
 
+### REQ-AGENTS-BACKGROUND-WORK-010: Claude background shells do not stay running
+
+**Intent:** The background jobs count reflects work that is still running.
+
+- **AC-AGENTS-BACKGROUND-WORK-010.1:** When the agent process that owns a workload has ended, including through replacement, idle reclaim, or a backend restart, every non-terminal workload of that session shall become terminal with an unknown outcome. Verified liveness shall still be required before settlement.
+- **AC-AGENTS-BACKGROUND-WORK-010.2:** When the connected Claude bridge advertises background task lifecycle support, a detached shell shall settle from the lifecycle event that names its launch tool, retaining the reported outcome. The launch tool completing shall not settle it. **Not yet delivered:** the capture confirms the bridge frames, but the pinned ACP SDK cannot represent them, and advertising the capability changes transcript and follow-up-turn behavior. Process-end settlement (`010.1`) applies. See the [rejected proposal](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md); a new proposal requires SDK support (or a safe raw-frame path) and a product decision on the follow-up turn.
+- **AC-AGENTS-BACKGROUND-WORK-010.3:** When that support is not advertised, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
+- **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
+- **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
+
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
-owns these provider-specific additions. The shared criteria above retain their
-existing meanings. A working-in-background display does not change workflow
-placement, authorize concurrent prompts, or declare the user's goal complete.
+owns full provider continuity. The
+[Kandev plugin design](../system-design/opencode-kandev-plugin.md) owns the
+bounded v2 compatibility path for criteria 007.6 through 007.9. The shared
+criteria retain their existing meanings. A working-in-background display does
+not change workflow placement, authorize concurrent prompts, or declare the
+user's goal complete.
 
 ## Exclusions and related contracts
 
@@ -136,6 +153,7 @@ Input is part of the shared contract, but Codex background stdin is unsupported
 unless independently proven for thread-owned commands in the pinned version.
 
 - [Design](../system-design/background-work.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
 - [Native Codex requirements](codex-app-server.md)
 - [Subagent invocation history](subagent-context-persistence.md)
 - [Existing subagent presentation](../../ui/requirements/subagent-observability.md)

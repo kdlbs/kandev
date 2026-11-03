@@ -1,13 +1,14 @@
 ---
 status: current
 system: platform
-updated: 2026-10-27
+updated: 2026-10-29
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-001
   - REQ-PLATFORM-INTERACTIVE-READS-002
   - REQ-PLATFORM-INTERACTIVE-READS-003
   - REQ-PLATFORM-INTERACTIVE-READS-004
   - REQ-PLATFORM-INTERACTIVE-READS-005
+  - REQ-PLATFORM-INTERACTIVE-READS-007
 ---
 
 # Interactive Read Availability System Design
@@ -30,6 +31,7 @@ remain authoritative. This design adds workload control, not a health bypass.
 | REQ-PLATFORM-INTERACTIVE-READS-003 | Section recovery and presentation |
 | REQ-PLATFORM-INTERACTIVE-READS-004 | Clarification workload control |
 | REQ-PLATFORM-INTERACTIVE-READS-005 | Task navigation recovery |
+| REQ-PLATFORM-INTERACTIVE-READS-007 | Quiet task refresh recovery |
 
 ## Query shape and metric compatibility
 
@@ -258,15 +260,16 @@ An existing attempt can settle or reach its own deadline while hidden.
 No automatic retry starts until the tab becomes visible again.
 Foreground triggers join that active cycle without renewing its budget.
 
-Keep the visible-time clock private to task navigation, beside `TaskNavigationReads`.
-The proposed helper is `lib/state/task-navigation-recovery-clock.ts`.
+Keep `TaskNavigationRecoveryClock` beside `TaskNavigationReads`.
+The sidebar recovery owner also reuses this clock for the same visible-time policy.
 It owns the remaining cycle time, visibility listener, and deadline timer.
 The navigation owner disposes those resources on success, exhaustion, cancellation, and final release.
 Use a monotonic clock and fake timers in tests.
 Keep budget expiry distinct from navigation cancellation.
 Budget expiry aborts outstanding task/session work and publishes a temporary failed snapshot.
 Navigation cancellation remains an abort and cannot publish into the new scope.
-Preserve the most recent temporary error during a pending retry so the notice does not disappear between attempts.
+Preserve the most recent temporary error during a pending retry for classification and accessible progress.
+Visible warning timing follows quiet task refresh recovery.
 
 Honor a larger `ApiError.retryAfterSeconds` value without sending an early request.
 When its delay exceeds the remaining budget, wait only until budget exhaustion and stop.
@@ -282,7 +285,7 @@ Keep the existing optional session-list fallback and shared `TaskSessionReads` o
 
 ### Content continuity and presentation
 
-When no task content exists, show recovery status while the bounded cycle runs.
+When no task content exists, show ordinary loading progress while the bounded cycle runs.
 Keep Retry disabled with its stable accessible name and leave the task-overview link usable.
 After exhaustion, enable Retry in the temporary error surface.
 Keep permanent failures in `TaskLoadErrorState` without automatic retries.
@@ -294,7 +297,7 @@ That selector already checks task identity, authentication, active workspace, ar
 Do not broaden its eligibility or replay a previous route's hydration payload as fallback.
 Keep `initialState` null for a retained projection so stale data cannot overwrite newer store state.
 For loaded same-task details, preserve the current task view and selected session through failed refreshes.
-The shared read snapshot drives an in-flow availability notice during retries and after exhaustion.
+The shared read snapshot drives quiet recovery progress and an in-flow notice after exhaustion.
 On success, clear the notice without remounting the conversation or resetting a draft.
 On a permanent lookup or authorization failure, stop retention even when a projection remains cached.
 Existing invalidation still clears content when authorization or workspace scope changes.
@@ -308,7 +311,7 @@ Phone stacks actions inside the main content area, retains the route's scroll
 owner and safe-area handling, and provides targets of at least 44px. Desktop uses
 ordinary 28px buttons. Use semantic status announcements and retain focus on the
 Retry control during attempts. Keep the overview action reachable during an initial cold-load recovery.
-Show the retained-content notice as one row on desktop and a wrapped block on phone.
+After exhaustion, show the retained-content notice as one row on desktop and a wrapped block on phone.
 The notice remains in normal flow above the existing task content.
 `TaskNavigationReadFeedback` in `components/task/task-navigation-read-feedback.tsx` owns this strip.
 Place it directly below the task header and above the session tabs and panels, across the task content area.
@@ -326,10 +329,98 @@ Then return 404 or an authorization error and require the permanent unavailable 
 Cover hidden-time accounting, never-settling reads, late responses, Retry-After beyond the budget, and cleanup.
 Desktop and phone E2E cover automatic recovery without a new user event, exhaustion, manual recovery, and retained content.
 
+## Quiet task refresh recovery
+
+This section owns AC-PLATFORM-INTERACTIVE-READS-007.1 through .8.
+UI retains sidebar membership, ordering, disclosure continuity, and permission rules through its
+[sidebar design](../../ui/system-design/sidebar-archived-filter.md).
+Recovery changes neither the persistence admission gate nor mutation behavior.
+
+### Sidebar recovery ownership
+
+Keep `SidebarTaskPageCache` as the per-store owner of a query's shared read.
+Implement its bounded runner in `lib/sidebar/sidebar-task-page-recovery.ts`.
+Do not place retry timers in each `useSidebarTaskPage` consumer.
+Use the existing cache request identity, including workspace, scope, full query, and requested page.
+Preserve the separate request generation and ranking checks in the hook.
+
+A consumer lease spans the displayed query lifetime, including terminal failure.
+Release that lease on replacement, scope invalidation, disablement, or unmount.
+Do not release it after each attempt or discard the terminal record when its promise settles.
+Multiple desktop and phone mounts join the same cycle.
+Final release aborts pending attempts, disposes the clock, and removes the recovery record.
+Retain existing StrictMode restart behavior and bounded page/entity ownership.
+
+The runner uses the task-navigation schedule: five attempts, with delays of 2, 5, 10, and 10 seconds.
+Reuse `TaskNavigationRecoveryClock` for the thirty-second visible-time budget and hidden-tab accounting.
+Each HTTP attempt has a ten-second wall-time deadline and its own abort signal.
+Cycle expiry and cancellation abort that attempt even when a mocked transport ignores cancellation.
+Cleanup closes its deadline timer and child signal listeners.
+
+Extract shared HTTP/network classification into `lib/api/temporary-read-error.ts`.
+Keep `isTemporaryTaskNavigationError` compatible with its existing cycle-deadline handling.
+Both owners classify TypeError, HTTP 429/502/503/504, and structured `persistence_unavailable` as temporary.
+An attempt deadline is temporary. An obsolete-request abort is cancellation.
+Validation, authorization, 404, parsing, and unknown errors do not receive automatic retries.
+Honor Retry-After without extending the cycle or advancing an attempt early.
+
+Keep the hook's page request pending throughout an automatic cycle.
+Temporary attempts do not publish `sidebar:queryRefreshFailed` into component state.
+After exhaustion, publish the existing localized error once and retain eligible rows.
+The shared record distinguishes background triggers, explicit Retry, and a foreground recovery episode.
+Repeated foreground triggers join pending work and reuse an already handled episode.
+
+Live invalidations mark membership dirty without resetting the active budget or backoff.
+Preserve provisional response reconciliation and the single trailing refresh after accepted success.
+`useProvisionalSidebarRefresh` must not restart a failed cycle when pending returns to null.
+An exhausted cycle rejects ordinary background refresh admission until explicit Retry or a later foreground episode.
+Queued invalidations cannot bypass that latch. They remain available for the next admitted read.
+No retry record makes a provisional page reusable or establishes complete local coverage.
+
+### Warning visibility
+
+`TaskNavigationReads` adds an owner-level latch for exhausted temporary recovery.
+Set it on temporary exhaustion, preserve it through explicit recovery, and clear it on success or scope invalidation.
+Permanent failures use their existing unavailable surface and invalidate retained content.
+Feed warning visibility through `TaskNavigationReadRecovery`; do not infer it from temporary classification alone.
+The route, `useTaskDetails`, and `TaskNavigationReadFeedback` consume the same owner state.
+
+During automatic recovery with eligible content, keep only a screen-reader status.
+Do not mount a visible strip, disabled Retry row, toast, or spinner that moves existing content.
+Without eligible content, keep the ordinary loading surface and reachable task-overview action.
+Show the applicable error surface only after exhaustion or an immediate permanent failure.
+
+After exhaustion, preserve the existing sidebar status slot and task-detail strip.
+Explicit recovery keeps that warning visible and disables its stable Retry control until settlement.
+Do not clear it merely because another request begins.
+Success removes the warning without remounting the conversation or changing a draft.
+Announce the start and terminal outcome of a logical cycle, not every failed HTTP attempt.
+
+### Desktop and phone
+
+Desktop reuses `SidebarTaskQueryStatus` below view controls and the in-flow `TaskNavigationReadFeedback` strip.
+Phone reuses `SessionTaskSwitcherSheet`, `MobileTaskList`, and the existing app-navigation task outlet.
+Their current drawer or menu remains the task-choice surface. Recovery opens no new overlay.
+The picker body or menu retains its current scroll owner, safe areas, dismissal, and focus return.
+The task-detail phone layout retains its header offset only while the terminal strip exists.
+Retry remains at least 44px on phones or coarse pointers and 28px on fine-pointer desktop.
+Shared state supplies identical timing, errors, and recovery actions to every presentation.
+
+### Regression evidence
+
+Use fake timers and deferred requests for provisional-page failure, all trigger families, and shared-consumer tests.
+Assert attempt counts, elapsed visible time, terminal latching, and timer cleanup.
+Cover cancellation, Retry-After, hidden tabs, never-settling requests, and permanent errors after a temporary failure.
+Keep deletion, disclosure, live reconciliation, page bounds, and access-denial regressions.
+Component tests prove that active automatic recovery reserves no visible error-strip space.
+Desktop and phone E2E cover a thirteen-second outage, exhausted recovery, manual recovery, and retained task content.
+Use existing causal waits and request counters. Keep the current permanent-error scenarios.
+
 ## Implementation plans
 
 - [Task navigation availability repair](../../../plans/task-navigation-availability/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-004 and -005.
 - [Task read resilience](../../../plans/task-read-resilience/plan.md) revises recovery timing and preserves current task content for REQ-PLATFORM-INTERACTIVE-READS-005.
+- [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) adds bounded sidebar recovery and defers warnings until exhaustion.
 
 ## Journey loading extension
 

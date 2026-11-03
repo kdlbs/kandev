@@ -8,6 +8,7 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import type { PendingQuickChatCreation, QuickChatCreationState } from "./quick-chat-creation";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
 const CREATION_STATUS_MESSAGE: Record<QuickChatCreationState, string> = {
   submitting: "chat:quickChatCreationUnknown",
@@ -27,7 +28,7 @@ export function QuickChatCreationStatus({
   checking: boolean;
   onCheck: () => void;
   onRetry: () => void;
-  onDelete: () => void;
+  onDelete: (options: DeleteTaskParams) => void;
 }) {
   const { t } = useTranslation();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -87,10 +88,11 @@ export function QuickChatCreationStatus({
       </div>
       <QuickChatDeleteDialog
         sessionToDelete={deleteOpen ? (pending.taskId ?? null) : null}
+        taskId={pending.taskId ?? undefined}
         onOpenChange={setDeleteOpen}
-        onConfirm={() => {
+        onConfirm={(options) => {
           setDeleteOpen(false);
-          onDelete();
+          onDelete(options);
         }}
       />
     </>

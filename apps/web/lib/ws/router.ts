@@ -12,6 +12,7 @@ import { registerSessionInfoHandlers } from "@/lib/ws/handlers/session-info";
 import { registerPromptSuggestionHandlers } from "@/lib/ws/handlers/prompt-suggestions";
 import { registerSessionPendingActionHandlers } from "@/lib/ws/handlers/session-pending-action";
 import { registerSessionWorkspaceRecoveryHandlers } from "@/lib/ws/handlers/session-workspace-recovery";
+import { registerSessionDeliveryStorageHandlers } from "@/lib/ws/handlers/session-delivery-storage";
 import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerBackgroundWorkHandlers } from "@/lib/ws/handlers/background-work";
@@ -80,6 +81,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerPromptSuggestionHandlers(store),
     ...registerSessionPendingActionHandlers(store),
     ...registerSessionWorkspaceRecoveryHandlers(store),
+    ...registerSessionDeliveryStorageHandlers(store),
     ...registerSessionTodosHandlers(store),
     ...registerPromptUsageHandlers(store),
     ...registerBackgroundWorkHandlers(store),

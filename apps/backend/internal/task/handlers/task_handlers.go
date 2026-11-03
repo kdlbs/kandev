@@ -42,6 +42,7 @@ type TaskHandlers struct {
 	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
+	runtimeStorageHealth          dto.RuntimeStorageHealthProvider
 	parkedProjection              dto.ParkedProvider
 	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
@@ -227,6 +228,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
 	}
+	if runtimeStorage, ok := orchestrator.(dto.RuntimeStorageHealthProvider); ok {
+		h.runtimeStorageHealth = runtimeStorage
+	}
 	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
 		h.parkedProjection = parked
 	}
@@ -266,6 +270,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
+	api.POST("/tasks/:id/turn-error/dismiss", h.httpDismissTaskTurnError)
 	api.POST("/task-sessions/:id/mark-read", h.httpMarkSessionRead)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
@@ -281,6 +286,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
+	// Explicit discard of a pending deferred launch. Task-scoped and
+	// synchronous; the response distinguishes already-clear, discarded, and
+	// retained (the queued launch is still owned).
+	api.POST("/tasks/:id/deferred-launch/discard", h.httpDiscardDeferredLaunch)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)

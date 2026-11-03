@@ -41,6 +41,29 @@ finish without a backend restart.
   prompt completion shall not settle its successor. An unnumbered completion
   shall remain ineligible while a dispatched prompt is pending.
 
+### REQ-TASKS-SESSION-TURN-SETTLEMENT-002: Agent-started turns reach completion
+
+**Intent:** A turn the agent starts on its own, such as the follow-up to a
+finished background job, must not hold the session busy after the agent stops.
+
+#### Acceptance criteria
+
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.1:** When an agent-started turn has
+  gone quiet for the idle window and has no tool with a reported active status,
+  the session shall complete the turn and become ready.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.2:** An update that carries no status
+  shall not make a tool active. This includes an update for a tool that has
+  already finished, and it shall not delay or prevent turn completion.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.3:** When the provider explicitly
+  reports the end of an agent-started turn, the session shall complete that turn
+  even if a tool never reported a terminal status.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.4:** A foreground tool with a reported
+  active status shall keep the turn open during silence when the provider has
+  not reported the end of the turn.
+- **AC-TASKS-SESSION-TURN-SETTLEMENT-002.5:** When an agent-started turn
+  completes, auto-run queued messages for that session shall be delivered without
+  another user action.
+
 ## Exclusions
 
 - Changing dispatch-only prompt completion eligibility.
@@ -51,3 +74,4 @@ finish without a backend restart.
 ## Implementation plans
 
 - [Completion callback lease repair](../../../plans/completion-callback-lease/plan.md).
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md).

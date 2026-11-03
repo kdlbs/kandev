@@ -281,6 +281,21 @@ func (c *Client) GitRenameBranch(ctx context.Context, newName, repo string) (*Gi
 	return c.gitOperation(ctx, "/api/v1/git/rename-branch", payload)
 }
 
+// GitRenameGeneratedBranch renames a verified generated branch and carries the
+// expected old branch so agentctl refuses to rename an unrelated checkout.
+func (c *Client) GitRenameGeneratedBranch(ctx context.Context, expectedBranch, newName, repo string) (*GitOperationResult, error) {
+	payload := struct {
+		NewName                 string `json:"new_name"`
+		Repo                    string `json:"repo,omitempty"`
+		ExpectedGeneratedBranch string `json:"expected_generated_branch"`
+	}{
+		NewName:                 newName,
+		Repo:                    repo,
+		ExpectedGeneratedBranch: expectedBranch,
+	}
+	return c.gitOperation(ctx, "/api/v1/git/rename-branch", payload)
+}
+
 // GitStage stages files for commit.
 // If paths is empty, stages all changes (git add -A).
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.

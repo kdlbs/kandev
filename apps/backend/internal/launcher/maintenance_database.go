@@ -142,7 +142,7 @@ func parseMaintenanceDatabaseArgs(argv []string) (maintenanceDatabaseArgs, error
 			out.ShowHelp = true
 			return out, nil
 		}
-		if arg == "--json" {
+		if arg == flagJSON {
 			out.JSON = true
 			continue
 		}

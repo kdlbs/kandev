@@ -10,6 +10,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { QuickChatOpeningPayload, QuickChatSessionKind } from "@/lib/state/slices/ui/types";
@@ -45,7 +46,7 @@ type QuickChatSetupProps = {
   checkingCreation: boolean;
   onCheckCreation: () => Promise<void>;
   onRetryCreation: () => Promise<boolean>;
-  onDeleteCreation: () => Promise<void>;
+  onDeleteCreation: (options: DeleteTaskParams) => Promise<void>;
   draft: QuickChatSetupDraft;
   onDraftChange: (patch: Partial<QuickChatSetupDraft>) => boolean | void;
   onStartQuickChat: (
@@ -522,7 +523,7 @@ function QuickChatSetupLayout(props: QuickChatSetupLayoutProps) {
               checking={checkingCreation}
               onCheck={() => void onCheckCreation()}
               onRetry={() => void onRetryCreation()}
-              onDelete={() => void onDeleteCreation()}
+              onDelete={(options) => void onDeleteCreation(options)}
             />
           ) : null}
           <QuickChatAgentField

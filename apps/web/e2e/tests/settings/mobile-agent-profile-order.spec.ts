@@ -47,7 +47,8 @@ async function touchDragProfile(
   sourceRow: Locator,
   targetRow: Locator,
 ) {
-  await targetRow.scrollIntoViewIfNeeded();
+  // Keep this adjacent-row gesture away from the edge that activates auto-scroll.
+  await sourceRow.evaluate((element) => element.scrollIntoView({ block: "center" }));
   const from = await settledBoundingBox(sourceHandle);
   await expect(sourceHandle).toBeInViewport();
   await expect(targetRow).toBeInViewport();

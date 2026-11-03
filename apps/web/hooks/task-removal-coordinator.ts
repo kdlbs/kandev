@@ -167,6 +167,7 @@ function beginRemovalOperation(
     taskIds: [...removalTaskIds],
     requestIds,
     departure,
+    cascade: opts?.cascade === true,
   });
   if (!token) return null;
   return {
@@ -204,6 +205,7 @@ function beginUnselectedRemovalOperation(
     taskIds: [...removalTaskIds],
     requestIds,
     departure: null,
+    cascade: opts?.cascade === true,
   });
   if (!token) return null;
   return {

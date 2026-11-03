@@ -23,6 +23,11 @@ identity, observations, and capabilities belong here; task storage and UI consum
 them without owning protocol semantics. Existing prompt admission and public
 session-activity authority remain with Tasks and Platform.
 
+Kandev-supplied provider integration plugins also belong here. Their launch
+configuration, declared behaviors, and observations extend the provider contract.
+These implementation assets are separate from marketplace plugins for the
+Kandev host, which retain their own plugin-system ownership.
+
 ## Exclusions
 
 - Durable work items and workflow transitions belong to the [task and workflow

@@ -158,6 +158,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		DeliveryStreamID:               req.DeliveryStreamID,
 		DeliveryIncarnationID:          req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:      req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:          req.OpenCodePluginRuntime,
 	}, nil
 }
 

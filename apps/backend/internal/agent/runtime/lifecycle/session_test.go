@@ -53,6 +53,7 @@ type mockAgentServer struct {
 	mu                   sync.Mutex
 	actionLog            []string // ordered log of actions received
 	httpActionLog        []string
+	configuredAgents     []mockAgentConfigureRequest
 	rejectStreamAttempts int
 	agentStatus          string
 	instanceID           string
@@ -67,6 +68,12 @@ type mockAgentServer struct {
 	failMaterialize      bool
 	materializedName     string
 	promptAttachments    [][]v1.MessageAttachment
+}
+
+type mockAgentConfigureRequest struct {
+	Command   string            `json:"command"`
+	AgentArgs []string          `json:"agent_args"`
+	Env       map[string]string `json:"env"`
 }
 
 // materializedUpload records one /api/v1/attachments/materialize request so a
@@ -98,9 +105,20 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"success":true}`)
 	})
-	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
+		var configured mockAgentConfigureRequest
+		_ = json.NewDecoder(r.Body).Decode(&configured)
 		m.mu.Lock()
 		m.httpActionLog = append(m.httpActionLog, "configure")
+		configured.AgentArgs = append([]string(nil), configured.AgentArgs...)
+		if configured.Env != nil {
+			env := make(map[string]string, len(configured.Env))
+			for key, value := range configured.Env {
+				env[key] = value
+			}
+			configured.Env = env
+		}
+		m.configuredAgents = append(m.configuredAgents, configured)
 		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"success":true}`)
@@ -383,6 +401,26 @@ func (m *mockAgentServer) getHTTPActionLog() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.httpActionLog...)
+}
+
+func (m *mockAgentServer) getConfiguredAgents() []mockAgentConfigureRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	configured := make([]mockAgentConfigureRequest, len(m.configuredAgents))
+	for index, request := range m.configuredAgents {
+		configured[index] = mockAgentConfigureRequest{
+			Command:   request.Command,
+			AgentArgs: append([]string(nil), request.AgentArgs...),
+		}
+		if request.Env != nil {
+			env := make(map[string]string, len(request.Env))
+			for key, value := range request.Env {
+				env[key] = value
+			}
+			configured[index].Env = env
+		}
+	}
+	return configured
 }
 
 func (m *mockAgentServer) Close() {

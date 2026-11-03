@@ -26,12 +26,11 @@ suggestions, or a turn that produced none, leaves the composer unchanged.
 
 Adjacent contracts used, with the change each needs:
 
-- **ACP transport (Agents).** The Claude ACP adapter (`claude-agent-acp` 0.81.2,
-  the pinned version) accepts `_meta.claudeCode.options.promptSuggestions` and
-  `_meta.claudeCode.emitRawSDKMessages`. It forwards a matching SDK message as
-  the `_claude/sdkMessage` extension notification. Kandev's ACP client must
-  receive extension notifications. The `kdlbs/acp-go-sdk` fork currently routes
-  them to `MethodNotFound`, and they are dropped.
+- **Provider support (Agents).** The [native capability design](../../agents/system-design/native-prompt-suggestion-capability.md)
+  owns evidence, configuration, and adapter normalization. The pinned Claude
+  bridge accepts suggestion options and raw-message filters. The current
+  `kdlbs/acp-go-sdk` replacement already routes extension notifications.
+  The capability follow-up is implemented in the Agents work package.
 - **Session and turn lifecycle (Tasks).** This design reads session state,
   turns, messages, the queue, and pending clarification. It writes one session
   metadata key with a state-guarded write.
@@ -68,29 +67,16 @@ contains this change.
   `InstanceConfig`, and the adapter config to `shared.Config.PromptSuggestions`,
   in the same way `disable_ask_question` does. A per-instance flag avoids
   changing the session API of every adapter.
-- **Negotiated capability.** On `initialize`, the adapter records whether the
-  agent advertised the `_meta.claudeCode` namespace
-  (`agentAdvertisesClaudeCode`). That identifies a Claude Code bridge whether it
-  is the built-in `claude-acp` agent, a custom ACP agent that wraps
-  `claude-agent-acp`, or the mock. This follows the agentctl "negotiated, not
-  named" rule already used for prompt handoff and steering. Native suggestions
-  are a Claude Code harness feature, not a model feature: OpenCode or Codex
-  running an Anthropic model never qualify. When both the advertisement and the
-  instance flag are true, the adapter builds this `_meta`:
-
-  ```json
-  {
-    "claudeCode": {
-      "options": { "promptSuggestions": true },
-      "emitRawSDKMessages": [{ "type": "prompt_suggestion" }]
-    }
-  }
-  ```
-
-  The adapter sends that map as `_meta` on `session/new` and `session/load` or
-  `session/resume`. Agents that did not advertise Claude Code receive no
-  `_meta`, so their behavior is unchanged. The `agent_capabilities` stream event
-  gains `supports_prompt_suggestions`, true only when the `_meta` is sent.
+- **Effective capability.** `supports_prompt_suggestions` means that this session
+  requested native suggestions from a supported integration. Preserve that meaning.
+  The planned support-only field, `native_prompt_suggestions_supported`, never
+  enables a composer by itself. Agents owns its evidence rules and all producer/
+  consumer changes. The landed namespace-only heuristic is the subject of that
+  follow-up, not proof of explicit feature support.
+- **Session configuration.** Agents owns the metadata builder for `session/new`,
+  `session/load`, and `session/resume`. Its design preserves the pinned bridge,
+  separates support from requested enablement, and defines unsupported fallback.
+  A selected model never establishes support.
 - **Client.** `acp.Client` implements `HandleExtensionNotification` and
   forwards every extension notification to a registered handler.
 - **Adapter.** The adapter dispatches `_claude/sdkMessage` and accepts only
@@ -110,7 +96,7 @@ contains this change.
   `prompt_suggestions = true` on the agentctl request only when the user
   preference is on and the session is an interactive task or Quick Chat session,
   not an Office run, automation, utility call, or passthrough session. The agent
-  type does not matter here; agentctl negotiates the rest.
+  type does not matter here; agentctl normalizes provider support.
   The decision lives in `Manager.promptSuggestionsForLaunch`. Interactive
   means MCP mode `task`, `task-title-pending`, or empty. The preference is read
   through `SetPromptSuggestionsPreference`, wired to
@@ -173,17 +159,18 @@ contains this change.
 
 ### Native launch request
 
-The agentctl instance creation field is `prompt_suggestions`. The ACP `_meta`
-is shown above. Session metadata key:
+The agentctl instance creation field is `prompt_suggestions`. Agents owns the
+[provider metadata and generic capability contract](../../agents/system-design/native-prompt-suggestion-capability.md#generic-contract).
+Session metadata key:
 
 | Key | Value | Writer |
 | --- | --- | --- |
 | `prompt_suggestion` | `{ "turn_id": string, "text": string }` | orchestrator |
 | `prompt_suggestion_source` | `"native"` or `"none"` | orchestrator, from `agent_capabilities` |
 
-A session counts as native only when it negotiated native suggestions. A Claude
-Code session started while the preference was off is not native, and shows no
-suggestion until it restarts or resumes with the preference on.
+A session counts as native only when it effectively enabled native suggestions.
+Provider support can remain true while the preference is off. That session shows
+no suggestion until it restarts or resumes with the preference on.
 
 ### Suggestion origin
 
@@ -288,10 +275,9 @@ Dismissals are kept in the browser by session and turn ID.
 
 - **Agent without native support.** agentctl sends no `_meta`, the session
   records no native source, and the composer keeps its normal behavior.
-- **Adapter that accepts the `_meta` but sends nothing.** The session is native,
-  but no suggestion arrives, so the composer shows none. This applies to a
-  missing `_meta` handling or an older pinned version. The adapter version is
-  pinned (0.81.2 verified), so this is a regression signal.
+- **Supported adapter that sends nothing.** The session can be effectively
+  enabled without receiving a suggestion. The composer shows none. Native silence
+  is valid; it does not independently prove support or lack of support.
 - **Suggestion payload on a non-native session.** The composer ignores it.
 - **Notification ordering.** A suggestion arriving during a newer prompt is
   dropped by agentctl, and one whose origin overlaps a newer prompt is dropped
@@ -340,8 +326,11 @@ often show no native suggestion, by design.
 - **Orchestrator.** Debug log for a rejected or state-lost write.
 - **Metrics.** None in this version.
 
-## Related decisions
+## Related decisions and delivery
 
-No ADR. The change reuses ACP `_meta` and extension notifications and existing
-session metadata. The SDK fork change makes its
-documented extension contract complete for notifications.
+- [Native capability boundary](../../../decisions/2026-10-28-native-prompt-suggestion-capability.md)
+- [Native capability follow-up](../../../plans/native-prompt-suggestion-capability/plan.md)
+- [Original composer delivery](../../../plans/composer-prompt-suggestions/plan.md)
+
+The original SDK fork change completed extension-notification delivery.
+The follow-up changes provider evidence while preserving this interaction contract.

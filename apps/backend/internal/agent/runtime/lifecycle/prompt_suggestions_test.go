@@ -27,6 +27,7 @@ func TestPromptSuggestionsForLaunch(t *testing.T) {
 		{name: "automation", pref: enabled, mode: mcpmode.Automation},
 		{name: "coordinator", pref: enabled, mode: mcpmode.Coordinator},
 		{name: "configuration chat", pref: enabled, mode: mcpmode.Config},
+		{name: "external passthrough", pref: enabled, mode: mcpmode.External},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

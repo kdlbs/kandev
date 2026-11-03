@@ -2,47 +2,26 @@ package acp
 
 import (
 	"encoding/json"
-	"strings"
-
-	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
 
-// claudeSDKMessageMethod is the extension notification the Claude ACP adapter
-// uses to forward raw Claude Agent SDK messages selected by emitRawSDKMessages.
-const claudeSDKMessageMethod = "_claude/sdkMessage"
-
-const claudePromptSuggestionType = "prompt_suggestion"
-
-// agentAdvertisesClaudeCode reports whether the initialize response carries
-// the `_meta.claudeCode` namespace that Claude Code bridges advertise.
-func agentAdvertisesClaudeCode(caps acp.AgentCapabilities) bool {
-	return claudeCodeMeta(caps.Meta) != nil
-}
-
-// nativePromptSuggestions reports whether this session asks a Claude Code agent
-// for native suggestions: the instance requested them and the agent advertised
-// Claude Code on initialize.
-func (a *Adapter) nativePromptSuggestions() bool {
+// promptSuggestionsEffective reports whether this session may emit native
+// suggestions: the provider supports them and this launch asked for them.
+func (a *Adapter) promptSuggestionsEffective() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.cfg.PromptSuggestions && a.claudeCodeAgent
+	return a.cfg.PromptSuggestions && a.promptSuggestionSupport
 }
 
-// promptSuggestionSessionMeta returns the session _meta that asks Claude Code to
-// emit prompt suggestions and forward them, or nil when they were not negotiated.
+// promptSuggestionSessionMeta returns the session _meta the Claude integration
+// requires for the negotiated support/request pair, or nil when unsupported.
 func (a *Adapter) promptSuggestionSessionMeta() map[string]any {
-	if !a.nativePromptSuggestions() {
-		return nil
-	}
-	return map[string]any{
-		"claudeCode": map[string]any{
-			"options":            map[string]any{"promptSuggestions": true},
-			"emitRawSDKMessages": []any{map[string]any{"type": claudePromptSuggestionType}},
-		},
-	}
+	a.mu.Lock()
+	supported := a.promptSuggestionSupport
+	a.mu.Unlock()
+	return claudePromptSuggestionSessionMeta(supported, a.cfg.PromptSuggestions)
 }
 
 // handleExtensionNotification dispatches inbound ACP extension notifications.
@@ -52,33 +31,22 @@ func (a *Adapter) handleExtensionNotification(method string, params json.RawMess
 	}
 }
 
-type claudeSDKMessageParams struct {
-	SessionID string `json:"sessionId"`
-	Message   struct {
-		Type       string `json:"type"`
-		Suggestion string `json:"suggestion"`
-	} `json:"message"`
-}
-
 // handleClaudeSDKMessage turns a forwarded prompt_suggestion into a stream
-// event bound to its originating prompt generation. It is dropped for another
-// session, or when its originating turn cannot be established.
+// event bound to its originating prompt generation. It is dropped when this
+// session did not enable suggestions, for another session, or when its
+// originating turn cannot be established.
 func (a *Adapter) handleClaudeSDKMessage(params json.RawMessage) {
-	if !a.nativePromptSuggestions() {
+	if !a.promptSuggestionsEffective() {
 		return
 	}
-	var msg claudeSDKMessageParams
-	if err := json.Unmarshal(params, &msg); err != nil || msg.Message.Type != claudePromptSuggestionType {
-		return
-	}
-	text := strings.TrimSpace(msg.Message.Suggestion)
-	if text == "" {
+	notification, ok := decodeClaudePromptSuggestion(params)
+	if !ok {
 		return
 	}
 	a.mu.Lock()
 	sessionID := a.sessionID
 	a.mu.Unlock()
-	if sessionID == "" || msg.SessionID != sessionID {
+	if sessionID == "" || notification.SessionID != sessionID {
 		return
 	}
 	generation := a.claimPromptSuggestionOrigin()
@@ -90,7 +58,7 @@ func (a *Adapter) handleClaudeSDKMessage(params json.RawMessage) {
 	a.sendUpdate(AgentEvent{
 		Type:             streams.EventTypePromptSuggestion,
 		SessionID:        sessionID,
-		Text:             text,
+		Text:             notification.Text,
 		PromptGeneration: generation,
 	})
 }
@@ -122,6 +90,20 @@ func (a *Adapter) markPromptSentForSuggestion(turn *promptTurnState) {
 	defer a.promptTurnMu.Unlock()
 	turn.suggestion = promptSuggestionTurn{sent: true, overlaps: a.suggestionOrigin.open}
 	a.suggestionOrigin = promptSuggestionOrigin{}
+}
+
+// resetPromptSuggestionOrigin discards an open window only after a proven
+// conversation replacement, and the captured prompt's suggestion bookkeeping
+// while it still owns the prompt turn. A failed transition or a same-ID restore
+// keeps the old conversation, so its window stays open to make the successor
+// prompt ambiguous rather than clean.
+func (a *Adapter) resetPromptSuggestionOrigin(priorTurn *promptTurnState) {
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	a.suggestionOrigin = promptSuggestionOrigin{}
+	if priorTurn != nil && a.promptTurn == priorTurn {
+		priorTurn.suggestion = promptSuggestionTurn{}
+	}
 }
 
 // recordPromptFinishedForSuggestionLocked opens the finished prompt's window.

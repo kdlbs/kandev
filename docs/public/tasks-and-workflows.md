@@ -631,7 +631,15 @@ Each card uses retained data for that turn. Later edits, commits, or branch chan
 
 The diff shows the selected file’s full path and its previous path after a rename. If a file list fails to load, select **Retry**.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. Retained content can expire. Kandev then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+For a new capture, Kandev compares the turn with its captured history. If the branch integrates upstream commits during the turn, for example with a rebase or merge onto the configured comparison target, the card excludes those upstream changes. Starting local edits stay in the baseline, so a later revert still appears as a turn change. If Kandev cannot separate the history safely, the affected repository reports an unavailable comparison and does not show whole-repository totals as turn edits. Other repositories in the same turn remain usable.
+
+Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
+
+Some captures are partial or unavailable. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. A turn whose summary is unavailable or failed has no card, even when it retained file entries or a history comparison. Partial summaries with usable changes keep their card, label the state, and identify the affected repositories. The selected historical diff still explains why an unavailable comparison has no totals.
+
+Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+
+Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
@@ -662,6 +670,13 @@ generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
 
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
+
 What a job row can show depends on the agent runtime:
 
 - **Running and waiting** counts come from a runtime that reports current job
@@ -673,11 +688,19 @@ What a job row can show depends on the agent runtime:
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
 
+For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
+detached shell job from the native exit event. A job can therefore move from
+unknown to completed, failed, or interrupted after the foreground prompt ends.
+The plugin is off by default; see
+[Agents and profiles](agents-and-profiles.md#opencode-terminal-outcomes) for
+activation and compatibility. Without the plugin, or on an unsupported runtime,
+the job keeps the unknown fallback.
+
 Controls appear only when the runtime advertises them and the job is currently
 actionable. Runs that provide observation only, such as a detached OpenCode
-shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
-or input controls, and their output is labeled unavailable rather than shown as
-live logs. The launch banner in the original tool message is not live command
+shell launch without the integration plugin, show no Stop, Interrupt, or input
+controls, and their output is labeled unavailable rather than shown as live
+logs. The launch banner in the original tool message is not live command
 output.
 
 ### Prevent auto-start on open
@@ -753,19 +776,42 @@ your review. If the runtime is unavailable or evidence is incomplete, Kandev
 leaves the session waiting for you. A new message, a session change, **Cancel**,
 or a backend restart stops pending automatic recovery.
 
+### Prompt errors on a usable runtime
+
+When an ACP agent returns a prompt error while its process and ACP connection
+are still usable, Kandev ends that turn with a sanitized error entry and keeps
+the same native conversation. This includes generic internal, database,
+authentication, quota, and invalid-model errors. The composer stays available,
+so your next message runs on the existing runtime instead of starting a new
+conversation.
+
+Retention is not a retry. Kandev does not replay the failed prompt and does not
+start automatic recovery for an error class that has no existing policy. The
+task row keeps an error badge until you select **Dismiss turn error**, use the
+task menu dismissal, or send a new prompt after the error appears. A real
+process exit, transport loss, or recovery failure still uses the normal runtime
+recovery controls.
+
 ### Model capacity
 
-For interactive tasks, Kandev retries a model-capacity error when the runtime
-supports live continuation and at least one tool has a confirmed result. Kandev
-keeps confirmed actions in the conversation. It asks the agent to continue
-without repeating those actions. This does not guarantee exactly-once effects.
+Kandev supports live model-capacity recovery for tested Codex and OpenCode ACP
+profiles in interactive tasks. OpenCode can run its own short retries first. A
+native retry does not start a Kandev retry and does not use the Kandev attempt
+budget. When OpenCode ends those retries with a capacity refusal, Kandev keeps
+the same runtime and continues the unfinished turn there.
+
+Kandev retries a model-capacity error when the runtime supports live
+continuation and at least one tool has a confirmed result. Kandev keeps
+confirmed actions in the conversation. It asks the agent to continue without
+repeating those actions. This does not guarantee exactly-once effects.
 
 Kandev makes up to 11 additional attempts within 30 minutes. Waits increase
-from 5 seconds to a maximum of 5 minutes. The inline notice shows the attempt
-count, next retry, deadline, and **Cancel** action. A new message, a session
-configuration change, or **Cancel** stops pending recovery. A backend restart
-also stops automatic recovery. It does not restore the retry schedule. The
-deadline does not stop a turn that is already running.
+from 5 seconds to a maximum of 5 minutes. A short provider wait hint can raise
+one of the first five waits. It never shortens a wait. The inline notice shows
+the attempt count, next retry, deadline, and **Cancel** action. A new message, a
+session configuration change, or **Cancel** stops pending recovery. A backend
+restart also stops automatic recovery. It does not restore the retry schedule.
+The deadline does not stop a turn that is already running.
 
 Kandev leaves a model-capacity error for you to handle when a tool or permission
 is pending, an outcome is uncertain, background work is unaccounted for, the
@@ -786,6 +832,13 @@ session sends or queues it according to its current input mode. If delivery
 fails, the form keeps your answer so you can retry. **Close question** removes
 the answer surface without sending anything, while the question stays in the
 conversation history.
+
+Unfinished answers stay with their question when you switch tasks or sessions
+and come back. This includes text you have typed but not sent, selected options,
+and your position in a multi-question bundle. Drafts last for the current
+browser page: a reload, logout, or different signed-in user clears them. Kandev
+keeps up to eight unfinished question bundles at a time and discards the least
+recently used one after that.
 
 ## Task dependencies
 
@@ -850,9 +903,10 @@ own and never quietly drops the link.
 Three things clear it, all of them deliberate: retry the predecessor until it
 succeeds, remove the link over MCP, or start the dependent manually.
 
-An **archived** predecessor is treated as unfinished, not as failed and not as
-resolved, so archiving a task does not release the work waiting on it.
-**Deleting** a task does remove its links in both directions, and any dependent
+An **archived** predecessor keeps its outcome: **Completed** resolves the
+dependency, **Failed** or **Cancelled** keeps the dependent blocked, and
+unfinished work stays pending. Archiving does not remove the link.
+**Deleting** a task removes its links in both directions, and any dependent
 that was waiting only on it becomes unblocked. That dependent is not started:
 deletion is not success.
 
@@ -953,11 +1007,16 @@ while its page refreshes. Expanding shows already available rows immediately;
 any additional rows appear when the refresh finishes. This also applies in the
 phone **Tasks** drawer and navigation menu.
 
-If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
-failure; rows already shown remain visible during a failed refresh. If a filter
-is invalid, use **Filters** to correct the indicated selection instead. Repository
-and workflow selections support up to 1,000 values per filter; the limits apply
-to each selected value, not to the combined selection.
+If a temporary sidebar read fails, Kandev retries it automatically for up to
+about thirty seconds. The current rows stay in place, and no warning appears
+while those retries continue. If recovery stops, the sidebar shows one message,
+and **Retry** starts another bounded attempt. Rows already shown remain visible.
+A temporary problem that clears during the retry window needs no action. Access
+or missing-resource failures are reported immediately without automatic retries.
+If a filter is invalid, use **Filters** to correct the indicated selection
+instead.
+Repository and workflow selections support up to 1,000 values per filter; the
+limits apply to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
 - On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
@@ -1006,12 +1065,20 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit             | Scope and effect                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
+| Limit             | Scope and effect                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior.                          |
+| **Session limit** | Caps automatic agent starts and new message turns across the instance. When reached, Kandev keeps the selected destination or pending message and retries later.                                                  |
 
-The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
+The session limit is off by default. Explicit **Start**, **Resume**, and
+**Send Now** can override it. Ordinary messages, including chat and
+`message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
+input in the existing prompt queue and starts one new turn when capacity
+becomes available. After a backend restart, later authorized session activity
+re-registers the pending queue. Auto-run OFF keeps that input pending. Set a positive limit
+in **Settings → Preferences → Task Behavior → Runtime**.
+`KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
+limit. Change the environment variable and restart Kandev.
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
@@ -1166,6 +1233,7 @@ to review an action and return to your list.
 
 - Kandev removes archived tasks from active views. Saved views that include archived tasks still show them.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
+- Several archives can be pending at once. Each row keeps its own spinner and ignores repeated archive requests until its own request settles, and Kandev does not switch you to a task that is also being archived.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
 For Git worktrees, archive deletes Kandev-owned checkouts and their local
@@ -1273,7 +1341,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
-- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
+- **A task or task list shows as temporarily unavailable:** Kandev retries the task, session, and sidebar reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. Warnings appear only after those automatic retries stop. Then select **Retry**, or use **Back to task overview**. Task details and rows that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

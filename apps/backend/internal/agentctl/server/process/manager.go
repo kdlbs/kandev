@@ -20,10 +20,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/antigravityruntime"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/opencodeplugin"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -32,9 +35,11 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -74,6 +79,10 @@ type PendingPermission struct {
 	CreatedAt         time.Time
 	State             string
 	AutoApproveOption *adapter.PermissionOption
+	// HumanInput marks a provider-native question only a person can answer.
+	// It bypasses every automatic policy branch and never carries an
+	// AutoApproveOption.
+	HumanInput bool
 }
 
 // PermissionOperationError carries a stable code across the agentctl stream.
@@ -114,6 +123,7 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
+	processManagerID         string
 	questionImageWorkDir     string
 	questionImageOnce        sync.Once
 	questionImageSlots       chan struct{}
@@ -149,6 +159,24 @@ type Manager struct {
 	deliveryCancellationFailed  bool
 	deliveryPromptMu            sync.Mutex
 	deliveryPromptByGeneration  map[uint64]string
+	deliverySubmissionHistory   map[uint64]string
+	deliverySubmissionOrder     []uint64
+
+	openCodePluginMu        sync.Mutex
+	openCodePluginSyncMu    sync.Mutex
+	openCodePluginHost      *opencodeplugin.Host
+	openCodePluginValidator openCodePluginAdmissionValidator
+	openCodePluginGuard     openCodePluginAdmissionGuard
+	openCodePluginRetirer   openCodePluginClaimRetirer
+
+	// diskSampler is the process-wide advisory capacity cache shared by every
+	// instance. Nil falls back to a direct bounded read on the advisory route.
+	diskSampler   *systemmetrics.DiskCapacitySampler
+	diskSamplerMu sync.RWMutex
+	// runtimeStorageCache is the last advisory snapshot produced by the
+	// dedicated route. Ordinary status reads it without filesystem I/O.
+	runtimeStorageCacheMu sync.RWMutex
+	runtimeStorageCache   *streams.RuntimeStorageSnapshot
 
 	// Process state
 	cmd                *exec.Cmd
@@ -342,6 +370,10 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+
+	// agentProcessIdentity is the running agent child's process-group identity,
+	// reported in the delivery descriptor for per-session termination proof.
+	agentProcessIdentity atomic.Pointer[processidentity.Identity]
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
@@ -451,6 +483,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
+		processManagerID:           uuid.NewString(),
 		questionImageWorkDir:       imageWorkDir,
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
@@ -461,6 +494,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCtx:                lifetimeCtx,
 		lifetimeCancel:             lifetimeCancel,
 		deliveryPromptByGeneration: make(map[uint64]string),
+		deliverySubmissionHistory:  make(map[uint64]string),
 		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
 	}
@@ -470,6 +504,9 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 			m.deliveryLimit = m.deliveryJournal.MaxEventBytes()
 			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
+		}
+		if m.deliveryJournalErr != nil {
+			logDeliveryJournalOpenFailure(m.logger, cfg.InstanceID, cfg.SessionID, cfg.DurableJournalPath, m.deliveryJournalErr)
 		}
 	}
 	// Build the root plus any immediate sibling repositories and recursively
@@ -585,10 +622,12 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 		if capability.Reason == "storage_not_durable" {
 			return journal.RecoveryDescriptor{
 				StorageCapability: capability,
+				ProcessManagerID:  m.ProcessManagerID(),
 				SessionID:         m.cfg.SessionID,
 				IncarnationID:     m.DeliveryIncarnationID(),
 				HarnessGeneration: m.DeliveryHarnessGeneration(),
 				StreamID:          currentStreamID,
+				AgentProcess:      m.AgentProcessIdentity(),
 			}, nil
 		}
 		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
@@ -608,6 +647,8 @@ func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID strin
 		return journal.RecoveryDescriptor{}, err
 	}
 	descriptor.StorageCapability = capability
+	descriptor.ProcessManagerID = m.ProcessManagerID()
+	descriptor.AgentProcess = m.AgentProcessIdentity()
 	return descriptor, nil
 }
 
@@ -755,7 +796,35 @@ func (m *Manager) TrackDeliverySubmission(submissionID string, promptGeneration 
 		m.deliveryPromptByGeneration = make(map[uint64]string)
 	}
 	m.deliveryPromptByGeneration[promptGeneration] = submissionID
+	m.recordDeliverySubmissionHistoryLocked(promptGeneration, submissionID)
 	m.deliveryPromptMu.Unlock()
+}
+
+// recordDeliverySubmissionHistoryLocked keeps bounded attribution for claims
+// captured during an older prompt. It never lets a late observation adopt the
+// current active submission.
+func (m *Manager) recordDeliverySubmissionHistoryLocked(generation uint64, submissionID string) {
+	if generation == 0 || submissionID == "" {
+		return
+	}
+	if m.deliverySubmissionHistory == nil {
+		m.deliverySubmissionHistory = make(map[uint64]string)
+	}
+	if _, exists := m.deliverySubmissionHistory[generation]; !exists {
+		m.deliverySubmissionOrder = append(m.deliverySubmissionOrder, generation)
+	}
+	m.deliverySubmissionHistory[generation] = submissionID
+	for len(m.deliverySubmissionOrder) > 64 {
+		oldest := m.deliverySubmissionOrder[0]
+		m.deliverySubmissionOrder = m.deliverySubmissionOrder[1:]
+		delete(m.deliverySubmissionHistory, oldest)
+	}
+}
+
+func (m *Manager) submissionForGeneration(generation uint64) string {
+	m.deliveryPromptMu.Lock()
+	defer m.deliveryPromptMu.Unlock()
+	return m.deliverySubmissionHistory[generation]
 }
 
 func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
@@ -1825,9 +1894,14 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
+		m.closeOpenCodePlugin(context.Background())
 		return 0, err
 	}
-	return m.startManagedProcess()
+	generation, err := m.startManagedProcess()
+	if err != nil {
+		m.closeOpenCodePlugin(context.Background())
+	}
+	return generation, err
 }
 
 func (m *Manager) startManagedProcess() (uint64, error) {
@@ -1848,6 +1922,7 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
 	processGeneration := m.beginManagedStartupGeneration()
+	m.watchOpenCodePluginReadiness()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
@@ -1882,6 +1957,8 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 		m.status.Store(StatusError)
 		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
+
+	m.recordAgentProcessIdentity(m.cmd.Process.Pid)
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
@@ -1966,7 +2043,23 @@ func (m *Manager) buildAdapterConfig() error {
 		AgentBackgroundWorkEnabled: m.cfg.AgentBackgroundWorkEnabled,
 		PromptCancelJoinTimeout:    m.cfg.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
+		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+	}
+	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
+		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
+		if harness == "" {
+			bundle, err := antigravityruntime.Resolve(context.Background(), antigravityruntime.ResolveOptions{})
+			if err != nil {
+				return fmt.Errorf("resolve Antigravity harness: %w", err)
+			}
+			harness = bundle.HarnessPath
+		}
+		env, err := acpcompat.PrepareLocalAntigravityEnv(m.cfg.AgentEnv, harness)
+		if err != nil {
+			return fmt.Errorf("prepare Antigravity child environment: %w", err)
+		}
+		m.cfg.AgentEnv = env
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2042,6 +2135,8 @@ func (m *Manager) buildFinalCommand() error {
 		m.finalCommand = "[wrapped agent]"
 	}
 	cmdArgs = finalArgs[1:]
+
+	m.prepareOpenCodePlugin()
 
 	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
 	// the HTTP request context to kill the agent process when the request completes.
@@ -2510,6 +2605,7 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			return
 		}
 		update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+		m.syncOpenCodePluginClaims(agentAdapter)
 		if suppressOrdinaryOutput && !isTerminalDeliveryEvent(update) {
 			if update.DeliverySubmissionID == "" || update.DeliverySubmissionID == suppressedSubmissionID {
 				continue
@@ -2590,26 +2686,18 @@ func (m *Manager) closeDeliveryEventWriter() {
 // The normalized event is kept as an opaque payload here; backend projection
 // remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
-	m.deliveryJournalMu.RLock()
-	deliveryJournal := m.deliveryJournal
-	eventLimit := m.deliveryLimit
-	if eventLimit <= 0 && deliveryJournal != nil && m.deliveryJournalErr == nil {
-		eventLimit = deliveryJournal.MaxEventBytes()
-	}
-	m.deliveryJournalMu.RUnlock()
+	return m.persistDeliveryEventContext(context.Background(), update)
+}
+
+// persistDeliveryEventContext is the cancellable variant used by the plugin
+// ingress. A cancelled caller receives an error and no acknowledgement even if
+// the writer later commits the queued observation.
+func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
 		eventLimit = deliverylimits.MaxEventBytes
 	}
-	limit := deliverylimits.DisplayBudgetFor(eventLimit)
-	update = streams.PrepareToolEventWithLimit(update, limit)
-	m.deliveryJournalMu.Lock()
-	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
-	if configured && deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
-		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
-		m.deliveryWriter = newDeliveryEventWriter(m)
-	}
-	writer := m.deliveryWriter
-	m.deliveryJournalMu.Unlock()
+	update = streams.PrepareToolEventWithLimit(update, deliverylimits.DisplayBudgetFor(eventLimit))
 	if !configured {
 		return update, nil
 	}
@@ -2621,18 +2709,35 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 		return update, err
 	}
 	if writer != nil {
-		persisted, err := writer.persist(context.Background(), update)
+		persisted, err := writer.persist(ctx, update)
 		if err != nil {
 			m.recordDeliveryWriteFailure(err, update, eventLimit)
 		}
 		return persisted, err
 	}
-	committed, err := m.persistDeliveryBatch(context.Background(), []adapter.AgentEvent{update})
+	committed, err := m.persistDeliveryBatch(ctx, []adapter.AgentEvent{update})
 	if err != nil {
 		m.recordDeliveryWriteFailure(err, update, eventLimit)
 		return update, err
 	}
 	return committed[0], nil
+}
+
+// deliveryWriteState snapshots the journal and ordered writer under one lock.
+func (m *Manager) deliveryWriteState() (*journal.Journal, int64, bool, *deliveryEventWriter) {
+	m.deliveryJournalMu.Lock()
+	defer m.deliveryJournalMu.Unlock()
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
+	deliveryJournal := m.deliveryJournal
+	eventLimit := m.deliveryLimit
+	if eventLimit <= 0 && deliveryJournal != nil && m.deliveryJournalErr == nil {
+		eventLimit = deliveryJournal.MaxEventBytes()
+	}
+	if configured && deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
+		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
+		m.deliveryWriter = newDeliveryEventWriter(m)
+	}
+	return deliveryJournal, eventLimit, configured, m.deliveryWriter
 }
 
 func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
@@ -2675,12 +2780,17 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 		if sessionID == "" {
 			sessionID = streamID
 		}
+		submissionID := update.DeliverySubmissionID
+		if submissionID == "" && update.DeliveryEventID == "" {
+			submissionID = m.deliverySubmissionIDForEvent(update)
+		}
 		events[i] = journal.Event{
 			SessionID:         sessionID,
 			IncarnationID:     incarnationID,
 			HarnessGeneration: harnessGeneration,
 			StreamID:          streamID,
-			SubmissionID:      m.deliverySubmissionIDForEvent(update),
+			SubmissionID:      submissionID,
+			Identity:          update.DeliveryEventID,
 			Type:              update.Type,
 			Payload:           payload,
 			Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
@@ -2723,12 +2833,16 @@ func (m *Manager) SendErrorEventWithProviderError(
 	errorMessage string,
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
+	storage ...*streams.DeliveryStorageDiagnostic,
 ) {
 	event := adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
+	}
+	if len(storage) > 0 && storage[0] != nil {
+		event.Storage = storage[0]
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
 		m.logger.Error("failed to commit durable error event", zap.Error(err))
@@ -2868,6 +2982,7 @@ func (m *Manager) stop(ctx context.Context) error {
 	if err := m.passthrough.StopAll(ctx); err != nil {
 		return err
 	}
+	defer m.closeOpenCodePlugin(ctx)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -3050,6 +3165,7 @@ func (m *Manager) closeAdapterAndStdin() bool {
 // adapter's update worker is still live; reassigning the fields would strand
 // both permanently.
 func (m *Manager) finishPreviousLifecycle(ctx context.Context) {
+	m.closeOpenCodePlugin(ctx)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -3498,6 +3614,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 	// The manager owns stderr's read/write pipe, so Wait can reap the process
 	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	m.clearAgentProcessIdentity(pid)
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
 	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
@@ -3543,6 +3660,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 				"exit_code":          exitCode,
 				"recent_stderr":      recentStderr,
 				"process_generation": generation,
+				"process_manager_id": m.ProcessManagerID(),
 				"startup_evidence":   evidence,
 			},
 		}
@@ -3567,6 +3685,7 @@ func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, gene
 		}
 	}
 	m.status.Store(StatusStopped)
+	m.closeOpenCodePlugin(context.Background())
 }
 
 // GetFinalCommand returns the full command string that was used to start the agent process,
@@ -3605,18 +3724,25 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		pendingID = fmt.Sprintf("%s-%s-%d", req.SessionID, req.ToolCallID, time.Now().UnixNano())
 	}
 
+	req.HumanInput = m.classifyHumanInputPermission(req)
 	m.logger.Info("handling permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
+		zap.Bool("human_input", req.HumanInput),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// A coordinator session's agentctl instance does not consult its own
-	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
-	// injected-MCP approval; only the exact seven-tool coordinator allowlist
-	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	// A native human question is classified before every automatic policy
+	// branch. Coordinator, managed-MCP, and blanket auto-approval would
+	// otherwise select an offered allow option, which is the user's answer.
 	switch {
+	case req.HumanInput:
+		// Wait for the person. Nothing below may answer this request.
 	case m.cfg.McpMode == mcpmode.Coordinator:
+		// A coordinator session's agentctl instance does not consult its own
+		// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+		// injected-MCP approval; only the exact seven-tool coordinator allowlist
+		// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
 		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
 			return response, nil
 		}
@@ -3636,8 +3762,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 
 	// A coordinator session never takes the blanket or injected-tool approval:
 	// only its allowlist above decides, and anything else waits for a person.
+	// A human question never takes any automatic approval at all.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.McpMode != mcpmode.Coordinator {
+	if !req.HumanInput && m.cfg.McpMode != mcpmode.Coordinator {
 		var response *adapter.PermissionResponse
 		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
@@ -3654,6 +3781,7 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		CreatedAt:         createdAt,
 		State:             streams.PermissionStatusPending,
 		AutoApproveOption: autoApproveOption,
+		HumanInput:        req.HumanInput,
 	}
 	pending.Snapshot = m.permissionSnapshot(pending)
 
@@ -3792,15 +3920,16 @@ func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.Age
 		}
 	}
 	event := adapter.AgentEvent{
-		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         m.permissionSessionID(pending),
-		ToolCallID:        pending.Request.ToolCallID,
-		RequestID:         pending.RequestID,
-		PendingID:         pending.ID,
-		PermissionTitle:   pending.Snapshot.Title,
-		PermissionOptions: options,
-		ActionType:        pending.Snapshot.Action.Type,
-		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
+		Type:                 adapter.EventTypePermissionRequest,
+		SessionID:            m.permissionSessionID(pending),
+		ToolCallID:           pending.Request.ToolCallID,
+		RequestID:            pending.RequestID,
+		PendingID:            pending.ID,
+		PermissionTitle:      pending.Snapshot.Title,
+		PermissionOptions:    options,
+		PermissionHumanInput: pending.HumanInput,
+		ActionType:           pending.Snapshot.Action.Type,
+		ActionDetails:        permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
 	if pending.AutoApproveOption != nil {
 		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
@@ -3828,7 +3957,7 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		event = persisted
 	}
 
-	if !m.IsAttached() {
+	if !m.IsAttached() || pending.HumanInput {
 		m.sendUpdateBlocking(event)
 		return
 	}
@@ -3925,9 +4054,10 @@ func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.Pending
 			Tool:        action.Tool,
 			Redacted:    action.Redacted,
 		},
-		Options:   options,
-		CreatedAt: pending.CreatedAt,
-		Status:    streams.PermissionStatusPending,
+		Options:    options,
+		HumanInput: pending.HumanInput,
+		CreatedAt:  pending.CreatedAt,
+		Status:     streams.PermissionStatusPending,
 	}
 }
 

@@ -20,6 +20,8 @@ const discovery: CopilotPluginDiscoveryResponse = {
   profile_id: "profile-a",
   provider_id: "copilot-acp",
   status: "ready",
+  runtime_version: "1.0.88",
+  mount_permitted: true,
   plugins: [],
 };
 

@@ -273,7 +273,12 @@ async function checkSavedReports(
         apply_state === "failed" ? 2 : 1,
       );
       await expect(explorer).not.toContainText("Desired revision");
-      if (apply_state !== "applied") await expect(summary).toContainText("stays in use");
+      if (apply_state === "failed") {
+        await expect(summary).toContainText("The last accepted setup is kept for comparison.");
+        await expect(summary).not.toContainText("stays in use");
+      } else if (apply_state !== "applied") {
+        await expect(summary).toContainText("stays in use");
+      }
       if (mobile) {
         await expect(page.locator('[data-slot="drawer-content"][data-state="open"]')).toHaveCount(
           1,

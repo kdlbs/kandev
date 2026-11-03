@@ -710,6 +710,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSSetConfigOption(ctx, msg)
 	case "agent.session.authenticate":
 		return s.handleWSAuthenticate(ctx, msg)
+	case "agent.auth.status":
+		return s.handleWSAuthStatus(msg)
 	case "agent.session.reset":
 		return s.handleWSResetSession(ctx, msg)
 	default:
@@ -1317,6 +1319,7 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 				message,
 				req.PromptGeneration,
 				providerError,
+				streams.DeliveryStorageDiagnosticFromError(err),
 			)
 		}
 	}()
@@ -1374,7 +1377,8 @@ func (s *Server) admitDurablePrompt(
 		Payload:           payload,
 	})
 	if err != nil {
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "prompt submission could not be admitted", nil)
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict,
+			"prompt submission could not be admitted", promptErrorDetails(err))
 		return "", resp
 	}
 	s.procMgr.TrackDeliverySubmission(submission.ID, req.PromptGeneration)
@@ -1637,6 +1641,33 @@ func (s *Server) handleWSAuthenticate(ctx context.Context, msg *ws.Message) *ws.
 		}
 		return aa.Authenticate(ctx, req.MethodID)
 	})
+}
+
+func (s *Server) handleWSAuthStatus(msg *ws.Message) *ws.Message {
+	var req struct {
+		AttemptID string `json:"attempt_id,omitempty"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
+		return resp
+	}
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+	provider, ok := agentAdapter.(adapter.AuthStatusProvider)
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "agentctl does not support auth status; upgrade required", nil)
+		return resp
+	}
+	status := provider.AuthStatus()
+	if req.AttemptID != "" && status.AttemptID != req.AttemptID {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "auth attempt is no longer active", nil)
+		return resp
+	}
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, status)
+	return resp
 }
 
 func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.Message {

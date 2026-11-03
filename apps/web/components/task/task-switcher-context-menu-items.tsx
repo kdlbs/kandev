@@ -31,6 +31,7 @@ import {
   TaskCreateSubtaskItem,
   TaskDeleteItem,
   TaskDetachItem,
+  TaskTurnErrorDismissItem,
 } from "./task-switcher-action-items";
 import {
   useTaskPluginLinkActions,
@@ -267,6 +268,7 @@ function SingleMarkGroup({
           onSelect={(priority) => void updateTaskPriority(task.id, priority)}
         />
       )}
+      <TaskTurnErrorDismissItem task={task} disabled={isDeleting} />
     </>
   );
 }

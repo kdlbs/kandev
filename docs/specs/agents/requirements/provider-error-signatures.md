@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-10-08
+updated: 2026-10-28
 owners:
   - kandev
 ---
@@ -63,11 +64,44 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
+  opening `free usage limit reached` line without an error-envelope label shall
+  classify as a quota limit. This criterion covers only the unlabelled
+  provider-specific form.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
+  with `Rate limit exceeded: free-models-per-day...` or
+  `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
+  when sanitization masks the cadence token. The recorded excerpt remains
+  sanitized, and these signatures shall not outrank existing typed signals or
+  earlier payment, credit, and quota rules.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8:** An opening labeled JSON error
+  envelope containing `error_type` with the value `provider_unavailable`
+  shall classify as provider unavailable. Bare JSON examples and quoted
+  mid-sentence prose shall not trigger it.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.9:** OpenCode's opening
+  `Rate limit exceeded. Please try again later` line, optionally wrapped by
+  its provider error label, shall classify as rate limited without inferring a
+  daily reset period.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.11:** For `opencode-acp`, an opening
+  `Upstream request failed: [ttft_admission_refused] the cell is at capacity`
+  diagnostic shall classify as high-confidence, retryable `model_capacity`.
+  Established error labels can precede the diagnostic.
+  Bare capacity prose, quoted examples, other refusal tokens, and unrelated
+  providers shall not match this signature.
+  Existing structured classification and earlier account-limit rules retain precedence.
+  A valid `(after N s)` suffix shall provide a reset hint from the diagnostic's observation time.
+  Only integer delays from 1 through 60 seconds qualify.
+  Missing, malformed, zero, negative, and larger delays shall provide no hint.
+  Classification shall not establish runtime health or authorize another prompt.
+
+Criterion 001.11 was added by the October 28
+[OpenCode capacity package](../../../plans/opencode-capacity-retry/plan.md).
 
 ## Out of scope
 
-- Changing rule order, confidence levels, or classification flags.
-- Changing the provider-neutral rules or the runtime-environment rules.
+- Changing rule order, confidence levels, or classification flags beyond the
+  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, and 001.11.
+- Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
 
 

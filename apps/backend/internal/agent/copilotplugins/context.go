@@ -21,12 +21,6 @@ var inventoryQualifiedVersions = map[string]struct{}{
 	"1.0.104": {},
 }
 
-// policyVerifiedVersions lists runtimes for which native fixtures established
-// that an explicit --plugin-dir mount preserves native MCP disables and managed
-// prohibitions. No runtime has that evidence yet, so nonempty starts stay
-// fail-closed while discovery remains available.
-var policyVerifiedVersions = map[string]struct{}{}
-
 // RuntimeSupported reports whether safe inventory discovery is qualified for
 // the selected managed runtime version.
 func RuntimeSupported(version string) bool {
@@ -34,20 +28,10 @@ func RuntimeSupported(version string) bool {
 	return ok
 }
 
-// MountsPermitted reports whether explicit plugin mounts are permitted for the
-// selected runtime. Inventory qualification is deliberately separate.
+// MountsPermitted reports whether the selected runtime has a supported native
+// inventory and metadata adapter for explicit plugin preparation.
 func MountsPermitted(version string) bool {
-	_, ok := policyVerifiedVersions[strings.TrimSpace(version)]
-	return ok
-}
-
-// RequireMountPolicy returns a typed policy_unverified error until native
-// evidence proves that explicit mounts preserve the runtime's vetoes.
-func RequireMountPolicy(version string) error {
-	if MountsPermitted(version) {
-		return nil
-	}
-	return &Error{Reason: ReasonPolicyUnverified}
+	return RuntimeSupported(version)
 }
 
 // RuntimeVersionFromCommand extracts the exact @github/copilot package version

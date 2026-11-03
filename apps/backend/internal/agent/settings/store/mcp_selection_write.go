@@ -34,6 +34,10 @@ func readMCPSelectionSnapshotTx(ctx context.Context, tx *sqlx.Tx, origin mcpconf
 	if err != nil || origin.Scope != mcpconfig.SelectionScopeTaskSession {
 		return snapshot, err
 	}
+	snapshot.ExcludedDefinitionIDs, err = readMCPSessionExclusionsTx(ctx, tx, origin.WorkspaceID, origin.OwnerID)
+	if err != nil {
+		return snapshot, err
+	}
 	state, err := readMCPSelectionState(ctx, tx, origin.OwnerID)
 	if errors.Is(err, mcpconfig.ErrMCPSelectionStateNotFound) {
 		return snapshot, nil
@@ -125,18 +129,10 @@ func (r *sqliteRepository) ReplaceMCPSelectionsConditional(ctx context.Context, 
 	if err := checkMCPSelectionCondition(previous, condition); err != nil {
 		return result, err
 	}
-	ids = normalizedMCPSelectionIDs(ids)
-	if slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(previous.DefinitionIDs, id) }) {
-		if err := validateMCPSelectionAdditionOwner(ctx, tx, origin, condition.ValidateAdditions); err != nil {
-			return result, err
-		}
-	}
-	if err := validateMCPSelectionDefinitions(ctx, tx, origin.WorkspaceID, ids, previous.DefinitionIDs); err != nil {
+	if err := writeMCPSelectionSets(ctx, tx, origin, previous, ids, condition); err != nil {
 		return result, err
 	}
-	if err := replaceMCPSelectionsTx(ctx, tx, origin.Scope, origin.WorkspaceID, origin.OwnerID, ids); err != nil {
-		return result, err
-	}
+
 	if origin.Scope == mcpconfig.SelectionScopeTaskSession {
 		if err := advanceMCPSelectionRevision(ctx, tx, origin.OwnerID); err != nil {
 			return result, err
@@ -194,4 +190,29 @@ func lockMCPDefinition(ctx context.Context, tx *sqlx.Tx, workspaceID, id string)
 		return mcpconfig.ErrMCPServerDefinitionNotFound
 	}
 	return err
+}
+
+func writeMCPSelectionSets(ctx context.Context, tx *sqlx.Tx, origin mcpconfig.SelectionOrigin, previous mcpconfig.SelectionSnapshot, ids []string, condition mcpconfig.SelectionCondition) error {
+	if condition.ExcludedDefinitionIDs != nil && ids == nil {
+		ids = previous.DefinitionIDs
+	}
+	ids = normalizedMCPSelectionIDs(ids)
+	if err := lockMCPSelectionDefinitions(ctx, tx, origin.WorkspaceID, ids, condition.ExcludedDefinitionIDs); err != nil {
+		return err
+	}
+	if err := replaceMCPSessionExclusionsTx(ctx, tx, origin, previous.ExcludedDefinitionIDs, condition); err != nil {
+		return err
+	}
+	if slices.ContainsFunc(ids, func(id string) bool { return !slices.Contains(previous.DefinitionIDs, id) }) {
+		if err := validateMCPSelectionAdditionOwner(ctx, tx, origin, condition.ValidateAdditions); err != nil {
+			return err
+		}
+	}
+	if err := validateMCPSelectionDefinitions(ctx, tx, origin.WorkspaceID, ids, previous.DefinitionIDs); err != nil {
+		return err
+	}
+	if err := replaceMCPSelectionsTx(ctx, tx, origin.Scope, origin.WorkspaceID, origin.OwnerID, ids); err != nil {
+		return err
+	}
+	return nil
 }

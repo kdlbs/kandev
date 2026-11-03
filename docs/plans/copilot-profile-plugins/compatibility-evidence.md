@@ -2,11 +2,28 @@
 
 Date: 2026-10-28 (initial checks 2026-10-27)
 Owner: work order 00
-Status: reproduced local evidence plus an explicit authentication limitation
+Status: diagnostic investigation and supported process preparation complete
 
 This record supports the implementation in
 [plan.md](plan.md). It does not claim behavior that this machine could not
 observe.
+
+The [completion package](../copilot-profile-plugin-completion/plan.md) extends
+this same ledger rather than creating another support matrix.
+[Completion task 03](../copilot-profile-plugin-completion/task-03-native-qualification.md)
+records eight actual native attempts and limitations below.
+The [accepted native-authority decision](../../decisions/2026-10-28-copilot-native-policy-authority.md)
+removes privileged policy certification as a production prerequisite. Copilot
+owns native policy/consent; supported inventory/metadata versions, verified
+roots, and valid launch contexts remain required.
+
+The original Linux evidence is preserved separately from the macOS follow-up.
+An early missing-selector pause did not prove native incompatibility.
+The user later chose no administrator/system-policy changes. A tempdir is not
+a managed macOS policy source. Before completion WO-04, production code retained
+the empty policy gate. WO-04 removed that gate and delivered supported native
+process preparation. Native policy and component activation remain Copilot's
+responsibility.
 
 ## Environment
 
@@ -134,14 +151,19 @@ Official references checked on 2026-10-27 state:
 
 The adapter adds only read-only `--plugin-dir` mounts. It does not run
 `plugin enable`, `plugin disable`, `plugin install`, or `plugin update` and does
-not edit Copilot configuration. It therefore cannot grant a policy exception.
+not edit Copilot configuration or request a policy exception. These
+restrictions do not themselves certify native enterprise enforcement.
 
 Limitation: this machine had no authorized Copilot authentication. It could not
 observe an authenticated `session/new` veto for a managed-prohibited plugin.
-That remains unverified. The qualified set below is deliberately narrow, and a
-future runtime that bypasses a native veto must be removed from it.
+That Linux case remains unverified. The adapter set below is deliberately
+narrow. A demonstrated native incompatibility requires an explicit support
+decision; absence of a privileged test is not such a demonstration.
 
 ## Inventory-qualified subset
+
+This table preserves the original Linux results, not the later macOS
+observations or the revised target admission contract.
 
 | Capability | 1.0.88 | 1.0.103 | 1.0.104 |
 | --- | --- | --- | --- |
@@ -158,16 +180,112 @@ Inventory qualification: `1.0.88` and `1.0.104`. `1.0.103` remains unqualified
 because only supplied observations exist. Other versions return
 `runtime_unsupported`; Kandev does not fall back to a global CLI.
 
-Mount permission: none. `policyVerifiedVersions` is intentionally empty. Safe
-inventory discovery remains available, but a nonempty profile start fails with
-`policy_unverified` before any native inventory command or process start. This
-is the explicit AC-AGENTS-COPILOT-PLUGINS-007.2 gate; it must not be removed
-without authenticated evidence for the selected version and platform.
+At the original baseline, mount permission was empty: `policyVerifiedVersions`
+rejected nonempty starts with `policy_unverified` before inventory/start.
+That AC-AGENTS-COPILOT-PLUGINS-007.2 gate is superseded by 007.6 and 005.8.
+Completion WO-04 removed it under native authority. Current preparation admits
+valid local/worktree selections for `1.0.88` and `1.0.104`, while retaining
+root, identity, executor, wrapper, and argument-conflict validation. Unknown
+versions remain unsupported. Preparation eligibility is not native policy
+approval or enterprise certification.
 
 ## Not exercised
+
+Original Linux exclusions (see the subsequent macOS observations separately):
 
 - Authenticated plugin tool calls and native authentication reuse.
 - Plugin-provided MCP servers, native MCP disables, and managed prohibitions
   under an authenticated session.
 - Windows and macOS native paths.
 - Remote/container execution. Nonempty selections are rejected there by design.
+
+## Completion observations: macOS arm64
+
+The sections above preserve the original Linux fixture results. The completion
+execution used `darwin/arm64` (macOS 26.7.1) against baseline
+`fb4c2bc3ef98da2fc303fe05cb144bcd6c167d58` plus the uncommitted follow-up package.
+During those native diagnostic attempts, the managed pin and production mount
+gate were unchanged. The later WO-04 implementation removed only the artificial
+gate; the pin remains unchanged.
+
+The first three attempts per candidate used this native command, substituting
+the exact candidate and a private capture directory:
+
+```bash
+(cd apps/backend && env -u KANDEV_COPILOT_NATIVE_POLICY_FIXTURE KANDEV_COPILOT_NATIVE_ARTIFACT_DIR=<private-session-artifact-root> KANDEV_COPILOT_NATIVE_VERSION=<1.0.88-or-1.0.104> go test -trimpath -tags copilot_native -count=1 -timeout 10m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeAcceptance$' -v)
+```
+
+All six invocations exited 1, each running one top-level acceptance test with
+no subtests. These are incomplete harness attempts, not successful qualification
+or demonstrated native veto failures:
+
+| Candidate | Observed progress | Limitation |
+| --- | --- | --- |
+| 1.0.88 | Exact package/binary identity and two plugin roots, including the special-character path | Initial capability/setup errors; final `session/new` rejected an omitted SSE `headers` field |
+| 1.0.104 | Exact identity and two roots after removing unsupported `--no-remote`; all four plugin/native/ACP sentinels initialized and listed tools | Prompts ended without a tool call |
+
+Inventory visibility alone does not satisfy the repeated native-use case.
+Primary inspection found that the harness's `mcp__server__tool` allowlist did
+not match the `server-tool` identifier in earlier successful native Copilot
+traffic. The failed synthetic prompts reported unavailable tools. These six
+initial attempts do not establish native incompatibility, authentication
+failure, or enforcement of a prohibition.
+
+One corrective invocation per candidate then used the same command with the
+fixed selector, version-specific flags, and SSE `headers: []`. Both exited 1
+with one top-level test and no subtests:
+
+| Candidate | Actual corrective observation | Remaining limitation |
+| --- | --- | --- |
+| 1.0.104 | Each plugin-target, sibling, native-config, and ACP-injected sentinel received one valid `tools/call` and sent one successful result | No ACP tool-update events; endpoint evidence establishes coexistence, not managed enforcement |
+| 1.0.104 disable case | Target had no initialize/list/call traffic; allowed sibling completed one call/result | No authoritative denial captured; do not claim certification |
+| 1.0.88 | All four sentinels initialized, listed, and received endpoint calls | Then-current ACP-update correlation failed; paired disable was not reached, and the later evidence-assertion correction was not natively rerun |
+
+Final offline verification passed: 10 top-level tagged tests and 20 subtests
+with zero skips, ordinary provider tests, three focused race tests, native-test
+discovery, seven-file Go lint with zero issues, and whitespace. The tool-selector
+regression had a real assertion Red followed by Green. Exact commands and
+counts are in completion WO-03. All eight owned runtime roots were removed;
+subprocesses/listeners closed; raw captures remain private.
+
+The managed-policy fixture issue is now concrete, rather than an unset-selector
+assumption. Official deployment documentation requires forced macOS MDM
+preferences, the regular root-owned
+`/Library/Application Support/GitHubCopilot/managed-settings.json`, or
+account-bound server-managed settings. Candidate help provides no per-run
+managed-policy path override. No isolated macOS policy context was available;
+Linux container results would not establish macOS managed enforcement. Existing MDM,
+system policy, enterprise settings, credentials, and activation were not changed.
+
+Primary sources:
+
+- [Managed settings deployment](https://docs.github.com/en/copilot/how-tos/administer-copilot/manage-for-enterprise/use-managed-settings/deploy-managed-settings).
+- [Managed settings schema, including `deniedMcpServers`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings).
+- [ACP session setup](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v1/session-setup.mdx).
+
+Managed policy was not run. The user explicitly chose native enforcement
+without administrator rights or system-policy changes. Diagnostic delivery is
+complete, not a fully passing enterprise qualification. WO-04 implemented
+supported process preparation under native authority; missing enterprise
+evidence is not a launch gate. Raw frames/help remain private; only synthetic
+identifiers and sanitized observations are recorded here.
+
+## Completion verification exception: macOS SSH teardown
+
+WO-04's extended race command fails in the existing
+`TestSSHPassthroughResetReplacesChangedWorkspaceMCP` cleanup, not native startup.
+The error is `operation not permitted` from `manager.StopForTeardown` at
+`manager_ssh_passthrough_test.go:58`. The same failure was reproduced using a
+disposable archive of pristine baseline `fb4c2bc3ef98da2fc303fe05cb144bcd6c167d58`,
+without any follow-up source or tests:
+
+```bash
+(cd apps/backend && go test -json -trimpath -race -count=3 ./internal/agent/runtime/lifecycle -run '^TestSSHPassthroughResetReplacesChangedWorkspaceMCP$')
+```
+
+All three top-level runs failed; subtests produced eight passes and four
+failures. This establishes a pre-existing macOS teardown failure, not a new
+Copilot regression or an initial process-start denial. Do not describe the
+extended race command as passing. Unrelated process-group cleanup was not
+changed. The disposable baseline archive was removed and raw results remain
+private.

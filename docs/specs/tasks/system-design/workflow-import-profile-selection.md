@@ -16,6 +16,9 @@ Selections use profile IDs, so duplicate descriptors cannot redirect a user's ch
 
 No database migration or portable YAML version change is required.
 Profile selection does not change unattended sync or legacy raw-YAML profile matching.
+The later [portable profile matching design](workflow-portable-profile-matching.md)
+extends the descriptor and synchronization contract, including version 3;
+the statements here describe the original selection delivery.
 One-time import name selection is shared by preview, browser submission, and raw-YAML/MCP import.
 This is a local import extension. Its requirement and design preserve the rationale without a separate ADR.
 

@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-09-12
-updated: 2026-10-27
+updated: 2026-10-29
 owners:
   - kandev
 ---
@@ -69,13 +69,13 @@ Task and workspace systems retain authority over their records and permissions.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-INTERACTIVE-READS-005.1:** Temporary task-read failures shall show localized availability copy and Retry. They shall not imply deletion or lost access.
+- **AC-PLATFORM-INTERACTIVE-READS-005.1:** Exhausted temporary task reads shall show localized availability copy and Retry. Automatic recovery follows the quiet presentation in REQ-PLATFORM-INTERACTIVE-READS-007. Copy shall not imply deletion or lost access.
 - **AC-PLATFORM-INTERACTIVE-READS-005.2:** Each task-navigation read attempt shall finish within ten seconds. Timeouts shall remain temporary errors. One recovery cycle shall permit at most four automatic retries within thirty seconds of visible-tab time. Exhausted recovery shall retain manual Retry and the task-overview link.
 - **AC-PLATFORM-INTERACTIVE-READS-005.3:** Concurrent recovery triggers shall share one read. Navigation, authentication changes, and unmount shall invalidate obsolete recovery work.
 - **AC-PLATFORM-INTERACTIVE-READS-005.4:** Successful recovery shall open the selected task and retain its valid selected session. It shall not select a task from an earlier request.
 - **AC-PLATFORM-INTERACTIVE-READS-005.5:** Missing or inaccessible tasks shall retain the existing generic unavailable state. Authorization errors shall not receive automatic retries.
 - **AC-PLATFORM-INTERACTIVE-READS-005.6:** Desktop and phone users shall have equivalent keyboard and touch recovery actions. Phone targets shall measure at least 44px without horizontal overflow.
-- **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a temporary task read fails after content appears, the current task content and valid selected session shall remain visible during recovery and exhaustion. This applies to loaded details and the current authorized task projection. The page shall show recovery status without claiming that retained data is newly verified. A different task, changed identity or workspace, or permanent failure shall not reuse that content.
+- **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a temporary task read fails after content appears, the current task content and valid selected session shall remain visible during recovery and exhaustion. This applies to loaded details and the current authorized task projection. Recovery presentation follows REQ-PLATFORM-INTERACTIVE-READS-007 without claiming that retained data is newly verified. A different task, changed identity or workspace, or permanent failure shall not reuse that content.
 - **AC-PLATFORM-INTERACTIVE-READS-005.8:** When a temporary outage lasts up to fifteen seconds and each read settles within one second, task navigation shall recover automatically. Recovery shall not require another click, focus event, navigation, or page reload.
 - **AC-PLATFORM-INTERACTIVE-READS-005.9:** Hidden tabs shall pause automatic retry delays and the visible-time budget. Returning to the tab shall resume the remaining cycle. Concurrent foreground triggers shall not reset an active cycle's budget or duplicate its requests.
 - **AC-PLATFORM-INTERACTIVE-READS-005.10:** During recovery, the page shall announce progress and retain a reachable task-overview action. Retry shall keep its accessible name and remain disabled while the shared cycle runs. A server retry delay shall never be shortened to fit the remaining budget. When no compliant retry fits, the cycle shall stop within its budget.
@@ -94,6 +94,21 @@ Task and workspace systems retain authority over their records and permissions.
 
 The [journey loading design](../system-design/journey-data-loading.md) owns this extension. Criteria 006.1–006.2 concern inspection, not mutation admission or a guarantee during storage failure.
 
+### REQ-PLATFORM-INTERACTIVE-READS-007: Quiet task refresh recovery
+
+**Intent:** Short availability failures recover without repeated warnings or disruption to usable task content.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-INTERACTIVE-READS-007.1:** During automatic recovery, eligible retained task details and sidebar pages shall remain visible without a refresh warning or layout shift. Progress shall remain accessible. A successful recovery shall preserve the selected conversation, draft, and list scroll position.
+- **AC-PLATFORM-INTERACTIVE-READS-007.2:** One sidebar recovery cycle shall permit five total attempts within thirty seconds of visible-tab time. Each attempt shall finish within ten seconds. A temporary outage of fifteen seconds shall recover automatically when individual attempts settle within one second.
+- **AC-PLATFORM-INTERACTIVE-READS-007.3:** Concurrent consumers of the same sidebar query shall share its recovery cycle. Live updates, provisional results, foreground events, and rerenders shall not shorten retry delays or renew an active cycle's budget.
+- **AC-PLATFORM-INTERACTIVE-READS-007.4:** After automatic recovery ends unsuccessfully, the affected surface shall show one stable localized warning and Retry. New background events shall not restart exhausted recovery. Manual Retry or a later foreground episode can start one new cycle. Its warning shall remain until success or scope invalidation.
+- **AC-PLATFORM-INTERACTIVE-READS-007.5:** Authorization, missing-resource, invalid-filter, and other permanent failures shall retain immediate handling. Access denial shall clear affected content. Quiet recovery shall not reuse another account, workspace, view, or task's content.
+- **AC-PLATFORM-INTERACTIVE-READS-007.6:** Hidden tabs shall pause scheduled retries and the visible-time budget. A server retry delay shall never be shortened. Scope changes and final consumer release shall cancel obsolete requests and timers.
+- **AC-PLATFORM-INTERACTIVE-READS-007.7:** Desktop and phone shall share recovery semantics. Phone task pickers and app navigation shall retain touch recovery, contained scrolling, safe areas, and focus return. Each visible surface shall announce progress once per cycle, without announcements for every failed attempt.
+- **AC-PLATFORM-INTERACTIVE-READS-007.8:** Without eligible retained content, automatic recovery shall show ordinary loading progress rather than a refresh warning or a successful empty result. Exhausted recovery shall show the applicable unavailable state and recovery actions.
+
 ## Related contracts
 
 - [Required-store health](postgres-domain-store-parity.md), REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.
@@ -106,3 +121,7 @@ The [journey loading design](../system-design/journey-data-loading.md) owns this
 - New database pools, health-state semantics, public configuration, or feature flags.
 - Guaranteed latency under unrelated write saturation, failed disks, or remote database outages.
 - Attribution of every incident to inbox queries without query-level evidence.
+
+## Implementation plans
+
+- [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) covers the shared warning policy and bounded sidebar recovery.

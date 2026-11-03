@@ -51,9 +51,6 @@ func (s *Service) RegisterRemoteRepository(
 	if err := s.preflightRepositoryInputs(ctx, req.WorkspaceID, inputs); err != nil {
 		return nil, false, err
 	}
-	if err := s.verifyRemoteRepositoryOrigin(ctx, req.WorkspaceID, &inputs[0]); err != nil {
-		return nil, false, err
-	}
 	if err := validateBuiltInRemoteHints(inputs[0]); err != nil {
 		return nil, false, err
 	}

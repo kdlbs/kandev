@@ -280,6 +280,7 @@ func capacityContinuationHasUnsafeWork(snapshot *streams.CapacityContinuationSna
 
 func supportsCapacityContinuation(support streams.CapacityContinuationSupport) bool {
 	return support == streams.CapacityContinuationCodexLiveSessionV1 ||
+		support == streams.CapacityContinuationOpenCodeLiveSessionV1 ||
 		support == streams.CapacityContinuationMockLiveSessionV1
 }
 

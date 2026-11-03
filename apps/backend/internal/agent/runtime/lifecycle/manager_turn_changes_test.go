@@ -690,3 +690,21 @@ func (h *turnChangeCaptureBarrierHandler) FinishTurnChanges(_ context.Context, t
 }
 
 var _ TurnChangeCaptureHandler = (*turnChangeCaptureBarrierHandler)(nil)
+
+func TestTurnChangeRestoreInProgressRequiresStartingExecutionWithoutClient(t *testing.T) {
+	manager := newTestManager(t)
+	require.False(t, manager.TurnChangeRestoreInProgress("missing"))
+
+	execution := &AgentExecution{
+		ID: "execution-restore", SessionID: "session-restore", Status: v1.AgentStatusStarting,
+	}
+	require.NoError(t, manager.executionStore.Add(execution))
+	require.True(t, manager.TurnChangeRestoreInProgress("session-restore"))
+
+	execution.Status = v1.AgentStatusReady
+	require.False(t, manager.TurnChangeRestoreInProgress("session-restore"))
+
+	execution.Status = v1.AgentStatusStarting
+	execution.agentctl = agentctl.NewClient("127.0.0.1", 1, newTestLogger())
+	require.False(t, manager.TurnChangeRestoreInProgress("session-restore"))
+}

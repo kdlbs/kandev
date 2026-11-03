@@ -205,6 +205,11 @@ type AgentEvent struct {
 	// when agentctl can establish that association.
 	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
 
+	// DeliveryEventID is a stable producer identity for an observation that
+	// can be retried after a lost acknowledgement. The journal stores it
+	// beside the committed event so a retry cannot project twice.
+	DeliveryEventID string `json:"delivery_event_id,omitempty"`
+
 	// OperationID identifies an operation when the agent exposes an operation ID.
 	// It may be empty when no operation ID is available.
 	OperationID string `json:"operation_id,omitempty"`
@@ -300,6 +305,13 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
+	// ToolStatusMissing retains ACP wire provenance for the local turn finalizer.
+	// It is not serialized because only the adapter consumes this evidence.
+	ToolStatusMissing bool `json:"-"`
+
+	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
+	// New producers leave this read-compatibility field unset.
+	ToolOutputBytes *uint64 `json:"tool_output_bytes,omitempty"`
 
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.
@@ -335,6 +347,10 @@ type AgentEvent struct {
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
 
+	// Storage carries host-owned storage evidence for this error. It is never
+	// populated from provider prose or tool output.
+	Storage *DeliveryStorageDiagnostic `json:"storage,omitempty"`
+
 	// ProviderError contains a validated, sanitized provider diagnostic for a
 	// terminal error. Raw stderr never crosses this boundary.
 	ProviderError *ProviderError `json:"provider_error,omitempty"`
@@ -360,6 +376,11 @@ type AgentEvent struct {
 
 	// PermissionOptions contains the available permission choices.
 	PermissionOptions []PermissionOption `json:"permission_options,omitempty"`
+
+	// PermissionHumanInput marks a provider-native question that only a person
+	// can answer. It is set by the host classification, never by the provider
+	// wire payload, and automatic consumers must leave it pending.
+	PermissionHumanInput bool `json:"permission_human_input,omitempty"`
 
 	// RequestedModeID is set on a session_mode event only when Kandev asked for
 	// a mode the agent did not end up in, or could not confirm. It is what makes
@@ -469,9 +490,17 @@ type AgentEvent struct {
 	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
 
-	// SupportsPromptSuggestions indicates this session asked a Claude Code agent
-	// for native next-prompt suggestions. Only such sessions show suggestions.
+	// SupportsPromptSuggestions indicates this session asked an agent with
+	// established native support for next-prompt suggestions. It is the
+	// effective enablement value: support alone is not enough. Only such
+	// sessions show suggestions.
 	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
+
+	// NativePromptSuggestionsSupported reports provider support independently
+	// of user preference and session scope. A new ACP producer emits an explicit
+	// true or false; nil/absence means unknown from an older producer or another
+	// transport. Consumers must not treat it as effective enablement.
+	NativePromptSuggestionsSupported *bool `json:"native_prompt_suggestions_supported,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`

@@ -176,7 +176,7 @@ export type WorkflowStep = {
    * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   /**
    * ADR 0015: gate on_turn_complete transitions on an explicit
    * `step_complete_kandev` MCP signal from the agent. When true, the
@@ -584,7 +584,7 @@ export type WorkflowStepDTO = {
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;
@@ -695,6 +695,38 @@ export type SessionRecoveryBlockProjection = {
   updated_at: string;
 };
 
+/** Bounded storage evidence shared by live pressure and terminal causes. */
+export type RuntimeStorageFailure = {
+  reason?: string;
+  location?: string;
+  executor_label?: string;
+  observed_at?: string;
+  disk_available_bytes?: number;
+  disk_required_bytes?: number;
+  retained_bytes?: number;
+  limit_bytes?: number;
+  event_bytes?: number;
+};
+
+/** Runtime-only advisory storage state owned by the lifecycle observation. */
+export type RuntimeStorageHealth = {
+  state: "warning" | "normal" | "unavailable";
+  storage_kind?: "journal" | "workspace";
+  location: "local_runtime" | "executor_runtime" | "unknown";
+  executor_label?: string;
+  total_bytes?: number;
+  available_bytes?: number;
+  observed_at?: string;
+  /** Backend receipt age. Browser freshness adds local monotonic elapsed time. */
+  age_seconds?: number;
+  write_pressure?: boolean;
+  producer_paused?: boolean;
+  delivery_state?: string;
+  failure_storage?: RuntimeStorageFailure;
+  revision: number;
+  epoch: number;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -746,6 +778,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation used to reject stale snapshots. */
   cancellation_revision?: number;
+  /** Live advisory capacity; omitted by older backends and healthy peers. */
+  runtime_storage_health?: RuntimeStorageHealth | null;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /**
@@ -804,7 +838,7 @@ export type {
   ApproveSessionResponse,
 } from "./http-session-responses";
 
-export type NotificationProviderType = "local" | "apprise" | "system";
+export type NotificationProviderType = "local" | "apprise" | "system" | "webhook" | "webpush";
 
 export type NotificationProvider = {
   id: string;
@@ -1168,6 +1202,8 @@ export type Message = {
    * created_at ascending, ties by id); present only on user messages from an
    * indexed server payload, omitted on older payloads. */
   prompt_index?: number;
+  /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
+  turn_error_acknowledgement_failed?: boolean;
 };
 
 export type Turn = {
@@ -1201,6 +1237,7 @@ export type AgentProfilePortable = {
   agent_name: string;
   model?: string;
   mode?: string;
+  config_options?: Record<string, string>;
 };
 
 export type WorkflowPortable = {

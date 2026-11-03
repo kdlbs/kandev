@@ -226,6 +226,18 @@ type liveClarificationReader interface {
 	SessionHasLiveClarification(ctx context.Context, sessionID string) bool
 }
 
+// messageCapacityWaitRegistrar records a queue head blocked only by the session
+// ceiling so the shared capacity sweep retries it.
+type messageCapacityWaitRegistrar interface {
+	RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string)
+}
+
+// messageTurnCapacityReserver reserves a bounded message-turn slot before a
+// created or idle session starts a new provider turn.
+type messageTurnCapacityReserver interface {
+	ReserveMessageTurn(ctx context.Context, taskID, sessionID, incarnationID string) (*orchestrator.MessageTurnReservation, bool)
+}
+
 var _ liveClarificationReader = (*orchestrator.Service)(nil)
 
 type peerMessageStartAdmissionProvider interface {
@@ -300,6 +312,7 @@ type AgentProfileVerifier interface {
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	automationCreator      AutomationCreator
+	automationPluginTools  AutomationPluginTools
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -2855,6 +2868,12 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if req.Prompt == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
 	}
+	if req.DeliveryMode == "report" {
+		if req.ReplyToQuestionID != "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "report cannot answer a pending question", nil)
+		}
+		return h.handleWorkspaceCollaborationReport(ctx, msg, req.TaskID, req.SessionID, req.Prompt)
+	}
 	if req.SenderTaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sender_task_id is required (the calling agent's MCP server must supply this)", nil)
 	}
@@ -2890,7 +2909,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// ErrTaskNotFound on no-rows, never (nil, nil). The loaded task's
 	// ParentID also tells us whether the sender is the target's parent,
 	// which decides interrupt eligibility below.
-	targetTask, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	targetTask, err := h.taskSvc.GetTaskForPrompt(ctx, req.TaskID)
 	if err != nil {
 		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
@@ -3604,6 +3623,28 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if !pinnedTarget {
 			return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
 		}
+		if reserver, ok := h.sessionLauncher.(messageTurnCapacityReserver); ok {
+			reservation, admitted := reserver.ReserveMessageTurn(
+				ctx, taskID, session.ID, session.QueueIncarnationID,
+			)
+			if !admitted {
+				completedMetadata := make(map[string]interface{}, len(metadata)+1)
+				for key, value := range metadata {
+					completedMetadata[key] = value
+				}
+				completedMetadata[orchestrator.MetaKeyCompletedFollowUpIntent] = true
+				result, queueErr := h.queueRecordedTaskMessageForCapacity(
+					ctx, taskID, session, prompt, completedMetadata, nil,
+				)
+				if queueErr != nil {
+					return taskMessageDispatchResult{}, queueErr
+				}
+				return result, nil
+			}
+			if reservation != nil {
+				defer reservation.Release()
+			}
+		}
 		resumed, err := h.resumeCompletedTaskMessageSession(ctx, taskID, session.ID)
 		if err != nil {
 			return taskMessageDispatchResult{}, err
@@ -3724,7 +3765,7 @@ func (r *taskMessageReviewRollback) captureExpectedTaskState(ctx context.Context
 	if r == nil || !r.restoreTask {
 		return nil
 	}
-	task, err := taskSvc.GetTask(ctx, r.taskID)
+	task, err := taskSvc.GetTaskForPrompt(ctx, r.taskID)
 	if err != nil {
 		return err
 	}
@@ -3842,7 +3883,7 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 	if err != nil {
 		return nil, fmt.Errorf("failed to resume completed session: %w", err)
 	}
-	resumed, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	resumed, err := h.taskSvc.GetTaskSessionForPrompt(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload completed session after resume: %w", err)
 	}
@@ -3921,6 +3962,22 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 	}
 	if queued != nil {
 		return *queued, nil
+	}
+	if reserver, ok := h.sessionLauncher.(messageTurnCapacityReserver); ok {
+		reservation, admitted := reserver.ReserveMessageTurn(ctx, taskID, session.ID, session.QueueIncarnationID)
+		if !admitted {
+			releasePeerMessageStartAdmission(admission)
+			recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+			result, queueErr := h.queueRecordedTaskMessageForCapacity(ctx, taskID, session, prompt, metadata, recorded)
+			if queueErr != nil {
+				h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
+				return taskMessageDispatchResult{}, queueErr
+			}
+			return result, nil
+		}
+		if reservation != nil {
+			defer reservation.Release()
+		}
 	}
 	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 	if admission != nil {
@@ -4002,10 +4059,65 @@ func (h *Handlers) promptPreparedTaskMessage(
 	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	if err != nil {
+		if orchestrator.IsMessageTurnCapacityRefusal(err) {
+			result, queueErr := h.queueRecordedTaskMessageForCapacity(
+				ctx, taskID, session, prompt, metadata, recorded,
+			)
+			if queueErr == nil {
+				return result, nil
+			}
+			h.logger.Warn("failed to queue capacity-refused task message",
+				zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(queueErr))
+			err = queueErr
+		}
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
 	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+}
+
+// queueRecordedTaskMessageForCapacity keeps an already-recorded agent message
+// as durable pending input when the enabled ceiling has no turn capacity. The
+// queued entry carries sender metadata and the transcript identity so dispatch
+// does not duplicate the visible message.
+func (h *Handlers) queueRecordedTaskMessageForCapacity(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	prompt string,
+	metadata map[string]interface{},
+	recorded *models.Message,
+) (taskMessageDispatchResult, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
+	}
+	identity, err := h.resolveTaskMessageQueueIdentity(ctx, taskID, session)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	queueMetadata := make(map[string]interface{}, len(metadata)+2)
+	for key, value := range metadata {
+		queueMetadata[key] = value
+	}
+	queueMetadata[orchestrator.MetaKeyTurnStartAlreadyProcessed] = true
+	if recorded != nil {
+		queueMetadata["user_message_recorded"] = true
+		queueMetadata[messagequeue.MetadataDurableTranscriptMessageID] = recorded.ID
+	}
+	queued, err := queue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, queueMetadata,
+	)
+	if err != nil {
+		return taskMessageDispatchResult{}, err
+	}
+	if registrar, ok := h.sessionLauncher.(messageCapacityWaitRegistrar); ok {
+		registrar.RegisterMessageCapacityWait(ctx, taskID, session.ID, queued.ID)
+	}
+	h.publishQueueStatusEvent(ctx, identity, queue)
+	return taskMessageDispatchResult{
+		status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID,
+	}, nil
 }
 
 func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *models.TaskSession) bool {
@@ -4244,7 +4356,7 @@ func (h *Handlers) prepareSessionForTaskMessage(
 		// The caller addressed this exact session — never reroute to the
 		// task's primary session, just pick up any state change from
 		// on_turn_start.
-		reloaded, err := h.taskSvc.GetTaskSession(ctx, session.ID)
+		reloaded, err := h.taskSvc.GetTaskSessionForPrompt(ctx, session.ID)
 		if err != nil {
 			return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
 		}
@@ -4261,7 +4373,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 	if h.taskSvc == nil {
 		return taskMessageReviewRollback{}, errors.New("task service not available")
 	}
-	task, err := h.taskSvc.GetTask(ctx, taskID)
+	task, err := h.taskSvc.GetTaskForPrompt(ctx, taskID)
 	if err != nil {
 		return taskMessageReviewRollback{}, err
 	}
@@ -4668,11 +4780,11 @@ func (h *Handlers) resolveSessionAfterTaskMessageTurnStart(ctx context.Context, 
 	if h.taskSvc == nil {
 		return nil, errors.New("task service not available")
 	}
-	reloaded, err := h.taskSvc.GetTaskSession(ctx, submitted.ID)
+	reloaded, err := h.taskSvc.GetTaskSessionForPrompt(ctx, submitted.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session after on_turn_start: %w", err)
 	}
-	primary, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	primary, err := h.taskSvc.GetPrimarySessionForPrompt(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve primary session after on_turn_start: %w", err)
 	}
@@ -4757,6 +4869,9 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return taskMessageStatusSent, nil
+	}
+	if orchestrator.IsMessageTurnCapacityRefusal(err) {
+		return "", err
 	}
 	if !errors.Is(err, executor.ErrExecutionNotFound) {
 		return "", fmt.Errorf("failed to send prompt: %w", err)

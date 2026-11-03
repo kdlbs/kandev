@@ -242,6 +242,7 @@ const CARRIED_WHEN_DEFINED = [
   "supports_steering",
   "cancellation_pending",
   "cancellation_revision",
+  "runtime_storage_health",
   "execution_profile_id",
   "route_generation",
   "route_state",

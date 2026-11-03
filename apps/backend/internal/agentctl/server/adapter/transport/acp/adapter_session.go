@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -147,6 +148,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	}
 	a.mu.Lock()
 	conn := a.acpConn
+	priorSessionID := a.sessionID
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -164,9 +166,11 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
+	clear(a.contextCompactions)
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -228,6 +232,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = ""
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -244,6 +249,12 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
+	if sessionID != priorSessionID {
+		// Only a proven conversation replacement discards the prior suggestion
+		// window. A failed transition or a same-ID restore keeps the old
+		// conversation, so its pending suggestion must stay ambiguous.
+		a.resetPromptSuggestionOrigin(priorPromptTurn)
+	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -562,6 +573,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	conn := a.acpConn
 	capabilities := a.capabilities
+	priorSessionID := a.sessionID
 	a.mu.Unlock()
 
 	if conn == nil {
@@ -588,8 +600,12 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearClaudeSubagentsLocked("")
 	a.clearCursorTaskMetaLocked("")
 	a.clearPromptHandoffToolTrackingLocked()
+	if priorSessionID != sessionID {
+		clear(a.contextCompactions)
+	}
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -664,6 +680,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.sessionSettingsPolicy = providerRestoredPolicy(settingsPolicy)
 	a.configGeneration++
 	clear(a.contextSamples)
@@ -683,6 +700,11 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
 	}
 	a.mu.Unlock()
+	if sessionID != priorSessionID {
+		// A same-ID restore keeps the same provider conversation, so its prior
+		// suggestion window must stay ambiguous instead of being discarded.
+		a.resetPromptSuggestionOrigin(priorPromptTurn)
+	}
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
@@ -760,6 +782,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	_, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
 		SessionId: acp.SessionId(sessionID), Cwd: a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
+		Meta:       a.promptSuggestionSessionMeta(),
 	})
 	if err != nil {
 		for _, server := range filteredServers {
@@ -773,6 +796,7 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.advanceNativeGenerationLocked()
 	a.configGeneration++
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
@@ -1879,12 +1903,22 @@ func isModelConfigID(configID string, cachedConfig []streams.ConfigOption) bool 
 
 // Authenticate triggers ACP session/authenticate for a given auth method.
 func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
+	var policy *acpcompat.AuthPolicy
+	if a.cfg != nil {
+		policy = a.cfg.AuthPolicy
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && methodID != policy.MethodID {
+		return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
+	}
 	a.mu.RLock()
 	conn := a.acpConn
 	a.mu.RUnlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) {
+		return a.authenticateAntigravity(ctx, policy)
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{

@@ -54,7 +54,7 @@ No completion-gate, autopilot, agent/task state authority, queue policy, or gene
 ## Implementation acceptance
 
 1. Persist policy and fresh starts after generation admission but before external provider dispatch; off policy causes zero capture/ref/export writes.
-2. Accepted end capture/export completes or records bounded failure before successor prompt writes and teardown, across READY/COMPLETE, cancel, failure, interruption, and process exit.
+2. Accepted end capture precedes successor prompt writes. Content preservation or bounded final failure precedes source teardown across terminal paths.
 3. Duplicate/stale events, callback lock races, restart without boundary proof, mid-turn toggles, and overlapping checkouts preserve exact ownership and availability.
 
 ## Verification
@@ -79,6 +79,13 @@ Do not recursively acquire startup callback leases. Stop issues cancellation bef
 Unknown generation-zero or dynamic work cannot receive a late fabricated baseline.
 
 ## Results
+
+The completed [preservation retry package](../turn-change-preservation-retry/plan.md) refines temporary content failure and restart resumption.
+Its runtime work order separates the accepted-end prompt fence from preservation before source destruction.
+The results below remain historical validation of the original implementation.
+
+The [history integrity attribution work order](../turn-change-history-integrity/task-03-writer-attribution.md)
+implements canonical writer intervals. Historical validation below remains unchanged.
 
 Implemented generation-bound admission, terminal capture fences, checkout-manifest refresh, overlap attribution, and nonblocking failure persistence. The full backend suite passed. Race-enabled dispatch-completion, prompt-steer, cancellation, turn-change, and settlement tests passed; `internal/task/changes` passed its complete race suite, and the new launch/admission checkout-manifest lifecycle tests passed under `-race`.
 

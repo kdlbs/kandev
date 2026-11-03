@@ -115,7 +115,7 @@ has settled.
 
 When a turn, startup, or resume fails:
 
-- For a supported ACP provider's classified temporary capacity, overload, or rate-limit error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
+- When an ACP agent returns a prompt error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same process, connection, and native conversation available when it can confirm that runtime is still usable. This covers generic internal, database, authentication, quota, and invalid-model errors, not only classified capacity, overload, or rate-limit failures. Kandev does not replay the failed prompt. Automatic retries still apply only to existing supported classifications and only when the prompt produced no assistant output or tool activity; other failures require your next message. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
 - When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
 - If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
 - When **Start fresh session** replaces an existing conversation, it opens a new native conversation and delivery stream. Unresolved work from the previous conversation stays in history and is not sent to the provider again.
@@ -123,6 +123,7 @@ When a turn, startup, or resume fails:
 - For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Every error entry keeps its summary and expandable technical details in the chat history, even while the recovery card is visible. Recovery buttons appear only on the current card.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
+- A failed interactive turn also adds a durable error badge to the task row. Focusing, reading, or opening the task does not clear it. Select **Dismiss turn error** in the error alert or the task menu, or send a new prompt after the error appears, to acknowledge that exact failure. A newer failure restores the badge. A runtime recovery error shown at the same time keeps its own separate control.
 - History loading and new messages keep the normal chat scroll behavior.
 
 For eligible failed Auggie ACP task sessions, the recovery card explains that
@@ -160,11 +161,14 @@ previous results. It does not resend the original request or create a replacemen
 conversation automatically.
 
 Recovery shares the existing five-attempt budget and paced backoff. One notice
-shows waiting, reconnecting, or continuing, with **Cancel** available while the
-continued turn runs. Cancellation returns control to Chat when the ACP runtime
-is still usable; normal recovery actions remain available if it is not. An
-exhaustion message reports attempts that actually started; a refused recovery
-does not claim retries ran. Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
+shows waiting, reconnecting, or continuing. Once actual output or attributable
+foreground tool activity confirms that the agent resumed, the notice changes to
+neutral **Agent resumed** feedback. **Cancel** stays available while the
+continued turn runs, and the change does not extend or reset the attempt budget.
+Cancellation returns control to Chat when the ACP runtime is still usable; normal
+recovery actions remain available if it is not. An exhaustion message reports
+attempts that actually started; a refused recovery does not claim retries ran.
+Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
 prevent automatic continuation. So do subagents, background work, unresolved,
 denied or cancelled permissions, and overlapping work after a turn handoff. If the
 runtime remains usable, send a follow-up in the same conversation. If it is
@@ -198,6 +202,13 @@ before it accepts new work. This delivery recovery is automatic and separate
 from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
+
+After a restart, confirmed evidence that the exact Remote Docker or Sprites
+instance is absent ends attachment so the existing recovery actions can check
+the saved state. An unreachable host or control endpoint does not prove that
+the instance stopped, so Kandev keeps that owner protected. Missing native
+conversation or delivery evidence can still block Resume. Kandev does not resend
+an instruction whose outcome is uncertain.
 
 If delivery is interrupted and the prompt outcome is uncertain, the recovery
 card shows **Retry connection** and **Stop**. Retry connection reconnects the
@@ -306,6 +317,23 @@ Use **Auto-run** for queue processing:
 
 **Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
 
+### Recover from low disk space
+
+Kandev reads capacity from the executor that runs the agent. A warning row
+appears above the chat composer at 90% disk usage and clears below 85%. Work
+continues while the warning is shown. Open **Details** for measurements, or
+**Storage** for a local session. A remote warning names the executor and does
+not link to local cleanup.
+
+A session that stops because storage is full shows **Session interrupted by low
+disk space**. Free space on the executor filesystem, then use **Resume
+session**. Do not delete delivery data or start a fresh conversation to fix
+physical capacity. A journal limit, delivery limit, or oversized output uses its
+own cause and guidance, and technical details stay collapsed.
+
+These controls do not clean up storage automatically. Cleanup policy remains in
+**Settings > System > Storage**.
+
 ### Send while a session resumes
 
 You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
@@ -351,6 +379,22 @@ chat limit across both rows; increase Maximum chats if you want more chats.
 Each conversation scrolls independently, and the deck scrolls sideways when
 needed. Short windows temporarily show Columns with an explanation in Display; Grid
 returns when there is enough height, without changing the saved choice.
+
+### Keep chosen tasks in a fixed order
+
+1. In **View settings**, set **Task scope** to **Selected tasks**.
+2. Under **Sort**, choose **Selection order**.
+3. Open **Choose tasks** and select the tasks in the order you want the
+   columns. Each selected task shows its position.
+4. Select **Save**.
+
+The deck keeps that order after a reload and while the agents work. A selected
+task that only becomes active while the page is open joins at the end; reload or
+select **Reapply sort** to move it into its selected position. To move a task to
+the end, clear it and select it again. **Select all** adds the visible
+tasks in list order. Use the direction button to reverse the order. Selection
+order is available only for selected tasks; switching the scope to **All
+eligible tasks** changes the sort to **Attention**.
 
 With auto-hide enabled on a mouse or trackpad, the whole composer and its
 controls hide when idle. Only the existing CI popover remains, when available.
@@ -584,6 +628,10 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+The device preference also makes Kandev's grid, rotating, and pulsing status
+indicators static. Their labels and status updates remain visible. Changes to
+the preference apply while the page is open; no reload is needed.
+
 Select **Jump to latest** above the composer to return to the newest message,
 including agent replies. The action appears only when newer content is below
 the transcript. It does not change the session's auto-scroll preference.
@@ -626,7 +674,7 @@ In **Commits**, each row starts collapsed. Select a row to inspect its files
 inline; the saved flat or tree Changes layout applies to this list. Select
 the icon labeled **Open commit** to open the historical commit detail. Its flat file index can
 be collapsed independently of the file sections, and selecting an index entry
-opens that file's diff. These controls also work on phones.
+opens that file's diff. Use **Copy identifier** beside the short identifier in the commit detail to copy the full identifier. These controls also work on phones.
 
 Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
 
@@ -703,6 +751,8 @@ Select **Walkthrough** from Changes or Review. Kandev sends the built-in `change
   title="Follow a code walkthrough"
   caption="A guided walkthrough moves from an explanation to the exact file and lines it describes."
 />
+
+The walkthrough shows when the agent last published it, using your selected language and local time. Hover over the timestamp to see its timezone. Publishing a replacement updates this timestamp.
 
 When the agent publishes the walkthrough:
 

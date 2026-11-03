@@ -25,10 +25,11 @@ vi.mock("@/lib/api/domains/workspace-api", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
-  deleteTaskAfterUserAction: (...args: unknown[]) => deleteTask(...args),
+  deleteTask: (...args: unknown[]) => deleteTask(...args),
 }));
 
 import { useQuickChatCreation } from "./use-quick-chat-creation";
+import { useAgentSelection } from "./use-quick-chat-agent-selection";
 import { useQuickChatSetupDraft } from "./use-quick-chat-setup-draft";
 
 const WORKSPACE_ID = "workspace-creation";
@@ -54,7 +55,9 @@ function makeQuickChat(isOpen = true) {
   };
 }
 
-function useCreationHarness(quickChat = makeQuickChat()) {
+function useCreationHarness(
+  quickChat: Parameters<typeof useQuickChatCreation>[0]["quickChat"] = makeQuickChat(),
+) {
   const setupDraft = useQuickChatSetupDraft(WORKSPACE_ID, USER_ID);
   const creation = useQuickChatCreation({
     workspaceId: WORKSPACE_ID,
@@ -460,6 +463,8 @@ it("keeps an untyped 404 uncertain because it does not prove allocation failed",
   expect(handleSelectAgent).toHaveBeenCalledTimes(1);
 });
 
+const DELETE_TASK_ID = "task-delete";
+
 it("deletes a confirmed task and retires its pending receipt", async () => {
   const { result } = renderHook(() => useCreationHarness());
   act(() => {
@@ -471,12 +476,17 @@ it("deletes a confirmed task and retires its pending receipt", async () => {
   });
   const pending = result.current.setupDraft.pendingCreation!;
   act(() =>
-    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: "task-delete" }),
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
   );
 
-  await act(async () => result.current.creation.remove());
+  await act(async () =>
+    result.current.creation.remove({ confirmationId: "preview-1", discardWorktreeChanges: true }),
+  );
 
-  expect(deleteTask).toHaveBeenCalledWith("task-delete");
+  expect(deleteTask).toHaveBeenCalledWith(DELETE_TASK_ID, {
+    confirmationId: "preview-1",
+    discardWorktreeChanges: true,
+  });
   expect(result.current.setupDraft.pendingCreation).toBeNull();
 });
 
@@ -487,7 +497,7 @@ it("keeps the receipt and reports a deletion failure", async () => {
   });
   const pending = result.current.setupDraft.pendingCreation!;
   act(() =>
-    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: "task-delete" }),
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
   );
   deleteTask.mockRejectedValueOnce(new ApiError("delete unavailable", 503, null));
 
@@ -499,4 +509,43 @@ it("keeps the receipt and reports a deletion failure", async () => {
     creationId: pending.creationId,
   });
   expect(reportSetupError).toHaveBeenCalledWith(expect.any(ApiError));
+});
+
+it.each([
+  [
+    "outdated preview",
+    new ApiError("task deletion preview is no longer current", 409, {
+      error: "task deletion preview is no longer current",
+    }),
+    "Try again",
+  ],
+  [
+    "dirty worktree",
+    new ApiError("task worktree contains local changes", 409, {
+      error_code: "task_delete_dirty_worktree",
+    }),
+    "select discard",
+  ],
+])("keeps the receipt and explains how to retry a %s", async (_case, failure, expected) => {
+  const { result } = renderHook(() => {
+    const reporter = useAgentSelection(WORKSPACE_ID, {} as Parameters<typeof useAgentSelection>[1]);
+    const harness = useCreationHarness({
+      ...makeQuickChat(),
+      reportSetupError: reporter.reportSetupError,
+    });
+    return { ...harness, setupError: reporter.setupError };
+  });
+  act(() =>
+    result.current.setupDraft.beginPendingCreation(openingPayload("Keep this chat"), "agent-1", []),
+  );
+  const pending = result.current.setupDraft.pendingCreation!;
+  act(() =>
+    result.current.setupDraft.updatePendingCreation(pending.creationId, { taskId: DELETE_TASK_ID }),
+  );
+  deleteTask.mockRejectedValueOnce(failure);
+  await act(async () => result.current.creation.remove({ confirmationId: "expired" }));
+  expect(result.current.setupDraft.pendingCreation).toMatchObject({
+    creationId: pending.creationId,
+  });
+  expect(result.current.setupError).toContain(expected);
 });

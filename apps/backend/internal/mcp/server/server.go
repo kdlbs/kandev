@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -144,6 +145,10 @@ type Server struct {
 	pluginToolsMu              sync.Mutex
 	pluginTools                plugintools.Snapshot
 	pluginToolsReady           bool
+	automationPluginToolsMu    sync.Mutex
+	automationPluginTools      plugintools.Snapshot
+	automationPluginToolsReady bool
+	pluginToolsEpoch           atomic.Uint64
 }
 
 // ServerOption configures the per-instance MCP transport.
@@ -889,6 +894,11 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 		if s.profile.Surface != mcpprofile.SurfaceAutomation {
 			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 		}
+		s.automationPluginToolsMu.Lock()
+		s.automationPluginTools = plugintools.Snapshot{}
+		s.automationPluginToolsReady = false
+		s.automationPluginToolsMu.Unlock()
+		s.pluginToolsEpoch.Add(1)
 	} else {
 		s.legacyModeCapabilities = slices.Clone(profileContext.Capabilities)
 	}
@@ -954,8 +964,24 @@ func (s *Server) rebuildTools() {
 func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) error {
 	s.pluginToolsUpdateMu.Lock()
 	defer s.pluginToolsUpdateMu.Unlock()
+	return s.setPluginToolsLocked(snapshot)
+}
+
+func (s *Server) setPluginToolsLocked(snapshot plugintools.Snapshot) error {
 	if err := validatePluginToolSnapshot(snapshot); err != nil {
 		return err
+	}
+	s.mu.RLock()
+	automationSurface := s.profile.Surface == mcpprofile.SurfaceAutomation
+	s.mu.RUnlock()
+	if automationSurface {
+		// A global push is only an invalidation notice for an automation
+		// session. Its candidate tools are never installed here; the next
+		// list request fetches the session-filtered catalog from the backend.
+		// Bumping the epoch also discards any filtered fetch already in flight.
+		s.pluginToolsEpoch.Add(1)
+		s.clearAutomationPluginToolsLocked()
+		return nil
 	}
 	normalized := plugintools.Normalize(snapshot)
 	s.pluginToolsMu.Lock()
@@ -981,6 +1007,71 @@ func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
 	left.Generation, right.Generation = "", ""
 	left.Revision, right.Revision = 0, 0
 	return plugintools.Equal(left, right)
+}
+
+func (s *Server) clearAutomationPluginToolsLocked() {
+	s.automationPluginToolsMu.Lock()
+	s.automationPluginTools = plugintools.Snapshot{}
+	s.automationPluginToolsReady = false
+	s.automationPluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+}
+
+// SetAutomationPluginTools replaces the backend-filtered automation snapshot.
+// Selection changes can alter membership at the same global catalog revision,
+// so this setter compares definitions rather than revision ordering.
+func (s *Server) SetAutomationPluginTools(snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	// A direct replacement invalidates any older fetch that has not applied.
+	s.pluginToolsEpoch.Add(1)
+	return s.setAutomationPluginToolsLocked(snapshot)
+}
+
+func (s *Server) setAutomationPluginToolsLocked(snapshot plugintools.Snapshot) error {
+	if err := validatePluginToolSnapshot(snapshot); err != nil {
+		return err
+	}
+	normalized := plugintools.Normalize(snapshot)
+	s.automationPluginToolsMu.Lock()
+	if s.automationPluginToolsReady && equivalentPluginToolCatalog(s.automationPluginTools, normalized) {
+		s.automationPluginTools = normalized
+		s.automationPluginToolsMu.Unlock()
+		return nil
+	}
+	s.automationPluginTools = normalized
+	s.automationPluginToolsReady = true
+	s.automationPluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+	return nil
+}
+
+// applyAutomationPluginTools applies a filtered fetch only while it is still
+// the newest request. A later list fetch or invalidation bumps the epoch and
+// makes an older delayed response a no-op.
+func (s *Server) applyAutomationPluginTools(epoch uint64, snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if epoch != s.pluginToolsEpoch.Load() {
+		return nil
+	}
+	return s.setAutomationPluginToolsLocked(snapshot)
+}
+
+// discardAutomationPluginTools clears discovery after a failed fetch unless a
+// newer request has already superseded this one.
+func (s *Server) discardAutomationPluginTools(epoch uint64) {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if epoch != s.pluginToolsEpoch.Load() {
+		return
+	}
+	s.pluginToolsEpoch.Add(1)
+	s.clearAutomationPluginToolsLocked()
 }
 
 func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
@@ -1021,7 +1112,8 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	}
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
-		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice && surface != plugintools.SurfaceManaged {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice &&
+			surface != plugintools.SurfaceManaged && surface != plugintools.SurfaceAutomation {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {
@@ -1052,8 +1144,23 @@ func (s *Server) syncPluginTools(ctx context.Context) {
 	s.mu.RLock()
 	surface := string(s.profile.Surface)
 	s.mu.RUnlock()
+	automationSurface := surface == string(mcpprofile.SurfaceAutomation)
+	epoch := uint64(0)
+	if automationSurface {
+		epoch = s.pluginToolsEpoch.Add(1)
+	}
 	var snapshot plugintools.Snapshot
 	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
+		if automationSurface {
+			s.discardAutomationPluginTools(epoch)
+		}
+		return
+	}
+	if automationSurface {
+		if err := s.applyAutomationPluginTools(epoch, snapshot); err != nil {
+			s.logger.Warn("ignoring invalid automation plugin tool catalog", zap.Error(err))
+			s.discardAutomationPluginTools(epoch)
+		}
 		return
 	}
 	if err := s.SetPluginTools(snapshot); err != nil {
@@ -1062,18 +1169,28 @@ func (s *Server) syncPluginTools(ctx context.Context) {
 }
 
 func (s *Server) registerPluginTools() {
-	s.pluginToolsMu.Lock()
-	ready := s.pluginToolsReady
-	snapshot := plugintools.Normalize(s.pluginTools)
-	s.pluginToolsMu.Unlock()
+	surface := s.profile.Surface
+	var snapshot plugintools.Snapshot
+	ready := false
+	if surface == mcpprofile.SurfaceAutomation {
+		s.automationPluginToolsMu.Lock()
+		ready = s.automationPluginToolsReady
+		snapshot = plugintools.Normalize(s.automationPluginTools)
+		s.automationPluginToolsMu.Unlock()
+	} else {
+		s.pluginToolsMu.Lock()
+		ready = s.pluginToolsReady
+		snapshot = plugintools.Normalize(s.pluginTools)
+		s.pluginToolsMu.Unlock()
+	}
 	if !ready {
 		return
 	}
 	for _, definition := range snapshot.Tools {
-		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+		if !pluginToolSupportsSurface(definition, string(surface)) {
 			continue
 		}
-		if s.profile.Surface == mcpprofile.SurfaceManagedConversation &&
+		if surface == mcpprofile.SurfaceManagedConversation &&
 			(s.profile.ManagedToolPolicy == nil || !s.profile.ManagedToolPolicy.Allows(definition.PluginID, definition.LocalName)) {
 			continue
 		}
@@ -1289,7 +1406,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
+	if s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",
@@ -1438,14 +1555,22 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
+	messageDescription := `Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question.`
+	messageDeliveryModes := []string{"queued", "interrupt"}
+	if s.profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport) {
+		messageDescription += ` Use delivery_mode="report" with an explicit session_id to append a status report without waking or queueing the target; workspace collaboration must be enabled and the calling conversation must have the native task-write scope and report grant. A report cannot answer a pending question. Returns "queued", "sent", "started", or "reported".`
+		messageDeliveryModes = append(messageDeliveryModes, "report")
+	} else {
+		messageDescription += ` Returns "queued", "sent", or "started".`
+	}
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
+			mcp.WithDescription(messageDescription),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
 			mcp.WithString("delivery_mode",
-				mcp.Enum("queued", "interrupt"),
+				mcp.Enum(messageDeliveryModes...),
 				mcp.DefaultString("queued"),
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),

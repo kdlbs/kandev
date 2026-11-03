@@ -3524,6 +3524,76 @@ func replaceTaskPROutgoingRow(ctx context.Context, tx *sqlx.Tx, tp *TaskPR) (*Ta
 	return &outgoing, nil
 }
 
+// UpdateTaskPRWorkflowAttention stores one workflow observation for the exact
+// (task, repository, PR) row whose head still matches expectedHeadSHA. An empty
+// expected head is rejected: head-scoped evidence without a head is never
+// authoritative. The conditional predicate keeps a slower Actions read from
+// overwriting evidence for a newer head. A nil row with changed false means the
+// observation was already current or the row moved on; callers publish only
+// when changed.
+func (s *Store) UpdateTaskPRWorkflowAttention(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+	expectedHeadSHA string, attention *WorkflowAttention,
+) (*TaskPR, bool, error) {
+	if strings.TrimSpace(expectedHeadSHA) == "" {
+		// Head-scoped evidence without a head is never authoritative.
+		return nil, false, nil
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var outgoing TaskPR
+	err = tx.GetContext(ctx, &outgoing,
+		tx.Rebind(`SELECT `+taskPRColumns+` FROM github_task_prs
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL LIMIT 1`),
+		taskID, repositoryID, prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := hydrateTaskPRWorkflowAttention(&outgoing); err != nil {
+		return nil, false, err
+	}
+	if expectedHeadSHA != "" && outgoing.HeadSHA != expectedHeadSHA {
+		return nil, false, nil
+	}
+	resolved := resolveTaskPRWorkflowAttention(&outgoing, &PRStatus{
+		PR:                         &PR{HeadSHA: outgoing.HeadSHA},
+		WorkflowAttention:          attention,
+		WorkflowAttentionPopulated: true,
+	}, outgoing.HeadSHA)
+	if workflowAttentionSemanticEqual(outgoing.WorkflowAttention, resolved) {
+		return nil, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE github_task_prs SET workflow_attention = ? WHERE id = ? AND head_sha = ? AND detached_at IS NULL`),
+		marshalWorkflowAttention(resolved), outgoing.ID, expectedHeadSHA)
+	if err != nil {
+		return nil, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if affected == 0 {
+		return nil, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	stored, err := s.GetTaskPRByID(ctx, outgoing.ID)
+	if err != nil {
+		return nil, true, err
+	}
+	return stored, true, nil
+}
+
 // UpdateTaskPR updates a task-PR association. This is the sync writer's
 // exclusive write path.
 // UpdateTaskPR writes queue-removal evidence in a separate guarded statement

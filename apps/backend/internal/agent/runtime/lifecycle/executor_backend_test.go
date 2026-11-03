@@ -96,6 +96,10 @@ func TestCausingRunMetadataIsSessionScoped(t *testing.T) {
 		"the causal run must survive a same-session runtime restart")
 	require.True(t, IsSessionScopedMetadataKey(MetadataKeyCausingRunID),
 		"the causal run must not leak into a sibling session")
+	require.True(t, ShouldPersistMetadataKey(MetadataKeyTerminalCausingRunID),
+		"the terminal event identity must survive a same-session runtime restart")
+	require.True(t, IsSessionScopedMetadataKey(MetadataKeyTerminalCausingRunID),
+		"the terminal event identity must not leak into a sibling session")
 }
 
 func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
@@ -206,6 +210,7 @@ func TestToAgentExecutionCarriesCausingRunID(t *testing.T) {
 		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "office-run-1"},
 	})
 	require.Equal(t, "office-run-1", execution.CausingRunID)
+	require.Equal(t, "office-run-1", execution.TerminalCausingRunID)
 }
 
 func TestToAgentExecutionDoesNotReuseRuntimeCausingRunMetadata(t *testing.T) {
@@ -214,4 +219,5 @@ func TestToAgentExecutionDoesNotReuseRuntimeCausingRunMetadata(t *testing.T) {
 		Metadata:   map[string]interface{}{MetadataKeyCausingRunID: "stale-office-run"},
 	}).ToAgentExecution(&ExecutorCreateRequest{})
 	require.Empty(t, execution.CausingRunID)
+	require.Empty(t, execution.TerminalCausingRunID)
 }

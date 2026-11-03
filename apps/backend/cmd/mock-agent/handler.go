@@ -456,6 +456,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 	}
 	if scenario, ok := parseSavedPromptDeliveryScenario(prompt); ok {
 		cmd = "/e2e:" + scenario
+	} else if scenario, ok := parseOfficeScenarioDirective(prompt); ok {
+		cmd = "/e2e:" + scenario
 	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return
@@ -536,6 +538,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
 		emitAsyncSubagentLifecycle(e, cmd, false)
+	case strings.EqualFold(cmd, "/async-followup"):
+		emitAsyncFollowup(e)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}

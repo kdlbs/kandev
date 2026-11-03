@@ -45,7 +45,7 @@ The UI system owns this contract because it is a reusable presentation preferenc
 ## Out of scope
 
 - Live re-rendering of the relative label as time passes. The label keeps its current refresh behavior.
-- Timestamps outside the transcript message footer, including the sidebar, task lists, Office surfaces, and Account security "Last seen" (see [relative last seen](relative-last-seen.md)).
+- Other timestamp surfaces, including the sidebar, task lists, Office surfaces, and Account security "Last seen" (see [relative last seen](relative-last-seen.md)). The [queued-message timestamp extension](queued-message-timestamps.md) separately applies this preference to pending queue rows.
 - Per-session or per-message overrides of the choice.
 - A custom date pattern, 12-hour versus 24-hour override, or time zone selection.
 - Changing which messages show a timestamp, or the footer layout and visibility rules.

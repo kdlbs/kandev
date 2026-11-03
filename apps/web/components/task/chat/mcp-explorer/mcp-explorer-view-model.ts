@@ -67,6 +67,7 @@ export function mcpStatusLabelKey(status: MCPAttachmentStatus): string {
 }
 
 const FILTER_REASON_KEYS: Record<string, string> = {
+  session_excluded: "task:mcpReasonSessionExcluded",
   http_unsupported: "task:mcpReasonHttpUnsupported",
   sse_unsupported: "task:mcpReasonSseUnsupported",
   duplicate_name: "task:mcpReasonDuplicateName",
