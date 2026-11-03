@@ -178,6 +178,7 @@ Implementation completed on 2026-11-03.
 - Review remediation on 2026-11-03: the phone sound selector now fills the row beside the preview, the mobile E2E asserts that row fill, and the unrelated Traditional Chinese automation-copy changes were reverted. The review pass itself did not run builds or tests.
 - PR preparation reran the four targeted component suites (47 passed) and both notification type-scale E2E specs with `CAPTURE_PR_ASSETS=true` (4 desktop and 3 mobile tests passed), producing fresh PR screenshots.
 - PR fixup kept desktop rows on one line, added the disabled-preview explanation to every catalog, restored measured normal-row bounds, and tightened the same-row overlap check. The same component suites and both type-scale E2E specs passed with fresh captures.
+- CI fixup aligned the settings-composition E2E with four shared groups plus two compact preference rows; the focused spec passed (8 tests).
 
 Verification:
 

@@ -212,6 +212,7 @@ Implementation validation completed on 2026-11-03:
 - Review remediation on 2026-11-03: the phone preset selector now grows to fill its control row beside the preview, and unrelated Traditional Chinese automation-copy regeneration was restored to HEAD. The review pass itself did not run builds or tests.
 - PR preparation on 2026-11-03 reran the four targeted component suites (47 passed) and both notification type-scale E2E specs with `CAPTURE_PR_ASSETS=true` (4 desktop and 3 mobile tests passed), producing fresh desktop and phone screenshots.
 - PR fixup on 2026-11-03 kept desktop preference rows on one line, explained why a disabled sound preview is unavailable, and restored measured normal-row bounds plus a bounded same-row overlap assertion. Local component suites (47 passed) and both type-scale E2E specs with fresh captures (4 desktop and 3 mobile tests passed) cover the fix.
+- CI fixup updated the settings-composition E2E to expect four shared settings groups plus the two compact notification preference rows; the focused spec passed (8 tests).
 
 The exact implementation commands are in Task 01.
 
