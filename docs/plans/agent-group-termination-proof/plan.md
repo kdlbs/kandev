@@ -162,7 +162,11 @@ The fixup addresses the remaining recovery gates in review thread
 now evaluates original-owner proof even when the execution ID remains listed. Silent restart
 uses agent-group proof when a standalone row is alive and combined original-owner proof when
 row liveness is unknown. Tests cover both paths and retain the existing successor protections.
-Local validation and current-head CI results are recorded after delivery.
+Fixup commit `d278ecd6ce52f2896bfd75647cb55fd158791510` passed the repository pre-commit
+hooks, including Go lint, docs catalog, architecture, and specification checks. The default
+Go lint resource settings timed
+out after reporting zero issues; the same hook passed with `GOMAXPROCS=4 GOMEMLIMIT=6GiB`.
+Local Go tests were not run. Current-head CI is pending after the push.
 
 ## Risks
 

@@ -107,5 +107,11 @@ Task 01.
 - `python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all`: passed.
 
 Review corrections add surviving-child, changed-birth, previous-boot, retained recovery,
-history-gap, registered-instance, and unknown-liveness regressions. Current fixup results and
-validation are recorded in the plan after delivery.
+history-gap, registered-instance, and unknown-liveness regressions.
+
+The source fix is in commit `d278ecd6ce52f2896bfd75647cb55fd158791510`. Its pre-commit hooks
+passed: documentation catalog, architecture, specification structure, gofmt, and changed-package
+Go lint. The first Go lint
+attempt used default resources, reported zero issues, and timed out after five minutes. The same
+hook passed with `GOMAXPROCS=4 GOMEMLIMIT=6GiB`. Commit-message validation passed. Local Go tests
+were not run. Current-head CI is pending after the push.
