@@ -130,6 +130,12 @@ After the fix, all 11 phone cases and 20 affected component tests passed.
 Targeted ESLint, formatting, and specification validation passed. Final CI and
 review dispositions remain externally tracked on PR #5020.
 
+The final review also exercised live association updates while the drawer
+stays open. Growing from two linked PRs to twelve initially moved the action
+37 CSS pixels. Reserving the phone selector height removed that shift;
+all 11 phone cases passed again. Extra selector space for short lists is
+intentional so later updates cannot move the action.
+
 Implementation and follow-up changes are committed through normal hooks.
 Publication and automated review are tracked separately from this work order.
 

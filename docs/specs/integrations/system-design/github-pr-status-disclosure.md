@@ -101,8 +101,10 @@ switches' extended touch targets. Matching negative margins preserve the
 visible content alignment. Do not clip the targets to hide overflow.
 On phones, let PR tabs share the available width and wrap when needed;
 truncate repository labels while retaining reachable selection and unlink controls.
-Keep a text space between the repository and PR number. Bound the phone tab
-selector to the smaller of 8rem and 20dvh. When it overflows, selection scrolls
+Keep a text space between the repository and PR number. Fix the phone tab
+selector height to the smaller of 8rem and 20dvh, with rows aligned to its top.
+Reserve this space for short lists so live association updates cannot move
+the PR action while the multi-PR disclosure remains open. When it overflows, selection scrolls
 vertically within that bound; status details retain their separate scroll owner.
 Selection must leave the fixed PR action and a usable details region visible
 on short screens.

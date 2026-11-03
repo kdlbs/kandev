@@ -42,6 +42,8 @@ owns informational sidebar and card tooltips.
   overflow. Phone PR tabs shall fit or wrap without horizontal scrolling.
   An overflowing PR selector shall stay bounded on short phones so that PR
   selection cannot hide the fixed action or collapse the details region.
+  The selector height shall remain fixed while the multi-PR disclosure is
+  open, including when linked PRs arrive or are removed.
 - **AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.5:** Pointer transfer from the
   trigger to the disclosure shall keep it open. Keyboard users shall reach
   the PR link and scroll region. Escape shall dismiss the disclosure and retain

@@ -213,7 +213,7 @@ export function MultiPRCIPopover({
         role="tablist"
         aria-label={t("github:pullRequests")}
         data-testid="pr-multi-popover-tabs"
-        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 pb-2 max-md:max-h-[min(8rem,20dvh)] max-md:flex-wrap max-md:overflow-y-auto max-md:overscroll-contain"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 pb-2 max-md:h-[min(8rem,20dvh)] max-md:flex-wrap max-md:content-start max-md:overflow-y-auto max-md:overscroll-contain"
         onKeyDown={onTablistKeyDown}
       >
         {prs.map((pr) => (

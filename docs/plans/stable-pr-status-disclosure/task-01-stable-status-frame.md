@@ -197,3 +197,12 @@ the approved region tables. Fresh PR screenshots are captured after the fix.
 
 CodeRabbit's summary suggestion is covered by an explicit first-load status
 assertion in the existing checks suite. All four checks tests passed.
+
+CodeRabbit's final review identified live tab-count changes as another source
+of motion. The short-phone case now opens with two linked PRs, records the
+action position, and associates ten more PRs while the drawer remains open.
+RED: the action moved 37 CSS pixels. GREEN: the selector reserves the smaller
+of 8rem and 20dvh, with rows aligned at the top and excess rows scrolling
+inside it. All 11 phone cases passed after this change. Targeted ESLint and
+specification validation passed. This preserves the existing frame and action
+contract; no new public copy or provider behavior is introduced.

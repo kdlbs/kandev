@@ -762,7 +762,7 @@ test.describe("mobile PR CI chip drawer", () => {
       seedData,
       title: "Short phone with many PRs",
     });
-    for (let number = 100; number <= 110; number++) {
+    const associate = async (number: number) => {
       await apiClient.mockGitHubAssociateTaskPR({
         workspace_id: seedData.workspaceId,
         task_id: taskId,
@@ -779,16 +779,21 @@ test.describe("mobile PR CI chip drawer", () => {
         checks_total: 1,
         checks_passing: 1,
       });
-    }
+    };
+    await associate(100);
     const session = await openTask(testPage, taskId);
     await session.tapPRStatusChip();
     const drawer = session.prStatusChipDrawer();
     await waitForFiniteAnimations(drawer);
     const link = drawer.getByTestId("pr-popover-pr-link");
     await expect(link).toBeInViewport();
+    const before = await link.boundingBox();
+    for (let number = 101; number <= 110; number++) await associate(number);
+    const tabs = drawer.getByTestId("pr-multi-popover-tabs");
+    await expect(tabs.getByRole("tab")).toHaveCount(12);
+    expect(Math.abs((await link.boundingBox())!.y - before!.y)).toBeLessThanOrEqual(1);
     const body = drawer.getByTestId("pr-popover-scroll-body");
     expect(await body.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(44);
-    const tabs = drawer.getByTestId("pr-multi-popover-tabs");
     expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
     expect(await tabs.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
       true,
