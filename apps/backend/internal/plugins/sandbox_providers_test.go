@@ -17,6 +17,7 @@ import (
 )
 
 type sandboxWireFixture struct {
+	report  func(context.Context, *pluginsdk.ReadSandboxReportRequest) (*pluginsdk.ReadSandboxReportResponse, error)
 	compile func(context.Context, *pluginsdk.CompileSandboxPolicyRequest) (*pluginsdk.CompileSandboxPolicyResponse, error)
 	calls   atomic.Int32
 }
@@ -55,7 +56,10 @@ func (*sandboxWireFixture) NormalizeSandboxApproval(context.Context, *pluginsdk.
 func (*sandboxWireFixture) NormalizeSandboxStatus(context.Context, *pluginsdk.NormalizeSandboxStatusRequest) (*pluginsdk.NormalizeSandboxStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "unsupported status")
 }
-func (*sandboxWireFixture) ReadSandboxReport(context.Context, *pluginsdk.ReadSandboxReportRequest) (*pluginsdk.ReadSandboxReportResponse, error) {
+func (f *sandboxWireFixture) ReadSandboxReport(ctx context.Context, request *pluginsdk.ReadSandboxReportRequest) (*pluginsdk.ReadSandboxReportResponse, error) {
+	if f.report != nil {
+		return f.report(ctx, request)
+	}
 	return nil, status.Error(codes.Unimplemented, "unsupported report")
 }
 func (*sandboxWireFixture) ProposeSandboxRevision(context.Context, *pluginsdk.ProposeSandboxRevisionRequest) (*pluginsdk.ProposeSandboxRevisionResponse, error) {

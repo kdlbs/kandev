@@ -1,6 +1,6 @@
 ---
 created: 2026-10-30
-status: draft
+status: in_progress
 requirements:
   - REQ-AGENTS-SANDBOX-003
   - REQ-AGENTS-SANDBOX-005
@@ -24,7 +24,7 @@ legacy_specs: []
 
 First migrate the dedicated plugin SDK and evaluate Nono 0.81.0. Deliver separate evidence facts and richer audit reports before extending operator approvals to TCP connections, commands, and HTTP endpoints. Finish with typed learning and actual managed acceptance.
 
-This is an extension of the [initial package](../nono-sandbox-integration/plan.md), not a replay of its completed work orders. Host baseline is `29170265fc88b820c661036dc626fcf8d83ccb41`; companion plugin baseline is `8f68c6a10add119a1187c7428c5fad51aa6ca25a`. Existing acceptance predates SDK extraction. This package is draft and uncommitted for review. No production or permanent test changes occur in the design turn.
+This is an extension of the [initial package](../nono-sandbox-integration/plan.md), not a replay of its completed work orders. Host baseline is `29170265fc88b820c661036dc626fcf8d83ccb41`; companion plugin baseline is `8f68c6a10add119a1187c7428c5fad51aa6ca25a`. Existing acceptance predates SDK extraction. The user reviewed this package and authorized implementation. Results below track delivery. The paired pull requests remain drafts while the remaining work orders and acceptance checks are incomplete.
 
 ## Scope and assumption check
 
@@ -151,7 +151,7 @@ Files are under `apps/web/e2e/tests/task/`, except editor files under `settings/
 - [x] [Task 02: Add compatible major 2 provider contracts](task-02-provider-protocol.md)
 - [x] [Task 03: Show separate process and launch evidence](task-03-runtime-facts.md)
 - [x] [Task 04: Expose network and command audit reports](task-04-typed-reports.md)
-- [ ] [Task 05: Verify finalized audit artifacts against explicit trust](task-05-audit-verification.md)
+- [x] [Task 05: Verify finalized audit artifacts against explicit trust](task-05-audit-verification.md)
 - [ ] [Task 06: Deliver exact connection approvals and policy envelopes](task-06-network-approvals.md)
 - [ ] [Task 07: Deliver confined command invocation approvals](task-07-command-approvals.md)
 - [ ] [Task 08: Deliver exact HTTP endpoint approvals](task-08-endpoint-approvals.md)
@@ -185,4 +185,4 @@ The user explicitly requested implementation of this package. Implementation fol
 
 ## Foundation delivery checkpoint (2026-11-02)
 
-Tasks 01 and 02 are complete. Host foundation `7545c750c150` is pushed to the existing feature branch/PR. Task 03 is complete: independent facts, captured launch receipts, runtime metadata, SQLite/PostgreSQL persistence, localized desktop/phone UI, and rendered expiry checks passed. Task 04 is complete: typed reports, bounded frozen source reads, preserved successful-read age, SQLite/PostgreSQL history, real filesystem/proxy records, and desktop/phone inspection and learning regressions passed. Task 05 is in progress: the explicit verifier SDK, native Nono verification, and final-artifact retention are checked and pushed. Operator trust storage passes SQLite/PostgreSQL and upgrade checks. Verification-job storage is pushed at `798f9ca8a90b`; runtime/API dispatch is pushed at `e91ddb1c9ef6`. Audit projection retains original verification metadata, refreshes terminal history on audit changes/startup, and separates current trust from signature history. Go race suites, SQLite/PostgreSQL persistence, observer/reconnect tests, scoped lint, 63 browser-state tests, and frontend typecheck pass. The shared desktop/phone action is implemented; 13 controller/current-trust tests, five desktop browser journeys, and two phone audit journeys pass. Three phone Reports/learning regression checks also pass. Explicit RPC deadline alignment and provider algorithm classification remain before Task 05 completion. GitHub reports new conflicts against moving main; integration is required before final managed acceptance. No PR merge is authorized.
+Tasks 01-05 are complete. The host foundation, independent process/launch/runtime facts, typed audit reports, and finalized audit verification are implemented. Host UI checkpoint `4970f79f3724` and provider key-classification checkpoint `c45dae9d` are pushed to their draft PRs. Task 05 passes its persistence/restart and native-verifier checks, 13 controller/current-trust tests, ten desktop/phone browser journeys, seven-locale checks, scoped lint, documentation checks, and builds. Explicit verification RPCs use the 30-second job bound; ordinary reads retain five seconds and shorter caller/wire deadlines win. Full plugin and packaged-runtime race suites pass. Tasks 06-10 remain pending. Current-pair managed acceptance is not complete. Moving main introduced PR conflicts; rebase and integration checks precede the next work order. Main :9998 and retained instances remain unchanged. No PR merge is authorized.

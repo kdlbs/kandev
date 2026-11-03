@@ -85,6 +85,14 @@ Coalesced audit wakes received during a pass remain pending. Failed history
 passes retry without reversing terminal state. This also repairs a wake lost
 before backend exit. Reads project stored evidence and never execute a verifier.
 
+Ordinary report RPCs retain a five-second limit. An explicit verification RPC
+has a 30-second limit within the existing job deadline. A shorter caller or
+wire deadline always wins. Chunk RPCs cannot renew the overall job budget.
+Nono's native verifier retains its separate 15-second process limit. A valid
+operator key with an unsupported algorithm yields an unsupported signature
+result while preserving the independent chain and ledger results. Malformed
+public-key input or a mismatched fingerprint is rejected.
+
 The runtime owns at most four verification workers with a 30-second job deadline.
 Workers use the runtime context after authenticated admission. Browser disconnect
 does not abandon an admitted job. Shutdown closes admission, cancels workers,

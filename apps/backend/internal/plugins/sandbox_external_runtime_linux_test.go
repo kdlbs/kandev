@@ -39,7 +39,9 @@ func TestSandboxProviderExternalPackageRetainsOwnedRuntime(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, record.SandboxProviders, 1)
 	binding := sandboxFixtureBinding(record, record.SandboxProviders[0].Key)
+	binding.ProtocolMajor = record.SandboxProviders[0].ProtocolMajor
 	req := sandboxFixtureCompileRequest(binding)
+	req.Context.ProtocolMajor = binding.ProtocolVersion()
 	req.Runtime = &pluginsdk.SandboxRuntimeFacts{Os: "linux", Architecture: "amd64", Transport: "local"}
 	description, err := svc.DescribeSandboxProvider(ctx, binding, &pluginsdk.DescribeSandboxProviderRequest{Context: req.Context, Runtime: req.Runtime})
 	require.NoError(t, err)

@@ -3,9 +3,9 @@ package plugins
 import (
 	"context"
 	"errors"
-	"github.com/kandev/kandev/internal/plugins/manifest"
 	"time"
 
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
@@ -90,7 +90,11 @@ func (s *Service) NormalizeSandboxStatus(ctx context.Context, binding SandboxPro
 }
 
 func (s *Service) ReadSandboxReport(ctx context.Context, binding SandboxProviderBinding, req *pluginsdk.ReadSandboxReportRequest) (*pluginsdk.ReadSandboxReportResponse, error) {
-	return invokeSandboxProvider(ctx, s, binding, req, 5*time.Second, (*pluginsdk.RemotePlugin).ReadSandboxReport)
+	timeout := 5 * time.Second
+	if req.GetVerifyAuditV2() {
+		timeout = 30 * time.Second
+	}
+	return invokeSandboxProvider(ctx, s, binding, req, timeout, (*pluginsdk.RemotePlugin).ReadSandboxReport)
 }
 
 func (s *Service) ProposeSandboxRevision(ctx context.Context, binding SandboxProviderBinding, req *pluginsdk.ProposeSandboxRevisionRequest) (*pluginsdk.ProposeSandboxRevisionResponse, error) {

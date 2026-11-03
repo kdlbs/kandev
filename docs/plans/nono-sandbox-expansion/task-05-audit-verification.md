@@ -1,7 +1,7 @@
 ---
 id: "05-audit-verification"
 title: "Verify finalized audit artifacts against explicit trust"
-status: in_progress
+status: done
 wave: 5
 depends_on: 
   - "04-typed-reports"
@@ -101,7 +101,8 @@ A report-selected signer is not operator trust. Cryptographic validity does not 
 
 ## Results
 
-In progress. Pinned 0.81.0 API investigation confirms that
+Complete. The checkpoints below record staged delivery. Final evidence appears
+at the end. Pinned 0.81.0 API investigation confirms that
 `nono audit verify --json --public-key-file <file> <session>` reports chain,
 ledger, and attestation results separately. JSON mode can exit successfully
 while result fields report a mismatch. A verifier must check the individual
@@ -251,9 +252,20 @@ screenshots show a fixed header/footer and one internal scroller. Seven-locale
 validation, the new-copy ratchet, frontend typecheck, and zero-warning scoped
 ESLint pass. Phone Reports/learning regressions also pass (three tests).
 
-Two final Task 05 checks remain: align the explicit verifier RPC budget with
-the existing 30-second worker bound, and distinguish a valid but unsupported
-operator public-key algorithm from an invalid audit chain in the Nono adapter.
-The unsupported-key RED test reproduces the incorrect chain error; its focused
-GREEN test preserves valid chain and ledger results and reports unsupported
-signature verification. Final plugin validation and packaging are still required.
+The final provider key-classification fix is committed and pushed at
+`c45dae9d64bd503f39fbb9d4a9dbdd63e97b8ee0`. The unsupported-key RED test
+reproduced an incorrect invalid-chain error. Its GREEN case retains valid chain
+and ledger results and reports unsupported signature verification. Additional
+cases reject malformed key material, unrelated leading text, and mismatched
+fingerprints. Full pinned-runtime race tests, validation/package checks, and
+the independent standalone SDK consumer build pass.
+
+Explicit verifier RPCs now receive up to 30 seconds inside the existing overall
+worker deadline. Ordinary reads retain five seconds. Real gRPC RED/GREEN cases
+cover both limits and shorter parent/wire deadlines. The packaged runtime race
+suite passes with the new provider archive and disposable PostgreSQL fixture.
+The broad plugin suite exposed an external-package test fixture that still
+selected protocol 1. Its request now uses the installed manifest's major; its
+retained-runtime test passes. The final full plugin race suite passes. Scoped Go lint reports zero issues,
+and the backend build passes. Task 05 is complete. This work does not complete
+current-pair managed acceptance, which remains Task 10.
