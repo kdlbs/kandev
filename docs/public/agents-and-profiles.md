@@ -526,6 +526,13 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+For a mode defined in a repository, open **Start mode**, type its exact ID,
+select the custom entry, and save the profile. The host probe runs outside the
+task repository, so it may omit that mode and show options for the host default.
+At task startup, the selected executor must confirm the requested mode before
+the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
+agent's default.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select

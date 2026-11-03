@@ -1148,7 +1148,7 @@
   "webhookProvider": "Webhook 提供者",
   "webhookUrl": "Webhook 地址",
   "webhookHeadersPlaceholder": "請求頭，每行一個（名稱：值）",
-  "webhookHeadersInvalid": "Webhook 請求標頭必須使用有效的 HTTP 標頭名稱，且不能重複。",
+  "webhookHeadersInvalid": "Webhook 請求頭必須使用有效的 HTTP 請求頭名稱，且不能重複。",
   "webhookSecret": "金鑰（可選）",
   "webhookUrlRequired": "需要 Webhook 地址。",
   "webhooks": "Webhook 通知",
