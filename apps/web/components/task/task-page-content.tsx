@@ -40,7 +40,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
-import { useRenderedTaskSessionId } from "@/components/task/task-page-session-ownership";
+import { useRenderedTaskSession } from "@/components/task/task-page-session-ownership";
 import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -411,6 +411,7 @@ function useTaskPageData(
   } = useTaskDetails(fallbackTaskId ?? activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
+  const renderedSession = useRenderedTaskSession(task?.id ?? null, sessionId, agent.taskSessionId);
   const searchParams = useSearchParams();
   const creationPending = isCreationPendingSearch(searchParams);
   const ensureSession = useEnsureTaskSession(
@@ -421,14 +422,13 @@ function useTaskPageData(
       workflowStepId: task?.workflow_step_id,
       workflowId: task?.workflow_id,
     },
-    { enabled: !creationPending },
+    {
+      enabled:
+        !creationPending && !renderedSession.routeSessionUnresolved && !renderedSession.sessionId,
+    },
   );
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
-  const effectiveSessionId = useRenderedTaskSessionId(
-    task?.id ?? null,
-    sessionId,
-    agent.taskSessionId,
-  );
+  const effectiveSessionId = renderedSession.sessionId;
 
   useEffect(() => {
     const applied = syncActiveTaskSession({

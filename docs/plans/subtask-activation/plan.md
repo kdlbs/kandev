@@ -18,7 +18,7 @@ session selection within the rendered task. Add hook, mounted-page, and desktop
 and phone E2E regressions in the same work order.
 
 The implementation is complete and verified; the results below record the
-delivered behavior. The design package remains uncommitted for review.
+delivered behavior. The design package is included in this PR for review.
 
 ## Evidence and root cause
 
@@ -189,11 +189,18 @@ One sequential work order. No delegation is authorized.
 - All relative package links resolve. Explicit whitespace inspection passed for
   all four untracked documents. `git diff --check` passed for the package paths.
 - Catalog discovery includes both new Tasks specifications.
-- Implementation unit/integration: 5 files / 40 tests passed for the work-order
+- Implementation unit/integration: 6 files / 55 tests passed for the work-order
   command; broader task-page and route regression suites: 7 files / 101 tests passed.
 - `pnpm run typecheck`: passed (with a 6 GiB Node heap for the rich-output check).
 - Lint: `eslint --max-warnings 0` passed for the production files, new helper,
   unit tests, E2E specs, and E2E helpers.
+- Fixup (review findings): an explicit route session whose row is missing now
+  stays pending instead of falling back to the task's first session, automatic
+  session ensuring is disabled while the route session is unresolved or an
+  owned session already exists, and the desktop Dockview layout prefers the
+  global active session only when its row belongs to the rendered task. Added
+  route-pending, same-task active-precedence, ensure-gating, and Dockview
+  ownership regressions.
 - Desktop E2E: `subtask.spec.ts`, 16/16 passed on `chromium`; the extended
   sidebar creation case uses passive pre-reload assertions (one visible
   `session-chat` with the exact child `data-session-id`, child-only prompt
@@ -225,5 +232,6 @@ The implementation must reassess public documentation only if that scope changes
   must resume with hydration without guessing ownership or launching another session.
 - Broad changes to URL-only navigation can affect sidebar selection and guards.
   Keep this correction in the subtask caller and its task-page consumer.
-- A full browser reproduction was not run during planning. The future E2E checks
-  must prove the complete user flow against a fresh managed build.
+- The browser proof is limited to the two managed E2E entry points (desktop
+  sidebar creation and phone task-actions creation); another creation surface
+  would need its own coverage.

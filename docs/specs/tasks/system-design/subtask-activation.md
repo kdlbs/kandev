@@ -61,6 +61,12 @@ waits for existing route/session hydration. It does not authorize a guessed
 conversation or a new session. An ineligible candidate does not prevent a later
 owned candidate from supplying the view.
 
+An explicit route session is authoritative while its row is missing: the page
+renders no conversation instead of substituting another session of the same
+task. Automatic session ensuring is disabled while the route session is
+unresolved, and when an owned session is already selected. A route session owned
+by another task is equally ineligible and cannot trigger a new session.
+
 An old parent view can remain mounted during child hydration. Its task/session
 pair must remain parent-owned, or its session must be null. Once the child is
 ready, its owned session supplies the view. Keep the existing route generation
@@ -69,6 +75,9 @@ because the route intentionally retains usable previous content during reads.
 
 `TaskPageContentLive` passes this same `effectiveSessionId` to panel state,
 agentctl, resumption, focus, and the inner view. Keep these consumers aligned.
+The desktop Dockview layout applies the same ownership test to its global
+active-session read, falling back to the guarded session prop when the global
+row does not belong to the rendered task.
 The backend ownership rejection in `task_operations.go` remains authoritative.
 There is no backend change or error suppression.
 

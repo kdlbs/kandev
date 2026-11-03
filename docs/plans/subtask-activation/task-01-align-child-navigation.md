@@ -102,9 +102,9 @@ Run these commands after the TDD implementation. The managed E2E runner builds
 fresh assets and starts isolated test instances. Run desktop and phone sequentially.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/use-subtask-submit.test.ts components/task/use-subtask-submit.navigation.test.tsx components/task/task-page-session-ownership.test.tsx lib/routing/client-router.test.ts src/task-detail-route-session-selection.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/use-subtask-submit.test.ts components/task/use-subtask-submit.navigation.test.tsx components/task/task-page-session-ownership.test.tsx components/task/dockview-desktop-layout.test.ts lib/routing/client-router.test.ts src/task-detail-route-session-selection.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/use-subtask-submit.ts components/task/task-page-content.tsx components/task/task-page-session-ownership.ts components/task/use-subtask-submit.test.ts components/task/use-subtask-submit.navigation.test.tsx components/task/task-page-session-ownership.test.tsx e2e/helpers/document-navigation.ts e2e/helpers/session-status-ownership.ts e2e/helpers/ws-capture.ts e2e/tests/task/subtask.spec.ts e2e/tests/task/mobile-subtask-activation.spec.ts)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/use-subtask-submit.ts components/task/task-page-content.tsx components/task/task-page-session-ownership.ts components/task/use-subtask-submit.test.ts components/task/use-subtask-submit.navigation.test.tsx components/task/task-page-session-ownership.test.tsx components/task/dockview-desktop-layout.tsx components/task/dockview-desktop-layout-hooks.ts components/task/dockview-desktop-layout.test.ts components/task/task-layout.tsx e2e/helpers/document-navigation.ts e2e/helpers/session-status-ownership.ts e2e/helpers/ws-capture.ts e2e/tests/task/subtask.spec.ts e2e/tests/task/mobile-subtask-activation.spec.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/subtask.spec.ts -- --retries=0)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-subtask-activation.spec.ts -- --retries=0)
 python3 scripts/list-docs.py validate
@@ -124,6 +124,9 @@ the work order. Do not export the private page hook only to make it testable.
 - `apps/web/components/task/use-subtask-submit.navigation.test.tsx` (new)
 - `apps/web/components/task/task-page-content.tsx`
 - `apps/web/components/task/task-page-session-ownership.ts` (new)
+- `apps/web/components/task/dockview-desktop-layout.tsx`
+- `apps/web/components/task/dockview-desktop-layout-hooks.ts`
+- `apps/web/components/task/task-layout.tsx`
 - `apps/web/components/task/task-page-session-ownership.test.tsx` (new)
 - `apps/web/e2e/helpers/document-navigation.ts` (new)
 - `apps/web/e2e/helpers/session-status-ownership.ts` (new)
@@ -173,10 +176,10 @@ Completed on 2026-11-03 against repository commit `8cd31a0896a` plus this change
   and `useTaskPageData` admitted only candidates whose session row belongs to the
   rendered task. Deferred navigation publishes `setActiveSession` inside
   `onNavigated`; cancellation leaves the parent selection and does not recreate.
-- Unit/integration: 5 files, 40 tests passed (`use-subtask-submit.test.ts`,
+- Unit/integration: 6 files, 55 tests passed (`use-subtask-submit.test.ts`,
   `use-subtask-submit.navigation.test.tsx`,
-  `task-page-session-ownership.test.tsx`, `client-router.test.ts`,
-  `task-detail-route-session-selection.test.tsx`).
+  `task-page-session-ownership.test.tsx`, `dockview-desktop-layout.test.ts`,
+  `client-router.test.ts`, `task-detail-route-session-selection.test.tsx`).
 - Broader page regression: `task-page-content*.test.*` and
   `task-detail-route-recovery.test.tsx`, 7 files, 101 tests passed.
 - `pnpm run typecheck` passed (with `NODE_OPTIONS=--max-old-space-size=6144`).
@@ -194,6 +197,12 @@ Completed on 2026-11-03 against repository commit `8cd31a0896a` plus this change
   with the same passive exact child-session/content and no-navigation evidence,
   plus an editable composer, reachable bottom navigation, no document horizontal
   overflow, and child-owned status requests before and after the explicit reload.
+- Fixup review findings: an unhydrated explicit route session stays pending
+  instead of showing an older task session; automatic session ensuring is
+  disabled while that ownership is unresolved or an owned session exists; and
+  the desktop Dockview layout uses the global active session only when its row
+  belongs to the rendered task. Unit coverage includes route-pending,
+  same-task active-precedence, ensure-gating, and Dockview ownership cases.
 - Docs: `python3 scripts/list-docs.py validate` (428 decisions, 1,895
   specifications), `python3 scripts/lint-spec-files.test.py` (36 tests), and
   `python3 scripts/lint-spec-files.py --all` passed. `git diff --check` passed.

@@ -18,6 +18,8 @@ const PARENT_TASK_ID = "parent-task";
 const PARENT_SESSION_ID = "parent-session";
 const CHILD_TASK_ID = "child-task";
 const CHILD_SESSION_ID = "child-session";
+const OLDER_CHILD_SESSION_ID = "older-child-session";
+const ACTIVE_SESSION_ID = "active-session";
 const FOREIGN_SESSION_ID = "foreign-session";
 const PARENT_TITLE = "Parent task";
 const CHILD_TITLE = "Child task";
@@ -26,6 +28,7 @@ type SessionStatusRequest = { taskId: string; sessionId: string };
 
 const mocks = vi.hoisted(() => {
   const requests: SessionStatusRequest[] = [];
+  const listTaskSessions = vi.fn();
   const socket = {
     request: vi.fn(async (action: string, payload: Record<string, unknown>) => {
       if (action === "task.session.status") {
@@ -40,7 +43,12 @@ const mocks = vi.hoisted(() => {
     subscribeSession: vi.fn(() => () => undefined),
     focusSession: vi.fn(() => () => undefined),
   };
-  return { requests, socket };
+  return { requests, listTaskSessions, socket };
+});
+
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, listTaskSessions: mocks.listTaskSessions };
 });
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -81,10 +89,6 @@ vi.mock("@/hooks/domains/kanban/use-workflow-steps-by-id", () => ({
 
 vi.mock("@/hooks/domains/task/use-task-canvases", () => ({
   useTaskCanvasesStateForTask: () => ({ key: null, canvases: [], status: "idle" }),
-}));
-
-vi.mock("@/hooks/domains/session/use-ensure-task-session", () => ({
-  useEnsureTaskSession: () => ({ status: "idle", error: null, retry: vi.fn() }),
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -135,12 +139,17 @@ function makeState({
   sessionsByTask?: Record<string, TaskSession[]>;
 }): Partial<AppState> {
   const items = Object.fromEntries(sessions.map((session) => [session.id, session]));
+  const itemsByTaskId: Record<string, TaskSession[]> = {};
+  for (const session of sessions) {
+    (itemsByTaskId[session.task_id] ??= []).push(session);
+  }
+  Object.assign(itemsByTaskId, sessionsByTask ?? {});
   return {
     workspaces: { activeId: "workspace-1", items: [] },
     connection: { status: "connected" },
     tasks: { activeTaskId, activeSessionId },
     taskSessions: { items },
-    taskSessionsByTask: { itemsByTaskId: sessionsByTask ?? {} },
+    taskSessionsByTask: { itemsByTaskId },
     kanban: { workflowId: "workflow-1", tasks: [], steps: [] },
   } as unknown as Partial<AppState>;
 }
@@ -150,6 +159,13 @@ function renderPage(
   props: { task: Task; sessionId: string | null },
   onStore?: (store: ReturnType<typeof useAppStoreApi>) => void,
 ) {
+  const rows = Object.values(
+    (state.taskSessions as { items?: Record<string, TaskSession> } | undefined)?.items ?? {},
+  );
+  mocks.listTaskSessions.mockImplementation(async (taskId: string) => {
+    const owned = rows.filter((row) => row.task_id === taskId);
+    return { sessions: owned, total: owned.length };
+  });
   function StoreCapture({ children }: { children: ReactNode }) {
     onStore?.(useAppStoreApi());
     return <>{children}</>;
@@ -323,6 +339,12 @@ describe("mounted task page session ownership", () => {
     );
 
     await waitFor(() => expect(renderedPair()).toEqual({ taskId: CHILD_TASK_ID, sessionId: "" }));
+    await waitFor(() =>
+      expect(store?.getState().taskSessionsByTask.loadedByTaskId[CHILD_TASK_ID]).toBe(true),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
     expect(statusPairs()).toHaveLength(0);
 
     const childSession = makeSession(CHILD_SESSION_ID, CHILD_TASK_ID);
@@ -341,10 +363,89 @@ describe("mounted task page session ownership", () => {
       }),
     );
     expectOnlyOwnedStatusPairs({ [CHILD_SESSION_ID]: childSession });
-    expect(mocks.socket.request).not.toHaveBeenCalledWith(
-      "session.launch",
-      expect.anything(),
-      expect.anything(),
+    const unexpectedActions = mocks.socket.request.mock.calls
+      .map(([action]) => action)
+      .filter((action) => action !== "task.session.status");
+    expect(unexpectedActions).toEqual([]);
+  });
+
+  it("keeps an unhydrated route session pending instead of showing an older task session", async () => {
+    const olderSession = makeSession(OLDER_CHILD_SESSION_ID, CHILD_TASK_ID);
+    const state = makeState({
+      activeTaskId: CHILD_TASK_ID,
+      activeSessionId: null,
+      sessions: [olderSession],
+      sessionsByTask: { [CHILD_TASK_ID]: [olderSession] },
+    });
+    const childTask = makeTask(CHILD_TASK_ID, CHILD_TITLE);
+    let store: ReturnType<typeof useAppStoreApi> | null = null;
+
+    render(
+      renderPage(state, { task: childTask, sessionId: CHILD_SESSION_ID }, (captured) => {
+        store = captured;
+      }),
+    );
+
+    await waitFor(() => expect(renderedPair()).toEqual({ taskId: CHILD_TASK_ID, sessionId: "" }));
+    expect(statusPairs()).toHaveLength(0);
+    expect(statusPairs()).not.toContainEqual({
+      taskId: CHILD_TASK_ID,
+      sessionId: OLDER_CHILD_SESSION_ID,
+    });
+
+    const childSession = makeSession(CHILD_SESSION_ID, CHILD_TASK_ID);
+    act(() => store?.getState().upsertTaskSessionFromEvent(CHILD_TASK_ID, childSession));
+
+    await waitFor(() =>
+      expect(renderedPair()).toEqual({
+        taskId: CHILD_TASK_ID,
+        sessionId: CHILD_SESSION_ID,
+      }),
+    );
+    await waitFor(() =>
+      expect(statusPairs()).toEqual([{ taskId: CHILD_TASK_ID, sessionId: CHILD_SESSION_ID }]),
+    );
+  });
+
+  it("prefers an owned active session over a different owned route session", async () => {
+    const routeSession = makeSession(PARENT_SESSION_ID, PARENT_TASK_ID);
+    const activeSession = makeSession(ACTIVE_SESSION_ID, PARENT_TASK_ID);
+    const state = makeState({
+      activeTaskId: PARENT_TASK_ID,
+      activeSessionId: PARENT_SESSION_ID,
+      sessions: [routeSession, activeSession],
+      sessionsByTask: { [PARENT_TASK_ID]: [routeSession, activeSession] },
+    });
+    const parentTask = makeTask(PARENT_TASK_ID, PARENT_TITLE);
+    let store: ReturnType<typeof useAppStoreApi> | null = null;
+
+    render(
+      renderPage(state, { task: parentTask, sessionId: PARENT_SESSION_ID }, (captured) => {
+        store = captured;
+      }),
+    );
+    await waitFor(() =>
+      expect(renderedPair()).toEqual({
+        taskId: PARENT_TASK_ID,
+        sessionId: PARENT_SESSION_ID,
+      }),
+    );
+
+    // A session-tab change updates the active selection without changing the
+    // route; the owned active session must win over the route session.
+    act(() => store?.getState().setActiveSession(PARENT_TASK_ID, ACTIVE_SESSION_ID));
+
+    await waitFor(() =>
+      expect(renderedPair()).toEqual({
+        taskId: PARENT_TASK_ID,
+        sessionId: ACTIVE_SESSION_ID,
+      }),
+    );
+    await waitFor(() =>
+      expect(statusPairs()).toContainEqual({
+        taskId: PARENT_TASK_ID,
+        sessionId: ACTIVE_SESSION_ID,
+      }),
     );
   });
 
