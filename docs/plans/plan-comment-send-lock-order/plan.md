@@ -68,8 +68,8 @@ Repair the notification boundary for direct comment-bearing message admission,
 including the shared preview-feedback branch. Preserve durable receipts, exact
 comment consumption, replay identity, initial-brief ownership, queue policy,
 selected-session Send, and primary-session Run.
-Use ordinary queue claim updates only for ordinary queue entries. Retained
-receipts keep their existing ownership-token and delivery-attempt checks.
+Exclude plan-comment receipts from ordinary queue claim updates. Other queue
+producers retain their existing validation rules.
 
 This repair needs no schema, protocol, provider, configuration, localization,
 or rendered UI changes. Existing completed comment persistence, recovery,
@@ -103,10 +103,11 @@ request before preparing stored content. Rebuild stale candidates from that
 snapshot, then notify only after final acceptance. The regression failed
 before this correction and passed after it.
 
-Restrict `deliveryClaimUpdater` in queued dispatch to ordinary entries.
-Plan comments, lifecycle entries, and managed inputs use retained receipts
-instead of ordinary dispatch claims. Keep protocol negotiation and backend
-durable submission persistence for these prompts. A real-SQLite orchestrator
+Skip `deliveryClaimUpdater` for durable plan-comment receipts in queued dispatch.
+Plan comments bypass ordinary claims. Lifecycle prompts keep their existing
+handling, and managed inputs retain ordinary claim validation in this path.
+Keep protocol negotiation and backend durable submission persistence for these
+prompts. A real-SQLite orchestrator
 regression must reach the agent admission callback for direct and queued
 comments with legacy and durable agents. Ordinary messages are the positive
 control for their existing claim persistence.
@@ -184,9 +185,24 @@ no violations in the plan or work order. The investigation removed temporary
 reproduction files and the browser-library path file. The isolated browser instances
 stopped, leaving the original instance list intact.
 
+## PR review follow-up
+
+The updater bypass now applies only to durable plan comments. Managed inputs
+keep their existing ordinary claim validation. The CI eligibility test now
+requires one plan-comment dispatch and zero managed-input dispatches. The broad
+bypass failed the managed-input assertion locally before this correction.
+
+Added real-handler delivery and deferred-contender coverage. Removing the
+asynchronous completion call makes queued feedback remain undelivered. The
+mutation probe restored the handler source byte-for-byte. Final focused race
+suites passed for handlers in 3.094 seconds and the orchestrator in 6.663 seconds.
+The spec restores guard scope and connection rationale and links receipt terms
+to their defining section. Normal commit hooks must pass before publication.
+Remote CI and review resolution remain external verification for the pushed head.
+
 ## Risks
 
 - Moving notification must preserve initial-brief contender and replay behavior.
 - Reusing an admitted callback context after release would misrepresent lock ownership.
 - Browser coverage must prove new agent output rather than only transcript persistence.
-- Retained receipts must not require an ordinary queue dispatch claim at agent admission.
+- Plan-comment receipts must not require an ordinary queue dispatch claim at agent admission.

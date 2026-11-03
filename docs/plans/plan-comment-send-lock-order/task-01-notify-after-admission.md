@@ -85,7 +85,8 @@ messages through the real orchestrator. Test legacy and durable agent
 capabilities. Require one provider call, one transcript, an empty pending queue,
 and a persisted submission for durable delivery. The retained comment cases
 must fail before the correction. Attach the ordinary `deliveryClaimUpdater`
-only when the entry does not use retained delivery. Keep retained ownership
+except for durable plan comments and lifecycle prompts. Preserve ordinary
+claim validation for managed inputs. Keep retained ownership
 validation, protocol negotiation, and backend submission persistence.
 
 Finally strengthen the two existing browser scenarios described in the plan.
@@ -99,7 +100,7 @@ Run from the repository root after implementation:
 
 ```bash
 (cd apps/backend && go test -trimpath -race -tags fts5 ./internal/task/handlers -run 'PlanComment|PreviewFeedback|InitialTaskBrief|FeedbackAdmission' -count=1 -timeout=180s)
-(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'PlanComment|QueueDispatch|ManagedInput|DurableLifecycle' -count=1 -timeout=180s)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'PlanComment|QueueDispatch|QueuedDelivery|QueuedLifecycle|ManagedInput|DurableLifecycle' -count=1 -timeout=180s)
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=kandev.lintBaseRef GIT_CONFIG_VALUE_0=origin/main bash scripts/lint-go-changed apps/backend/internal/task/handlers/message_handlers.go apps/backend/internal/task/handlers/message_handlers_feedback_admission_test.go apps/backend/internal/orchestrator/event_handlers_agent.go apps/backend/internal/orchestrator/event_handlers_plan_comment_delivery_test.go
 env -u KANDEV_INTERNAL_CONFIG_FILE -u KANDEV_INTERNAL_CONFIG_HOME_FILE -u KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG -u KANDEV_BUNDLE_DIR KANDEV_SERVER_HOST=127.0.0.1 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/task-plan-comments.spec.ts -- --grep 'shares comments across tabs'
 env -u KANDEV_INTERNAL_CONFIG_FILE -u KANDEV_INTERNAL_CONFIG_HOME_FILE -u KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG -u KANDEV_BUNDLE_DIR KANDEV_SERVER_HOST=127.0.0.1 pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/session/mobile-task-plan-comments.spec.ts -- --grep 'migrates shared context'
@@ -124,8 +125,10 @@ test counts and results before marking this work order done.
 
 - `apps/backend/internal/task/handlers/message_handlers.go`
 - `apps/backend/internal/task/handlers/message_handlers_feedback_admission_test.go`
+- `apps/backend/internal/task/handlers/message_handlers_feedback_completion_test.go`
 - `apps/backend/internal/orchestrator/event_handlers_agent.go`
 - `apps/backend/internal/orchestrator/event_handlers_plan_comment_delivery_test.go`
+- `apps/backend/internal/orchestrator/event_handlers_queue_lifecycle_delivery_test.go`
 - `apps/web/e2e/tests/session/task-plan-comments.spec.ts`
 - `apps/web/e2e/tests/session/mobile-task-plan-comments.spec.ts`
 - This work order and `plan.md` for status and results.
@@ -156,8 +159,8 @@ The notification context must not retain a released session admission token.
 ## Results
 
 The handler now notifies after session admission returns and rebuilds stale
-briefs from the original request. Queued dispatch updates ordinary claims only
-for ordinary entries. Retained receipts reach agent admission with their
+briefs from the original request. Queued dispatch skips ordinary claim updates
+for plan-comment receipts. Those receipts reach agent admission with their
 existing ownership and delivery-attempt checks.
 
 The handler ordering regression failed before its correction. The real-SQLite
@@ -176,3 +179,24 @@ All six admission cases now pass.
 
 Cleanup removed temporary logs and diagnostic captures. All owned isolated
 browser instances stopped. Implementation and validation are complete.
+
+## PR review follow-up
+
+Added a real-handler queue-drain fixture. Direct feedback must reach its prompt
+boundary. A held ordinary first prompt must keep comment feedback queued until
+the handler completes that dispatch, then deliver the feedback and acknowledge
+its receipt. Both focused race tests pass. Removing the handler's asynchronous
+completion call makes the deferred-feedback assertion fail. The mutation probe
+restored the handler source byte-for-byte. The final related handler race
+suite passed in 3.094 seconds. The orchestrator race suite passed in 6.663 seconds,
+including the existing queued-delivery eligibility and lifecycle tests.
+
+The eligibility test now accepts plan-comment delivery and keeps managed-input
+rejection. Narrowing the updater bypass to durable plan comments fixes that
+preserved boundary. The broad bypass failed the managed-input assertion before
+this correction. Normal commit hooks must pass before publication. Remote CI
+and review resolution remain external verification for the pushed head.
+
+The design now states the process-local SQLite guard, cross-process PostgreSQL
+lock, writer-connection rationale, and exact notification lock order. It links
+receipt tokens and delivery-attempt validation to their defining section.

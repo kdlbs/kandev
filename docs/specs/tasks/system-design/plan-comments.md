@@ -30,11 +30,11 @@ the basis for implementation.
 
 ## Requirement mapping
 
-| Requirement                   | Design sections                                                                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `REQ-TASKS-PLAN-COMMENTS-001` | [Persistence model](#persistence-model), [Frontend projection](#frontend-projection), [Plan lifecycle](#plan-lifecycle)         |
+| Requirement | Design sections |
+| --- | --- |
+| `REQ-TASKS-PLAN-COMMENTS-001` | [Persistence model](#persistence-model), [Frontend projection](#frontend-projection), [Plan lifecycle](#plan-lifecycle) |
 | `REQ-TASKS-PLAN-COMMENTS-002` | [Composer delivery](#composer-delivery), [Atomic acceptance](#atomic-acceptance), [Failure and recovery](#failure-and-recovery) |
-| `REQ-TASKS-PLAN-COMMENTS-003` | [Run routing](#run-routing), [Atomic acceptance](#atomic-acceptance)                                                            |
+| `REQ-TASKS-PLAN-COMMENTS-003` | [Run routing](#run-routing), [Atomic acceptance](#atomic-acceptance) |
 | `REQ-TASKS-PLAN-COMMENTS-004` | [Legacy migration](#legacy-migration), [Failure and recovery](#failure-and-recovery), [Responsive and accessibility behavior](#responsive-and-accessibility-behavior) |
 
 ## Ownership decision
@@ -246,17 +246,20 @@ enabled because comment ownership is independent of session availability.
 ## Atomic acceptance
 
 Direct delivery holds a task admission lease from exact preflight through
-task-state hooks, turn-start hooks, and the final transaction. Comment mutations
-and plan deletion use the same lease. SQLite uses a local guard. PostgreSQL adds
-a shared advisory lock and requires at least two writer connections: one for
-the lease and another for hooks and acceptance.
+task-state and turn-start hooks to the final transaction. Comment mutations
+and plan deletion share the lease. SQLite uses a process-local guard.
+PostgreSQL also takes a cross-process advisory lock. It needs two writer
+connections because the lease holds one while hooks and acceptance use another.
 
 Call `NotifyQueuedUserPrompt` with the caller context after
-`WithInitialTaskBriefAdmission` returns. Lifecycle drains take the cancellation
-guard before the session gate. Keep commit and brief tracking inside admission.
-Rebuild stale briefs from the original submission. Retained comment receipts
-use their ownership token and delivery marker, not ordinary queue dispatch
-claims. Agent admission still negotiates delivery and persists durable submissions.
+`WithInitialTaskBriefAdmission` returns. This releases the per-session admission
+lock before notification takes the cancellation guard. Lifecycle drains take
+the cancellation guard before session admission. Keep commit and brief tracking
+inside admission.
+Rebuild stale briefs from the original submission. Retained comment receipts use
+the [reservation token and delivery-attempt validation](#receipt-dispatch), not
+ordinary queue dispatch claims. Agent admission negotiates the protocol and
+persists durable submissions.
 
 Comment-bearing variants then extend the final transaction boundary in this
 order:
@@ -292,6 +295,8 @@ observable through admission. Reserve/dispatch retains that queue row as a
 replay receipt and writes a deterministic, idempotent transcript before
 external delivery. The transcript metadata retains the caller queue ID, so a
 lost response can still reconcile after the queue receipt is acknowledged.
+
+### Receipt dispatch
 
 Every pre-dispatch reservation has a random ownership token and a short lease.
 Only that token may release, acknowledge, or cross the delivery boundary. A
