@@ -22,8 +22,8 @@ that continuation in the same session without delegation.
 
 ## Technical approach
 
-Require matching normalized repository names in the existing leading-row amend
-check. Preserve duplicate handling, same-repository amendments, root-name
+Select the leading row within the incoming commit's normalized repository scope
+for amend detection. Preserve duplicate handling, same-repository amendments, root-name
 compatibility, environment ownership, and snapshot replacement.
 
 The [system design](../../specs/tasks/system-design/multi-branch-live-commits.md)
@@ -58,14 +58,20 @@ The original reported task's shared-parent condition remains unverified.
 RED: five new store cases failed while ten controls passed. The browser
 regression received both commit events and failed on the missing desktop row.
 
-GREEN: all 37 focused store/handler tests passed. Changed-file ESLint and
+GREEN: all 38 focused store/handler tests passed. Changed-file ESLint and
 Prettier checks passed. Typecheck passed with an 8 GiB Node heap after the
 default 4 GiB heap exhausted memory. No type errors remained.
 
-The rebuilt browser scenario passed. Its final capture run passed in 10.7 s,
+The rebuilt browser scenario passed. Its final capture run passed in 10.5 s,
 with both desktop and Pixel 5 views receiving both live commits. Two fresh
 synthetic screenshots were inspected and compressed. The desktop capture closes
 the terminal before capture to exclude the host username.
 
 Documentation catalog validation, specification lint, the 36 specification
 linter tests, and `git diff --check` passed. PR publication follows this record.
+
+PR review also identified an amendment arriving after a newer sibling commit.
+Its new regression failed before selecting the leading row within each
+repository, then passed with the correction. The affected tests, lint, browser
+scenario, and typecheck passed again. The PR documentation evaluator also passed
+after the work order declared its sibling plan, dependency list, and wave.

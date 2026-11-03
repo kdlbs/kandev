@@ -190,4 +190,16 @@ describe("addSessionCommit repository scope", () => {
 
     expect(store.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([amended, sibling]);
   });
+
+  it("replaces an amended repository head after a sibling repository commits", () => {
+    const store = makeStore();
+    const original = commit({ commit_sha: "original", repository_name: "api" });
+    const sibling = commit({ commit_sha: "sibling", repository_name: "web" });
+    const amended = commit({ commit_sha: "amended", repository_name: "api" });
+    store.getState().setSessionCommits(SESSION, [sibling, original]);
+
+    store.getState().addSessionCommit(SESSION, amended);
+
+    expect(store.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([sibling, amended]);
+  });
 });

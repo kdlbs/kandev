@@ -2,6 +2,9 @@
 id: "01-preserve-live-commits"
 title: "Preserve repository-qualified live commits"
 status: done
+plan: plan.md
+wave: 1
+depends_on: []
 requirements:
   - REQ-TASKS-MULTI-BRANCH-001
 acceptance_criteria:
@@ -14,7 +17,7 @@ system_design:
 
 ## Outcome and scope
 
-Implement the [plan](plan.md) through a minimal repository check in
+Implement the [plan](plan.md) through repository-scoped amend selection in
 `addSessionCommit`. Retain both repository rows with shared parents and keep
 same-repository amend replacement and duplicate notifications correct.
 
@@ -66,14 +69,20 @@ The compatibility risk and excluded behavior are recorded in the plan.
 - RED: five repository-isolation cases failed, with ten controls passing.
   The real browser test failed because one desktop commit row was missing
   after both `commit_created` events arrived.
-- GREEN: all 37 store and handler tests passed. ESLint passed for the source,
+- GREEN: all 38 store and handler tests passed. ESLint passed for the source,
   unit tests, and E2E test. Prettier and typecheck passed.
 - The default 4 GiB Node heap was insufficient for typecheck. The documented
   8 GiB rerun passed without source changes.
-- The rebuilt browser test passed. The final screenshot run reused that build
-  with `--no-build` and passed in 10.7 s. Desktop and Pixel 5 each displayed both
+- The rebuilt browser test passed. The final screenshot run rebuilt the revised
+  source and passed in 10.5 s. Desktop and Pixel 5 each displayed both
   live commits without reload or PR association.
 - Fresh desktop and phone screenshots were inspected and compressed. Capture
   closes the desktop terminal to exclude the host username.
 - Catalog validation and specification lint passed. The specification linter's
   36 tests and `git diff --check` passed.
+- PR review added an interleaved amendment regression: one failure before
+  selecting the repository's own leading row, then all 38 focused tests passed.
+  Lint, browser verification, and typecheck passed on the revised source.
+- The PR documentation evaluator rejected missing `depends_on`, `wave`, and
+  `plan` metadata. Adding those fields produced `status: covered` with no errors
+  from the same local evaluator.

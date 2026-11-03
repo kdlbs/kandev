@@ -29,9 +29,10 @@ Within that collection, commit identity includes its repository scope and SHA.
 additional worktrees. Missing and empty names both identify the legacy root.
 
 A repeated notification updates its matching repository-qualified row.
-Amend detection can replace the leading row only when its normalized repository
-scope and parent SHA both match the incoming commit. A shared parent across
-different scopes does not establish an amendment.
+Amend detection selects the first row in the incoming commit's normalized
+repository scope. It replaces that row only when the parent SHA also matches.
+This preserves an amendment when a sibling repository has a newer global row.
+A shared parent across different scopes does not establish an amendment.
 
 The existing full-history query continues to replace a complete snapshot.
 No transport fields, persistence, Git commands, authorization, or refresh policy
