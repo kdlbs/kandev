@@ -136,7 +136,7 @@ stays open. Growing from two linked PRs to twelve initially moved the action
 all 11 phone cases passed again. Extra selector space for short lists is
 intentional so later updates cannot move the action.
 
-The compact fallback uses the full viewport at 320px height or less and combines
+The compact fallback uses the full viewport at 480px height or less and combines
 drawer chrome around the existing PR header. The phone regression covers
 single and multiple PRs at 320x240, including the actual link hit target and
 close action. The lifecycle and merge-queue phone tests now measure the inner

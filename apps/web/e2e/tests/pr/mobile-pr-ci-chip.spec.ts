@@ -21,29 +21,35 @@ const PR_NUMBER = 99;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
 async function expectCompactAction(page: Page, drawer: Locator) {
-  await page.setViewportSize({ width: 320, height: 240 });
-  await waitForFiniteAnimations(drawer);
-  const link = drawer.getByTestId("pr-popover-pr-link");
-  const bounds = await link.boundingBox();
-  const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
-  expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(240);
-  const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
-  expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
-  expect(
-    await drawer.getByTestId("pr-popover-scroll-body").evaluate((element) => element.clientHeight),
-  ).toBeGreaterThanOrEqual(44);
-  expect(
-    await link.evaluate((element) => {
-      const rect = element.getBoundingClientRect();
-      return (
-        document
-          .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-          ?.closest("a") === element
-      );
-    }),
-  ).toBe(true);
+  for (const height of [240, 321, 400, 480, 481]) {
+    await page.setViewportSize({ width: 320, height });
+    await waitForFiniteAnimations(drawer);
+    const link = drawer.getByTestId("pr-popover-pr-link");
+    const bounds = await link.boundingBox();
+    const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(wrapper!.x);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(wrapper!.x + wrapper!.width);
+    expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+    const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
+    expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+    expect(
+      await drawer
+        .getByTestId("pr-popover-scroll-body")
+        .evaluate((element) => element.clientHeight),
+    ).toBeGreaterThanOrEqual(44);
+    expect(
+      await link.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest("a") === element
+        );
+      }),
+    ).toBe(true);
+  }
 }
 
 type SeedTaskArgs = {

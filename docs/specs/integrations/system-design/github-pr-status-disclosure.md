@@ -92,7 +92,7 @@ Test Escape and focus return without overriding trigger click behavior.
 Use the existing `PRStatusChipDrawer` and `PRStatusChipMultiDrawer` as the
 mobile exemplars. Retain their explicit tap entry and close control. The
 GitHub drawer uses a stable 80dvh frame with its existing safe-area handling.
-At viewport heights of 320px or less, use the full dynamic viewport height.
+At viewport heights of 480px or less, use the full dynamic viewport height.
 Hide the decorative handle and retain the drawer title for screen readers.
 Pin Close at the top right and reserve space for it in the PR header and
 selector. This compact composition keeps the PR action visible at 240px

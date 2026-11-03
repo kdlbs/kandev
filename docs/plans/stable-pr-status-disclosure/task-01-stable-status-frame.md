@@ -228,3 +228,22 @@ completed the active tool before the delay intended to let CI queue a message.
 After integrating current main, the existing delay now precedes tool completion.
 The focused browser case passed with retries disabled, and the mock-agent
 package passed with the race detector. Production queue logic is unchanged.
+
+A further review found insufficient details space just above 320px height.
+The existing single-PR and multi-PR cases reproduced that failure. Compact
+composition now applies through 480px, with boundary checks at heights 240,
+321, 400, 480, and 481. Both horizontal and vertical link bounds must fit
+inside the drawer body; the footer and at least 44px of scrolling details
+remain visible. The two cases passed after extending the breakpoint.
+
+The queue fixture now accepts an optional release marker through its existing
+friendly command. The browser releases active work only after durable queue
+admission and the queue chip are confirmed. The existing file-gate helper
+provides a bounded wait. A fake-clock unit test proves the follow-up remains
+active beyond the queue-mode wait and finishes after release. The browser case
+passes without retries, and its explicit retry override was removed. The
+marker is also released on test failure. No runtime product contract changed.
+
+Final focused verification passed: 17 phone cases, five desktop stability
+cases, the gated queue-delivery case, seven unit suites (88 tests), mock-agent
+race tests, typecheck, targeted lint, and specification validation.
