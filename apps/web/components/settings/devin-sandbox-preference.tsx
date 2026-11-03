@@ -4,6 +4,7 @@ import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import { SettingsRow } from "@/components/settings/settings-group";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 import {
   DEVIN_AGENT_ID,
   DEVIN_SMART_MODE,
@@ -95,7 +96,7 @@ export function DevinSandboxPreferenceField({
             <SelectTrigger
               id={`${instanceId}-devin-sandbox`}
               aria-describedby={descriptionId}
-              className="min-h-11 w-full cursor-pointer sm:min-h-9"
+              className={settingsControlClassName("w-full cursor-pointer")}
               data-testid="devin-sandbox-select"
             >
               <SelectValue />

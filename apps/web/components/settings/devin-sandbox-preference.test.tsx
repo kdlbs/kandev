@@ -135,7 +135,9 @@ describe("DevinSandboxPreferenceField", () => {
   it("exposes a touch-sized selector", () => {
     renderField({});
     const trigger = screen.getByRole("combobox", { name: /Devin sandbox/ });
-    expect(trigger.className).toContain("min-h-11");
+    expect(trigger.className).toContain("h-7");
+    expect(trigger.className).toContain("max-md:h-11");
+    expect(trigger.className).toContain("[@media(pointer:coarse)]:h-11");
   });
 
   it("keeps the onChange callback unused until the user selects", () => {
