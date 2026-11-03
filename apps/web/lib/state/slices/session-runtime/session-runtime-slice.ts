@@ -264,8 +264,12 @@ function buildSessionCommitActions(set: ImmerSet) {
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
           return;
         }
-        // For amend: only replace HEAD (first entry) if it has the same parent
-        if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
+        // An amend replaces the leading commit only within the same repository scope.
+        if (
+          existing.length > 0 &&
+          (existing[0].repository_name ?? "") === (commit.repository_name ?? "") &&
+          existing[0].parent_sha === commit.parent_sha
+        ) {
           existing[0] = commit;
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
         } else {
