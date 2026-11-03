@@ -511,7 +511,9 @@ func (s *Service) executeSendNowClaimWithContext(
 			if errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
 				if releaseErr := s.releaseUnrecoverableSendNowClaim(ctx, claim); releaseErr != nil {
 					s.logger.Error("failed to release unrestorable send-now queue claim",
-						zap.String("session_id", sessionID), zap.Error(releaseErr))
+						zap.String("session_id", sessionID),
+						zap.String("claim_id", claim.ClaimID),
+						zap.Error(releaseErr))
 				}
 			} else {
 				s.logger.Error("failed to restore send-now queue claim",

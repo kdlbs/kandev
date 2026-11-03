@@ -415,15 +415,25 @@ func (s *Service) CreateCompletedUserMessageIdempotent(
 	if messageID == "" {
 		return nil, errors.New("message id is required for idempotent creation")
 	}
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
 	if err := s.authorizeMessageCreate(ctx, req); err != nil {
 		return nil, err
 	}
-	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
-	if err == nil && existing != nil {
-		return existing, nil
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, messageID, req)
+	if err != nil {
+		return nil, err
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("check existing completed user message: %w", err)
+	defer releaseAdmission()
+	ctx = admissionCtx
+
+	existing, found, err := s.existingCompletedUserMessage(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return existing, nil
 	}
 	session, err := s.getSessionWithRetry(
 		ctx, req.TaskSessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
@@ -437,7 +447,47 @@ func (s *Service) CreateCompletedUserMessageIdempotent(
 	}
 	req.TurnID = turn.ID
 	req.CompletedTurn = true
-	return s.CreateMessageIdempotent(ctx, messageID, req)
+	message, err := s.CreateMessageWithID(ctx, messageID, req)
+	if err == nil {
+		return message, nil
+	}
+	// A concurrent writer can still win between the admitted lookup and this
+	// insert. Treat a matching committed row as success.
+	existing, found, lookupErr := s.existingCompletedUserMessage(ctx, messageID, req)
+	if lookupErr == nil && found {
+		return existing, nil
+	}
+	return nil, s.rollbackCompletedUserMessageTurn(ctx, session, turn, err)
+}
+
+func (s *Service) existingCompletedUserMessage(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing completed user message: %w", err)
+	}
+	if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
+func (s *Service) rollbackCompletedUserMessageTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+	turn *models.Turn,
+	cause error,
+) error {
+	if _, rollbackErr := s.RollbackReservedTurn(ctx, session.ID, turn.ID); rollbackErr != nil {
+		return errors.Join(cause, rollbackErr)
+	}
+	return cause
 }
 
 type planCommentMessageValidator interface {

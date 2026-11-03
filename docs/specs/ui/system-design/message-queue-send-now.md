@@ -110,10 +110,11 @@ A durable source, such as a plan-comment or preview-feedback message, stays in
 with a delivery lease of `DeliveryReservationTTL` (30 seconds). The
 replacement prompt can wait longer than that: `agentPromptReadyTimeout` is
 also 30 seconds and starts after the claim, so a stalled session always
-outlives the lease. When the lease has expired, the head reservation treats the
-row as free. A readiness drain then reserves it with a new token. The claim's
-later restore fails its token check with `ErrSendNowClaimChanged`, and the FIFO
-owner later acknowledges the row without delivering it.
+outlives the lease. Before the ownership rule, an expired lease let the head
+reservation treat the row as free. A readiness drain then reserved it with a
+new token; the claim's later restore failed its token check with
+`ErrSendNowClaimChanged`, and the FIFO owner later acknowledged the row without
+delivering it.
 
 The open claim, not the lease, owns its sources. `reserveHeadTx`
 (`messagequeue/repository_sqlite.go`, which also serves PostgreSQL) reads the
@@ -138,19 +139,24 @@ reach that state: the running backend's restore in
 startup reconciliation without a recovery-block store. Today the first leaves
 the claim row behind, and the other two delete it silently.
 
-All three call one release step. It deletes the exact claim through
-`DeletePendingSendNowClaim` and marks the claim's user message as not
-delivered. When the message is already in the history (a durable source
-recorded by `prepareSendNowTranscript`, or a message recorded after the prompt
-claim), the step adds `delivery_status: not_delivered` to its metadata. When it
-is not, the step records it from the claim's dispatch envelope with that status
-in an already-completed lifecycle-only turn. That keeps the release from
-starting or adopting an active conversation turn, which would corrupt turn
-timing and running indicators. The step then publishes the message update and
-queue status. It is idempotent per claim, so a retry or a second recovery pass
-does not duplicate it. Transient failures are retried with the bounded claim
-mutation helper; a release that still fails leaves the claim row for the next
-startup reconciliation or recovery action.
+All three call one release step. It releases the exact claim and every source
+row the claim still owns, so FIFO cannot later deliver work already reported as
+undelivered. If a successor owns a surviving source, the step leaves the
+message unmarked because that successor may deliver it. Otherwise the step
+marks the claim's user message as not delivered. When the message is already in
+the history (a durable source recorded by `prepareSendNowTranscript`, or a
+message recorded after the prompt claim), the step adds
+`delivery_status: not_delivered` to its metadata. When it is not, the step
+records it from the claim's dispatch envelope with that status in an
+already-completed lifecycle-only turn. That keeps the release from starting or
+adopting an active conversation turn, which would corrupt turn timing and
+running indicators. The step then publishes the message update and queue
+status. It is idempotent per claim, so a retry or a second recovery pass does
+not duplicate it. Transient failures are retried with the bounded claim
+mutation helper. A failure before the release transaction commits leaves the
+claim in place for the next startup reconciliation or recovery action; a
+persistent failure while writing the message status leaves the claim and its
+sources released but the message unmarked, and the error is logged.
 
 Claims invalidated by deleting or replacing the task or session are not
 unrecoverable: restore already skips sources whose generation changed and

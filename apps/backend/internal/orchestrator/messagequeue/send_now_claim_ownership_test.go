@@ -186,3 +186,89 @@ func markReservedMetadataWithLeaseForTest(
 	marked, _, _ := markReservedMetadataWithLease(metadata, "", now)
 	return marked
 }
+
+// TestReleaseSendNowClaimSettlesOwnedSources pins that releasing an
+// unrestorable claim removes its surviving source rows, so FIFO cannot deliver
+// a message already reported as undelivered.
+func TestReleaseSendNowClaimSettlesOwnedSources(t *testing.T) {
+	factories := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	}
+	for _, factory := range factories {
+		t.Run(factory.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := factory.new(t)
+			source := planCommentSendNowSource("session-1", "task-1", "plan-comment-release")
+			require.NoError(t, repo.Insert(ctx, source, 0))
+			claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*source})
+			require.NoError(t, err)
+
+			settled, err := repo.ReleaseSendNowClaim(ctx, claim)
+			require.NoError(t, err)
+			require.True(t, settled)
+			entries, err := repo.ListBySession(ctx, "session-1")
+			require.NoError(t, err)
+			require.Empty(t, entries)
+			require.Zero(t, pendingSendNowClaims(t, repo))
+		})
+	}
+}
+
+// TestReleaseSendNowClaimLeavesSuccessorOwnership pins that a claim superseded
+// by another claim does not remove the successor's source or report a settled
+// outcome.
+func TestReleaseSendNowClaimLeavesSuccessorOwnership(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	source := planCommentSendNowSource("session-1", "task-1", "plan-comment-successor")
+	require.NoError(t, repo.Insert(ctx, source, 0))
+	claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*source})
+	require.NoError(t, err)
+	_, err = repo.db.ExecContext(ctx,
+		`UPDATE queue_send_now_claims SET claim_id = ? WHERE session_id = ?`, "successor-claim", "session-1")
+	require.NoError(t, err)
+
+	settled, err := repo.ReleaseSendNowClaim(ctx, claim)
+	require.NoError(t, err)
+	require.False(t, settled)
+	entries, err := repo.ListBySession(ctx, "session-1")
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "the successor's source must remain")
+	require.Equal(t, 1, pendingSendNowClaims(t, repo))
+}
+
+// TestMemorySendNowKeepsEarlierClaimOwnership pins that a later claim adds its
+// own sources without clearing an earlier claim's durable ownership. The later
+// ordinary-only claim must not make the first claim's source reservable.
+func TestMemorySendNowKeepsEarlierClaimOwnership(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	first := planCommentSendNowSource("session-1", "task-1", "plan-comment-first")
+	require.NoError(t, repo.Insert(ctx, first, 0))
+	firstClaim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first})
+	require.NoError(t, err)
+
+	second := &QueuedMessage{
+		ID: "ordinary-second", SessionID: "session-1", TaskID: "task-1",
+		Content: "second send now", QueuedBy: QueuedByUser,
+	}
+	require.NoError(t, repo.Insert(ctx, second, 0))
+	_, err = repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*second})
+	require.NoError(t, err)
+
+	reserved, err := repo.ReserveHead(ctx, "session-1")
+	require.NoError(t, err)
+	require.Nil(t, reserved, "the first claim must still own its durable source")
+
+	settled, err := repo.ReleaseSendNowClaim(ctx, firstClaim)
+	require.NoError(t, err)
+	require.True(t, settled)
+	entries, err := repo.ListBySession(ctx, "session-1")
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}

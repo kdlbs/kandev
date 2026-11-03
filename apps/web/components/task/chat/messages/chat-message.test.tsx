@@ -591,7 +591,8 @@ describe("ChatMessage blocked delivery badge", () => {
 });
 
 describe("ChatMessage not-delivered badge", () => {
-  it("shows the localized not-delivered status on the saved user instruction", () => {
+  it("shows the localized not-delivered status on the saved user instruction", async () => {
+    await activateLocale("en");
     const Wrapper = wrapper();
 
     render(
@@ -614,6 +615,16 @@ describe("ChatMessage not-delivered badge", () => {
       "status",
     );
     expect(screen.getByText("Fix the button spacing (2 notes)", { exact: true })).not.toBeNull();
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń.",
+    );
+    await act(async () => {
+      await activateLocale("en");
+    });
   });
 });
 

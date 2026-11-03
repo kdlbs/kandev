@@ -28,12 +28,13 @@ not.
 - One release step for `ErrSendNowClaimChanged` after the retry budget, called
   from the restore in `executeSendNowClaimWithContext`, from
   `restorePendingSendNowClaimsForRecovery`, and from startup reconciliation
-  without a recovery-block store. It deletes the exact claim, sets
-  `delivery_status: not_delivered` on the recorded user message or records the
-  message from the dispatch envelope in an already-completed lifecycle-only
-  turn, then publishes the message update and queue status. It is idempotent
-  per claim and retries transient failures with the bounded claim mutation
-  helper.
+  without a recovery-block store. It releases the exact claim and every source
+  row the claim still owns, so FIFO cannot later run it. When no successor owns
+  a surviving source, it sets `delivery_status: not_delivered` on the recorded
+  user message or records the message from the dispatch envelope in an
+  already-completed lifecycle-only turn, then publishes the message update and
+  queue status. It is idempotent per claim and retries transient failures with
+  the bounded claim mutation helper.
 - Apply it only while the claim's session identity is still current. A session
   identity mismatch keeps its existing handling.
 - `models.MessageDeliveryStatusNotDelivered`, and two narrow `MessageCreator`
@@ -135,33 +136,38 @@ Task 02.
 
 Implemented. All three `ErrSendNowClaimChanged` sites call one release step:
 the running restore in `executeSendNowClaimWithContext`, recovery restore, and
-startup reconciliation without a recovery-block store. The step marks the
-recorded message or records it from the dispatch envelope with
-`delivery_status: not_delivered`, deletes the exact claim, and publishes the
-queue status. A message that is absent from history is recorded in an
-already-completed lifecycle-only turn, so release never starts or adopts an
-active conversation turn. The step retries transient failures with the existing
-bounded claim mutation helper. A session identity mismatch keeps the previous
-discard behavior, and an accepted claim's superseded record is discarded
-without marking the message. The task service exposes a narrow
-`SetUserMessageDeliveryStatus` and `CreateCompletedUserMessageIdempotent` pair
-through `MessageCreator`, and the chat bubble renders the localized badge
-beside the existing `blocked` badge.
+startup reconciliation without a recovery-block store. The step releases the
+exact claim and every source row it still owns, so FIFO cannot later deliver a
+message already reported as undelivered. It marks the recorded message or
+records it from the dispatch envelope with `delivery_status: not_delivered`
+only when no successor owns a surviving source. A message that is absent from
+history is recorded in an already-completed lifecycle-only turn, so release
+never starts or adopts an active conversation turn. The step retries transient
+failures with the existing bounded claim mutation helper. A session identity
+mismatch keeps the previous discard behavior, and an accepted claim's
+superseded record is discarded without marking the message. The task service
+exposes a narrow `SetUserMessageDeliveryStatus` and
+`CreateCompletedUserMessageIdempotent` pair through `MessageCreator`, and the
+chat bubble renders the localized badge beside the existing `blocked` badge.
 
 Backend coverage: `queue_send_now_unrecoverable_test.go` (all three sites,
-idempotency, transient-release retry, existing-message and replaced-session
-cases, plus assertions that release creates no active turn),
-`service_message_delivery_status_test.go` (exact session-owned user message and
-a completed lifecycle-only turn that leaves an existing active turn untouched),
-and the successful-restore ownership regression.
+source settling, successor ownership, idempotency, transient-release retry,
+existing-message and replaced-session cases, plus assertions that release
+creates no active turn), `send_now_claim_ownership_test.go` (memory/SQLite/
+PostgreSQL release and preserved earlier-claim ownership), `service_message_delivery_status_test.go`
+(exact session-owned user message and a completed lifecycle-only turn that
+leaves an existing active turn untouched, including concurrent callers), and
+the successful-restore ownership regression.
 Frontend coverage: `chat-message.test.tsx` renders the localized badge.
 E2E coverage: `tests/chat/send-now-not-delivered.spec.ts` and
 `tests/chat/mobile-send-now-not-delivered.spec.ts` use the new
 `e2e-send-now-fixture`. The fixture seeds a pending claim whose durable source
 row is missing and runs `restorePendingSendNowClaimsForRecovery`, the same
 release entry point a resolved `unknown_send_now_outcome` recovery block uses,
-without a live agent. Both specs passed locally with the host runner
-(`chromium` and `mobile-chrome`), including the completed lifecycle-only turn.
+without a live agent. The managed runner, CI build step, build identity, and
+Docker build path all build the fixture. Both specs passed locally with the
+host runner (`chromium` and `mobile-chrome`), including the completed
+lifecycle-only turn.
 
 Verified:
 
@@ -174,4 +180,6 @@ Verified:
 bash scripts/lint-go-changed <changed Go files>
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium -- tests/chat/send-now-not-delivered.spec.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome --no-build -- tests/chat/mobile-send-now-not-delivered.spec.ts)
+python3 .github/scripts/e2e-tests-workflow-contract_test.py
+python3 .github/scripts/lint-action-pinning_test.py
 ```

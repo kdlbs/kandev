@@ -1503,15 +1503,17 @@ func (r *memoryRepository) claimSendNowLocked(
 	} else {
 		r.entries[sessionID] = remaining
 	}
-	claimIDs := make(map[string]struct{}, len(sources))
+	claimIDs := r.sendNowClaims[sessionID]
+	if claimIDs == nil {
+		claimIDs = make(map[string]struct{}, len(sources))
+	}
 	for _, source := range sources {
-		if source.IsDurableDelivery() {
-			claimIDs[source.ID] = struct{}{}
-		}
+		// Every source belongs to its claim while it is open. A later claim
+		// adds its own sources without dropping an earlier claim's durable
+		// ownership; settlement removes only the settling claim's sources.
+		claimIDs[source.ID] = struct{}{}
 	}
-	if len(claimIDs) > 0 {
-		r.sendNowClaims[sessionID] = claimIDs
-	}
+	r.sendNowClaims[sessionID] = claimIDs
 	r.setAutoRunLocked(identityPointer(identity), sessionID, true)
 	r.sendNowGeneration[sessionID]++
 	return &SendNowClaim{
@@ -1602,7 +1604,7 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
 	r.entries[sessionID] = list
-	delete(r.sendNowClaims, sessionID)
+	r.removeSendNowClaimOwnershipLocked(sessionID, claim.Sources)
 	return nil
 }
 
@@ -1695,8 +1697,95 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 	} else {
 		r.entries[sessionID] = remaining
 	}
-	delete(r.sendNowClaims, sessionID)
+	r.removeSendNowClaimOwnershipLocked(sessionID, claim.Sources)
 	return nil
+}
+
+// ReleaseSendNowClaim removes an unrestorable claim and the source rows it
+// still owns. A false result means a successor owns a surviving source, so the
+// caller must not mark the message not delivered.
+func (r *memoryRepository) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return false, ErrSendNowEmpty
+	}
+	if err := r.validateSendNowClaimAuthority(ctx, claim); err != nil {
+		return false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.releaseSendNowClaimLocked(claim), nil
+}
+
+func (r *memoryRepository) releaseSendNowClaimLocked(claim *SendNowClaim) bool {
+	sessionID := claim.Sources[0].SessionID
+	owned := r.sendNowClaims[sessionID]
+	if len(owned) == 0 {
+		return !r.sendNowClaimRowsPresentLocked(sessionID, claim)
+	}
+	if !sendNowClaimOwnsAllSources(owned, claim) {
+		return false
+	}
+	settled := r.removeReleasedSendNowSourcesLocked(sessionID, claim)
+	r.removeSendNowClaimOwnershipLocked(sessionID, claim.Sources)
+	return settled
+}
+
+func (r *memoryRepository) removeSendNowClaimOwnershipLocked(sessionID string, sources []QueuedMessage) {
+	owned := r.sendNowClaims[sessionID]
+	for _, source := range sources {
+		delete(owned, source.ID)
+	}
+	if len(owned) == 0 {
+		delete(r.sendNowClaims, sessionID)
+	}
+}
+
+func (r *memoryRepository) sendNowClaimRowsPresentLocked(sessionID string, claim *SendNowClaim) bool {
+	for _, source := range claim.Sources {
+		for _, entry := range r.entries[sessionID] {
+			if entry.ID == source.ID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sendNowClaimOwnsAllSources(owned map[string]struct{}, claim *SendNowClaim) bool {
+	for _, source := range claim.Sources {
+		if _, ok := owned[source.ID]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *memoryRepository) removeReleasedSendNowSourcesLocked(sessionID string, claim *SendNowClaim) bool {
+	sourcesByID := make(map[string]QueuedMessage, len(claim.Sources))
+	for _, source := range claim.Sources {
+		sourcesByID[source.ID] = source
+	}
+	settled := true
+	list := r.entries[sessionID]
+	remaining := list[:0]
+	for _, entry := range list {
+		source, ok := sourcesByID[entry.ID]
+		if !ok || (!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
+			if ok {
+				settled = false
+			}
+			remaining = append(remaining, entry)
+			continue
+		}
+		// This source row belongs to the claim being released. Drop it so
+		// FIFO cannot deliver it after the message is marked not delivered.
+	}
+	if len(remaining) == 0 {
+		delete(r.entries, sessionID)
+	} else {
+		r.entries[sessionID] = remaining
+	}
+	return settled
 }
 
 // cloneSendNowSources deep-copies the claimed sources so later mutation cannot alter the claim.

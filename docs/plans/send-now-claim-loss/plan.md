@@ -76,11 +76,12 @@ applies the same rule through `sendNowClaimContainsLocked`. See
 
 `apps/backend/internal/orchestrator/queue_send_now.go` and
 `queue_send_now_claim.go`: the three sites that end with
-`ErrSendNowClaimChanged` call one release step. It deletes the exact claim and
-marks the user message, or records it in an already-completed lifecycle-only
-turn, with `delivery_status: not_delivered`. The release retries transient
-failures with the bounded claim mutation helper. The web chat bubble renders
-that status with the existing badge pattern. See
+`ErrSendNowClaimChanged` call one release step. It releases the exact claim and
+the source rows it still owns, then marks the user message, or records it in an
+already-completed lifecycle-only turn, with `delivery_status: not_delivered`.
+A successor-owned source keeps the message unmarked. The release retries
+transient failures with the bounded claim mutation helper. The web chat bubble
+renders that status with the existing badge pattern. See
 [Unrecoverable claims](../../specs/ui/system-design/message-queue-send-now.md#unrecoverable-claims).
 
 ## ASCII UI preview
@@ -120,7 +121,7 @@ Illustrative: exact wording, color, and spacing. Maps to
 | --- | --- |
 | `AC-TASKS-SESSION-TURN-SETTLEMENT-002.6` | `apps/backend/internal/agent/runtime/lifecycle/wakeup_statusless_test.go` (new) |
 | `AC-UI-MESSAGE-QUEUE-SEND-NOW-001.13` | `apps/backend/internal/orchestrator/messagequeue/send_now_claim_ownership_test.go` (new), `apps/backend/internal/orchestrator/queue_send_now_claim_ownership_test.go` (new) |
-| `AC-UI-MESSAGE-QUEUE-SEND-NOW-001.14` | `apps/backend/internal/orchestrator/queue_send_now_unrecoverable_test.go` (new; all three sites, lifecycle-only turn, transient retry), `apps/backend/internal/task/service/service_message_delivery_status_test.go` (new), `apps/web/components/task/chat/messages/chat-message.test.tsx` |
+| `AC-UI-MESSAGE-QUEUE-SEND-NOW-001.14` | `apps/backend/internal/orchestrator/queue_send_now_unrecoverable_test.go` (new; all three sites, source settling, successor guard, lifecycle-only turn, transient retry), `apps/backend/internal/task/service/service_message_delivery_status_test.go` (new; replay, admission, completed turn), `apps/web/components/task/chat/messages/chat-message.test.tsx` |
 
 ## E2E tests
 
@@ -144,11 +145,12 @@ Illustrative: exact wording, color, and spacing. Maps to
   first startup after upgrade like any crash leftover: with a recovery-block
   store, startup parks the session behind an `unknown_send_now_outcome`
   recovery block, and resolving it runs the release step.
-- The release retries transient failures with the existing bounded claim
-  mutation helper. If every attempt still fails, the claim row remains and its
-  entry stays blocked until the next startup reconciliation or recovery action.
-  The failure is logged. The message is marked before the claim is deleted, so
-  a later pass re-applies the same status and removes the claim without
-  creating a second history row.
+- The release clears the exact claim and the source rows it still owns before
+  writing the message status, so a released source cannot run later. A failure
+  before that transaction commits leaves the claim for the next startup
+  reconciliation or recovery action. Transient message-status failures are
+  retried with the existing bounded claim mutation helper. A persistent status
+  failure leaves the claim and sources released but the message unmarked; the
+  error is logged and the user can resend manually.
 - The exact bridge frame in the first report is inferred from bridge 0.97.0. The
   backend rule depends only on the empty status, not on the frame's source.

@@ -836,13 +836,15 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
-// isStatuslessToolUpdate reports a tool_update that carries no status. The
-// adapter synthesizes in_progress for an update with a title, input, content,
-// or locations, so an empty status means metadata only. The agentctl finalizer
-// ignores that update, so it must not start a turn the finalizer will never
-// close.
+// isStatuslessToolUpdate reports a tool_update whose ACP wire status was
+// missing. The adapter synthesizes in_progress for an update with a title,
+// input, content, or recognized shell output, so real progress still reaches
+// the finalizer. The lifecycle boundary must use the same evidence as the
+// finalizer, which ignores ToolStatusMissing updates: an empty or missing
+// status may not start a turn the finalizer will never close.
 func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
-	return event.Type == "tool_update" && event.ToolStatus == ""
+	return event.Type == "tool_update" &&
+		(event.ToolStatus == "" || event.ToolStatusMissing)
 }
 
 // recordActivity updates the last-activity timestamp and, on the very first

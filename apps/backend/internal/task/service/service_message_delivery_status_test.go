@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/events"
@@ -131,4 +132,41 @@ func TestSetUserMessageDeliveryStatusSkipsAbsentOrForeignMessages(t *testing.T) 
 	userStored, err := svc.GetMessage(ctx, userMessage.ID)
 	require.NoError(t, err)
 	require.NotContains(t, userStored.Metadata, models.MessageMetaKeyDeliveryStatus)
+}
+
+func TestCreateCompletedUserMessageIdempotentConcurrentCreatesOneTurn(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	ctx := context.Background()
+	const workers = 4
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := svc.CreateCompletedUserMessageIdempotent(
+				ctx, "message-completed-concurrent", &CreateMessageRequest{
+					TaskSessionID: "sess-msg",
+					TaskID:        "task-msg",
+					Content:       "concurrent release retry",
+					AuthorType:    "user",
+				},
+			)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "sess-msg")
+	require.NoError(t, err)
+	require.Len(t, turns, 2, "only one completed lifecycle turn may be created")
+	messages, err := repo.ListMessages(ctx, "sess-msg")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "only one message may be stored")
 }

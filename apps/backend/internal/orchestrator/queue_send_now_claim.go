@@ -203,10 +203,12 @@ func (s *Service) restoreSendNowClaimWithRetry(
 }
 
 // releaseUnrecoverableSendNowClaim closes a claim that can be neither delivered
-// nor restored. The message is marked not delivered first, so a failure leaves
-// the claim in place for a later pass instead of losing the evidence. The step
-// is idempotent and retries transient failures, because a leftover claim blocks
-// its entry through the ownership rule until the next reconciliation.
+// nor restored. It first releases the exact claim and the source rows it still
+// owns, so FIFO cannot run work already reported as undelivered. Only when no
+// successor owns a surviving source does it mark the user message not
+// delivered. The step is idempotent and retries transient failures, because a
+// leftover claim blocks its entry through the ownership rule until the next
+// reconciliation.
 func (s *Service) releaseUnrecoverableSendNowClaim(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
@@ -223,25 +225,31 @@ func (s *Service) releaseUnrecoverableSendNowClaimOnce(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
 ) error {
-	releaseCtx := context.WithoutCancel(ctx)
-	if !s.queuedDispatchIdentityIsCurrent(releaseCtx, claim.Identity) {
+	if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
 		// A replaced or deleted session keeps its existing handling: discard
 		// the exact claim without marking a message that no longer belongs to
 		// the current session identity.
-		return s.discardSendNowClaim(releaseCtx, claim)
+		return s.discardSendNowClaim(ctx, claim)
 	}
-	if err := s.markSendNowClaimNotDelivered(releaseCtx, claim); err != nil {
+	settled, err := s.messageQueue.ReleaseSendNowClaim(ctx, claim)
+	if err != nil {
 		return err
 	}
-	if err := s.discardSendNowClaim(releaseCtx, claim); err != nil {
+	if !settled {
+		// A successor owns a surviving source and may deliver it. Never mark
+		// the message not delivered in that case.
+		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
+		return nil
+	}
+	if err := s.markSendNowClaimNotDelivered(ctx, claim); err != nil {
 		return err
 	}
-	s.publishQueueStatusEventForIdentity(releaseCtx, claim.Identity)
+	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	return nil
 }
 
 func (s *Service) discardSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {
-	err := s.messageQueue.DeletePendingSendNowClaim(context.WithoutCancel(ctx), claim)
+	err := s.messageQueue.DeletePendingSendNowClaim(ctx, claim)
 	if err != nil && !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
 		return err
 	}

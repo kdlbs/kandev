@@ -44,6 +44,35 @@ func TestWakeup_StatuslessToolUpdateDoesNotFlipToRunning(t *testing.T) {
 	}
 }
 
+// TestWakeup_MissingWireStatusToolUpdateDoesNotFlipToRunning covers the
+// adapter's synthesized status: a metadata-only ACP update with no wire status
+// can carry in_progress after shell-output recognition. The finalizer still
+// ignores it, so the lifecycle boundary must too.
+func TestWakeup_MissingWireStatusToolUpdateDoesNotFlipToRunning(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	_ = mgr.executionStore.Add(execution)
+
+	execution.firstActivityOnce.Do(func() {})
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "tool_update",
+		ToolCallID:        "tool-1",
+		ToolStatus:        "in_progress",
+		ToolStatusMissing: true,
+	})
+
+	for _, published := range eventBus.PublishedEvents {
+		if published.Event != nil && published.Event.Type == events.AgentRunning {
+			t.Fatal("missing-wire-status tool update published agent.running")
+		}
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution.Status = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+}
+
 // TestWakeup_TurnContentStillFlipsToRunning keeps the positive side of the
 // same boundary: real turn content and an active tool update still start the
 // agent-started turn.

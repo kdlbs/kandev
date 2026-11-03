@@ -173,6 +173,9 @@ func (f *sendNowUnrecoverableFixture) requireReleased(t *testing.T) {
 	pending, err := f.queue.ListPendingSendNowClaims(ctx)
 	require.NoError(t, err)
 	require.Empty(t, pending, "unrecoverable claim must be released")
+	entries, _, err := f.queue.SnapshotSession(ctx, "session-1")
+	require.NoError(t, err)
+	require.Empty(t, entries, "surviving claimed sources must not stay queued for FIFO")
 
 	userMessages := f.userMessages(t)
 	require.Len(t, userMessages, 1, "not-delivered message must be recorded once")
@@ -279,6 +282,24 @@ func TestSendNowUnrecoverableClaimForReplacedSessionKeepsExistingHandling(t *tes
 	require.NoError(t, err)
 	require.Empty(t, pending, "the exact claim is still discarded")
 	require.Empty(t, fixture.userMessages(t))
+}
+
+// TestSendNowReleaseSkipsMarkingWhenSuccessorOwnsSource pins the ambiguity
+// guard: a different claim now owns the session, so release must leave the
+// message unmarked even though this claim could not be restored.
+func TestSendNowReleaseSkipsMarkingWhenSuccessorOwnsSource(t *testing.T) {
+	fixture := newSendNowUnrecoverableFixture(t)
+	_, err := fixture.db.ExecContext(context.Background(),
+		`UPDATE queue_send_now_claims SET claim_id = ? WHERE session_id = ?`,
+		"successor-claim-id", "session-1")
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.svc.releaseUnrecoverableSendNowClaim(context.Background(), fixture.claim))
+
+	require.Empty(t, fixture.userMessages(t))
+	pending, err := fixture.queue.ListPendingSendNowClaims(context.Background())
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "the successor claim must stay in place")
 }
 
 // TestSendNowAcceptedClaimNeverMarksNotDelivered pins the release guard: an

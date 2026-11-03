@@ -112,6 +112,7 @@ func TestSendNowNotDeliveredFixture(t *testing.T) {
 	claim, err := queue.ClaimSendNow(ctx, session.ID, []messagequeue.QueuedMessage{*source})
 	require.NoError(t, err)
 	require.NotEmpty(t, claim.ClaimID)
+	expectedMessageID := sendNowClaimTranscriptMessageID(claim)
 	_, err = sqlConnection.ExecContext(ctx,
 		`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`, source.ID, session.ID)
 	require.NoError(t, err)
@@ -132,7 +133,8 @@ func TestSendNowNotDeliveredFixture(t *testing.T) {
 	require.NoError(t, err)
 	found := false
 	for _, message := range messages {
-		if message.AuthorType == models.MessageAuthorUser &&
+		if message.ID == expectedMessageID &&
+			message.AuthorType == models.MessageAuthorUser &&
 			message.Metadata[models.MessageMetaKeyDeliveryStatus] == models.MessageDeliveryStatusNotDelivered {
 			found = true
 		}
