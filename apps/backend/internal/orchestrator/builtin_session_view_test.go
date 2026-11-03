@@ -28,7 +28,7 @@ func TestBuiltinIntentAdmissionDoesNotFreezeTitleOwnership(t *testing.T) {
 	require.NoError(t, err)
 	task.WorkspaceID = "ws1"
 	require.NoError(t, repo.UpdateTask(ctx, task))
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 	svc.executor.SetBuiltinPolicyReader(defaultBuiltinIntentReader{})
 	prepared, err := svc.PrepareBuiltinIntent(ctx, "task", "session", "walkthrough")
 	require.NoError(t, err)
@@ -52,7 +52,7 @@ func TestBuiltinSessionViewSeparatesDesiredAndAcceptedPackages(t *testing.T) {
 			require.NoError(t, err)
 			task.WorkspaceID = "ws1"
 			require.NoError(t, repo.UpdateTask(ctx, task))
-			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 			svc.executor.SetBuiltinPolicyReader(builtinPromptReader{})
 			reader, ok := any(svc).(interface {
 				ReadBuiltinSessionMCP(context.Context, string) (*mcpconfig.BuiltinSessionView, error)
@@ -103,7 +103,7 @@ func TestBuiltinSessionViewRequiresSessionAndTaskAccess(t *testing.T) {
 		ctx := context.Background()
 		repo := setupTestRepo(t)
 		seedTaskAndSession(t, repo, "task", "session", models.TaskSessionStateCreated)
-		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 		denied := errors.New("resource denied")
 		if checkTask {
 			svc.SetTaskAccessChecker(func(context.Context, string) error { return denied })

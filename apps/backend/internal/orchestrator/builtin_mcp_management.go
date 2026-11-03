@@ -77,14 +77,19 @@ func (s *Service) ReadBuiltinSessionMCP(ctx context.Context, sessionID string) (
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return nil, err
 	}
-	if running == nil {
-		return view, nil
-	}
-	if running.TaskID != task.ID || running.SessionID != sessionID {
+	if running != nil && (running.TaskID != task.ID || running.SessionID != sessionID) {
 		return nil, mcpconfig.ErrBuiltinPolicyInvalid
 	}
-	view.ExecutionID = running.AgentExecutionID
-	applyBuiltinSessionEvidence(view, running)
+	if running != nil {
+		view.ExecutionID = running.AgentExecutionID
+		applyBuiltinSessionEvidence(view, running)
+	}
+	live, probeErr := s.probeAgentRunning(ctx, sessionID)
+	if probeErr != nil {
+		view.WalkthroughAvailability = builtinStateUnknown
+	} else if !live {
+		view.WalkthroughAvailability = builtinSelectionAvailability(view.Desired)
+	}
 	return view, nil
 }
 

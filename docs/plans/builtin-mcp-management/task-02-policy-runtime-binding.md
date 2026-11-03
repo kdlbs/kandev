@@ -210,3 +210,24 @@ any primary session exists. HTTP creation policy denials/conflicts now use typed
 403/400/409 responses; the corresponding handler tests pass. Final affected Go lint
 reports zero issues. Full-suite environment limits remain explicit in the results
 record; they are not counted as passing broad audits.
+
+### Adversarial review remediation (2026-11-03)
+
+The user requested a second session to review the existing PR and follow valid
+findings. The review identified two Walkthrough admission defects under the
+existing process-start contract. Legacy namespacing clients report the exact
+bare `show_walkthrough` alias. Trusted native host/source/execution checks must
+accept it without accepting foreign or lookalike tools. Runtime inventory alone
+does not prove a retained process: reuse the error-preserving runtime probe,
+retain the accepted execution grant for a live process, and resolve desired
+packages for a confirmed future start. Probe errors block admission and project
+Unknown availability without discarding historical evidence. Final dispatch
+still validates its actual execution and manifest. Missing inventory does not
+promise that ordinary resume can launch.
+
+Focused TDD reproduced both defects. Alias admission now passes; inventory
+On/Off, suspension, missing inventory and probe-error cases, plus a real executor
+resume-to-launch boundary, pass. Existing live-binding and foreign-execution
+cases remain covered. The reviewer rechecked the working changes without edits
+or additional findings. Final race, lint, integration and publication evidence
+is recorded in `implementation-results.md` after validation.

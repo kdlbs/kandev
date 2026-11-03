@@ -36,7 +36,7 @@ func TestBuiltinIntentQueueReadFailurePreservesRequest(t *testing.T) {
 }
 
 func TestBuiltinIntentUsesAcceptedExecutionRatherThanDesiredPackages(t *testing.T) {
-	for _, state := range []string{"selected", "excluded", "unknown", "foreign-execution", "created", "legacy-observed"} {
+	for _, state := range []string{"selected", "excluded", "unknown", "foreign-execution", "created", "legacy-observed", "legacy-namespaced", "legacy-lookalike", "legacy-foreign-host", "legacy-foreign-source"} {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
@@ -49,7 +49,7 @@ func TestBuiltinIntentUsesAcceptedExecutionRatherThanDesiredPackages(t *testing.
 			require.NoError(t, err)
 			task.WorkspaceID = "ws1"
 			require.NoError(t, repo.UpdateTask(ctx, task))
-			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 			svc.executor.SetBuiltinPolicyReader(builtinPromptReader{}) // Desired Walkthroughs is Off.
 			validator, ok := any(svc).(interface {
 				ValidateBuiltinIntent(context.Context, string, string, string) error
@@ -70,17 +70,35 @@ func TestBuiltinIntentUsesAcceptedExecutionRatherThanDesiredPackages(t *testing.
 					history.BuiltinBinding.ExecutionID = "old-execution"
 				}
 			}
-			if state == "legacy-observed" {
+			if state == "legacy-observed" || state == "legacy-namespaced" || state == "legacy-lookalike" || state == "legacy-foreign-host" || state == "legacy-foreign-source" {
 				history.Current.BuiltinPackages = nil
 				now := time.Now().UTC()
-				history.Current.Servers = []streams.MCPServerAttachment{{Name: "kandev", Source: streams.MCPServerSourceKandev, Status: streams.MCPAttachmentStatusActive, ToolsListedAt: &now, Tools: []streams.MCPToolSummary{{Name: "show_walkthrough_kandev"}}}}
+				toolName := "show_walkthrough_kandev"
+				if state != "legacy-observed" {
+					toolName = "show_walkthrough"
+				}
+				if state == "legacy-lookalike" {
+					toolName += "_foreign"
+				}
+				history.Current.Servers = []streams.MCPServerAttachment{{Name: "kandev", Source: streams.MCPServerSourceKandev, Status: streams.MCPAttachmentStatusActive, ToolsListedAt: &now, Tools: []streams.MCPToolSummary{{Name: toolName}}}}
+				if state == "legacy-foreign-host" {
+					history.Current.Servers[0].Name = "foreign"
+				}
+				if state == "legacy-foreign-source" {
+					history.Current.Servers[0].Source = streams.MCPServerSourceProfile
+				}
 			}
 			require.NoError(t, repo.SetSessionMetadataKey(ctx, "session", models.SessionMetaKeyMCPAttachmentState, history))
 			err = validator.ValidateBuiltinIntent(ctx, "task", "session", "walkthrough")
-			if state == "selected" || state == "legacy-observed" {
+			if state == "selected" || state == "legacy-observed" || state == "legacy-namespaced" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
+			}
+			if state == "legacy-observed" || state == "legacy-namespaced" {
+				view, viewErr := svc.ReadBuiltinSessionMCP(ctx, "session")
+				require.NoError(t, viewErr)
+				require.Equal(t, "available", view.WalkthroughAvailability)
 			}
 			require.Error(t, validator.ValidateBuiltinIntent(ctx, "foreign-task", "session", "walkthrough"))
 			require.Error(t, validator.ValidateBuiltinIntent(ctx, "task", "session", "unknown-tool"))
@@ -90,7 +108,7 @@ func TestBuiltinIntentUsesAcceptedExecutionRatherThanDesiredPackages(t *testing.
 
 func TestBuiltinIntentPreparedDispatchContext(t *testing.T) {
 	repo := setupTestRepo(t)
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{isAgentRunning: true})
 	preparer, ok := any(svc).(interface {
 		PrepareBuiltinIntent(context.Context, string, string, string) (context.Context, error)
 	})

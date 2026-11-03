@@ -87,6 +87,10 @@ separate from the current process's connections until a new process accepts it.
 If the current agent's package set is unknown, the saved selections remain
 visible with an Unknown explanation. They are not reported as new connections.
 
+Walkthrough requests use the accepted packages while the agent process is live.
+After the process stops, requests use the saved choices for its next start. An
+unavailable runtime check leaves availability unknown.
+
 If a Walkthrough request is unavailable, inspect its task choice and current
 process acceptance. After changing the choice, start a new process. Refresh
 Connections to check again. Existing walkthroughs remain readable; queued

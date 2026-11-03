@@ -24,6 +24,16 @@ for the diagnosed cause, regression checks, and desktop/phone composition.
 The repair is complete and locally verified. Earlier checkpoints remain historical
 evidence; exact-head remote CI is pending publication of this checkpoint.
 
+## User-requested adversarial review (2026-11-03)
+
+A secondary read-only session reviewed the package boundaries and integration.
+Three findings are repaired under work orders 02/03: legacy Walkthrough transport
+aliases, future-start versus live execution intent, and executor-discovery E2E
+verification. The original package authority and apply point stay unchanged.
+Focused post-rebase race and browser checks pass. See
+[implementation-results.md](implementation-results.md#secondary-adversarial-review-2026-11-03)
+for review coverage limits, regressions and final publication evidence.
+
 ## Checkpoint and verified baseline
 
 Design approved by the user; implementation explicitly authorized with "go for it"

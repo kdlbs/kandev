@@ -39,7 +39,13 @@ func (s *Service) PrepareBuiltinIntent(ctx context.Context, taskID, sessionID, v
 		return ctx, ErrTaskSessionPairMismatch
 	}
 	binding := builtinintent.Binding{Intent: intent, TaskID: taskID, SessionID: sessionID}
-	if session.State == models.TaskSessionStateCreated {
+	if session.State != models.TaskSessionStateCreated {
+		binding.ExecutionID, err = s.builtinIntentExecution(ctx, taskID, session)
+		if err != nil {
+			return ctx, err
+		}
+	}
+	if binding.ExecutionID == "" {
 		profile, prepareErr := s.executor.PrepareTaskSessionMCPProfile(ctx, taskID, session, false)
 		if prepareErr != nil {
 			return ctx, prepareErr
@@ -47,23 +53,29 @@ func (s *Service) PrepareBuiltinIntent(ctx context.Context, taskID, sessionID, v
 		if !builtinWalkthroughSelected(profile.BuiltinPackages) {
 			return ctx, builtinintent.ErrUnavailable
 		}
-		return builtinintent.Bind(ctx, binding), nil
-	}
-	binding.ExecutionID, err = s.builtinIntentExecution(ctx, taskID, session)
-	if err != nil {
-		return ctx, err
 	}
 	return builtinintent.Bind(ctx, binding), nil
 }
 
 func (s *Service) builtinIntentExecution(ctx context.Context, taskID string, session *models.TaskSession) (string, error) {
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	if err != nil {
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return "", err
 	}
-	if running == nil || running.TaskID != taskID || running.SessionID != session.ID || running.AgentExecutionID == "" {
+	if running != nil && (running.TaskID != taskID || running.SessionID != session.ID) {
 		return "", builtinintent.ErrUnavailable
 	}
+	live, err := s.probeAgentRunning(ctx, session.ID)
+	if err != nil || !live {
+		return "", err
+	}
+	if running == nil || running.AgentExecutionID == "" {
+		return "", builtinintent.ErrUnavailable
+	}
+	return s.retainedBuiltinIntentExecution(ctx, taskID, session, running)
+}
+
+func (s *Service) retainedBuiltinIntentExecution(ctx context.Context, taskID string, session *models.TaskSession, running *models.ExecutorRunning) (string, error) {
 	history, ok := runtime.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState])
 	if !ok {
 		return "", builtinintent.ErrUnavailable
@@ -109,7 +121,7 @@ func legacyWalkthroughObserved(attempt streams.MCPAttachmentAttempt, executionID
 			continue
 		}
 		for _, tool := range server.Tools {
-			if tool.Name == "show_walkthrough_kandev" {
+			if tool.Name == "show_walkthrough_kandev" || tool.Name == "show_walkthrough" {
 				return true
 			}
 		}

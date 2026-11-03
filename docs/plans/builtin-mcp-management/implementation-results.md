@@ -487,3 +487,69 @@ logs use `/tmp/kandev-4762-package-ux-*.log`. Images are ignored files in
 The existing manual instance receives refreshed SPA assets after publication;
 its backend and user choices are preserved. No main runtime or sibling workspace
 is changed. No merge is authorized.
+
+## Secondary adversarial review (2026-11-03)
+
+The user requested another session to review the PR and follow valid suggestions.
+Session `cc25a267-a0c6-432d-aafc-ef6445812b60` reviewed the package architecture,
+authority, lifecycle, evidence and UI paths, then expanded coverage to changed
+integration hunks and fixtures. It reported three actionable P2 findings:
+
+- Trusted legacy Auggie evidence uses `show_walkthrough`. Admission now accepts
+  this exact alias alongside the canonical name while rejecting lookalikes,
+  foreign servers and foreign sources.
+- Stopped/suspended execution inventory was treated as a live intent target.
+  Admission now uses the existing runtime probe, preserves live grants, and
+  checks desired packages for a future start. Probe errors block admission and
+  project Unknown. Historical acceptance is preserved. Final runtime execution
+  and manifest checks remain mandatory; package availability does not promise
+  that a missing-inventory session can resume.
+- The executor-listing config E2E called Configuration instead of Core and could
+  pass on a title emitted before failure. It now opens that call's output and
+  requires the seeded executor ID, and calls `kandev/list_executors_kandev`.
+
+RED receipts: `/tmp/kandev-4762-adversarial-alias-red.log`,
+`/tmp/kandev-4762-adversarial-resume-red.log`, and
+`/tmp/kandev-4762-adversarial-executors-red.log`. The browser failure showed the
+actual wrong-package tool-not-found error. Focused unit GREEN and the reviewer's
+read-only patch recheck passed before the main rebase.
+
+The branch reconciles main's agent-group termination proof change without
+conflicts. Range-diff confirms all twelve existing feature commits retain their
+patches. Backups preserve the published branch and complete working checkpoint.
+No shared Git metadata repair, main runtime or manual instance changes occur.
+
+This review is not an exhaustive full-file audit of all 298 files. The reviewer
+read new small owners and traced changed integration hunks; it did not audit all
+legacy owner bodies, translations, docs, installed providers or screenshots, and
+ran no tests. Primary-session post-rebase validation and publication follow.
+
+Post-rebase verification passes:
+
+- Race-enabled focused checks in orchestrator, executor, intent, MCP server and
+  lifecycle packages. Coverage includes built-in admission/evidence, native tool
+  name presentation, cold resume and main's agent-process group checks. After
+  extracting retained-binding validation to meet complexity limits, the affected
+  orchestrator intent/session-view race tests pass again.
+- Rebuilt desktop configuration catalog and executor profile lifecycle: two
+  passed in 11.0s. The strengthened executor output assertion sees the real
+  `exec-local` result through Core.
+- Sequential phone package opt-in/pruning: one passed in 13.8s. Browser runs use
+  one worker, retries zero, and the clean isolated environment described above.
+- Changed E2E ESLint and Prettier, 55-page public-doc validation and its tests,
+  documentation catalog (429 decisions, 1895 specifications), full spec lint and
+  whitespace checks pass.
+
+Receipts: `/tmp/kandev-4762-adversarial-race.log`,
+`/tmp/kandev-4762-adversarial-orchestrator-final-race.log`,
+`/tmp/kandev-4762-adversarial-desktop-final.log`, and
+`/tmp/kandev-4762-adversarial-phone-final.log`. Earlier lint identified the
+complexity extraction and a test switch cleanup; a later attempt collided with
+another workspace's active lint process and was retried without bypassing it.
+The manual test instance and its existing preferences are unchanged. No new UI
+markup or layout is introduced by these review fixes, so existing UI captures
+remain representative. Remote CI is pending publication of this checkpoint.
+
+Final affected Go lint passes with zero issues after the extraction and test
+switch correction: `/tmp/kandev-4762-adversarial-go-lint-green.log`. Normal commit
+hooks and exact-head publication evidence are preserved in the saved task plan.

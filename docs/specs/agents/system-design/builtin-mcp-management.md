@@ -415,11 +415,12 @@ a still-bound capable execution. Record typed queued built-in intent and recheck
 at dispatch against the target execution; never parse arbitrary message text.
 Existing saved walkthrough/output rendering remains available.
 
-Before shipping, reconcile the conditional availability and discovery wording in
-`agent-rich-output.md`, `mcp-tool-discovery-guidance.md`, and workspace MCP
-requirements/design, plus configuration tool contracts where they state a single
-server. This draft declares the proposed change; active documents continue to
-describe shipped behavior until the implementation work order updates them.
+Use the runtime's error-preserving process probe. Retired executor inventory does
+not bind a future start; a probe error leaves availability Unknown. Legacy native
+evidence accepts the exact bare transport alias for namespacing clients.
+
+Rich-output, discovery, workspace MCP and configuration contracts use selected
+package membership instead of one always-available server.
 
 ## Management projection and evidence
 

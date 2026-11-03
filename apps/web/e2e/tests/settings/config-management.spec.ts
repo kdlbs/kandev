@@ -430,7 +430,7 @@ test("executor listing and profile lifecycle use config-mode MCP", async ({
   const executor = executors.find((e) => e.type === "local")!;
   const page = await runConfig(
     [
-      ["kandev-configuration", "list_executors_kandev", {}],
+      ["kandev", "list_executors_kandev", {}],
       [
         "kandev-configuration",
         "create_executor_profile_kandev",
@@ -441,9 +441,12 @@ test("executor listing and profile lifecycle use config-mode MCP", async ({
   );
   await test.step("agent can list executors", async () => {
     await expandToolCallGroups(page);
-    await expect(page.chat.getByText("Kandev: List Executors", { exact: true })).toBeVisible({
-      timeout: 10_000,
-    });
+    const listing = page.chat
+      .locator(".group\\/expandable")
+      .filter({ hasText: "Kandev: List Executors" });
+    await expect(listing).toHaveCount(1);
+    await listing.getByText("Kandev: List Executors", { exact: true }).click();
+    await expect(listing.locator("pre")).toContainText(executor.id);
   });
   await test.step("agent can create and delete an executor profile", async () => {
     const { executors: afterCreate } = await apiClient.listExecutors();
