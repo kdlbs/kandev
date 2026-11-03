@@ -134,12 +134,13 @@ async function hydrateSourceSession({
     throw new MessageSendError("session-unavailable", unavailableMessage);
   }
 
-  const needsSession = cachedSession === undefined;
+  // Admission derives direct-vs-queue from the source session state, and a
+  // cached row can lag the backend, so the session is always read fresh. The
+  // transcript is only loaded when this client has none for the session.
   const needsMessages = !Object.prototype.hasOwnProperty.call(state.messages.bySession, sessionId);
-  if (!needsSession && !needsMessages) return;
 
   const [sessionResponse, messagesResponse] = await Promise.all([
-    needsSession ? fetchTaskSession(sessionId, { cache: "no-store" }) : null,
+    fetchTaskSession(sessionId, { cache: "no-store" }),
     needsMessages
       ? listTaskSessionMessages(sessionId, { limit: 100, sort: "asc" }, { cache: "no-store" })
       : null,
