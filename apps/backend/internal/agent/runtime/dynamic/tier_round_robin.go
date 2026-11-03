@@ -5,9 +5,11 @@ import (
 	"errors"
 )
 
-func supportedTierMode(mode string) bool {
-	return mode == orderedTierMode || mode == tierModeCost || mode == tierModeRandom || mode == tierModeRoundRobin ||
-		mode == tierModePace || mode == tierModeHeadroom || mode == tierModeConsumptionRate
+func supportedTierMode(mode string, usageAvailable bool) bool {
+	if mode == orderedTierMode || mode == tierModeCost || mode == tierModeRandom || mode == tierModeRoundRobin {
+		return true
+	}
+	return usageAvailable && usageTierMode(mode)
 }
 
 // The engine mutex encloses this read, ranking and the existing decision

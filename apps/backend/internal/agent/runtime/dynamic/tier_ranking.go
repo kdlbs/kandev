@@ -19,6 +19,13 @@ func WithTierRandomPick(pick func(int) int) EngineOption {
 	return func(e *Engine) { e.tierPick = pick }
 }
 
+// WithTierPreviewPick supplies an independent deterministic picker for the
+// read-only preview. Preview never consumes the execution picker, so sampling
+// a preview cannot change the next execution's random sequence.
+func WithTierPreviewPick(pick func(int) int) EngineOption {
+	return func(e *Engine) { e.tierPreviewPick = pick }
+}
+
 type rankedTierRow struct {
 	candidate Candidate
 	entry     TierPreviewEntry
@@ -198,7 +205,7 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 	if !e.orderedTiers {
 		return preview, nil
 	}
-	tiers, err := deriveOrderedTiers(profile.Candidates)
+	tiers, err := deriveOrderedTiers(profile.Candidates, e.tierUsageAvailable)
 	if err != nil {
 		return preview, err
 	}
@@ -215,7 +222,7 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 			}
 			loaded = true
 		}
-		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, e.tierPick, history, preview.ObservedAt), unreached)
+		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, e.tierPreviewPick, history, preview.ObservedAt), unreached)
 	}
 	preview.State = "no_candidates"
 	if len(preview.Considered) > 0 {

@@ -378,6 +378,7 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
 		dynamicruntime.WithEngineLogger(log.Zap()),
 		dynamicruntime.WithOrderedTiers(cfg.Features.DynamicProfileTiers),
+		dynamicruntime.WithTierUsageAvailable(cfg.Features.ProviderUsageLimits),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {

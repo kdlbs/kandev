@@ -12,6 +12,12 @@ const (
 	tierModeConsumptionRate = "consumption_rate"
 )
 
+// WithTierUsageAvailable declares whether the provider usage surface is on.
+// While it is off, saved usage modes stay stored but are not executed as order.
+func WithTierUsageAvailable(enabled bool) EngineOption {
+	return func(e *Engine) { e.tierUsageAvailable = enabled }
+}
+
 // UsageBucket contains existing, proved provider/account/window references.
 // Empty Model identifies a shared account window, not a per-model allowance.
 type UsageBucket struct{ Provider, OrganizationRef, AccountRef, Window, Model string }

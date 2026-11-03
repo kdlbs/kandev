@@ -50,7 +50,7 @@ type SelectionChain struct {
 	LastCandidateID   string   `json:"last_candidate_id,omitempty"`
 }
 
-func deriveOrderedTiers(candidates []Candidate) ([]orderedTier, error) {
+func deriveOrderedTiers(candidates []Candidate, usageAvailable bool) ([]orderedTier, error) {
 	var tiers []orderedTier
 	for _, candidate := range candidates {
 		var selection orderedSelection
@@ -72,7 +72,7 @@ func deriveOrderedTiers(candidates []Candidate) ([]orderedTier, error) {
 				direction = selection.Tier.OnFailure
 			}
 		}
-		if !supportedTierMode(mode) || (direction != orderedSameTier && direction != orderedNextTier) {
+		if !supportedTierMode(mode, usageAvailable) || (direction != orderedSameTier && direction != orderedNextTier) {
 			return nil, fmt.Errorf("dynamic tier selection mode or direction is not supported by this increment")
 		}
 		tiers = append(tiers, orderedTier{head: candidate.ID, mode: mode, direction: direction, rows: []Candidate{candidate}})
@@ -101,7 +101,7 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 			}
 		}}, nil
 	}
-	tiers, err := deriveOrderedTiers(profile.Candidates)
+	tiers, err := deriveOrderedTiers(profile.Candidates, e.tierUsageAvailable)
 	if err != nil {
 		return orderedPlan{}, err
 	}

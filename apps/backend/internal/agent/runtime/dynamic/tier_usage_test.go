@@ -175,3 +175,13 @@ func TestNormalizedUsageRejectsStaleOrAbsentReset(t *testing.T) {
 		t.Fatalf("future reset = %#v, want it kept", got)
 	}
 }
+
+func TestUsageTierRequiresTheProviderUsageSurface(t *testing.T) {
+	candidates := []Candidate{{ID: "a", Enabled: true, SelectionJSON: usageTierSelectionJSON(t, tierModePace)}}
+	if _, err := deriveOrderedTiers(candidates, false); err == nil {
+		t.Fatal("usage mode was accepted while the provider usage surface is off")
+	}
+	if _, err := deriveOrderedTiers(candidates, true); err != nil {
+		t.Fatalf("usage mode rejected while the provider usage surface is on: %v", err)
+	}
+}

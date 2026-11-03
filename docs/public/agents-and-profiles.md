@@ -626,7 +626,8 @@ the proved reset, and consumption rate ranks the slower burner. Without a
 comparable reading the candidate stays unknown; unknown ranks above a measured
 exhausted window and below measured remaining capacity. A rate needs two
 comparable readings of the same provider, account and window with an unchanged
-reset.
+reset. With **Provider usage and limits** off, saved usage modes are not
+executed as order.
 
 Use **Preview new selection** to inspect the current saved or unsaved draft.
 Preview does not save, claim a runtime slot or start an agent. Its random result

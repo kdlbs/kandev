@@ -115,7 +115,7 @@ var registrations = []runtimeFlagRegistration{
 			Kind: KindFeature, Label: "Dynamic profile tiers",
 			Description: "Enables adjacent order, cost, random, round-robin and provider-usage candidate tiers, read-only selection preview and durable no-revisit fallback chains.",
 			Stability:   StabilityExperimental, RiskLevel: RiskMedium,
-			RiskDescription: "Requires Dynamic agent routing. Changes candidate traversal when enabled. Round-robin uses committed task/session selections within one backend engine; transient utility routes have no durable RR progress. Usage-paced modes use only the last observed provider usage snapshot and stay unknown when no snapshot or provider usage is disabled.",
+			RiskDescription: "Requires Dynamic agent routing. Changes candidate traversal when enabled. Round-robin uses committed task/session selections within one backend engine; native utility and taskless Office callers advance the same history. Usage-paced modes require Provider usage and limits and use only the last observed snapshot; while that feature is off, saved usage modes are not executed as order.",
 			RestartRequired: true, Mutable: true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicProfileTiers },

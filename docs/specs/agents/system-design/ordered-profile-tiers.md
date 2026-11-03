@@ -60,7 +60,9 @@ unchanged reset. A missing, stale or unobserved reading stays unknown. A measure
 exhausted window is unavailable; unknown ranks above exhausted but below measured
 remaining capacity. Preview exposes the same usage facts without fetching, and a
 selection log records candidate, tier, mode, remaining, rate, reset and pace score
-without account references, provider text or credentials.
+without account references, provider text or credentials. While the provider usage
+feature is off, saved usage modes are unsupported and are not executed as order;
+the feature flag and the engine option are set from the same startup value.
 
 Utility/review/taskless Office synthetic `utility:` routes retain their existing
 state/attempt storage contract through the native owner bridge below: the attempt

@@ -50,6 +50,7 @@ func TestUsageTierSelectionLogsPerCandidateFacts(t *testing.T) {
 	engine := NewEngine(
 		WithClock(func() time.Time { return now }),
 		WithOrderedTiers(true),
+		WithTierUsageAvailable(true),
 		WithEngineLogger(log),
 	)
 	profile := Profile{ID: "dynamic-log", Version: 1, Candidates: []Candidate{
@@ -101,6 +102,7 @@ func TestOrderTierSelectionLogsNothing(t *testing.T) {
 	engine := NewEngine(
 		WithClock(func() time.Time { return now }),
 		WithOrderedTiers(true),
+		WithTierUsageAvailable(true),
 		WithEngineLogger(log),
 	)
 	profile := Profile{ID: "dynamic-order", Version: 1, Candidates: []Candidate{
@@ -112,5 +114,28 @@ func TestOrderTierSelectionLogsNothing(t *testing.T) {
 	}
 	if entries := observed.FilterMessage(tierSelectionLogMessage).All(); len(entries) != 0 {
 		t.Fatalf("order profile emitted %d selection log entries, want 0", len(entries))
+	}
+}
+
+func TestPreviewUsesAnIndependentRandomPicker(t *testing.T) {
+	executionCalls, previewCalls := 0, 0
+	engine := NewEngine(
+		WithOrderedTiers(true),
+		WithTierRandomPick(func(int) int { executionCalls++; return 0 }),
+		WithTierPreviewPick(func(int) int { previewCalls++; return 0 }),
+	)
+	random := usageTierSelectionJSON(t, tierModeRandom)
+	profile := Profile{ID: "preview-pick", Version: 1, Candidates: []Candidate{
+		{ID: "a", Enabled: true, SelectionJSON: random},
+		{ID: "b", Enabled: true, SelectionJSON: joinedTierSelectionJSON(t)},
+	}}
+	if _, err := engine.PreviewTiers(profile); err != nil {
+		t.Fatalf("PreviewTiers: %v", err)
+	}
+	if executionCalls != 0 {
+		t.Fatalf("preview consumed the execution picker %d time(s)", executionCalls)
+	}
+	if previewCalls == 0 {
+		t.Fatal("preview did not use its own picker")
 	}
 }
