@@ -29,7 +29,7 @@ describe("newDevinProfileDefaults", () => {
         envVars: [{ key: DEVIN_SANDBOX_ENV_KEY, value: "true" }],
       }),
     ).toEqual({
-      mode: DEVIN_SMART_MODE,
+      mode: DEVIN_AUTONOMOUS_MODE,
       envVars: [{ key: DEVIN_SANDBOX_ENV_KEY, value: "true" }],
     });
   });

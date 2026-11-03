@@ -44,27 +44,50 @@ func TestGroupedCatalogRoundTrip(t *testing.T) {
 	if len(converted[0].Options) != 2 {
 		t.Fatalf("flat projection = %#v", converted[0].Options)
 	}
-	count := countGroupedCatalogProjection(converted)
-	if count != 2 {
-		t.Fatalf("catalog groups = %d, want 2 after JSON round trip", count)
-	}
+	catalog := decodeGroupedCatalogProjection(t, converted)
+	assertGroupedCatalogShape(t, catalog)
+
 	cloned := cloneModelConfigResolution(ModelConfigResolution{ConfigOptions: converted})
-	if cloned.ConfigOptions[0].Catalog == nil ||
-		cloned.ConfigOptions[0].Catalog.Nodes[0].ID != "fusion" {
-		t.Fatalf("cached resolution dropped the catalog: %#v", cloned)
+	cloneCatalog := cloned.ConfigOptions[0].Catalog
+	assertGroupedCatalogShape(t, cloneCatalog)
+	// The cache clone must isolate nested catalog data from later mutation.
+	cloneCatalog.Nodes[0].Children[0].Description = "mutated"
+	if converted[0].Catalog.Nodes[0].Children[0].Description == "mutated" {
+		t.Fatal("cloneModelConfigResolution shares catalog nodes with the cached result")
 	}
 }
 
-func countGroupedCatalogProjection(options []ConfigOption) int {
+func decodeGroupedCatalogProjection(t *testing.T, options []ConfigOption) *modelcatalog.Catalog {
+	t.Helper()
 	raw, err := json.Marshal(options)
 	if err != nil {
-		return -1
+		t.Fatalf("marshal options: %v", err)
 	}
 	var decoded []struct {
 		Catalog *modelcatalog.Catalog `json:"catalog"`
 	}
 	if err := json.Unmarshal(raw, &decoded); err != nil || len(decoded) != 1 || decoded[0].Catalog == nil {
-		return -1
+		t.Fatalf("catalog missing after JSON round trip: %s", raw)
 	}
-	return len(decoded[0].Catalog.Nodes)
+	return decoded[0].Catalog
+}
+
+func assertGroupedCatalogShape(t *testing.T, catalog *modelcatalog.Catalog) {
+	t.Helper()
+	if catalog == nil || len(catalog.Nodes) != 2 {
+		t.Fatalf("catalog = %#v, want two groups", catalog)
+	}
+	if catalog.Nodes[0].ID != "fusion" || catalog.Nodes[0].Label != "Fusion" {
+		t.Fatalf("first group = %#v", catalog.Nodes[0])
+	}
+	if catalog.Nodes[1].ID != "standard" || len(catalog.Nodes[1].Children) != 1 {
+		t.Fatalf("second group = %#v", catalog.Nodes[1])
+	}
+	leaf := catalog.Nodes[0].Children[0]
+	if leaf.Value != "pair-a" || leaf.Label != "Balanced" || leaf.Description != "Lead A with Sidekick A" {
+		t.Fatalf("first leaf = %#v", leaf)
+	}
+	if catalog.Nodes[1].Children[0].Value != "solo" {
+		t.Fatalf("second group leaf = %#v", catalog.Nodes[1].Children[0])
+	}
 }

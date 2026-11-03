@@ -30,7 +30,10 @@ export function ModelConfigSheet({
   const { t } = useTranslation();
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent onCloseAutoFocus={onCloseAutoFocus} className="max-h-[90dvh]">
+      <DrawerContent
+        onCloseAutoFocus={onCloseAutoFocus}
+        className="data-[vaul-drawer-direction=bottom]:!max-h-[90dvh]"
+      >
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex items-center justify-between gap-2 px-4 pb-2">
             <DrawerTitle className="text-sm">{title}</DrawerTitle>

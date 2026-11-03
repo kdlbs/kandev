@@ -72,7 +72,7 @@ func TestApplyDevinProfileDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mode, entries := ApplyDevinProfileDefaults(tt.agentID, tt.mode, tt.entries)
+			mode, entries := ApplyDevinProfileDefaults(tt.agentID, tt.mode, tt.entries, true)
 			if mode != tt.wantMode {
 				t.Fatalf("mode = %q, want %q", mode, tt.wantMode)
 			}
@@ -83,9 +83,19 @@ func TestApplyDevinProfileDefaults(t *testing.T) {
 	}
 }
 
+func TestApplyDevinProfileDefaultsKeepsExplicitInheritance(t *testing.T) {
+	mode, entries := ApplyDevinProfileDefaults(DevinAgentID, "", nil, false)
+	if mode != DevinSmartMode {
+		t.Fatalf("mode = %q, want Smart", mode)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("explicit inheritance gained an override: %#v", entries)
+	}
+}
+
 func TestApplyDevinProfileDefaultsDoesNotMutateCallerSlice(t *testing.T) {
 	entries := []EnvEntry{{Key: "OTHER", Value: "1"}}
-	_, updated := ApplyDevinProfileDefaults(DevinAgentID, "", entries)
+	_, updated := ApplyDevinProfileDefaults(DevinAgentID, "", entries, true)
 	if len(entries) != 1 {
 		t.Fatalf("caller slice was mutated: %#v", entries)
 	}

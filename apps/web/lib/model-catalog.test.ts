@@ -172,4 +172,32 @@ describe("resolveModelCatalogDraft", () => {
       "complete",
     );
   });
+
+  it("rejects orphaned compositions and duplicate bindings", () => {
+    const orphan = catalogValue() as { compositions: { group_id: string }[] };
+    orphan.compositions[0].group_id = "missing-group";
+    expect(normalizeModelCatalog(orphan)).toBeUndefined();
+
+    const duplicate = catalogValue() as { compositions: { bindings: unknown[] }[] };
+    duplicate.compositions[0].bindings = [
+      ...duplicate.compositions[0].bindings,
+      ...duplicate.compositions[0].bindings,
+    ];
+    expect(normalizeModelCatalog(duplicate)).toBeUndefined();
+  });
+
+  it("keeps prototype-like dimension ids as ordinary data", () => {
+    const catalog = catalogValue() as {
+      nodes: { children?: unknown[] }[];
+      compositions: {
+        dimensions: { id: string }[];
+        bindings: { values: Record<string, string> }[];
+      }[];
+    };
+    catalog.compositions[0].dimensions[0].id = "__proto__";
+    catalog.compositions[0].bindings[0].values = JSON.parse(
+      '{"__proto__":"lead-a","sidekick":"sidekick-a"}',
+    ) as Record<string, string>;
+    expect(normalizeModelCatalog(catalog)).toBeDefined();
+  });
 });

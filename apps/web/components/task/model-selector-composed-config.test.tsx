@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelSelector } from "@/components/task/model-selector";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
@@ -111,7 +111,10 @@ const mocks = vi.hoisted(() => {
       for (const listener of listeners) listener();
     }),
   };
-  return { appState, listeners, toast, SESSION_ID };
+  const initialSession = JSON.parse(
+    JSON.stringify(appState.sessionModels.bySessionId[SESSION_ID]),
+  ) as Record<string, unknown>;
+  return { appState, listeners, toast, SESSION_ID, initialSession };
 });
 
 const SESSION_ID = mocks.SESSION_ID;
@@ -146,6 +149,24 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 }));
 
 vi.mock("@/lib/api/domains/session-api", () => ({
+  resolveSessionModelConfig: vi.fn(async (_sessionId: string, request: { model: string }) => ({
+    agent_name: "devin-acp",
+    model: request.model,
+    status: "ok",
+    config_options: [
+      {
+        type: "select",
+        id: "thinking",
+        name: "Thinking",
+        current_value: "low",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      },
+    ],
+    error: null,
+  })),
   setSessionConfigOption: vi.fn(() => Promise.resolve({ ok: true })),
   setSessionMode: vi.fn(() => Promise.resolve({ ok: true })),
   setSessionModel: vi.fn(() => Promise.resolve({ ok: true })),
@@ -179,6 +200,13 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
     error: null,
   })),
 }));
+
+beforeEach(() => {
+  mocks.appState.activeModel.bySessionId = {};
+  mocks.appState.sessionModels.bySessionId[SESSION_ID] = JSON.parse(
+    JSON.stringify(mocks.initialSession),
+  ) as Record<string, unknown>;
+});
 
 afterEach(() => {
   cleanup();

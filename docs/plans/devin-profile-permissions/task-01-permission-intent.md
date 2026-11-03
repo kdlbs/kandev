@@ -1,7 +1,7 @@
 ---
 id: "01-permission-intent"
 title: "Default and execute Devin permission intent"
-status: completed
+status: in-progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -135,3 +135,4 @@ Completed 2026-11-03.
 - Saved-profile discovery now validates the complete edited permission intent: a draft mode in the launch snapshot (or the resolve request's mode) wins over the saved mode, so enabling sandbox fixes Smart -> Autonomous and the reverse without a false conflict. Saved-only discovery keeps the persisted intent, and an omitted draft mode never invents a saved conflict.
 - Tests: `TestDevinProfileDefaults` (create omission, explicit modes, enabled sandbox, explicit false, rejected conflict, duplication, name-only update, explicit empty mode, conflicting update), `TestDevinSandboxProfileContext` (saved and draft env reaches both probe paths), `TestSavedProfileDiscoveryUsesEditedPermissionIntent` (both directions, baseline and dependent resolution), `TestSavedProfileDiscoveryRejectsConflictingPermissionIntent`, `TestSavedProfileDiscoveryKeepsSavedIntentWithoutDraft`, the HTTP permission-intent mapping test, `TestDevinUnavailableSmartKeepsRequestedValue`, and the pure `profileconfig` table.
 - Commands: `go test -trimpath -tags fts5 ./internal/agent/settings/profileconfig ./internal/agent/settings/controller ./internal/agent/settings/handlers -count=1` passed.
+- Remaining gap: the documented lifecycle acceptance (`TestDevinPermissionModeLaunch`, confirmed mode before inference, and the sandbox initialization failure) is not implemented. The task stays in progress until that seam is covered; no completion is claimed for it.

@@ -4,13 +4,13 @@ import {
   cleanupFirstProfile,
   enableAmpMockProvider,
   expectAmpAvailableWithoutSavedRow,
+  expectAmpBaselineAbsent,
   expectFirstDraftRequestEvidence,
   expectPersistedFirstProfile,
   expectReadyDiscovery,
   observeProfileDiscoveryRequests,
   openFirstProfileDraft,
   removeDisposableAmpRows,
-  saveSettingsPage,
 } from "../../helpers/first-profile-capability-discovery";
 
 /**
@@ -26,6 +26,7 @@ test.describe("Mobile first profile capability discovery", () => {
     test.setTimeout(180_000);
     const requests = observeProfileDiscoveryRequests(testPage);
 
+    await expectAmpBaselineAbsent(apiClient);
     await enableAmpMockProvider(backend);
     try {
       await removeDisposableAmpRows(apiClient);
@@ -40,16 +41,29 @@ test.describe("Mobile first profile capability discovery", () => {
       await refresh.tap();
       await expectReadyDiscovery(testPage);
 
-      const chosenLabel = await chooseAdvertisedModel(testPage);
-      expect(chosenLabel).not.toBe("");
+      const chosenModel = await chooseAdvertisedModel(testPage);
+      expect(chosenModel).not.toBe("");
+
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
 
       const { agents: agentsDuringDraft } = await apiClient.listAgents();
       expect(agentsDuringDraft.some((agent) => agent.name === "amp-acp")).toBe(false);
 
       await testPage.getByTestId("profile-name-input").fill("Mobile Amp profile");
-      await saveSettingsPage(testPage);
+      const save = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await expect(save).toBeEnabled({ timeout: 20_000 });
+      expect((await save.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await save.tap();
 
-      const persisted = await expectPersistedFirstProfile(apiClient, "Mobile Amp profile");
+      const persisted = await expectPersistedFirstProfile(
+        apiClient,
+        "Mobile Amp profile",
+        chosenModel,
+      );
       expect(persisted.model).not.toBe("");
       await testPage.goto(`/settings/agents/amp-acp/profiles/${persisted.profileId}`);
       await expect(testPage.getByTestId("profile-name-input")).toHaveValue("Mobile Amp profile", {

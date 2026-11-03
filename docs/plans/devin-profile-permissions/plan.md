@@ -170,11 +170,11 @@ Use real profile save APIs. Fixture capability responses must not replace backen
 
 ## Work orders
 
-- [x] [Task 01: Default and execute Devin permission intent](task-01-permission-intent.md)
+- [ ] [Task 01: Default and execute Devin permission intent](task-01-permission-intent.md) (lifecycle acceptance open)
 - [ ] [Task 02: Expose and prove Devin settings](task-02-permission-controls.md), after Task 01 (controls done; browser proof open)
 
 Execution is sequential in the primary session.
-Task 01 is implemented; Task 02 controls are implemented and its browser proof remains partially open.
+Task 01's controller defaults/validation are implemented, but its lifecycle mode-confirmation acceptance remains open; Task 02 controls are implemented with desktop/phone flows, and its conditional capability scenarios remain partially open.
 The combined plan's final acceptance follows both packages and does not introduce a dependency cycle.
 
 ## Investigation and verification results

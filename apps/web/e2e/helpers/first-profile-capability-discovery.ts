@@ -13,6 +13,18 @@ export type DiscoveryRequestEvidence = {
 
 const AMP_AGENT_ID = "amp-acp";
 
+/**
+ * The worker must start without an Amp installation. Fail before mutating a
+ * pre-existing one instead of deleting user/worker data that this test does not
+ * own.
+ */
+export async function expectAmpBaselineAbsent(apiClient: ApiClient): Promise<void> {
+  expect(
+    await ampAgentRow(apiClient),
+    "a pre-existing Amp installation is present; use a dedicated worker instead of deleting it",
+  ).toBeUndefined();
+}
+
 /** Enables the disposable Amp mock provider for one worker restart. */
 export async function enableAmpMockProvider(backend: BackendContext): Promise<void> {
   await backend.restart({ KANDEV_MOCK_PROVIDERS: AMP_AGENT_ID });
@@ -140,10 +152,11 @@ export async function chooseAdvertisedModel(page: Page): Promise<string> {
   await expect(options.first()).toBeVisible({ timeout: 20_000 });
   const count = await options.count();
   const target = count > 1 ? options.nth(1) : options.first();
+  const value = (await target.getAttribute("data-value")) ?? "";
   const name = (await target.getAttribute("aria-label")) ?? (await target.textContent()) ?? "";
   await target.click();
   await dismissModelPicker(page);
-  return name.trim();
+  return (value || name).trim();
 }
 
 /** Closes whichever picker surface the viewport opened. */
@@ -170,15 +183,25 @@ export async function saveSettingsPage(page: Page): Promise<void> {
 export async function expectPersistedFirstProfile(
   apiClient: ApiClient,
   profileName: string,
+  expectedModel: string,
   agentName = AMP_AGENT_ID,
 ): Promise<{ agentId: string; profileId: string; model: string }> {
+  await expect
+    .poll(
+      async () => {
+        const { agents } = await apiClient.listAgents();
+        return agents
+          .find((item) => item.name === agentName)
+          ?.profiles.find((item) => item.name === profileName)?.model;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(expectedModel);
   const { agents } = await apiClient.listAgents();
   const agent = agents.find((item) => item.name === agentName);
-  expect(agent, `Agent ${agentName} must be persisted after the first save`).toBeDefined();
   const profile = agent?.profiles.find((item) => item.name === profileName);
-  expect(profile, `the "${profileName}" profile must be persisted`).toBeDefined();
-  expect(profile?.model ?? "").not.toBe("");
-  return { agentId: agent?.id ?? "", profileId: profile?.id ?? "", model: profile?.model ?? "" };
+  if (!agent || !profile) throw new Error("persisted first profile missing");
+  return { agentId: agent.id, profileId: profile.id, model: profile.model ?? "" };
 }
 
 /** Removes only the owned Amp parent after a test, then restarts the worker. */

@@ -19,7 +19,10 @@ function renderField(overrides: {
   agentName?: string;
   mode?: string;
   envVars?: { key: string; value?: string; secret_id?: string }[];
+  baselineEnvVars?: { key: string; value?: string; secret_id?: string }[];
+  baselineMode?: string;
   smartAvailable?: boolean;
+  discoveryReady?: boolean;
   handler?: Mock<
     (patch: {
       mode: string;
@@ -39,7 +42,12 @@ function renderField(overrides: {
     <DevinSandboxPreferenceField
       agentName={overrides.agentName ?? "devin-acp"}
       profile={{ mode: overrides.mode ?? DEVIN_SMART_MODE, env_vars: overrides.envVars ?? [] }}
+      baselineProfile={{
+        mode: overrides.baselineMode ?? overrides.mode ?? DEVIN_SMART_MODE,
+        env_vars: overrides.baselineEnvVars ?? overrides.envVars ?? [],
+      }}
       smartAvailable={overrides.smartAvailable ?? true}
+      discoveryReady={overrides.discoveryReady ?? true}
       onChange={handler}
     />,
   );
@@ -81,6 +89,7 @@ describe("DevinSandboxPreferenceField", () => {
     expect(handler).toHaveBeenCalledWith({
       mode: DEVIN_AUTONOMOUS_MODE,
       env_vars: [{ key: DEVIN_SANDBOX_ENV_KEY, value: "true" }],
+      devin_sandbox_inherited: false,
     });
   });
 
@@ -93,6 +102,20 @@ describe("DevinSandboxPreferenceField", () => {
     expect(handler).toHaveBeenCalledWith({
       mode: DEVIN_SMART_MODE,
       env_vars: [{ key: DEVIN_SANDBOX_ENV_KEY, value: "false" }],
+      devin_sandbox_inherited: false,
+    });
+  });
+
+  it("preserves an explicit mode when inheriting the CLI setting", async () => {
+    const handler = renderField({
+      mode: DEVIN_AUTONOMOUS_MODE,
+      envVars: [{ key: DEVIN_SANDBOX_ENV_KEY, value: "true" }],
+    });
+    await choose("Use CLI settings");
+    expect(handler).toHaveBeenCalledWith({
+      mode: DEVIN_AUTONOMOUS_MODE,
+      env_vars: [],
+      devin_sandbox_inherited: true,
     });
   });
 

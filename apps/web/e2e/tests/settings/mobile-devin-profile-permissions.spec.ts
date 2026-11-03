@@ -25,6 +25,13 @@ test.describe("Mobile Devin profile permissions", () => {
       await removeDisposableDevinRows(apiClient);
       await openDevinDraft(testPage);
 
+      const preference = testPage.getByTestId("devin-sandbox-preference");
+      await expect(preference).toBeVisible();
+      const rowDirection = await preference
+        .locator("[data-settings-row='true']")
+        .evaluate((element) => getComputedStyle(element).flexDirection);
+      expect(rowDirection).toBe("column");
+
       const control = sandboxControl(testPage);
       await control.scrollIntoViewIfNeeded();
       expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);

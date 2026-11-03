@@ -107,3 +107,16 @@ func TestClientCapabilityMetaAddsQualifiedProviderExtensions(t *testing.T) {
 		t.Fatalf("unrelated agent meta = %#v", other)
 	}
 }
+
+func TestCatalogFromSelectOptionsRejectsOversizedGroupsBeforeConversion(t *testing.T) {
+	options := make([]acp.SessionConfigSelectOption, modelcatalog.MaxNodes+1)
+	for i := range options {
+		options[i] = acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId("v" + string(rune('a'+i%26))), Name: "V"}
+	}
+	grouped := acp.SessionConfigSelectOptionsGrouped{{
+		Group: "huge", Name: "Huge", Options: options,
+	}}
+	if catalog := CatalogFromSelectOptions(acp.SessionConfigSelectOptions{Grouped: &grouped}); catalog != nil {
+		t.Fatalf("oversized ACP groups produced a catalog with %d nodes", len(catalog.Nodes))
+	}
+}

@@ -4,6 +4,7 @@ import {
   cleanupFirstProfile,
   enableAmpMockProvider,
   expectAmpAvailableWithoutSavedRow,
+  expectAmpBaselineAbsent,
   expectFirstDraftRequestEvidence,
   expectPersistedFirstProfile,
   expectReadyDiscovery,
@@ -28,6 +29,7 @@ test.describe("First profile capability discovery", () => {
     test.setTimeout(180_000);
     const requests = observeProfileDiscoveryRequests(testPage);
 
+    await expectAmpBaselineAbsent(apiClient);
     await enableAmpMockProvider(backend);
     try {
       await removeDisposableAmpRows(apiClient);
@@ -38,8 +40,8 @@ test.describe("First profile capability discovery", () => {
       await testPage.getByTestId("profile-refresh-capabilities").click();
       await expectReadyDiscovery(testPage);
 
-      const chosenLabel = await chooseAdvertisedModel(testPage);
-      expect(chosenLabel).not.toBe("");
+      const chosenModel = await chooseAdvertisedModel(testPage);
+      expect(chosenModel).not.toBe("");
 
       // Discovery must not persist the parent before the explicit Save.
       const { agents: agentsDuringDraft } = await apiClient.listAgents();
@@ -48,7 +50,11 @@ test.describe("First profile capability discovery", () => {
       await testPage.getByTestId("profile-name-input").fill("First Amp profile");
       await saveSettingsPage(testPage);
 
-      const persisted = await expectPersistedFirstProfile(apiClient, "First Amp profile");
+      const persisted = await expectPersistedFirstProfile(
+        apiClient,
+        "First Amp profile",
+        chosenModel,
+      );
       expect(persisted.profileId).not.toBe("");
       expect(persisted.model).not.toBe("");
 

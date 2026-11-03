@@ -558,7 +558,7 @@ func (c *Controller) createDefaultProfile(
 	if !p.isPassthrough && p.defaultModel != "" {
 		profileName = p.defaultModel
 	}
-	mode, envVars := devinProfilePermissionDefaults(agentConfig.ID(), "", nil)
+	mode, envVars := devinProfilePermissionDefaults(agentConfig.ID(), "", nil, true)
 	defaultProfile := &models.AgentProfile{
 		AgentID:                    agentID,
 		Name:                       profileName,

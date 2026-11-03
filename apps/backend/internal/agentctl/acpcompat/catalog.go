@@ -24,6 +24,16 @@ func CatalogFromSelectOptions(options acp.SessionConfigSelectOptions) *modelcata
 		return nil
 	}
 	groups := *options.Grouped
+	if len(groups) > modelcatalog.MaxNodes {
+		return nil
+	}
+	total := 0
+	for _, group := range groups {
+		total += len(group.Options)
+		if total > modelcatalog.MaxNodes {
+			return nil
+		}
+	}
 	nodes := make([]modelcatalog.Node, 0, len(groups))
 	for _, group := range groups {
 		children := make([]modelcatalog.Node, 0, len(group.Options))

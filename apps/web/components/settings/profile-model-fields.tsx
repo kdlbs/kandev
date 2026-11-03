@@ -48,6 +48,8 @@ export type ProfileFormData = {
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
   cursor_plugins_mcp_enabled?: boolean;
+  /** Request-only explicit inheritance for a new Devin sandbox profile. */
+  devin_sandbox_inherited?: boolean;
 } & Record<PermissionKey, boolean>;
 
 // A configured model that is no longer advertised ("gone") stays visible in

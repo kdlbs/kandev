@@ -106,7 +106,12 @@ function ProviderOptionRow({
         <SelectContent>
           {(option.options ?? []).map((choice) => (
             <SelectItem key={choice.value} value={choice.value} className="cursor-pointer">
-              {choice.name || choice.value}
+              <span className="flex flex-col">
+                <span>{choice.name || choice.value}</span>
+                {choice.description && (
+                  <span className="text-xs text-muted-foreground">{choice.description}</span>
+                )}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
@@ -273,16 +278,18 @@ export function CompositionDimensionList({
           {error}
         </p>
       )}
-      <Button
-        type="button"
-        size="sm"
-        className={cn("mx-2 cursor-pointer", TOUCH_TARGET_CLASS)}
-        disabled={!applyEnabled}
-        data-testid="model-composition-apply"
-        onClick={onApply}
-      >
-        {t("agents:useModelConfiguration")}
-      </Button>
+      <div className="sticky bottom-0 -mx-2 mt-1 bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1 backdrop-blur">
+        <Button
+          type="button"
+          size="sm"
+          className={cn("w-full cursor-pointer", TOUCH_TARGET_CLASS)}
+          disabled={!applyEnabled}
+          data-testid="model-composition-apply"
+          onClick={onApply}
+        >
+          {t("agents:useModelConfiguration")}
+        </Button>
+      </div>
     </div>
   );
 }

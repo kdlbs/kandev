@@ -85,14 +85,10 @@ function createSessionMutator({
   const confirmedExecutionIsCurrent = () => {
     const live = store.getState().sessionModels.bySessionId[sid];
     if (!live) return false;
-    if (
-      executionId &&
-      live.confirmedConfigOptionsExecutionId &&
-      live.confirmedConfigOptionsExecutionId !== executionId
-    ) {
-      return false;
-    }
-    return true;
+    if (!executionId) return true;
+    // A missing live id means the execution was invalidated while the
+    // confirmation was pending; only the exact captured execution is current.
+    return live.confirmedConfigOptionsExecutionId === executionId;
   };
   return {
     isCurrent: () => latestReqId.current[sid] === reqId && confirmedExecutionIsCurrent(),
@@ -107,6 +103,84 @@ function createSessionMutator({
       await setSessionConfigOption(sid, optionId, value);
     },
   };
+}
+
+function handleModelFailure({
+  sid,
+  previousActive,
+  previousModels,
+  t,
+  toast,
+  setActiveModel,
+  setSessionModels,
+}: {
+  sid: string;
+  previousActive: string;
+  previousModels: SessionModelsEntry | undefined;
+  t: (key: string) => string;
+  toast: ReturnType<typeof useToast>["toast"];
+  setActiveModel: (sessionId: string, modelId: string) => void;
+  setSessionModels: (sessionId: string, data: SessionModelsEntry) => void;
+}) {
+  console.error("[ModelSelector] model change failed");
+  setActiveModel(sid, previousActive);
+  if (previousModels) setSessionModels(sid, previousModels);
+  toast({
+    title: t("task:failedToChangeModel"),
+    description: t("task:unknownError2"),
+    variant: "error",
+  });
+}
+
+async function retryConfigurationOptions({
+  model,
+  pending,
+  applyModel,
+  applyOption,
+  updateLocalConfig,
+  sid,
+  isCurrent,
+  t,
+  toast,
+}: {
+  model: string;
+  pending: Record<string, string>;
+  applyModel: (model: string) => Promise<void>;
+  applyOption: (optionId: string, value: string) => Promise<void>;
+  updateLocalConfig: (sid: string, configId: string, value: string) => void;
+  sid: string;
+  isCurrent: () => boolean;
+  t: (key: string, options?: Record<string, unknown>) => string;
+  toast: ReturnType<typeof useToast>["toast"];
+}): Promise<void> {
+  const retried = await applyModelConfiguration({
+    model,
+    configOptions: pending,
+    modelConfirmed: true,
+    applyModel,
+    applyOption,
+    onOptionConfirmed: (optionId, value) => updateLocalConfig(sid, optionId, value),
+    isCurrent,
+  });
+  if (retried.status !== "option_failed") return;
+  notifyPartialConfiguration({
+    result: retried,
+    requested: pending,
+    t,
+    toast,
+    retry: (nextPending) =>
+      void retryConfigurationOptions({
+        model,
+        pending: nextPending,
+        applyModel,
+        applyOption,
+        updateLocalConfig,
+        sid,
+        isCurrent,
+        t,
+        toast,
+      }),
+  });
 }
 
 function notifyPartialConfiguration({
@@ -194,31 +268,34 @@ function useSessionConfigurationApply({
 
       if (result.status === "superseded" || result.status === "cancelled") return;
       if (result.status === "model_failed") {
-        console.error("[ModelSelector] model change failed");
-        setActiveModel(sid, previousActive);
-        if (previousModels) setSessionModels(sid, previousModels);
-        toast({
-          title: t("task:failedToChangeModel"),
-          description: t("task:unknownError2"),
-          variant: "error",
+        handleModelFailure({
+          sid,
+          previousActive,
+          previousModels,
+          t,
+          toast,
+          setActiveModel,
+          setSessionModels,
         });
         return;
       }
       if (result.status === "option_failed") {
         notifyPartialConfiguration({
           result,
-          requested: selection.configOptions,
+          requested: selection.configOptions ?? {},
           t,
           toast,
           retry: (pending) =>
-            void applyModelConfiguration({
+            void retryConfigurationOptions({
               model: selection.model,
-              configOptions: pending,
-              modelConfirmed: true,
+              pending,
               applyModel,
               applyOption,
-              onOptionConfirmed: (optionId, value) => updateLocalConfig(sid, optionId, value),
+              updateLocalConfig,
+              sid,
               isCurrent,
+              t,
+              toast,
             }),
         });
       }
@@ -247,6 +324,7 @@ export function useModelChangeHandlers(
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
+  const store = useAppStoreApi();
   const { toast } = useToast();
   // Per-session monotonic request id so a stale failure doesn't clobber a
   // newer successful selection (rapid A -> B -> C where B fails).
@@ -254,21 +332,25 @@ export function useModelChangeHandlers(
 
   const updateLocalConfig = useCallback(
     (sid: string, configId: string, value: string) => {
-      if (!sessionModelsData) return;
+      // Each confirmation starts from the live entry so earlier confirmed
+      // values and newer provider updates are never overwritten by the
+      // pre-Apply snapshot.
+      const live = store.getState().sessionModels.bySessionId[sid] ?? sessionModelsData;
+      if (!live) return;
       // A manual model change ends the fallback story — drop the note so the
       // picker stops labelling the model as a fallback.
       const fallbackModel =
-        configId === sessionModelsData.configOptions.find(isModelConfigOption)?.id
+        configId === live.configOptions.find(isModelConfigOption)?.id
           ? undefined
-          : sessionModelsData.fallbackModel;
+          : live.fallbackModel;
       setSessionModels(sid, {
-        ...sessionModelsData,
+        ...live,
         fallbackModel,
-        currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
-        configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
+        currentModelId: nextCurrentModelId(live, configId, value),
+        configOptions: updateConfigOptionValue(live.configOptions, configId, value),
       });
     },
-    [sessionModelsData, setSessionModels],
+    [sessionModelsData, setSessionModels, store],
   );
 
   const onFail = useCallback(

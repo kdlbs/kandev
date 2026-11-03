@@ -94,9 +94,9 @@ Add all copy in seven locales. Generate Traditional Chinese through the existing
 Run from the repository root after the fresh-worktree dependency install, if needed.
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/model-catalog-selection.test.ts components/model-config-selector.test.tsx components/model-config-selector-content.test.tsx)
+(cd apps/web && pnpm exec vitest run lib/model-catalog-selection.test.ts components/model-config-selector.test.tsx components/model-config-selector-custom-model.test.tsx components/model-config-selector-catalog.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint lib/model-catalog-selection.ts lib/model-catalog-selection.test.ts components/model-config-selector.tsx components/model-config-selector-content.tsx components/model-catalog-picker.tsx)
+(cd apps/web && pnpm exec eslint lib/model-catalog-selection.ts lib/model-catalog-selection.test.ts lib/model-catalog.ts lib/model-catalog.test.ts components/model-config-selector.tsx components/model-config-selector-content.tsx components/model-config-selector-rows.tsx components/model-catalog-groups.tsx components/model-catalog-composition.tsx components/model-config-sheet.tsx components/model-config-selector-catalog.test.tsx hooks/use-model-catalog-navigation.ts)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
 git diff --check
@@ -142,5 +142,6 @@ Completed 2026-11-03.
 - `components/model-config-selector.tsx` keeps the unfinished composition draft per group in `hooks/use-model-catalog-navigation.ts`. Back to the model list, dismissal, dimension Back, and viewport changes retain it; re-entering the same group restores the draft. A superseded catalog or changed owning model invalidates it.
 - `components/model-catalog-groups.tsx` renders native groups and opens a focused composition view. Catalog leaves always keep their full group path in the command-filter keywords, so a provider description cannot hide them from a group-name search.
 - `components/model-catalog-composition.tsx` renders one row per dimension, the candidate model's real provider options, an explicit Apply action, and visible invalid state. Back, dimension, choice, Apply, and provider-option controls use the shared density: 28px on fine-pointer desktop, at least 44px below the 768px phone boundary and on coarse pointers.
-- `components/model-config-sheet.tsx` is the phone shell: fixed header, one vertical scroller, safe-area padding, and focus return to the trigger.
+- `components/model-config-sheet.tsx` is the phone shell: fixed header, one vertical scroller with a sticky Apply action, safe-area padding, and focus return to the trigger.
+- Component regressions cover Back navigation, dismissal, viewport changes with the same unfinished draft, candidate-option loading/failure/retry, path search, and phone sizing classes.
 - Commands: `pnpm exec vitest run lib/model-catalog-selection.test.ts components/model-config-selector.test.tsx components/model-config-selector-custom-model.test.tsx components/model-config-selector-catalog.test.tsx` passed. `pnpm run i18n:check` passed after adding the six new copy keys in seven locales.

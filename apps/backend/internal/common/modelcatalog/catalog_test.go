@@ -164,3 +164,21 @@ func TestValidateRejectsUnboundedOrInconsistentData(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateBoundsCompositionsAndLabels(t *testing.T) {
+	tooMany := testCatalog()
+	tooMany.Compositions = make([]Composition, MaxCompositions+1)
+	for i := range tooMany.Compositions {
+		tooMany.Compositions[i] = testCatalog().Compositions[0]
+		tooMany.Compositions[i].ID = "composition-" + strconv.Itoa(i)
+	}
+	if err := Validate(tooMany); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("oversized composition list error = %v", err)
+	}
+
+	oversizedLabel := testCatalog()
+	oversizedLabel.Compositions[0].Label = string(make([]byte, MaxStringLength+1))
+	if err := Validate(oversizedLabel); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("oversized composition label error = %v", err)
+	}
+}

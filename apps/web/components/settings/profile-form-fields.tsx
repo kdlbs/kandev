@@ -45,6 +45,8 @@ export type ProfileFormData = {
   provider_kind?: string;
   cursor_mcp_auth_enabled?: boolean;
   cursor_plugins_mcp_enabled?: boolean;
+  /** Request-only explicit inheritance for a new Devin sandbox profile. */
+  devin_sandbox_inherited?: boolean;
   mcp_selection_mode?: MCPSelectionMode;
   mcp_selected_servers?: string[];
   copilot_selected_plugins?: string[];

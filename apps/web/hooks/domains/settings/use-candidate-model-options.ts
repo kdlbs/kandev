@@ -2,11 +2,14 @@ import { useCallback, useRef } from "react";
 
 import { usableConfigOptions } from "@/components/model-config-selector";
 import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
+import { resolveSessionModelConfig } from "@/lib/api/domains/session-api";
 import type { ProfileLaunchSettingsRequest } from "@/lib/types/http";
 import type { ConfigurationOption } from "@/hooks/use-model-catalog-navigation";
 
 export type CandidateModelOptionsInput = {
   agentName: string;
+  /** Live session whose saved launch context should resolve the candidate. */
+  sessionId?: string;
   profileId?: string;
   mode?: string;
   /** Complete draft launch snapshot. Omit to resolve with the saved profile. */
@@ -23,6 +26,7 @@ export type CandidateModelOptionsInput = {
  */
 export function useCandidateModelOptions({
   agentName,
+  sessionId,
   profileId,
   mode,
   launchSettings,
@@ -35,13 +39,18 @@ export function useCandidateModelOptions({
       if (!agentName || !model) return undefined;
       const currentLaunch = launchRef.current;
       try {
-        const response = await resolveAgentModelConfig(agentName, {
-          model,
-          ...(mode ? { mode } : {}),
-          ...(profileId ? { profile_id: profileId } : {}),
-          ...(currentLaunch ? { launch_settings: currentLaunch } : {}),
-          refresh: true,
-        });
+        const response = sessionId
+          ? await resolveSessionModelConfig(sessionId, {
+              model,
+              ...(mode ? { mode } : {}),
+            })
+          : await resolveAgentModelConfig(agentName, {
+              model,
+              ...(mode ? { mode } : {}),
+              ...(profileId ? { profile_id: profileId } : {}),
+              ...(currentLaunch ? { launch_settings: currentLaunch } : {}),
+              refresh: true,
+            });
         if (response.status !== "ok" || response.error) return undefined;
         return usableConfigOptions(
           (response.config_options ?? []).map((option) => ({
@@ -59,6 +68,6 @@ export function useCandidateModelOptions({
         return undefined;
       }
     },
-    [agentName, profileId, mode, launchKey],
+    [agentName, sessionId, profileId, mode, launchKey],
   );
 }

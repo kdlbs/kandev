@@ -103,11 +103,15 @@ describe("applyModelConfiguration confirmation and retry", () => {
   it("resumes from a confirmed model and retries only the pending options", async () => {
     const applyModel = vi.fn().mockResolvedValue(undefined);
     const first = await applyModelConfiguration(
-      request({ applyOption: vi.fn().mockRejectedValue(new Error("option rejected")) }),
+      request({
+        applyOption: vi
+          .fn()
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("option rejected")),
+      }),
     );
     expect(first.status).toBe("option_failed");
     expect(pendingConfigurationOptions(first, { speed: FAST, thinking: HIGH })).toEqual({
-      speed: FAST,
       thinking: HIGH,
     });
 
@@ -122,7 +126,7 @@ describe("applyModelConfiguration confirmation and retry", () => {
     expect(retry).toEqual({
       status: "applied",
       model: PAIR_A,
-      appliedOptions: { speed: FAST, thinking: HIGH },
+      appliedOptions: { thinking: HIGH },
     });
   });
 

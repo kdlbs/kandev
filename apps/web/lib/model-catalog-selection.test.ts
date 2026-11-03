@@ -203,4 +203,34 @@ describe("composition availability", () => {
   it("accepts only a normalized catalog with the same bounds as the backend", () => {
     expect(normalizeModelCatalog(catalog)).toBeDefined();
   });
+
+  it("treats an advertised choice with no binding as unavailable", () => {
+    const withUnbound = {
+      ...composition,
+      dimensions: [
+        {
+          ...composition.dimensions[0],
+          choices: [...composition.dimensions[0].choices, { value: "plan-z", label: "Plan Z" }],
+        },
+        composition.dimensions[1],
+      ],
+    };
+    expect(isDimensionChoiceAvailable(withUnbound, "planner", "plan-z")).toBe(false);
+  });
+
+  it("does not label a model whose value maps to multiple pairings", () => {
+    const ambiguous = {
+      ...catalog,
+      compositions: [
+        {
+          ...composition,
+          bindings: [
+            ...composition.bindings,
+            { values: { planner: "plan-y", "worker-size": "size-s" }, model: "opaque-model-a" },
+          ],
+        },
+      ],
+    };
+    expect(composedPairingLabel(ambiguous, "opaque-model-a")).toBeUndefined();
+  });
 });

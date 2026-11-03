@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -86,6 +87,40 @@ func TestDevinProfileDefaults(t *testing.T) {
 		}
 		if !profile.AutoApprove {
 			t.Fatal("explicit auto-approve was not preserved")
+		}
+	})
+
+	t.Run("the defaulted sandbox entry respects the environment bound", func(t *testing.T) {
+		ctrl, _, ctx, agentID := newDevinProfileTestController(t)
+		envVars := make([]dto.ProfileEnvVarDTO, 100)
+		for i := range envVars {
+			envVars[i] = dto.ProfileEnvVarDTO{Key: fmt.Sprintf("KEY_%d", i), Value: "value"}
+		}
+		_, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+			AgentID: agentID, Name: "Too many entries", EnvVars: envVars,
+		})
+		if !errors.Is(err, ErrInvalidProfileEnvVars) {
+			t.Fatalf("CreateProfile error = %v, want ErrInvalidProfileEnvVars", err)
+		}
+	})
+
+	t.Run("explicit inheritance keeps the provider setting", func(t *testing.T) {
+		ctrl, repo, ctx, agentID := newDevinProfileTestController(t)
+		created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+			AgentID: agentID, Name: "Inherited", DevinSandboxInherited: true,
+		})
+		if err != nil {
+			t.Fatalf("CreateProfile: %v", err)
+		}
+		profile, err := repo.GetAgentProfile(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("get profile: %v", err)
+		}
+		if profile.Mode != profileconfig.DevinSmartMode {
+			t.Fatalf("mode = %q, want Smart", profile.Mode)
+		}
+		if _, ok := sandboxValue(t, profile); ok {
+			t.Fatalf("explicit inheritance gained a sandbox override: %#v", profile.EnvVars)
 		}
 	})
 
@@ -224,15 +259,17 @@ func TestDevinSandboxProfileContext(t *testing.T) {
 	}
 
 	draft := completeDraftLaunchSettings()
-	sandboxEnv := []dto.ProfileEnvVarDTO{{Key: profileconfig.DevinSandboxEnvKey, Value: "true"}}
+	draftMode := profileconfig.DevinSmartMode
+	draft.Mode = &draftMode
+	sandboxEnv := []dto.ProfileEnvVarDTO{{Key: profileconfig.DevinSandboxEnvKey, Value: "false"}}
 	draft.EnvVars = &sandboxEnv
 	if _, err := ctrl.FetchProfileDynamicModels(ctx, agentsDevinForTest, dto.ProfileCapabilityRequest{
 		AuthorizationScope: "user-1", LaunchSettings: draft,
 	}); err != nil {
 		t.Fatalf("draft FetchProfileDynamicModels: %v", err)
 	}
-	if got := utility.request.Context.Env[profileconfig.DevinSandboxEnvKey]; got != "true" {
-		t.Fatalf("draft sandbox env = %q", got)
+	if got := utility.request.Context.Env[profileconfig.DevinSandboxEnvKey]; got != "false" {
+		t.Fatalf("draft sandbox env = %q, want the edited draft value", got)
 	}
 }
 

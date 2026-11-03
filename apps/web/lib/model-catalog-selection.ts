@@ -222,17 +222,19 @@ export function composedPairingLabel(
   model: string,
 ): string | undefined {
   if (!catalog || !model) return undefined;
+  const labels = new Set<string>();
   for (const composition of catalog.compositions ?? []) {
-    const binding = composition.bindings.find((entry) => entry.model === model);
-    if (!binding) continue;
-    const parts = composition.dimensions.flatMap((dimension) => {
-      const value = binding.values[dimension.id];
-      const choice = dimension.choices.find((entry) => entry.value === value);
-      return choice ? [choice.label] : [];
-    });
-    return parts.length === composition.dimensions.length ? parts.join(" / ") : undefined;
+    for (const binding of composition.bindings) {
+      if (binding.model !== model) continue;
+      const parts = composition.dimensions.flatMap((dimension) => {
+        const value = binding.values[dimension.id];
+        const choice = dimension.choices.find((entry) => entry.value === value);
+        return choice ? [choice.label] : [];
+      });
+      if (parts.length === composition.dimensions.length) labels.add(parts.join(" / "));
+    }
   }
-  return undefined;
+  return labels.size === 1 ? [...labels][0] : undefined;
 }
 
 /** Starts a draft from the currently selected model's verified binding, if any. */

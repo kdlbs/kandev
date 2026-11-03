@@ -127,7 +127,7 @@ Run from the repository root. Keep managed E2E invocations sequential.
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/devin-profile-permissions.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-devin-profile-permissions.spec.ts)
-(cd apps/backend && go test -trimpath ./internal/agent/registry -run 'Test.*(Mock|Devin)' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/registry -run 'Test.*(Mock|Devin)' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/agent/registry/provider.go apps/backend/internal/agent/registry/provider_test.go
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs

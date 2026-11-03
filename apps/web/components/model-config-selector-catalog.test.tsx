@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   configOptionToModelOptions,
@@ -8,8 +8,18 @@ import {
   type SelectConfigOption,
 } from "@/components/model-config-selector";
 
+const responsive = vi.hoisted(() => ({ isMobile: false }));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: responsive.isMobile }),
+}));
+
+beforeEach(() => {
+  responsive.isMobile = false;
+});
+
 afterEach(() => {
   cleanup();
+  responsive.isMobile = false;
 });
 
 const MODEL_SETTINGS = "Model settings";
@@ -344,5 +354,87 @@ describe("ModelConfigSelector candidate options and sizing", () => {
       expect(control.className).toContain("max-md:min-h-11");
       expect(control.className).toContain("[@media(pointer:coarse)]:min-h-11");
     }
+  });
+});
+
+describe("ModelConfigSelector catalog viewport and availability", () => {
+  it("keeps the unfinished draft across a viewport change", () => {
+    responsive.isMobile = false;
+    const modelConfig = catalogModelOption("solo");
+    const view = render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={configOptionToModelOptions(modelConfig)}
+          currentModel="solo"
+          configOptions={[modelConfig]}
+          onModelChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+    openFusionComposition();
+    fireEvent.click(screen.getByTestId(DIMENSION_LEAD));
+    fireEvent.click(screen.getByTestId(CHOICE_LEAD_B));
+    responsive.isMobile = true;
+    view.rerender(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={configOptionToModelOptions(modelConfig)}
+          currentModel="solo"
+          configOptions={[modelConfig]}
+          onModelChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId(DIMENSION_LEAD).getAttribute(ARIA_LABEL)).toBe(LEAD_B_LABEL);
+    responsive.isMobile = false;
+  });
+
+  it("keeps the custom-model row for a catalog-backed selector", () => {
+    const modelConfig = catalogModelOption();
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={configOptionToModelOptions(modelConfig)}
+          currentModel="pair-a"
+          configOptions={[modelConfig]}
+          onModelChange={() => {}}
+          allowCustomModel
+        />
+      </TooltipProvider>,
+    );
+    const trigger = screen.getByRole("button", { name: modelSettingsButtonName });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByPlaceholderText("Filter models..."), {
+      target: { value: "unlisted-custom-model" },
+    });
+    expect(screen.getByTestId("model-config-custom-row")).toBeTruthy();
+  });
+
+  it("keeps a withdrawn current model visible and disabled in the catalog", () => {
+    const modelConfig = catalogModelOption("removed-model");
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[
+            ...configOptionToModelOptions(modelConfig),
+            {
+              id: "removed-model",
+              name: "Removed model",
+              disabled: true,
+              disabledReason: "No longer advertised",
+            },
+          ]}
+          currentModel="removed-model"
+          configOptions={[modelConfig]}
+          onModelChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+    const trigger = screen.getByRole("button", { name: modelSettingsButtonName });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const row = screen.getByRole("option", { name: "Removed model" });
+    expect(row.getAttribute("aria-disabled")).toBe(ARIA_TRUE);
   });
 });

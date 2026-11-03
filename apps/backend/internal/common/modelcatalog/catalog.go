@@ -22,6 +22,7 @@ const SchemaVersion = 1
 const (
 	MaxDepth            = 4
 	MaxNodes            = 4096
+	MaxCompositions     = 64
 	MaxDimensions       = 8
 	MaxDimensionChoices = 256
 	MaxBindings         = 4096
@@ -291,6 +292,9 @@ func validateText(value string) error {
 }
 
 func validateCompositions(catalog *Catalog) error {
+	if len(catalog.Compositions) > MaxCompositions {
+		return fmt.Errorf("%w: composition count exceeds %d", ErrInvalidCatalog, MaxCompositions)
+	}
 	seen := make(map[string]struct{}, len(catalog.Compositions))
 	for i := range catalog.Compositions {
 		if err := validateComposition(&catalog.Compositions[i], catalog, seen); err != nil {
@@ -303,6 +307,9 @@ func validateCompositions(catalog *Catalog) error {
 func validateComposition(composition *Composition, catalog *Catalog, seen map[string]struct{}) error {
 	if composition.ID == "" || len(composition.ID) > MaxIDLength {
 		return fmt.Errorf("%w: invalid composition id", ErrInvalidCatalog)
+	}
+	if err := validateText(composition.Label); err != nil {
+		return err
 	}
 	if _, exists := seen[composition.ID]; exists {
 		return fmt.Errorf("%w: duplicate composition id %q", ErrInvalidCatalog, composition.ID)

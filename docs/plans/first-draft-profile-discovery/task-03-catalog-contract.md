@@ -68,7 +68,7 @@ Run from the repository root after the new RED test and minimum implementation.
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/common/modelcatalog ./internal/agentctl/acpcompat ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/utility ./internal/agent/hostutility ./internal/agent/settings/controller -run 'Test.*(Catalog|Grouped|ClientCapabilityMeta|ConfigOption)' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run 'Test.*(Catalog|SessionModel|ConfigOption)' -count=1)
-(cd apps/web && pnpm exec vitest run lib/state/slices/session-runtime/session-model-hydration.test.ts lib/model-catalog.test.ts)
+(cd apps/web && pnpm exec vitest run lib/model-catalog.test.ts lib/model-catalog-selection.test.ts lib/state/slices/session-runtime/session-model-hydration.test.ts lib/state/slices/session-runtime/session-model-catalog-hydration.test.ts)
 (cd apps/web && pnpm run typecheck)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -125,4 +125,4 @@ Completed 2026-11-03.
 - `ClientCapabilityMeta` now adds `cognition.ai/groupedSessionConfigOptions` for Devin only and keeps the Cursor opt-in unchanged.
 - The optional catalog threads through stream config options, the utility probe, host-utility results/caches, settings DTOs, and the live session snapshot JSON. Flat providers and older snapshots keep `catalog` absent.
 - Frontend: `@kandev/types/model-catalog`, `lib/model-catalog.ts` validation/resolution, hydration and WebSocket mapping, and selector types.
-- Commands: `go test -trimpath ./internal/common/modelcatalog ./internal/agentctl/acpcompat ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/utility -count=1` passed. `go test -trimpath -tags fts5 ./internal/agent/hostutility ./internal/agent/settings/controller -count=1` passed. `pnpm exec vitest run lib/model-catalog.test.ts lib/state/slices/session-runtime/session-model-catalog-hydration.test.ts` passed.
+- Commands: `go test -trimpath -tags fts5 ./internal/common/modelcatalog ./internal/agentctl/acpcompat ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/utility -count=1` passed. `go test -trimpath -tags fts5 ./internal/agent/hostutility ./internal/agent/settings/controller -count=1` passed. `pnpm exec vitest run lib/model-catalog.test.ts lib/state/slices/session-runtime/session-model-catalog-hydration.test.ts` passed.

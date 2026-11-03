@@ -305,8 +305,8 @@ An ordinary model fallback is compatibility evidence, not a substitute for verif
 - [x] [Task 06: Integrate configuration ownership](task-06-selector-integration.md)
 - [ ] [Task 07: Prove both issues end to end](task-07-combined-acceptance.md) (partial)
 
-Execute sequentially in the primary session.
-Tasks 01 and 02 were implemented in the primary session. The remaining gates are recorded per work order.
+Execute remaining work sequentially in the primary session.
+Tasks 01, 02, 03, 05, and 06 plus the permission defaults/controls are implemented. Remaining gates: Task 04's Fusion qualification and Task 07's grouped/Fusion browser acceptance. Do not rerun completed tasks.
 Run Tasks 01, 02, 03, and 04, then the permission companion, then Tasks 05, 06, and 07.
 Task 04 blocks real Fusion composition until its evidence is complete.
 Other independent completed outcomes remain valid while that gate is unresolved.
@@ -373,6 +373,15 @@ Review remediation (2026-11-03):
 - Back, dimension, choice, Apply, and provider-option controls use 28px fine-pointer desktop density and at least 44px below the 768px phone boundary and on coarse pointers.
 
 Added verification: `pnpm exec vitest run` for the selector, catalog, apply, profile/workflow/live owning-surface, hydration, and Devin suites passed (209 tests across 22 files). `go test -trimpath -tags fts5 ./internal/agent/settings/... ./internal/agent/hostutility ./internal/common/modelcatalog ./internal/agentctl/acpcompat -count=1` passed. `bash scripts/lint-go-changed` on every changed Go file reported `0 issues`. Desktop first-profile E2E was re-run after the picker changes.
+
+PR fixup remediation (2026-11-03):
+
+- Live candidate options resolve through a session-scoped backend route that uses the session profile's saved launch context and never mutates the session; dynamic profiles fall back to the agent-wide probe.
+- The picker binds candidate option state to the resolved model, resets drafts when the catalog or owning model changes, keeps custom-model and withdrawn-model rows in the catalog view, renders composition leaves that have no binding, and shows option descriptions with a sticky phone Apply action.
+- Explicit "Use CLI settings" on a new Devin profile is carried as a request-only intent so creation does not re-insert the default disabled override; inherit also preserves an explicit Autonomous mode.
+- Catalog validation now bounds composition counts and labels, rejects orphaned/duplicate bindings and prototype-like dimension keys, and enforces identifier lengths in both Go and TypeScript. Cached resolutions deep-copy the catalog.
+- Applied live confirmations read the live session entry per mutation, require the captured execution id when present, report superseded late failures, and re-notify a second partial failure.
+- Review-driven regressions include session-reset isolation, retry-only-pending options, catalog bounds, unbound choices, ambiguous pairings, missing-profile discovery, env-bound defaults, and header/phone assertions.
 
 Known gaps:
 

@@ -116,3 +116,48 @@ func TestGroupedCatalogLegacyFlatSnapshot(t *testing.T) {
 		t.Fatalf("legacy flat choices = %#v", loaded.ConfigOptions[0].Options)
 	}
 }
+
+// @covers AC-AGENTS-DYNAMIC-PROVIDER-OPTIONS-004.3
+func TestComposedConfigurationPartialApply(t *testing.T) {
+	// The provider confirmed the exact model and one option before a later
+	// option failed. Restore must keep that confirmed state and the catalog,
+	// and must not borrow the previous model or an optimistic option value.
+	snapshot := SessionModelsSnapshot{
+		CurrentModelID:       "pair-b",
+		ConfigOptionsSettled: true,
+		SettingsAttemptID:    "attempt-1",
+		ConfigOptions: []streams.ConfigOption{
+			{Type: "select", ID: "model", Name: "Model", CurrentValue: "pair-b", Category: "model", Catalog: groupedSnapshotCatalog()},
+			{Type: "select", ID: "thinking", Name: "Thinking", CurrentValue: "high"},
+			{Type: "select", ID: "speed", Name: "Speed", CurrentValue: "standard"},
+		},
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		t.Fatalf("rehydrate metadata: %v", err)
+	}
+	loaded, ok := LoadSessionModelsSnapshot(metadata)
+	if !ok {
+		t.Fatal("partial composed configuration was not restored")
+	}
+	if loaded.CurrentModelID != "pair-b" {
+		t.Fatalf("restored model = %q, want the confirmed composed model", loaded.CurrentModelID)
+	}
+	values := make(map[string]string, len(loaded.ConfigOptions))
+	for _, option := range loaded.ConfigOptions {
+		values[option.ID] = option.CurrentValue
+	}
+	if values["thinking"] != "high" || values["speed"] != "standard" {
+		t.Fatalf("confirmed option values = %#v", values)
+	}
+	if values["model"] != "pair-b" {
+		t.Fatalf("confirmed model option = %q", values["model"])
+	}
+	if len(loaded.ConfigOptions) != 3 || loaded.ConfigOptions[0].Catalog == nil {
+		t.Fatalf("restored composed snapshot = %#v", loaded.ConfigOptions)
+	}
+}

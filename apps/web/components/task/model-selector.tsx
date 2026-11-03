@@ -422,6 +422,7 @@ function useSessionModelResolver(sessionId: string | null, showAgentIcon: boolea
   );
   const resolveConfigurationOptions = useCandidateModelOptions({
     agentName: resolverAgentName ?? "",
+    sessionId: sessionId ?? undefined,
     mode: currentModeId,
   });
   return { agentName: showAgentIcon ? resolverAgentName : null, resolveConfigurationOptions };

@@ -34,9 +34,10 @@ func profileConfigEnvVars(entries []profileconfig.EnvEntry) []dto.ProfileEnvVarD
 func devinProfilePermissionDefaults(
 	agentName, mode string,
 	envVars []dto.ProfileEnvVarDTO,
+	addDisabledDefault bool,
 ) (string, []dto.ProfileEnvVarDTO) {
 	mode, entries := profileconfig.ApplyDevinProfileDefaults(
-		agentName, mode, profileConfigEnvEntries(envVars),
+		agentName, mode, profileConfigEnvEntries(envVars), addDisabledDefault,
 	)
 	return mode, profileConfigEnvVars(entries)
 }

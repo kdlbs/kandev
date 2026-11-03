@@ -346,16 +346,18 @@ func (r failingAgentLookupRepo) GetAgentByName(context.Context, string) (*models
 // @covers AC-AGENTS-PROFILE-DISCOVERY-001.4
 func TestSavedProfileDiscoveryRequiresParentOwnership(t *testing.T) {
 	tests := []struct {
-		name    string
-		profile func(codexID, claudeID string) *models.AgentProfile
-		agent   string
-		wantErr error
+		name     string
+		profile  func(codexID, claudeID string) *models.AgentProfile
+		agent    string
+		skipSeed bool
+		wantErr  error
 	}{
 		{
-			name:    "missing profile",
-			agent:   "codex-acp",
-			profile: func(string, string) *models.AgentProfile { return &models.AgentProfile{ID: "missing-profile"} },
-			wantErr: ErrProfileDiscoveryMissing,
+			name:     "missing profile",
+			agent:    "codex-acp",
+			profile:  func(string, string) *models.AgentProfile { return &models.AgentProfile{ID: "missing-profile"} },
+			skipSeed: true,
+			wantErr:  ErrProfileDiscoveryMissing,
 		},
 		{
 			name:  "another agent's profile",
@@ -402,8 +404,10 @@ func TestSavedProfileDiscoveryRequiresParentOwnership(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl, repo, ctx, codexID, claudeID := newProviderTestController(t)
 			profile := tt.profile(codexID, claudeID)
-			if err := repo.CreateAgentProfile(ctx, profile); err != nil {
-				t.Fatalf("seed profile: %v", err)
+			if !tt.skipSeed {
+				if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+					t.Fatalf("seed profile: %v", err)
+				}
 			}
 			utility := &draftDiscoveryUtility{}
 			ctrl.hostUtility = utility

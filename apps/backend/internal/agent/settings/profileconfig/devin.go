@@ -44,7 +44,11 @@ func DevinSandboxEntry(entries []EnvEntry) (EnvEntry, bool) {
 // ApplyDevinProfileDefaults applies new-profile permission intent to a Devin
 // profile. Saved profiles and non-Devin agents are returned unchanged, so this
 // must run only from creation paths.
-func ApplyDevinProfileDefaults(agentID, mode string, entries []EnvEntry) (string, []EnvEntry) {
+func ApplyDevinProfileDefaults(
+	agentID, mode string,
+	entries []EnvEntry,
+	addDisabledDefault bool,
+) (string, []EnvEntry) {
 	if agentID != DevinAgentID {
 		return mode, entries
 	}
@@ -57,7 +61,7 @@ func ApplyDevinProfileDefaults(agentID, mode string, entries []EnvEntry) (string
 			effectiveMode = DevinAutonomousMode
 		}
 	}
-	if hasSandbox {
+	if hasSandbox || !addDisabledDefault {
 		return effectiveMode, entries
 	}
 	withDefaults := append([]EnvEntry{}, entries...)

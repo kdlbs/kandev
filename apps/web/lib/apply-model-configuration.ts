@@ -53,6 +53,7 @@ export async function applyModelConfiguration(
     try {
       await request.applyModel(request.model);
     } catch {
+      if (!isCurrent()) return { status: "superseded", ...partial() };
       return { status: "model_failed", model: request.model, appliedOptions: {} };
     }
     if (!isCurrent()) return { status: "superseded", ...partial() };

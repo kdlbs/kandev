@@ -74,7 +74,11 @@ export function canonicalLaunchSettings(
 }
 
 export function launchSettingsKey(settings: ProfileLaunchSettingsRequest): string {
-  return JSON.stringify(settings);
+  // A mode edit changes the resolve request (permission-intent validation) but
+  // not the provider capability identity, so it must not invalidate the cached
+  // capability/probe context. Mode still travels in the request body.
+  const { mode: _mode, ...launch } = settings;
+  return JSON.stringify(launch);
 }
 
 export function profileContextKey(

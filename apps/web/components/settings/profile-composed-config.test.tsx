@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StateProvider } from "@/components/state-provider";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
+import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import type { ModelConfig } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({ onChange: vi.fn() }));
@@ -43,7 +44,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
     agent_name: AGENT,
     model: request.model,
     status: STATUS_OK,
-    config_options: [modelConfigOption(), thinkingOption()],
+    config_options: [modelConfigOption(request.model), thinkingOption()],
     context_revision: "profile-composed",
     error: null,
   })),
@@ -67,12 +68,12 @@ vi.mock("@/lib/api/domains/profile-capability-api", () => ({
   })),
 }));
 
-function modelConfigOption() {
+function modelConfigOption(currentValue = PAIR_A) {
   return {
     type: "select",
     id: "model",
     name: "Model",
-    current_value: PAIR_A,
+    current_value: currentValue,
     category: "model",
     options: [
       { value: PAIR_A, name: BALANCED_A },
@@ -201,5 +202,9 @@ describe("profile composed configuration", () => {
       model: PAIR_B,
       config_options: { thinking: "high" },
     });
+    expect(vi.mocked(resolveAgentModelConfig)).toHaveBeenCalledWith(
+      AGENT,
+      expect.objectContaining({ model: PAIR_B }),
+    );
   });
 });

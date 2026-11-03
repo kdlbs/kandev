@@ -314,15 +314,34 @@ function ModelListBody({
       <CommandList className={cn(catalogTree && "max-h-none", !embedded && "max-h-60")}>
         <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
         {catalogTree && catalogNavigation ? (
-          <CatalogCommandGroups
-            tree={catalogTree}
-            heading={<ModelGroupHeading providerIcon={providerIcon} />}
-            compositions={catalog?.compositions}
-            currentModel={currentModelValue}
-            loading={configOptionsLoading}
-            onSelectModel={onModelSelect}
-            onOpenComposition={(group) => catalogNavigation.openComposition(group)}
-          />
+          <>
+            <CatalogCommandGroups
+              tree={catalogTree}
+              heading={<ModelGroupHeading providerIcon={providerIcon} />}
+              compositions={catalog?.compositions}
+              currentModel={currentModelValue}
+              loading={configOptionsLoading}
+              onSelectModel={onModelSelect}
+              onOpenComposition={(group) => catalogNavigation.openComposition(group)}
+            />
+            {showCustomRow && (
+              <CommandGroup>
+                <CustomModelRow value={trimmedFilter} onSelect={onModelSelect} />
+              </CommandGroup>
+            )}
+            {orderedModelOptions
+              .filter((model) => model.disabled && model.id === currentModelValue)
+              .map((model) => (
+                <CommandGroup key={model.id}>
+                  <ModelRow
+                    model={model}
+                    selected
+                    loading={configOptionsLoading}
+                    onSelect={onModelSelect}
+                  />
+                </CommandGroup>
+              ))}
+          </>
         ) : (
           <CommandGroup heading={<ModelGroupHeading providerIcon={providerIcon} />}>
             {orderedModelOptions.map((model) => (

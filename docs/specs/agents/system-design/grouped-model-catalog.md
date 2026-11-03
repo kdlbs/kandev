@@ -68,8 +68,8 @@ Native ACP groups become one group level. Additional nesting requires supplied o
 Repeated labels remain distinguishable through group paths.
 Repeated provider values can retain separate presentation occurrences without changing executable identity.
 
-Validate depth, node count, strings, dimensions, and bindings before publication.
-Initial limits are four group levels, 4096 nodes, eight dimensions per composition, 256 choices per dimension, and 4096 bindings.
+Validate depth, node count, strings, dimensions, compositions, and bindings before publication.
+Initial limits are four total catalog node levels (the root list plus three nested group levels), 4096 nodes, 64 compositions, eight dimensions per composition, 256 choices per dimension, and 4096 bindings.
 Malformed or oversized richer metadata retains the original validated flat choices.
 Do not truncate a composition into an apparently complete but inaccurate mapping.
 Forward only reviewed presentation metadata, not arbitrary vendor `_meta`, filesystem/runtime details, inferred pricing, or recommendations.

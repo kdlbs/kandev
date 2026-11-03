@@ -159,6 +159,11 @@ func profilePermissionIntentMode(
 		if launchSettings.Mode != nil {
 			return *launchSettings.Mode
 		}
+		// An older client can send a launch snapshot without a mode. Fall back
+		// to the saved profile so a genuine sandbox/mode conflict still fails.
+		if profile != nil {
+			return profile.Mode
+		}
 		return ""
 	}
 	if profile != nil {

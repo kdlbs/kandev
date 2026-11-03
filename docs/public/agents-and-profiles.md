@@ -430,8 +430,10 @@ If you install an agent CLI after Kandev started, **Settings > Agents** can list
 as available before any profile row exists. Open its card and create the profile
 as usual. Model discovery and dependent option resolution use the complete draft,
 so the model list, modes, and dependent options work before the first Save.
-Saving persists the agent and its first profile together. Discovery alone does
-not create a profile, change an existing one, or start a task session.
+Saving creates the agent and then its first profile. Invalid profile input is
+rejected before the agent row is created; a later storage failure reports an
+error instead of claiming a partial success. Discovery alone does not create a
+profile, change an existing one, or start a task session.
 
 ### Model groups and composed selections
 

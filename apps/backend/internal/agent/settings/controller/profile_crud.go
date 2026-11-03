@@ -105,6 +105,10 @@ type CreateProfileRequest struct {
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// DevinSandboxInherited is a request-only intent flag. It marks an explicit
+	// "Use CLI settings" choice on a new Devin profile so creation does not add
+	// the default disabled override.
+	DevinSandboxInherited bool
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
@@ -188,7 +192,12 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
-	mode, envVars := devinProfilePermissionDefaults(agent.Name, req.Mode, req.EnvVars)
+	mode, envVars := devinProfilePermissionDefaults(
+		agent.Name, req.Mode, req.EnvVars, !req.DevinSandboxInherited,
+	)
+	if err := validateProfileEnvVarDTOs(envVars); err != nil {
+		return nil, err
+	}
 	if err := validateDevinProfilePermissionIntent(agent.Name, mode, envVars); err != nil {
 		return nil, err
 	}

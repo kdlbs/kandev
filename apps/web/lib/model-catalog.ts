@@ -20,7 +20,11 @@ export function normalizeModelCatalog(value: unknown): ModelCatalog | undefined 
   if (value.version !== MODEL_CATALOG_VERSION) return undefined;
   const nodes = normalizeNodes(value.nodes);
   if (!nodes) return undefined;
-  const compositions = normalizeCompositions(value.compositions, advertisedValues(nodes));
+  const compositions = normalizeCompositions(
+    value.compositions,
+    advertisedValues(nodes),
+    groupIds(nodes),
+  );
   if (compositions === null) return undefined;
   return compositions
     ? { version: MODEL_CATALOG_VERSION, nodes, compositions }
@@ -100,16 +104,29 @@ function advertisedValues(nodes: ModelCatalogNode[]): Set<string> {
   return new Set(leafNodes(nodes).map((node) => node.value ?? ""));
 }
 
+function groupIds(nodes: ModelCatalogNode[]): Set<string> {
+  const ids = new Set<string>();
+  const walk = (list: ModelCatalogNode[]) => {
+    for (const node of list) {
+      if (node.kind === "group" && node.id) ids.add(node.id);
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return ids;
+}
+
 function normalizeCompositions(
   value: unknown,
   advertised: Set<string>,
+  groups: Set<string>,
 ): ModelCatalogComposition[] | undefined | null {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return null;
   const seen = new Set<string>();
   const out: ModelCatalogComposition[] = [];
   for (const item of value) {
-    const composition = normalizeComposition(item, seen, advertised);
+    const composition = normalizeComposition(item, seen, advertised, groups);
     if (!composition) return null;
     out.push(composition);
   }
@@ -120,11 +137,15 @@ function normalizeComposition(
   value: unknown,
   seen: Set<string>,
   advertised: Set<string>,
+  groups: Set<string>,
 ): ModelCatalogComposition | undefined {
   if (!isRecord(value)) return undefined;
   const id = typeof value.id === "string" ? value.id : "";
   const groupId = typeof value.group_id === "string" ? value.group_id : "";
-  if (!id || !groupId || seen.has(id)) return undefined;
+  if (!id || id.length > MODEL_CATALOG_LIMITS.maxIdLength) return undefined;
+  if (!groupId || groupId.length > MODEL_CATALOG_LIMITS.maxIdLength) return undefined;
+  if (!groups.has(groupId)) return undefined;
+  if (seen.has(id)) return undefined;
   if (!validText(value.label)) return undefined;
   seen.add(id);
   const dimensions = normalizeDimensions(value.dimensions);
@@ -172,7 +193,8 @@ function normalizeDimensionChoices(value: unknown): ModelCatalogDimension["choic
   for (const item of value) {
     if (!isRecord(item)) return undefined;
     const choiceValue = typeof item.value === "string" ? item.value : "";
-    if (!choiceValue || seen.has(choiceValue)) return undefined;
+    if (!choiceValue || choiceValue.length > MODEL_CATALOG_LIMITS.maxIdLength) return undefined;
+    if (seen.has(choiceValue)) return undefined;
     if (!validText(item.label) || !validText(item.description)) return undefined;
     seen.add(choiceValue);
     choices.push({
@@ -192,23 +214,38 @@ function normalizeBindings(
   if (!Array.isArray(value) || value.length === 0) return undefined;
   if (value.length > MODEL_CATALOG_LIMITS.maxBindings) return undefined;
   const out: ModelCatalogBinding[] = [];
+  const tuples = new Set<string>();
   for (const item of value) {
-    if (!isRecord(item)) return undefined;
-    if (!isRecord(item.values)) return undefined;
-    if (typeof item.model !== "string" || item.model === "" || !advertised.has(item.model)) {
-      return undefined;
-    }
-    const values: Record<string, string> = {};
-    for (const dimension of dimensions) {
-      const choice = item.values[dimension.id];
-      if (typeof choice !== "string") return undefined;
-      if (!dimension.choices.some((entry) => entry.value === choice)) return undefined;
-      values[dimension.id] = choice;
-    }
-    if (Object.keys(item.values).length !== dimensions.length) return undefined;
-    out.push({ values, model: item.model });
+    const normalized = normalizeBindingEntry(item, dimensions, advertised);
+    if (!normalized || tuples.has(normalized.tuple)) return undefined;
+    tuples.add(normalized.tuple);
+    out.push(normalized.binding);
   }
   return out;
+}
+
+function normalizeBindingEntry(
+  item: unknown,
+  dimensions: ModelCatalogDimension[],
+  advertised: Set<string>,
+): { binding: ModelCatalogBinding; tuple: string } | undefined {
+  if (!isRecord(item) || !isRecord(item.values)) return undefined;
+  if (typeof item.model !== "string" || item.model === "" || !advertised.has(item.model)) {
+    return undefined;
+  }
+  // Provider-controlled keys such as "__proto__" must stay ordinary data.
+  const values: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const dimension of dimensions) {
+    const choice = item.values[dimension.id];
+    if (typeof choice !== "string") return undefined;
+    if (!dimension.choices.some((entry) => entry.value === choice)) return undefined;
+    values[dimension.id] = choice;
+  }
+  if (Object.keys(item.values).length !== dimensions.length) return undefined;
+  const tuple = dimensions
+    .map((dimension) => `${dimension.id}=${values[dimension.id]}`)
+    .join("\u0000");
+  return { binding: { values, model: item.model }, tuple };
 }
 
 function optionalDescription(value: unknown): { description?: string } {

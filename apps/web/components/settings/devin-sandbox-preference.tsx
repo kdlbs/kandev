@@ -21,8 +21,15 @@ export type DevinSandboxPreferenceFieldProps = {
   agentName: string;
   /** Profile-form shape: `env_vars` entries, not the camelCase draft. */
   profile: { mode: string; env_vars?: DevinEnvVar[] };
-  onChange: (patch: { mode: string; env_vars: DevinEnvVar[] }) => void;
+  baselineProfile?: { mode: string; env_vars?: DevinEnvVar[] };
+  onChange: (patch: {
+    mode: string;
+    env_vars: DevinEnvVar[];
+    devin_sandbox_inherited: boolean;
+  }) => void;
   smartAvailable: boolean;
+  /** Only report an unavailable Smart mode after discovery has settled. */
+  discoveryReady?: boolean;
 };
 
 /** Whether this agent exposes the Devin sandbox override at all. */
@@ -39,16 +46,25 @@ export function supportsDevinSandbox(agentName: string): boolean {
 export function DevinSandboxPreferenceField({
   agentName,
   profile,
+  baselineProfile,
   onChange,
   smartAvailable,
+  discoveryReady = true,
 }: DevinSandboxPreferenceFieldProps) {
   const { t } = useTranslation();
   const instanceId = useId();
   const descriptionId = `${instanceId}-devin-sandbox-description`;
   if (!supportsDevinSandbox(agentName)) return null;
   const preference = devinSandboxPreference(profile.env_vars);
+  const baselinePreference = baselineProfile
+    ? devinSandboxPreference(baselineProfile.env_vars)
+    : undefined;
   const custom = hasCustomDevinSandboxValue(profile.env_vars);
-  const smartUnavailable = (profile.mode ?? "") === DEVIN_SMART_MODE && !smartAvailable;
+  const smartUnavailable =
+    discoveryReady && (profile.mode ?? "") === DEVIN_SMART_MODE && !smartAvailable;
+  const isDirty =
+    baselinePreference !== undefined &&
+    (preference !== baselinePreference || (profile.mode ?? "") !== (baselineProfile?.mode ?? ""));
 
   return (
     <div className="space-y-2" data-testid="devin-sandbox-preference">
@@ -57,7 +73,7 @@ export function DevinSandboxPreferenceField({
         description={t("agents:devinSandboxDescription")}
         descriptionId={descriptionId}
         controlId={`${instanceId}-devin-sandbox`}
-        isDirty={false}
+        isDirty={isDirty}
         control={
           <Select
             value={preference}
@@ -69,7 +85,11 @@ export function DevinSandboxPreferenceField({
                 next,
                 { smartAvailable },
               );
-              onChange({ mode: patch.mode, env_vars: patch.envVars });
+              onChange({
+                mode: patch.mode,
+                env_vars: patch.envVars,
+                devin_sandbox_inherited: next === "inherit",
+              });
             }}
           >
             <SelectTrigger

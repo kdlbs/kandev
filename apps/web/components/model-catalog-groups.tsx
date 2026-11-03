@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 
@@ -123,8 +123,17 @@ function renderEntries(
     }
     const composition = context.compositions?.find((candidate) => candidate.group_id === entry.id);
     if (composition) {
+      const bound = new Set(composition.bindings.map((binding) => binding.model));
+      const unbound = entry.children.filter(
+        (child): child is CatalogLeafEntry => child.kind === "choice" && !bound.has(child.value),
+      );
       return (
-        <CompositionRow key={entry.key} group={entry} composition={composition} context={context} />
+        <Fragment key={entry.key}>
+          <CompositionRow group={entry} composition={composition} context={context} />
+          {unbound.map((leaf) => (
+            <CatalogLeafRow key={leaf.key} leaf={leaf} context={context} />
+          ))}
+        </Fragment>
       );
     }
     return (

@@ -78,10 +78,12 @@ export function devinSandboxPatch(
       envVars: replaceSandboxEntry(profile.envVars ?? [], "true"),
     };
   }
-  const envVars =
-    preference === "disabled"
-      ? replaceSandboxEntry(profile.envVars ?? [], "false")
-      : removeSandboxEntry(profile.envVars);
+  if (preference === "inherit") {
+    // "Use CLI settings" preserves the explicit mode and removes only the
+    // override, so the provider's own policy applies.
+    return { mode, envVars: removeSandboxEntry(profile.envVars) };
+  }
+  const envVars = replaceSandboxEntry(profile.envVars ?? [], "false");
   if (mode !== DEVIN_AUTONOMOUS_MODE) return { mode, envVars };
   return { mode: smartAvailable ? DEVIN_SMART_MODE : "", envVars };
 }
@@ -95,10 +97,11 @@ export function newDevinProfileDefaults(profile: DevinPermissionProfile): {
   mode: string;
   envVars: DevinEnvVar[];
 } {
-  const mode = (profile.mode ?? "").trim() || DEVIN_SMART_MODE;
-  if ((profile.envVars ?? []).some((envVar) => envVar.key === DEVIN_SANDBOX_ENV_KEY)) {
-    return { mode, envVars: profile.envVars ?? [] };
-  }
+  const sandbox = (profile.envVars ?? []).find((envVar) => envVar.key === DEVIN_SANDBOX_ENV_KEY);
+  const mode =
+    (profile.mode ?? "").trim() ||
+    (sandbox?.value === "true" ? DEVIN_AUTONOMOUS_MODE : DEVIN_SMART_MODE);
+  if (sandbox) return { mode, envVars: profile.envVars ?? [] };
   return { mode, envVars: replaceSandboxEntry(profile.envVars ?? [], "false") };
 }
 
