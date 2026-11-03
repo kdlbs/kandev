@@ -7,7 +7,6 @@ depends_on:
   - "01-gate-idle-suspended-focus-resume"
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001
   - REQ-EXECUTORS-IDLE-PARKING-001
 acceptance_criteria:
   - AC-EXECUTORS-IDLE-PARKING-001.4

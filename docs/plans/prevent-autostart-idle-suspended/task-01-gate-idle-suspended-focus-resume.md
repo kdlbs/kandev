@@ -6,10 +6,8 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001
   - REQ-EXECUTORS-IDLE-PARKING-001
 acceptance_criteria:
-  - AC-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001.1
   - AC-EXECUTORS-IDLE-PARKING-001.5
 system_design:
   - ../../specs/executors/system-design/idle-runtime-parking.md

@@ -2,7 +2,6 @@
 created: 2026-11-03
 status: implemented
 requirements:
-  - REQ-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001
   - REQ-EXECUTORS-IDLE-PARKING-001
 system_design:
   - ../../specs/executors/system-design/idle-runtime-parking.md
