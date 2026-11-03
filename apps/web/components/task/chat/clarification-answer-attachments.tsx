@@ -293,7 +293,7 @@ export function ClarificationAnswerAttachments({
       {!touchPresentation ? (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-          <PopoverContent align="end" className="w-auto p-3">
+          <PopoverContent align="end" className="z-[70] w-auto p-3">
             {manager}
           </PopoverContent>
         </Popover>
