@@ -606,3 +606,19 @@ func cloneDeliveryStatus(status *agentctl.DeliveryStatus) *agentctl.DeliveryStat
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	return &copy
 }
+
+// recoveredDeliveryFailureIsConclusive reports whether durable adoption failed
+// because the recovered identity disagrees with authoritative evidence, rather
+// than because a read, transport, or deadline failed before evidence existed.
+func recoveredDeliveryFailureIsConclusive(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, ErrDurableAdoptionEvidenceUnavailable) {
+		return false
+	}
+	return errors.Is(err, ErrDurableAdoptionIdentityMismatch) || errors.Is(err, ErrDurableAdoptionBlocked)
+}

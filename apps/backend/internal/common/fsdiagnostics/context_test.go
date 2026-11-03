@@ -1,7 +1,10 @@
 package fsdiagnostics
 
 import (
+	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -80,8 +83,11 @@ func TestContextFieldsCanonicalizeTargetAndIncludeIdentity(t *testing.T) {
 	zap.New(core).Warn("filesystem.access_denied", fields...)
 	entry := logs.All()[0].ContextMap()
 
-	if got, want := entry["operation"], "workspace.file_monitor"; got != want {
+	if got, want := entry["operation"], "stat"; got != want {
 		t.Fatalf("operation = %v, want %v", got, want)
+	}
+	if got, want := entry["error_class"], "permission_denied"; got != want {
+		t.Fatalf("error_class = %v, want %v", got, want)
 	}
 	if got, want := entry["target"], CanonicalPath(operation.Target); got != want {
 		t.Fatalf("target = %v, want %v", got, want)
@@ -106,5 +112,30 @@ func TestIsAccessDenied(t *testing.T) {
 	}
 	if IsAccessDenied(errors.New("temporary index lock")) {
 		t.Error("index lock was classified as access denied")
+	}
+}
+
+func TestErrorClassUsesClosedVocabulary(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "canceled", err: context.Canceled, want: "context_canceled"},
+		{name: "deadline", err: context.DeadlineExceeded, want: "deadline_exceeded"},
+		{name: "permission", err: os.ErrPermission, want: "permission_denied"},
+		{name: "not found", err: os.ErrNotExist, want: "not_found"},
+		{name: "git start", err: &exec.Error{Name: "git", Err: exec.ErrNotFound}, want: "git_start_failed"},
+		{name: "git command", err: &exec.ExitError{}, want: "git_command_failed"},
+		{name: "repository context", err: errors.New("fatal: not a git repository"), want: "repository_context_unavailable"},
+		{name: "io", err: &os.PathError{Op: "read", Path: "file", Err: errors.New("broken")}, want: "io_error"},
+		{name: "unknown", err: errors.New("unexpected"), want: "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ErrorClass(tt.err); got != tt.want {
+				t.Fatalf("ErrorClass(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
 	}
 }
