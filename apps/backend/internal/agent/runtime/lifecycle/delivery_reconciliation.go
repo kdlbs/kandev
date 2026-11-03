@@ -187,7 +187,7 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
 	}
-	originalRuntime := client.RuntimeProcessIdentity()
+	originalRuntime := boundAgentProcessGroup(execution, client.RuntimeProcessIdentity(), submissionID)
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
 		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
