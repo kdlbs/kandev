@@ -553,3 +553,66 @@ remain representative. Remote CI is pending publication of this checkpoint.
 Final affected Go lint passes with zero issues after the extraction and test
 switch correction: `/tmp/kandev-4762-adversarial-go-lint-green.log`. Normal commit
 hooks and exact-head publication evidence are preserved in the saved task plan.
+
+
+### CI delivery and main integration (2026-11-03)
+
+Rebased the owned branch from `8cd31a0896ab` onto main `8d0186aa77ef`.
+The backup branch `backup/builtin-mcp-before-ci2-main-20261104` retains the
+published `e830f1790c1d` checkpoint. Range comparison preserves all package
+changes. The async follow-up conflicts use main's newer per-prompt release
+marker, bounded failure/timeout handling, and causal queue-admission test.
+This supersedes the backend-wide environment gate in the historical receipts.
+Main and sibling workspaces were not changed.
+
+Exact-head E2E run `41692938913`, attempt 1, used synthetic merge
+`9dc41444e0f4` (published head `e830f1790c1d` into base `8cd31a0896ab`).
+Three leaf failures required repair:
+
+- The phone Dismiss action was measured during the menu's entrance scale.
+  The unchanged test failed locally at 43.072px. A diagnostic capture proved
+  the menu transform was below 1 while the computed control height was 44px;
+  its settled rendered height was 44px. The test now waits for finite menu
+  animations before measuring. The existing target-size assertion and real
+  dismissal interaction remain.
+- OpenCode exhaustion passed in isolation and in its full five-case file.
+  Temporary fourfold browser CPU throttling reproduced the CI failure.
+  Frame capture and the browser store showed retry 9/10 while the API had
+  already recorded exhaustion; the viewer had not received the deletion yet.
+  The test now arms a wait for that exact session/notice deletion before the
+  final dispatch and awaits delivery before asserting the UI. No assertion
+  timeout, retry budget, provider, or runtime behavior changed. The same
+  throttled reproduction passes with the causal wait. Temporary throttling,
+  frame capture, and diagnostic output are absent from the committed test.
+- Desktop E2E Smoke failed during the release-shaped native rebuild with
+  `no space left on device`, before any release-shaped smoke assertion.
+  Its setup-go restore unpacked a shared 1,161MB compressed cache alongside
+  Rust artifacts. This job now disables that restore to retain build space.
+  Other job caches and all smoke assertions remain. A fresh hosted run must
+  confirm that the runner has sufficient space; local checks cannot prove it.
+
+Final affected checks, all with normal hooks enabled and no test retries:
+
+```sh
+GOMAXPROCS=2 GOMEMLIMIT=4GiB go -C apps/backend test -trimpath -race -p=1 ./cmd/mock-agent ./internal/orchestrator ./internal/orchestrator/executor -run 'AsyncFollowup|AwaitFile|BuiltinIntent|BuiltinSessionView' -count=1 -timeout=5m
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/session/opencode-capacity-retry.spec.ts e2e/tests/chat/queue-after-background-followup.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts -- --retries=0 --repeat-each=3
+python3 .github/scripts/e2e-tests-workflow-contract_test.py
+pnpm --dir apps/web exec eslint --max-warnings 0 e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts e2e/tests/session/opencode-capacity-retry.spec.ts
+pnpm --dir apps/web exec prettier --check e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts e2e/tests/session/opencode-capacity-retry.spec.ts
+```
+
+The Go mock-agent and orchestrator cohorts pass under the race detector; the
+executor package compiles with no matching tests. Desktop E2E passes six cases;
+phone E2E passes six cases (both cases repeated three times). All 28 workflow
+contract checks pass. ESLint and formatting pass. Managed artifacts were rebuilt
+after the rebase; later runs reused those current artifacts. Browser commands
+use the clean launch-variable environment, Nix browser libraries, and resource
+bounds recorded above. Only one E2E process ran at a time. Main port 9998 and
+the user's manual preview were untouched.
+
+This repair changes test synchronization and CI cache behavior. It adds no
+product behavior, public configuration, UI markup, copy, or screenshots.
+Public docs, durable requirements, and system design therefore need no change.
+Fresh published-head CI remains the delivery gate; historical green receipts
+are not proof for the rewritten head.

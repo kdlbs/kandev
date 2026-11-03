@@ -457,3 +457,20 @@ browser runs passed; the CI assertions and artifacts provide the failure
 observations. The rejected export-state precondition was corrected to the
 content-completeness contract before the successful repeated checks. All changes
 in this batch are test-only. Public behavior and visual composition are unchanged.
+
+
+### CI and merge-conflict repair (2026-11-03)
+
+Rebased onto main `8d0186aa77ef`, preserving package behavior and adopting
+main's per-prompt async follow-up release marker. Replaced the phone menu's
+in-motion measurement with the existing finite-animation wait. Reproduced the
+OpenCode stale-card assertion under browser slowdown and synchronized the test
+with the exact notice deletion event. Disabled the desktop smoke job's shared
+Go-cache restore after its release-shaped build exhausted runner disk space.
+No production or public contract changed.
+
+Affected race checks, six desktop cases, six phone cases, 28 workflow contract
+checks, ESLint and formatting pass. Exact commands, failure evidence and limits
+are in [implementation results](implementation-results.md#ci-delivery-and-main-integration-2026-11-03).
+Publication must be followed by fresh-head CI; local checks do not prove the
+hosted desktop runner has enough disk space.
