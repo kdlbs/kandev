@@ -474,3 +474,14 @@ checks, ESLint and formatting pass. Exact commands, failure evidence and limits
 are in [implementation results](implementation-results.md#ci-delivery-and-main-integration-2026-11-03).
 Publication must be followed by fresh-head CI; local checks do not prove the
 hosted desktop runner has enough disk space.
+
+
+### Reload readiness in CI navigation fixture (2026-11-03)
+
+Published-head CI exposed a desktop Files restoration test that checked Git
+hydration before its reloaded Dockview layout was ready. The same failure
+reproduces with temporary browser slowdown. One existing layout-readiness wait
+fixes the sequence without increasing the Git assertion timeout. The full five
+case desktop file and the phone journey pass with retries disabled; diagnostic
+instrumentation is removed. See the [implementation results](implementation-results.md#navigation-fixture-follow-up-from-published-head-ci-2026-11-03).
+No package UI or runtime behavior changes. Fresh-head CI remains required.

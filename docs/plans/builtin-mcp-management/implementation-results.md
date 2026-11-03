@@ -676,3 +676,45 @@ The startup correction conforms to the existing platform progress contract;
 it adds no package option, permission, recovery action, UI layout or public API.
 The public package guide already documents recovery-required behavior and needs
 no change. Existing package screenshots still represent the product surfaces.
+
+
+### Navigation fixture follow-up from published-head CI (2026-11-03)
+
+CI on `724bab647927` completed with 86 passed, 13 skipped, one neutral,
+and three failed checks: two leaf jobs plus the E2E summary. The leaf jobs
+were shard 5/28 and Kubernetes compatibility v1.34.8. No review threads or
+approval-required runs were open. All other checks, including the original
+three CI failures, passed.
+
+Shard 5's Files restoration journey entered its Git-state assertion immediately
+after reload, before the desktop layout had mounted. The isolated case passed;
+temporary eightfold browser CPU throttling around reload reproduced the same
+five-second false hydration predicate. A diagnostic capture shortly afterward
+showed Git ready, commits loaded, and loading false. The fixture now waits for
+the existing positive-width Dockview readiness signal before checking Git state.
+The Git timeout, folder retry, held-sibling assertions, and task-return checks
+are unchanged. The same slowdown reproduction passes with this one added wait.
+Temporary throttling and diagnostic capture are absent from the final source.
+The phone path has no Dockview dependency.
+
+After the final helper edit, the complete five-case desktop file and the phone
+journey pass with one worker and retries disabled. ESLint and formatting pass.
+Current artifacts were built against the published source; the fix changes
+only test synchronization and does not require a product rebuild.
+
+```sh
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/task/task-navigation-responsiveness.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts -- --retries=0
+pnpm --dir apps/web exec eslint --max-warnings 0 e2e/tests/task/task-navigation-helpers.ts
+pnpm --dir apps/web exec prettier --check e2e/tests/task/task-navigation-helpers.ts
+```
+
+Kubernetes failed during `kind load docker-image`, before product assertions.
+Its ignored stderr prevents a root-cause claim. The local host has no Docker
+installation, so a single fresh-runner retry of that exact completed job was
+requested against the unchanged head. It passed in attempt 2 (job
+`126284732204`) on the same `724bab647927` source, including the agentctl/API
+smoke. The original import failure's cause remains unknown because stderr was
+discarded. No Kubernetes or product code changed; this does not replace the
+separate navigation fixture repair. Fresh CI is still required after publication.
+Public docs, package UI screenshots, and durable package contracts are unchanged.
