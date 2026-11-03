@@ -130,13 +130,7 @@ func testRebindHarnessGenerationNativeSession(t *testing.T, open func(*testing.T
 			rebound, err := repo.RebindHarnessGenerationNativeSession(ctx, fixture.request)
 			require.NoError(t, err)
 			require.False(t, rebound)
-			running, err := repo.GetExecutorRunningBySessionID(ctx, fixture.session.ID)
-			require.NoError(t, err)
-			require.Equal(t, previous, running.ResumeToken, "a refused rebind must not move the token")
-			var count int
-			require.NoError(t, repo.DB().QueryRowContext(ctx, repo.db.Rebind(
-				`SELECT COUNT(*) FROM harness_native_session_rebinds WHERE session_id = ?`), fixture.session.ID).Scan(&count))
-			require.Zero(t, count)
+			requireNativeIdentity(t, repo, fixture, previous, 0)
 		})
 	}
 }

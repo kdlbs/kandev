@@ -58,11 +58,14 @@ design gains an "In-place context reset" rule.
 ### In scope
 
 - A repository method that, in one transaction, stores the token and rebinds the current
-  generation's native ID, and appends a history row. It does this only while the generation
-  still has the previous native ID, the execution owns `executors_running`, no newer
-  generation exists, and no restore attempt is incomplete.
-- The workflow context reset uses that method instead of the plain token store.
-- If the rebind is refused, the reset fails through the existing reset-failure settlement.
+  generation's native ID. It checks the token against the previous or new ID, requires the
+  requested generation to remain current, and refuses while a restore attempt is incomplete.
+- The transaction appends a history row when it changes the generation. It accepts an
+  already-new generation without adding a duplicate history row.
+- Reset-time agent events defer token writes until the reset commits. A partial provider
+  failure uses the same rebind path when the live native ID changed.
+- A refused rebind keeps prompt admission blocked until a later reset commits the identity.
+- The legacy clear-and-store path remains for sessions without a committed generation.
 
 ### Out of scope
 
@@ -84,32 +87,35 @@ Persistence (`apps/backend/internal/task/repository/sqlite/`):
 - New `Repository.RebindHarnessGenerationNativeSession(ctx, req)` in
   `harness_native_rebind.go`. In a single transaction it:
   - takes the writer (PostgreSQL: an advisory lock keyed by the session);
-  - updates `executors_running` (token and `last_message_uuid`) where
-    `agent_execution_id = req.ExecutionID`;
-  - updates `harness_session_generations.native_session_id` for the current generation,
-    where the native ID still equals `req.PreviousNativeSessionID`, no newer generation
-    exists, and no `session_restore_attempts` row has `completed_at IS NULL`;
-  - inserts the history row.
-  It returns `(bool, error)`. Any zero-row update rolls back and returns `false`.
-- Add the method to the repository interface (`task/repository/interface.go`).
+  - updates `executors_running` (token and `last_message_uuid`) when the token equals the
+    previous or new native ID and the execution still owns the row;
+  - checks that the requested generation is current, its native ID equals the previous or
+    new native ID, and no `session_restore_attempts` row has `completed_at IS NULL`;
+  - changes the generation and inserts one history row when it still has the previous ID.
+    If it already has the new ID, the transaction accepts the request without another row.
+  It returns `(bool, error)`. Any refused guard rolls back and returns `false`.
+- The method stays on the concrete repository. The orchestrator uses a local
+  `harnessNativeRebindStore` interface, following the existing `sessionContinuityStore` pattern.
 
 Orchestrator (`apps/backend/internal/orchestrator/`):
 
-- In `resetAgentContextWithError`, after `ResetAgentContext` succeeds, call a new
-  `rebindResetNativeSession` instead of `clearResumeToken` followed by `storeResumeToken`.
-  It passes `previousACPSessionID`, the current ACP session ID, the execution, and the
-  current generation. A `false` result settles through `settleFailure` with
-  `workflow_context_reset_failed`. Sessions without a committed generation (legacy or
-  non-durable) keep the existing clear-and-store path.
+- Agent event handlers defer resume-token writes while reset admission is active. The final
+  reset step writes the token through `rebindResetNativeSession` or the legacy fallback.
+- Resolve the prior native ID from the committed generation when the live prior ID is empty
+  or no longer matches durable state. Use the legacy clear-and-store path only when no
+  generation is committed.
+- If the provider reports an error after changing its live ID, reconcile through the same
+  guarded path. If the identity cannot commit, retain the reset marker so prompt admission
+  remains blocked. A later reset can retry the rebind.
 - `persistACPSessionID` still mirrors the token into session metadata on success.
 
 ## Tests
 
 | Criterion | Evidence |
 |---|---|
-| AC-AGENTS-HARNESS-SESSION-CONTINUITY-001.1 | `orchestrator/event_handlers_workflow_reset_rebind_test.go`: `TestWorkflowContextResetRebindsCommittedGeneration`. The reset leaves the token and the generation native ID equal to the new ACP session ID, and adds one history row. Fails on main: the generation keeps the old ID. |
+| AC-AGENTS-HARNESS-SESSION-CONTINUITY-001.1 | `orchestrator/event_handlers_workflow_reset_rebind_test.go`: success, event-before-rebind refusal, partial provider failure, and missing prior live ID. The token and generation stay aligned, and only one history row is added. |
 | AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.21, 006.23 | `task/repository/sqlite/harness_native_rebind_test.go`: `TestRebindHarnessGenerationNativeSession`. Covers acceptance, then refusal with no partial writes for a wrong previous ID, a foreign execution, a newer generation, and an incomplete restore attempt. `TestPostgresRebindHarnessGenerationNativeSession` repeats it when `KANDEV_TEST_POSTGRES_DSN` is set. |
-| Fail-closed reset | `TestWorkflowContextResetRefusedRebindFailsReset`: a refused rebind settles the reset failure and keeps the previous token and generation. |
+| Fail-closed reset | `TestWorkflowContextResetRefusedRebindFailsReset`: a refused rebind keeps the previous token and generation and blocks prompt admission. |
 
 ## E2E tests
 

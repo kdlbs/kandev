@@ -30,6 +30,9 @@ history table. A refused rebind fails the reset and keeps the previous identity.
 - Table `harness_native_session_rebinds`, its schema, store registration, and conformance.
 - `Repository.RebindHarnessGenerationNativeSession` with the guards from the plan.
 - `resetAgentContextWithError` uses the rebind when a generation is committed.
+- Reset-time agent events defer token writes until the guarded rebind settles.
+- Partial provider failures and missing live prior IDs use the committed generation identity.
+- A refused transition keeps prompt admission blocked until a later reset repairs it.
 
 ## Out of scope
 
@@ -41,16 +44,19 @@ history table. A refused rebind fails the reset and keeps the previous identity.
    native ID are all the new ACP session ID, and exactly one history row exists.
 2. A wrong previous ID, a foreign execution, a newer generation, or an incomplete restore
    attempt each refuse the rebind with no partial write, and the reset settles as failed.
-3. `TestWorkflowContextResetRebindsCommittedGeneration` fails on the current code before the
-   production change.
+3. An event before a refused rebind cannot move only the token. The refusal keeps the old
+   token and generation, and blocks prompt admission.
+4. A provider error after the live ID changes uses the guarded rebind to keep durable identity
+   aligned, while the reset still reports the provider error.
+5. An unavailable previous live ID uses the committed generation as the guarded prior ID.
 
 ## Verification
 
 ```bash
-(cd apps/backend && go test -trimpath -race -count=1 ./internal/task/repository/sqlite -run 'RebindHarnessGenerationNativeSession')
-(cd apps/backend && go test -trimpath -race -count=1 ./internal/orchestrator -run 'WorkflowContextReset')
+(cd apps/backend && go test -trimpath -race -tags fts5 -count=1 ./internal/task/repository/sqlite -run 'RebindHarnessGenerationNativeSession')
+(cd apps/backend && go test -trimpath -race -tags fts5 -count=1 ./internal/orchestrator -run 'WorkflowContextReset')
 (cd apps/backend && go run ./cmd/sqlguard ./internal && go test -trimpath -race -count=1 ./internal/persistence/storeconformance)
-(cd apps/backend && go test -trimpath -race -count=1 ./internal/task/repository/sqlite ./internal/orchestrator)
+(cd apps/backend && go test -trimpath -race -tags fts5 -count=1 ./internal/task/repository/sqlite ./internal/orchestrator)
 (bash scripts/lint-go-changed $(git diff --name-only -- 'apps/backend/*.go'))
 (python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all)
 ```
@@ -63,7 +69,10 @@ history table. A refused rebind fails the reset and keeps the previous identity.
 - `apps/backend/internal/task/repository/interface.go`
 - `apps/backend/internal/persistence/requiredstores/`, `apps/backend/internal/persistence/storeconformance/`
 - `apps/backend/internal/orchestrator/event_handlers_workflow.go`
-- `apps/backend/internal/orchestrator/event_handlers_workflow_reset_rebind_test.go` (new)
+- `apps/backend/internal/orchestrator/event_handlers_workflow_reset_rebind.go`
+- `apps/backend/internal/orchestrator/event_handlers_workflow_reset_rebind_test.go`
+- `apps/backend/internal/orchestrator/event_handlers.go`
+- `apps/backend/internal/orchestrator/event_handlers_streaming.go`
 
 ## Dependencies
 
@@ -86,6 +95,12 @@ None.
 
 ## Results
 
+- Follow-up fix on PR head `8d8d8ee`: the new refusal, partial-reset, and missing-prior-ID
+  tests failed before the production changes and passed after them.
+- `go test -trimpath -race -tags fts5 -count=1 ./internal/task/repository/sqlite -run 'RebindHarnessGenerationNativeSession'`:
+  `ok` (2.781s).
+- `go test -trimpath -race -tags fts5 -count=1 ./internal/orchestrator -run 'WorkflowContextReset'`:
+  `ok` (1.454s).
 - `go test -trimpath -race -count=1 ./internal/task/repository/sqlite -run 'RebindHarnessGenerationNativeSession'`:
   failed against the stub (`Should be true`, `no such table`), then `ok`. The PostgreSQL variant
   skips without `KANDEV_TEST_POSTGRES_DSN` (not run locally).
