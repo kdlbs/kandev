@@ -3,7 +3,7 @@ package acpdbg
 import "testing"
 
 func TestInitializeParamsOmitsAIRWithoutCapabilities(t *testing.T) {
-	params := initializeParams(nil)
+	params := initializeParams(nil, nil)
 	caps, ok := params["clientCapabilities"].(map[string]any)
 	if !ok {
 		t.Fatalf("clientCapabilities = %#v", params["clientCapabilities"])
@@ -14,7 +14,7 @@ func TestInitializeParamsOmitsAIRWithoutCapabilities(t *testing.T) {
 }
 
 func TestInitializeParamsAdvertisesAIRCapabilities(t *testing.T) {
-	params := initializeParams([]string{"asyncTasks"})
+	params := initializeParams(nil, []string{"asyncTasks"})
 	caps, ok := params["clientCapabilities"].(map[string]any)
 	if !ok {
 		t.Fatalf("clientCapabilities = %#v", params["clientCapabilities"])

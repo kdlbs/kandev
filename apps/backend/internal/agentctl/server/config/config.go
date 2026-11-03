@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
@@ -403,6 +404,10 @@ type InstanceConfig struct {
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
@@ -803,6 +808,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.ProviderGatewayAuth != nil {
 		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
 	}
+	if overrides.AuthPolicy != nil {
+		cfg.AuthPolicy = overrides.AuthPolicy
+	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
@@ -873,6 +881,7 @@ type InstanceOverrides struct {
 	RequiresProcessKill        bool
 	StripEnv                   []string
 	ProviderGatewayAuth        *acpprovider.GatewayAuth
+	AuthPolicy                 *acpcompat.AuthPolicy
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
 	RemoteContributions        map[string]models.RemoteContribution

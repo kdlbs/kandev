@@ -1794,7 +1794,10 @@ func (s *Service) launchPreparedDynamicRelaunch(
 			prompt.attachments,
 			true,
 			origin,
-			promptTaskOptions{allowRouteActionPrompt: true},
+			promptTaskOptions{
+				capacityIntent:         turnCapacityOverride,
+				allowRouteActionPrompt: true,
+			},
 		)
 		if err != nil {
 			return dynamicRelaunchFailed, err

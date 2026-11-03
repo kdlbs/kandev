@@ -35,6 +35,8 @@ type UserSettingsDTO struct {
 	ConfirmTaskArchive                bool                                    `json:"confirm_task_archive"`
 	PreventAutoStartAgentOnOpen       bool                                    `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                                    `json:"unread_divider"`
+	UnreadTaskDot                     bool                                    `json:"unread_task_dot"`
+	UnreadTaskDotHideDelaySeconds     int                                     `json:"unread_task_dot_hide_delay_seconds"`
 	AgentGeneratedTaskTitles          bool                                    `json:"agent_generated_task_titles"`
 	PromptSuggestions                 bool                                    `json:"prompt_suggestions"`
 	AutoFocusNewTasks                 bool                                    `json:"auto_focus_new_tasks"`
@@ -158,6 +160,8 @@ type UpdateUserSettingsRequest struct {
 	ConfirmTaskArchive                *bool                              `json:"confirm_task_archive,omitempty"`
 	PreventAutoStartAgentOnOpen       *bool                              `json:"prevent_auto_start_agent_on_open,omitempty"`
 	UnreadDivider                     *bool                              `json:"unread_divider,omitempty"`
+	UnreadTaskDot                     *bool                              `json:"unread_task_dot,omitempty"`
+	UnreadTaskDotHideDelaySeconds     *int                               `json:"unread_task_dot_hide_delay_seconds,omitempty"`
 	AgentGeneratedTaskTitles          *bool                              `json:"agent_generated_task_titles,omitempty"`
 	PromptSuggestions                 *bool                              `json:"prompt_suggestions,omitempty"`
 	AutoFocusNewTasks                 *bool                              `json:"auto_focus_new_tasks,omitempty"`
@@ -364,6 +368,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ConfirmTaskArchive:                settings.ConfirmTaskArchive,
 		PreventAutoStartAgentOnOpen:       settings.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     settings.UnreadDivider,
+		UnreadTaskDot:                     settings.UnreadTaskDot,
+		UnreadTaskDotHideDelaySeconds:     settings.UnreadTaskDotHideDelaySeconds,
 		AgentGeneratedTaskTitles:          settings.AgentGeneratedTaskTitles,
 		PromptSuggestions:                 settings.PromptSuggestions,
 		AutoFocusNewTasks:                 settings.AutoFocusNewTasks,

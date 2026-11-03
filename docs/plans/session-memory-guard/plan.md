@@ -2,7 +2,7 @@
 created: 2026-10-20
 status: done
 requirements:
-  - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-004
 system_design:
   - ../../specs/agents/system-design/session-memory-guard.md
 legacy_specs: []
@@ -48,4 +48,4 @@ and retry sweep.
 
 The work order owns the hostmemory package, the orchestrator ceiling files
 above, their permanent tests, the flag plumbing,
-`REQ-AGENTS-SESSION-CEILING-003`, and the session memory guard design.
+`REQ-AGENTS-SESSION-CEILING-004`, and the session memory guard design.

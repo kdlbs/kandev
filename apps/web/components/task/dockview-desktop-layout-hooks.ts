@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from "react";
+import type { DockviewApi } from "dockview-react";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 
@@ -13,6 +14,7 @@ export function useCompactDockviewDefault(compact: boolean) {
 export function useDockviewUnmountCleanup(
   saveTimerRef: RefObject<ReturnType<typeof setTimeout> | null>,
   readyDisposersRef: RefObject<Array<() => void>>,
+  ownedApiRef: RefObject<DockviewApi | null>,
 ) {
   useEffect(() => {
     const timerRef = saveTimerRef;
@@ -20,7 +22,12 @@ export function useDockviewUnmountCleanup(
     return () => {
       for (const dispose of disposersRef.current.splice(0)) dispose();
       if (timerRef.current) clearTimeout(timerRef.current);
-      panelPortalManager.releaseAll();
+      const owner = ownedApiRef.current;
+      const state = useDockviewStore.getState();
+      if (owner && state.api === owner) {
+        panelPortalManager.releaseAll();
+        state.setApi(null);
+      }
     };
-  }, [readyDisposersRef, saveTimerRef]);
+  }, [ownedApiRef, readyDisposersRef, saveTimerRef]);
 }

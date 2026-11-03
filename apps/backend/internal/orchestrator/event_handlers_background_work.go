@@ -139,6 +139,9 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 			obs.OriginTurnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 		}
 	case payload.Data.Normalized != nil:
+		if isSubagentPresentationUpdate(payload) {
+			return
+		}
 		fromNorm := buildObservationFromNormalized(payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		if fromNorm == nil {
 			return

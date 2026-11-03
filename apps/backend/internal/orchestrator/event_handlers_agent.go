@@ -1640,7 +1640,34 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 	if state.dispatchErr = s.validateQueuedPassthroughDelivery(ctx, identity); state.dispatchErr != nil {
 		return
 	}
+	turnReservation, refusal := s.admitQueuedPassthroughTurn(ctx, identity)
+	if refusal != nil {
+		state.dispatchErr = refusal
+		return
+	}
+	if turnReservation != nil {
+		defer func() {
+			turnReservation.release()
+			s.signalCeilingSweep()
+		}()
+	}
 	s.deliverQueuedPassthroughPrompt(ctx, identity, queuedMsg, &state)
+}
+
+// admitQueuedPassthroughTurn gates passthrough input before the running claim
+// and PTY write. The ticket is held until the caller returns, after the running
+// state transition has made the session counted.
+func (s *Service) admitQueuedPassthroughTurn(
+	ctx context.Context, identity messagequeue.QueueSessionIdentity,
+) (*messageTurnReservation, *messageTurnCapacityRefusal) {
+	if s.sessionCeiling == nil {
+		return nil, nil
+	}
+	return s.sessionCeiling.admitTurn(ctx, turnAdmissionRequest{
+		taskID: identity.TaskID, sessionID: identity.SessionID,
+		incarnationID: identity.SessionIncarnationID,
+		intent:        turnCapacityBounded, seam: "queued_passthrough",
+	})
 }
 
 type queuedPassthroughExecutionState struct {
@@ -1678,8 +1705,12 @@ func (s *Service) finishQueuedPassthroughExecution(
 		isLifecycleAutomationMessage(queuedMsg),
 		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
 	)
-	s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-	s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+	if _, refusedForCapacity := messageTurnCapacityRefusalOf(state.dispatchErr); refusedForCapacity {
+		s.clearQueuedDispatchInFlightForCapacityRefusal(identity.SessionID, reservation)
+	} else {
+		s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
+		s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+	}
 	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
 	if s.onQueuedMessageExecutionComplete != nil {
 		s.onQueuedMessageExecutionComplete()
@@ -1966,6 +1997,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	deliveryProtocol, deliverySubmissionID, deliveryPayloadHash := queuedMsg.DeliverySubmission()
 	options := promptTaskOptions{
+		capacityIntent:       queuedMessageCapacityIntent(queuedMsg),
 		claimEntryID:         claimEntryID,
 		lifecyclePrompt:      lifecyclePrompt,
 		afterClaim:           afterClaim,
@@ -2013,6 +2045,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 		launchOriginAutomatic,
 		options)
 	if err != nil {
+		if _, refusedForCapacity := messageTurnCapacityRefusalOf(err); refusedForCapacity {
+			// The refusal restores the head and registers a capacity wait. An
+			// immediate tail drain would take the same head back before the
+			// release signal and spin.
+			allowFollowupDrain = false
+		}
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
 			s.retireInitialCreatePromptPassthroughForQueueEvent(
@@ -2048,7 +2086,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
 		lifecyclePrompt, userMessageRecorded, deliveryAttempted, err,
 	)
-	s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+	if _, refusedForCapacity := messageTurnCapacityRefusalOf(err); refusedForCapacity {
+		s.clearQueuedDispatchInFlightForCapacityRefusal(reservedSessionID, reservation)
+	} else {
+		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
+	}
 	if err == nil {
 		// A ready event can arrive while this worker still owns the reservation.
 		// Retry through the public guarded drain after releasing that marker so a
@@ -2258,6 +2300,10 @@ func (s *Service) finishQueuedMessageExecution(
 	if s.retainQueuedMessageForDynamicRouteAction(
 		ctx, callerSessionID, queuedMsg, reservation, userMessageRecorded, err,
 	) {
+		return
+	}
+	if refusal, ok := messageTurnCapacityRefusalOf(err); ok {
+		s.deferQueuedMessageForCapacity(ctx, queuedMsg, reservation, refusal)
 		return
 	}
 	if s.retainQueuedMessageForFixedProfile(ctx, callerSessionID, queuedMsg, reservation, userMessageRecorded, err) {

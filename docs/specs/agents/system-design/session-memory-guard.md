@@ -2,7 +2,7 @@
 status: current
 system: agents
 requirements:
-  - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-004
 created: 2026-10-20
 owners:
   - kandev
