@@ -301,8 +301,8 @@ func ValidateConsentURL(raw string) (*url.URL, error) {
 }
 
 func validateConsentQuery(query url.Values) error {
-	if query.Get("client_id") == "" || query.Get("state") == "" {
-		return errors.New("consent URL is missing client_id or state")
+	if query.Get("client_id") == "" || query.Get("state") == "" || query.Get("code_challenge") == "" {
+		return errors.New("consent URL is missing client_id, state, or code_challenge")
 	}
 	redirect := query.Get("redirect_uri")
 	if redirect == "" {

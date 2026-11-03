@@ -20,7 +20,7 @@ func TestAntigravityAuthStatusWhilePending(t *testing.T) {
 			},
 		},
 	}
-	line := "Open https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb"
+	line := "Open https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&code_challenge=c&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb"
 	a.ConsumeStderrLine(line)
 	status := a.AuthStatus()
 	if status.AttemptID != "attempt-1" || status.AuthorizationURL == "" {

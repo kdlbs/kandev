@@ -104,7 +104,7 @@ func TestAntigravityUtilityEnvironmentPolicy(t *testing.T) {
 func TestAntigravityUtilityStderrRedaction(t *testing.T) {
 	var stderr stderrBuffer
 	consent := stderr.consent()
-	line := "Open https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=secret&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb\n"
+	line := "Open https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=secret&code_challenge=c&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb\n"
 	half := len(line) / 2
 	_, _ = stderr.Write([]byte(line[:half]))
 	_, _ = stderr.Write([]byte(line[half:]))

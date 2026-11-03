@@ -18,6 +18,7 @@
   "agentProtocolTerminal": "터미널",
   "agentProtocolTerminalHelp": "Kandev가 터미널 탭에서 명령을 실행합니다. 구조화된 채팅, 도구 호출, 모델 목록이 없습니다.",
   "authRequiredOpenLoginTerminal": "인증이 필요합니다. 클릭하여 로그인 터미널을 여세요",
+  "authRequiredOpenAntigravityLogin": "클릭하여 Antigravity에 로그인",
   "authRequiredOpenShell": "인증이 필요합니다. 클릭하여 셸을 열고 로그인하세요",
   "authenticationRequired": "인증 필요",
   "automaticallyAvailable": "자동으로 사용 가능",

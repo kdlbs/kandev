@@ -27,6 +27,7 @@ var (
 	ErrPermissionOptionNotOffered      = errors.New("permission_option_not_offered")
 	ErrPermissionAuditFailed           = errors.New("permission_audit_failed")
 	ErrPermissionDeliveryFailed        = errors.New("permission_delivery_failed")
+	ErrPermissionHumanInputRequired    = errors.New("human_input_required")
 	// ErrPermissionFinalizationFailed is an internal post-delivery subtype of
 	// ErrPermissionAuditFailed. It keeps the established public audit-failure
 	// classification while letting automatic fallback distinguish uncertain
@@ -102,9 +103,12 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 	if err != nil {
 		return nil, err
 	}
-	_, option, lookupErr := findPermissionOption(permissions, request)
+	live, option, lookupErr := findPermissionOption(permissions, request)
 	if lookupErr != nil {
 		return nil, s.permissionLookupError(ctx, request, lookupErr)
+	}
+	if request.Source == models.PermissionSourceAutomation && live != nil && live.HumanInput {
+		return nil, ErrPermissionHumanInputRequired
 	}
 	if s.messageCreator == nil {
 		return nil, ErrPermissionAuditFailed

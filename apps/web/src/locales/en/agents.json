@@ -18,6 +18,7 @@
   "agentProtocolTerminal": "Terminal",
   "agentProtocolTerminalHelp": "Kandev runs the command in a terminal tab. No structured chat, tool calls, or model list.",
   "authRequiredOpenLoginTerminal": "Authentication required - click to open login terminal",
+  "authRequiredOpenAntigravityLogin": "Click to sign in to Antigravity",
   "authRequiredOpenShell": "Authentication required - click to open a shell and sign in",
   "authenticationRequired": "Authentication required",
   "automaticallyAvailable": "Automatically available",

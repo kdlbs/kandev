@@ -18,6 +18,7 @@
   "agentProtocolTerminal": "Terminal",
   "agentProtocolTerminalHelp": "O Kandev corre o comando num separador de terminal. Sem conversa estruturada, chamadas de ferramentas ou lista de modelos.",
   "authRequiredOpenLoginTerminal": "É necessária autenticação - clique para abrir o terminal de início de sessão",
+  "authRequiredOpenAntigravityLogin": "Clique para iniciar sessão no Antigravity",
   "authRequiredOpenShell": "É necessária autenticação - clique para abrir uma shell e iniciar sessão",
   "authenticationRequired": "É necessária autenticação",
   "automaticallyAvailable": "Disponível automaticamente",

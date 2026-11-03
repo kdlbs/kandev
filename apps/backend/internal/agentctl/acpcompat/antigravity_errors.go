@@ -50,7 +50,6 @@ var (
 		`(?s)Error\s+(\d{3}),\s*Message:\s*(.+?),\s*Status:\s*([A-Z][A-Z0-9_]*)`,
 	)
 	antigravityReasonPattern         = regexp.MustCompile(`\breason:([A-Z][A-Z0-9_]*)\b`)
-	antigravityQuotaReasonPattern    = regexp.MustCompile(`\breason:` + antigravityQuotaReason + `\b`)
 	antigravityResetTimestampPattern = regexp.MustCompile(`\bquotaResetTimeStamp:([^\s\]]+)`)
 	antigravityResetDelayPattern     = regexp.MustCompile(
 		`\bquotaResetDelay:((?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|h|m|s))+)`,
@@ -140,9 +139,6 @@ func parseAntigravityReason(env *AntigravityErrorEnvelope, text string) {
 		if match := antigravityReasonPattern.FindStringSubmatch(text); match != nil {
 			env.Reason = match[1]
 		}
-	}
-	if antigravityQuotaReasonPattern.MatchString(text) {
-		env.QuotaExhausted = true
 	}
 }
 

@@ -1369,7 +1369,7 @@ func resolveSpawnCommandContext(ctx context.Context, cfg *InferenceConfigDTO) (s
 		return command, ""
 	}
 	if filepath.IsAbs(command) {
-		if antigravityruntime.IsManagedServerPath(ctx, command) {
+		if antigravityruntime.IsValidatedServerPath(ctx, command) {
 			return command, ""
 		}
 		if base := filepath.Base(command); base == "agy_acp_server.par" || base == "agy_acp_server.exe" {
@@ -1491,7 +1491,7 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 func (b *stderrBuffer) tail() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return strings.TrimSpace(b.buf.String())
+	return acpcompat.RedactConsentURLs(strings.TrimSpace(b.buf.String()))
 }
 
 // probeTails keeps classification and complete-line log input on one snapshot.
@@ -1505,7 +1505,7 @@ func (b *stderrBuffer) probeTails() (string, string) {
 	if partial {
 		_, logTail, _ = strings.Cut(logTail, "\n")
 	}
-	return strings.TrimSpace(raw), strings.TrimSpace(logTail)
+	return acpcompat.RedactConsentURLs(strings.TrimSpace(raw)), acpcompat.RedactConsentURLs(strings.TrimSpace(logTail))
 }
 
 // describeACPFailure names an expired or cancelled context as the cause instead

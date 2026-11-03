@@ -126,12 +126,12 @@ func antigravityEvidence(in AntigravityFailure) (Code, Confidence, string) {
 	switch {
 	case antigravityAuthEvidence(in, status, reason, message):
 		return CodeAuthRequired, confidence, "antigravity.structured.auth.v1"
+	case antigravityQuotaEvidence(in, status, reason, message):
+		return CodeQuotaLimited, confidence, "antigravity.structured.quota.v1"
 	case antigravitySubscriptionEvidence(in, status, reason, message):
 		return CodeSubscriptionRequired, confidence, "antigravity.structured.subscription.v1"
 	case antigravityModelAccessEvidence(in, status, reason, message):
 		return CodeModelUnavailable, confidence, "antigravity.structured.model_access.v1"
-	case antigravityQuotaEvidence(in, status, reason, message):
-		return CodeQuotaLimited, confidence, "antigravity.structured.quota.v1"
 	case antigravityThrottleEvidence(in, status, reason, message):
 		return CodeRateLimited, confidence, "antigravity.structured.throttle.v1"
 	case antigravityProviderOverloadedEvidence(in, status, message):

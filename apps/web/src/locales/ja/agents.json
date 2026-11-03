@@ -18,6 +18,7 @@
   "agentProtocolTerminal": "ターミナル",
   "agentProtocolTerminalHelp": "Kandev はコマンドをターミナルタブで実行します。構造化されたチャット、ツール呼び出し、モデル一覧はありません。",
   "authRequiredOpenLoginTerminal": "認証が必要です。クリックしてログイン用ターミナルを開く",
+  "authRequiredOpenAntigravityLogin": "クリックして Antigravity にサインイン",
   "authRequiredOpenShell": "認証が必要です。クリックしてシェルを開き、サインインしてください",
   "authenticationRequired": "認証が必要です",
   "automaticallyAvailable": "自動的に利用可能",

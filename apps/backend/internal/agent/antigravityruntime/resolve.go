@@ -238,20 +238,27 @@ func isRegularExecutable(path, goos string) bool {
 }
 
 // IsManagedServerPath reports whether path is the active, validated managed
-// server executable. Utility admission uses it to preserve the resolved
-// absolute path instead of reducing it to a PATH basename.
+// server executable.
 func IsManagedServerPath(ctx context.Context, path string) bool {
 	bundle, err := Resolve(ctx, ResolveOptions{})
-	if err != nil || !bundle.Managed {
-		return false
-	}
-	got, err := os.Stat(path)
+	return err == nil && bundle.Managed && sameServerFile(path, bundle.ServerPath)
+}
+
+// IsValidatedServerPath reports whether path is the active managed bundle or a
+// complete manual PATH install selected by the resolver.
+func IsValidatedServerPath(ctx context.Context, path string) bool {
+	bundle, err := Resolve(ctx, ResolveOptions{})
+	return err == nil && sameServerFile(path, bundle.ServerPath)
+}
+
+func sameServerFile(path, want string) bool {
+	gotInfo, err := os.Stat(path)
 	if err != nil {
 		return false
 	}
-	want, err := os.Stat(bundle.ServerPath)
+	wantInfo, err := os.Stat(want)
 	if err != nil {
 		return false
 	}
-	return os.SameFile(got, want)
+	return os.SameFile(gotInfo, wantInfo)
 }

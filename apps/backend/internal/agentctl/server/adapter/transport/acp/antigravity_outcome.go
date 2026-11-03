@@ -125,7 +125,23 @@ func (a *Adapter) checkAntigravityOutcome(
 		return a.antigravityRefusalFailure(), ""
 	}
 	if boundary.store.state == antigravityOutcomeNoStore {
-		return nil, ""
+		start := int64(-1)
+		after := inspectAntigravityJournal(
+			a.outcomeContext(), boundary.store.root, boundary.sessionID, &start,
+		)
+		if after.state == antigravityOutcomeNoStore {
+			return nil, ""
+		}
+		if after.state == antigravityOutcomeUnavailable {
+			return nil, after.reason
+		}
+		if after.state != antigravityOutcomePresent {
+			return nil, antigravityNativeUnavailable
+		}
+		if after.errorStep == nil {
+			return nil, ""
+		}
+		return a.antigravityFailureFromErrorStep(after.errorStep), ""
 	}
 	if boundary.store.state == antigravityOutcomeUnavailable {
 		return nil, boundary.store.reason

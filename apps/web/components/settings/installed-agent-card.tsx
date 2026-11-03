@@ -68,6 +68,12 @@ type Props = {
   children?: ReactNode;
 };
 
+function authTooltipKey(antigravityLogin: boolean, loginAvailable: boolean): string {
+  if (antigravityLogin) return "agents:authRequiredOpenAntigravityLogin";
+  if (loginAvailable) return "agents:authRequiredOpenLoginTerminal";
+  return "agents:authRequiredOpenShell";
+}
+
 function InstalledAgentIdentity({
   agent,
   displayName,
@@ -75,6 +81,7 @@ function InstalledAgentIdentity({
   probing,
   authRequired,
   loginAvailable,
+  antigravityLogin,
   onAuthClick,
   runtime,
   status,
@@ -85,6 +92,7 @@ function InstalledAgentIdentity({
   probing: boolean;
   authRequired: boolean;
   loginAvailable: boolean;
+  antigravityLogin: boolean;
   onAuthClick: () => void;
   runtime?: RuntimeUpdate;
   status?: AgentUpdateStatus;
@@ -128,11 +136,7 @@ function InstalledAgentIdentity({
                   <IconLock className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
-                {loginAvailable
-                  ? t("agents:authRequiredOpenLoginTerminal")
-                  : t("agents:authRequiredOpenShell")}
-              </TooltipContent>
+              <TooltipContent>{t(authTooltipKey(antigravityLogin, loginAvailable))}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -338,7 +342,8 @@ export function InstalledAgentCard(props: Props) {
             configured={configured}
             probing={probing}
             authRequired={authRequired}
-            loginAvailable={loginAvailable || antigravityAgent}
+            loginAvailable={loginAvailable}
+            antigravityLogin={antigravityAgent}
             onAuthClick={handleAuthClick}
             runtime={props.runtimeUpdate}
             status={props.runtimeUpdateStatus}

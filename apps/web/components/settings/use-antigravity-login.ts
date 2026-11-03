@@ -28,6 +28,7 @@ type LoginActionContext = {
   generationRef: MutableRefObject<number>;
   completedRef: MutableRefObject<boolean>;
   startPromiseRef: MutableRefObject<Promise<boolean> | null>;
+  refreshPromiseRef: MutableRefObject<Promise<void> | null>;
   setBusy: (busy: boolean) => void;
   setError: (error: string | null) => void;
   t: (key: string) => string;
@@ -41,6 +42,7 @@ function useAntigravityLoginActions(ctx: LoginActionContext) {
     generationRef,
     completedRef,
     startPromiseRef,
+    refreshPromiseRef,
     setBusy,
     setError,
     t,
@@ -101,12 +103,30 @@ function useAntigravityLoginActions(ctx: LoginActionContext) {
   }, [applySnapshot, attemptIdRef, generationRef, setBusy, setError, t]);
 
   const dismiss = useCallback(async (): Promise<boolean> => {
+    const generation = generationRef.current;
     if (startPromiseRef.current) await startPromiseRef.current;
+    if (refreshPromiseRef.current) await refreshPromiseRef.current;
+    if (generation !== generationRef.current) return true;
     if (!isAntigravityLoginActive(snapshotRef.current)) return true;
     return cancel();
-  }, [cancel, snapshotRef, startPromiseRef]);
+  }, [cancel, generationRef, refreshPromiseRef, snapshotRef, startPromiseRef]);
 
   return { start, cancel, dismiss };
+}
+
+function useAntigravityClipboard(url: string | undefined) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(async () => {
+    if (!url) return;
+    if (await copyToClipboard(url)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }
+  }, [url]);
+  const openURL = useCallback(() => {
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  }, [url]);
+  return { copied, copy, openURL };
 }
 
 export function useAntigravityLogin({
@@ -120,13 +140,14 @@ export function useAntigravityLogin({
   const [snapshot, setSnapshot] = useState<AntigravityLoginSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const snapshotRef = useRef<AntigravityLoginSnapshot | null>(null);
   const onCompleteRef = useRef(onComplete);
   const generationRef = useRef(0);
+  const refreshSequenceRef = useRef(0);
   const completedRef = useRef(false);
   const startPromiseRef = useRef<Promise<boolean> | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -137,12 +158,27 @@ export function useAntigravityLogin({
     setSnapshot(next);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const handleRefreshFailure = useCallback(
+    (err: unknown, requestedAttempt: string | null, generation: number, sequence: number) => {
+      if (generation !== generationRef.current || sequence !== refreshSequenceRef.current) return;
+      if (isMissingAttempt(err)) {
+        attemptIdRef.current = null;
+        applySnapshot(null);
+        setError(requestedAttempt ? t("agents:antigravityLoginExpired") : null);
+        return;
+      }
+      setError(t("agents:antigravityLoginStatusError"));
+    },
+    [applySnapshot, t],
+  );
+
+  const doRefresh = useCallback(async () => {
     const generation = generationRef.current;
+    const sequence = ++refreshSequenceRef.current;
     const requestedAttempt = attemptIdRef.current;
     try {
       const next = await getAntigravityLogin(requestedAttempt ?? undefined);
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || sequence !== refreshSequenceRef.current) return;
       if (requestedAttempt && attemptIdRef.current !== requestedAttempt) return;
       if (!requestedAttempt && attemptIdRef.current) return;
       attemptIdRef.current = next.attempt_id;
@@ -153,16 +189,15 @@ export function useAntigravityLogin({
         onCompleteRef.current?.();
       }
     } catch (err) {
-      if (generation !== generationRef.current) return;
-      if (isMissingAttempt(err)) {
-        attemptIdRef.current = null;
-        applySnapshot(null);
-        setError(requestedAttempt ? t("agents:antigravityLoginExpired") : null);
-        return;
-      }
-      setError(t("agents:antigravityLoginStatusError"));
+      handleRefreshFailure(err, requestedAttempt, generation, sequence);
     }
-  }, [applySnapshot, t]);
+  }, [applySnapshot, handleRefreshFailure]);
+
+  const refresh = useCallback(() => {
+    const promise = doRefresh();
+    refreshPromiseRef.current = promise;
+    return promise;
+  }, [doRefresh]);
 
   useEffect(() => {
     if (!open) return;
@@ -185,23 +220,12 @@ export function useAntigravityLogin({
     generationRef,
     completedRef,
     startPromiseRef,
+    refreshPromiseRef,
     setBusy,
     setError,
     t,
   });
 
-  const copy = useCallback(async () => {
-    if (!snapshot?.authorization_url) return;
-    if (await copyToClipboard(snapshot.authorization_url)) {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    }
-  }, [snapshot?.authorization_url]);
-
-  const openURL = useCallback(() => {
-    if (!snapshot?.authorization_url) return;
-    window.open(snapshot.authorization_url, "_blank", "noopener,noreferrer");
-  }, [snapshot?.authorization_url]);
-
+  const { copied, copy, openURL } = useAntigravityClipboard(snapshot?.authorization_url);
   return { snapshot, busy, error, copied, start, cancel, dismiss, copy, openURL };
 }

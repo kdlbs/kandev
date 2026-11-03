@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const validConsentURL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=client&state=state&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback"
+const validConsentURL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=client&state=state&code_challenge=challenge&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcallback"
 
 func TestAntigravityClientInfo(t *testing.T) {
 	name, version := ClientInfoForAgent(AntigravityAgentID)
@@ -36,6 +36,7 @@ func TestAntigravityConsentURL(t *testing.T) {
 		t.Fatalf("valid URL rejected: %v", err)
 	}
 	cases := []string{
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb",
 		"http://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb",
 		"https://evil.example/o/oauth2/v2/auth?client_id=x&state=y&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb",
 		"https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y&redirect_uri=https%3A%2F%2Fevil.example%2Fcb",

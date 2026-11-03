@@ -22,6 +22,7 @@
   "agentProtocolTerminal": "终端",
   "agentProtocolTerminalHelp": "Kandev 在终端标签页中运行该命令。没有结构化对话、工具调用或模型列表。",
   "authRequiredOpenLoginTerminal": "需要身份验证；点击打开登录终端",
+  "authRequiredOpenAntigravityLogin": "点击登录 Antigravity",
   "authRequiredOpenShell": "需要身份验证；点击打开 shell 并登录",
   "authenticationRequired": "需要身份验证",
   "automaticallyAvailable": "自动可用",
