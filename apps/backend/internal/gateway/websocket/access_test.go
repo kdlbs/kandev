@@ -77,13 +77,13 @@ func TestRequireConnectionAuth(t *testing.T) {
 	// top of every subtest, so these subtests must stay sequential — do not add
 	// t.Parallel() here without giving each case its own capture.
 	var resolvedToken string
-	resolveValid := func(_ context.Context, token string) (authn.Identity, bool) {
+	resolveValid := func(_ context.Context, token string) (authn.Identity, bool, error) {
 		resolvedToken = token
-		return tokenIdentity, true
+		return tokenIdentity, true, nil
 	}
-	resolveReject := func(_ context.Context, token string) (authn.Identity, bool) {
+	resolveReject := func(_ context.Context, token string) (authn.Identity, bool, error) {
 		resolvedToken = token
-		return authn.Identity{}, false
+		return authn.Identity{}, false, nil
 	}
 
 	cases := []struct {
@@ -222,7 +222,7 @@ func TestRequireConnectionAuthAcceptsPortProxyCapability(t *testing.T) {
 	gateway.SetPortProxy(nil) // constructs the handler; capability logic needs no manager
 	gateway.SetAuthPolicy(AuthPolicy{
 		Enforced:     func() bool { return true },
-		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool, error) { return authn.Identity{}, false, nil },
 	})
 	identity := authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin}
 	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173, identity)
@@ -294,7 +294,7 @@ func TestRequireConnectionAuthAcceptsAnyValidCapabilityAmongDuplicates(t *testin
 	gateway.SetPortProxy(nil)
 	gateway.SetAuthPolicy(AuthPolicy{
 		Enforced:     func() bool { return true },
-		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool, error) { return authn.Identity{}, false, nil },
 	})
 	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173,
 		authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin})
@@ -333,7 +333,7 @@ func TestRequireConnectionAuthCapabilityRequiresActiveUser(t *testing.T) {
 	run := func(active func(context.Context, string) bool) int {
 		gateway.SetAuthPolicy(AuthPolicy{
 			Enforced:     func() bool { return true },
-			ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+			ResolveToken: func(context.Context, string) (authn.Identity, bool, error) { return authn.Identity{}, false, nil },
 			ActiveUser:   active,
 		})
 		router := gin.New()
@@ -367,7 +367,7 @@ func TestRequireConnectionAuthAcceptsAnyValidCapabilityCookie(t *testing.T) {
 	gateway.SetPortProxy(nil)
 	gateway.SetAuthPolicy(AuthPolicy{
 		Enforced:     func() bool { return true },
-		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool, error) { return authn.Identity{}, false, nil },
 	})
 	capability := gateway.PortProxyHandler.issueCapability("sess-cap", 5173,
 		authn.Identity{UserID: "owner-1", Role: authn.RoleAdmin})
@@ -403,7 +403,7 @@ func TestRequireConnectionAuthIgnoresCapabilityWhenHandlerUnwired(t *testing.T) 
 	gateway := NewGateway(newNopTestLogger(t))
 	gateway.SetAuthPolicy(AuthPolicy{
 		Enforced:     func() bool { return true },
-		ResolveToken: func(context.Context, string) (authn.Identity, bool) { return authn.Identity{}, false },
+		ResolveToken: func(context.Context, string) (authn.Identity, bool, error) { return authn.Identity{}, false, nil },
 	})
 
 	router := gin.New()
