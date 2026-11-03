@@ -750,4 +750,64 @@ test.describe("mobile PR CI chip drawer", () => {
     await session.prStatusChipDrawerClose().tap();
     await expect(session.prStatusChipDrawer()).toHaveCount(0);
   });
+  test("many PR tabs keep the action reachable on a short phone", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 480 });
+    const taskId = await seedTaskWithPR({
+      apiClient,
+      seedData,
+      title: "Short phone with many PRs",
+    });
+    for (let number = 100; number <= 110; number++) {
+      await apiClient.mockGitHubAssociateTaskPR({
+        workspace_id: seedData.workspaceId,
+        task_id: taskId,
+        owner: OWNER,
+        repo: REPO,
+        pr_number: number,
+        pr_url: `https://github.com/${OWNER}/${REPO}/pull/${number}`,
+        pr_title: `Additional PR ${number}`,
+        head_branch: `feature/${number}`,
+        base_branch: "main",
+        author_login: "test-user",
+        state: "open",
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+      });
+    }
+    const session = await openTask(testPage, taskId);
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await waitForFiniteAnimations(drawer);
+    const link = drawer.getByTestId("pr-popover-pr-link");
+    await expect(link).toBeInViewport();
+    const body = drawer.getByTestId("pr-popover-scroll-body");
+    expect(await body.evaluate((element) => element.clientHeight)).toBeGreaterThanOrEqual(44);
+    const tabs = drawer.getByTestId("pr-multi-popover-tabs");
+    expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    expect(await tabs.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+      true,
+    );
+    const last = tabs.getByRole("tab").last();
+    await last.scrollIntoViewIfNeeded();
+    await last.tap();
+    await expect(last).toHaveAttribute("aria-selected", "true");
+    await expect(link).toHaveAttribute("href", `https://github.com/${OWNER}/${REPO}/pull/110`);
+    expect(
+      await link.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest("a") === element
+        );
+      }),
+    ).toBe(true);
+    await session.prStatusChipDrawerClose().tap();
+  });
 });

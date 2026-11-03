@@ -84,7 +84,7 @@ function PRTab({
       >
         <IconGitPullRequest className={cn("h-3.5 w-3.5 shrink-0", getPRStatusColor(pr))} />
         <span className="flex min-w-0 gap-1 font-medium">
-          <span className="max-md:truncate">{pr.repo}</span>
+          <span className="max-md:truncate">{pr.repo}</span>{" "}
           <span className="shrink-0">#{pr.pr_number}</span>
         </span>
       </button>
@@ -117,12 +117,6 @@ function PRTab({
   );
 }
 
-/**
- * Multi-PR variant of the CI popover. A segmented header lists every PR linked
- * to the task (one chip per PR, coloured by its status); the body reuses the
- * single-PR PRCIPopover for whichever PR is selected. Defaults to the
- * worst-status open PR so problems surface first.
- */
 type MultiPRCIPopoverProps = {
   prs: TaskPR[];
   enabled: boolean;
@@ -132,6 +126,12 @@ type MultiPRCIPopoverProps = {
   onCollapseFocus?: (remainingPR: TaskPR) => void;
 };
 
+/**
+ * Multi-PR variant of the CI popover. A segmented header lists every PR linked
+ * to the task (one chip per PR, coloured by its status); the body reuses the
+ * single-PR PRCIPopover for whichever PR is selected. Defaults to the
+ * worst-status open PR so problems surface first.
+ */
 export function MultiPRCIPopover({
   prs,
   enabled,
@@ -213,7 +213,7 @@ export function MultiPRCIPopover({
         role="tablist"
         aria-label={t("github:pullRequests")}
         data-testid="pr-multi-popover-tabs"
-        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 pb-2 max-md:flex-wrap"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 pb-2 max-md:max-h-[min(8rem,20dvh)] max-md:flex-wrap max-md:overflow-y-auto max-md:overscroll-contain"
         onKeyDown={onTablistKeyDown}
       >
         {prs.map((pr) => (

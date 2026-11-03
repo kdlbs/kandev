@@ -62,8 +62,8 @@ details scroll position. Retain existing selection and unlink rules.
 two-line title/author area so late author data cannot change header height.
 Truncate the title within the remaining width. Preserve title detail behavior.
 
-Give the external link visible localized Open PR text, retaining its existing
-URL, target, accessible name, and `pr-popover-pr-link` test ID. Use a 28px
+Give the external link visible localized Open PR text and the same accessible
+name, retaining its URL, target, and `pr-popover-pr-link` test ID. Use a 28px
 desktop control height and at least 44px in both dimensions on phone/touch.
 Do not change topbar click navigation to the internal review panel.
 
@@ -101,6 +101,11 @@ switches' extended touch targets. Matching negative margins preserve the
 visible content alignment. Do not clip the targets to hide overflow.
 On phones, let PR tabs share the available width and wrap when needed;
 truncate repository labels while retaining reachable selection and unlink controls.
+Keep a text space between the repository and PR number. Bound the phone tab
+selector to the smaller of 8rem and 20dvh. When it overflows, selection scrolls
+vertically within that bound; status details retain their separate scroll owner.
+Selection must leave the fixed PR action and a usable details region visible
+on short screens.
 
 Preserve current pointer-based drawer routing. Narrow fine-pointer popovers
 still need viewport containment and 44px phone action targets. Share data and

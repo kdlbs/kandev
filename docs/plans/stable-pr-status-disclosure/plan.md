@@ -117,7 +117,21 @@ record the exact command scope and local environment adjustments.
   coverage, and whitespace checks passed.
 - Rendered desktop and phone screenshots match the intended layout.
 
-All work is local and uncommitted. Publication was outside this work order.
+The 2026-11-03 horizontal-overflow follow-up passed all 10 phone tests and
+all five desktop stability cases. Live checks at 320, 360, and 390 CSS pixels
+confirmed zero horizontal overflow and reachable switch touch targets. The
+existing drawer composition was retained.
+
+PR review follow-up added Portuguese footer-fit checks at 320px, a long
+repository-name selection case, matching visible and accessible link labels,
+text spacing in tabs, and a bounded selector for many PRs on a short phone.
+The many-PR regression first failed because Open PR was outside the viewport.
+After the fix, all 11 phone cases and 20 affected component tests passed.
+Targeted ESLint, formatting, and specification validation passed. Final CI and
+review dispositions remain externally tracked on PR #5020.
+
+Implementation and follow-up changes are committed through normal hooks.
+Publication and automated review are tracked separately from this work order.
 
 ## Risks
 

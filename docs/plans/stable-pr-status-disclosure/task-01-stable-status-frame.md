@@ -183,3 +183,14 @@ as specified in the stable-frame design. Keyboard transfer is covered by the
 desktop stability scenarios: tabbing from the link into the scroll body keeps
 the disclosure open after the pointer leaves. The shared hover lifecycle
 cancels close timers on focus entry and rechecks focus presence before closing.
+
+
+The next review batch added a 320x480 phone case with twelve linked PRs.
+RED: wrapped tabs placed the PR action outside the viewport. GREEN: bound
+selection to 8rem or 20dvh with its own vertical scroll region; all 11 phone
+cases passed. Matching the visible link label and preserving the text space
+between repository and PR number also passed all 20 affected component tests.
+The component documentation comment now remains attached to the component.
+The plan summary includes both follow-up verification rounds. No ASCII preview
+was added because this session requires structured previews; UI-01/UI-02 retain
+the approved region tables. Fresh PR screenshots are captured after the fix.

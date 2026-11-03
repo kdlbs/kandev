@@ -105,7 +105,7 @@ function PRCIPopoverHeader({
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
       openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
-      externalLabel={t("github:viewPullRequestOnGithub")}
+      externalLabel={t("github:openPr")}
       externalActionLabel={t("github:openPr")}
       className="h-14 shrink-0 [@media(pointer:coarse)]:h-16 [@media(max-width:767px)]:h-16"
     />

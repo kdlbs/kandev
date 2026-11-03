@@ -31,6 +31,7 @@ owns informational sidebar and card tooltips.
   labelled Open PR link as soon as the selected PR URL is available. The link
   shall remain visible and operable during loading, refresh, empty results,
   and status errors. It shall open the selected PR, including after tab changes.
+  Its accessible name shall contain the visible localized Open PR label.
 - **AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.3:** First loading shall show a
   localized loading state. Refresh shall retain available results and show an
   updating indicator. Updates shall remain live without closing the disclosure.
@@ -39,6 +40,8 @@ owns informational sidebar and card tooltips.
   and existing automation and merge controls shall remain reachable. The frame
   shall fit the available viewport without horizontal page or details-body
   overflow. Phone PR tabs shall fit or wrap without horizontal scrolling.
+  An overflowing PR selector shall stay bounded on short phones so that PR
+  selection cannot hide the fixed action or collapse the details region.
 - **AC-INTEGRATIONS-GITHUB-PR-DISCLOSURE-001.5:** Pointer transfer from the
   trigger to the disclosure shall keep it open. Keyboard users shall reach
   the PR link and scroll region. Escape shall dismiss the disclosure and retain

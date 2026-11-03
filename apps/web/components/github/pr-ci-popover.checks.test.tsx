@@ -129,15 +129,15 @@ describe("PR check disclosure cancellation", () => {
     feedbackState.value = null;
     feedbackState.loading = true;
     const first = renderPopover();
-    const link = screen.getByRole("link", { name: "View pull request on GitHub" });
+    const link = screen.getByRole("link", { name: "Open PR" });
     expect(link.textContent).toContain("Open PR");
     expect(link.getAttribute("href")).toBe(makePR().pr_url);
     first.unmount();
     feedbackState.authenticated = false;
     renderPopover();
-    expect(
-      screen.getByRole("link", { name: "View pull request on GitHub" }).getAttribute("href"),
-    ).toBe(makePR().pr_url);
+    expect(screen.getByRole("link", { name: "Open PR" }).getAttribute("href")).toBe(
+      makePR().pr_url,
+    );
     expect(screen.getByTestId("pr-popover-reconnect-link")).toBeTruthy();
   });
 
