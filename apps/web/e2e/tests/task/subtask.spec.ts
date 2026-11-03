@@ -241,6 +241,9 @@ test.describe("Subtask basics", () => {
         documentNavigations.requests,
       )}`,
     ).toEqual([]);
+    await prCapture.screenshot("desktop-subtask-child-conversation", {
+      caption: "Desktop child task conversation opened directly after subtask creation",
+    });
 
     // Reload after the handoff assertions as a separate persistence check and
     // repeat the exact child-session/content assertions.

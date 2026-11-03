@@ -17,7 +17,12 @@ type CreatedTask = {
 };
 
 test.describe("Mobile subtask activation", () => {
-  test("opens the created child conversation", async ({ testPage, apiClient, seedData }) => {
+  test("opens the created child conversation", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
     test.setTimeout(180_000);
     // Distinct prompt markers prove the child chat is not the stale parent
     // conversation. Both resolve to the simple-message mock scenario.
@@ -101,6 +106,9 @@ test.describe("Mobile subtask activation", () => {
         documentNavigations.requests,
       )}`,
     ).toEqual([]);
+    await prCapture.screenshot("phone-subtask-child-conversation", {
+      caption: "Phone child task conversation opened directly after subtask creation",
+    });
 
     // Reload after the handoff assertions as a separate persistence check and
     // repeat the exact child-session/content assertions.
