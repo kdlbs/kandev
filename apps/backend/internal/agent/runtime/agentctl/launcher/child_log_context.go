@@ -143,7 +143,7 @@ var childLogOperations = stringSet(
 	"read_directory", "read_file", "stat", "git_inspection", "submodule_discovery",
 )
 
-var childLogTriggers = stringSet("manual_refresh", "user_select", "turn_complete", "startup_grace")
+var childLogTriggers = stringSet("manual_refresh", "user_select", "turn_complete", "startup_grace", "poll")
 
 var childLogContextValidators = map[string]func(json.RawMessage) bool{
 	childLogComponentField: childLogAllowedString(childLogComponents, 64),

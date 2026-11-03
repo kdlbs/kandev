@@ -278,10 +278,10 @@ func run(cfg *config.Config, log *logger.Logger) {
 	}()
 
 	// Monitor parent liveness via inherited pipe (standalone mode only).
-	// Returns a channel that closes when the parent dies.
+	// Returns a channel that closes when the parent-liveness pipe closes.
 	parentDied := monitorParentLiveness(log)
 
-	// Wait for shutdown signal (OS signal, parent death, or an authenticated
+	// Wait for shutdown signal (OS signal, parent-liveness closure, or an authenticated
 	// ownership-shutdown operation from an adopting/owning backend).
 	waitForShutdown(log, parentDied, controlServer.ShutdownRequested(), func(ctx context.Context) {
 		// Flush pending traces before stopping instances

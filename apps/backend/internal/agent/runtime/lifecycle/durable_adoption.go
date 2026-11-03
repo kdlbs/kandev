@@ -608,17 +608,11 @@ func cloneDeliveryStatus(status *agentctl.DeliveryStatus) *agentctl.DeliveryStat
 }
 
 // recoveredDeliveryFailureIsConclusive reports whether durable adoption failed
-// because the recovered identity disagrees with authoritative evidence, rather
-// than because a read, transport, or deadline failed before evidence existed.
+// because the recovered identity disagrees with authoritative evidence. Every
+// other blocked or unavailable outcome leaves the candidate incomplete.
 func recoveredDeliveryFailureIsConclusive(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	if errors.Is(err, ErrDurableAdoptionEvidenceUnavailable) {
-		return false
-	}
-	return errors.Is(err, ErrDurableAdoptionIdentityMismatch) || errors.Is(err, ErrDurableAdoptionBlocked)
+	return errors.Is(err, ErrDurableAdoptionIdentityMismatch)
 }

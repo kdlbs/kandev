@@ -57,7 +57,7 @@ Preserve the original cleanup evidence and required capped cascade retries.
 Add `TestCleanupConflictsExposeEveryAffectedResource` using real competing registration and changed-ref Git fixtures.
 It must fail on the recorded base because the action/condition fields are absent and only the first joined inspection error is attributed.
 Add `TestCleanupConflictRetainsCascadeRetryAcrossRestart` with persisted jobs after attempts 13 and 14.
-Add `TestCleanupConflictReconciliationPreservesEvidence` with exact before/after snapshot and manifest comparisons.
+Add `TestApplyCleanupPreservesConflictDiagnosticEvidence` in inventory repair with exact before/after snapshot and manifest comparisons.
 Cover missing expected evidence, transient Git start/context errors, independent resources, stale attempt completion, and diagnostic overflow.
 Do not restore a moved branch by discarding new work to make the test pass.
 

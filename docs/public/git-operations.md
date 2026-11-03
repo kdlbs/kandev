@@ -307,10 +307,12 @@ The diagnostic does not authorize deletion and does not expose paths, commit
 IDs, branch names, repository contents, or raw Git output.
 
 A confirmed identity conflict reports `cleanup_condition=reconciliation_required`
-while cascade-critical cleanup stays in its normal capped retry schedule. Each
-attempt checks the original immutable snapshot against current Git state again.
-Restarting Kandev preserves the snapshot, retry eligibility, and identity
-checks. An independent healthy worktree can still be removed in the same batch.
+while cleanup follows its effective retry policy. Cascade cleanup without
+unverified-change consent keeps its capped retry schedule across restart;
+cascade cleanup that allows unverified changes becomes `failed` after eight
+attempts and is not retried automatically. Each attempt checks the original
+immutable snapshot against current Git state again. An independent healthy
+worktree can still be removed in the same batch.
 
 Do not force-delete a checkout, reset a branch, or edit the cleanup snapshot to
 make a conflict pass. Use the inspection action first. If the evidence shows an

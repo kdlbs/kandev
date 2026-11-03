@@ -244,7 +244,7 @@ reporter's only seeding entry point. An `opaque` step declares none of the three
 | `task.prompt_seq.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
 | `task.message_timestamps.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
 | `task.subagent_context.backfill` | `applying_migrations` | `opaque` | rows | both | n/a | n/a | n/a |
-| `sessions.recovery` | `recovering_sessions` | `counted` | sessions | both | the `executors_running` record set read before the sweep | n/a | n/a |
+| `sessions.recovery` | `recovering_sessions` | `counted` | sessions | both | the filtered recovery candidate set after confirmed passthrough exclusions | n/a | n/a |
 
 Three identifiers were retired on 2026-09-18, after this design first froze, and
 AC-PLATFORM-STARTUP-PROGRESS-005.6 bars their reuse: `task.journal.turns.backfill`,

@@ -107,19 +107,25 @@ func ErrorClass(err error) string {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
+		if isRepositoryContextUnavailableText(strings.ToLower(string(exitErr.Stderr))) {
+			return "repository_context_unavailable"
+		}
 		return "git_command_failed"
-	}
-	if isRepositoryContextUnavailable(err) {
-		return "repository_context_unavailable"
 	}
 	if errors.As(err, &pathErr) {
 		return "io_error"
+	}
+	if isRepositoryContextUnavailable(err) {
+		return "repository_context_unavailable"
 	}
 	return "unknown"
 }
 
 func isRepositoryContextUnavailable(err error) bool {
-	message := strings.ToLower(err.Error())
+	return isRepositoryContextUnavailableText(strings.ToLower(err.Error()))
+}
+
+func isRepositoryContextUnavailableText(message string) bool {
 	return strings.Contains(message, "not a git repository") ||
 		strings.Contains(message, "cannot change to") ||
 		strings.Contains(message, "no such file or directory") ||

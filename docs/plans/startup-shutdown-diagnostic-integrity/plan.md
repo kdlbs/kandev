@@ -161,7 +161,7 @@ Each work order records its expected red result before implementation.
 | 01 | `TestRecoveryProgressCountsConfirmedAbsence`, `TestRecoveryProgressMixedResolvedCandidates`, `TestRecoveryProgressRetainsIncompleteOutcomes` in lifecycle | Attribution 001.4/.5/.7 and startup progress 001.3/.21/.22 |
 | 02 | `TestPipeOutputPreservesSafeDiagnosticContext`, `TestPipeOutputRejectsUnsafeOptionalContext`, `TestDeliveryPressureHealthyTransitionSeverity`, `TestWorkspaceDiagnosticSafeClassification` | Diagnostic signal 001.1-.5, 002.5, 003.1-.4 |
 | 03 | `TestLauncherPlannedStopKeepsLivenessUntilChildExit`, `TestParentLivenessEOFDoesNotClaimProcessDeath`, `TestAbruptParentLossCleansOwnedChild` | Diagnostic signal 004.1-.4 |
-| 04 | `TestCleanupConflictsExposeEveryAffectedResource`, `TestCleanupConflictRetainsCascadeRetryAcrossRestart`, `TestCleanupConflictReconciliationPreservesEvidence` | Inventory repair 002.1-.6 and runtime cleanup 001.9/.32/.45 |
+| 04 | `TestCleanupConflictsExposeEveryAffectedResource`, `TestCleanupConflictRetainsCascadeRetryAcrossRestart`, `TestApplyCleanupPreservesConflictDiagnosticEvidence` | Inventory repair 002.1-.6 and runtime cleanup 001.9/.32/.45 |
 
 Use real logger observers, pipes/helper subprocesses, temporary Git repositories, and persisted cleanup jobs at the changed boundaries.
 MacOS was the reported environment. Linux reproductions establish shared source paths, not platform-specific process behavior on macOS.

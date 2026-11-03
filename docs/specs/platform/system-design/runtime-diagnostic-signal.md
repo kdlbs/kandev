@@ -62,7 +62,7 @@ Use fixed key dispatch and typed validation, without recursive object forwarding
 | `state` | `healthy`, `pressure`, `guarded`, `cancelling`, `interrupted`, `cancellation_failed`, `storage_error`, `delivery_failed` |
 | `error_class`, `reason` | `permission_denied`, `not_found`, `context_canceled`, `deadline_exceeded`, `git_start_failed`, `git_command_failed`, `repository_context_unavailable`, `io_error`, `unknown` |
 | `operation` | `read_directory`, `read_file`, `stat`, `git_inspection`, `submodule_discovery` |
-| `trigger` | `manual_refresh`, `user_select`, `turn_complete`, `startup_grace` |
+| `trigger` | `manual_refresh`, `user_select`, `turn_complete`, `startup_grace`, `poll` |
 | `runtime` | `desktop`, `server` |
 | `poll_mode` | `fast`, `slow`, `paused` |
 | `exit_code` | JSON integer from -1 through 4294967295 |

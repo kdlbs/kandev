@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -127,6 +128,8 @@ func TestErrorClassUsesClosedVocabulary(t *testing.T) {
 		{name: "not found", err: os.ErrNotExist, want: "not_found"},
 		{name: "git start", err: &exec.Error{Name: "git", Err: exec.ErrNotFound}, want: "git_start_failed"},
 		{name: "git command", err: &exec.ExitError{}, want: "git_command_failed"},
+		{name: "git repository context", err: &exec.ExitError{Stderr: []byte("fatal: not a git repository")}, want: "repository_context_unavailable"},
+		{name: "stat through regular file", err: &os.PathError{Op: "stat", Path: "file/child", Err: syscall.ENOTDIR}, want: "io_error"},
 		{name: "repository context", err: errors.New("fatal: not a git repository"), want: "repository_context_unavailable"},
 		{name: "io", err: &os.PathError{Op: "read", Path: "file", Err: errors.New("broken")}, want: "io_error"},
 		{name: "unknown", err: errors.New("unexpected"), want: "unknown"},

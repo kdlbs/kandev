@@ -33,7 +33,11 @@ func TestAbruptParentLossHelperProcess(t *testing.T) {
 		_ = os.WriteFile(marker+".error", []byte(err.Error()), 0600)
 		os.Exit(1)
 	}
-	if err := os.WriteFile(marker+".ready", []byte(strconv.Itoa(descendant.Process.Pid)), 0600); err != nil {
+	readyTmp := marker + ".ready.tmp"
+	if err := os.WriteFile(readyTmp, []byte(strconv.Itoa(descendant.Process.Pid)), 0600); err != nil {
+		os.Exit(1)
+	}
+	if err := os.Rename(readyTmp, marker+".ready"); err != nil {
 		os.Exit(1)
 	}
 

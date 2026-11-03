@@ -19,6 +19,7 @@ import (
 )
 
 var errRecoveredTaskEnvironmentAbsent = errors.New("task environment identity: durable store answered with no value")
+var errRecoveredAgentIdentityAbsent = errors.New("recovered agent identity is authoritatively absent")
 
 const (
 	containerStateCreated = "created"
@@ -409,7 +410,9 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "agent_identity")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				progress.resolveAfterStop(ri.SessionID)
+				if errors.Is(err, errRecoveredAgentIdentityAbsent) {
+					progress.resolveAfterStop(ri.SessionID)
+				}
 				continue
 			}
 			// Durable adoption must establish the authenticated owner, SQL
@@ -596,10 +599,11 @@ func (m *Manager) Start(ctx context.Context) error {
 			continue
 		}
 		absenceCtx, cancelAbsence := m.remoteAttemptContext(ctx)
-		if err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, true, detailedOutcomes[record.SessionID]); err != nil {
+		settled, err := m.settleRemoteRecoveryAbsence(absenceCtx, pending, record, true, detailedOutcomes[record.SessionID])
+		if err != nil {
 			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
 				zap.String("session_id", record.SessionID), zap.Error(err))
-		} else {
+		} else if settled {
 			progress.advance(ctx, record.SessionID)
 		}
 		cancelAbsence()

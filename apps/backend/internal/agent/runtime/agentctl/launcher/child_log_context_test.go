@@ -270,3 +270,10 @@ func TestChildLogIntegerBounds(t *testing.T) {
 		require.False(t, childLogContextValidators[tt.key](raw), "%s=%v", tt.key, tt.value)
 	}
 }
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
+func TestChildLogContextAcceptsPollTrigger(t *testing.T) {
+	if !childLogContextValidators["trigger"](json.RawMessage(`"poll"`)) {
+		t.Fatal("periodic poll trigger must remain forwardable")
+	}
+}

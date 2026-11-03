@@ -280,6 +280,12 @@ func (failingSettingsReader) GetTaskSession(context.Context, string) (*models.Ta
 	return nil, context.DeadlineExceeded
 }
 
+type failingRecoveryProfileResolver struct{}
+
+func (failingRecoveryProfileResolver) ResolveProfile(context.Context, string) (*AgentProfileInfo, error) {
+	return nil, context.DeadlineExceeded
+}
+
 type noopSettingsWriter struct{}
 
 func (noopSettingsWriter) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
@@ -334,6 +340,34 @@ func TestRecoveryProgressRetainsOperationalReconstructionFailures(t *testing.T) 
 		registerRecoveryTestAgentProfile(t, mgr)
 		mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{{
 			TaskID: "task-delivery", SessionID: "session-delivery", ExecutionProfileID: recoveryTestAgentProfileID,
+		}}})
+		mgr.SetRecoveryDeadline(5 * time.Second)
+
+		reporter, stepLogs := newRecoveryProgressReporter(t)
+		if err := mgr.Start(startup.WithReporter(context.Background(), reporter)); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		fields := completedStepFields(t, stepLogs, startup.StepSessionsRecovery)
+		assertRecoveryCount(t, fields, "done", 0)
+		assertRecoveryCount(t, fields, "total", 1)
+	})
+
+	t.Run("agent profile read failure", func(t *testing.T) {
+		log, _ := newObservedRecoveryManagerLogger(t)
+		backend := &MockExecutor{
+			name: executor.NameStandalone,
+			recoverInstances: []*ExecutorInstance{{
+				InstanceID:     "inst-agent",
+				TaskID:         "task-agent",
+				SessionID:      "session-agent",
+				AgentProfileID: "missing-profile",
+				RuntimeName:    executor.NameStandalone,
+			}},
+		}
+		mgr := newRecoverySummaryManager(t, log, backend)
+		mgr.profileResolver = failingRecoveryProfileResolver{}
+		mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{{
+			TaskID: "task-agent", SessionID: "session-agent", ExecutionProfileID: "missing-profile",
 		}}})
 		mgr.SetRecoveryDeadline(5 * time.Second)
 

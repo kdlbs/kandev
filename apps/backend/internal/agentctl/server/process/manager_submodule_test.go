@@ -169,7 +169,7 @@ func TestSubmoduleDiagnosticSafeClassification(t *testing.T) {
 	if fields["operation"] != "submodule_discovery" {
 		t.Fatalf("operation = %v, want submodule_discovery", fields["operation"])
 	}
-	if fields["error_class"] == "" || fields["error_class"] == nil {
-		t.Fatalf("error_class missing from %+v", fields)
+	if fields["error_class"] != "repository_context_unavailable" {
+		t.Fatalf("error_class = %v, want repository_context_unavailable", fields["error_class"])
 	}
 }
