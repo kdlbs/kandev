@@ -70,7 +70,7 @@ shared geometry checks and disposable job responses for both browser projects.
 ## ASCII UI preview
 
 The previews show structure. Spacing is illustrative. Existing catalog copy
-supplies every rendered label. These views map to criteria 001.1 through 001.5.
+supplies every rendered label. These views map to criteria 001.1 through 001.11.
 
 ### UI-00: Current constrained desktop, idle
 
@@ -146,9 +146,15 @@ semantics without duplicating the browser geometry checks.
 | Acceptance | Evidence |
 | --- | --- |
 | 001.1, 001.2 | New desktop layout spec measures the section, copy, cells, controls, gap, and page overflow at narrow and wide widths. |
-| 001.3 | New layout specs measure running, terminal, permission-disabled, and longer translated labels, including the wrapper span. |
-| 001.4 | New desktop spec checks single-line 28px height. New mobile spec checks phone and coarse-pointer targets at least 44px. |
-| 001.5 | New specs activate both enabled actions with mocked requests and check keyboard order. Existing maintenance tests retain handler and permission coverage. |
+| 001.3 | State tests check readable localized labels through running, terminal, and permission-disabled states. |
+| 001.4 | Mobile geometry checks measure phone and coarse-pointer targets at least 44px. |
+| 001.5 | Screenshot inspection checks the primary Run now and outline Analyze treatments. |
+| 001.6 | Label geometry checks measure unclipped text and sufficient control height at narrow widths. |
+| 001.7 | Disabled-state geometry checks measure button and wrapper width against their allocated cell. |
+| 001.8 | Desktop geometry checks measure single-line height at 28px. |
+| 001.9 | The keyboard case checks action order, focus retention, and both mocked requests after resizing. |
+| 001.10 | The phone case activates both mocked operations with taps after resizing. |
+| 001.11 | The phone case measures separate full-width rows with Analyze first. |
 
 All shortened criterion numbers refer to
 `REQ-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001`.
@@ -251,6 +257,11 @@ environment details, and logs.
 Final catalog validation, specification lint, documentation coverage preflight,
 and diff checks passed. Work order 01 is done. Its requirement is active and
 its system design is current.
+
+PR review corrections split the acceptance criteria into individual behaviors
+and aligned the verification commands with the passing local runs. The test
+annotations and design mappings follow the expanded criteria. Documentation
+validation and focused lint passed again. Production behavior did not change.
 
 ## Documentation impact
 

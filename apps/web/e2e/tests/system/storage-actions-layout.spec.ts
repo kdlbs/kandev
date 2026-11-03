@@ -7,6 +7,9 @@ import {
 import { setStoreRole } from "../../helpers/session-store";
 
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.1
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.2
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.6
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.8
 test("fits actions inside a constrained Storage section", async ({ testPage, prCapture }) => {
   await testPage.emulateMedia({ colorScheme: "dark" });
   await mockStorageActionJobs(testPage);
@@ -44,6 +47,8 @@ test("fits actions inside a constrained Storage section", async ({ testPage, prC
 });
 
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.3
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.6
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
 test("contains job labels and disabled wrappers", async ({ testPage, prCapture }) => {
   const jobs = await mockStorageActionJobs(testPage);
   await testPage.setViewportSize({ width: 1024, height: 900 });
@@ -89,7 +94,7 @@ test("contains job labels and disabled wrappers", async ({ testPage, prCapture }
   }
 });
 
-// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.5
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.9
 test("retains keyboard actions after resizing", async ({ testPage }) => {
   const jobs = await mockStorageActionJobs(testPage);
   await testPage.setViewportSize({ width: 1400, height: 900 });

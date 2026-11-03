@@ -13,6 +13,12 @@ acceptance_criteria:
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.3
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.4
   - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.5
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.6
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.8
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.9
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.10
+  - AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
 system_design:
   - ../../specs/system-page/system-design/storage-action-layout.md
 ---
@@ -39,7 +45,7 @@ controls readable and usable through job-state changes and viewport changes.
 
 ## Acceptance
 
-1. All five linked criteria pass through rendered layout and activation checks.
+1. All linked criteria pass through rendered layout, visual, and activation checks.
 2. Both enabled and disabled controls fit their cells in every tested state.
 3. Existing operation tests pass, and other wrapper consumers keep their layout.
 
@@ -47,7 +53,7 @@ controls readable and usable through job-state changes and viewport changes.
 
 See the [complete before/after previews](plan.md#ascii-ui-preview).
 These excerpts retain labels UI-01, UI-02, and UI-03 and cover criteria 001.1
-through 001.5. The asterisk marks the primary action and is not rendered text.
+through 001.11. The asterisk marks the primary action and is not rendered text.
 
 ```text
 UI-01: Wide section, idle
@@ -118,14 +124,20 @@ No new animation needs verification.
 Run from the repository root. Install dependencies once if this worktree lacks
 `apps/node_modules`. Do not run the desktop and mobile E2E commands concurrently.
 
+The typecheck uses an 8 GiB Node heap because the default 4 GiB heap failed
+in this worktree. E2E runs use host mode and a loopback server bind.
+On NixOS, set `LD_LIBRARY_PATH` to the installed Chromium runtime libraries
+before E2E runs. The passing runs used systemd, libxcb, and the local Kandev
+Playwright library bundle. Nix store paths depend on the installed generation.
+
 ```bash
 test -d apps/node_modules || (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm test components/settings/system/storage)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/settings/system/storage/storage-maintenance-settings.tsx components/settings/system/storage/storage-action-button.tsx e2e/helpers/storage-actions-layout.ts e2e/tests/system/storage-actions-layout.spec.ts e2e/tests/system/mobile-storage-actions-layout.spec.ts)
-(cd apps/web && pnpm run typecheck)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:ratchet)
-(cd apps/web && pnpm e2e:run --project chromium tests/system/storage-actions-layout.spec.ts tests/system/storage-maintenance.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/system/mobile-storage-actions-layout.spec.ts tests/system/mobile-storage-maintenance.spec.ts)
+(cd apps/web && KANDEV_SERVER_HOST=127.0.0.1 pnpm e2e:run --host --project chromium tests/system/storage-actions-layout.spec.ts tests/system/storage-maintenance.spec.ts)
+(cd apps/web && KANDEV_SERVER_HOST=127.0.0.1 pnpm e2e:run --host --project mobile-chrome tests/system/mobile-storage-actions-layout.spec.ts tests/system/mobile-storage-maintenance.spec.ts)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -234,5 +246,10 @@ The saved desktop log is
 `.tmp/storage-layout-logs/kandev-run.e2e.KweHsROR.log`.
 The saved phone log is
 `.tmp/storage-layout-logs/kandev-run.e2e.jKVLy9zI.log`.
+
+PR review corrections split the acceptance criteria and aligned Verification
+with the recorded host mode, loopback bind, Nix libraries, and Node heap.
+Only documentation and test annotations changed. Documentation validation,
+focused lint, formatting, and diff checks passed again.
 
 Final specification, reference, and diff validation is recorded in the plan.

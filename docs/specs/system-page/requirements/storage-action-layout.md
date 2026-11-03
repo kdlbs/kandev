@@ -35,20 +35,29 @@ controls, clipped labels, or horizontal page scrolling.
   gap. Neither action shall overlap the explanation or the other action.
 - **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.2:** When the section cannot fit
   its explanation and action group beside each other, the actions shall appear
-  below the explanation. On phones below 768 CSS pixels, Analyze shall precede
-  Run now in separate full-width rows.
+  below the explanation.
 - **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.3:** Idle, queued, running,
   succeeded, failed, and permission-disabled actions shall retain readable
-  localized labels and contained control boundaries. Longer labels shall wrap
-  when needed. Disabled controls shall retain their allocated row width.
+  localized labels.
 - **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.4:** Phone and coarse-pointer
-  actions shall have a rendered height of at least 44 CSS pixels. Single-line
-  fine-pointer desktop actions shall retain the standard 28-pixel height at
-  the standard root font. Wrapped labels may increase that height.
-- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.5:** Run now shall retain the
-  primary visual treatment. Analyze shall retain its outline treatment.
-  Enabled actions shall support keyboard and pointer activation through their
-  existing operation paths after a resize.
+  actions shall have a rendered height of at least 44 CSS pixels.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.5:** The actions shall retain
+  their visual hierarchy, with Run now primary and Analyze outlined.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.6:** Longer labels shall wrap
+  when needed, with enough control height to display every line.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7:** Disabled controls shall
+  retain their allocated row width.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.8:** Single-line fine-pointer
+  desktop actions shall retain the standard 28-pixel height at the standard
+  root font.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.9:** Enabled actions shall
+  support keyboard activation through their existing operation paths after
+  a resize.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.10:** Enabled actions shall
+  support pointer activation through their existing operation paths after
+  a resize.
+- **AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11:** On phones below 768 CSS
+  pixels, Analyze shall precede Run now in separate full-width rows.
 
 ## Out of scope
 

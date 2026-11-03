@@ -6,8 +6,10 @@ import {
 } from "../../helpers/storage-actions-layout";
 import { setStoreRole } from "../../helpers/session-store";
 
-// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.2
 // @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.4
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.7
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.10
+// @covers AC-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001.11
 test("stacks actions with usable touch targets", async ({ testPage, prCapture }) => {
   await testPage.emulateMedia({ colorScheme: "dark" });
   const jobs = await mockStorageActionJobs(testPage);

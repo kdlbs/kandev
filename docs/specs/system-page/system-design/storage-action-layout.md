@@ -38,9 +38,9 @@ disabled reason. Full-width buttons therefore need to size that wrapper too.
 
 | Acceptance criteria | Design section |
 | --- | --- |
-| 001.1, 001.2 | Available-width layout |
-| 001.3 | Button and wrapper geometry |
-| 001.4, 001.5 | Controls and interaction |
+| 001.1, 001.2, 001.11 | Available-width layout |
+| 001.3, 001.6, 001.7, 001.8 | Button and wrapper geometry |
+| 001.4, 001.5, 001.9, 001.10 | Controls and interaction |
 
 All criteria in this table belong to
 `REQ-SYSTEM-PAGE-STORAGE-ACTION-LAYOUT-001`.
