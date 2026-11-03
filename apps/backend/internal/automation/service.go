@@ -112,6 +112,9 @@ type RunDispatcher interface {
 	) error
 }
 
+// DispatchDeferredFixedProfileSuspended identifies a pre-provider circuit wait.
+const DispatchDeferredFixedProfileSuspended = "fixed_profile_suspended"
+
 // RunDispatchDeferred marks an error that must leave the admitted run open
 // for an explicit recovery action. The automation package deliberately keeps
 // this contract generic so the orchestrator can classify native-session

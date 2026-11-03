@@ -806,6 +806,16 @@ type AgentDeliveryWorkflowOutcomeRepository interface {
 	BackfillLegacyAgentDeliveryWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
+// SessionUnreadStateRepository reads the task unread aggregate's inputs. It is
+// a separate capability so SessionRepository fakes need not implement it.
+type SessionUnreadStateRepository interface {
+	// ListSessionUnreadState returns, for each requested session that still
+	// exists, the cursor rank (zero without a cursor) and the newest
+	// unread-qualifying rank after it (or the cursor rank when none qualifies).
+	// Missing sessions are absent.
+	ListSessionUnreadState(ctx context.Context, sessionIDs []string) (map[string]statussummary.SessionUnreadState, error)
+}
+
 // SessionWorktreeRepository exposes session-scoped worktree projections over
 // the task environment's repository rows. Sessions reference worktrees only
 // through task_sessions.task_environment_id.

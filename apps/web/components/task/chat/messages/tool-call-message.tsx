@@ -148,6 +148,26 @@ function getInlineOutput(output: unknown): string | null {
   return trimmed;
 }
 
+// i18n-exempt: protocol enum values select localized labels and are not copy.
+function getSubagentControlLabel(control: string | undefined): string | null {
+  switch (control) {
+    case "wait":
+      return t("task:subagentControlWait");
+    case "close":
+      return t("task:subagentControlClose");
+    case "message":
+      return t("task:subagentControlMessage");
+    case "read":
+      return t("task:subagentControlRead");
+    case "list":
+      return t("task:subagentControlList");
+    case "resume":
+      return t("task:subagentControlResume");
+    default:
+      return null;
+  }
+}
+
 function parseToolCallMetadata(comment: Message) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const toolName = metadata?.tool_name ?? "";
@@ -158,6 +178,16 @@ function parseToolCallMetadata(comment: Message) {
   // When output is shown inline, there's nothing more to expand — skip the expand affordance
   // unless a permission prompt still needs to be rendered.
   return { toolName, status, output, isHttpError, hasOutput, inlineOutput };
+}
+
+function resolveToolCallTitle(
+  comment: Message,
+  metadata: ToolCallMetadata | undefined,
+  worktreePath: string | undefined,
+): string {
+  const rawTitle = metadata?.title ?? comment.content ?? t("task:toolCall");
+  const controlLabel = getSubagentControlLabel(metadata?.normalized?.generic?.subagent_control);
+  return transformPathsInText(controlLabel ?? prettifyToolTitle(rawTitle), worktreePath);
 }
 
 export const ToolCallMessage = memo(function ToolCallMessage({
@@ -188,8 +218,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
   const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const rawTitle = metadata?.title ?? comment.content ?? t("task:toolCall");
-  const title = transformPathsInText(prettifyToolTitle(rawTitle), worktreePath);
+  const title = resolveToolCallTitle(comment, metadata, worktreePath);
 
   const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
 

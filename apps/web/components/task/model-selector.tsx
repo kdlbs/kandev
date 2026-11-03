@@ -140,6 +140,16 @@ export function requiredConfigKeys(session: TaskSession | null, agents: Agent[])
   return [...keys];
 }
 
+// hasUsableAdvertisedCatalog reports whether the session entry carries enough
+// provider-advertised model information to render the selector: at least one
+// raw config option plus a flat model choice or a usable model-shaped select
+// option (including category aliases).
+function hasUsableAdvertisedCatalog(sessionModelsData: SessionModelsEntry): boolean {
+  if (sessionModelsData.configOptions.length === 0) return false;
+  if (sessionModelsData.models.length > 0) return true;
+  return usableConfigOptions(sessionModelsData.configOptions).some(isModelConfigOption);
+}
+
 export function hasCompleteDynamicConfig(
   session: TaskSession | null,
   sessionModelsData: SessionModelsEntry | undefined,
@@ -147,7 +157,7 @@ export function hasCompleteDynamicConfig(
 ): boolean {
   const required = requiredConfigKeys(session, agents);
   if (required.length === 0) return true;
-  if (!sessionModelsData) return false;
+  if (!session || !sessionModelsData) return false;
   const available = new Set(sessionModelsData.configOptions.map((option) => option.id));
   // Flat-model-list agents (e.g. claude-opus) expose their models via the ACP
   // top-level `models` list and switch with session/set_model rather than a
@@ -162,12 +172,24 @@ export function hasCompleteDynamicConfig(
   // to the selected model.
   const isUnadvertisedSettledKey = (key: string): boolean =>
     key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key);
+  // Historical runtime keys can survive a move to an agent that never
+  // advertises them. A usable advertised catalog is authoritative for the
+  // controls it offers, so ignore only keys no profile source still requires.
+  const runtimeOnlyKeys = persistedRuntimeConfigKeys(session);
+  const profileKeys = profileRequiredConfigKeys(session, agents);
+  const hasUsableCatalog = hasUsableAdvertisedCatalog(sessionModelsData);
+  const isIgnorableHistoricalKey = (key: string): boolean =>
+    key !== AGENT_CONFIG_KEY &&
+    hasUsableCatalog &&
+    runtimeOnlyKeys.has(key) &&
+    !profileKeys.has(key);
   return required.every(
     (key) =>
       available.has(key) ||
       (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList) ||
-      isUnadvertisedSettledKey(key),
+      isUnadvertisedSettledKey(key) ||
+      isIgnorableHistoricalKey(key),
   );
 }
 

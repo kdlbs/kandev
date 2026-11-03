@@ -8,6 +8,7 @@ const (
 	ProviderTypeLocal   ProviderType = "local"
 	ProviderTypeApprise ProviderType = "apprise"
 	ProviderTypeSystem  ProviderType = "system"
+	ProviderTypeWebPush ProviderType = "webpush"
 	ProviderTypeWebhook ProviderType = "webhook"
 )
 

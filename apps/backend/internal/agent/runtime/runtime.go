@@ -34,6 +34,13 @@ type OwnerAdmission = lifecycle.OwnerAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+
+// CapturedResourceCircuitKey reads the immutable resource of an execution;
+// it never reconstructs identity from current profile settings.
+func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, profileID string) string {
+	return lifecycle.CapturedResourceCircuitKey(metadata, executionID, profileID)
+}
+
 type AgentExecution = lifecycle.AgentExecution
 type RuntimeFootprintSnapshot = agentruntime.RuntimeFootprintSnapshot
 type SessionRuntimeFootprint = agentruntime.SessionRuntimeFootprint

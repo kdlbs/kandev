@@ -526,6 +526,13 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+For a mode defined in a repository, open **Start mode**, type its exact ID,
+select the custom entry, and save the profile. The host probe runs outside the
+task repository, so it may omit that mode and show options for the host default.
+At task startup, the selected executor must confirm the requested mode before
+the first prompt. If it cannot, startup fails. Leaving the mode unset uses the
+agent's default.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select
@@ -634,25 +641,34 @@ Any workflow step can veto this policy with
 workflow-step API and is included in workflow import/export. The veto applies
 to the step's task session even when the candidate policy is enabled.
 
-After a provider switch, the failed provider is paused for the route health
-backoff, or until its trusted reset time when one is available. Kandev runs an
-exclusive health probe before it becomes eligible again. This shared error
-classification is used by task/Kanban and Office routing, while the per-
-candidate policies are configured on dynamic profiles.
+After a provider switch, the failed resource enters the shared circuit backoff:
+1, 5, 15, and 30 minutes, then 1, 2, and 4 hours. Failures in one open window
+count as one incident. A failed probe advances the ladder, while a successful
+probe keeps its count. A clean completed turn resets the count. A trusted
+provider reset time can extend the wait; inferred reset times are capped at
+24 hours. Kandev runs an exclusive health probe before a dynamic candidate
+becomes eligible again.
+
+When `features.dynamicAgentRouting` is enabled, fixed profiles use the same
+shared circuits. A fixed profile waits for its resource circuit to expire and
+does not switch to another provider. This flag remains off by default. This
+shared error classification is used by task/Kanban and Office routing, while
+per-candidate policies are configured on dynamic profiles.
 
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
-resume, or message the session.
+resume, or use Send Now on the session.
 
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity
 full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
-and message delivery keep manual admission.
+and **Send Now** keep manual admission. Ordinary message delivery waits for
+capacity through the same ceiling.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

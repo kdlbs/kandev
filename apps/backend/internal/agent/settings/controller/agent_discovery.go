@@ -27,19 +27,22 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 	payload := make([]dto.AgentDiscoveryDTO, 0, len(results))
 	for _, result := range results {
 		var loginCmd *dto.LoginCommandDTO
+		localInstall := false
 		if ag, ok := c.agentRegistry.Get(result.Name); ok {
 			loginCmd = buildLoginCommandDTO(ag)
+			localInstall = supportsLocalInstall(ag)
 		}
 		payload = append(payload, dto.AgentDiscoveryDTO{
-			Name:              result.Name,
-			SupportsMCP:       result.SupportsMCP,
-			MCPConfigPath:     result.MCPConfigPath,
-			InstallationPaths: result.InstallationPaths,
-			Available:         result.Available,
-			MatchedPath:       result.MatchedPath,
-			LoginCommand:      loginCmd,
-			CLIVersion:        result.CLIVersion,
-			CLIVersionError:   result.CLIVersionError,
+			Name:                 result.Name,
+			SupportsMCP:          result.SupportsMCP,
+			SupportsLocalInstall: localInstall,
+			MCPConfigPath:        result.MCPConfigPath,
+			InstallationPaths:    result.InstallationPaths,
+			Available:            result.Available,
+			MatchedPath:          result.MatchedPath,
+			LoginCommand:         loginCmd,
+			CLIVersion:           result.CLIVersion,
+			CLIVersionError:      result.CLIVersionError,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -143,23 +146,29 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	return dto.AvailableAgentDTO{
-		Name:               ag.ID(),
-		DisplayName:        displayName,
-		Description:        ag.Description(),
-		InstallScript:      installScript,
-		SupportsMCP:        availability.SupportsMCP,
-		MCPConfigPath:      availability.MCPConfigPath,
-		InstallationPaths:  availability.InstallationPaths,
-		Available:          availability.Available,
-		MatchedPath:        availability.MatchedPath,
-		Capabilities:       capabilities,
-		ModelConfig:        modelConfig,
-		PermissionSettings: permissionSettings,
-		PassthroughConfig:  passthroughConfig,
-		LoginCommand:       loginCommand,
-		RuntimeUpdate:      runtimeUpdate,
-		UpdatedAt:          now,
+		Name:                 ag.ID(),
+		DisplayName:          displayName,
+		Description:          ag.Description(),
+		InstallScript:        installScript,
+		SupportsLocalInstall: supportsLocalInstall(ag),
+		SupportsMCP:          availability.SupportsMCP,
+		MCPConfigPath:        availability.MCPConfigPath,
+		InstallationPaths:    availability.InstallationPaths,
+		Available:            availability.Available,
+		MatchedPath:          availability.MatchedPath,
+		Capabilities:         capabilities,
+		ModelConfig:          modelConfig,
+		PermissionSettings:   permissionSettings,
+		PassthroughConfig:    passthroughConfig,
+		LoginCommand:         loginCommand,
+		RuntimeUpdate:        runtimeUpdate,
+		UpdatedAt:            now,
 	}
+}
+
+func supportsLocalInstall(ag agents.Agent) bool {
+	installer, ok := ag.(agents.LocalInstallAgent)
+	return ok && installer.SupportsLocalInstall()
 }
 
 func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
@@ -94,6 +95,10 @@ type CreateInstanceRequest struct {
 	// after initialize. Resolved by the backend from the launching agent
 	// profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
 
 	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
 	// built-in tool names for an agent that appends the server name itself.

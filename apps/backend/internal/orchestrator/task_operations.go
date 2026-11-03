@@ -1264,6 +1264,9 @@ func (s *Service) handleSessionLaunchFailure(
 	preloadedSession ...*models.TaskSession,
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
+	if isFixedProfileSuspendedError(launchErr) {
+		return launchErr
+	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
 			zap.String("task_id", taskID),
@@ -4753,6 +4756,11 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 			sessionID,
 		)
 	}
+	// Both production callers hold sessionID's lifecycle lock
+	// (ensureSessionRunningWithAttemptAndBinding and the resume pipeline). The
+	// stopped event the teardown publishes therefore cannot settle inside the
+	// handler; this owner settles in place before the caller relaunches.
+	s.settleBackgroundWorkLocked(ctx, sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	taskID := ""
 	if refreshed != nil {
@@ -6800,7 +6808,10 @@ type promptTaskOptions struct {
 	// liveExecutionFence disables lazy resume and binds dispatch to the current
 	// execution and native conversation. Capacity continuation uses it because
 	// completed effects cannot authorize a runtime restore.
-	liveExecutionFence        *promptTaskLiveExecutionFence
+	liveExecutionFence *promptTaskLiveExecutionFence
+	// capacityIntent selects bounded message-turn admission or an explicit
+	// execution override. The zero value is bounded for ordinary message turns.
+	capacityIntent            turnCapacityIntent
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
@@ -7031,6 +7042,38 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
 	if err != nil {
 		return nil, err
+	}
+
+	// A fixed profile whose resource circuit is open must not receive a new
+	// provider request, even into an execution that is still alive. Dynamic
+	// sessions are gated by their own selection.
+	if !s.isDynamicPromptSession(session) {
+		if err := s.admitFixedSessionPrompt(ctx, session); err != nil {
+			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+			return nil, err
+		}
+	}
+
+	// A new message turn needs capacity even when the runtime is already warm.
+	// This runs before sessionAlreadyPromptReady's early return and before cold
+	// resume, so both share one admission boundary.
+	turnReservation, err := s.admitPromptTaskMessageTurn(ctx, taskID, sessionID, session, options)
+	if err != nil {
+		if refusal, refused := messageTurnCapacityRefusalOf(err); refused {
+			if deferredErr := s.disposeMessageTurnCapacityRefusal(
+				ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, origin, options, refusal,
+			); deferredErr != nil {
+				err = deferredErr
+			}
+		}
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, err
+	}
+	if turnReservation != nil {
+		defer func() {
+			turnReservation.release()
+			s.signalCeilingSweep()
+		}()
 	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
@@ -10175,6 +10218,9 @@ func (s *Service) SetQueueAutoRun(ctx context.Context, sessionID string, enabled
 	if err := s.messageQueue.SetAutoRun(ctx, sessionID, enabled); err != nil {
 		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
 	}
+	if enabled {
+		s.signalCeilingSweep()
+	}
 	if !enabled || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
 	}
@@ -10216,6 +10262,9 @@ func (s *Service) SetQueueAutoRunForSession(ctx context.Context, identity messag
 
 	if err := s.messageQueue.SetAutoRunForSession(ctx, identity, enabled); err != nil {
 		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
+	}
+	if enabled {
+		s.signalCeilingSweep()
 	}
 	if !enabled || s.queueAutoRunDrainBlocked(identity.SessionID) {
 		return enabled, false, nil
@@ -11316,6 +11365,15 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	}
 	defer guard.release()
 
+	// Cancellation can arrive just after the backend settled the turn, while
+	// the control is still visible. A fully idle target has nothing to
+	// interrupt, so succeed without creating a turn or a status message.
+	if s.explicitCancellationTargetIsIdle(ctx, sessionID) {
+		s.logger.Debug("ignoring explicit cancel for idle session",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+
 	// Invalidate startup before probing or cancelling the runtime. A resume
 	// continuation that is already waiting on ACP readiness will observe this
 	// identity fence and cannot publish a late token, failure, or prompt.
@@ -11355,6 +11413,63 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+// explicitCancellationTargetIsIdle reports whether a user cancel reached a
+// session that has no turn to interrupt. An internal continuation cancel is
+// never a no-op because it owns the resume attempt it is trying to stop.
+func (s *Service) explicitCancellationTargetIsIdle(ctx context.Context, sessionID string) bool {
+	if ctx.Value(continuationCancelContextKey{}) != nil || s.repo == nil {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	switch session.State {
+	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
+	default:
+		return false
+	}
+	// A held or waiting prompt admission is an in-flight dispatch, not a
+	// settled session: the cancel must reach it.
+	if s.messageQueue != nil && s.messageQueue.SessionAdmissionActive(sessionID) {
+		return false
+	}
+	return !s.sessionHasCancellableWork(ctx, sessionID)
+}
+
+// sessionHasCancellableWork reports any in-flight turn, dispatch, clarification,
+// or resume attempt that a cancellation must reach.
+func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID string) bool {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil || turnID != "" {
+		return true
+	}
+	if _, active := s.activeTurns.Load(sessionID); active || s.reservedPromptTurnID(sessionID) != "" {
+		return true
+	}
+	if _, ok := s.resumeAttemptStore().current(sessionID); ok {
+		return true
+	}
+	if s.sessionHasLiveClarification(ctx, sessionID) {
+		return true
+	}
+	if _, inFlight := s.steerInFlight.Load(sessionID); inFlight {
+		return true
+	}
+	if settler := s.backgroundWorkSettler(); settler != nil {
+		sessionIDs, err := settler.ListSessionIDsWithOpenBackgroundWork(ctx)
+		if err != nil {
+			return true
+		}
+		for _, candidate := range sessionIDs {
+			if candidate == sessionID {
+				return true
+			}
+		}
+	}
+	return s.pendingQueuedDispatch(sessionID) != nil || s.isQueuedDispatchAccepted(sessionID)
 }
 
 func (s *Service) acknowledgeRetainedPromptFailure(identity cancellationIdentity) {

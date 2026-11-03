@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -300,6 +302,7 @@ func buildStandaloneCreateInstanceRequest(
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -310,6 +313,10 @@ func buildStandaloneCreateInstanceRequest(
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
+}
+
+func effectiveEnv(overrides map[string]string) []string {
+	return acpcompat.MergeEnvMap(os.Environ(), overrides)
 }
 
 func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
@@ -324,13 +331,25 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
-
-	// Create instance via control API
-	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
+	for key, value := range req.LocalRuntimeEnv {
+		env[key] = value
+	}
 	agentType := ""
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve the shared Antigravity home: %w", err)
+		}
+		if err := acpcompat.ValidateLocalAntigravityEnvSlice(effectiveEnv(env), home); err != nil {
+			return nil, err
+		}
+	}
+
+	// Create instance via control API
+	// Agent command is NOT set - workspace access only. Agent is started explicitly via agentctl client.
 	disableAskQuestion := !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
@@ -343,6 +362,9 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 			requiresProcessKill = rt.RequiresProcessKill
 			stripEnv = rt.StripEnv
 		}
+	}
+	if req.AuthPolicy != nil && acpcompat.IsAntigravity(agentType) {
+		stripEnv = append(stripEnv, acpcompat.AntigravityCredentialEnvNames()...)
 	}
 
 	createReq := buildStandaloneCreateInstanceRequest(

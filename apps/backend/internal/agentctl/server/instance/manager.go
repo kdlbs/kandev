@@ -397,6 +397,7 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		RequiresProcessKill:        req.RequiresProcessKill,
 		StripEnv:                   req.StripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
+		AuthPolicy:                 req.AuthPolicy,
 		BaseBranches:               req.BaseBranches,
 		ComparisonTargets:          req.ComparisonTargets,
 		RemoteContributions:        req.RemoteContributions,
