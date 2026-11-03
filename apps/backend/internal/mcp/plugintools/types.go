@@ -159,6 +159,23 @@ func ProjectLegacySafe(snapshot Snapshot) Snapshot {
 	return projected
 }
 
+// ProjectCoordinatorOnly keeps the descriptors a coordinator agentctl can
+// register. A live coordinator execution receives this projection so a catalog
+// refresh replaces its tools immediately; older task executions receive
+// ProjectLegacySafe instead.
+func ProjectCoordinatorOnly(snapshot Snapshot) Snapshot {
+	projected := Snapshot{Generation: snapshot.Generation, Revision: snapshot.Revision}
+	projected.Tools = make([]Definition, 0, len(snapshot.Tools))
+	for _, definition := range snapshot.Tools {
+		if !slices.Contains(definition.Surfaces, SurfaceCoordinator) {
+			continue
+		}
+		definition.Surfaces = []string{SurfaceCoordinator}
+		projected.Tools = append(projected.Tools, definition)
+	}
+	return projected
+}
+
 // ProjectNonAutomation is the earlier legacy projection kept for callers that
 // predate the coordinator and external contexts.
 func ProjectNonAutomation(snapshot Snapshot) Snapshot {

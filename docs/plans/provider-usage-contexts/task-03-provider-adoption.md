@@ -1,7 +1,7 @@
 ---
 id: "03-provider-adoption"
 title: "Provider declaration and packaged evidence"
-status: complete
+status: in-progress
 wave: 3
 depends_on:
   - 01-instance-external-tools

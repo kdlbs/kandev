@@ -55,6 +55,7 @@ func instanceReadHandler(t *testing.T) (*Handlers, *plugins.Registry) {
 	pluginService := plugins.NewService(nil, registry, nil, testLogger(t))
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetPluginService(pluginService)
+	h.coordinatorPhase2ForTest = func() bool { return true }
 	return h, registry
 }
 
@@ -264,4 +265,28 @@ func TestTaskPrincipalCannotInvokeAnotherSurface(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(ws.MessageTypeError), string(response.Type))
 	require.Contains(t, string(response.Payload), "does not match the caller principal")
+}
+
+func TestCoordinatorPluginToolsRequirePhase2(t *testing.T) {
+	h, _ := instanceReadHandler(t)
+	h.coordinatorPhase2ForTest = func() bool { return false }
+	ctx := coordinatorInstanceReadContext(coordinatorBindingV2("installation-1", "policy-1"))
+	for _, action := range []string{ws.ActionMCPListPluginTools, ws.ActionMCPInvokePluginTool} {
+		payload := map[string]any{"surface": manifest.AgentToolSurfaceCoordinator}
+		if action == ws.ActionMCPInvokePluginTool {
+			payload["plugin_id"] = "kandev-provider-usage"
+			payload["local_name"] = "get_provider_usage"
+			payload["invocation_id"] = "invocation-1"
+		}
+		var response *ws.Message
+		var err error
+		if action == ws.ActionMCPListPluginTools {
+			response, err = h.handleListPluginTools(ctx, makeWSMessage(t, action, payload))
+		} else {
+			response, err = h.handleInvokePluginTool(ctx, makeWSMessage(t, action, payload))
+		}
+		require.NoError(t, err)
+		require.Equal(t, string(ws.MessageTypeError), string(response.Type))
+		require.Contains(t, string(response.Payload), "require phase 2")
+	}
 }

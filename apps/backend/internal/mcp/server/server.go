@@ -977,9 +977,16 @@ func (s *Server) setPluginToolsLocked(snapshot plugintools.Snapshot) error {
 	filteredSurface := sessionFilteredPluginSurface(s.profile.Surface)
 	s.mu.RUnlock()
 	if filteredSurface {
-		// A global push is only an invalidation notice for a session-filtered
-		// context. Its candidate tools are never installed here; the next list
-		// request fetches the context-filtered catalog from the backend.
+		if s.profile.Surface == mcpprofile.SurfaceCoordinator {
+			// A coordinator execution can filter the full catalog by its bound
+			// references locally, so install the coordinator projection instead
+			// of dropping live tools until the next list.
+			s.pluginToolsEpoch.Add(1)
+			return s.setFilteredPluginToolsLocked(plugintools.ProjectCoordinatorOnly(snapshot))
+		}
+		// A global push is only an invalidation notice for automation. Its
+		// candidate tools depend on a backend-owned exact approval, so they are
+		// never installed here; the next list fetches the filtered catalog.
 		// Bumping the epoch also discards any filtered fetch already in flight.
 		s.pluginToolsEpoch.Add(1)
 		s.clearFilteredPluginToolsLocked()

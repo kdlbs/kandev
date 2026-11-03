@@ -407,9 +407,10 @@ agent_tools:
 
 `coordinator` and `external` require both instance scope and
 `read_only_hint: true`; a missing or false hint rejects the install. External
-calls arrive only through the authenticated external MCP endpoint and have
-empty task, session, and workspace context, so `invocation_workspace_id` must
-be the empty string. A coordinator conversation binds eligible tools by exact
+calls arrive only through the configured external MCP endpoint over its
+trusted in-process transport, follow the endpoint authentication setting, and
+have empty task, session, and workspace context, so
+`invocation_workspace_id` must be the empty string. A coordinator conversation binds eligible tools by exact
 reference, including the installation and policy version, when it opens. A
 phase-1 conversation or a version-1 binding exposes no plugin tools; reopen the
 conversation after installing or changing a plugin to gain a new binding.

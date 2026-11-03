@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: implemented
+status: in-progress
 requirements:
   - REQ-PLUGINS-AGENT-TOOLS-001
   - REQ-PLUGINS-AGENT-TOOLS-002
@@ -67,11 +67,11 @@ row says otherwise.
 | Criteria | Planned evidence |
 | --- | --- |
 | AC-PLUGINS-AGENT-TOOLS-001.5; 002.1, 002.4 | manifest/agent_tools_test.go: TestAgentToolInvocationScope; server/plugin_tools_test.go: TestPluginToolsContextEligibility |
-| 002.2, 002.6 | handlers/plugin_tools_test.go: TestInstancePluginToolTrustedExternalContext and TestInstancePluginToolRejectsForgedIdentity |
-| 002.3 | handlers/plugin_tools_automation_test.go: TestProviderUsageRequiresAutomationGrant |
-| 002.4, 002.6 | profile/coordinator_policy_test.go: TestCoordinatorPluginBindingCompatibility; handlers/coordinator_authorization_test.go: TestCoordinatorPluginToolAuthorization |
+| 002.2, 002.6 | handlers/plugin_tools_contexts_test.go: TestInstancePluginToolTrustedExternalContext and TestInstancePluginToolRejectsForgedIdentity |
+| 002.3 | handlers/plugin_tools_automation_grant_test.go: TestProviderUsageRequiresAutomationGrant |
+| 002.4, 002.6 | profile/coordinator_policy_test.go: TestCoordinatorPluginBindingCompatibility; handlers/plugin_tools_contexts_test.go: TestCoordinatorPluginToolAuthorization |
 | 002.5 | plugin server/agent_tool_test.go: TestProviderUsageInstanceContextsUseCache |
-| 002.6 | handlers/plugin_tools_test.go: TestInstancePluginToolRevokedAfterDiscovery |
+| 002.6 | handlers/plugin_tools_contexts_test.go: TestInstancePluginToolRevokedAfterDiscovery |
 
 Host paths above are relative to `apps/backend/internal/mcp`, except manifest
 tests, which are under `apps/backend/internal/plugins`.
@@ -91,7 +91,7 @@ No rendered UI change or Playwright test is required.
 
 - [x] [01: Instance tools through external MCP](task-01-instance-external-tools.md)
 - [x] [02: Bound coordinator plugin reads](task-02-coordinator-bindings.md)
-- [x] [03: Provider declaration and packaged evidence](task-03-provider-adoption.md)
+- [ ] [03: Provider declaration and packaged evidence](task-03-provider-adoption.md)
 
 Order: 01 → 02 → 03. No delegation is authorized.
 

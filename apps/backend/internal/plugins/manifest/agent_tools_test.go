@@ -95,6 +95,7 @@ func TestAgentToolInvocationScope(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := managedManifest(t)
+			m.MinKandevVersion = "0.99.0"
 			m.AgentTools = []AgentTool{tc.tool}
 			err := m.Validate()
 			if tc.wantErr == "" {
@@ -127,5 +128,28 @@ agent_tools:
 	}
 	if got := m.AgentTools[0].NormalizedInvocationScope(); got != AgentToolInvocationScopeTask {
 		t.Fatalf("NormalizedInvocationScope() = %q, want task", got)
+	}
+}
+
+func TestInstanceReadSurfacesRequireCompatibilityFloor(t *testing.T) {
+	readOnly := true
+	for _, surface := range []string{AgentToolSurfaceCoordinator, AgentToolSurfaceExternal} {
+		t.Run(surface, func(t *testing.T) {
+			m := managedManifest(t)
+			m.AgentTools = []AgentTool{{
+				Name: "provider_usage", Description: "Read cached usage.",
+				Surfaces:        []string{surface},
+				InvocationScope: AgentToolInvocationScopeInstance,
+				InputSchema:     map[string]any{"type": "object"},
+				Annotations:     AgentToolAnnotations{ReadOnlyHint: &readOnly},
+			}}
+			if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "min_kandev_version") {
+				t.Fatalf("Validate() error = %v, want compatibility floor", err)
+			}
+			m.MinKandevVersion = "0.99.0"
+			if err := m.Validate(); err != nil {
+				t.Fatalf("Validate() with the compatibility floor: %v", err)
+			}
+		})
 	}
 }

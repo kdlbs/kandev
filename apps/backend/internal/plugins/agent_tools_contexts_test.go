@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func TestAgentToolCatalogTransportsScopeAndBindingIdentity(t *testing.T) {
@@ -155,11 +156,14 @@ func TestInvokeInstanceSurfaceRevalidatesDeclaration(t *testing.T) {
 		AgentToolPolicyVersion: "policy-1",
 	})
 
-	for _, name := range []string{"task_scoped", "write_tool"} {
+	for name, want := range map[string]string{
+		"task_scoped": "requires instance invocation scope",
+		"write_tool":  "requires a true read-only hint",
+	} {
 		_, err := svc.InvokeAgentTool(context.Background(), "kandev-provider-usage", name, map[string]any{},
 			AgentToolInvocationContext{InvocationID: "invocation-1", Surface: manifest.AgentToolSurfaceExternal})
-		if err == nil {
-			t.Fatalf("%s invocation reached the plugin despite an ineligible declaration", name)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s invocation error = %v, want declaration rejection %q", name, err, want)
 		}
 	}
 }
@@ -251,6 +255,13 @@ func TestInvokeCoordinatorToolRejectsRotationInsideDispatchGap(t *testing.T) {
 	}
 
 	lease := svc.dispatchLocks.lockFor("kandev-provider-usage")
+	admitted := make(chan struct{})
+	release := make(chan struct{})
+	lease.onReadAdmission = func() {
+		close(admitted)
+		<-release
+	}
+	defer func() { lease.onReadAdmission = nil }()
 	lease.Lock()
 	started := make(chan struct{})
 	results := make(chan error, 1)
@@ -260,13 +271,41 @@ func TestInvokeCoordinatorToolRejectsRotationInsideDispatchGap(t *testing.T) {
 		results <- err
 	}()
 	<-started
+	lease.Unlock()
+	<-admitted
 	rotated := *record
 	rotated.AgentToolPolicyVersion = "policy-2"
 	svc.registry.Add(&rotated)
-	lease.Unlock()
+	close(release)
 
 	err := <-results
 	if err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("rotation inside the dispatch gap error = %v, want stale policy rejection", err)
+	}
+}
+
+type capturingAgentToolRemote struct {
+	context pluginsdk.AgentToolContext
+}
+
+func (r *capturingAgentToolRemote) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentToolRequest) (*pluginsdk.AgentToolResult, error) {
+	r.context = req.Context
+	return &pluginsdk.AgentToolResult{Text: "ok"}, nil
+}
+
+func TestInvokeRemoteAgentToolSuppliesCoordinatorInstallation(t *testing.T) {
+	remote := &capturingAgentToolRemote{}
+	_, err := invokeRemoteAgentTool(context.Background(), remote, "get_provider_usage", map[string]any{},
+		AgentToolInvocationContext{
+			InvocationID: "invocation-1", Surface: manifest.AgentToolSurfaceCoordinator,
+			CoordinatorToolAuthorization: &plugintools.CoordinatorToolAuthorization{
+				InstallationID: "installation-1", PolicyVersion: "policy-1",
+			},
+		})
+	if err != nil {
+		t.Fatalf("invokeRemoteAgentTool: %v", err)
+	}
+	if remote.context.InstallationID != "installation-1" {
+		t.Fatalf("installation context = %q, want installation-1", remote.context.InstallationID)
 	}
 }

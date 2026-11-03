@@ -99,3 +99,17 @@ func TestAutomationAuthorizationAllowsOnlyExactPluginAndTool(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectCoordinatorOnlyKeepsCoordinatorSurface(t *testing.T) {
+	snapshot := Snapshot{Tools: []Definition{
+		{PluginID: "p", LocalName: "mixed", Surfaces: []string{SurfaceKanban, SurfaceCoordinator, SurfaceExternal}},
+		{PluginID: "p", LocalName: "task", Surfaces: []string{SurfaceKanban}},
+	}}
+	projected := ProjectCoordinatorOnly(snapshot)
+	if len(projected.Tools) != 1 {
+		t.Fatalf("projected tools = %#v", projected.Tools)
+	}
+	if surfaces := projected.Tools[0].Surfaces; len(surfaces) != 1 || surfaces[0] != SurfaceCoordinator {
+		t.Fatalf("projected surfaces = %#v", surfaces)
+	}
+}

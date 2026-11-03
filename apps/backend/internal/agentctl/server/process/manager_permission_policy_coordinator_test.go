@@ -233,6 +233,10 @@ func TestCoordinatorPermissionPolicyApprovesBoundPluginReferences(t *testing.T) 
 	legacy.cfg.McpProfile.CoordinatorToolPolicy = &profile.CoordinatorToolPolicy{
 		Version: profile.CoordinatorToolPolicyVersionV1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t",
 		ToolNames: []string{"list_tasks_kandev"},
+		PluginTools: []profile.CoordinatorPluginTool{{
+			PluginID: "kandev-provider-usage", LocalName: "get_provider_usage",
+			InstallationID: "installation-1", PolicyVersion: "policy-1",
+		}},
 	}
 	if _, approved := legacy.autoApproveCoordinatorPermission(&adapter.PermissionRequest{
 		ToolName: permissionStringPtr("mcp__kandev__" + exposed), Options: allow,

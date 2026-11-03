@@ -176,10 +176,16 @@ agent_tools:
       open_world_hint: false
 ```
 
-`name` must match `^[a-z0-9][a-z0-9_]{0,31}$`. `surfaces` must contain one
-or both supported task surfaces without duplicates. `input_schema` is required;
-`output_schema` and `annotations` are optional. Unknown fields continue to
-follow the manifest's existing compatibility rules.
+`name` must match `^[a-z0-9][a-z0-9_]{0,31}$`. `surfaces` must contain one or
+more of `kanban-task`, `office-task`, `managed-conversation`, `automation`,
+`coordinator`, and `external`, without duplicates; `configuration` is not a
+supported surface. `managed-conversation` also requires
+`capabilities.api_write: [managed_agent_tools]`. `coordinator` and `external`
+require `invocation_scope: instance` and a true `annotations.read_only_hint`;
+they also require `min_kandev_version` at or above the first supporting host
+release. `input_schema` is required; `output_schema` and `annotations` are
+optional. Unknown fields continue to follow the manifest's existing
+compatibility rules.
 
 An install or upgrade fails before changing the active installation when its
 declarations are invalid, when two declarations produce the same exposed name,

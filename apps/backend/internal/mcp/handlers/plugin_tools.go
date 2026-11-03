@@ -144,7 +144,10 @@ func (h *Handlers) handleListExternalPluginTools(ctx context.Context, msg *ws.Me
 		return slices.Contains(definition.Surfaces, string(mcpprofile.SurfaceExternal))
 	})
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		if h.logger != nil {
+			h.logger.Warn("external plugin tool catalog failed", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tools", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, snapshot)
 }
@@ -161,6 +164,10 @@ func (h *Handlers) handleListCoordinatorPluginTools(ctx context.Context, msg *ws
 	if h.pluginSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tools are unavailable", nil)
 	}
+	if !h.coordinatorPhase2Enabled() {
+		h.logPluginToolDenial(ctx, msg.Action, "phase2_disabled")
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator plugin tools require phase 2", nil)
+	}
 	binding, ok := coordinatorPluginBinding(ctx, principal)
 	if !ok {
 		return ws.NewResponse(msg.ID, msg.Action, emptyCoordinatorPluginToolSnapshot(principal.CallerTaskID))
@@ -170,7 +177,10 @@ func (h *Handlers) handleListCoordinatorPluginTools(ctx context.Context, msg *ws
 			binding.AllowsPlugin(definition.PluginID, definition.LocalName, definition.InstallationID, definition.PolicyVersion)
 	})
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		if h.logger != nil {
+			h.logger.Warn("coordinator plugin tool catalog failed", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tools", nil)
 	}
 	snapshot.Generation = "coordinator-" + principal.CallerTaskID
 	return ws.NewResponse(msg.ID, msg.Action, snapshot)
@@ -368,6 +378,10 @@ func (h *Handlers) handleInvokeCoordinatorPluginTool(ctx context.Context, msg *w
 	}
 	if h.pluginSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tools are unavailable", nil)
+	}
+	if !h.coordinatorPhase2Enabled() {
+		h.logPluginToolDenial(ctx, msg.Action, "phase2_disabled")
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator plugin tools require phase 2", nil)
 	}
 	binding, ok := coordinatorPluginBinding(ctx, principal)
 	if !ok {

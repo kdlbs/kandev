@@ -335,11 +335,13 @@ snapshot, and the server rechecks each descriptor's exact installation and
 policy version against the same binding before registration. In the
 wave of task 02 the catalog holds the phase-1 seven; task 03 and task 04
 each add their tools' rows and handlers, and task 04 owns the end-state test
-that registered equals bound. The invariant this task tests is therefore:
-registered tools = bound names that have a catalog handler; auto-approved
-names = bound names; bound names = `BoundToolNames` at open (equal to
-`ToolNames(policy, phase2)` of the policy as read at open, or the phase-1
-seven for a conversation without a binding). A tool that is not
+that registered equals bound. The invariant this task tests is therefore: registered core tools = bound
+`ToolNames` that have a catalog handler; registered plugin tools = the exposed
+names derived from exact `PluginTools` references, filtered again by the live
+installation and policy version; auto-approved names = the bound `ToolNames`
+plus those derived plugin names; bound core names = `BoundToolNames` at open
+(equal to `ToolNames(policy, phase2)` of the policy as read at open, or the
+phase-1 seven for a conversation without a binding). A tool that is not
 registered is unknown to the session's MCP server: the agent's call fails
 there, before any backend action, so it has no refused row (`002.2`). The
 guard's `not_in_profile` covers the calls that do reach the backend: a

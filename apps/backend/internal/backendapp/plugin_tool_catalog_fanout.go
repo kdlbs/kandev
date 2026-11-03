@@ -68,16 +68,18 @@ func (f *pluginToolCatalogFanout) SetPluginToolsForAllExecutions(ctx context.Con
 	defer f.mu.RUnlock()
 
 	var errs []error
-	if executions != nil {
-		if err := executions.SetPluginToolsForAllExecutions(ctx, snapshot); err != nil {
-			errs = append(errs, err)
-		}
-	}
+	// Refresh in-process servers first: a stalled remote agentctl push must
+	// not delay tools/list_changed for healthy external clients.
 	for _, subscriber := range subscribers {
 		if err := subscriber.RefreshPluginTools(ctx); err != nil {
 			if f.logger != nil {
 				f.logger.Warn("in-process plugin tool catalog refresh failed", zap.Error(err))
 			}
+			errs = append(errs, err)
+		}
+	}
+	if executions != nil {
+		if err := executions.SetPluginToolsForAllExecutions(ctx, snapshot); err != nil {
 			errs = append(errs, err)
 		}
 	}

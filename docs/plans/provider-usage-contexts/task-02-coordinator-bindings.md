@@ -46,7 +46,7 @@ granting plugins to phase-1 coordinators.
 Run from the host root after Task 01 setup:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/coordinator/... ./internal/mcp/... ./internal/plugins/...)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/coordinator/... ./internal/mcp/... ./internal/plugins/...)
 python3 scripts/lint-spec-files.py --all
 python3 scripts/list-docs.py validate
 git diff --check

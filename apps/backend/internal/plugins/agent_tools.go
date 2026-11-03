@@ -613,6 +613,9 @@ func invokeRemoteAgentTool(ctx context.Context, remote interface {
 		toolContext.InstallationID = authorization.InstallationID
 		toolContext.AgentToolNames = append([]string(nil), authorization.ToolNames...)
 	}
+	if authorization := invocation.CoordinatorToolAuthorization; authorization != nil {
+		toolContext.InstallationID = authorization.InstallationID
+	}
 	return remote.InvokeAgentTool(callCtx, &pluginsdk.AgentToolRequest{
 		InvocationID: invocation.InvocationID,
 		Name:         localName,

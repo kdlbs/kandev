@@ -33,7 +33,8 @@ func (m *Manager) coordinatorAutoApprovedNames() []string {
 		return nil
 	}
 	names := profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
-	if policy := m.cfg.McpProfile.CoordinatorToolPolicy; policy != nil {
+	if policy := m.cfg.McpProfile.CoordinatorToolPolicy; policy != nil &&
+		policy.Version == profile.CoordinatorToolPolicyVersionV2 {
 		for _, tool := range policy.PluginTools {
 			names = append(names, plugintools.ExposedName(tool.PluginID, tool.LocalName))
 		}
