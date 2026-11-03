@@ -168,3 +168,18 @@ two affected phone cases passed again. The automation suite passed all 16
 tests, including tab accessibility and selection. Targeted ESLint, formatting,
 specification validation, and whitespace checks passed. The existing layout
 and controls remain; no mobile redesign was applied.
+
+### PR review validation
+
+Review follow-up extends the existing phone cases at 320px: Portuguese
+refresh and updated-time text must fit the reserved footer, and a long
+repository name must retain a reachable PR number, tab selection, and unlink
+controls. Both focused cases passed with retries disabled. Targeted ESLint
+passed. These checks preserve the accepted presentation; no product behavior
+or public documentation change is required.
+
+The fixed desktop height is deliberate, including short and empty results,
+as specified in the stable-frame design. Keyboard transfer is covered by the
+desktop stability scenarios: tabbing from the link into the scroll body keeps
+the disclosure open after the pointer leaves. The shared hover lifecycle
+cancels close timers on focus entry and rechecks focus presence before closing.

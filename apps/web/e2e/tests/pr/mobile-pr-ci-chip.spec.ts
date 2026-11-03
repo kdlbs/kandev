@@ -82,15 +82,15 @@ async function seedTaskWithPRAndTodos(args: SeedTaskArgs): Promise<string> {
   });
 }
 
-async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
+async function seedTaskWithTwoPRs(args: SeedTaskArgs, secondRepo = "api"): Promise<string> {
   const taskId = await seedTaskWithPR(args);
   await args.apiClient.mockGitHubAssociateTaskPR({
     workspace_id: args.seedData.workspaceId,
     task_id: taskId,
     owner: OWNER,
-    repo: "api",
+    repo: secondRepo,
     pr_number: 100,
-    pr_url: `https://github.com/${OWNER}/api/pull/100`,
+    pr_url: `https://github.com/${OWNER}/${secondRepo}/pull/100`,
     pr_title: "PR events mobile PR",
     head_branch: "feat/mobile-pr-events",
     base_branch: "main",
@@ -118,8 +118,13 @@ test.describe("mobile PR CI chip drawer", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 320, height: 844 });
+    await testPage
+      .context()
+      .addCookies([{ name: "kandev_locale", value: "pt-pt", url: backend.baseUrl }]);
     const taskId = await seedTaskWithPR({ apiClient, seedData, title: "Stable mobile PR action" });
     await apiClient.mockGitHubSeedPRFeedback({
       owner: OWNER,
@@ -144,6 +149,16 @@ test.describe("mobile PR CI chip drawer", () => {
       await session.tapPRStatusChip();
       const drawer = session.prStatusChipDrawer();
       await waitForFiniteAnimations(drawer);
+      await expect(testPage.locator("html")).toHaveAttribute("lang", "pt-pt");
+      const footer = drawer.getByTestId("pr-popover-footer");
+      const footerFits = () =>
+        footer.evaluate((element) => {
+          const slot = element.parentElement!.getBoundingClientRect();
+          const text = element.querySelector("span")!.getBoundingClientRect();
+          return text.left >= slot.left && text.right <= slot.right && text.bottom <= slot.bottom;
+        });
+      await expect(drawer.getByTestId("pr-popover-updating")).toHaveText("A atualizar…");
+      expect(await footerFits()).toBe(true);
       const link = drawer.getByTestId("pr-popover-pr-link");
       await expect(link).toBeVisible();
       const before = await link.boundingBox();
@@ -156,6 +171,8 @@ test.describe("mobile PR CI chip drawer", () => {
       gate.resolve();
       await response;
       await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(24);
+      await expect(drawer.getByTestId("pr-popover-updated-at")).toContainText("atualizado");
+      expect(await footerFits()).toBe(true);
       const after = await link.boundingBox();
       expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
       expect(
@@ -480,16 +497,19 @@ test.describe("mobile PR CI chip drawer", () => {
   }) => {
     test.setTimeout(120_000);
     await testPage.setViewportSize({ width: 320, height: 844 });
-    const taskId = await seedTaskWithTwoPRs({
-      apiClient,
-      seedData,
-      title: "Mobile multi PR unlink",
-      prOverrides: {
-        checks_state: "success",
-        checks_total: 2,
-        checks_passing: 2,
+    const taskId = await seedTaskWithTwoPRs(
+      {
+        apiClient,
+        seedData,
+        title: "Mobile multi PR unlink",
+        prOverrides: {
+          checks_state: "success",
+          checks_total: 2,
+          checks_passing: 2,
+        },
       },
-    });
+      "repository-name-long-enough-to-exercise-truncation",
+    );
     const session = await openTask(testPage, taskId);
 
     await expect(session.prStatusChip()).toHaveAttribute("data-pr-count", "2", {
@@ -501,6 +521,21 @@ test.describe("mobile PR CI chip drawer", () => {
     await waitForFiniteAnimations(session.prStatusChipDrawer());
     const tabs = session.prStatusChipDrawer().getByTestId("pr-multi-popover-tabs");
     expect(await tabs.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    const longTab = tabs.getByRole("tab").filter({ hasText: "#100" });
+    const number = longTab.getByText("#100", { exact: true });
+    expect(
+      await number.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest('[role="tab"]') === element.closest('[role="tab"]')
+        );
+      }),
+    ).toBe(true);
+    await longTab.tap();
+    await expect(longTab).toHaveAttribute("aria-selected", "true");
+    await tabs.getByRole("tab").filter({ hasText: "#99" }).tap();
     await prCapture.screenshot("mobile-pr-unlink-drawer", {
       caption: "Mobile multi-PR drawer with visible unlink controls inside the tabs",
     });
