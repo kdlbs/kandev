@@ -270,7 +270,7 @@ func historicalProcessTermination(request DeliveryRecordEvidenceRequest, liveExe
 	if request.OriginalRuntime == nil || request.OriginalRuntime.Validate() != nil {
 		return nil
 	}
-	terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime)
+	terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime)
 	if err != nil {
 		return nil
 	}

@@ -180,6 +180,14 @@ func readProcStat(pid int) (procStat, error) {
 }
 
 func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProcess, error) {
+	return liveProcessesSince(rootStartTime, func(stat procStat) bool { return stat.sessionID == sessionID })
+}
+
+func processesInOwnedGroup(groupID int, rootStartTime uint64) ([]ownedProcess, error) {
+	return liveProcessesSince(rootStartTime, func(stat procStat) bool { return stat.groupID == groupID })
+}
+
+func liveProcessesSince(rootStartTime uint64, member func(procStat) bool) ([]ownedProcess, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate processes: %w", err)
@@ -197,7 +205,7 @@ func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProces
 		if err != nil {
 			return nil, err
 		}
-		if stat.sessionID != sessionID || stat.startTime < rootStartTime || stat.state == 'Z' || stat.state == 'X' {
+		if !member(stat) || stat.startTime < rootStartTime || stat.state == 'Z' || stat.state == 'X' {
 			continue
 		}
 		processes = append(processes, ownedProcess{
@@ -278,6 +286,34 @@ func OwnedSessionTerminated(identity Identity) (bool, error) {
 }
 
 // Procfs can return ESRCH when a process exits after its stat file was opened.
+// OwnedGroupTerminated reports whether every process in the identity's group
+// that started at or after the leader's birth has exited.
+func OwnedGroupTerminated(identity Identity) (bool, error) {
+	if identity.Validate() != nil || identity.GroupID != identity.PID {
+		return false, ErrUnverifiableIdentity
+	}
+	wantBoot, start, err := parseBirthToken(identity.BirthToken)
+	if err != nil {
+		return false, err
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return false, fmt.Errorf("read kernel boot identity: %w", err)
+	}
+	if strings.TrimSpace(string(boot)) != wantBoot {
+		return true, nil
+	}
+	stat, err := readProcStat(identity.PID)
+	if err != nil && !processNoLongerExists(err) {
+		return false, err
+	}
+	if err == nil && stat.startTime == start && stat.groupID == identity.GroupID && stat.state != 'Z' && stat.state != 'X' {
+		return false, nil
+	}
+	processes, err := processesInOwnedGroup(identity.GroupID, start)
+	return len(processes) == 0, err
+}
+
 func processNoLongerExists(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }
