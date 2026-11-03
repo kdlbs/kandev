@@ -77,6 +77,45 @@ function buildImage(tag: string, dockerfile: string): void {
   }
 }
 
+/**
+ * Docker agents write to their mounted, worker-owned session directories as
+ * root. Return that isolated subtree to the host owner before the backend
+ * fixture removes its temporary root.
+ */
+export function restoreAgentSessionDirectoryOwnership(
+  kandevHomeDir: string,
+  runCommand: (file: string, args: string[]) => void = runFixtureCommand,
+): void {
+  const sessionRoot = path.join(kandevHomeDir, "agent-sessions");
+  let sessionRootStat: fs.Stats;
+  try {
+    sessionRootStat = fs.lstatSync(sessionRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (!sessionRootStat.isDirectory()) {
+    throw new Error(`Docker agent session root is not a directory: ${sessionRoot}`);
+  }
+
+  const owner = fs.statSync(kandevHomeDir);
+  runCommand("docker", [
+    "run",
+    "--rm",
+    "--user",
+    "0:0",
+    "--volume",
+    `${sessionRoot}:/agent-sessions`,
+    "--entrypoint",
+    "chown",
+    E2E_IMAGE_TAG,
+    "-R",
+    "--no-dereference",
+    `${owner.uid}:${owner.gid}`,
+    "/agent-sessions",
+  ]);
+}
+
 function listScopedKandevContainers(scope: string, scanAll = false): string[] | null {
   const list = spawnSync(
     "docker",
