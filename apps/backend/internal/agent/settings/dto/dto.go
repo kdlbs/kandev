@@ -210,13 +210,14 @@ type ListAgentsResponse struct {
 }
 
 type AgentDiscoveryDTO struct {
-	Name              string           `json:"name"`
-	SupportsMCP       bool             `json:"supports_mcp"`
-	MCPConfigPath     string           `json:"mcp_config_path,omitempty"`
-	InstallationPaths []string         `json:"installation_paths,omitempty"`
-	Available         bool             `json:"available"`
-	MatchedPath       string           `json:"matched_path,omitempty"`
-	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+	Name                 string           `json:"name"`
+	SupportsMCP          bool             `json:"supports_mcp"`
+	SupportsLocalInstall bool             `json:"supports_local_install,omitempty"`
+	MCPConfigPath        string           `json:"mcp_config_path,omitempty"`
+	InstallationPaths    []string         `json:"installation_paths,omitempty"`
+	Available            bool             `json:"available"`
+	MatchedPath          string           `json:"matched_path,omitempty"`
+	LoginCommand         *LoginCommandDTO `json:"login_command,omitempty"`
 
 	// Vendor CLI state. Present only for agent types that declare a host CLI;
 	// every other agent omits both fields.
@@ -344,22 +345,23 @@ type ToolStatusDTO struct {
 }
 
 type AvailableAgentDTO struct {
-	Name               string                          `json:"name"`
-	DisplayName        string                          `json:"display_name"`
-	Description        string                          `json:"description,omitempty"`
-	InstallScript      string                          `json:"install_script,omitempty"`
-	SupportsMCP        bool                            `json:"supports_mcp"`
-	MCPConfigPath      string                          `json:"mcp_config_path,omitempty"`
-	InstallationPaths  []string                        `json:"installation_paths,omitempty"`
-	Available          bool                            `json:"available"`
-	MatchedPath        string                          `json:"matched_path,omitempty"`
-	Capabilities       AgentCapabilitiesDTO            `json:"capabilities"`
-	ModelConfig        ModelConfigDTO                  `json:"model_config"`
-	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
-	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
-	LoginCommand       *LoginCommandDTO                `json:"login_command,omitempty"`
-	RuntimeUpdate      *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
-	UpdatedAt          time.Time                       `json:"updated_at"`
+	Name                 string                          `json:"name"`
+	DisplayName          string                          `json:"display_name"`
+	Description          string                          `json:"description,omitempty"`
+	InstallScript        string                          `json:"install_script,omitempty"`
+	SupportsLocalInstall bool                            `json:"supports_local_install,omitempty"`
+	SupportsMCP          bool                            `json:"supports_mcp"`
+	MCPConfigPath        string                          `json:"mcp_config_path,omitempty"`
+	InstallationPaths    []string                        `json:"installation_paths,omitempty"`
+	Available            bool                            `json:"available"`
+	MatchedPath          string                          `json:"matched_path,omitempty"`
+	Capabilities         AgentCapabilitiesDTO            `json:"capabilities"`
+	ModelConfig          ModelConfigDTO                  `json:"model_config"`
+	PermissionSettings   map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
+	PassthroughConfig    *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
+	LoginCommand         *LoginCommandDTO                `json:"login_command,omitempty"`
+	RuntimeUpdate        *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
+	UpdatedAt            time.Time                       `json:"updated_at"`
 }
 
 // AgentUpdateMode selects the built-in runtime update contract.

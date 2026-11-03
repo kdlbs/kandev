@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -1902,12 +1903,22 @@ func isModelConfigID(configID string, cachedConfig []streams.ConfigOption) bool 
 
 // Authenticate triggers ACP session/authenticate for a given auth method.
 func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
+	var policy *acpcompat.AuthPolicy
+	if a.cfg != nil {
+		policy = a.cfg.AuthPolicy
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) && methodID != policy.MethodID {
+		return fmt.Errorf("antigravity authentication method %q is not supported", methodID)
+	}
 	a.mu.RLock()
 	conn := a.acpConn
 	a.mu.RUnlock()
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	if policy != nil && acpcompat.IsAntigravity(a.agentID) {
+		return a.authenticateAntigravity(ctx, policy)
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{

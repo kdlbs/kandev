@@ -121,6 +121,10 @@ type Adapter struct {
 	// Agent identity (from config, for logging)
 	agentID string
 
+	// antigravityJournalRoot overrides the host native journal root. Empty
+	// resolves the current user's home; tests and qualification set it.
+	antigravityJournalRoot string
+
 	// backgroundWorkEnabled is the effective shared background-work feature
 	// value resolved by the backend for this launch.
 	backgroundWorkEnabled bool
@@ -140,6 +144,11 @@ type Adapter struct {
 	// Agent info (populated after Initialize)
 	agentInfo    *AgentInfo
 	capabilities acp.AgentCapabilities
+
+	// authStatus is the transient provider authentication snapshot used by the
+	// dedicated operator sign-in instance. It never contains durable state.
+	authStatus    streams.AuthStatus
+	authConsentCh chan string
 
 	// promptQueueing caches the negotiated prompt-queueing advertisement from the
 	// initialize response. It is derived once under `mu` rather than re-read from
@@ -641,10 +650,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
-		ClientInfo: &acp.Implementation{
-			Name:    "kandev-agentctl",
-			Version: "1.0.0",
-		},
+		ClientInfo:         clientInfoForAgent(a.agentID),
 	})
 	if err != nil {
 		span.RecordError(err)
@@ -707,6 +713,10 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+	if err := a.applyAntigravityPersonalAuth(ctx, resp); err != nil {
 		span.RecordError(err)
 		return err
 	}

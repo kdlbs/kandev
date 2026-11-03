@@ -730,6 +730,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 

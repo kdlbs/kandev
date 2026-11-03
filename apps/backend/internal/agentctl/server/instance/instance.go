@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -226,6 +227,10 @@ type CreateRequest struct {
 	// ProviderGatewayAuth, when set, authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.

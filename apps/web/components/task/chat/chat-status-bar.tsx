@@ -25,6 +25,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
@@ -215,6 +216,7 @@ function ChatStatusBarRightControls({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarRightControlsProps) {
+  const subscriptionUsage = useSessionSubscriptionUsage(sessionId);
   return (
     <div
       data-testid="chat-status-bar-right-controls"
@@ -239,6 +241,7 @@ function ChatStatusBarRightControls({
               taskId={taskId}
               sessionId={sessionId}
               detailActive={detailActive}
+              subscriptionBilling={subscriptionUsage}
             />
           ) : null
         }
@@ -369,16 +372,15 @@ export function ChatStatusBar({
     showScrollToStart,
     onScrollToStart,
   };
-  if (
-    !shouldRenderChatStatusBar({
-      hasTask: !!taskId,
-      hasTodos: showTodos,
-      hasQueueChip: !!queueChip,
-      showRightControls,
-      showProceed,
-      hasGoal: !!activeGoal,
-    })
-  ) {
+  const renderStatusBar = shouldRenderChatStatusBar({
+    hasTask: !!taskId,
+    hasTodos: showTodos,
+    hasQueueChip: !!queueChip,
+    showRightControls,
+    showProceed,
+    hasGoal: !!activeGoal,
+  });
+  if (!renderStatusBar) {
     return null;
   }
   // PRMergedBanner returns null internally when not applicable

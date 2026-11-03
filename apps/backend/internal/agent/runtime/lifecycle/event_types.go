@@ -571,7 +571,10 @@ type PermissionRequestEventPayload struct {
 	ToolCallID       string             `json:"tool_call_id"`
 	Title            string             `json:"title"`
 	Options          []PermissionOption `json:"options"`
-	ActionType       string             `json:"action_type"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput bool   `json:"human_input,omitempty"`
+	ActionType string `json:"action_type"`
 	// AutoApprovedOptionID names the option agentctl already selected. A
 	// nonempty value makes this payload an audit record of an answered
 	// request rather than a prompt awaiting a person.
