@@ -441,3 +441,49 @@ browser runs passed; the CI assertions and artifacts provide the failure
 observations. The rejected export-state precondition was corrected to the
 content-completeness contract before the successful repeated checks. All changes
 in this batch are test-only. Public behavior and visual composition are unchanged.
+
+
+## Package detail and unavailable acceptance repair (2026-11-03)
+
+User task 1 saved Configuration On at revision 5, while its session returned
+binding_state legacy and no accepted manifest. The next-start comparison helper
+required accepted evidence and returned no rows. It now exposes the owned desired
+selection with a neutral Selected label and current-agent Unknown explanation.
+Valid accepted differences retain Add/Remove labels, and foreign desired owners
+remain hidden. Actual attachment rows, health and observed tools stay unchanged.
+
+Package detail now labels its type, supplies Back to packages, uses a compact
+choice/authority card and one timing notice, and collapses tools and metadata.
+The list names Built-in packages. Exclusion help appears only with inherited
+inventory or saved exclusion intent; dormant/disabled restore remains available.
+Translations cover every shipped locale and pseudo. Traditional Chinese settings
+were generated; unrelated generator changes to automation catalogs were removed.
+
+RED: `pnpm --dir apps/web exec vitest run components/task/chat/mcp-explorer/builtin-mcp-view-model.test.ts`
+failed the three new selection cases. The managed desktop new-case run with
+`--no-build --project chromium e2e/tests/settings/builtin-mcp-management.spec.ts
+-- --retries=0 -g 'identifies package details|keeps a saved package visible'`
+failed both UI regressions before implementation.
+
+GREEN (standard isolated environment, one worker, retries disabled):
+- Focused Vitest: eight files, 76 tests, passed. Includes built-in view/choice,
+  management/session hooks, explorer, exclusion and shared save coverage.
+- Full web typecheck and changed TS/TSX ESLint with zero warnings passed.
+- `pnpm --dir apps/web run i18n:check` passed all shipped languages and pseudo.
+- Managed chromium `e2e/tests/settings/builtin-mcp-management.spec.ts`: nine
+  passed (38.5s) after updating the intentional timing-copy expectation.
+- Managed mobile-chrome `e2e/tests/settings/mobile-builtin-mcp-management.spec.ts`:
+  nine passed (54.9s), including translated layouts and 320px touch controls.
+- Managed chromium inherited/dormant exclusion and detail cases: two passed
+  (26.7s). The corresponding mobile cases: two passed (29.8s).
+- Final dark desktop detail capture: one passed (6.1s). Phone dark detail is
+  captured at 393px after its minimum-width checks and metadata collapse.
+- Public-doc test runner and validator, doc catalog and full spec lint passed.
+
+Read-only instance evidence is retained in the isolated root under
+`{management,session}-<task-id>-ux-baseline.json`. Original RED and final GREEN
+logs use `/tmp/kandev-4762-package-ux-*.log`. Images are ignored files in
+`.pr-screenshots/builtin-mcp-4762/` and delivered through Kandev FilePreview.
+The existing manual instance receives refreshed SPA assets after publication;
+its backend and user choices are preserved. No main runtime or sibling workspace
+is changed. No merge is authorized.

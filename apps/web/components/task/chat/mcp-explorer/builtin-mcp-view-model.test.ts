@@ -62,16 +62,36 @@ it("lists a future addition and removal without manufacturing attachment evidenc
   expect(value.bound?.manifest.packages).toEqual(["core", "walkthroughs"]);
   expect(value.history).toBeUndefined();
 });
-it("does not compare unknown, foreign or legacy package acceptance", () => {
-  const unknown = view();
-  delete unknown.bound;
-  expect(builtinPendingPackages(unknown)).toEqual([]);
+it.each(["unknown", "legacy"] as const)(
+  "keeps saved selections visible with %s acceptance without inferring additions",
+  (bindingState) => {
+    const value = view();
+    delete value.bound;
+    value.binding_state = bindingState;
+    value.desired = {
+      ...manifest,
+      packages: ["core", "configuration"],
+      origins: { core: "required", configuration: "task" },
+    };
+    expect(builtinPendingPackages(value)).toEqual([
+      { id: "core", action: "selected" },
+      { id: "configuration", action: "selected" },
+    ]);
+    expect(builtinPackageState(value, "configuration").bound).toBeUndefined();
+    expect(value.history).toBeUndefined();
+  },
+);
+it("shows owned saved choices without comparing foreign acceptance", () => {
   const foreign = view();
   foreign.bound!.execution_id = "foreign";
-  expect(builtinPendingPackages(foreign)).toEqual([]);
-  const wrongDesiredOwner = view();
-  wrongDesiredOwner.desired!.task_id = "foreign";
-  expect(builtinPendingPackages(wrongDesiredOwner)).toEqual([]);
+  expect(builtinPendingPackages(foreign)).toEqual([{ id: "core", action: "selected" }]);
+});
+it("does not expose a desired selection owned by another task or workspace", () => {
+  for (const owner of ["task_id", "workspace_id"] as const) {
+    const value = view();
+    value.desired![owner] = "foreign";
+    expect(builtinPendingPackages(value)).toEqual([]);
+  }
 });
 it("does not claim package changes for revision-only saves", () => {
   const value = view();

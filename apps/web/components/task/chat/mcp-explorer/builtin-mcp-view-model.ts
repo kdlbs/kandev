@@ -1,5 +1,10 @@
 import type { BuiltinMCPPackage, BuiltinMCPSessionView } from "@/lib/types/builtin-mcp";
 import { validBuiltinAcceptance } from "@/lib/state/slices/session-runtime/builtin-mcp-validation";
+
+type BuiltinPackageChange = {
+  id: BuiltinMCPPackage;
+  action: "selected" | "add" | "remove";
+};
 export function builtinPackageState(
   view: BuiltinMCPSessionView | undefined,
   id: BuiltinMCPPackage,
@@ -39,8 +44,10 @@ export function builtinPendingPackages(view: BuiltinMCPSessionView | undefined) 
     "walkthroughs",
     "diagnostics",
   ];
-  return ids.flatMap((id) => {
+  return ids.flatMap<BuiltinPackageChange>((id) => {
     const state = builtinPackageState(view, id);
+    if (state.bound === undefined)
+      return state.desired ? [{ id, action: "selected" as const }] : [];
     return state.pending
       ? [{ id, action: state.desired ? ("add" as const) : ("remove" as const) }]
       : [];

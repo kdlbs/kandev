@@ -5,6 +5,8 @@ import {
 import { expect, test } from "../../fixtures/test-base";
 import {
   checkBuiltinPendingAddition,
+  checkBuiltinPackageDetail,
+  checkBuiltinUnavailableAcceptance,
   checkBuiltinDirtyFeedback,
 } from "../../helpers/builtin-mcp-save-feedback";
 import {
@@ -90,4 +92,25 @@ test("shows change-aware package controls only for unsaved edits", async ({
   seedData,
 }) => {
   await checkBuiltinDirtyFeedback(testPage, apiClient, seedData, false);
+});
+
+test("identifies package details and hides empty exclusions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  await checkBuiltinPackageDetail(testPage, apiClient, seedData, false);
+  await testPage
+    .getByTestId("mcp-server-explorer")
+    .screenshot({ path: testInfo.outputPath("package-configuration.png") });
+});
+test("keeps a saved package visible without current acceptance", async ({
+  testPage,
+  apiClient,
+  seedData,
+}, testInfo) => {
+  await checkBuiltinUnavailableAcceptance(testPage, apiClient, seedData, false);
+  await testPage
+    .getByTestId("mcp-server-explorer")
+    .screenshot({ path: testInfo.outputPath("configuration-saved-unknown.png") });
 });

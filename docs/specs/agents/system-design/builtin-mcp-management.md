@@ -470,8 +470,12 @@ Connections also shows a separate next-process-start change list for desired
 packages that differ from a valid accepted manifest. Each addition or removal
 names the package and opens its existing Customize detail. A pending addition
 does not create an attachment row, health state, or observed tool count. Unknown
-or foreign acceptance cannot produce a claimed change comparison. Package rows
-in Customize show their effective choice and inheritance without opening detail.
+or foreign acceptance cannot produce a claimed comparison. Show owned saved
+selections with current-agent Unknown, without attachment rows or health.
+Customize shows effective choices and inheritance. Detail uses Built-in package,
+Back to packages, a compact choice card, one timing notice, and collapsed tools
+and ownership. Show exclusion help only for inherited servers or saved exclusions;
+keep dormant restore controls. Exclusion policy does not change.
 
 Task package editing reuses the settings change-aware treatment: changed fields
 and their framed group carry the shared dirty attributes, and one compact save

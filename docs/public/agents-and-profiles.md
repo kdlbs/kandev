@@ -1125,7 +1125,8 @@ After a definition is configured, select it where it should apply:
   additions under **Additional servers**. Inherited entries retain all contributing
   origins. Choose **Exclude for this session** to leave out one inherited server,
   or **Restore inheritance** to use its current inherited selections again.
-  Check **Connections** for evidence of delivery or loaded tools.
+  Exclusion help appears only when there are inherited servers or saved
+  exclusions. Check **Connections** for evidence of delivery or loaded tools.
 
 Selections combine every repository attached to the task, its profile, task,
 and session additions. An existing session can exclude a definition from this

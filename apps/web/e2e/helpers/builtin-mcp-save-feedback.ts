@@ -89,6 +89,89 @@ export async function checkBuiltinDirtyFeedback(
   await activate(page.getByTestId("builtin-mcp-save"), touch);
   await expect(bar).toHaveCount(0);
   await expect(field).toHaveAttribute("data-settings-dirty", "false");
-  await activate(page.getByRole("button", { name: "Back", exact: true }), touch);
+  await activate(page.getByRole("button", { name: "Back to packages", exact: true }), touch);
   await expect(page.getByTestId("builtin-mcp-package-configuration")).toContainText("On");
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-004.2, AC-AGENTS-BUILTIN-MCP-004.4
+export async function checkBuiltinPackageDetail(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  touch: boolean,
+) {
+  await page.addInitScript(() => localStorage.setItem("theme", "dark"));
+  if (touch) await page.setViewportSize({ width: 320, height: 760 });
+  await openPackages(page, api, seed, touch);
+  const explorer = page.getByTestId("mcp-server-explorer");
+  await expect(explorer.getByText("Saved session exclusions: 0", { exact: true })).toHaveCount(0);
+  await activate(page.getByTestId("builtin-mcp-package-configuration"), touch);
+  const detail = page.getByTestId("builtin-mcp-detail");
+  await expect(detail.getByText("Built-in package", { exact: true })).toBeVisible();
+  await expect(detail.getByRole("heading", { name: "Configuration", exact: true })).toBeVisible();
+  const back = detail.getByRole("button", { name: "Back to packages", exact: true });
+  await expect(back).toBeVisible();
+  await expect(
+    detail.getByText(
+      "Applies when a new agent process starts. Running or resumed agents keep their current tools.",
+      { exact: true },
+    ),
+  ).toHaveCount(1);
+  const metadata = detail.getByRole("button", { name: "Package details", exact: true });
+  await expect(metadata).toHaveAttribute("aria-expanded", "false");
+  await expect(detail.getByText("kandev-configuration", { exact: true })).not.toBeVisible();
+  await activate(metadata, touch);
+  await expect(detail.getByText("kandev-configuration", { exact: true })).toBeVisible();
+  await activate(metadata, touch);
+  await expect(detail.getByText("kandev-configuration", { exact: true })).not.toBeVisible();
+  if (touch) {
+    expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.setViewportSize({ width: 393, height: 852 });
+  }
+  await page
+    .getByTestId("mcp-customization-scroll")
+    .evaluate((node) => node.scrollTo({ top: 0, behavior: "instant" }));
+  await expect(detail.getByText("Built-in package", { exact: true })).toBeVisible();
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-003.3, AC-AGENTS-BUILTIN-MCP-004.1, AC-AGENTS-BUILTIN-MCP-004.5
+export async function checkBuiltinUnavailableAcceptance(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  touch: boolean,
+) {
+  const task = await openPackages(page, api, seed, touch);
+  const path = `**/api/v1/task-sessions/${task.session_id}/mcp-built-in`;
+  await page.route(path, async (route) => {
+    const response = await route.fetch();
+    const view = await response.json();
+    await route.fulfill({ response, json: { ...view, bound: null, binding_state: "legacy" } });
+  });
+  try {
+    await activate(page.getByTestId("builtin-mcp-package-configuration"), touch);
+    await chooseBuiltin(page, "configuration", "On", touch);
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith(`/tasks/${task.id}/mcp-built-in/preferences`),
+    );
+    await activate(page.getByTestId("builtin-mcp-save"), touch);
+    expect((await saved).ok()).toBe(true);
+    await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
+    await activate(page.getByTestId("mcp-connections-tab"), touch);
+    await expect(page.getByTestId("builtin-mcp-pending-configuration")).toContainText(
+      "Configuration",
+    );
+    await expect(page.getByTestId("builtin-mcp-pending-configuration")).toContainText("Selected");
+    await expect(page.getByTestId("builtin-mcp-pending-changes")).toContainText(
+      "Current agent packages are unknown",
+    );
+    await expect(page.getByTestId("mcp-server-row-kandev-configuration")).toHaveCount(0);
+  } finally {
+    await page.unroute(path);
+  }
 }

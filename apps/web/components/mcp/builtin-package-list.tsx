@@ -93,7 +93,7 @@ export function BuiltinPackageList({
   return (
     <section ref={root} className="min-w-0 space-y-3" data-testid="builtin-mcp-packages">
       <h2 className="text-base font-semibold">{t("settings:builtinMcp.title")}</h2>
-      <p className="text-sm text-muted-foreground">{t("settings:builtinMcp.owner")}</p>
+      <p className="text-sm text-muted-foreground">{t("settings:builtinMcp.packageSummary")}</p>
       <BuiltinMCPError editor={editor} />
       {editor.pending && <p role="status">{t("common:loading")}</p>}
       <div

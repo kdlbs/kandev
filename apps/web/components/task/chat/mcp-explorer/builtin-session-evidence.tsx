@@ -25,12 +25,23 @@ export function BuiltinPendingPackages() {
   const context = useContext(Context);
   const changes = builtinPendingPackages(context?.view);
   if (!context || changes.length === 0) return null;
+  const changeLabels = {
+    selected: "settings:builtinMcp.selected",
+    add: "settings:mcpPendingAdd",
+    remove: "settings:mcpPendingRemove",
+  };
   return (
     <section className="mb-4 space-y-2" data-testid="builtin-mcp-pending-changes">
       <h3 className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         {t("settings:builtinMcp.desired")}
       </h3>
-      <p className="px-2 text-xs text-muted-foreground">{t("settings:builtinMcp.pending")}</p>
+      <p className="px-2 text-xs text-muted-foreground">
+        {t(
+          changes.some(({ action }) => action === "selected")
+            ? "settings:builtinMcp.currentUnknown"
+            : "settings:builtinMcp.pending",
+        )}
+      </p>
       {changes.map(({ id, action }) => (
         <Button
           key={id}
@@ -46,9 +57,7 @@ export function BuiltinPendingPackages() {
           <span className="min-w-0 break-words">
             {t(`settings:builtinMcp.packages.${id}.label`)}
           </span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {t(action === "add" ? "settings:mcpPendingAdd" : "settings:mcpPendingRemove")}
-          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">{t(changeLabels[action])}</span>
         </Button>
       ))}
     </section>

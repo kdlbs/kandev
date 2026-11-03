@@ -39,7 +39,7 @@ export async function checkBuiltinWorkspace(page: Page, api: ApiClient, touch: b
       page.getByRole("listbox").getByRole("option", { name: "On by default", exact: true }),
     ).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await activate(detail.getByRole("button", { name: "Back", exact: true }), touch);
+    await activate(detail.getByRole("button", { name: "Back to packages", exact: true }), touch);
     await expect(page.getByTestId("builtin-mcp-package-configuration")).toBeFocused();
     await activate(page.getByTestId("builtin-mcp-package-diagnostics"), touch);
     await chooseBuiltin(page, "diagnostics", "Blocked", touch);
@@ -108,16 +108,14 @@ export async function checkBuiltinTask(page: Page, api: ApiClient, seed: SeedDat
     )
     .toBe("on");
   await expect(save).toHaveCount(0);
-  await activate(explorer.getByRole("button", { name: "Back", exact: true }), touch);
+  await activate(explorer.getByRole("button", { name: "Back to packages", exact: true }), touch);
   await activate(explorer.getByTestId("builtin-mcp-package-walkthroughs"), touch);
   await chooseBuiltin(page, "walkthroughs", "Off", touch);
   await activate(save, touch);
   await expect
     .poll(async () => (await builtinView(api, "tasks", task.id)).preferences?.packages.walkthroughs)
     .toBe("off");
-  await expect(explorer).toContainText(
-    "Running and resumed processes keep their accepted packages",
-  );
+  await expect(explorer).toContainText("Running or resumed agents keep their current tools");
   const { sessions } = await api.listTaskSessions(task.id);
   const current = sessions.find((entry) => entry.is_primary)!;
   const evidenceResponse = await api.rawRequest(
@@ -246,7 +244,7 @@ export async function checkBuiltinCreationBack(page: Page, touch: boolean) {
       true,
     );
   });
-  await activate(packages.getByRole("button", { name: "Back", exact: true }), touch);
+  await activate(packages.getByRole("button", { name: "Back to packages", exact: true }), touch);
   await expect(packages.getByTestId("builtin-mcp-package-configuration")).toBeFocused();
   await expect(form).toHaveAttribute("data-submissions", "0");
   await expect(dialog).toBeVisible();

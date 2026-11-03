@@ -153,6 +153,73 @@ need clear labels. All seven locales are required; generate Traditional Chinese.
 
 `sequential`
 
+## Current user-review repair (2026-11-03)
+
+Implementation proceeds within the reviewed UI-02 package and existing
+AC-003.3, AC-004.1 through .5. The user requested a clearer package detail,
+visible saved Configuration selection, and no empty exclusions section.
+This is presentation repair, not a new injection or exclusion authority.
+
+Read-only evidence: isolated task 1 has preference revision 5, Configuration On,
+and an owned desired manifest, but its session reports legacy with no bound
+manifest. The existing pending-difference helper returns no rows without a
+valid accepted snapshot. That hides the saved selection. Existing regression
+coverage explicitly expects this empty result, so it misses the user's state.
+The exclusions introduction is currently gated only on callback presence.
+Detail has a generic Back button, a Built-in badge, repeated timing copy and
+expanded technical ownership/context text; its sticky background mismatches
+the desktop dialog.
+
+Sequential work:
+1. Add a failing pure regression for owned selected packages with unknown or
+   legacy acceptance; preserve foreign-owner and no-fabricated-delta coverage.
+   Extend desktop/phone browser coverage for saved opt-in with missing
+   acceptance, package identity/navigation, and no empty exclusion help.
+2. Keep next-start selections visible with a neutral current-agent Unknown
+   explanation. Retain the valid accepted comparison and actual evidence path.
+   Recompose package detail around a labelled header, compact choice card,
+   concise authority/timing, and collapsed technical metadata. Keep one draft
+   and shared dirty/save controls. Show exclusion help only when inherited
+   inventory or saved exclusion intent exists; preserve dormant restore.
+3. Run focused units, typecheck, changed lint, i18n and the desktop/phone package
+   journeys plus inherited/dormant exclusion journeys. Use single workers and
+   retries disabled. Capture real desktop and phone detail/Connections views
+   through file previews. Update public behavior documentation and results.
+
+UI-02 desktop: compact Back to packages > Built-in package / Configuration >
+purpose > task-choice card with effective value and shared mutation warning >
+one next-start explanation > Tools and Package details disclosures. The sticky
+navigation matches the surrounding surface. The panel owns its save bar.
+Phone uses the existing full-height explorer and the same hierarchy, one content
+scroller, 44px active targets, reachable Back/Close/Save, and no nested drawer.
+Nearest exemplar: the existing explorer detail drill-down and settings change-
+aware save surface. Logic, choice state, error handling and permissions are
+shared across viewports. Verify 320/393/767px plus the 768px boundary and touch
+900px using the existing translated-detail case; preserve focus and drafts.
+
+Connections with known acceptance retains next-start additions/removals. With
+unknown acceptance it shows saved selected packages, explicitly says the current
+agent set is unknown, and makes no claim that an agent connected or changed.
+
+Repair completed. The pure regressions first failed in unknown, legacy and
+foreign-acceptance cases; both desktop regressions failed on the expected empty
+exclusion help and missing saved Configuration row. After repair, 76 focused
+frontend tests pass across eight files. All nine desktop package journeys and
+nine phone journeys pass. The existing inherited/dormant exclude/restore journey
+also passes on desktop and phone, preserving saved restore actions. Dark detail
+captures passed separately; phone capture uses 393px after 320px control checks.
+The translated-detail case covers 320/393/767/768/900px and dark/light. All runs
+use one worker and retries disabled. An old timing-copy assertion was updated to
+the intentional shorter wording before the final desktop pass.
+
+Full typecheck, changed-file ESLint, seven-language/pseudo validation, public-doc
+validation/tests, document catalog and spec lint pass. Shared exclusion help was
+extracted into its existing component owner to stay within complexity limits.
+No backend, injection, startup, permission or stored-preference behavior changed.
+Current screenshots live under ignored `.pr-screenshots/builtin-mcp-4762/` and
+are delivered through task FilePreview. Exact logs use the
+`/tmp/kandev-4762-package-ux-` prefix. See implementation-results for commands.
+
 ## Results
 
 ### User-reported save feedback correction (2026-11-02)

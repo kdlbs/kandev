@@ -12,7 +12,7 @@ these packages to themselves.
 ## Choose packages for a task
 
 1. Open the MCP button beside the task's chat composer, then **Customize**.
-2. Open **Built-in** and select a package.
+2. Open **Built-in packages** and select a package.
 3. Choose **Inherit workspace policy**, **On**, or **Off**.
 4. Select **Save changes**.
 
@@ -21,7 +21,7 @@ workspace policy. Changed choices use the settings change highlight. The compact
 save bar appears while edits are unsaved; its **Reset** restores saved choices.
 **Reset all packages to defaults** stages a separate change that still needs Save.
 
-In **New Task**, expand **Built-in** to choose packages before the first start.
+In **New Task**, expand **Built-in packages** to choose packages before the first start.
 Those choices are saved as part of task creation. A rejected choice prevents that
 creation from starting an agent.
 
@@ -41,13 +41,14 @@ Core supplies shared discovery, lifecycle, plans, questions, and coordination
 tools. Regular tasks can discover visible executors without enabling Configuration.
 Rich Output supplies native charts, comparisons, checks, and file previews. Walkthroughs
 supplies guided explanations of changes. Diagnostics supplies diagnostic bundles.
-The package detail lists registered tools and eligible contexts; profile
-capabilities can restrict the tools further.
+Package detail identifies the package and its task choice. Expand the registered
+tool list or **Package details** for its server name, ownership, and eligible
+contexts. Profile capabilities can restrict the tools further.
 
 ## Set workspace limits and defaults
 
 Open **Settings > Workspaces > your workspace > MCP servers > Configured**,
-then select a **Built-in** package.
+then select a **Built-in packages** package.
 
 - **Blocked** prevents regular tasks from selecting that package.
 - **Allow explicit task selection** keeps it off unless a human chooses On for a task.
@@ -83,6 +84,8 @@ unknown, not zero. One package's evidence does not describe another package.
 Connections also lists pending package additions and removals under **Next process
 start**. Select a pending package to review its choice. An added package stays
 separate from the current process's connections until a new process accepts it.
+If the current agent's package set is unknown, the saved selections remain
+visible with an Unknown explanation. They are not reported as new connections.
 
 If a Walkthrough request is unavailable, inspect its task choice and current
 process acceptance. After changing the choice, start a new process. Refresh

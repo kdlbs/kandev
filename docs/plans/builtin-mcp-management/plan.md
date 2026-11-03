@@ -53,6 +53,13 @@ revision. No reviewed implementation package has been found. Autopilot remains
 off. No workers, additional tasks/sessions, commits, pushes, or merge are
 part of this design turn. Recheck current base/contracts before implementation.
 
+## Current user-review UI repair (2026-11-03)
+
+Work order 03 completed the user's package-detail, missing saved selection
+and empty exclusion-help feedback. Follow its current repair section and the
+existing UI-02/AC-003.3/AC-004 contract. No runtime injection, permission or
+exclusion semantics change. The existing implementation authorization applies.
+
 ## Registration cleanup authorized on 2026-11-02
 
 The user requested completion of the registration cleanup after the latest main

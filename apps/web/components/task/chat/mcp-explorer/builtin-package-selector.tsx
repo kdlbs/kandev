@@ -32,8 +32,10 @@ export function BuiltinPackageSelector({ editor, selected, select }: BuiltinPack
       ) : (
         <BuiltinPackageList returnFocus={returnFocus.current} editor={editor} onSelect={select} />
       )}
-      <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.taskTiming")}</p>
-      {editor.view?.can_edit && (
+      {!item && (
+        <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.taskTiming")}</p>
+      )}
+      {!item && editor.view?.can_edit && (
         <Button
           type="button"
           variant="ghost"
