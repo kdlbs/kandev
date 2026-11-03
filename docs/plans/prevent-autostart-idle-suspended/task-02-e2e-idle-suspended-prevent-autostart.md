@@ -64,7 +64,8 @@ starts. The phone composition is the same, above the touch composer.
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run tests/session/session-idle-parking.spec.ts tests/session/mobile-session-idle-parking.spec.ts
+cd apps/web && pnpm e2e:run tests/session/session-idle-parking.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-session-idle-parking.spec.ts
 cd apps/web && pnpm run e2e:sleep-ratchet
 ```
 

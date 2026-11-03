@@ -25,9 +25,11 @@ workflow re-entry retain their own activation paths.
 The workspace [ACP idle-suspension policy](../../executors/requirements/idle-runtime-parking.md)
 can suspend a settled agent. With this preference enabled, opening or refocusing
 the task leaves an idle-suspended session suspended, like any other stopped
-resumable session (AC-EXECUTORS-IDLE-PARKING-001.5). The composer start hint is
-shown, and an accepted message resumes the same conversation. With the
-preference disabled, focus resumes the session as before.
+resumable session (AC-EXECUTORS-IDLE-PARKING-001.5). A non-terminal session
+shows the composer start hint, and an accepted message resumes the same
+conversation. A completed session keeps its terminal recovery actions instead
+of the composer hint. With the preference disabled, focus resumes the session
+as before.
 
 ## Requirements
 
@@ -147,7 +149,7 @@ auto-start or auto-resume is *triggered by opening the task page*:
 |---|---|---|
 | Open task, no session, step allows auto-start | agent starts (`created_start`) | non-final step: unchanged; final step: `created_prepare`, Start agent button shown |
 | Open task, session exists, agent not running, session resumable | auto-resume (`session.launch` intent=resume) | no auto-resume; session stays stopped; the chat composer shows a hint that sending a message will auto-start the agent |
-| Open or refocus task, session idle-suspended by the workspace policy | auto-resume (`session.launch` intent=resume, `activation_source=session_focus`) | no resume; session stays suspended; the composer shows the auto-start hint |
+| Open or refocus task, session idle-suspended by the workspace policy | auto-resume (`session.launch` intent=resume, `activation_source=session_focus`) | no resume; session stays suspended; the composer shows the auto-start hint (a completed session keeps its terminal recovery actions) |
 | Open task, agent already running | no-op | no-op (unchanged) |
 | Workflow step transition with `auto_start_agent` on-enter | agent starts | agent starts (unchanged) |
 | User clicks Start agent / Resume / sends a message | agent starts | agent starts (unchanged) |
@@ -184,7 +186,8 @@ per-task variant in this feature.
   workspace idle-suspension policy, **WHEN** the user opens the task or
   returns focus to its window, **THEN** no `session.launch` focus resume is
   sent, the session stays suspended, and the composer shows the auto-start
-  hint; sending a message resumes the same conversation.
+  hint (a completed session keeps its terminal recovery actions); sending a
+  message resumes the same conversation.
 - **GIVEN** the setting is ON and a task's session is FAILED but resumable,
   **WHEN** the user opens the task page, **THEN** no auto-resume is sent on
   open and the session keeps the existing recovery actions (Resume session and

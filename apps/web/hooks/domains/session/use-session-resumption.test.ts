@@ -620,6 +620,85 @@ describe("useSessionResumption", () => {
     }
   });
 
+  it("does not prioritize a restart focus for a suspendable session when the preference is on", async () => {
+    mockPreventAutoStart = true;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const status = Promise.withResolvers<unknown>();
+    mockSessionItems[SESSION_ID] = {
+      state: "WAITING_FOR_INPUT",
+      session_recovery_blocks: [{ consumer_reference: "agent_delivery" }],
+    };
+    mockRequest.mockImplementation((action: string) =>
+      action === STATUS_ACTION ? status.promise : Promise.resolve({ success: true }),
+    );
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          STATUS_ACTION,
+          expect.anything(),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+
+      await act(async () =>
+        status.resolve({
+          session_id: SESSION_ID,
+          task_id: TASK_ID,
+          state: "WAITING_FOR_INPUT",
+          is_agent_running: false,
+          is_resumable: true,
+          needs_resume: true,
+          is_idle_suspended: true,
+          auto_resume_allowed: true,
+          resume_reason: "idle_suspension",
+          updated_at: STARTED_AT,
+        }),
+      );
+      await waitFor(() => expect(mockSetResumeSkipped).toHaveBeenCalledWith(SESSION_ID, true));
+      expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("sends one focus resume for a live settled session after skipping restart priority", async () => {
+    mockPreventAutoStart = true;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    mockSessionItems[SESSION_ID] = {
+      state: "WAITING_FOR_INPUT",
+      session_recovery_blocks: [{ consumer_reference: "agent_delivery" }],
+    };
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: true,
+      is_resumable: false,
+      needs_resume: false,
+      is_idle_suspended: false,
+      updated_at: LATER_AT,
+    });
+    try {
+      renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({
+            activation_source: "session_focus",
+            intent: "resume",
+            session_id: SESSION_ID,
+          }),
+          expect.any(Number),
+        ),
+      );
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
   it("does not mint client timestamps when status has no updated_at", async () => {
     mockRequest.mockResolvedValueOnce({
       session_id: SESSION_ID,

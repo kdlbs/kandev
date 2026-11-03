@@ -88,12 +88,20 @@ if (status.is_idle_suspended && !status.is_agent_running) {
 }
 ```
 
-`recordResumeSkipIfStopped` sets `resumeSkippedSessionIds[sessionId]`. The
-idle-suspended session state is `WAITING_FOR_INPUT`/`IDLE`, so
+`recordResumeSkipIfStopped` sets `resumeSkippedSessionIds[sessionId]`. A
+non-terminal idle-suspended session is in `WAITING_FOR_INPUT`/`IDLE`, so
 `shouldShowComposerAgentStartHint` renders the existing hint with no UI change.
-If the user later turns the preference off, the existing effect dependency on
-`preventAutoStart` re-runs and resumes the session. That matches non-idle
-behavior.
+A `COMPLETED` idle-suspended session keeps its terminal recovery actions
+instead of the composer hint, because sending into a terminal session is
+rejected. Turning the preference off does not immediately retry an already
+skipped resume: reopening the task or returning focus to its window checks the
+session again and can resume it. That matches non-idle behavior.
+
+The preference also gates the early visible-restart focus used for sessions
+with an `agent_delivery` recovery block. That path cannot read the status
+endpoint first, so it skips the focus when the stored session state can be
+idle-suspended (`WAITING_FOR_INPUT`, `IDLE`, or `COMPLETED`). Sessions in any
+other state cannot be idle-suspended and keep their restart-priority focus.
 
 ## ASCII UI preview
 
@@ -161,9 +169,15 @@ Implemented on 2026-11-03.
   before the idle-suspended resume when the preference is on. The rewritten
   unit test failed on the unfixed source (2 failures) and passes with the fix;
   `pnpm exec vitest run hooks/domains/session/use-session-resumption.test.ts`
-  reports 52 passed. Window-focus cases cover preference on and off, and the
+  reports 54 passed. Window-focus cases cover preference on and off, and the
   in-flight startup join test runs with the preference off to keep its resume
   assertion.
+- Fixup: visible restart priority for an `agent_delivery` recovery block now
+  honors the preference for stored states that can be idle-suspended.
+  Non-suspendable states keep their early recovery focus, and a live settled
+  session still receives one focus. The new restart-priority test failed before
+  this change. A completed idle-suspended session is documented as keeping its
+  terminal recovery actions rather than the composer hint.
 - Task 01: `preventAutoStartAgentOnOpenHelp` and `preventStartShort` describe
   the inactivity-paused case in all seven catalogs, including the reviewed
   Traditional Chinese overrides. The help now states that the agent stays

@@ -88,14 +88,19 @@ Completed 2026-11-03.
 - `performResumeAction` gates the idle-suspended branch on `preventAutoStart`,
   records `setResumeSkipped(sessionId, true)`, sets `"idle"`, and returns
   before any launch. The existing preferred-off path is unchanged.
+- Visible restart priority for a session with an `agent_delivery` recovery
+  block applies the same preference gate when the stored session state can be
+  idle-suspended; non-suspendable states keep their early recovery focus.
 - Unit coverage: preference on keeps the session stopped on open and on window
-  focus; preference off still sends `activation_source=session_focus`; the
-  hidden-view test now exercises its own visibility guard, request invalidation
-  still suppresses the launch after an error, and the in-flight startup join
-  test runs with the preference off.
+  focus; preference off still sends `activation_source=session_focus`; restart
+  priority is skipped only for suspendable states and a live settled session
+  still receives one focus; the hidden-view test now exercises its own
+  visibility guard, request invalidation still suppresses the launch after an
+  error, and the in-flight startup join test runs with the preference off.
 - Locale copy updated in `en`, `pt-pt`, `zh-cn`, `ja`, `ko`, the reviewed
   `zh-tw`/`zh-hk` overrides, and generated `pseudo`. The help now says the
   agent stays stopped until the user starts it or sends a message, matching
   the composer hint instead of promising a button.
-- Verification: `vitest` 52 passed (new tests failed before the fix),
-  `tsc --noEmit`, targeted ESLint, `i18n:check`, and `e2e:sleep-ratchet` pass.
+- Verification: `vitest` 54 passed (new restart-priority test failed before the
+  fix), `tsc --noEmit`, targeted ESLint, `i18n:check`, and `e2e:sleep-ratchet`
+  pass.

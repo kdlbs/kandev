@@ -669,8 +669,8 @@ including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
 and **Send Now** keep manual admission. Ordinary message delivery waits for
 capacity through the same ceiling. When **Prevent auto-start on open** is
-enabled, focus does not send that resume; the composer shows the start hint and
-a message to the parked conversation resumes it instead.
+enabled in the web app, focus does not send that resume; the composer shows the
+start hint and a message to the parked conversation resumes it instead.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
