@@ -194,3 +194,6 @@ The component documentation comment now remains attached to the component.
 The plan summary includes both follow-up verification rounds. No ASCII preview
 was added because this session requires structured previews; UI-01/UI-02 retain
 the approved region tables. Fresh PR screenshots are captured after the fix.
+
+CodeRabbit's summary suggestion is covered by an explicit first-load status
+assertion in the existing checks suite. All four checks tests passed.

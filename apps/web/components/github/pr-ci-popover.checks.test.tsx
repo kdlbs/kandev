@@ -132,6 +132,7 @@ describe("PR check disclosure cancellation", () => {
     const link = screen.getByRole("link", { name: "Open PR" });
     expect(link.textContent).toContain("Open PR");
     expect(link.getAttribute("href")).toBe(makePR().pr_url);
+    expect(screen.getByRole("status").textContent).toContain("Updating");
     first.unmount();
     feedbackState.authenticated = false;
     renderPopover();
