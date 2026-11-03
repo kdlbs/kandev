@@ -73,6 +73,10 @@ func (c *Client) setDeliveryStatus(status *DeliveryStatus) {
 		stream := *status.Stream
 		copy.Stream = &stream
 	}
+	if status.AgentProcess != nil {
+		identity := *status.AgentProcess
+		copy.AgentProcess = &identity
+	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	c.deliveryStatus = &copy
 }
@@ -128,6 +132,10 @@ func (c *Client) DeliveryRecoveryDescriptor() (*DeliveryStatus, bool) {
 	if c.deliveryStatus.Stream != nil {
 		stream := *c.deliveryStatus.Stream
 		copy.Stream = &stream
+	}
+	if c.deliveryStatus.AgentProcess != nil {
+		identity := *c.deliveryStatus.AgentProcess
+		copy.AgentProcess = &identity
 	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), c.deliveryStatus.Submissions...)
 	return &copy, true

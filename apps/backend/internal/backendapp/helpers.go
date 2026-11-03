@@ -2069,6 +2069,8 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		if p.services.Plugins != nil {
 			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolOptionsProvider(p.services.Plugins)
+			p.services.Automation.Service.SetPluginToolCatalogNotifier(p.services.Plugins.NotifyAgentToolCatalogChanged)
 			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
 		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
@@ -2588,6 +2590,7 @@ func registerMCPAndDebugRoutes(
 	}
 	if p.services.Automation != nil {
 		mcpHandlers.SetAutomationCreator(p.services.Automation.Service)
+		mcpHandlers.SetAutomationPluginTools(p.services.Automation.Service)
 	}
 	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
 	if settingsRegistry, err := buildSettingsRegistry(); err != nil {

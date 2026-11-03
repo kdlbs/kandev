@@ -230,7 +230,8 @@ func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
 	var errs []error
 	seen := map[string]struct{}{}
 	for _, surface := range surfaces {
-		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice && surface != AgentToolSurfaceManaged {
+		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice &&
+			surface != AgentToolSurfaceManaged && surface != AgentToolSurfaceAutomation {
 			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
 		}
 		if _, ok := seen[surface]; ok {
