@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -11,7 +12,7 @@ import (
 // ends normally, then an agent-started follow-up emits output and a
 // metadata-only tool_call_update for a tool that already reported completion.
 // The status-less update must not keep the follow-up turn open.
-func emitAsyncFollowup(e *emitter) {
+func emitAsyncFollowup(e *emitter, gatePath string) {
 	e.text("Foreground response before the async follow-up.")
 	e.startTool("async-followup-check", "Check follow-up", acp.ToolKindRead, nil)
 	e.completeTool("async-followup-check", "follow-up check complete")
@@ -25,6 +26,13 @@ func emitAsyncFollowup(e *emitter) {
 		background.text("Background follow-up started.")
 		background.startTool("async-followup-work", "Follow-up work", acp.ToolKindOther, nil)
 
+		// The gated variant keeps the follow-up turn open until the browser has
+		// queued its message, so loaded CI workers do not race the fixed hold.
+		if gatePath != "" {
+			waitForAsyncFollowupGate(gatePath, 90*time.Second)
+		} else {
+			time.Sleep(15 * time.Second)
+		}
 		time.Sleep(time.Second)
 		// PostToolUse metadata-only frame for the tool that already finished
 		// in the foreground turn.
@@ -49,4 +57,14 @@ func (e *emitter) metadataOnlyToolUpdate(id acp.ToolCallId) {
 		SessionId: e.sid,
 		Update:    acp.UpdateToolCall(id),
 	})
+}
+
+func waitForAsyncFollowupGate(path string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

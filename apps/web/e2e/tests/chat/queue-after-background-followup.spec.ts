@@ -1,3 +1,5 @@
+import path from "node:path";
+import { writeFile } from "node:fs/promises";
 import { test, expect } from "../../fixtures/test-base";
 import { firstSessionId, waitForAgentMessage } from "../../helpers/session";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
@@ -17,14 +19,16 @@ test.describe("queued message after an agent-started follow-up", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(180_000);
+    const gatePath = path.join(backend.tmpDir, `async-followup-${Date.now()}.release`);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Queued message after follow-up",
       seedData.agentProfileId,
       {
-        description: "/e2e:async-followup",
+        description: `/e2e:async-followup-gate ${gatePath}`,
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -61,6 +65,7 @@ test.describe("queued message after an agent-started follow-up", () => {
       })
       .toBeGreaterThan(0);
     await expect(testPage.getByTestId("queue-chip")).toBeVisible();
+    await writeFile(gatePath, "release");
     await waitForAgentMessage(apiClient, sessionId, "queued follow-up delivered", 90_000);
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
     await session.waitForChatIdle({ timeout: 30_000 });
