@@ -59,12 +59,19 @@ func (r *messageCapacityWaitRegistry) register(wait messageCapacityWait) {
 	r.mu.Unlock()
 }
 
-func (r *messageCapacityWaitRegistry) remove(key string) {
+func sameMessageCapacityWait(left, right messageCapacityWait) bool {
+	return left.taskID == right.taskID && left.sessionID == right.sessionID &&
+		left.incarnationID == right.incarnationID && left.entryID == right.entryID
+}
+
+func (r *messageCapacityWaitRegistry) removeIfCurrent(key string, expected messageCapacityWait) {
 	if r == nil || key == "" {
 		return
 	}
 	r.mu.Lock()
-	delete(r.waits, key)
+	if current, ok := r.waits[key]; ok && sameMessageCapacityWait(current, expected) {
+		delete(r.waits, key)
+	}
 	r.mu.Unlock()
 }
 
@@ -81,15 +88,14 @@ func (r *messageCapacityWaitRegistry) setStartup(key string, ticket *messageTurn
 	r.mu.Unlock()
 }
 
-func (r *messageCapacityWaitRegistry) clearStartup(key string) {
+func (r *messageCapacityWaitRegistry) clearStartupIfCurrent(key string, expected messageCapacityWait) {
 	if r == nil || key == "" {
 		return
 	}
 	r.mu.Lock()
-	wait, ok := r.waits[key]
-	if ok {
-		wait.startup = nil
-		r.waits[key] = wait
+	if current, ok := r.waits[key]; ok && sameMessageCapacityWait(current, expected) {
+		current.startup = nil
+		r.waits[key] = current
 	}
 	r.mu.Unlock()
 }
@@ -280,7 +286,7 @@ func (s *Service) dropTerminalMessageCapacityWait(
 		return false
 	}
 	s.releaseWaitStartup(registry, wait)
-	registry.remove(wait.key())
+	registry.removeIfCurrent(wait.key(), wait)
 	return true
 }
 
@@ -297,7 +303,7 @@ func (s *Service) messageCapacityWaitHead(
 	}
 	if len(status.Entries) == 0 {
 		s.releaseWaitStartup(registry, wait)
-		registry.remove(wait.key())
+		registry.removeIfCurrent(wait.key(), wait)
 		return messagequeue.QueuedMessage{}, false
 	}
 	head := status.Entries[0]
@@ -341,13 +347,13 @@ func (s *Service) retryMessageCapacityWait(
 	}
 	if session == nil {
 		s.releaseWaitStartup(registry, wait)
-		registry.remove(wait.key())
+		registry.removeIfCurrent(wait.key(), wait)
 		return false
 	}
 	if wait.startup != nil && !s.sessionCeiling.ownsTurnReservation(wait.startup) {
 		// A released or expired startup ticket no longer authorizes the wait;
 		// clear the handle and let this pass reacquire under fresh ownership.
-		registry.clearStartup(wait.key())
+		registry.clearStartupIfCurrent(wait.key(), wait)
 		wait.startup = nil
 	}
 	if wait.startup != nil {
@@ -361,7 +367,7 @@ func (s *Service) retryMessageCapacityWait(
 		return s.startCreatedSessionForCapacityWait(ctx, registry, wait, identity, session)
 	case models.TaskSessionStateCompleted:
 		if !boolField(head.Metadata, MetaKeyCompletedFollowUpIntent) {
-			registry.remove(wait.key())
+			registry.removeIfCurrent(wait.key(), wait)
 			return false
 		}
 		return s.resumeCompletedSessionForCapacityWait(ctx, registry, wait, identity)
@@ -386,7 +392,7 @@ func (s *Service) finishMessageCapacityWaitDrain(
 		return
 	}
 	s.releaseWaitStartup(registry, wait)
-	registry.remove(wait.key())
+	registry.removeIfCurrent(wait.key(), wait)
 }
 
 // settleMessageCapacityWaitStartup keeps a startup ticket until its session
@@ -413,7 +419,7 @@ func (s *Service) releaseWaitStartup(registry *messageCapacityWaitRegistry, wait
 	if wait.startup != nil {
 		wait.startup.release()
 	}
-	registry.clearStartup(wait.key())
+	registry.clearStartupIfCurrent(wait.key(), wait)
 }
 
 // capacityWaitStartup runs the start or resume work that owns the acquired
@@ -449,7 +455,7 @@ func (s *Service) startMessageCapacityWaitWithTicket(
 		return false
 	}
 	ticket.release()
-	registry.clearStartup(wait.key())
+	registry.clearStartupIfCurrent(wait.key(), wait)
 	return false
 }
 

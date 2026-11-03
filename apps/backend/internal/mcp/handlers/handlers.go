@@ -4059,11 +4059,15 @@ func (h *Handlers) promptPreparedTaskMessage(
 	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	if err != nil {
 		if orchestrator.IsMessageTurnCapacityRefusal(err) {
-			if result, queueErr := h.queueRecordedTaskMessageForCapacity(
+			result, queueErr := h.queueRecordedTaskMessageForCapacity(
 				ctx, taskID, session, prompt, metadata, recorded,
-			); queueErr == nil {
+			)
+			if queueErr == nil {
 				return result, nil
 			}
+			h.logger.Warn("failed to queue capacity-refused task message",
+				zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(queueErr))
+			err = queueErr
 		}
 		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
