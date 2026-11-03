@@ -616,3 +616,63 @@ product behavior, public configuration, UI markup, copy, or screenshots.
 Public docs, durable requirements, and system design therefore need no change.
 Fresh published-head CI remains the delivery gate; historical green receipts
 are not proof for the rewritten head.
+
+
+### Follow-up integration with current main (2026-11-03)
+
+Published checkpoint `622cc1fda88b` cleared the three CI leaf failures:
+E2E run `41718286174` passed Desktop E2E Smoke and shards 3/28 and 8/28.
+Its complete snapshot had 89 passed, zero failed/pending, 12 skipped, one
+neutral, and no unresolved review threads. Main then advanced to
+`77e6460916b2`, introducing fresh conflicts. Those counts are historical.
+The backup `backup/builtin-mcp-before-main3-20261103` preserves that checkpoint.
+
+The next rebase retains both the built-in preference tables and main's new
+`harness_native_session_rebinds` readiness/upgrade contract. It also retains
+main's UI observation of all 11 retry ordinals together with the exact-notice
+deletion barrier. Main's Send Now fixture build/artifact identity additions
+coexist with the desktop job's cache setting. Package selection, registration,
+authority, and retained execution binding remain unchanged.
+
+A semantic merge correction was required in the built-in recovery branch.
+Main now counts classified recovery candidates through a per-input ledger.
+The older package branch bypassed it with a direct progress increment, even
+if the recovery-block write failed. The new real-Manager/SQLite/reporter test
+injects that exact write failure: before the correction it fails with
+`done = 1, want 0`; the persisted-refusal positive control passes.
+The branch now defers a confirmed persisted refusal to the ledger's stop-work
+settlement. A failed block write stays incomplete. The returned outer recovery
+error supplies that confirmation; a nested binding error inside a failed-write
+wrapper does not. Dispatch and recovery authorization are unchanged.
+
+The focused lifecycle cohort and queue/task/persistence integration cohorts
+pass under the race detector. Workflow contract checks (28), changed-file
+ESLint, and formatting also pass. Exact commands:
+
+```sh
+GOMAXPROCS=2 GOMEMLIMIT=6GiB go -C apps/backend test -trimpath -race -p=1 ./internal/agent/runtime/lifecycle -run 'Builtin|RecoveryProgress|SettingsSourceRecovery' -count=1 -timeout=5m
+GOMAXPROCS=2 GOMEMLIMIT=6GiB go -C apps/backend test -trimpath -race -p=1 ./internal/orchestrator ./internal/orchestrator/messagequeue ./internal/task/handlers ./internal/persistence/requiredstores ./internal/persistence/storeconformance -run 'Builtin|SendNow|QueuedMessage|PlanComment|InitialTaskBrief|Catalog|Upgrade|StoreConformance|OwnerBehavior' -count=1 -timeout=5m
+python3 .github/scripts/e2e-tests-workflow-contract_test.py
+pnpm --dir apps/web exec eslint --max-warnings 0 e2e/tests/session/opencode-capacity-retry.spec.ts e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts
+pnpm --dir apps/web exec prettier --check e2e/tests/session/opencode-capacity-retry.spec.ts e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts
+```
+
+After the final production edit, changed-package Go lint reports zero issues.
+The managed runner rebuilt all native and browser fixtures against the rebased
+source. Eight desktop cases and four phone cases pass with one worker and zero
+retries, covering queue follow-up delivery, Send Now not-delivered handling,
+OpenCode capacity recovery, Core executor discovery from Configuration chats,
+phone package opt-in/pruning, and phone error dismissal. Browser commands use
+the same clean launch-variable environment and bounded resources recorded above.
+The user's manual test instance and main port 9998 remain untouched.
+
+```sh
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_lifecycle.go apps/backend/internal/agent/runtime/lifecycle/builtin_mcp_recovery_progress_test.go apps/backend/internal/persistence/requiredstores/catalog.go
+pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/session/opencode-capacity-retry.spec.ts e2e/tests/chat/queue-after-background-followup.spec.ts e2e/tests/chat/send-now-not-delivered.spec.ts e2e/tests/settings/config-management.spec.ts -- --retries=0 -g 'desktop|delivers a message queued|marks an unrestorable|executor listing'
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/session/mobile-acp-prompt-error-continuity.spec.ts e2e/tests/chat/mobile-send-now-not-delivered.spec.ts e2e/tests/settings/mobile-builtin-mcp-management.spec.ts -- --retries=0 -g 'phone:|not-delivered Send Now|opts in and prunes'
+```
+
+The startup correction conforms to the existing platform progress contract;
+it adds no package option, permission, recovery action, UI layout or public API.
+The public package guide already documents recovery-required behavior and needs
+no change. Existing package screenshots still represent the product surfaces.

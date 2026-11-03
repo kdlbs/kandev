@@ -425,7 +425,10 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("instance_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
 				setCandidateOutcome(ri.SessionID, "builtin_mcp")
 				m.dispatchUnreconstructableStop(&stopWG, ri)
-				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				// Only the outer recovery error confirms a persisted refusal.
+				if _, blocked := err.(*BuiltinMCPRecoveryError); blocked {
+					progress.resolveAfterStop(ri.SessionID)
+				}
 				continue
 			}
 			if err := m.restoreRecoveredDelivery(recoveryCtx, execution, ri); err != nil {

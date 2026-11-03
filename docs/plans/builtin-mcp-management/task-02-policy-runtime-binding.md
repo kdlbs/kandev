@@ -231,3 +231,15 @@ resume-to-launch boundary, pass. Existing live-binding and foreign-execution
 cases remain covered. The reviewer rechecked the working changes without edits
 or additional findings. Final race, lint, integration and publication evidence
 is recorded in `implementation-results.md` after validation.
+
+
+### Current-main recovery integration (2026-11-03)
+
+The rebase onto main `77e6460916b2` retains its readiness table and recovery
+ledger contracts. A failed built-in recovery-block write must remain incomplete;
+a persisted refusal is counted through the ledger after owned stop work settles.
+A real Manager/SQLite failure-injection regression fails before the correction
+and passes afterward, alongside the existing package recovery and queue tests.
+See [implementation results](implementation-results.md#follow-up-integration-with-current-main-2026-11-03)
+for commands, conflict dispositions, and delivery evidence. Package authority and
+retained bindings are unchanged; published-head CI remains a separate gate.
