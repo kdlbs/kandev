@@ -7265,20 +7265,13 @@ func (s *Service) resetAgentContextWithError(
 		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
-	// Clear the old resume token only after the provider reset succeeds. This
-	// keeps a valid recovery token when the runtime reset fails. A fresh ACP
-	// session event can race this clear, so persist the lifecycle manager's
-	// current session ID again below after the clear.
-	if err := s.clearResumeToken(ctx, sessionID); err != nil {
-		s.logger.Error("failed to clear resume token after context reset",
+	if err := s.replaceResetResumeToken(ctx, taskID, session, executionID, previousACPSessionID); err != nil {
+		s.logger.Error("failed to replace resume token after context reset",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return settleFailure(executionID, fmt.Errorf("clear resume token after context reset: %w", err))
-	}
-	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
+		return settleFailure(executionID, err)
 	}
 
 	// Clear the remaining persisted state (ACP session metadata, context window)
