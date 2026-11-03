@@ -64,6 +64,7 @@ test.describe("Mobile clarification multiline answer", () => {
       caption: "Mobile clarification offers only the choices allowed by Codex",
     });
     await session.clarificationOption("Fast").tap();
+    await session.submitClarification();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("You answered");
@@ -228,6 +229,7 @@ test.describe("Mobile clarification multiline answer", () => {
 
     try {
       await session.clarificationOption("PostgreSQL").tap();
+      await session.submitClarification();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
       await expect(session.clarificationSkip()).toBeDisabled();
@@ -305,6 +307,7 @@ test.describe("Mobile clarification multiline answer", () => {
     });
 
     await session.clarificationOption("PostgreSQL").tap();
+    await session.submitClarification();
     const retry = testPage.getByTestId("clarification-retry");
     await expect(retry).toBeVisible();
     await expect(session.clarificationSkip()).toBeEnabled();
@@ -577,6 +580,7 @@ test.describe("Mobile clarification multiline answer", () => {
     ).resolves.toBe(true);
 
     await option.locator("code").tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(
       session
@@ -631,6 +635,7 @@ test.describe("Mobile clarification multiline answer", () => {
     const option = session.clarificationOption("PostgreSQL");
     await option.scrollIntoViewIfNeeded();
     await option.tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 

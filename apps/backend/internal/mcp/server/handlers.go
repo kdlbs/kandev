@@ -1153,6 +1153,9 @@ func simplifyAnswer(ans map[string]interface{}, rejected bool) map[string]interf
 	if customText, ok := ans["custom_text"].(string); ok && customText != "" {
 		out["custom_text"] = customText
 	}
+	if attachments, ok := ans["attachments"].([]interface{}); ok && len(attachments) > 0 {
+		out["attachments"] = attachments
+	}
 	if rejected && len(out) == 0 {
 		return map[string]interface{}{answeredFieldKey: false, rejectedFieldKey: true}
 	}

@@ -149,6 +149,12 @@ const CONTAINER_TESTID = "clarification-overlay-container";
 const QUESTION_COUNT_TESTID = "clarification-question-count";
 const SUBMITTING_STATUS_TESTID = "clarification-submitting-status";
 
+async function submitSinglePanelAnswer() {
+  const button = await screen.findByTestId("clarification-custom-submit");
+  await vi.waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+}
+
 describe("ClarificationPanelSection — image lifecycle", () => {
   it("cancels hidden question and choice reads while preserving the answer draft", async () => {
     const images = [1, 2, 3, 4].map((id) => ({
@@ -326,6 +332,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
 
       const status = await screen.findByTestId(SUBMITTING_STATUS_TESTID);
       const skip = screen.getByTestId("clarification-skip");
@@ -364,6 +371,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
 
     try {
       fireEvent.click(screen.getByTestId(OPTION_TESTID));
+      await submitSinglePanelAnswer();
       await screen.findByTestId(SUBMITTING_STATUS_TESTID);
 
       rejectResponse(new Error("network"));
@@ -611,6 +619,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
     );
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() =>
       expect(onOutcome).toHaveBeenCalledWith({
@@ -627,6 +636,7 @@ describe("ClarificationPanelSection — onOutcome forwarding (AC .39)", () => {
     ]);
 
     fireEvent.click(screen.getByTestId(OPTION_TESTID));
+    await submitSinglePanelAnswer();
 
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
   });

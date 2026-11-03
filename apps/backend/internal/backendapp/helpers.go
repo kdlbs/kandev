@@ -1206,6 +1206,9 @@ func registerRoutes(p routeParams) {
 		p.orchestratorSvc.HandleClarificationPrimaryAnswered,
 		p.log,
 	)
+	clarificationResolver.SetAnswerAttachmentMaterializer(
+		&clarificationAnswerAttachmentMaterializer{runtime: p.lifecycleMgr},
+	)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {

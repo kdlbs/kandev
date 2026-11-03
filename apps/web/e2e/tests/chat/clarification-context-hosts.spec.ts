@@ -158,5 +158,6 @@ test("Needs You bounds a long clarification to the inbox viewport and keeps its 
     contentType: "image/png",
   });
   await answer.click();
+  await row.getByTestId("clarification-custom-submit").click();
   await expect(row).toHaveCount(0, { timeout: 15_000 });
 });

@@ -2138,6 +2138,7 @@ func (sm *SessionManager) materializeAttachments(
 		result[i].Name = materialized.Name
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
+		result[i].Path = materialized.Path
 		result[i].Data = ""
 		if result[i].DeliveryMode == "" {
 			result[i].DeliveryMode = attachmentDeliveryPrompt
