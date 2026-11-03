@@ -501,3 +501,25 @@ it("starts file search while task mentions are pending", async () => {
   expect(started).toBe(1);
   menuHas(CURRENT_FILE);
 });
+
+it.each(["query", "session", "unmount"] as const)(
+  "aborts superseded file requests on %s",
+  async (change) => {
+    const requests = vi.spyOn(client, "request");
+    try {
+      const fixture = await mount();
+      await query(fixture.ref, "old");
+      const signal = requests.mock.calls.find(
+        ([action]) => action === "workspace.files.search",
+      )?.[3];
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+      if (change === "query") await query(fixture.ref, "new");
+      else if (change === "session") await switchSession(fixture, "beta");
+      else fixture.view.unmount();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      requests.mockRestore();
+    }
+  },
+);

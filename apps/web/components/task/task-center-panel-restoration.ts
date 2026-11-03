@@ -50,43 +50,37 @@ export function toPrimaryTab(savedTab: string) {
 export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFileTab[]) {
   const client = getWebSocketClient();
   if (!client) return null;
-  const loadedTabs: OpenFileTab[] = [];
-  for (let offset = 0; offset < savedTabs.length; offset += 4) {
-    const batch = await Promise.all(
-      savedTabs.slice(offset, offset + 4).map(async (savedTab) => {
-        try {
-          const response = await requestFileContent(
-            client,
-            sessionId,
-            savedTab.path,
-            savedTab.repo,
-          );
-          const hash = await calculateHash(response.content);
-          return installFileEditorTab({
-            path: savedTab.path,
-            name: savedTab.name,
-            content: response.content,
-            originalContent: response.content,
-            originalHash: hash,
-            isDirty: false,
-            isBinary: response.is_binary,
-            resolvedPath: response.resolved_path,
-            repo: savedTab.repo,
-            renderedPreview:
-              getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
-                ? savedTab.renderedPreview
-                : undefined,
-          });
-        } catch {
-          return null;
-        }
-      }),
-    );
-    for (const tab of batch) {
-      if (tab) loadedTabs.push(tab);
+  const loadedTabs: Array<OpenFileTab | undefined> = new Array(savedTabs.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < savedTabs.length) {
+      const index = nextIndex++;
+      const savedTab = savedTabs[index];
+      try {
+        const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
+        const hash = await calculateHash(response.content);
+        loadedTabs[index] = installFileEditorTab({
+          path: savedTab.path,
+          name: savedTab.name,
+          content: response.content,
+          originalContent: response.content,
+          originalHash: hash,
+          isDirty: false,
+          isBinary: response.is_binary,
+          resolvedPath: response.resolved_path,
+          repo: savedTab.repo,
+          renderedPreview:
+            getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+              ? savedTab.renderedPreview
+              : undefined,
+        });
+      } catch {
+        /* skip failed tabs */
+      }
     }
-  }
-  return loadedTabs;
+  };
+  await Promise.all(Array.from({ length: Math.min(4, savedTabs.length) }, worker));
+  return loadedTabs.filter((tab): tab is OpenFileTab => tab !== undefined);
 }
 
 type RestoreLoadedTabsParams = {

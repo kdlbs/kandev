@@ -538,17 +538,27 @@ describe("accepted message refresh concurrency", () => {
           resolveComments = resolve;
         }),
       );
+      let resolvePreview!: (value: unknown) => void;
+      getTaskPreviewFeedbackMock.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolvePreview = resolve;
+        }),
+      );
       let send!: ReturnType<typeof result.current.handleSendMessage>;
       await act(async () => {
         send = result.current.handleSendMessage(payload);
       });
-      const previewStarted = getTaskPreviewFeedbackMock.mock.calls.length;
+      const started = {
+        comments: getTaskPlanCommentsMock.mock.calls.length,
+        preview: getTaskPreviewFeedbackMock.mock.calls.length,
+      };
       const snapshot = { task_id: TASK_ID, plan_id: "plan-1", revision: 9, comments: [] };
       await act(async () => {
         resolveComments(snapshot);
+        resolvePreview({ task_id: TASK_ID, revision: 4, items: [] });
         await send;
       });
-      expect(previewStarted).toBe(1);
+      expect(started).toEqual({ comments: 1, preview: 1 });
       expect(setTaskPlanCommentsMock).toHaveBeenCalledWith(TASK_ID, snapshot);
       expect(setTaskPreviewFeedbackMock).toHaveBeenCalledWith(
         TASK_ID,

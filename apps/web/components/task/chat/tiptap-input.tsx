@@ -123,12 +123,13 @@ async function fetchFileResults(
   query: string,
   owner: FileSearchOwner,
   isCurrent: () => boolean,
+  signal: AbortSignal,
 ): Promise<string[]> {
   const client = getWebSocketClient();
   if (!client) return [];
   const cached = owner.completed;
   if (cached?.sessionId === sessionId && cached.query === query) return cached.results;
-  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
+  const response = await searchWorkspaceFiles(client, sessionId, query || "", 20, signal);
   if (!isCurrent()) return [];
   owner.completed = { sessionId, query, results: response.files || [] };
   return owner.completed.results;
@@ -179,7 +180,9 @@ function useMentionItems(
           isCurrent,
         }),
         owner.sessionId
-          ? fetchFileResults(owner.sessionId, query, owner, isCurrent).catch(() => [])
+          ? fetchFileResults(owner.sessionId, query, owner, isCurrent, controller.signal).catch(
+              () => [],
+            )
           : Promise.resolve([]),
       ]);
       if (!isCurrent()) return [];

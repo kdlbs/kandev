@@ -24,11 +24,12 @@ UI owns the client request scheduling and reply publication in these surfaces.
 
 - Read working-tree and base-ref diff content together. Settle both requests
   before retrying and retain working-tree error precedence.
-- Restore saved editor files in batches of four. Create Dockview panels in saved
-  order and retain session guards. Center-panel results retain saved order and
-  omit failed reads.
+- Restore Dockview files in batches of four and retain session guards. Use four
+  workers for center-panel files so a slow file cannot block free slots. Store
+  center-panel results by saved index and omit failed reads.
 - Start task and file mention searches together. Retain committed-owner guards,
-  ranking, and file-error fallback.
+  ranking, and file-error fallback. Pass the lookup cancellation signal through
+  the existing file-search client API.
 - Refresh plan comments and preview feedback together after direct, queued, or
   recovered message acceptance. Each refresh retains its own error handling.
 
@@ -51,7 +52,7 @@ These preserve `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` and
 
 ## Verification results
 
-The five changed suites passed 61 tests. Eight related suites passed 107 tests.
+Initial validation: the five changed suites passed 61 tests. Eight related suites passed 107 tests.
 Changed-file ESLint, the i18n ratchet, and typecheck passed. Typecheck required
 an 8 GB Node heap. The affected 19-test message suite passed again after the
 commit hook reformatted its fixture. Hosted CI and review completion remain
@@ -61,5 +62,17 @@ external delivery gates. No measured latency improvement is claimed.
 
 Concurrency must not weaken stale-response guards or reorder saved tabs.
 Unbounded restoration could overload the request transport, so file loading
-retains a fixed batch size. Shared mutable error state can require sequencing
+retains a maximum of four active reads. Shared mutable error state can require sequencing
 elsewhere and was excluded from this refactor.
+
+
+### Review remediation
+
+Cubic identified unused worker capacity, missing file-request cancellation, and
+a concurrency test that admitted the reverse sequential ordering. Controlled
+responses reproduced the first two gaps. A preview-first sequential mutation
+made all three strengthened message cases fail. Final checks passed: 175 tests across 14 files, changed-file ESLint, typecheck,
+the i18n ratchet, catalog validation, specification lint, and documentation
+coverage preflight.
+The separate stop-on-read-failure suggestion does not apply: read failures
+return true, while false denotes retired session ownership before publication.

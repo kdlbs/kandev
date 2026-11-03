@@ -174,7 +174,7 @@ describe("task center file restoration", () => {
   });
 });
 
-it("loads saved tabs in bounded parallel batches while preserving order and skipping failures", async () => {
+it("reuses free restoration slots while preserving order and skipping failures", async () => {
   mockGetWebSocketClient.mockReturnValue(CLIENT);
   const tabs = Array.from({ length: 6 }, (_, index) => ({
     path: `file-${index}.md`,
@@ -198,14 +198,18 @@ it("loads saved tabs in bounded parallel batches while preserving order and skip
     );
   const loading = loadSavedFileTabs(SESSION_ID, tabs);
   const started = mockRequestFileContent.mock.calls.length;
-  pending[3].resolve({ content: "fourth", is_binary: false });
-  pending[2].resolve({ content: "third", is_binary: false });
-  pending[1].reject(new Error("missing"));
+  await act(async () => {
+    pending[3].resolve({ content: "fourth", is_binary: false });
+    pending[2].resolve({ content: "third", is_binary: false });
+    pending[1].reject(new Error("missing"));
+  });
+  const startedWhileFirstIsPending = mockRequestFileContent.mock.calls.length;
   pending[0].resolve({ content: "first", is_binary: false });
   pending[5].resolve({ content: "sixth", is_binary: false });
   pending[4].resolve({ content: "fifth", is_binary: false });
   const loaded = await loading;
   expect(started).toBe(4);
+  expect(startedWhileFirstIsPending).toBe(6);
   expect(loaded?.map((tab) => tab.path)).toEqual([
     tabs[0].path,
     ...tabs.slice(2).map((tab) => tab.path),

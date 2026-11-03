@@ -27,7 +27,8 @@ and fallback contracts referenced above.
 ## In scope
 
 - Parallel read admission with existing response guards and error handling.
-- Four-file restoration batches with stable panel and result order.
+- Four-file Dockview batches and four center-panel workers with stable result order.
+- File-search cancellation through the existing client signal argument.
 - Deferred-request regression coverage at the existing production boundaries.
 
 ## Out of scope
@@ -61,7 +62,8 @@ Run from the repository root:
   hooks/use-file-rename-promotion.test.tsx \
   components/task/task-center-panel-mutation-ownership.test.tsx \
   components/diff/diff-viewer.test.tsx \
-  components/task/chat/composer-disclosure.test.tsx)
+  components/task/chat/composer-disclosure.test.tsx \
+  lib/ws/workspace-files.test.ts)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:ratchet)
 python3 scripts/list-docs.py validate
@@ -77,6 +79,8 @@ Normal commit hooks run changed-file ESLint and formatting.
 - `apps/web/components/task/task-center-panel-restoration.ts` and its test.
 - `apps/web/components/task/chat/tiptap-input.tsx` and its file-search ownership test.
 - `apps/web/hooks/use-message-handler.ts` and its plan-comments test.
+
+- `apps/web/lib/ws/workspace-files.ts` and its test.
 
 ## Dependencies
 
@@ -109,3 +113,15 @@ commit-hook formatting. Catalog validation and specification lint passed. The do
 preflight passed against the actual PR file list plus these two new records.
 Hosted CI and review completion remain pending. No browser E2E or latency
 benchmark was run.
+
+
+### Review remediation
+
+A held first file no longer prevents free center-panel workers from starting
+later files. Query, session, and unmount tests check signal retirement through
+the real client. Both message-refresh promises remain deferred until each
+request starts, so either sequential order fails the regression.
+Final verification passed: 175 tests across 14 files, changed-file ESLint,
+typecheck with an 8 GB Node heap, the i18n ratchet, catalog validation,
+specification lint, and documentation coverage preflight. Hosted checks and
+review resolution remain external delivery gates.
