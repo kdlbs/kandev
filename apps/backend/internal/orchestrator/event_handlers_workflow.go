@@ -7436,8 +7436,14 @@ func (s *Service) reconcileFailedContextReset(
 		return false, fmt.Errorf("execution changed during partial context reset")
 	}
 
-	if err := s.replaceResetResumeToken(ctx, taskID, session, executionID, previousACPSessionID); err != nil {
-		return false, fmt.Errorf("replace resume identity after partial context reset: %w", err)
+	rebound, err := s.rebindResetNativeSession(
+		ctx, taskID, session, executionID, previousACPSessionID, liveACPSessionID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("rebind resume identity after partial context reset: %w", err)
+	}
+	if !rebound && !s.storeResumeToken(ctx, taskID, session.ID, executionID, liveACPSessionID, "") {
+		return false, errResetNativeRebindRefused
 	}
 	s.clearPersistedResetState(ctx, session.ID, session)
 	return true, nil

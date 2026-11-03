@@ -16,24 +16,30 @@ type harnessNativeRebindStore interface {
 }
 
 // replaceResetResumeToken moves the session to the native conversation that a
-// successful provider reset created. With a committed harness generation, the
-// token and the generation move together or not at all. Without one, the
-// token is cleared and the current ACP session ID is stored, which tolerates
-// a fresh session event that raced the clear.
+// provider reset created. With a committed harness generation, the token and
+// generation move together or not at all. The legacy path uses the guarded
+// token write and does not clear the old identity if a newer session takes over.
 func (s *Service) replaceResetResumeToken(
 	ctx context.Context, taskID string, session *models.TaskSession, executionID, previousACPSessionID string,
 ) error {
-	rebound, err := s.rebindResetNativeSession(ctx, taskID, session, executionID, previousACPSessionID)
+	currentACPSessionID := s.currentACPSessionID(session.ID)
+	if currentACPSessionID == "" {
+		if s.currentACPSessionID(session.ID) != "" {
+			return errResetNativeRebindRefused
+		}
+		if err := s.clearResumeToken(ctx, session.ID); err != nil {
+			return fmt.Errorf("clear resume token after context reset: %w", err)
+		}
+		return nil
+	}
+	rebound, err := s.rebindResetNativeSession(
+		ctx, taskID, session, executionID, previousACPSessionID, currentACPSessionID,
+	)
 	if err != nil || rebound {
 		return err
 	}
-	if err := s.clearResumeToken(ctx, session.ID); err != nil {
-		return fmt.Errorf("clear resume token after context reset: %w", err)
-	}
-	if acpSessionID := s.currentACPSessionID(session.ID); acpSessionID != "" {
-		if !s.storeResumeToken(ctx, taskID, session.ID, executionID, acpSessionID, "") {
-			return fmt.Errorf("store resume token after context reset")
-		}
+	if !s.storeResumeToken(ctx, taskID, session.ID, executionID, currentACPSessionID, "") {
+		return errResetNativeRebindRefused
 	}
 	return nil
 }
@@ -42,7 +48,10 @@ func (s *Service) replaceResetResumeToken(
 // It declines sessions without a committed generation or without a changed
 // native conversation, and returns an error when the guarded rebind refuses.
 func (s *Service) rebindResetNativeSession(
-	ctx context.Context, taskID string, session *models.TaskSession, executionID, previousACPSessionID string,
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	executionID, previousACPSessionID, currentACPSessionID string,
 ) (bool, error) {
 	store, ok := s.repo.(harnessNativeRebindStore)
 	if !ok {
@@ -51,9 +60,11 @@ func (s *Service) rebindResetNativeSession(
 	if executionID == "" {
 		return false, nil
 	}
-	currentACPSessionID := s.currentACPSessionID(session.ID)
 	if currentACPSessionID == "" {
 		return false, nil
+	}
+	if !s.resetNativeSessionMatchesLive(session.ID, currentACPSessionID) {
+		return false, errResetNativeRebindRefused
 	}
 	incarnationID := session.QueueIncarnationID
 	if incarnationID == "" {
@@ -87,6 +98,10 @@ func (s *Service) rebindResetNativeSession(
 	}
 	s.persistACPSessionID(ctx, session.ID, currentACPSessionID)
 	return true, nil
+}
+
+func (s *Service) resetNativeSessionMatchesLive(sessionID, expectedACPSessionID string) bool {
+	return expectedACPSessionID != "" && s.currentACPSessionID(sessionID) == expectedACPSessionID
 }
 
 func (s *Service) currentResetGeneration(
