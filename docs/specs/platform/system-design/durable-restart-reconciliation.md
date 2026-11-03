@@ -192,6 +192,15 @@ their existing authenticated surviving-execution evidence. See
 and the delivery record
 [agent group termination proof](../../../plans/agent-group-termination-proof/plan.md).
 
+Standalone row liveness reports whether the shared agentctl still lists the session. It does
+not prove that the session's agent child is still active. When this row is alive and its
+execution ID matches the pinned source, lifecycle may use only the recorded agent-group proof;
+runtime-session termination cannot override the live shared-runtime evidence. When row
+liveness is unknown, lifecycle uses `processidentity.OriginalOwnerTerminated` for the pinned
+source. It validates the session and execution IDs before proof, then revalidates the recovery
+owner before cleanup. Cleanup remains conditional on that execution ID and row timestamp, so a
+successor cannot inherit the source proof.
+
 The restart inventory includes matching dispatching SQL rows without recovery metadata.
 The worker reconstructs a uniquely identified recovery block and source snapshot, including
 an existing generic delivery block with empty identities, then proves the original owner

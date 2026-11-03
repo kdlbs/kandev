@@ -64,8 +64,10 @@ define the group-level proof.
   `AgentBirthToken` fields on `original_runtime`.
 - `processidentity.OwnedGroupTerminated` provides Linux group proof. Darwin and other platforms
   return `ErrUnverifiableIdentity` for group inspection and retain their prior runtime proof.
-- Every original-owner termination check accepts runtime-session termination OR
-  agent-group termination.
+- Original-owner checks accept runtime-session termination or agent-group termination.
+- For a live standalone row, lifecycle uses only the exact agent-group proof because row
+  liveness describes the shared agentctl instance. For unknown row liveness, lifecycle uses
+  `processidentity.OriginalOwnerTerminated`.
 
 ### Out of scope
 
@@ -96,6 +98,10 @@ Work order 02, proof evaluation:
   absence. Unsupported optional group evidence preserves a known runtime result.
 - Journal retained recovery, retained gap recovery, record evidence, and already-resumed
   recovery use this shared helper. Independent admission checks still apply.
+- Lifecycle record evidence does not let a matching live execution ID block a successful
+  original-owner proof. Silent restart uses agent-group proof for a live standalone row and
+  the shared original-owner proof for an unknown row. Session and execution identity checks,
+  owner revalidation, and conditional cleanup remain in force.
 
 | Runtime | Group identity | Proof |
 |---|---|---|
@@ -117,9 +123,11 @@ Work order 02, proof evaluation:
 | Child identity lifecycle and failed startup | `internal/agentctl/server/process/agent_process_identity_linux_test.go`: `TestAgentProcessIdentityTracksRunningGroupLeader`, `TestAgentProcessIdentityAbsentAfterFailedStartup` |
 | Client cache ownership | `internal/agent/runtime/agentctl/client_delivery_agent_process_test.go`: `TestDeliveryDescriptorOwnsAgentProcessIdentity` |
 | Binding and reconciliation helper | `internal/agent/runtime/lifecycle/agent_process_group_test.go`: `TestWithAgentProcessGroupRecordsReportedAgentGroup`, `TestBoundAgentProcessGroupReusesPromptBinding` |
+| Registered and unknown source-row recovery gates | `internal/agent/runtime/lifecycle/delivery_record_live_execution_linux_test.go`: `TestHistoricalProcessTerminationAcceptsExitedAgentGroupForLiveExecution`; `internal/orchestrator/silent_restart_recovery_source_liveness_test.go`: `TestSilentRestoreSourceDeathProof` |
+| Successor remains protected during cleanup | `internal/orchestrator/silent_restart_recovery_source_liveness_test.go`: `TestSilentRestoreSourceCleanupRejectsExistingWorkspaceSuccessor`, `TestSilentRestoreSourceCleanupKeepsWorkspaceSuccessor` |
 
-Paths in this table are relative to `apps/backend/`. New review regressions remain unrun
-because the review request prohibits tests, builds, linters, and validation commands.
+Paths in this table are relative to `apps/backend/`. The original contributor verification
+results below do not cover the added review regressions.
 
 ## E2E tests
 
@@ -149,13 +157,12 @@ runtime-only rule.
 
 ## Review follow-up
 
-The broader recovery path still has independent gates that do not use the recorded group.
-`historicalProcessTermination` treats a matching registered execution as live before it reaches
-group proof. `proveSilentRestoreSourceDead` still uses runtime-session proof for unknown
-standalone rows. Its live-row branch also blocks recovery. The existing review thread
-[4454081765](https://github.com/kdlbs/kandev/pull/5015#discussion_r4454081765) owns this blocker.
-A follow-up must cover both registered and removed instances and preserve successor protection.
-The focused review fixes do not change these admission rules.
+The fixup addresses the remaining recovery gates in review thread
+[4454081765](https://github.com/kdlbs/kandev/pull/5015#discussion_r4454081765). Record evidence
+now evaluates original-owner proof even when the execution ID remains listed. Silent restart
+uses agent-group proof when a standalone row is alive and combined original-owner proof when
+row liveness is unknown. Tests cover both paths and retain the existing successor protections.
+Local validation and current-head CI results are recorded after delivery.
 
 ## Risks
 

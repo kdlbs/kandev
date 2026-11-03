@@ -33,6 +33,10 @@ Windows retains its existing unverifiable result.
 
 Linux group evidence removes the shared runtime lifetime from the original-owner proof.
 Existing execution and recovery admission checks remain authoritative.
+Standalone liveness can report the shared agentctl instance as alive while its session's agent
+group has exited. That path requires the exact saved agent-group proof. Unknown liveness uses
+the original-owner proof. Both paths retain the pinned execution check and conditional owner
+revalidation before cleanup.
 The agentctl delivery descriptor gains an additive field, so older peers retain the
 runtime-only rule. The kernel check sends no signal. An unreaped group member can delay proof
 until the operating system removes the group. Descendants that leave the agent's process group

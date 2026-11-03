@@ -29,6 +29,9 @@ termination proof while shared agentctl remains active. Independent admission ch
   their existing unverifiable result.
 - The call sites in `agentctl/journal/retained.go`, `agentctl/journal/retained_gap.go`,
   `lifecycle/delivery_record_evidence.go`, and `lifecycle/already_resumed_recovery.go`.
+- Lifecycle record evidence evaluates original-owner proof when the execution ID remains listed.
+- Silent restart uses agent-group proof for a live standalone row and original-owner proof for
+  unknown row liveness. Existing execution, recovery-owner, and cleanup guards remain active.
 
 ## Out of scope
 
@@ -37,9 +40,12 @@ termination proof while shared agentctl remains active. Independent admission ch
 ## Acceptance
 
 1. With the runtime alive and the recorded group exited, reconstruction and retained
-   recovery report the process as terminated, and restart recovery proceeds.
+   recovery report the process as terminated, and restart recovery proceeds. A live
+   standalone row can proceed on agent-group proof; unknown row liveness uses original-owner
+   proof.
 2. A live group, a reused PID with another birth, a missing group identity, or an
-   unverifiable platform keeps today's result.
+   unverifiable platform keeps today's result. Mismatched executions and successors remain
+   protected.
 3. `TestOriginalOwnerTerminatedByAgentGroup` fails on the current code before the production change.
 
 ## Verification
@@ -47,6 +53,8 @@ termination proof while shared agentctl remains active. Independent admission ch
 ```bash
 (cd apps/backend && go test -trimpath -race -count=1 ./internal/common/processidentity -run 'GroupTerminated|OriginalOwner')
 (cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle -run 'OriginalOwner|AgentGroup')
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle -run 'HistoricalProcessTerminationAcceptsExitedAgentGroupForLiveExecution')
+(cd apps/backend && go test -trimpath -race -count=1 ./internal/orchestrator -run 'SilentRestoreSourceDeathProof|SilentRestoreSourceCleanupRejectsExistingWorkspaceSuccessor|SilentRestoreSourceCleanupKeepsWorkspaceSuccessor')
 (cd apps/backend && go test -trimpath -race -count=1 ./internal/agentctl/journal -run 'Retained')
 (cd apps/backend && go test -trimpath -race -count=1 ./internal/common/processidentity ./internal/agentctl/journal ./internal/agent/runtime/lifecycle ./internal/orchestrator)
 (bash scripts/lint-go-changed $(git diff --name-only -- 'apps/backend/*.go'))
@@ -59,6 +67,8 @@ termination proof while shared agentctl remains active. Independent admission ch
 - `apps/backend/internal/common/processidentity/group_termination_linux_test.go` (new)
 - `apps/backend/internal/agentctl/journal/retained.go`, `retained_gap.go`
 - `apps/backend/internal/agent/runtime/lifecycle/delivery_record_evidence.go`, `already_resumed_recovery.go`
+- `apps/backend/internal/agent/runtime/lifecycle/delivery_record_live_execution_linux_test.go`
+- `apps/backend/internal/orchestrator/silent_restart_recovery.go`, `silent_restart_recovery_source_liveness_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/delivery_record_group_proof_test.go` (new)
 - `apps/backend/internal/agentctl/journal/retained_group_proof_test.go` (new)
 
@@ -96,6 +106,6 @@ Task 01.
 - `bash scripts/lint-go-changed <changed Go files>`: 0 issues.
 - `python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all`: passed.
 
-Review corrections add surviving-child, changed-birth, previous-boot, retained recovery, and
-history-gap regressions. These tests remain unrun under the review request. Independent recovery
-gates still need the follow-up recorded in `plan.md`.
+Review corrections add surviving-child, changed-birth, previous-boot, retained recovery,
+history-gap, registered-instance, and unknown-liveness regressions. Current fixup results and
+validation are recorded in the plan after delivery.
