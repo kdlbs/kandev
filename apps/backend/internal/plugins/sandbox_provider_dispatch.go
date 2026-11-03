@@ -40,7 +40,7 @@ func invokeSandboxProvider[Q sandboxRequest, R sandboxResponse](
 	if err := ctx.Err(); err != nil {
 		return empty, errors.Join(ErrSandboxProviderUnavailable, err)
 	}
-	_, release, err := service.admitSandboxProvider(binding)
+	_, release, err := service.admitSandboxProvider(ctx, binding)
 	if err != nil {
 		return empty, err
 	}
@@ -121,14 +121,14 @@ func validSandboxResponseContext(value *pluginsdk.SandboxResponseContext, reques
 		value.OperationId == request.OperationId && value.ErrorCode == ""
 }
 
-func (s *Service) admitSandboxProvider(binding SandboxProviderBinding) (*store.Record, func(), error) {
+func (s *Service) admitSandboxProvider(ctx context.Context, binding SandboxProviderBinding) (*store.Record, func(), error) {
 	record, err := s.Get(binding.PluginID)
 	if err != nil {
 		return nil, nil, ErrSandboxProviderUnavailable
 	}
-	record, release, err := s.beginPluginDispatch(binding.PluginID, dispatchGeneration(record))
+	record, release, err := s.beginPluginDispatchContext(ctx, binding.PluginID, dispatchGeneration(record))
 	if err != nil {
-		return nil, nil, ErrSandboxProviderUnavailable
+		return nil, nil, errors.Join(ErrSandboxProviderUnavailable, ctx.Err())
 	}
 	if !sandboxBindingMatches(record, binding) {
 		release()

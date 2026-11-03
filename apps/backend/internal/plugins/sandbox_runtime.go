@@ -22,7 +22,7 @@ func (s *Service) ReadSandboxRuntime(ctx context.Context, binding SandboxProvide
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	record, release, err := s.admitSandboxProvider(binding)
+	record, release, err := s.admitSandboxProvider(ctx, binding)
 	if err != nil {
 		return nil, err
 	}

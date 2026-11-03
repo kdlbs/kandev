@@ -269,3 +269,19 @@ selected protocol 1. Its request now uses the installed manifest's major; its
 retained-runtime test passes. The final full plugin race suite passes. Scoped Go lint reports zero issues,
 and the backend build passes. Task 05 is complete. This work does not complete
 current-pair managed acceptance, which remains Task 10.
+
+### Main rebase integration (2026-11-03)
+
+Rebased all 25 host commits onto main `c060076d6723a611ebc260371aa80b555442e589`. Generated protobuf sources retain the merged SDK surface. Main's prepared Copilot arguments enter the sandbox start path without a second preparation.
+
+Two integration regressions now have RED/GREEN coverage. Sandbox RPC and runtime-artifact admission honor cancellation while a lifecycle writer holds the plugin lease. A sandboxed Copilot reset retains the environment that selected its plugin mounts, even when the runtime environment changes during inventory. Shared tracker startup and MCP transport constants satisfy the merged Go limits without changing their behavior.
+
+Final affected checks passed:
+
+- `go test -trimpath -race -p=4 ./internal/plugins ./internal/agent/sandboxruntime` with the packaged Nono provider: passed (127.8s and 123.6s).
+- `go test -trimpath -race -p=4 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process -run 'Test.*(Sandbox|Copilot|GenericWrapper|OneShot|MCP)' -count=1`: passed after the final production edit (13.7s and 8.2s). This does not replace managed acceptance or delegated-cgroup prerequisites.
+- `go test -trimpath -race -p=4 ./internal/persistence/storeconformance -count=1` with the task-owned PostgreSQL DSN: passed (212.1s), including SQLite/PostgreSQL ownership and previous-stable upgrade/replay. The first run found the private fixture stopped; restarting that fixture resolved the connection refusal.
+- SQL guard, scoped Go lint (zero issues), 13 Audit controller/trust tests, frontend typecheck (8 GiB Node heap), seven-locale checks, documentation catalog, and specification lint: passed.
+- Fresh managed browser runs: five desktop and five mobile Audit/Reports/learning journeys passed. Both screenshots were inspected. Intermediate runs correctly refused backend artifacts made stale by integration edits; the final runs used rebuilt artifacts.
+
+Main `:9998` remains listening. Both PRs remain drafts. Tasks 06-10 and current-pair managed acceptance remain pending. Preliminary Task 06 native network findings are recorded in its work order; no new approval capability is enabled by this checkpoint.

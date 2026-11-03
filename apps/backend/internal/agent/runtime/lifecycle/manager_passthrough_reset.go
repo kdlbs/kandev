@@ -100,7 +100,7 @@ func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentE
 	}
 	var env map[string]string
 	if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
-		env, err = m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
+		env, err = m.passthroughResetLaunchEnvironment(ctx, execution, resolved.rt.RequiredEnv, copilotEnv, copilotPrepared)
 		if err != nil {
 			return passthroughResetPreparation{}, err
 		}
@@ -175,14 +175,9 @@ func (m *Manager) preparePassthroughResetEnvironment(
 		maps.Copy(env, getPassthroughMCPEnv(execution))
 		return env, nil
 	}
-	if copilotPrepared {
-		env = copilotEnv
-	} else {
-		var err error
-		env, err = m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
-		if err != nil {
-			return nil, err
-		}
+	env, err := m.passthroughResetLaunchEnvironment(ctx, execution, rt.RequiredEnv, copilotEnv, copilotPrepared)
+	if err != nil {
+		return nil, err
 	}
 	if err := m.stopPassthroughForReset(ctx, execution, runner); err != nil {
 		return nil, err
@@ -197,6 +192,13 @@ func (m *Manager) preparePassthroughResetEnvironment(
 		}
 	}
 	return env, nil
+}
+
+func (m *Manager) passthroughResetLaunchEnvironment(ctx context.Context, execution *AgentExecution, requiredEnv []string, preparedEnv map[string]string, prepared bool) (map[string]string, error) {
+	if prepared {
+		return preparedEnv, nil
+	}
+	return m.buildPassthroughEnv(ctx, execution, requiredEnv)
 }
 
 func (m *Manager) prepareCopilotPassthroughReset(

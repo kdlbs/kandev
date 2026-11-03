@@ -1984,11 +1984,7 @@ func (m *Manager) startManagedProcess(record *sandboxStartRecord) (uint64, error
 	go m.forwardUpdates(m.adapter, m.stopCh)
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	root, trackers := m.snapshotTrackers()
-	root.Start(context.Background())
-	for _, t := range trackers {
-		t.Start(context.Background())
-	}
+	m.startWorkspaceTrackers()
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()
@@ -1997,6 +1993,14 @@ func (m *Manager) startManagedProcess(record *sandboxStartRecord) (uint64, error
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
 	return processGeneration, nil
+}
+
+func (m *Manager) startWorkspaceTrackers() {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, tracker := range trackers {
+		tracker.Start(context.Background())
+	}
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
@@ -2022,11 +2026,7 @@ func (m *Manager) startOneShot() error {
 	go m.forwardUpdates(m.adapter, m.stopCh)
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	root, trackers := m.snapshotTrackers()
-	root.Start(context.Background())
-	for _, t := range trackers {
-		t.Start(context.Background())
-	}
+	m.startWorkspaceTrackers()
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()

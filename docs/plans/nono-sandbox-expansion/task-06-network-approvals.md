@@ -112,4 +112,8 @@ Plain allow_domain strips ports and upstream CONNECT bypasses the new approval b
 
 ## Results
 
-Pending.
+Pending implementation. Preliminary pinned-runtime probes on 2026-11-03 confirmed native CONNECT callbacks contain the network operation, exact port, PID zero, request ID, and runtime session ID. Two sequential allowed connections generated distinct callbacks. A different port and the callback endpoint were denied.
+
+The default kernel TCP-port restriction allowed a direct connection to an owned server at `127.0.0.2` on the proxy port, without a callback. Repeating the probe with `--isolate net` blocked that bypass while preserving approved CONNECT traffic. Native v2 mode must require network namespace isolation and refuse startup when it is unavailable. No all-port loopback option or external-enforcement fallback is permitted. The v1 relay path is unchanged. The full DNS/alias/IPv6, concurrency, MCP, operator, and packaged acceptance matrix is still pending.
+
+Temporary owned evidence: `/tmp/nono-task06-network-probe.py`, `/tmp/nono-task06-network-probe-result.json`, and `/tmp/nono-task06-network-netns-result.json`. These probes do not prove host integration or authorize capability activation.

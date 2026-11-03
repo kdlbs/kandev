@@ -6,6 +6,8 @@ import (
 	"strconv"
 )
 
+const sandboxMCPSSETransport = "sse"
+
 // configureSandboxMCP replaces automatic local access with the captured grant.
 // The caller holds the configuration lock and has validated the launch envelope.
 func (m *Manager) configureSandboxMCP() {
@@ -14,7 +16,7 @@ func (m *Manager) configureSandboxMCP() {
 	}
 	servers := make([]config.McpServerConfig, 0, len(m.cfg.McpServers))
 	if m.cfg.Sandbox.MCPURL != "" {
-		servers = append(servers, config.McpServerConfig{Name: injectedKandevMCPServerName, Type: "http", URL: m.cfg.Sandbox.MCPURL})
+		servers = append(servers, config.McpServerConfig{Name: injectedKandevMCPServerName, Type: managedMCPHTTPTransport, URL: m.cfg.Sandbox.MCPURL})
 	}
 	for _, server := range m.cfg.McpServers {
 		if server.Name != injectedKandevMCPServerName {
@@ -27,15 +29,15 @@ func (m *Manager) configureSandboxMCP() {
 
 func canonicalKandevMCPURL(cfg *config.InstanceConfig, transport string) string {
 	if cfg.Sandbox != nil {
-		if transport == "http" {
+		if transport == managedMCPHTTPTransport {
 			return cfg.Sandbox.MCPURL
 		}
 		return ""
 	}
-	if transport == "http" {
+	if transport == managedMCPHTTPTransport {
 		return config.MCPServerURL(cfg.MCPHost, cfg.Port, "/mcp")
 	}
-	if transport == "sse" {
+	if transport == sandboxMCPSSETransport {
 		return config.MCPServerURL(cfg.MCPHost, cfg.Port, "/sse")
 	}
 	return ""

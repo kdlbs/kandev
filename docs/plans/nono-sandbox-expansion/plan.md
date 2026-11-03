@@ -171,7 +171,7 @@ Design validation passed on 2026-10-30:
 - All work-order dependency references, 15 new documents' local links, and verification-block shell syntax passed.
 - `git diff --check`: passed. All new artifacts are visible in the specification catalog or plan directory.
 
-Task-level results are recorded in each work order. Tasks 01-04 passed their required checks. Task 05 is in progress. Tasks 06-10 remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
+Task-level results are recorded in each work order. Tasks 01-05 passed their required checks. Tasks 06-10 remain pending. Do not mark work complete while a required real-runtime case is skipped or unsupported. Keep capability refusal when a gate fails and report the blocker.
 
 Leave this package unstaged and uncommitted for review. After a later explicit implementation request, use TDD per work order. Update host PR #4769 and companion PR #2 within existing authorization after their affected checks pass. A production plugin release additionally requires the public compatible SDK dependency and independent package validation. No merge is authorized.
 
@@ -186,3 +186,9 @@ The user explicitly requested implementation of this package. Implementation fol
 ## Foundation delivery checkpoint (2026-11-02)
 
 Tasks 01-05 are complete. The host foundation, independent process/launch/runtime facts, typed audit reports, and finalized audit verification are implemented. Host UI checkpoint `4970f79f3724` and provider key-classification checkpoint `c45dae9d` are pushed to their draft PRs. Task 05 passes its persistence/restart and native-verifier checks, 13 controller/current-trust tests, ten desktop/phone browser journeys, seven-locale checks, scoped lint, documentation checks, and builds. Explicit verification RPCs use the 30-second job bound; ordinary reads retain five seconds and shorter caller/wire deadlines win. Full plugin and packaged-runtime race suites pass. Tasks 06-10 remain pending. Current-pair managed acceptance is not complete. Moving main introduced PR conflicts; rebase and integration checks precede the next work order. Main :9998 and retained instances remain unchanged. No PR merge is authorized.
+
+## Rebase integration checkpoint (2026-11-03)
+
+The host now contains verified main `c060076d6723a611ebc260371aa80b555442e589`; all 25 initiative commits remain. Cancellation during plugin lifecycle writes and sandboxed Copilot reset environment coherence have RED/GREEN coverage. Final affected race suites, SQLite/PostgreSQL owning-store and previous-stable upgrade checks, SQL guard, zero-issue Go lint, 13 Audit UI tests, typecheck, ten fresh desktop/phone browser journeys, localization, and documentation checks pass. Task 05 records the commands and limits. The private PostgreSQL fixture was restarted on its task-owned Unix socket; main and retained instances were preserved.
+
+Task 06 remains pending. Preliminary native probes require `--isolate net` to close a same-proxy-port alternate-address bypass. The full packaged network acceptance matrix remains required before capability activation.
