@@ -134,7 +134,9 @@ func withTierConsumptionRate(prior, current dynamic.CandidateUsage) dynamic.Cand
 	if prior.RemainingPct < current.RemainingPct {
 		return current
 	}
-	if prior.ResetAtKnown && current.ResetAtKnown && !prior.ResetAt.Equal(current.ResetAt) {
+	// A rate needs two proved, unchanged resets. A missing reset on either
+	// sample cannot establish that the two readings cover the same window.
+	if !prior.ResetAtKnown || !current.ResetAtKnown || !prior.ResetAt.Equal(current.ResetAt) {
 		return current
 	}
 	current.ConsumptionRateKnown = true

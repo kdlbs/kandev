@@ -136,7 +136,8 @@ preparation failure leaves a failed real call. Office uses its reserved actual
 run-session key. Legacy/off utility routes remain transient. Task-only startup
 and delayed recovery exclude native rows; native owners retain their recovery.
 
-This increment wires utility and taskless Office callers. Review-run ownership
-requires composition with the existing G2 review wiring and is not yet claimed
-connected. PostgreSQL runtime evidence and independent-backend unique choice,
-keep-model and installed acceptance remain distinct original work.
+This increment wires utility and taskless Office callers. The native owner
+validator accepts only utility-call and office-run-session keys; a review-run
+key fails closed until the existing G2 review composition is wired. PostgreSQL
+runtime evidence and independent-backend unique choice, keep-model and installed
+acceptance remain distinct original work.

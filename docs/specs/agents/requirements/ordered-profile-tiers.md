@@ -28,8 +28,10 @@ Their stored metadata remains opaque and preserved; unsupported runtime modes ar
 not silently executed as order. Usage modes read only the last observed provider
 usage snapshot and stay unknown when that feature is off or no snapshot exists.
 Round-robin is implemented for committed task/session routes and the native
-utility/taskless Office owner bridge; review-run ownership requires the existing
-G2 review wiring, and cross-backend atomic choice remains out of scope.
+utility/taskless Office owner bridge. The native owner validator accepts only
+utility-call and office-run-session keys; review-run ownership requires the
+existing G2 review wiring and fails closed until then. Cross-backend atomic
+choice remains out of scope.
 
 ## Implementation plans
 
