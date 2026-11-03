@@ -49,6 +49,7 @@ func waitForAsyncFollowupRelease(e *emitter, path string) bool {
 	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
 	defer cancel()
 	if err := waitForScriptFile(ctx, path); err != nil {
+		// Release failure retains the active tool and blocks queue delivery.
 		e.text(fmt.Sprintf("Async follow-up release failed: %v", err))
 		return false
 	}

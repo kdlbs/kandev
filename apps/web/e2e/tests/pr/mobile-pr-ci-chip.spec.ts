@@ -21,34 +21,51 @@ const PR_NUMBER = 99;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
 async function expectCompactAction(page: Page, drawer: Locator) {
-  for (const height of [240, 321, 400, 480, 481]) {
-    await page.setViewportSize({ width: 320, height });
-    await waitForFiniteAnimations(drawer);
-    const link = drawer.getByTestId("pr-popover-pr-link");
-    const bounds = await link.boundingBox();
-    const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
-    expect(bounds!.x).toBeGreaterThanOrEqual(wrapper!.x);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(wrapper!.x + wrapper!.width);
-    expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
-    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
-    const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
-    expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
-    expect(
-      await drawer
-        .getByTestId("pr-popover-scroll-body")
-        .evaluate((element) => element.clientHeight),
-    ).toBeGreaterThanOrEqual(44);
-    expect(
-      await link.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        return (
-          document
-            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-            ?.closest("a") === element
-        );
-      }),
-    ).toBe(true);
+  const client = await page.context().newCDPSession(page);
+  const zeroInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const cases = [
+    ...[240, 321, 400, 480, 481].map((height) => ({ height, insets: zeroInsets })),
+    { height: 400, insets: { top: 20, right: 32, bottom: 20, left: 24 } },
+  ];
+  try {
+    for (const { height, insets } of cases) {
+      await client.send("Emulation.setSafeAreaInsetsOverride", { insets });
+      await page.setViewportSize({ width: 320, height });
+      await waitForFiniteAnimations(drawer);
+      const close = drawer.getByTestId("pr-status-chip-drawer-close");
+      const closeBounds = await close.boundingBox();
+      expect(closeBounds!.y).toBeGreaterThanOrEqual(insets.top);
+      expect(closeBounds!.x + closeBounds!.width).toBeLessThanOrEqual(320 - insets.right);
+      await close.click({ trial: true });
+      const link = drawer.getByTestId("pr-popover-pr-link");
+      const bounds = await link.boundingBox();
+      const wrapper = await drawer.locator("[data-vaul-no-drag]").boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(wrapper!.x);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(wrapper!.x + wrapper!.width);
+      expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+      const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
+      expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+      expect(
+        await drawer
+          .getByTestId("pr-popover-scroll-body")
+          .evaluate((element) => element.clientHeight),
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        await link.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return (
+            document
+              .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+              ?.closest("a") === element
+          );
+        }),
+      ).toBe(true);
+    }
+  } finally {
+    await client.send("Emulation.setSafeAreaInsetsOverride", { insets: zeroInsets });
+    await client.detach();
   }
 }
 

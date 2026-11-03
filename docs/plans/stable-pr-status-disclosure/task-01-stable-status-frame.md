@@ -247,3 +247,21 @@ marker is also released on test failure. No runtime product contract changed.
 Final focused verification passed: 17 phone cases, five desktop stability
 cases, the gated queue-delivery case, seven unit suites (88 tests), mock-agent
 race tests, typecheck, targeted lint, and specification validation.
+
+The next review identified cutout insets for compact Close positioning.
+Browser CDP overrides with nonzero top, right, bottom, and left insets reproduced
+the failure in both compact cases. Close and content padding now respect those
+insets; both cases and all 17 affected phone tests passed. Five desktop cases
+and the gated queue case also passed. The mock unit test now requires a completed
+tool update as well as finished text. Removing tool completion made it fail.
+Release failure intentionally retains the active tool so a broken fixture cannot
+deliver queued work and conceal the failure. A new fake-clock case asserts that
+behavior and its visible error; mock-agent race tests passed.
+
+The ambient-environment CI job reached Go's default ten-minute package budget
+while a one-second subtest was running. The same package passed on the prior
+head in 464 seconds; the local full run completed in 488 seconds, with separate
+Git-shim assertion failures on NixOS. The GitLab-facing ambient command now uses
+an explicit 25-minute aggregate budget, matching existing backend race-job
+budgets. Per-test waits and assertions are unchanged. The exact timeout-site
+test passed locally with the race detector.

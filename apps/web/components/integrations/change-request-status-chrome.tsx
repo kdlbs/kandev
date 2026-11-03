@@ -151,6 +151,7 @@ export function ChangeRequestStatusDrawerContent({
         fixedContent && [
           "h-[80dvh] data-[vaul-drawer-direction=bottom]:max-h-[80dvh]",
           "[@media(max-height:480px)]:h-dvh [@media(max-height:480px)]:max-h-dvh [@media(max-height:480px)]:data-[vaul-drawer-direction=bottom]:max-h-dvh [@media(max-height:480px)]:data-[vaul-drawer-direction=bottom]:mt-0",
+          "[@media(max-height:480px)]:pt-[calc(0.5rem+env(safe-area-inset-top,0px))] [@media(max-height:480px)]:pr-[calc(0.5rem+env(safe-area-inset-right,0px))] [@media(max-height:480px)]:pl-[calc(0.5rem+env(safe-area-inset-left,0px))]",
           "[@media(max-height:480px)]:[&>div:first-child]:hidden [@media(max-height:480px)]:[&_[data-slot=change-request-popover-header]]:pr-12 [@media(max-height:480px)]:[&_[role=tablist]]:pr-12",
         ],
       )}
@@ -178,7 +179,7 @@ export function ChangeRequestStatusDrawerContent({
             className={cn(
               "cursor-pointer",
               fixedContent &&
-                "min-h-12 min-w-12 [@media(max-height:480px)]:absolute [@media(max-height:480px)]:top-2 [@media(max-height:480px)]:right-2 [@media(max-height:480px)]:z-10",
+                "min-h-12 min-w-12 [@media(max-height:480px)]:absolute [@media(max-height:480px)]:top-[calc(0.5rem+env(safe-area-inset-top,0px))] [@media(max-height:480px)]:right-[calc(0.5rem+env(safe-area-inset-right,0px))] [@media(max-height:480px)]:z-10",
             )}
           >
             <IconX className="h-4 w-4" />

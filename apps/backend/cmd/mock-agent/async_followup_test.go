@@ -3,9 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 func TestAsyncFollowupWaitsForQueuedMessageRelease(t *testing.T) {
@@ -20,7 +23,7 @@ func TestAsyncFollowupWaitsForQueuedMessageRelease(t *testing.T) {
 			started = started || getTextContent(update) == "Background follow-up started."
 			finished = finished || getTextContent(update) == "Background follow-up finished."
 		}
-		if !started || finished {
+		if !started || finished || completedFollowupTool(updates.getUpdates()) {
 			t.Fatalf("before queue release: started=%v, finished=%v", started, finished)
 		}
 		if err := os.WriteFile(path, []byte("release"), 0o600); err != nil {
@@ -29,10 +32,37 @@ func TestAsyncFollowupWaitsForQueuedMessageRelease(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		synctest.Wait()
 		for _, update := range updates.getUpdates() {
-			if getTextContent(update) == "Background follow-up finished." {
-				return
-			}
+			finished = finished || getTextContent(update) == "Background follow-up finished."
 		}
-		t.Fatal("follow-up did not finish after queue release")
+		if !finished || !completedFollowupTool(updates.getUpdates()) {
+			t.Fatal("follow-up text and tool must finish after queue release")
+		}
 	})
+}
+
+func TestAsyncFollowupReleaseFailureRetainsTool(t *testing.T) {
+	path := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		e, updates := newTestEmitter()
+		handlePrompt(e, "/async-followup "+path, modelFast)
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		failed := false
+		for _, update := range updates.getUpdates() {
+			failed = failed || strings.HasPrefix(getTextContent(update), "Async follow-up release failed:")
+		}
+		if !failed || completedFollowupTool(updates.getUpdates()) {
+			t.Fatal("release failure must stay visible and keep the tool active")
+		}
+	})
+}
+
+func completedFollowupTool(updates []recordedUpdate) bool {
+	for _, update := range updates {
+		call := update.notification.Update.ToolCallUpdate
+		if call != nil && call.ToolCallId == "async-followup-work" && call.Status != nil && *call.Status == acp.ToolCallStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
