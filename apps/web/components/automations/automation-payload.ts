@@ -2,6 +2,7 @@ import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
   AutomationRepository,
+  AutomationPluginToolSelection,
   ContinuationPolicy,
   ManagedConversationDestination,
   RepositoryMode,
@@ -45,7 +46,20 @@ export type FormState = {
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
   retryPolicy: RetryPolicy;
+  pluginTools: AutomationPluginToolSelection[];
 };
+
+/** Canonical form for comparing two approvals without tool-order noise. */
+export function canonicalPluginTools(
+  selection: AutomationPluginToolSelection[],
+): AutomationPluginToolSelection[] {
+  return selection
+    .map((entry) => ({
+      ...entry,
+      tool_names: [...entry.tool_names].sort(),
+    }))
+    .sort((left, right) => left.plugin_id.localeCompare(right.plugin_id));
+}
 
 export function retryPolicyAfterModeChange(
   policy: RetryPolicy,
@@ -212,12 +226,14 @@ export function buildCreatePayload(
       enabled: trigger.enabled,
     })),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    plugin_tools: form.taskMode === "automation_run" ? form.pluginTools : [],
   };
 }
 
 export function buildUpdatePayload(
   form: FormState,
   repositories: AutomationRepository[],
+  pluginTools?: AutomationPluginToolSelection[],
 ): UpdateAutomationRequest {
   return {
     name: form.name,
@@ -238,6 +254,9 @@ export function buildUpdatePayload(
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    ...(pluginTools !== undefined
+      ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
+      : {}),
   };
 }
 
