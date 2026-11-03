@@ -3056,5 +3056,6 @@
   "contextCompactionSummary": "概要",
   "contextCompactionTokenCounts": "{{preTokens}} → {{postTokens}} トークン",
   "contextCompactionTrigger": "実行条件：{{trigger}}",
-  "contextCompactionDuration": "所要時間：{{duration}}"
+  "contextCompactionDuration": "所要時間：{{duration}}",
+  "deliveryMessageNotDelivered": "未配信です。もう一度送信してください。"
 }

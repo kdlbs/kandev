@@ -3056,5 +3056,6 @@
   "contextCompactionSummary": "Śũḿḿàŕŷ",
   "contextCompactionTokenCounts": "{{preTokens}} ţōķēńś → {{postTokens}} ţōķēńś",
   "contextCompactionTrigger": "Ţŕĩĝĝēŕ: {{trigger}}",
-  "contextCompactionDuration": "Ďũŕàţĩōń: {{duration}}"
+  "contextCompactionDuration": "Ďũŕàţĩōń: {{duration}}",
+  "deliveryMessageNotDelivered": "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń."
 }

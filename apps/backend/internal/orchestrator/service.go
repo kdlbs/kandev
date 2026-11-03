@@ -126,6 +126,13 @@ type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
