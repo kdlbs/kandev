@@ -707,8 +707,8 @@ output.
 
 Under **Settings → Preferences → Task Behavior**, the **Prevent auto-start on open**
 preference is off by default. When enabled, opening a task never launches or
-resumes its agent on its own; it shows the **Start agent** button instead. The
-preference applies in two situations:
+resumes its agent on its own; it shows the **Start agent** button or the composer
+start hint instead. The preference applies in three situations:
 
 - **Opening a task in the final step of its workflow.** The task opens with a
   prepared session and the agent stays stopped until you select **Start agent**.
@@ -718,6 +718,10 @@ preference applies in two situations:
   preference is off, opening the task can resume its existing conversation.
   When it is on, the agent stays stopped until you select **Start agent** or
   send a message. The previous prompt is not replayed.
+- **Opening or refocusing a session paused by the workspace ACP idle policy.**
+  When this preference is on, the session stays suspended and the composer
+  shows the start hint. Sending a message resumes the same conversation once.
+  With the preference off, opening or refocusing the task resumes the session.
 
 Separately, after a backend restart Kandev runs a bounded background pass over
 eligible interrupted sessions. It does not wait for you to open or focus each

@@ -372,6 +372,11 @@ async function performResumeAction({
   canContinue,
 }: ResumeActionParams): Promise<boolean> {
   if (status.is_idle_suspended && !status.is_agent_running) {
+    if (preventAutoStart) {
+      recordResumeSkipIfStopped(setters, sessionId);
+      setters.setResumptionState("idle");
+      return false;
+    }
     if (status.auto_resume_allowed === false || document.visibilityState !== "visible") {
       setters.setResumptionState("idle");
       return false;
