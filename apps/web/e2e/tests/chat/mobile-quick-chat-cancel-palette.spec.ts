@@ -4,6 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForAgentMessage } from "../../helpers/session";
 import { holdCancellationSettlement } from "../../helpers/cancellation-observation";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   waitForActiveQuickChatForegroundActivity,
   waitForActiveQuickChatSupportsSteering,
@@ -110,6 +111,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.keyboard.press("Control+k");
     const palette = commandDialog(testPage);
     await expect(palette).toBeVisible({ timeout: 10_000 });
+    await waitForFiniteAnimations(palette);
     await palette.getByRole("combobox").fill("cancel");
     const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
     await expect(cancelOption).toHaveCount(1);

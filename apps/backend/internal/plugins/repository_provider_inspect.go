@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
@@ -19,6 +21,10 @@ const (
 	maxRepositoryProviderScopeBytes  = 512
 	nullJSONValue                    = "null"
 	repositoryProviderInspectionNone = "none"
+	// repositoryProviderInspectionNotSent marks an inspection that never
+	// reached the plugin action dispatcher.
+	repositoryProviderInspectionNotSent = "not_sent"
+	repositoryInspectionLogEvent        = "plugin repository inspection"
 )
 
 // RepositoryProviderInspectionRequest contains the untrusted URL and optional
@@ -94,25 +100,12 @@ func (s *Service) inspectRepositoryProvider(
 	started := time.Now()
 	providerID := strings.TrimSpace(request.Provider)
 	pluginID := ""
-	responseShape := "not_sent"
+	responseShape := repositoryProviderInspectionNotSent
 	defer func() {
-		if s.log == nil {
-			return
-		}
-		failureCategory := repositoryProviderInspectionNone
-		if err != nil {
-			failureCategory = repositoryProviderInspectionFailureCategory(err)
-		}
-		s.log.Info("plugin repository inspection",
-			zap.String("provider_id", providerID),
-			zap.String("plugin_id", pluginID),
-			zap.String("workspace_id", workspaceID),
-			zap.Duration("duration", time.Since(started)),
-			zap.String("response_shape", responseShape),
-			zap.String("failure_category", failureCategory))
+		s.logRepositoryInspection(providerID, pluginID, workspaceID, started, responseShape, err)
 	}()
 
-	request.Provider = strings.TrimSpace(request.Provider)
+	request.Provider = providerID
 	request.URL = strings.TrimSpace(request.URL)
 	if strings.TrimSpace(workspaceID) == "" || request.Provider == "" || request.URL == "" {
 		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, nil)
@@ -122,9 +115,34 @@ func (s *Service) inspectRepositoryProvider(
 		return nil, newRepositoryProviderError(RepositoryProviderErrorUnavailable, err)
 	}
 	pluginID = record.ID
+	outcome := s.runRepositoryProviderInspection(ctx, workspaceID, request, record, action, invoke)
+	responseShape = outcome.responseShape
+	if outcome.err != nil {
+		return nil, outcome.err
+	}
+	if !outcome.matched {
+		return nil, newRepositoryProviderError(RepositoryProviderErrorNotFound, nil)
+	}
+	return outcome.inspection, nil
+}
+
+// runRepositoryProviderInspection performs one manifest-owned inspection and
+// reports the three outcomes callers need to distinguish: a validated match, an
+// ordinary no-match, and a typed failure.
+func (s *Service) runRepositoryProviderInspection(
+	ctx context.Context,
+	workspaceID string,
+	request RepositoryProviderInspectionRequest,
+	record *store.Record,
+	action manifest.Action,
+	invoke repositoryActionInvoker,
+) repositoryInspectionOutcome {
 	body, err := json.Marshal(map[string]string{"url": request.URL})
 	if err != nil || action.MaxBodyBytes <= 0 || len(body) > action.MaxBodyBytes {
-		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
+		return repositoryInspectionOutcome{
+			responseShape: repositoryProviderInspectionNotSent,
+			err:           newRepositoryProviderError(RepositoryProviderErrorInvalid, err),
+		}
 	}
 	invokeCtx, cancel := context.WithTimeout(ctx, repositoryInspectActionTimeout)
 	defer cancel()
@@ -133,20 +151,60 @@ func (s *Service) inspectRepositoryProvider(
 		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: workspaceID},
 		Body:      body,
 	})
-	responseShape = repositoryProviderInspectionResponseShape(response)
+	outcome := repositoryInspectionOutcome{responseShape: repositoryProviderInspectionResponseShape(response)}
 	if err != nil {
-		return nil, newRepositoryProviderError(RepositoryProviderErrorUnavailable, err)
+		outcome.err = newRepositoryProviderError(RepositoryProviderErrorUnavailable, err)
+		return outcome
 	}
-	return parseRepositoryProviderActionResponse(response, request)
+	inspection, matched, parseErr := parseRepositoryProviderActionOutcome(response, request)
+	outcome.inspection, outcome.matched, outcome.err = inspection, matched, parseErr
+	return outcome
+}
+
+// logRepositoryInspection records one sanitized inspection outcome. It never
+// includes the URL, response body, plugin configuration, or credentials.
+func (s *Service) logRepositoryInspection(
+	providerID, pluginID, workspaceID string, started time.Time, responseShape string, err error,
+) {
+	if s.log == nil {
+		return
+	}
+	failureCategory := repositoryProviderInspectionNone
+	if err != nil {
+		failureCategory = repositoryProviderInspectionFailureCategory(err)
+	}
+	if responseShape == "" {
+		responseShape = repositoryProviderInspectionNone
+	}
+	s.log.Info(repositoryInspectionLogEvent,
+		zap.String("provider_id", providerID),
+		zap.String("plugin_id", pluginID),
+		zap.String("workspace_id", workspaceID),
+		zap.Duration("duration", time.Since(started)),
+		zap.String("response_shape", responseShape),
+		zap.String("failure_category", failureCategory))
 }
 
 func parseRepositoryProviderActionResponse(
 	response *pluginsdk.PluginActionResponse, request RepositoryProviderInspectionRequest,
 ) (*RepositoryProviderInspection, error) {
-	if response != nil && response.Status != 0 && (response.Status < 200 || response.Status >= 300) {
-		return nil, repositoryProviderStatusError(response.Status)
+	inspection, matched, err := parseRepositoryProviderActionOutcome(response, request)
+	if err != nil {
+		return nil, err
 	}
-	return parseRepositoryProviderInspection(response, request)
+	if !matched {
+		return nil, newRepositoryProviderError(RepositoryProviderErrorNotFound, nil)
+	}
+	return inspection, nil
+}
+
+func parseRepositoryProviderActionOutcome(
+	response *pluginsdk.PluginActionResponse, request RepositoryProviderInspectionRequest,
+) (*RepositoryProviderInspection, bool, error) {
+	if response != nil && response.Status != 0 && (response.Status < 200 || response.Status >= 300) {
+		return nil, false, repositoryProviderStatusError(response.Status)
+	}
+	return parseRepositoryProviderInspectionOutcome(response, request)
 }
 
 func repositoryProviderInspectionFailureCategory(err error) string {
@@ -192,31 +250,51 @@ func repositoryProviderInspectionResponseShape(response *pluginsdk.PluginActionR
 func parseRepositoryProviderInspection(
 	response *pluginsdk.PluginActionResponse, request RepositoryProviderInspectionRequest,
 ) (*RepositoryProviderInspection, error) {
+	inspection, matched, err := parseRepositoryProviderInspectionOutcome(response, request)
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return nil, newRepositoryProviderError(RepositoryProviderErrorNotFound, nil)
+	}
+	return inspection, nil
+}
+
+// parseRepositoryProviderInspectionOutcome keeps an ordinary no-match distinct
+// from a provider 404 or a malformed descriptor. matched is false with a nil
+// error only for the explicit `{"matched":false}` envelope.
+func parseRepositoryProviderInspectionOutcome(
+	response *pluginsdk.PluginActionResponse, request RepositoryProviderInspectionRequest,
+) (*RepositoryProviderInspection, bool, error) {
 	if response == nil || len(response.Body) == 0 || len(response.Body) > maxRepositoryInspectResponseSize {
-		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, nil)
+		return nil, false, newRepositoryProviderError(RepositoryProviderErrorInvalid, nil)
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(response.Body, &raw); err != nil {
-		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
+		return nil, false, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
 	}
 	if matched, exists := raw["matched"]; exists {
 		var value bool
 		if err := json.Unmarshal(matched, &value); err != nil {
-			return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
+			return nil, false, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
 		}
 		if !value {
 			if repository, hasRepository := raw["repository"]; hasRepository && string(repository) != nullJSONValue {
-				return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, nil)
+				return nil, false, newRepositoryProviderError(RepositoryProviderErrorInvalid, nil)
 			}
-			return nil, newRepositoryProviderError(RepositoryProviderErrorNotFound, nil)
+			return nil, false, nil
 		}
 	}
 
 	candidate, err := inspectionCandidate(raw)
 	if err != nil {
-		return nil, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
+		return nil, false, newRepositoryProviderError(RepositoryProviderErrorInvalid, err)
 	}
-	return validateRepositoryProviderInspection(candidate, request)
+	inspection, err := validateRepositoryProviderInspection(candidate, request)
+	if err != nil {
+		return nil, false, err
+	}
+	return inspection, true, nil
 }
 
 func inspectionCandidate(raw map[string]json.RawMessage) (*RepositoryProviderInspection, error) {

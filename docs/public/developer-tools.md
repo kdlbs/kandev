@@ -30,6 +30,47 @@ An aborted creation leaves no partially configured provider. If the connection f
 reload the settings to confirm the saved state before retrying, especially when adding a provider.
 Saves for separate providers are independent.
 
+## Configure webhook notifications
+
+Open **Settings > Preferences > Notifications** and select **Add Webhook Provider**.
+Enter an HTTP or HTTPS endpoint. Add request headers or a secret when the endpoint
+needs them. Select the events that the provider must receive, then save the
+settings.
+
+Kandev sends a `POST` request with a versioned JSON body. For example:
+
+```json
+{
+  "version": "1.0",
+  "event": "session.turn_finished",
+  "title": "Agent turn finished",
+  "message": "The agent finished a turn.",
+  "type": "info",
+  "fields": {
+    "task_id": "task-123",
+    "task_session_id": "session-456",
+    "occurrence_id": "turn-789"
+  }
+}
+```
+
+The `fields` object contains the IDs that are available for the event. Kandev
+omits an ID when it is empty. A configured `Authorization` header takes
+precedence over the secret. If there is no such header, Kandev sends a non-empty
+secret as `Authorization: Bearer <secret>`.
+
+Save the settings before you select **Test**. The test sends the saved
+configuration.
+
+By default, Kandev rejects destinations that resolve to loopback, private,
+link-local, multicast, or other reserved addresses. Kandev also refuses
+cross-origin redirects, so credential headers do not reach another origin.
+Private or local destinations need an operator opt-in. Set
+`notifications.webhookAllowPrivateNetworks: true` in `config.yaml`, or set
+`KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS=true` in the backend environment. This
+setting applies to the whole backend process. Kandev reads it at startup, so
+restart the backend after you change it.
+
 ## Use CLI passthrough on a phone
 
 Open a task running in CLI passthrough mode. Its connected terminal shows the

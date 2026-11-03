@@ -113,6 +113,7 @@ export type AgentProfileMcpConfig = {
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;
+  supports_local_install?: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
   available: boolean;
@@ -335,6 +336,7 @@ export type AvailableAgent = {
   display_name: string;
   description?: string;
   install_script?: string;
+  supports_local_install?: boolean;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];

@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
@@ -405,6 +406,10 @@ type InstanceConfig struct {
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
@@ -805,6 +810,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.ProviderGatewayAuth != nil {
 		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
 	}
+	if overrides.AuthPolicy != nil {
+		cfg.AuthPolicy = overrides.AuthPolicy
+	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
@@ -875,6 +883,7 @@ type InstanceOverrides struct {
 	RequiresProcessKill        bool
 	StripEnv                   []string
 	ProviderGatewayAuth        *acpprovider.GatewayAuth
+	AuthPolicy                 *acpcompat.AuthPolicy
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
 	RemoteContributions        map[string]models.RemoteContribution
@@ -953,7 +962,8 @@ func CollectAgentEnvWithoutAdditional() []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, value := range os.Environ() {
 		if idx := strings.Index(value, "="); idx > 0 &&
-			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) {
+			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) &&
+			!launchwrapper.IsAgentDebugSetting(value[:idx]) {
 			env = append(env, value)
 		}
 	}
@@ -975,7 +985,8 @@ func collectAgentEnvWithError(additional map[string]string, instance bool) ([]st
 	for _, e := range os.Environ() {
 		if idx := strings.Index(e, "="); idx > 0 {
 			key := e[:idx]
-			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
+			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) &&
+				!launchwrapper.IsAgentDebugSetting(key) {
 				envMap[key] = e[idx+1:]
 			}
 		}
@@ -1002,6 +1013,15 @@ func collectAgentEnvWithError(additional map[string]string, instance bool) ([]st
 			envMap[githubauth.CredentialCLIShimDirEnv],
 			envMap[githubauth.CredentialCLIBashEnvEnv],
 		)
+	}
+
+	// Agent processes must never receive agentctl's ACP debug-log settings, not
+	// even through an explicit per-instance override: a nested tool would write
+	// its frames into the developer's real log directory.
+	for key := range envMap {
+		if launchwrapper.IsAgentDebugSetting(key) {
+			delete(envMap, key)
+		}
 	}
 
 	// Convert back to slice

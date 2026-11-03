@@ -30,6 +30,7 @@ import {
   type SessionInputMode,
 } from "./domains/session/session-input-mode";
 import { t } from "@/lib/i18n";
+import { notifyTurnErrorAcknowledgementFailure } from "@/lib/task-turn-error-feedback";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { getTaskPreviewFeedback } from "@/lib/api/domains/preview-feedback-api";
 import {
@@ -37,6 +38,11 @@ import {
   toTaskPreviewFeedbackRefs,
 } from "@/lib/preview-feedback-refs";
 import { findMessageByID, sendMessageRequest } from "./message-request";
+import {
+  observedTurnErrorStampForSession,
+  selectTaskStatusSummary,
+} from "@/lib/task-status-summary";
+import { collectTaskStatusSummaryCandidates } from "@/hooks/domains/task/use-task-status-summary";
 
 export { sendMessageRequest } from "./message-request";
 
@@ -261,6 +267,13 @@ async function deliverComposedMessage({
   storeApi: ReturnType<typeof useAppStoreApi>;
   clientAdmissionId: string;
 }): Promise<MessageAdmissionOutcome | false> {
+  const observedTurnErrorStamp = observedTurnErrorStampForSession(
+    selectTaskStatusSummary(
+      undefined,
+      collectTaskStatusSummaryCandidates(storeApi.getState(), taskId),
+    ),
+    resolvedSessionId,
+  );
   try {
     if (hasPendingClarification || inputMode === "queue") {
       const accepted = await queue({
@@ -274,6 +287,7 @@ async function deliverComposedMessage({
         ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
         ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
         ...(contextFilesMeta ? { contextFilesMeta } : {}),
+        ...(observedTurnErrorStamp ? { observedTurnErrorStamp } : {}),
       });
       if (!accepted) {
         return false;
@@ -296,7 +310,9 @@ async function deliverComposedMessage({
       entityReferences: payload.entityReferences,
       planCommentRefs,
       previewFeedbackRefs,
+      observedTurnErrorStamp,
     });
+    notifyTurnErrorAcknowledgementFailure(created?.turn_error_acknowledgement_failed);
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
     await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
     await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);

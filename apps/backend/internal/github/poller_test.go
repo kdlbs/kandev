@@ -778,6 +778,9 @@ func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ ma
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if strings.Contains(query, "query WorkflowSuites") || strings.Contains(query, "query WorkflowSuiteJobs") {
+		return json.Unmarshal([]byte(`{"data":{}}`), out)
+	}
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {

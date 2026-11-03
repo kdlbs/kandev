@@ -78,6 +78,10 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+When a change targets one path but edits a helper or predicate shared by other
+paths, scope the change at the call site or add a regression for every unchanged
+path. Shared-helper coverage alone does not prove those paths stayed unchanged.
+
 When one behavior has separate wheel, keyboard, touch, or pointer handlers,
 inventory and test every handler with distinct branching. For input at a hard
 boundary where the underlying position cannot change, dispatch the input event

@@ -226,26 +226,27 @@ func TestOpenCodeCapacityNativeRetryDoesNotDispatch(t *testing.T) {
 }
 
 // @covers AC-PLATFORM-TURN-CONTINUITY-003.6, AC-PLATFORM-TURN-CONTINUITY-003.9
-func TestOpenCodeCapacityRetentionIsCapacityOnly(t *testing.T) {
-	tests := []struct {
-		name       string
-		message    string
-		wantRetain bool
-	}{
-		{name: "terminal admission refusal", message: openCodeCapacityTerminalMessage, wantRetain: true},
-		{name: "auth required", message: "Internal error: unauthorized"},
-		{name: "generic internal error", message: "Internal error: runtime exploded"},
-		{name: "rate limited", message: "AI_APICallError: Rate limit exceeded: free-models-per-min"},
-		{name: "quota limited", message: "AI_APICallError: 5-hour usage limit reached"},
-		{name: "unrelated refusal token", message: "Internal error: Upstream request failed: [budget_exhausted] the cell is at capacity"},
+func TestOpenCodeCapacityRetentionUsesResponseOrigin(t *testing.T) {
+	messages := []string{
+		openCodeCapacityTerminalMessage,
+		"Internal error: unauthorized",
+		"Internal error: runtime exploded",
+		"AI_APICallError: Rate limit exceeded: free-models-per-min",
+		"AI_APICallError: 5-hour usage limit reached",
+		"Internal error: Upstream request failed: [budget_exhausted] the cell is at capacity",
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, message := range messages {
+		t.Run(message, func(t *testing.T) {
 			a := newTestAdapterForAgent(openCodeAgentID)
-			_, ok := a.retainableACPApplicationError(&sdk.RequestError{Code: -32603, Message: tc.message})
-			require.Equal(t, tc.wantRetain, ok)
+			remote := remoteACPRequestError(t, -32603, message, nil)
+			_, ok := a.retainedACPApplicationError(remote)
+			require.True(t, ok, "a remote error response settles as a retained turn")
 		})
 	}
+
+	a := newTestAdapterForAgent(openCodeAgentID)
+	_, ok := a.retainedACPApplicationError(sdk.NewInternalError(map[string]any{"details": "database is locked"}))
+	require.False(t, ok, "a local failure must not retain the runtime")
 }
 
 func newOpenCodeCapacityPromptTurn(t *testing.T, generation uint64) (*Adapter, *promptTurnState) {

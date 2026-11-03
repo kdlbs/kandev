@@ -40,6 +40,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
 
@@ -351,8 +352,8 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     [effectiveTaskId, loadTaskDetails],
   );
   const isTemporaryTaskReadError =
-    isTemporaryTaskNavigationError(taskLoadError) ||
-    isTemporaryTaskNavigationReadPending(navigationReadState);
+    navigationReadState.exhausted ||
+    (taskLoadError !== null && isTemporaryTaskNavigationError(taskLoadError));
 
   return {
     task,
@@ -365,15 +366,6 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     retryTaskRead: () => loadTaskDetails(true, effectiveTaskId, true),
     isTemporaryTaskReadError,
   };
-}
-
-function isTemporaryTaskNavigationReadPending(
-  readState: ReturnType<typeof useTaskNavigationReadState>,
-): boolean {
-  if (!readState.temporary) return false;
-  return (
-    readState.phase === "loading" || readState.phase === "retrying" || readState.phase === "failed"
-  );
 }
 
 function useTaskPageData(
@@ -498,7 +490,13 @@ function resolveTaskPageReadFallback({
     hasTaskDetails,
     hasTaskLoadError: Boolean(taskLoadError),
   });
-  if (contentState === "loading") return <TaskLoadingState />;
+  if (contentState === "loading") {
+    return isTaskNavigationReadPending(navigationReadState) ? (
+      <TaskLoadProgressState onRetry={retryTaskRead} />
+    ) : (
+      <TaskLoadingState />
+    );
+  }
   if (contentState === "error") {
     return (
       <TaskLoadErrorState
@@ -602,7 +600,8 @@ function TaskPageContentLive({
       taskCanvases={taskCanvasesState.canvases}
       taskCanvasesStatus={taskCanvasesState.status}
       taskReadRecovery={{
-        temporaryError: isTemporaryTaskReadError,
+        exhausted: isTemporaryTaskReadError,
+        temporary: navigationReadState.temporary,
         retrying: isTaskNavigationReadPending(navigationReadState),
         onRetry: retryTaskRead,
       }}

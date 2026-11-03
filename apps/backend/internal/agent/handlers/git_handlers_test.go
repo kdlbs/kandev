@@ -27,6 +27,10 @@ type mockExecutionLookup struct {
 	executions map[string]*lifecycle.AgentExecution
 	// ensureErr allows tests to inject specific errors from GetOrEnsureExecution
 	ensureErr error
+	// execAccessErr allows review fallback tests to model the manager's
+	// independent session.exec check.
+	execAccessErr   error
+	execAccessCalls int
 }
 
 func TestWsGitReads_MissingSession(t *testing.T) {
@@ -124,6 +128,11 @@ func (m *mockExecutionLookup) GetOrEnsureExecution(_ context.Context, sessionID 
 		return nil, fmt.Errorf("no execution for session %s", sessionID)
 	}
 	return exec, nil
+}
+
+func (m *mockExecutionLookup) CheckSessionExecAccess(context.Context, string) error {
+	m.execAccessCalls++
+	return m.execAccessErr
 }
 
 // mockSessionReader implements SessionReader for testing.

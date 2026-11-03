@@ -52,6 +52,7 @@ var mcpServers map[string]mcpServerDef
 type mockAgent struct {
 	conn                           sessionUpdater
 	model                          string
+	clientSupportsCompaction       bool
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
@@ -132,7 +133,11 @@ func main() {
 // suggestions are gated on the explicit suggestion declaration, so the mock must
 // earn each independently the same way a real bridge does or E2E would prove
 // nothing about either gate.
-func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (a *mockAgent) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	a.mu.Lock()
+	a.clientSupportsCompaction = req.ClientCapabilities.Session != nil &&
+		req.ClientCapabilities.Session.Compaction != nil
+	a.mu.Unlock()
 	traceACP("initialize", "", nil)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
 		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
@@ -535,12 +540,18 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// Generic prompt-error continuity: a real error response on a live
+	// connection, with no capacity marker or transient keyword.
+	if resp, err, handled := a.handlePromptErrorContinuity(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
+	supportsCompaction := a.clientSupportsCompaction
 	a.mu.Unlock()
 	e := &emitter{
 		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
-		registerDetachedWork: a.registerDetachedWork,
+		registerDetachedWork: a.registerDetachedWork, supportsCompaction: supportsCompaction,
 	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
@@ -726,6 +737,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	_ = os.Remove(codexRateLimitCounterPath(req.SessionId))
 	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(promptErrorCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
@@ -801,9 +813,11 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
+		{Name: "async-followup", Description: "Agent-started follow-up with a status-less tool update"},
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
+		{Name: "prompt-error", Description: "Simulate a generic prompt error on a usable connection (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

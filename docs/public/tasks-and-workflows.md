@@ -635,7 +635,9 @@ For a new capture, Kandev compares the turn with its captured history. If the br
 
 Older captures keep their original files and counts with repository-change wording. Kandev does not reconstruct missing history from the current checkout.
 
-Some captures are partial or unavailable. Cards with captured files label that state and give the reason when available. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. An unavailable history comparison is the exception and uses the normal unavailable status. Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+Some captures are partial or unavailable. A completed turn with no recorded file entries has no card; this does not prove that a failed capture had no changes. A turn whose summary is unavailable or failed has no card, even when it retained file entries or a history comparison. Partial summaries with usable changes keep their card, label the state, and identify the affected repositories. The selected historical diff still explains why an unavailable comparison has no totals.
+
+Kandev keeps the file counts and names after history compaction expires the diff. The card then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 Saved files stay available while the remaining content is preserved. A selected file whose content is still pending shows the usual loading state. If preservation stops, the missing files report an explicit unavailable reason.
 
@@ -667,6 +669,13 @@ The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
 ordinary new prompt while earlier jobs continue, and those jobs keep their
 identity and history across the new turn.
+
+Subagent launches also stay visible as cards in chat. Copilot cards show the
+reported type, name, and description, with the prompt, result, and child tool
+calls in the expanded card. Other providers keep their existing result and
+child-call presentation. When Claude sends another message to a child, the card
+shows how many times it has resumed. A final report appears when the runtime
+permits Kandev to read the child's matching output file.
 
 What a job row can show depends on the agent runtime:
 
@@ -766,6 +775,22 @@ effects. Failed, cancelled, unknown, or background tool work still requires
 your review. If the runtime is unavailable or evidence is incomplete, Kandev
 leaves the session waiting for you. A new message, a session change, **Cancel**,
 or a backend restart stops pending automatic recovery.
+
+### Prompt errors on a usable runtime
+
+When an ACP agent returns a prompt error while its process and ACP connection
+are still usable, Kandev ends that turn with a sanitized error entry and keeps
+the same native conversation. This includes generic internal, database,
+authentication, quota, and invalid-model errors. The composer stays available,
+so your next message runs on the existing runtime instead of starting a new
+conversation.
+
+Retention is not a retry. Kandev does not replay the failed prompt and does not
+start automatic recovery for an error class that has no existing policy. The
+task row keeps an error badge until you select **Dismiss turn error**, use the
+task menu dismissal, or send a new prompt after the error appears. A real
+process exit, transport loss, or recovery failure still uses the normal runtime
+recovery controls.
 
 ### Model capacity
 
@@ -975,11 +1000,16 @@ while its page refreshes. Expanding shows already available rows immediately;
 any additional rows appear when the refresh finishes. This also applies in the
 phone **Tasks** drawer and navigation menu.
 
-If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
-failure; rows already shown remain visible during a failed refresh. If a filter
-is invalid, use **Filters** to correct the indicated selection instead. Repository
-and workflow selections support up to 1,000 values per filter; the limits apply
-to each selected value, not to the combined selection.
+If a temporary sidebar read fails, Kandev retries it automatically for up to
+about thirty seconds. The current rows stay in place, and no warning appears
+while those retries continue. If recovery stops, the sidebar shows one message,
+and **Retry** starts another bounded attempt. Rows already shown remain visible.
+A temporary problem that clears during the retry window needs no action. Access
+or missing-resource failures are reported immediately without automatic retries.
+If a filter is invalid, use **Filters** to correct the indicated selection
+instead.
+Repository and workflow selections support up to 1,000 values per filter; the
+limits apply to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
 - On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
@@ -1028,12 +1058,20 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit             | Scope and effect                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
+| Limit             | Scope and effect                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior.                          |
+| **Session limit** | Caps automatic agent starts and new message turns across the instance. When reached, Kandev keeps the selected destination or pending message and retries later.                                                  |
 
-The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
+The session limit is off by default. Explicit **Start**, **Resume**, and
+**Send Now** can override it. Ordinary messages, including chat and
+`message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
+input in the existing prompt queue and starts one new turn when capacity
+becomes available. After a backend restart, later authorized session activity
+re-registers the pending queue. Auto-run OFF keeps that input pending. Set a positive limit
+in **Settings → Preferences → Task Behavior → Runtime**.
+`KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
+limit. Change the environment variable and restart Kandev.
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
@@ -1296,7 +1334,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
-- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
+- **A task or task list shows as temporarily unavailable:** Kandev retries the task, session, and sidebar reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. Warnings appear only after those automatic retries stop. Then select **Retry**, or use **Back to task overview**. Task details and rows that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

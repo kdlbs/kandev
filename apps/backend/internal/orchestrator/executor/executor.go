@@ -1129,17 +1129,18 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
-	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
-	agentManager              AgentManagerClient
-	attachmentReader          AttachmentReader
-	repo                      executorStore
-	secretStore               secrets.SecretStore
-	shellPrefs                ShellPreferenceProvider
-	capabilities              ExecutorTypeCapabilities
-	gitlabCredentials         GitLabCredentialResolver
-	logger                    *logger.Logger
-	canvasesEnabled           bool
+	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	agentManager                  AgentManagerClient
+	attachmentReader              AttachmentReader
+	repo                          executorStore
+	secretStore                   secrets.SecretStore
+	shellPrefs                    ShellPreferenceProvider
+	capabilities                  ExecutorTypeCapabilities
+	gitlabCredentials             GitLabCredentialResolver
+	logger                        *logger.Logger
+	canvasesEnabled               bool
+	workspaceCollaborationEnabled bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1523,6 +1524,12 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose
+// the report-only delivery mode. Applied before any new session launch.
+func (e *Executor) SetWorkspaceCollaborationEnabled(enabled bool) {
+	e.workspaceCollaborationEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

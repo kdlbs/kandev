@@ -35,6 +35,25 @@ const (
 // shared with another namespace.
 var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
 
+// continuationActivityEventFrom copies the bounded stream fields the
+// continuation-activity observer needs without leaking runtime payload types
+// into the orchestrator's neutral activity record.
+func continuationActivityEventFrom(data *lifecycle.AgentStreamEventData) continuationActivityEvent {
+	if data == nil {
+		return continuationActivityEvent{}
+	}
+	return continuationActivityEvent{
+		Type:                        data.Type,
+		PromptGeneration:            data.PromptGeneration,
+		Text:                        data.Text,
+		Role:                        data.Role,
+		ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+		ToolCallID:                  data.ToolCallID,
+		ParentToolCallID:            data.ParentToolCallID,
+		Normalized:                  data.Normalized,
+	}
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
@@ -158,6 +177,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	if eventType != agentEventToolCall {
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
+	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
@@ -211,6 +233,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
+		// Observe after the handler records the finalized tool ownership. This
+		// prevents an unclassified or background call from confirming recovery.
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 
 	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
@@ -477,11 +502,14 @@ func (s *Service) completeTurnForStreamEvent(
 			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 			return
 		}
+		fixedResourceKey := s.fixedResourceForCleanStreamCompletion(ctx, payload, capturedTurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+		} else {
+			s.profileExecutionResolver.ResetFixedProfileCircuitFailures(ctx, fixedResourceKey)
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)
@@ -513,6 +541,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			AgentID:            payload.AgentID,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
+			ResourceCircuitKey: payload.ResourceCircuitKey,
 			PromptGeneration:   payload.Data.PromptGeneration,
 			ErrorMessage:       payload.Data.Error,
 			ProviderError:      payload.Data.ProviderError,
@@ -1057,6 +1086,11 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			// Only the original async-launch result attests a new child.
+			// Settlement and resume updates describe its card, not liveness.
+			if isSubagentPresentationUpdate(payload) {
+				return
+			}
 			kind := backgroundWorkKind(payload.Data.Normalized)
 			// Only attest the parked projection for a workload whose provider
 			// can confirm later liveness on this connection. An identified but
@@ -1177,6 +1211,25 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// subagentStatusAsyncLaunched is the subagent status carried only by the
+// original launch result of a detached Claude subagent.
+const subagentStatusAsyncLaunched = "async_launched"
+
+// isSubagentPresentationUpdate reports whether a terminal tool update only
+// re-presents a detached subagent card (settlement or resume) rather than
+// attesting its launch. Such updates must not record or publish background
+// work, because they carry no tool title and describe an existing child.
+func isSubagentPresentationUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	if !isTerminalToolStatus(payload.Data.ToolStatus) || !normalizedIsDetachedLaunch(payload.Data.Normalized) {
+		return false
+	}
+	if backgroundWorkKind(payload.Data.Normalized) != streams.BackgroundWorkKindSubagent {
+		return false
+	}
+	subagent := payload.Data.Normalized.SubagentTask()
+	return subagent == nil || subagent.Status != subagentStatusAsyncLaunched
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call

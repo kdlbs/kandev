@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -30,6 +31,17 @@ func (m *Manager) coordinatorAutoApprovedNames() []string {
 		return nil
 	}
 	return profile.BoundCoordinatorToolNames(*m.cfg.McpProfile)
+}
+
+// classifyHumanInputPermission reports whether req is a provider-native
+// question only a person can answer. Recognition is limited to the
+// Antigravity compatibility helper; every other agent keeps its normal
+// permission policy.
+func (m *Manager) classifyHumanInputPermission(req *adapter.PermissionRequest) bool {
+	if req == nil || m == nil || m.cfg == nil {
+		return false
+	}
+	return acpcompat.IsHumanInputPermission(m.cfg.AgentType, req.ToolCallID)
 }
 
 // autoApproveCoordinatorPermission auto-approves a permission request from a

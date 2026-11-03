@@ -120,13 +120,25 @@ func turnCheckpointContextChange(start, end *turnchanges.Provenance) turnchanges
 		start.TargetIdentity != end.TargetIdentity || start.TargetRef != end.TargetRef {
 		return turnchanges.ReasonHistoryContextChanged
 	}
-	if start.HeadRef != end.HeadRef {
+	if turnCheckpointBranchBindingBroken(start, end) {
 		return turnchanges.ReasonHistoryContextChanged
 	}
 	if start.HashAlgorithm != end.HashAlgorithm {
 		return turnchanges.ReasonHistoryContextChanged
 	}
 	return ""
+}
+
+// turnCheckpointBranchBindingBroken reports contradictory branch identity.
+// Different refs need the same valid binding proof. Equal refs normally keep
+// the legacy compatibility fallback, but two known IDs must still match: a
+// switch can recreate the original branch name at the same commit.
+func turnCheckpointBranchBindingBroken(start, end *turnchanges.Provenance) bool {
+	if start.HeadRef != end.HeadRef {
+		return !turnchanges.SameBranchBinding(start, end)
+	}
+	return start.HeadBindingID != end.HeadBindingID &&
+		start.HeadBindingID != "" && end.HeadBindingID != ""
 }
 
 func turnCheckpointOperationReason(start, end *turnchanges.Provenance) turnchanges.ReasonCode {
@@ -163,7 +175,7 @@ func (g *GitOperator) turnCheckpointUnbornFirstRoot(
 	if !start.Unborn || end.Unborn || end.HeadCommitOID == "" || start.CapturedAt.IsZero() {
 		return false
 	}
-	if start.HeadRef == "" || start.HeadRef != end.HeadRef {
+	if start.HeadRef == "" || turnCheckpointBranchBindingBroken(start, end) {
 		return false
 	}
 	endParents, err := g.turnCheckpointCommitParents(ctx, end.HeadCommitOID)

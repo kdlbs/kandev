@@ -232,6 +232,8 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	if options.deliverySubmissionID == "" {
 		options.deliverySubmissionID = "clarification:" + uuid.NewString()
 	}
+	// A clarification answer continues an already-accepted turn.
+	options.capacityIntent = turnCapacityOverride
 	prompt := buildClarificationPrompt(data)
 
 	s.logger.Info("resuming agent with clarification answer",
@@ -411,6 +413,7 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		false,
 		launchOriginAutomatic,
 		promptTaskOptions{
+			capacityIntent:        turnCapacityOverride,
 			expectedCurrentTurnID: data.ClarificationTurnID,
 			deliverySubmissionID:  "clarification:" + uuid.NewString(),
 		},
@@ -604,7 +607,10 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 	}
 	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
 		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
-		map[string]interface{}{metaKeyUserMessageRecorded: true},
+		map[string]interface{}{
+			metaKeyUserMessageRecorded: true,
+			metaKeyCapacityOverride:    true,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)

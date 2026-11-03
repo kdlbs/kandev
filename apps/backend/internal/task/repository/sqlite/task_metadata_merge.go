@@ -76,7 +76,7 @@ func (r *Repository) lockTaskMetadataMutation(ctx context.Context, tx *sql.Tx, i
 func ordinaryMetadataMergeOverlay(requested map[string]interface{}) (map[string]json.RawMessage, error) {
 	copied := maps.Clone(requested)
 	models.StripOfficeCarrierMetadata(copied)
-	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID, models.MetaKeyAutomationStartOwned, models.MetaKeyRequiredSubtaskCount} {
+	for _, key := range []string{models.MetaKeyDeferredLaunch, models.MetaKeyStepHandoffCarry, models.MetaKeyHandoffSource, models.MetaKeyHandoffs, models.MetaKeyAgentTitlePending, models.MetaKeyAgentTitleOwnerSessionID, models.MetaKeyAutomationStartOwned, models.MetaKeyRequiredSubtaskCount, models.MetaKeyLastTurnError} {
 		delete(copied, key)
 	}
 	encoded, err := json.Marshal(copied)

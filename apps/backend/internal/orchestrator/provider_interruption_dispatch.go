@@ -96,7 +96,8 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 			entry.restoredExecution = attempt.execution()
 			entry.mu.Unlock()
 			_, err := s.promptTask(promptCtx, taskID, sessionID, continuationInstruction, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
-				resumeAttempt: attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
+				capacityIntent: turnCapacityOverride,
+				resumeAttempt:  attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
 				deliverySubmissionID: "continuation:" + uuid.NewString(),
 				beforeDispatch: func() error {
 					if err := s.validateContinuationOwner(promptCtx, taskID, sessionID, entry); err != nil {
@@ -204,6 +205,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	}
 	_, err := s.promptTask(ctx, taskID, sessionID, instruction, "", false, nil, true,
 		launchOriginAutomatic, promptTaskOptions{
+			capacityIntent:            turnCapacityOverride,
 			internalContinuation:      true,
 			preservePromptContext:     true,
 			disableDispatchRetry:      true,

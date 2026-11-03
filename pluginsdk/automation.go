@@ -26,6 +26,7 @@ func (r *RemotePlugin) VerifyAutomationWebhook(ctx context.Context, req *Automat
 	return r.client.VerifyAutomationWebhook(ctx, req)
 }
 func (s *grpcPluginServer) DescribeAutomationCondition(ctx context.Context, req *AutomationConditionRequest) (*AutomationConditionResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	adapter, ok := s.impl.(AutomationAdapter)
 	if !ok {
 		return nil, status.Error(codes.Unimplemented, "automation adapters are not supported")
@@ -40,6 +41,7 @@ func (s *grpcPluginServer) DescribeAutomationCondition(ctx context.Context, req 
 	return result, err
 }
 func (s *grpcPluginServer) VerifyAutomationWebhook(ctx context.Context, req *AutomationWebhookRequest) (*AutomationWebhookResponse, error) {
+	ctx = withPluginCallReference(ctx)
 	adapter, ok := s.impl.(AutomationAdapter)
 	if !ok {
 		return nil, status.Error(codes.Unimplemented, "automation adapters are not supported")

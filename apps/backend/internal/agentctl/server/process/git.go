@@ -92,6 +92,11 @@ type GitOperator struct {
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
 	currentOp  string
+
+	// turnCheckpointBindingMu guards the live generated-branch identity that
+	// turn capture and verified title renames share for this checkout.
+	turnCheckpointBindingMu sync.Mutex
+	turnCheckpointBinding   turnCheckpointBindingState
 }
 
 // NewGitOperator creates a new GitOperator for the given workspace directory.
@@ -1259,6 +1264,10 @@ func (g *GitOperator) RenameBranch(ctx context.Context, newName string) (*GitOpe
 	}
 
 	result.Success = true
+	// A generic rename is not the verified title handoff. It must not carry
+	// branch-binding continuity to the new name, and it invalidates any binding
+	// still attached to the old checkout identity.
+	g.clearTurnCheckpointBinding()
 	g.logger.Info("branch renamed",
 		zap.String("from", currentBranch),
 		zap.String("to", newName))

@@ -203,6 +203,68 @@ func TestSetTaskDeferredLaunchReportsMissingTaskAsAnError(t *testing.T) {
 	}
 }
 
+func TestClearTaskDeferredLaunchAndReleaseOwnershipRollsBackBothWrites(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	original := newCeilingRecord(17)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "cas-discard-rollback", Title: "Discard rollback",
+		Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch:       original,
+			models.MetaKeyAutomationStartOwned: "run-1",
+		},
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	_, prior, err := repo.GetTaskDeferredLaunch(ctx, "cas-discard-rollback")
+	if err != nil {
+		t.Fatalf("GetTaskDeferredLaunch: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx, `
+		CREATE TRIGGER fail_discard_owner_clear
+		BEFORE UPDATE OF metadata ON tasks
+		WHEN OLD.id = 'cas-discard-rollback'
+		  AND json_extract(OLD.metadata, '$.automation_start_owned') = 'run-1'
+		  AND json_extract(NEW.metadata, '$.automation_start_owned') IS NULL
+		BEGIN
+		  SELECT RAISE(ABORT, 'forced owner release failure');
+		END
+	`); err != nil {
+		t.Fatalf("create owner-clear failure trigger: %v", err)
+	}
+
+	stored, lostCompare, released, err := repo.ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged(
+		ctx, "cas-discard-rollback", prior, map[string]interface{}{"wip_deferred": true}, "run-1",
+	)
+	if err == nil {
+		t.Fatalf("ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged = (%v, %v, %v, nil), want a trigger error", stored, lostCompare, released)
+	}
+	if stored || lostCompare || released {
+		t.Fatalf("ClearTaskDeferredLaunchAndReleaseOwnershipIfUnchanged = (%v, %v, %v, %v), want no reported writes", stored, lostCompare, released, err)
+	}
+
+	after, _, readErr := repo.GetTaskDeferredLaunch(ctx, "cas-discard-rollback")
+	if readErr != nil {
+		t.Fatalf("GetTaskDeferredLaunch after rollback: %v", readErr)
+	}
+	wantRecord, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("canonicalize original record: %v", err)
+	}
+	gotRecord, err := json.Marshal(after)
+	if err != nil {
+		t.Fatalf("canonicalize rolled-back record: %v", err)
+	}
+	if string(gotRecord) != string(wantRecord) {
+		t.Fatalf("deferred launch after rollback = %+v, want original %+v", after, original)
+	}
+	task := readTaskMetadata(t, repo, "cas-discard-rollback")
+	if got := task[models.MetaKeyAutomationStartOwned]; got != "run-1" {
+		t.Fatalf("automation owner after rollback = %v, want run-1", got)
+	}
+}
+
 // TestSetTaskDeferredLaunchAdmitsExactlyOneConcurrentCreate is AC-12e's race: two
 // automatic launches refused for the same task at the same moment both read "no
 // record". Exactly one may store; the other must report a lost compare, not an

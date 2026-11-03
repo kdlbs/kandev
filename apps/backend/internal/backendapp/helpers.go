@@ -69,6 +69,7 @@ import (
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
+	"github.com/kandev/kandev/internal/notifications/webpush"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/retention"
@@ -1738,6 +1739,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	if p.features.WorkspaceCollaboration {
+		taskhandlers.RegisterWorkspaceCollaborationRoutes(p.router, p.gateway.Dispatcher, p.taskSvc)
+	}
 	taskhandlers.RegisterMemberRoutes(p.router, p.taskSvc, p.log)
 	if p.services != nil && p.services.Org != nil {
 		org.NewController(p.services.Org, p.log).RegisterRoutes(p.router)
@@ -1914,6 +1918,11 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered User handlers (HTTP + WebSocket)")
 
 	notificationhandlers.RegisterRoutes(p.router, p.notificationCtrl, p.log)
+	if p.notificationCtrl != nil {
+		if pushSvc := p.notificationCtrl.WebPush(); pushSvc != nil {
+			webpush.RegisterRoutes(p.router, pushSvc, p.notificationCtrl, notificationcontroller.CallerUserID, p.log)
+		}
+	}
 	p.log.Debug("Registered Notification handlers (HTTP)")
 
 	editorhandlers.RegisterRoutes(p.router, p.editorCtrl, p.log)
@@ -1925,7 +1934,7 @@ func registerSecondaryRoutes(
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
 
-	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
+	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log, p.interimSettingsInterlockToken)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
 	clarification.RegisterRoutes(

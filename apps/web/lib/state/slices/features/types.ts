@@ -10,6 +10,7 @@ export const defaultFeatureFlags = {
   lspBrowserContinuity: false,
   office: false,
   integratedControl: false,
+  workspaceCollaboration: false,
   auth: false,
   canvases: false,
   multiTenancy: false,

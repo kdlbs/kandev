@@ -530,8 +530,8 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 		DeliverySubmissionID: "submission-1",
 	}
 	durableEvent := durableAgentEvent(execution, event)
-	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		context.Background(), execution, durableEvent, repository, nil,
+	process, _, effect, _, err := sm.prepareDurableAgentDeliveryEvent(
+		context.Background(), execution, durableEvent, repository, nil, false,
 	)
 	if err != nil {
 		t.Fatalf("prepare durable event: %v", err)

@@ -35,9 +35,19 @@ func (g pluginDispatchGeneration) matches(record *store.Record) bool {
 func (s *Service) beginPluginDispatch(
 	id string, expected pluginDispatchGeneration,
 ) (*store.Record, func(), error) {
-	lock := s.dispatchLocks.lockFor(id)
-	lock.RLock()
-	release := lock.RUnlock
+	return s.beginPluginDispatchContext(context.Background(), id, expected)
+}
+
+// beginPluginDispatchContext is beginPluginDispatch with a cancellation
+// boundary: a lifecycle mutation holding or waiting for the write lease no
+// longer keeps a caller past its own deadline.
+func (s *Service) beginPluginDispatchContext(
+	ctx context.Context, id string, expected pluginDispatchGeneration,
+) (*store.Record, func(), error) {
+	release, err := s.dispatchLocks.lockFor(id).RLockContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	record, err := s.Get(id)
 	if err != nil {
 		release()
@@ -67,7 +77,7 @@ func (s *Service) InvokeWebhook(ctx context.Context, id string, req *pluginsdk.W
 func (s *Service) InvokeAction(
 	ctx context.Context, id string, expected pluginDispatchGeneration, req *pluginsdk.PluginActionRequest,
 ) (*pluginsdk.PluginActionResponse, error) {
-	_, release, err := s.beginPluginDispatch(id, expected)
+	_, release, err := s.beginPluginDispatchContext(ctx, id, expected)
 	if err != nil {
 		return nil, err
 	}

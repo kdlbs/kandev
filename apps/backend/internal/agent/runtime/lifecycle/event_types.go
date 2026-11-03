@@ -33,6 +33,7 @@ type AgentEventPayload struct {
 	AgentID                   string                           `json:"agent_id,omitempty"`
 	AgentProfileID            string                           `json:"agent_profile_id"`
 	ExecutionProfileID        string                           `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey        string                           `json:"resource_circuit_key,omitempty"`
 	ContainerID               string                           `json:"container_id,omitempty"`
 	Status                    string                           `json:"status"`
 	StartedAt                 time.Time                        `json:"started_at"`
@@ -379,6 +380,7 @@ type AgentStreamEventPayload struct {
 	RunAttempt                      int                   `json:"run_attempt,omitempty"`
 	AgentProfileID                  string                `json:"agent_profile_id,omitempty"`     // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
 	ExecutionProfileID              string                `json:"execution_profile_id,omitempty"` // Concrete profile captured from the execution that produced this event.
+	ResourceCircuitKey              string                `json:"resource_circuit_key,omitempty"`
 	AgentType                       string                `json:"agent_type,omitempty"`
 	TaskID                          string                `json:"task_id"`
 	SessionID                       string                `json:"session_id"` // Task session ID
@@ -569,7 +571,10 @@ type PermissionRequestEventPayload struct {
 	ToolCallID       string             `json:"tool_call_id"`
 	Title            string             `json:"title"`
 	Options          []PermissionOption `json:"options"`
-	ActionType       string             `json:"action_type"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput bool   `json:"human_input,omitempty"`
+	ActionType string `json:"action_type"`
 	// AutoApprovedOptionID names the option agentctl already selected. A
 	// nonempty value makes this payload an audit record of an answered
 	// request rather than a prompt awaiting a person.
