@@ -265,3 +265,11 @@ Git-shim assertion failures on NixOS. The GitLab-facing ambient command now uses
 an explicit 25-minute aggregate budget, matching existing backend race-job
 budgets. Per-test waits and assertions are unchanged. The exact timeout-site
 test passed locally with the race detector.
+
+The final review requested two coverage additions. Compact link bounds now
+respect each viewport inset, and the footer bottom must stay above the bottom
+inset. The two compact cases passed. A separate fake-clock case leaves the
+release marker absent beyond two minutes, then requires the deadline error
+and an active tool. It releases the marker during cleanup so a future missing
+deadline cannot strand the test bubble. Mock-agent race tests passed. These
+are test-only changes; rendered screenshots remain valid.

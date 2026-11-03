@@ -44,9 +44,13 @@ async function expectCompactAction(page: Page, drawer: Locator) {
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(wrapper!.x + wrapper!.width);
       expect(bounds!.y).toBeGreaterThanOrEqual(wrapper!.y);
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
-      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+      expect(bounds!.x).toBeGreaterThanOrEqual(insets.left);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320 - insets.right);
+      expect(bounds!.y).toBeGreaterThanOrEqual(insets.top);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height - insets.bottom);
       const footer = await drawer.getByTestId("pr-popover-footer").boundingBox();
       expect(footer!.y + footer!.height).toBeLessThanOrEqual(wrapper!.y + wrapper!.height);
+      expect(footer!.y + footer!.height).toBeLessThanOrEqual(height - insets.bottom);
       expect(
         await drawer
           .getByTestId("pr-popover-scroll-body")

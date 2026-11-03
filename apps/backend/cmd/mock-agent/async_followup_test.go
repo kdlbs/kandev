@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,30 @@ func TestAsyncFollowupReleaseFailureRetainsTool(t *testing.T) {
 		}
 		if !failed || completedFollowupTool(updates.getUpdates()) {
 			t.Fatal("release failure must stay visible and keep the tool active")
+		}
+	})
+}
+
+func TestAsyncFollowupAbsentReleaseMarkerTimesOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "never-released")
+	synctest.Test(t, func(t *testing.T) {
+		e, updates := newTestEmitter()
+		defer func() {
+			if err := os.WriteFile(path, []byte("release"), 0o600); err != nil {
+				t.Error(err)
+			}
+		}()
+		handlePrompt(e, "/async-followup "+path, modelFast)
+		time.Sleep(2*time.Minute + 3*time.Second)
+		synctest.Wait()
+		failed := false
+		for _, update := range updates.getUpdates() {
+			text := getTextContent(update)
+			failed = failed || (strings.HasPrefix(text, "Async follow-up release failed:") &&
+				strings.Contains(text, context.DeadlineExceeded.Error()))
+		}
+		if !failed || completedFollowupTool(updates.getUpdates()) {
+			t.Fatal("absent release marker must time out and keep the tool active")
 		}
 	})
 }
