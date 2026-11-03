@@ -1,4 +1,6 @@
+import { githubOrigin, githubURLHost } from "@/lib/github/host";
 export type ParsedGitHubRepoUrl = {
+  host?: string;
   owner: string;
   repo: string;
   branch?: string;
@@ -15,7 +17,10 @@ const SSH_URL_RE = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/;
 // Branch names containing "/" cannot be told apart from the leading path
 // segments without asking the GitHub API, so single-segment branch names are
 // assumed. A /blob/ link to a file resolves to the file's directory.
-export function parseGitHubRepoUrl(input: string): ParsedGitHubRepoUrl | null {
+export function parseGitHubRepoUrl(
+  input: string,
+  expectedHost?: string,
+): ParsedGitHubRepoUrl | null {
   const raw = input.trim();
   if (!raw) return null;
 
@@ -28,7 +33,9 @@ export function parseGitHubRepoUrl(input: string): ParsedGitHubRepoUrl | null {
   } catch {
     return null;
   }
-  if (url.hostname !== GITHUB_HOST && url.hostname !== `www.${GITHUB_HOST}`) return null;
+  if (url.hostname === `www.${GITHUB_HOST}`) url.hostname = GITHUB_HOST;
+  const host = githubURLHost(url, expectedHost);
+  if (!host || url.username || url.password) return null;
 
   let segments: string[];
   try {
@@ -42,14 +49,16 @@ export function parseGitHubRepoUrl(input: string): ParsedGitHubRepoUrl | null {
   const [owner, rawRepo, ...rest] = segments;
   const repo = rawRepo.replace(/\.git$/, "");
   if (!owner || !repo) return null;
-  return { owner, repo, ...parseBranchAndPath(rest) };
+  return { owner, repo, ...(host !== GITHUB_HOST ? { host } : {}), ...parseBranchAndPath(rest) };
 }
 
 // buildGitHubRepoUrl renders a stored config back into a canonical GitHub
 // link (the inverse of parseGitHubRepoUrl) so the settings form can show one
 // URL instead of separate owner/repo/path fields.
 export function buildGitHubRepoUrl(parts: ParsedGitHubRepoUrl): string {
-  const base = `https://github.com/${parts.owner}/${parts.repo}`;
+  const origin = githubOrigin(parts.host);
+  if (!origin) return "";
+  const base = `${origin}/${parts.owner}/${parts.repo}`;
   if (!parts.branch) return base;
   const path = parts.path ? `/${parts.path.split("/").map(encodeURIComponent).join("/")}` : "";
   return `${base}/tree/${encodeURIComponent(parts.branch)}${path}`;

@@ -1,0 +1,15 @@
+{
+  "include": [
+    "pluginsdk/**/*.go",
+    "pluginsdk/go.mod",
+    "pluginsdk/go.sum",
+    "pluginsdk/proto/**/*.proto",
+    "apps/packages/plugin-sdk/src/**",
+    "apps/packages/plugin-sdk/package.json",
+    "apps/packages/plugin-sdk/LICENSE",
+    "apps/web/lib/plugins/types.ts",
+    "apps/web/lib/plugins/host-api*.ts",
+    "apps/backend/internal/plugins/manifest/*.go"
+  ],
+  "exclude": ["**/*_test.go", "**/*.test.ts", "**/test/**", "**/testdata/**"]
+}

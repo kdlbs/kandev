@@ -106,6 +106,12 @@ function StatusLine({
       <Badge variant={active ? "secondary" : "destructive"}>
         {t(sourceLabelKeys[connection.source])}
       </Badge>
+      <span
+        data-testid="github-connection-host"
+        className="break-all text-xs text-muted-foreground"
+      >
+        {connection.github_host}
+      </span>
       {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
       <GitHubRateLimitDisplay
         info={status.rate_limit}

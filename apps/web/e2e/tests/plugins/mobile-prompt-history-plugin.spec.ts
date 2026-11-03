@@ -2,6 +2,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
 const PANEL_OPTION = "mobile-plugin-panel-option-kandev-plugin-e2e-prompt-history-plugin";
 
@@ -12,6 +13,7 @@ test.describe("Mobile prompt-history fixture", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(90_000);
     await installFixturePlugin(testPage);
@@ -71,12 +73,22 @@ test.describe("Mobile prompt-history fixture", () => {
 
     await panel.getByTestId("fixture-prompt-history-row").first().getByRole("button").first().tap();
     const alias = panel.getByTestId("custom-prompt-mention");
+    await expect(alias).toHaveCount(1);
     await expect(alias).toHaveAttribute("data-prompt-name", "daily-mobile");
     expect((await alias.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await alias.tap();
-    await expect(testPage.getByText("Mobile saved prompt preview")).toBeVisible();
+    const preview = testPage.getByRole("dialog", { name: "Custom prompt: daily-mobile" });
+    await expect(preview).toBeVisible();
+    await expect(preview.getByText("Mobile saved prompt preview")).toBeVisible();
+    if (prCapture.capturing) await waitForFiniteAnimations(preview);
+    await prCapture.screenshot("host-prompt-preview-phone");
     await testPage.keyboard.press("Escape");
-    await expect(testPage.getByText("Mobile saved prompt preview")).toBeHidden();
+    await expect(preview).toBeHidden();
+    await expect(alias).toHaveAttribute("aria-expanded", "false");
+    await alias.tap();
+    await expect(preview).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(preview).toBeHidden();
 
     const openPrompt = panel.getByRole("button", { name: "Open prompt" });
     await expect(openPrompt).toBeVisible();

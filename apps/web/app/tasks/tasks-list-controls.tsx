@@ -1,7 +1,5 @@
 "use client";
 
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,18 +9,27 @@ import {
   TASKS_LIST_SORT_OPTIONS,
 } from "@/lib/tasks/tasks-list-options";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { TasksListFilters, type TasksListFilterProps } from "./tasks-list-filters";
+import { TasksListArchiveModes } from "./tasks-list-archive-modes";
+import type { TasksListArchiveMode } from "@/lib/tasks/tasks-list-query";
 
 export function TasksListControls({
-  showArchived,
-  onShowArchivedChange,
+  archiveMode,
+  onArchiveModeChange,
+  filters,
+  total = 0,
+  isLoading = false,
   tasksListSort,
   onTasksListSortChange,
   tasksListGroup,
   onTasksListGroupChange,
   facetOptions,
 }: {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
+  archiveMode: TasksListArchiveMode;
+  onArchiveModeChange: (mode: TasksListArchiveMode) => void;
+  filters?: TasksListFilterProps;
+  total?: number;
+  isLoading?: boolean;
   tasksListSort: string;
   onTasksListSortChange: (sort: string) => void;
   tasksListGroup: string;
@@ -44,8 +51,8 @@ export function TasksListControls({
     })),
     ...(facetOptions ?? []),
   ];
-  return (
-    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
+  const displayOptions = (
+    <div className="hidden flex-wrap items-center justify-end gap-3 md:flex">
       <ListOptionSelect
         label={t("tasks:sort")}
         value={tasksListSort}
@@ -60,16 +67,21 @@ export function TasksListControls({
         onChange={onTasksListGroupChange}
         testId="tasks-list-group"
       />
-      <Label
-        className={`${controlSizingClassName("standard")} flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none`}
-      >
-        <Checkbox
-          checked={showArchived}
-          onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
-          className="cursor-pointer"
-        />
-        {t("tasks:showArchived")}
-      </Label>
+    </div>
+  );
+  return filters ? (
+    <TasksListFilters
+      {...filters}
+      archiveMode={archiveMode}
+      onArchiveModeChange={onArchiveModeChange}
+      displayOptions={displayOptions}
+      total={total}
+      isLoading={isLoading}
+    />
+  ) : (
+    <div className="flex flex-wrap justify-between gap-3">
+      <TasksListArchiveModes value={archiveMode} onChange={onArchiveModeChange} />
+      {displayOptions}
     </div>
   );
 }

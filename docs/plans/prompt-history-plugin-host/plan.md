@@ -30,7 +30,7 @@ This plan does not implement or publish the external plugin and does not remove 
 
 ## Contract decisions
 
-- Browser plugins consume `host.conversation` from `@kandev/plugin-sdk`; they do not import `apps/web`, inspect `host.store`, call `/api/v1` directly, or register raw session message handlers.
+- Browser plugins consume `host.conversation` from `@kdlbs/plugin-sdk`; they do not import `apps/web`, inspect `host.store`, call `/api/v1` directly, or register raw session message handlers.
 - Authenticated `/api/plugins/{id}/conversation/...` routes reuse task services, enforce `api_read:messages`, and return narrow sanitized DTOs. Existing first-party REST and Go Host RPCs stay compatible.
 - Conversation hooks are resolved through a Host-created panel scope carrying panel/task/session/generation; IDs that differ from the active scope are rejected. They own snapshot/subscription ordering, pagination, reconnect reconciliation, and plugin-generation cancellation. The future plugin owns prompt filtering/derivation presentation only through returned DTOs.
 - Task-panel registration grows optional localized-title and visibility contracts. Task-panel props grow session kind and a generation-bound message-navigation capability.
@@ -111,7 +111,7 @@ The core prompt-history unit and E2E suites remain part of the final regression 
 - **System prompt leakage:** map a dedicated DTO and test stripped content plus omitted `raw_content`/metadata.
 - **Capability bypass inside supported APIs:** gate plugin-scoped routes server-side. Document that same-origin native plugins are not a hard sandbox.
 - **Mobile navigation ownership:** inject the existing local mobile adapter; do not globalize `mobileScrollTarget`.
-- **Public/internal type drift:** update `@kandev/plugin-sdk`, `PLUGIN-API.md`, internal aliases, host implementation, and assignability tests in the same contract package.
+- **Public/internal type drift:** update `@kdlbs/plugin-sdk`, `PLUGIN-API.md`, internal aliases, host implementation, and assignability tests in the same contract package.
 - **Accidental extraction:** keep core registrations, layout ID, stores, locale keys, and tests untouched; fixture contributions use a distinct plugin ID.
 
 ## Completion boundary

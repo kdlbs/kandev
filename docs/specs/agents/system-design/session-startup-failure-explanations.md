@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-30
-updated: 2026-10-06
+updated: 2026-10-21
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
 owners:
@@ -97,6 +97,15 @@ cases within that code. Existing timeout, authentication, and cancellation
 handling retains its precedence. Context cancellation and terminal-session
 sentinels remain outside bootstrap error conversion; a deadline must retain
 its timeout meaning instead of being relabelled an application rejection.
+Fail-closed model branches return caller cancellation, deadlines, and errors
+wrapping `agentctl.ErrAgentStreamNotConnected` unchanged. These errors retain
+transport/context identity rather than acquiring model application evidence.
+Do not reuse session/load's transport phrase matcher here: provider replies may
+mention a closed connection, and the ACP SDK also flattens some local write
+failures into the same `RequestError` envelope as a provider reply. Opaque ACP
+errors remain model application failures until their origin can be attested.
+The generic bootstrap cause therefore covers proven host-stream loss; this
+change does not claim to distinguish all remote ACP transport failures.
 
 Produce typed evidence at the decision branch. Keep `Cause` for `errors.Is` and
 `errors.As`; no persistence consumer uses its `Error()` as user detail.

@@ -16,9 +16,12 @@ import type { TipTapInputHandle } from "./tiptap-input";
 import type { ComposerActivity, useComposerDisclosure } from "./use-composer-disclosure";
 import "./composer-disclosure.css";
 
-export const ComposerDisclosureContext = createContext<ReturnType<
-  typeof useComposerDisclosure
-> | null>(null);
+export type ComposerDisclosureContextValue = ReturnType<typeof useComposerDisclosure> & {
+  clarificationAllocationRef?: RefObject<HTMLElement | null>;
+  clarificationReservedHeightPx?: number;
+};
+
+export const ComposerDisclosureContext = createContext<ComposerDisclosureContextValue | null>(null);
 export const useComposerDisclosureContext = () => useContext(ComposerDisclosureContext);
 
 export function useComposerActivity({ draft, busy, required, overlay }: ComposerActivity) {

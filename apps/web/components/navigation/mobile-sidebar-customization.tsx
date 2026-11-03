@@ -15,8 +15,14 @@ import {
 } from "@kandev/ui/drawer";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 import { useRouter } from "@/lib/routing/client-router";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useSidebarCustomization } from "@/hooks/domains/sidebar/use-sidebar-customization";
+import {
+  sidebarEditorNodes,
+  sidebarNodeSiblings,
+  isIntegrationPlugin,
+} from "@/lib/sidebar/integration-plugin-layout";
 import { toggleNodeVisibility, moveSection } from "@/lib/sidebar/layout-operations";
 import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
@@ -111,49 +117,59 @@ function CustomizationRows({
   const { t } = useTranslation();
   return (
     <>
-      {nodes.map((node, index) => (
-        <div key={node.id} className="flex min-h-11 items-center gap-2 border-b py-1">
-          <label className="flex min-h-11 min-w-0 flex-1 items-center gap-3">
-            <Checkbox
-              checked={node.visible}
-              disabled={busy}
-              data-testid={`mobile-sidebar-visibility-${node.id}`}
-              onCheckedChange={(checked) =>
-                void mutate((layout) => toggleNodeVisibility(layout, node.id, checked === true))
-              }
-            />
-            <span className="truncate text-sm">{node.label}</span>
-          </label>
-          {[-1, 1].map((delta) => (
-            <Button
-              key={delta}
-              variant="ghost"
-              size="icon"
-              className="size-11"
-              disabled={busy || !nodes[index + delta]}
-              aria-label={t(
-                delta < 0 ? "settings:sidebarMoveUpEntry" : "settings:sidebarMoveDownEntry",
-                { name: node.label },
-              )}
-              onClick={() =>
-                void mutate((layout) =>
-                  moveSection(
-                    layout,
-                    node.id,
-                    layout.nodes.findIndex((item) => item.id === nodes[index + delta].id),
-                  ),
-                )
-              }
-            >
-              {delta < 0 ? (
-                <IconArrowUp className="size-4" />
-              ) : (
-                <IconArrowDown className="size-4" />
-              )}
-            </Button>
-          ))}
-        </div>
-      ))}
+      {sidebarEditorNodes(nodes).map((node) => {
+        const siblings = sidebarNodeSiblings(nodes, node.id);
+        const index = siblings.findIndex((item) => item.id === node.id);
+        return (
+          <div
+            key={node.id}
+            className={cn(
+              "flex min-h-11 items-center gap-2 border-b py-1",
+              isIntegrationPlugin(node) && "ml-4",
+            )}
+          >
+            <label className="flex min-h-11 min-w-0 flex-1 items-center gap-3">
+              <Checkbox
+                checked={node.visible}
+                disabled={busy}
+                data-testid={`mobile-sidebar-visibility-${node.id}`}
+                onCheckedChange={(checked) =>
+                  void mutate((layout) => toggleNodeVisibility(layout, node.id, checked === true))
+                }
+              />
+              <span className="truncate text-sm">{node.label}</span>
+            </label>
+            {[-1, 1].map((delta) => (
+              <Button
+                key={delta}
+                variant="ghost"
+                size="icon"
+                className="size-11"
+                disabled={busy || !siblings[index + delta]}
+                aria-label={t(
+                  delta < 0 ? "settings:sidebarMoveUpEntry" : "settings:sidebarMoveDownEntry",
+                  { name: node.label },
+                )}
+                onClick={() =>
+                  void mutate((layout) =>
+                    moveSection(
+                      layout,
+                      node.id,
+                      layout.nodes.findIndex((item) => item.id === siblings[index + delta].id),
+                    ),
+                  )
+                }
+              >
+                {delta < 0 ? (
+                  <IconArrowUp className="size-4" />
+                ) : (
+                  <IconArrowDown className="size-4" />
+                )}
+              </Button>
+            ))}
+          </div>
+        );
+      })}
     </>
   );
 }

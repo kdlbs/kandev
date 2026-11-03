@@ -8,6 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 import { waitForStableActiveSession } from "../../helpers/session-store";
 import { routeMainWebSocketWithMessageListResponseHold } from "../../helpers/ws-response-hold";
 import { watchOlderMessageRequests } from "./message-pagination-helpers";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
 
 const MOBILE_END_TOLERANCE_PX = 10;
 
@@ -31,14 +32,84 @@ async function switchMobileTask(testPage: Page, title: string): Promise<void> {
   await expect(sheet).not.toBeVisible({ timeout: 10_000 });
 }
 
-async function simulateReaderScrollToMiddle(list: Locator): Promise<number> {
-  return list.evaluate((element) => {
-    const target = Math.floor((element.scrollHeight - element.clientHeight) / 2);
-    element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
-    element.scrollTop = target;
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    return element.scrollTop;
-  });
+type ReaderGestureElement = HTMLElement & {
+  readerGestureProbe?: { events: string[]; controller: AbortController };
+};
+
+async function scrollMobileReaderIntoHistory(page: Page, list: Locator): Promise<number> {
+  const client = await page.context().newCDPSession(page);
+  let touching = false;
+  let events: string[] = [];
+  try {
+    await list.evaluate((element: ReaderGestureElement) => {
+      const probe = { events: [] as string[], controller: new AbortController() };
+      element.readerGestureProbe = probe;
+      for (const type of ["touchstart", "touchmove", "touchend"]) {
+        element.addEventListener(
+          type,
+          (event) => {
+            if (event.isTrusted) probe.events.push(type);
+          },
+          { capture: true, signal: probe.controller.signal },
+        );
+      }
+    });
+    const box = await list.boundingBox();
+    if (!box) throw new Error("Mobile transcript has no reading viewport");
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 4 };
+    touching = true;
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ ...point, y: point.y + box.height / 2 }],
+    });
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    touching = false;
+  } finally {
+    try {
+      if (touching)
+        await client.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    } finally {
+      try {
+        events = await list.evaluate((element: ReaderGestureElement) => {
+          const probe = element.readerGestureProbe;
+          probe?.controller.abort();
+          delete element.readerGestureProbe;
+          return probe?.events ?? [];
+        });
+      } finally {
+        await client.detach();
+      }
+    }
+  }
+  expect(events).toEqual(["touchstart", "touchmove", "touchend"]);
+  await expect
+    .poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+    .toBeGreaterThan(100);
+  let previousGeometry = "";
+  let stableReads = 0;
+  let settledGeometry = [-1, 0, 0];
+  await expect
+    .poll(
+      async () => {
+        const geometry = await list.evaluate((el) => [
+          el.scrollTop,
+          el.scrollHeight,
+          el.clientHeight,
+        ]);
+        const key = geometry.join(":");
+        stableReads = key === previousGeometry ? stableReads + 1 : 0;
+        previousGeometry = key;
+        settledGeometry = geometry;
+        return stableReads;
+      },
+      { intervals: [100], message: "Mobile reading position and geometry should settle" },
+    )
+    .toBeGreaterThanOrEqual(3);
+  const [top, height, viewportHeight] = settledGeometry;
+  expect(top).toBeGreaterThan(100);
+  expect(height - viewportHeight - top).toBeGreaterThan(100);
+  return top;
 }
 
 /**
@@ -196,7 +267,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     );
     expect(olderRequests).toHaveLength(0);
 
-    const targetScrollTop = await simulateReaderScrollToMiddle(list);
+    const targetScrollTop = await scrollMobileReaderIntoHistory(testPage, list);
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -283,18 +354,22 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       })
       .toBeGreaterThan(200);
 
-    const targetScrollTop = await simulateReaderScrollToMiddle(list);
+    const targetScrollTop = await scrollMobileReaderIntoHistory(testPage, list);
     expect(targetScrollTop).toBeGreaterThan(100);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
+    expect(Math.abs((await list.evaluate((el) => el.scrollTop)) - targetScrollTop)).toBeLessThan(
+      10,
+    );
+
     // A brand-new message arrives while scrolled away from the bottom and
     // disabled — the view must not jump.
     const marker = "New content while disabled on mobile";
     await session.sendMessageViaButton(`e2e:message("${marker}")`);
-    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+    await expect(activeChat.getByText(marker, { exact: true }).last()).toBeVisible({
       timeout: 15_000,
     });
     await expect
@@ -343,6 +418,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const session = await seedOverflowingTask(
       testPage,
@@ -372,52 +448,55 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
+    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
     const marker = "New content while disabled at bottom on mobile";
-    await session.sendMessageViaButton(`e2e:delay(1500)\ne2e:message("${marker}")`);
-    await expect(activeChat.getByText("e2e:delay(1500)", { exact: false })).toBeVisible();
-    // Capture only after the submitted prompt's scroll position is stable.
-    // The delayed response leaves time for the user's message row to settle.
-    const frozenScrollTop = await list.evaluate(async (el) => {
-      let previous = el.scrollTop;
-      let stableFrames = 0;
-      for (let frame = 0; frame < 30; frame++) {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const current = el.scrollTop;
-        stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
-        previous = current;
-        if (stableFrames === 3) return current;
-      }
-      throw new Error("transcript scroll position did not settle after prompt submission");
-    });
-    const markerMessages = activeChat.getByText(marker, { exact: false });
-    const promptMarkerCount = await markerMessages.count();
-    expect(promptMarkerCount).toBeGreaterThan(0);
-    await expect
-      .poll(() => markerMessages.count(), {
+    const gate = mockTurnGate(backend.tmpDir, marker);
+    try {
+      await session.sendMessageViaButton(gate.prompt);
+      await expect(
+        activeChat.getByText("Queue blocking turn started", { exact: true }),
+      ).toBeVisible();
+      // Hold the response until the submitted prompt's scroll position settles.
+      await list.evaluate(async (el) => {
+        let previous = el.scrollTop;
+        let stableFrames = 0;
+        for (let frame = 0; frame < 30; frame++) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const current = el.scrollTop;
+          stableFrames = Math.abs(current - previous) <= 0.5 ? stableFrames + 1 : 0;
+          previous = current;
+          if (stableFrames === 3) return current;
+        }
+        throw new Error("transcript scroll position did not settle after prompt submission");
+      });
+      const markerMessages = activeChat.getByText(marker, { exact: false });
+      await expect(markerMessages).toHaveCount(1);
+      await gate.release();
+      await expect(markerMessages).toHaveCount(2, { timeout: 15_000 });
+      await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
         timeout: 15_000,
-        message: "Waiting for the delayed assistant response after the submitted prompt",
-      })
-      .toBeGreaterThan(promptMarkerCount);
-    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
-      timeout: 15_000,
-    });
+      });
 
-    await expect
-      .poll(
-        async () =>
-          list.evaluate(
-            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
-            frozenScrollTop,
-          ),
-        { timeout: 2_000 },
-      )
-      .toBeLessThanOrEqual(2);
+      await expect
+        .poll(
+          async () =>
+            list.evaluate(
+              (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+              frozenScrollTop,
+            ),
+          { timeout: 2_000 },
+        )
+        .toBeLessThanOrEqual(2);
+    } finally {
+      await gate.release();
+    }
   });
 
   test("follows a live turn from the bottom, then pauses after a small upward touch", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.emulateMedia({ reducedMotion: "reduce" });
     const session = await seedOverflowingTask(
@@ -437,7 +516,10 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await session.sendMessageViaButton(
       'e2e:message("MOBILE-LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("MOBILE-LIVE-FOLLOW-TAIL")',
     );
-    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false })).toBeVisible();
+    const agentMessages = activeChat.getByTestId("agent-message-highlight");
+    await expect(
+      agentMessages.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false }),
+    ).toBeVisible();
     const runningStatus = list.getByRole("status", { name: "Agent is running" });
     await expect(runningStatus).toBeVisible({ timeout: 10_000 });
     await expect
@@ -493,7 +575,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       .toBeGreaterThan(5);
     const readerTop = await list.evaluate((element) => element.scrollTop);
 
-    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
+    await expect(agentMessages.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
       timeout: 10_000,
     });
     await expect
@@ -505,5 +587,8 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         },
       )
       .toBeLessThanOrEqual(3);
+    await prCapture.screenshot("held-reading-phone", {
+      caption: "Phone transcript retains the reading position after upward touch and new output.",
+    });
   });
 });

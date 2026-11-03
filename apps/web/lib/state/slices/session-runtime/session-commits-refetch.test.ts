@@ -5,9 +5,7 @@ import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import type { SessionCommit, SessionRuntimeSlice } from "./types";
 
 function makeStore() {
-  return create<SessionRuntimeSlice>()(
-    immer((set, get, store) => createSessionRuntimeSlice(set, get, store)),
-  );
+  return create<SessionRuntimeSlice>()(immer((set, get) => createSessionRuntimeSlice(set, get)));
 }
 
 const SESSION = "sess-1";

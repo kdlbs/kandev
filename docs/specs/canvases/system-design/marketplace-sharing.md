@@ -436,6 +436,13 @@ known, with visible placeholders otherwise. Never put credentials in commands.
 GitLab/Bitbucket instructions describe manual hosting for direct links; their
 repositories are not accepted by the GitHub-only official registry in v1.
 
+`CanvasShareHelp` copies the displayed registry example through the shared
+`copyToClipboard` utility. Its modern clipboard rejection falls back to a DOM
+copy within the active dialog; the boolean result controls copied feedback. A
+failed attempt clears copied feedback, including after a previous success. The
+example, review-derived package ID, translations, and sharing layout remain
+unchanged. This host action does not publish or modify registry data.
+
 ## Mobile contract
 
 - Entry points are the Plugins settings page and existing workspace/canvas

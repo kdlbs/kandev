@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -163,6 +164,7 @@ type DetachedClarificationResumer interface {
 // Resolver, which is shared with the answer_question_kandev /
 // list_pending_questions_kandev MCP tools (R3).
 type Handlers struct {
+	imageReader    QuestionImageReader
 	store          *Store
 	hub            Broadcaster
 	messageCreator MessageCreator
@@ -227,9 +229,14 @@ func RegisterRoutes(
 	inboxTasks inboxTaskService,
 	inboxBundles inboxBundleStore,
 	needsYouInboxEnabled bool,
+	imageReaders ...QuestionImageReader,
 ) {
 	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log, inboxTasks, inboxBundles)
+	if len(imageReaders) > 0 {
+		h.imageReader = imageReaders[0]
+	}
 	api := router.Group("/api/v1/clarification")
+	api.GET("/:id/images/:imageID", h.httpQuestionImage)
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
 	api.GET("/:id/wait", h.httpWaitForResponse)
@@ -276,6 +283,14 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 	// Look up the task ID for this session
 	sessionID := body.SessionID
 	taskID := body.TaskID
+	if protocol.HasQuestionImages(body.Questions) {
+		session, err := h.repo.GetTaskSession(c.Request.Context(), sessionID)
+		if err != nil || session == nil || (taskID != "" && taskID != session.TaskID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image question session does not belong to task"})
+			return
+		}
+		taskID = session.TaskID
+	}
 	if taskID == "" {
 		session, err := h.repo.GetTaskSession(c.Request.Context(), sessionID)
 		if err != nil {
@@ -356,6 +371,9 @@ func normalizeAndValidateQuestions(questions []Question, allowFreeTextOnly bool)
 	}
 	if len(questions) > 4 {
 		return "questions must contain at most 4 questions"
+	}
+	if err := protocol.ValidateQuestionImages(questions); err != nil {
+		return err.Error()
 	}
 	seen := map[string]bool{}
 	for i := range questions {

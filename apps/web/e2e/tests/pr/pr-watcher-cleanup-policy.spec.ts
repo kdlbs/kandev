@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 
 /**
@@ -315,6 +316,12 @@ test.describe("PR watcher cleanup policy", () => {
     // the task. Under always-policy it should NOT.
     const { sessions } = await apiClient.listTaskSessions(prTask!.id);
     expect(sessions.length).toBeGreaterThan(0);
+    await waitForSessionState(apiClient, {
+      taskId: prTask!.id,
+      sessionId: sessions[0].id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the automatic review prompt before submitting a user message",
+    });
     await apiClient.addUserMessage(prTask!.id, sessions[0].id, "wait, hold on");
 
     await apiClient.mockGitHubAddPRs([

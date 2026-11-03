@@ -2,12 +2,15 @@ package sqlite
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -16,19 +19,22 @@ import (
 )
 
 // ProjectCanonicalAgentDeliveryEvent persists output and advances the inbox
-// cursor in one transaction. The returned bool is true when the stable
-// canonical message already existed and this event appended to it.
+// cursor in one transaction. The result carries the committed message ID and
+// whether this event appended to an existing message.
 func (r *Repository) ProjectCanonicalAgentDeliveryEvent(
 	ctx context.Context,
 	event *models.AgentDeliveryEvent,
 	effect *models.AgentDeliveryEffect,
-) (bool, error) {
+) (models.CanonicalAgentDeliveryProjectionResult, error) {
 	appendMessages, err := r.ProjectCanonicalAgentDeliveryEvents(ctx,
 		[]*models.AgentDeliveryEvent{event}, []*models.AgentDeliveryEffect{effect})
 	if err != nil {
-		return false, err
+		return models.CanonicalAgentDeliveryProjectionResult{}, err
 	}
-	return len(appendMessages) == 1 && appendMessages[0], nil
+	if len(appendMessages) != 1 {
+		return models.CanonicalAgentDeliveryProjectionResult{}, fmt.Errorf("canonical delivery projector returned %d results for one event", len(appendMessages))
+	}
+	return appendMessages[0], nil
 }
 
 // ProjectCanonicalAgentDeliveryEvents projects one contiguous stream batch in
@@ -39,7 +45,7 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	ctx context.Context,
 	events []*models.AgentDeliveryEvent,
 	effects []*models.AgentDeliveryEffect,
-) ([]bool, error) {
+) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 	streamID, err := validateCanonicalDeliveryBatch(events, effects)
 	if err != nil {
 		return nil, err
@@ -50,6 +56,38 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
 		return nil, err
 	}
+	return projectCanonicalDeliveryWithRetry(ctx, func() ([]models.CanonicalAgentDeliveryProjectionResult, error) {
+		return r.projectCanonicalDeliveryAttempt(ctx, streamID, events, effects)
+	})
+}
+
+func projectCanonicalDeliveryWithRetry(ctx context.Context, attempt func() ([]models.CanonicalAgentDeliveryProjectionResult, error)) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
+	// The attempt releases session/stream locks before retrying task-row contention.
+	delay := 10 * time.Millisecond
+	for {
+		result, err := attempt()
+		if err == nil {
+			return result, nil
+		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			return result, errors.Join(err, contextErr)
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			return result, err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		delay = min(delay*2, 250*time.Millisecond)
+	}
+}
+
+func (r *Repository) projectCanonicalDeliveryAttempt(ctx context.Context, streamID string, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -64,14 +102,14 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	}
 
 	var projectedSequence int64
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT projected_sequence FROM agent_delivery_cursors WHERE stream_id = ?`),
-		streamID).Scan(&projectedSequence); err != nil {
-		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
+	var boundary sql.NullInt64
+	projectedSequence, boundary, err = loadCanonicalDeliveryCursorTx(ctx, tx, r.db.Rebind, streamID)
+	if err != nil {
+		return nil, err
 	}
-	appendMessages := make([]bool, len(events))
+	results := make([]models.CanonicalAgentDeliveryProjectionResult, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
-		ctx, tx, events, effects, appendMessages, projectedSequence,
+		ctx, tx, events, effects, results, projectedSequence, boundary,
 	); err != nil {
 		return nil, err
 	}
@@ -79,7 +117,7 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 		return nil, err
 	}
 	r.refreshAgentDeliveryLag(ctx)
-	return appendMessages, nil
+	return results, nil
 }
 
 func (r *Repository) projectCanonicalDeliveryBatchTx(
@@ -87,15 +125,26 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 	tx *sqlx.Tx,
 	events []*models.AgentDeliveryEvent,
 	effects []*models.AgentDeliveryEffect,
-	appendMessages []bool,
+	results []models.CanonicalAgentDeliveryProjectionResult,
 	projectedSequence int64,
+	boundary sql.NullInt64,
 ) error {
+	initialProjectedSequence := projectedSequence
+	boundarySequence := boundary.Int64
+	boundaryInitialized := boundary.Valid
+	initializeBoundary := func() {
+		if boundaryInitialized {
+			return
+		}
+		boundarySequence = initialProjectedSequence
+		boundaryInitialized = true
+	}
 	group := make([]canonicalDeliveryBatchEntry, 0, len(events))
 	flushGroup := func() error {
 		if len(group) == 0 {
 			return nil
 		}
-		if err := r.projectCanonicalDeliveryBatchGroupTx(ctx, tx, group, appendMessages); err != nil {
+		if err := r.projectCanonicalDeliveryBatchGroupTx(ctx, tx, group, results); err != nil {
 			return err
 		}
 		group = group[:0]
@@ -117,6 +166,15 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 			if err := flushGroup(); err != nil {
 				return err
 			}
+			results[i].AlreadyProjected = true
+			results[i].CanonicalMessageID = stored.CanonicalMessageID
+			if results[i].CanonicalMessageID == "" && stored.PayloadPrunedAt == nil && len(stored.Payload) > 0 {
+				var projectedEvent streams.AgentEvent
+				if err := json.Unmarshal(stored.Payload, &projectedEvent); err != nil {
+					return fmt.Errorf("decode projected canonical agent event: %w", err)
+				}
+				results[i].CanonicalMessageID = projectedEvent.CanonicalMessageID
+			}
 			if stored.Sequence > projectedSequence {
 				projectedSequence = stored.Sequence
 			}
@@ -129,16 +187,31 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if err := json.Unmarshal(stored.Payload, &agentEvent); err != nil {
 			return fmt.Errorf("decode canonical agent event: %w", err)
 		}
+		initializeBoundary()
+		if agentEvent.Type == streams.EventTypeToolCall && agentEvent.ParentToolCallID == "" {
+			if err := flushGroup(); err != nil {
+				return err
+			}
+			boundarySequence = stored.Sequence
+		}
+		if agentEvent.Type == streams.EventTypeMessageChunk {
+			if agentEvent.CanonicalMessageBaseID == "" {
+				agentEvent.CanonicalMessageBaseID = agentEvent.CanonicalMessageID
+			}
+			agentEvent.CanonicalMessageID = canonicalDeliverySegmentMessageID(agentEvent, boundarySequence)
+		}
+		results[i].CanonicalMessageID = agentEvent.CanonicalMessageID
 		if len(group) > 0 && !compatibleCanonicalDeliveryEvents(group[0].agentEvent, agentEvent) {
 			if err := flushGroup(); err != nil {
 				return err
 			}
 		}
 		group = append(group, canonicalDeliveryBatchEntry{
-			index:      i,
-			stored:     stored,
-			agentEvent: agentEvent,
-			effect:     effects[i],
+			index:                          i,
+			stored:                         stored,
+			agentEvent:                     agentEvent,
+			effect:                         effects[i],
+			messageSegmentBoundarySequence: boundarySequence,
 		})
 		projectedSequence = stored.Sequence
 	}
@@ -149,10 +222,11 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 }
 
 type canonicalDeliveryBatchEntry struct {
-	index      int
-	stored     models.AgentDeliveryEvent
-	agentEvent streams.AgentEvent
-	effect     *models.AgentDeliveryEffect
+	index                          int
+	stored                         models.AgentDeliveryEvent
+	agentEvent                     streams.AgentEvent
+	effect                         *models.AgentDeliveryEffect
+	messageSegmentBoundarySequence int64
 }
 
 func compatibleCanonicalDeliveryEvents(previous, next streams.AgentEvent) bool {
@@ -160,11 +234,26 @@ func compatibleCanonicalDeliveryEvents(previous, next streams.AgentEvent) bool {
 		previous.CanonicalMessageID == next.CanonicalMessageID
 }
 
+func canonicalDeliverySegmentMessageID(event streams.AgentEvent, boundary int64) string {
+	if event.Type != streams.EventTypeMessageChunk || event.Role == authorKindUser || event.ProtocolMessageID != "" {
+		return event.CanonicalMessageID
+	}
+	baseID := event.CanonicalMessageBaseID
+	if baseID == "" {
+		baseID = event.CanonicalMessageID
+	}
+	if baseID == "" || boundary <= 0 {
+		return baseID
+	}
+	digest := sha256.Sum256([]byte(baseID + ":" + fmt.Sprint(boundary)))
+	return "agent-delivery-segment-" + fmt.Sprintf("%x", digest[:16])
+}
+
 func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	group []canonicalDeliveryBatchEntry,
-	appendMessages []bool,
+	results []models.CanonicalAgentDeliveryProjectionResult,
 ) error {
 	for _, item := range group {
 		if item.agentEvent.Type == streams.EventTypeToolCall {
@@ -172,7 +261,7 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 			if err != nil {
 				return err
 			}
-			appendMessages[item.index] = appended
+			results[item.index].Appended = appended
 		} else if item.agentEvent.ShellOutput != nil || item.agentEvent.Type == streams.EventTypeShellOutputUpdate {
 			if err := r.persistCanonicalShellOutputTx(ctx, tx, &item.stored, item.agentEvent); err != nil {
 				return err
@@ -196,7 +285,7 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 		if err != nil {
 			return err
 		}
-		setCanonicalDeliveryAppendMessages(group, appendMessages, firstContent, appended)
+		setCanonicalDeliveryProjectionResults(group, results, firstContent, appended)
 	}
 	return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
 }
@@ -217,9 +306,9 @@ func canonicalDeliveryBatchContent(group []canonicalDeliveryBatchEntry) (int, st
 	return firstContent, content.String()
 }
 
-func setCanonicalDeliveryAppendMessages(
+func setCanonicalDeliveryProjectionResults(
 	group []canonicalDeliveryBatchEntry,
-	appendMessages []bool,
+	results []models.CanonicalAgentDeliveryProjectionResult,
 	firstContent int,
 	appended bool,
 ) {
@@ -227,7 +316,7 @@ func setCanonicalDeliveryAppendMessages(
 		if canonicalDeliveryEventContent(item.agentEvent) == "" {
 			continue
 		}
-		appendMessages[item.index] = appended || index > firstContent
+		results[item.index].Appended = appended || index > firstContent
 	}
 }
 
@@ -252,11 +341,43 @@ func (r *Repository) markCanonicalDeliveryBatchProjectedTx(
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE agent_delivery_inbox SET projected_at = ?
-			WHERE stream_id = ? AND sequence = ?`), now, item.stored.StreamID, item.stored.Sequence); err != nil {
-			return err
+		switch {
+		case item.agentEvent.CanonicalMessageID == "":
+			if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+				UPDATE agent_delivery_inbox SET projected_at = ?
+				WHERE stream_id = ? AND sequence = ?`), now, item.stored.StreamID, item.stored.Sequence); err != nil {
+				return err
+			}
+		case item.agentEvent.Type == streams.EventTypeMessageChunk || item.agentEvent.Type == streams.EventTypeReasoning:
+			payload, err := json.Marshal(item.agentEvent)
+			if err != nil {
+				return fmt.Errorf("encode canonical agent event identity: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+				UPDATE agent_delivery_inbox
+				SET payload = ?, payload_bytes = ?, canonical_message_id = ?, projected_at = ?
+				WHERE stream_id = ? AND sequence = ?`),
+				payload, len(payload), item.agentEvent.CanonicalMessageID, now,
+				item.stored.StreamID, item.stored.Sequence); err != nil {
+				return err
+			}
+		default:
+			if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+				UPDATE agent_delivery_inbox
+				SET canonical_message_id = ?, projected_at = ?
+				WHERE stream_id = ? AND sequence = ?`),
+				item.agentEvent.CanonicalMessageID, now,
+				item.stored.StreamID, item.stored.Sequence); err != nil {
+				return err
+			}
 		}
+	}
+	lastBoundary := group[len(group)-1].messageSegmentBoundarySequence
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_delivery_cursors
+		SET message_segment_boundary_sequence = ?
+		WHERE stream_id = ?`), lastBoundary, group[0].stored.StreamID); err != nil {
+		return err
 	}
 	if err := advanceProjectedCursorTx(ctx, tx, r.db.Rebind, group[0].stored.StreamID, now); err != nil {
 		return err
@@ -440,15 +561,43 @@ func (r *Repository) canonicalDeliveryTurnTx(
 		return "", fmt.Errorf("load canonical delivery turn: %w", err)
 	}
 	turnID = fmt.Sprintf("agent-delivery-turn-%s-%d", event.StreamID, event.Sequence)
+	metadata, err := r.canonicalDeliveryTurnMetadataTx(ctx, tx, taskID)
+	if err != nil {
+		return "", err
+	}
 	now := r.nowUTC()
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns
 		(id, task_session_id, task_id, started_at, completed_at, execution_profile_id,
 		route_generation, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULL, '', 0, '{}', ?, ?)
-		ON CONFLICT (id) DO NOTHING`), turnID, sessionID, taskID, now, now, now)
+		VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`), turnID, sessionID, taskID, now, metadata, now, now)
 	if err != nil {
 		return "", fmt.Errorf("create canonical delivery turn: %w", err)
 	}
 	return turnID, nil
+}
+
+func (r *Repository) canonicalDeliveryTurnMetadataTx(ctx context.Context, tx *sqlx.Tx, taskID string) (string, error) {
+	_, stepID, found, err := r.readTaskStepInTxMode(ctx, tx, taskID, true)
+	if err != nil {
+		return "", fmt.Errorf("read canonical turn workflow step: %w", err)
+	}
+	if !found {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	turn := &models.Turn{TaskID: taskID}
+	if stepID != "" {
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			return "", fmt.Errorf("stamp canonical turn workflow entry: %w", err)
+		}
+	}
+	if turn.Metadata == nil {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(turn.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical turn workflow stamp: %w", err)
+	}
+	return string(raw), nil
 }

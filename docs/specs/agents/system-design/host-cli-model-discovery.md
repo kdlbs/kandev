@@ -212,10 +212,12 @@ part of the same list, so keyboard and touch flows are unchanged.
 
 ## Agents settings card
 
-The identity block shows `<DisplayName> <version>` after the detected path, or
-a muted unknown-version line with its reason. No new action is added to the
-card: installing or upgrading a CLI remains the existing install flow, and
-updating the ACP bridge remains the existing runtime update control.
+The card's initially closed Diagnostics disclosure shows the detected local CLI path
+and `<DisplayName> <version>`, or an unknown-version line with its reason. The visible
+identity block describes the selected session runtime instead; see
+[runtime identity display](runtime-identity-display.md). Installing or upgrading a CLI
+remains the existing install flow, and updating the ACP bridge remains the existing
+runtime update control.
 
 ## Failure and recovery
 

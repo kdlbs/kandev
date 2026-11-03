@@ -156,4 +156,6 @@ func (s *Service) ceilingSweepTick(ctx context.Context) {
 		s.sessionCeiling.expireStaleReservations()
 	}
 	s.drainDeferredCeilingLaunches(ctx)
+	s.resumeFixedProfileWaits(ctx)
+	s.retryMessageCapacityWaits(ctx)
 }

@@ -45,7 +45,7 @@ type TaskCommandsForTaskProps = {
 function TaskCommandsForTask({ task, workspaceId, data }: TaskCommandsForTaskProps) {
   const { t } = useTranslation();
   const store = useAppStoreApi();
-  const actions = useTaskRowActions(store);
+  const actions = useTaskRowActions(store, undefined, workspaceId);
   const prefs = useSidebarTaskPrefs();
   const linkHandlers = useSidebarTaskLinking(workspaceId, actions);
   const repositories = useAppStore((state) => state.repositories.itemsByWorkspaceId[workspaceId]);

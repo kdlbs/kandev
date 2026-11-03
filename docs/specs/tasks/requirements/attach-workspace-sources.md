@@ -173,3 +173,5 @@ The initial-layout and nested-placement portions are implemented in the [placeme
 ## Follow-up implementation plan
 
 [Add sources to the current workspace](../../../plans/current-workspace-sources/plan.md) owns REQ-005/006. This follow-up extends repositoryless attachment and Local placement; it retains the remote host-folder restriction. Earlier Worktree-only placement limits describe the preceding package, not a prohibition on this extension.
+
+[Managed source attachment](managed-source-attachment.md) owns REQ-008 and its [recovery design](../system-design/current-managed-attachment-recovery.md). Missing legacy recovery remains excluded; this is a partial response to issue #4426.

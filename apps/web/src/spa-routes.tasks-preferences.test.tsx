@@ -56,7 +56,7 @@ function renderTaskBoot(sort: string, query = "") {
   ] as Task[];
   window.history.replaceState({}, "", `/tasks${query}`);
   render(
-    <StateProvider>
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
       <SpaRoutes
         routeData={
           {
@@ -121,12 +121,43 @@ it.each(["state", "workflow_step", "invalid"])("resolves a live SPA %s grouping 
     },
   } as BootRouteData;
   render(
-    <StateProvider>
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
       <SpaRoutes routeData={routeData} />
     </StateProvider>,
   );
   expect(consumer.mock.calls.at(-1)?.[0]).toMatchObject({
     initialGroup: "workflow_step",
     initialSort: "title_desc",
+  });
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2
+it("does not present saved active boot rows beneath an explicit archive query", () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/tasks?workspace=ws&archive=archived&workflow=all&repository=all",
+  );
+  render(
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
+      <SpaRoutes
+        routeData={
+          {
+            tasksPage: {
+              activeWorkspaceId: "ws",
+              workflows: [],
+              repositories: [],
+              tasks: [{ id: "active", title: "Active boot task" } as Task],
+              total: 1,
+            },
+          } as BootRouteData
+        }
+      />
+    </StateProvider>,
+  );
+  expect(consumer.mock.calls.at(-1)?.[0]).toMatchObject({
+    initialTasks: [],
+    initialTotal: 0,
+    initialDataLoaded: false,
   });
 });

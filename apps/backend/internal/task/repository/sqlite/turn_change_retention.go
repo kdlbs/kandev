@@ -263,6 +263,14 @@ func expireTurnChangeContent(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, cand
 		reason = models.TurnChangeReasonExpiredTaskLimit
 	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		UPDATE turn_repository_changes
+		   SET export_state = ?, export_reason = ?, export_claim_owner = '',
+		       export_claim_expires_at = NULL, content_complete = ?, updated_at = ?
+		 WHERE change_set_id = ?
+	`), models.TurnChangeExportUnavailable, reason, false, now, candidate.id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		UPDATE turn_file_changes SET canonical_content_id = '', filtered_content_id = '', old_content_id = '', new_content_id = '',
 			content_availability = 'expired', content_reason = ?, content_truncated = TRUE
 		WHERE repository_change_id IN (SELECT id FROM turn_repository_changes WHERE change_set_id = ?)

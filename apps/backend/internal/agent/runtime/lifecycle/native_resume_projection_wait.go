@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -40,7 +41,7 @@ func (m *Manager) ownsNativeResumeProof(owner nativeResumeProofOwner) bool {
 	if !exists || current != owner.execution || !m.runtimeExecutionCurrent(current) {
 		return false
 	}
-	// The caller holds the client lease throughout this bounded proof.
+	// Each proof attempt holds the client lease while it verifies ownership.
 	return current.currentAgentCtlClient() == owner.client && current.ACPSessionID == owner.nativeID &&
 		current.DeliveryIncarnationID == owner.incarnationID &&
 		current.DeliveryStreamID == owner.streamID && current.DeliveryHarnessGeneration == owner.generation
@@ -70,7 +71,7 @@ func (m *Manager) waitForNativeResumeProjection(ctx context.Context, owner nativ
 			return nil, errors.Join(errNativeResumeProjectionLag, ctx.Err())
 		}
 		lag := errors.Is(err, errNativeResumeProjectionLag)
-		if !lag && (!waiting || !errors.Is(err, errNativeResumeStreamProgress)) {
+		if !lag && !errors.Is(err, errNativeResumeStreamProgress) {
 			return proof, err
 		}
 		if !waiting {
@@ -100,7 +101,14 @@ func nativeResumeStreamAdvanced(before, after *agentctl.DeliveryStatus) bool {
 		current.FirstRetained < previous.FirstRetained || current.Acknowledged > current.HighWater {
 		return false
 	}
+	sequenceProgressed := nativeResumeSequenceAdvanced(previous, current)
+	// Pruning can reduce byte usage, but byte usage cannot prove sequence progress.
 	previous.HighWater, previous.Acknowledged = current.HighWater, current.Acknowledged
 	previous.FirstRetained, previous.Bytes = current.FirstRetained, current.Bytes
-	return previous == current
+	return previous == current && sequenceProgressed
+}
+
+func nativeResumeSequenceAdvanced(before, after journal.Stream) bool {
+	return after.HighWater > before.HighWater || after.Acknowledged > before.Acknowledged ||
+		after.FirstRetained > before.FirstRetained
 }

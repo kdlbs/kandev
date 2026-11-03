@@ -22,10 +22,9 @@ import (
 // (internal/backendapp/services.go) and this package only decides *which*
 // resource each entry point has to authorize.
 //
-// Scoping keys off the request-context identity exactly as the task service
-// does: no identity means an internal caller (event bus, orchestrator,
-// pollers), and a synthetic identity means authentication is disabled. Both
-// are unscoped, so with auth off nothing here runs at all.
+// The task domain supplies the production authorization predicate. It covers
+// native identities and verified conversations while leaving internal and
+// auth-disabled callers unscoped. Standalone services fall back to identity.
 //
 // Denials are reported as ErrNotVisible, which is also what a genuinely
 // missing workflow, workspace or step produces. That is deliberate: a
@@ -69,13 +68,24 @@ func (s *Service) SetTaskAccessChecker(checker func(context.Context, string) err
 	s.taskAccessChecker = checker
 }
 
-// callerIsScoped mirrors internal/task/service's callerScope: false means the
-// caller is an internal one or authentication is disabled, and no scoping
-// applies. The workflow package repeats the three lines rather than importing
-// the task service, which would be a dependency cycle.
+// callerIsScoped is the standalone fallback. Production uses the task-domain
+// predicate so verified conversation contexts also reach the access checkers.
 func callerIsScoped(ctx context.Context) bool {
 	identity, ok := authn.IdentityFromContext(ctx)
 	return ok && !identity.Synthetic
+}
+
+func (s *Service) authorizationApplies(ctx context.Context) bool {
+	if s.workflowAuthorizationRequired != nil {
+		return s.workflowAuthorizationRequired(ctx)
+	}
+	return callerIsScoped(ctx)
+}
+
+// SetWorkflowAuthorizationRequiredChecker lets the task domain identify
+// verified conversation contexts without coupling this package to MCP.
+func (s *Service) SetWorkflowAuthorizationRequiredChecker(checker func(context.Context) bool) {
+	s.workflowAuthorizationRequired = checker
 }
 
 // AuthorizeWorkflow checks that the caller may see a workflow.
@@ -85,7 +95,7 @@ func callerIsScoped(ctx context.Context) bool {
 // handing "" to the task-domain checker would be read as "no scoping applies"
 // (the trap runSubscriptionCheck documents in backendapp/auth.go).
 func (s *Service) AuthorizeWorkflow(ctx context.Context, workflowID string) error {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return nil
 	}
 	if workflowID == "" {
@@ -100,7 +110,7 @@ func (s *Service) AuthorizeWorkflow(ctx context.Context, workflowID string) erro
 // AuthorizeWorkspace checks that the caller may see a workspace. An empty
 // workspace ID fails closed for the same reason as AuthorizeWorkflow.
 func (s *Service) AuthorizeWorkspace(ctx context.Context, workspaceID string) error {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return nil
 	}
 	if workspaceID == "" {
@@ -116,7 +126,7 @@ func (s *Service) AuthorizeWorkspace(ctx context.Context, workspaceID string) er
 // event actions. An empty ID fails closed for the same reason as
 // AuthorizeWorkflow; callers strip the "this" sentinel before calling.
 func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return nil
 	}
 	if taskID == "" {
@@ -136,7 +146,7 @@ func (s *Service) AuthorizeTask(ctx context.Context, taskID string) error {
 // only thing the caller supplied — but nothing is disclosed: every rejection,
 // including a step that does not exist at all, returns ErrNotVisible.
 func (s *Service) AuthorizeStep(ctx context.Context, stepID string) error {
-	if !callerIsScoped(ctx) {
+	if !s.authorizationApplies(ctx) {
 		return nil
 	}
 	if stepID == "" {

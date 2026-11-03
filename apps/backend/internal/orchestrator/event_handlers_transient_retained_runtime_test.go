@@ -18,6 +18,7 @@ import (
 func TestTransientReplayUsesRetainedRuntime(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	installInterruptionTurnService(t, svc)
 	mgr := configureRetainedReplayRuntime(t, svc)
 	armTransientPromptEvidence(svc)
 	svc.rememberTurnPrompt("s1", "retry the request", "", false, nil)
@@ -271,7 +272,10 @@ func TestRetainedRuntimeConfirmedAbsenceUsesExistingReplayFallback(t *testing.T)
 	probe := &retainedRuntimeProbeAgentManager{mockAgentManager: mgr, running: false}
 	svc.agentManager = probe
 
-	svc.handleAgentTurnFailed(context.Background(), retainedTurnFailureDataForReplay())
+	data := retainedTurnFailureDataForReplay()
+	data.ErrorMessage = overloaded529
+	data.ProviderError = nil
+	svc.handleAgentTurnFailed(context.Background(), data)
 	value, ok := svc.transientRetries.Load("s1")
 	require.True(t, ok)
 	entry := value.(*transientRetryEntry)

@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/authz"
 	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -40,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -70,6 +72,7 @@ func provideOrchestrator(
 	eventBus bus.EventBus,
 	taskRepo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
+	historyStore *taskchanges.GitHistoryStore,
 	authSvc *auth.Service,
 	userSvc *userservice.Service,
 	lifecycleMgr *lifecycle.Manager,
@@ -82,6 +85,7 @@ func provideOrchestrator(
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	retryClock *e2eCapacityRetryClock,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -92,6 +96,9 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	if retryClock != nil {
+		serviceCfg.RetryClock = retryClock
+	}
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
@@ -159,6 +166,7 @@ func provideOrchestrator(
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
+	orchestratorSvc.SetWorkspaceCollaborationEnabled(cfg != nil && cfg.Features.WorkspaceCollaboration)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
@@ -199,16 +207,53 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetTaskTurnErrorRecorder(taskSvc)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
 	orchestratorSvc.SetStreamingMessageRetractionService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeContent.SetHistoryStore(historyStore)
+	taskSvc.SetTurnChangeContentService(turnChangeContent)
 	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
 	turnChangeCoordinator.SetLogger(log.Zap())
-	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
-		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	turnChangeCoordinator.SetTurnChangeOperationGuard(runtimeTurnChangeOperationGuard{reader: lifecycleMgr})
+	exportLimiter := taskchanges.NewExportLimiter()
+	turnChangeCoordinator.SetExportLimiter(exportLimiter)
+	turnChangeCoordinator.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor := taskchanges.NewExportProcessor(taskRepo, turnChangeCoordinator)
+	turnChangeExportProcessor.SetClientProvider(runtimeTurnChangeExportProviderAdapter{manager: lifecycleMgr})
+	turnChangeExportProcessor.SetSummaryPublisher(taskSvc)
+	turnChangeExportProcessor.SetLogger(log.Zap())
+	preservationRetrier := taskchanges.NewPreservationRetrier(taskRepo, turnChangeContent,
+		func(_ context.Context, sessionID string) (taskchanges.ArchiveClient, func(), error) {
+			execution, ok := lifecycleMgr.GetExecutionBySessionID(sessionID)
+			if !ok || execution == nil {
+				return nil, func() {}, errors.New("turn-change preservation execution is unavailable")
+			}
+			client, release := execution.AcquireAgentCtlClient()
+			if client == nil {
+				release()
+				return nil, func() {}, errors.New("turn-change preservation client is unavailable")
+			}
+			return client, release, nil
+		},
+		func(ctx context.Context, taskID, sessionID, changeSetID string) {
+			if err := taskSvc.PublishTurnChangeSummary(ctx, taskID, sessionID, changeSetID); err != nil {
+				log.Warn("failed to publish recovered turn-change summary", zap.Error(err))
+			}
+		}, nil)
+	taskSvc.SetTurnChangePreservationRetrier(preservationRetrier)
+	taskSvc.SetTurnHistoryCleanup(taskchanges.NewHistoryService(taskRepo, historyStore, nil))
+	if ctx != nil {
+		context.AfterFunc(ctx, turnChangeExportProcessor.Stop)
+		startup.AfterReady(ctx, func() {
+			if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+				log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+			}
+			turnChangeExportProcessor.Start(ctx)
+		})
 	}
 	agentruntime.InstallTurnChangeCaptureHandler(
 		lifecycleMgr,
@@ -265,6 +310,11 @@ func provideOrchestrator(
 		}
 		return queues
 	})
+
+	// An explicit deferred-launch discard needs the orchestrator's automation
+	// settlement and ceiling-record ownership; the task service keeps the
+	// task-write authorization and never learns the record's shape.
+	taskSvc.SetDeferredLaunchDiscarder(orchestratorSvc)
 
 	// Per-user scoping for the session-keyed WS actions. The orchestrator
 	// resolves sessions through its own repo handle, so it does not inherit the
@@ -420,20 +470,24 @@ func githubPRBaseFromPR(pr *githubpkg.PR, owner, repo string, number int, checko
 		return taskmodels.PRBase{}, err
 	}
 	headOwner, headName := strings.TrimSpace(pr.HeadRepoOwner), strings.TrimSpace(pr.HeadRepoName)
+	host, err := githubPRBaseHost(pr.GitHubHost)
+	if err != nil {
+		return taskmodels.PRBase{}, err
+	}
 	candidate := taskmodels.ComparisonTargetCandidate{
 		Provider:         taskmodels.ComparisonTargetProviderGitHub,
 		Kind:             taskmodels.ComparisonTargetKindPullRequest,
 		Number:           number,
 		HeadBranch:       pr.HeadBranch,
 		TargetBranch:     pr.BaseBranch,
-		HeadRepository:   githubComparisonRepository(headOwner, headName, pr.HeadRepoID),
-		TargetRepository: githubComparisonRepository(owner, repo, pr.BaseRepoID),
+		HeadRepository:   githubComparisonRepository(host, headOwner, headName, pr.HeadRepoID),
+		TargetRepository: githubComparisonRepository(host, owner, repo, pr.BaseRepoID),
 	}
 	target, err := candidate.Build()
 	if err != nil {
 		return taskmodels.PRBase{}, fmt.Errorf("validate GitHub PR base identity: %w", err)
 	}
-	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA}
+	base := taskmodels.PRBase{Target: target, OID: pr.BaseSHA, HeadRepositoryNodeID: strings.TrimSpace(pr.HeadRepoNodeID)}
 	if err := base.Validate(); err != nil {
 		return taskmodels.PRBase{}, err
 	}
@@ -535,14 +589,27 @@ func splitGitHubRepositoryPath(path string) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
-func githubComparisonRepository(owner, repo string, id int64) taskmodels.ComparisonTargetRepository {
+// githubPRBaseHost returns the host the PR was fetched from. An unstamped PR
+// keeps the legacy github.com meaning.
+func githubPRBaseHost(raw string) (githubhost.Host, error) {
+	if strings.TrimSpace(raw) == "" {
+		return githubhost.Public(), nil
+	}
+	host, err := githubhost.Parse(raw)
+	if err != nil {
+		return githubhost.Host{}, fmt.Errorf("GitHub PR host is invalid: %w", err)
+	}
+	return host, nil
+}
+
+func githubComparisonRepository(host githubhost.Host, owner, repo string, id int64) taskmodels.ComparisonTargetRepository {
 	providerID := ""
 	if id > 0 {
 		providerID = strconv.FormatInt(id, 10)
 	}
 	return taskmodels.ComparisonTargetRepository{
-		Host: "github.com", Path: owner + "/" + repo, ProviderID: providerID,
-		RemoteURL: fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+		Host: host.String(), Path: owner + "/" + repo, ProviderID: providerID,
+		RemoteURL: fmt.Sprintf("%s/%s/%s.git", host.WebURL(), owner, repo),
 	}
 }
 
@@ -1302,6 +1369,14 @@ func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, re
 		LocalPath: &localPath,
 	})
 	return err
+}
+
+// UpdateVerifiedRepositoryLocalPath retains the repository snapshot validated by attachment.
+func (u *repoLocalPathUpdater) UpdateVerifiedRepositoryLocalPath(ctx context.Context, repository *taskmodels.Repository, localPath string) error {
+	if repository == nil || repository.ID == "" || localPath == "" {
+		return fmt.Errorf("verified repository identity and path are required")
+	}
+	return u.svc.UpdateVerifiedManagedRepositoryPath(ctx, repository, localPath)
 }
 
 func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {

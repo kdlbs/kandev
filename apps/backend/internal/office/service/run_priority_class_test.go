@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -37,7 +39,7 @@ func TestQueueRun_InlineFallbackStampsEventPriorityClass(t *testing.T) {
 	if len(reqs) != 1 {
 		t.Fatalf("want 1 run, got %d", len(reqs))
 	}
-	if reqs[0].PriorityClass != models.PriorityClassEvent {
-		t.Errorf("priority_class = %d, want %d (PriorityClassEvent)", reqs[0].PriorityClass, models.PriorityClassEvent)
+	if reqs[0].PriorityClass != runsmodels.PriorityClassEvent {
+		t.Errorf("priority_class = %d, want %d (PriorityClassEvent)", reqs[0].PriorityClass, runsmodels.PriorityClassEvent)
 	}
 }

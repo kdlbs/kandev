@@ -78,7 +78,7 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
   const sv = getRootSplitview(api);
-  const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = store.sidebarVisible && sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
   setPinnedTarget(
     "right",
     resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null),
@@ -92,7 +92,7 @@ function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget |
   const sash = (target as HTMLElement | null)?.closest(".dv-sash");
   if (!sash) return false;
   const sv = getRootSplitview(api);
-  const rootSashes = sv?.sashes as Array<{ container?: HTMLElement }> | undefined;
+  const rootSashes = sv?.sashes;
   return rootSashes?.[rootSashes.length - 1]?.container === sash;
 }
 
@@ -125,7 +125,7 @@ function applyRightConstraints(
   measuredWidth: number | undefined,
 ): number {
   const sv = getRootSplitview(api);
-  const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = sv && sv.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((candidate) => candidate.id === gid);

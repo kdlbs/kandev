@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -21,13 +23,48 @@ func (s *Service) handleBackgroundWorkUpdatedEvent(ctx context.Context, payload 
 	}
 	obs := *payload.Data.BackgroundWork
 	obs.SessionID = sessionID
-	if s.backgroundWorkObserver != nil {
-		_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, payload.TaskID, sessionID)
-	}
+	published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, sessionID)
 	if s.eventBus != nil {
 		subject := events.BuildBackgroundWorkUpdatedSubject(sessionID)
-		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
 	}
+}
+
+// recordBackgroundWorkObservation persists one observation and returns the
+// projection to publish. Observers that can report the committed row let the
+// publication carry its durable revision, output, and exit status; providers'
+// raw adapter frames lose those fields at the journal boundary.
+func (s *Service) recordBackgroundWorkObservation(
+	ctx context.Context,
+	obs streams.WorkloadRunObservation,
+	taskID, sessionID string,
+) streams.WorkloadRunObservation {
+	if s.backgroundWorkObserver == nil {
+		return obs
+	}
+	if recorder, ok := s.backgroundWorkObserver.(BackgroundWorkRecordingObserver); ok {
+		committed, err := recorder.RecordBackgroundWorkloadObservationWithResult(ctx, obs, taskID, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to record background workload observation",
+				zap.String("session_id", sessionID),
+				zap.String("work_id", obs.WorkID),
+				zap.Error(err))
+			return obs
+		}
+		// An adapter declaration wins over the projected row; a frame without
+		// one keeps the declaration already recorded for this workload. Dynamic
+		// availability always follows the committed state.
+		if obs.Capabilities.HasDeclaration() {
+			committed.Capabilities = obs.Capabilities
+		}
+		committed.Capabilities = streams.ApplyWorkloadActionAvailability(
+			committed.Capabilities,
+			committed.State,
+		)
+		return committed
+	}
+	_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, taskID, sessionID)
+	return obs
 }
 
 func (s *Service) handleBackgroundWorkOutputEvent(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
@@ -69,9 +106,13 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 	if workID == "" {
 		workID = payload.Data.ToolCallID
 	}
-	return &streams.WorkloadRunObservation{
-		SessionID:    payload.SessionID,
-		WorkID:       workID,
+	obs := &streams.WorkloadRunObservation{
+		SessionID: payload.SessionID,
+		WorkID:    workID,
+		// Only the adapter-declared provider run identity is trusted here.
+		// Deriving it from WorkID would invent a second run for a provider
+		// whose item and process identities differ (native Codex).
+		RunID:        bw.RunID,
 		Kind:         streams.NormalizeWorkloadKind(string(bw.Kind)),
 		Title:        title,
 		State:        state,
@@ -79,6 +120,10 @@ func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, or
 		SourceCallID: payload.Data.ToolCallID,
 		OriginTurnID: originTurnID,
 	}
+	if bw.Capabilities != nil {
+		obs.Capabilities = *bw.Capabilities
+	}
+	return obs
 }
 
 func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
@@ -94,6 +139,9 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 			obs.OriginTurnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 		}
 	case payload.Data.Normalized != nil:
+		if isSubagentPresentationUpdate(payload) {
+			return
+		}
 		fromNorm := buildObservationFromNormalized(payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		if fromNorm == nil {
 			return
@@ -104,11 +152,11 @@ func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Con
 	}
 
 	if s.backgroundWorkObserver != nil {
-		_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, payload.TaskID, payload.SessionID)
-	}
-	if s.eventBus != nil {
-		subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
-		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+		published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, payload.SessionID)
+		if s.eventBus != nil {
+			subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
+			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
+		}
 	}
 }
 
@@ -120,11 +168,30 @@ type BackgroundWorkSettler interface {
 	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 }
 
+// BackgroundWorkRecordingObserver optionally reports the committed projection
+// after recording an observation. Publishers use it to carry the durable
+// revision and retained output instead of the adapter's raw frame.
+type BackgroundWorkRecordingObserver interface {
+	RecordBackgroundWorkloadObservationWithResult(
+		ctx context.Context,
+		obs streams.WorkloadRunObservation,
+		taskID, sessionID string,
+	) (streams.WorkloadRunObservation, error)
+}
+
 var _ BackgroundWorkSettler = (*taskservice.Service)(nil)
+var _ BackgroundWorkRecordingObserver = (*taskservice.Service)(nil)
 
 func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
 	settler, _ := s.backgroundWorkObserver.(BackgroundWorkSettler)
 	return settler
+}
+
+func backgroundWorkCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
 }
 
 func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
@@ -136,6 +203,9 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 		return false
 	}
 	probedExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	// A live or uncertain probe keeps the work open: the process can still
+	// report completion, and a late report for an old execution must never
+	// settle a successor's work.
 	running, err := s.probeAgentRunning(ctx, sessionID)
 	if err != nil || running {
 		return false
@@ -151,6 +221,13 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 	if row == nil {
 		return true
 	}
+	// Startup reconciliation terminalizes a row whose runtime recovery found no
+	// owner and clears its local PID in the same write. The ended status is the
+	// surviving stop evidence: RowProcessLiveness answers Unknown once the PID is
+	// cleared, and a live successor would already have failed the probe above.
+	if executorRowHasEnded(row.Status) {
+		return true
+	}
 	// Stop evidence belongs to an execution; a retained successor still owns
 	// its work when a delayed completion arrives for the previous execution.
 	if stoppedExecutionID != "" && stoppedExecutionID == row.AgentExecutionID {
@@ -160,6 +237,21 @@ func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID strin
 		return true
 	}
 	return s.rowLiveness(row) == models.ProcessLivenessDead
+}
+
+// executorRowHasEnded reports whether the persisted row already records a
+// finished execution. The lifecycle manager clears LocalPID for exactly these
+// statuses, so the status is the stop evidence that survives startup
+// reconciliation.
+func executorRowHasEnded(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, stoppedExecutionID string) {
@@ -180,9 +272,140 @@ func (s *Service) settleBackgroundWorkAfterTeardown(ctx context.Context, session
 	if sessionID == "" || s.backgroundWorkSettler() == nil {
 		return
 	}
-	release := s.acquireSessionLifecycleLock(sessionID)
+	release, acquired := s.acquireSessionLifecycleLockWithContext(ctx, sessionID)
+	if !acquired {
+		return
+	}
 	defer release()
 	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+func (s *Service) acquireSessionLifecycleLockWithContext(ctx context.Context, sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if lock.TryLock() {
+			if ctx.Err() == nil {
+				return lock.Unlock, true
+			}
+			lock.Unlock()
+			return nil, false
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false
+		case <-timer.C:
+		}
+	}
+}
+
+// settleBackgroundWorkWithoutWaiting is the lifecycle-event path. The publisher
+// of the stop event can be the goroutine that already holds the session
+// lifecycle lock (prompt-readiness replacement stops synchronously publish
+// agent.stopped), so this must never block. It tries the lock once; a holder
+// that ends a process settles in place, and any other holder gets a detached
+// settle after it releases. The stopped execution ID stays bound so a late
+// settle cannot read a successor's liveness as the stopped process being alive.
+func (s *Service) settleBackgroundWorkWithoutWaiting(ctx context.Context, sessionID, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	settleCtx, cancel := backgroundWorkCleanupContext(ctx)
+	defer cancel()
+	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if acquired {
+		defer release()
+		s.settleBackgroundWorkLocked(settleCtx, sessionID, stoppedExecutionID)
+		return
+	}
+	s.startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID)
+}
+
+func (s *Service) startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID string) {
+	s.backgroundWorkSettleMu.Lock()
+	if s.backgroundWorkSettleStopped {
+		s.backgroundWorkSettleMu.Unlock()
+		return
+	}
+	if s.backgroundWorkSettleCtx == nil {
+		s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	}
+	if s.backgroundWorkSettleWorkers == nil {
+		s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	}
+	workerCtx := s.backgroundWorkSettleCtx
+	workers := s.backgroundWorkSettleWorkers
+	workers.Add(1)
+	s.backgroundWorkSettleMu.Unlock()
+
+	go func() {
+		defer workers.Done()
+		ctx, cancel := context.WithTimeout(workerCtx, sendNowClaimRecoveryTimeout)
+		defer cancel()
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, stoppedExecutionID)
+	}()
+}
+
+func (s *Service) resetBackgroundWorkSettleWorkers() error {
+	s.backgroundWorkSettleMu.Lock()
+	defer s.backgroundWorkSettleMu.Unlock()
+	if !s.backgroundWorkSettleStopped {
+		return nil
+	}
+	if s.backgroundWorkSettleDrain != nil {
+		select {
+		case <-s.backgroundWorkSettleDrain:
+		default:
+			return errors.New("background-work settlement workers are still draining")
+		}
+	}
+	s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	s.backgroundWorkSettleDrain = nil
+	s.backgroundWorkSettleStopped = false
+	return nil
+}
+
+func (s *Service) stopBackgroundWorkSettleWorkers() {
+	s.backgroundWorkSettleMu.Lock()
+	s.backgroundWorkSettleStopped = true
+	cancel := s.backgroundWorkSettleCancel
+	workers := s.backgroundWorkSettleWorkers
+	done := s.backgroundWorkSettleDrain
+	startWait := workers != nil && done == nil
+	if startWait {
+		done = make(chan struct{})
+		s.backgroundWorkSettleDrain = done
+	}
+	s.backgroundWorkSettleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if workers == nil {
+		return
+	}
+	if startWait {
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+	}
+	select {
+	case <-done:
+	case <-time.After(sendNowWorkerShutdownTimeout):
+		s.logger.Warn("timed out waiting for background-work settlement workers during shutdown")
+	}
 }
 
 func (s *Service) settleBackgroundWorkLocked(ctx context.Context, sessionID string, stoppedExecutionID string) {

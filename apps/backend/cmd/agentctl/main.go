@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/api"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -55,6 +56,11 @@ func runMain() int {
 	// descendant inherits it and records the outer job as its own.
 	processidentity.TakeWindowsJobNameFromEnv()
 
+	if acpcompat.IsAntigravityNoopBrowserInvocation(os.Args) {
+		// The Antigravity vendor server may invoke BROWSER while a background
+		// operation needs consent. This helper intentionally opens nothing.
+		return 0
+	}
 	if code, handled := runGitHubUtilityCommand(); handled {
 		return code
 	}

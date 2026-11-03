@@ -205,7 +205,7 @@ func VerifyReconstructionSubmission(submission Submission, expected SubmissionSu
 	if !submissionNeedsRecovery(submission) || submission.Retired {
 		return ErrSubmissionState
 	}
-	if len(submission.Payload) == 0 || int64(len(submission.Payload)) > DefaultMaxEventBytes {
+	if len(submission.Payload) == 0 || int64(len(submission.Payload)) > DefaultMaxSubmissionBytes {
 		return ErrStreamFull
 	}
 	if !validReconstructionPayload(submission.Payload, expected.Hash) {

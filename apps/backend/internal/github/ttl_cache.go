@@ -188,10 +188,6 @@ func (c *ttlCache) endFill(key string, gen uint64) {
 	c.keyEpochs[key] = state
 }
 
-func (c *ttlCache) setIfCurrentVersions(key string, value any, gen, keyEpoch uint64) {
-	c.setIfCurrentVersionsWithTTL(key, value, gen, keyEpoch, c.ttl)
-}
-
 func (c *ttlCache) setIfCurrentVersionsWithTTL(
 	key string, value any, gen, keyEpoch uint64, ttl time.Duration,
 ) {

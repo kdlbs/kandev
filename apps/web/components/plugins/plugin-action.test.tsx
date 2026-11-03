@@ -2,7 +2,7 @@ import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import type { PluginActionGroupProps, PluginActionProps } from "@kandev/plugin-sdk";
+import type { PluginActionGroupProps, PluginActionProps } from "@kdlbs/plugin-sdk";
 import * as pluginActionSurface from "./plugin-action-surface";
 import { PluginSlot } from "./plugin-slot";
 import { pluginRegistry } from "@/lib/plugins/registry";

@@ -124,6 +124,8 @@ type TaskItemProps = {
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  /** Show the unread dot; the shared row resolves setting and selection. */
+  hasUnreadMessages?: boolean;
   automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
@@ -135,6 +137,10 @@ function handleTaskItemKeyDown(
   isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target instanceof Element) {
+    const button = e.target.closest("button");
+    if (button && e.currentTarget.contains(button)) return;
+  }
   e.preventDefault();
   if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
@@ -233,6 +239,7 @@ type TaskItemContentProps = {
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
@@ -258,6 +265,7 @@ function TaskItemContent({
   launchQueue,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
   comparisonUnavailable,
   resolvedTaskRow,
   relativeTime,
@@ -273,9 +281,13 @@ function TaskItemContent({
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
-          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          showChangeRequestStatus={
+            resolvedTaskRow.trailing !== "change_request_status" &&
+            resolvedTaskRow.trailing !== "none"
+          }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
+          hasUnreadMessages={hasUnreadMessages}
         />
         <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
@@ -404,6 +416,7 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  hasUnreadMessages,
   automaticColor,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
@@ -475,6 +488,7 @@ export const TaskItem = memo(function TaskItem({
         launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        hasUnreadMessages={hasUnreadMessages}
         comparisonUnavailable={comparisonUnavailable}
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}

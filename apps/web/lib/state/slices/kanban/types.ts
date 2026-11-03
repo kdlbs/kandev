@@ -44,7 +44,7 @@ export type KanbanStepEvents = {
  *
  * `status` is the resolution verdict and is only meaningful on `dependsOn`
  * entries: "resolved" (finished successfully), "failed" (FAILED/CANCELLED —
- * halts the chain), or "pending" (anything else, including archived).
+ * halts the chain), or "pending" (unfinished work, whether archived or not).
  */
 export type TaskDependencyRef = {
   id: string;
@@ -85,7 +85,7 @@ export type KanbanState = {
      * pick the right meta surface (review/approval shows multi-agent
      * decisions). Backend never branches on this field.
      */
-    stage_type?: "work" | "review" | "approval" | "custom";
+    stage_type?: "work" | "review" | "approval" | "custom" | "hold";
     /**
      * Last order-revision this step's task order was written at
      * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
@@ -287,6 +287,8 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
+    source?: string;
+    source_path?: string;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
@@ -417,7 +419,11 @@ export type KanbanSliceActions = {
   ) => void;
   releaseTaskRemoval: (token: string) => void;
   advanceTaskNavigationRevision: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
+  setWorkflowSnapshot: (
+    workflowId: string,
+    data: WorkflowSnapshotData,
+    options?: { stageClaimsReconciled?: boolean },
+  ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
@@ -438,6 +444,13 @@ export type KanbanSliceActions = {
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
   removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
+  /** Retains one live task summary for consumers whose task is not a board row
+   * (for example an ephemeral Quick Chat task). */
+  recordSidebarStatusSummary: (
+    workspaceId: string,
+    taskId: string,
+    summary: TaskStatusSummary,
+  ) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

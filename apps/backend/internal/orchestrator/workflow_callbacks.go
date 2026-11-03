@@ -274,23 +274,152 @@ func (c *resetAgentContextCallback) Execute(ctx context.Context, in engine.Actio
 // autoStartAgentCallback sends the auto-start prompt for a workflow step.
 type autoStartAgentCallback struct {
 	svc *Service
+	// launch overrides the direct step launch in tests; nil uses LaunchSession.
+	launch func(ctx context.Context, in engine.ActionInput) error
 }
+
+// maxBusyAutoStartAttempts bounds how often a QueueIfBusy auto-start retries
+// after the launch is refused as busy and the session is no longer mid-turn.
+const maxBusyAutoStartAttempts = 3
 
 func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
 	if in.State.IsPassthrough {
 		return engine.ActionResult{}, nil
 	}
 
+	if in.Action.AutoStartAgent == nil || !in.Action.AutoStartAgent.QueueIfBusy {
+		if err := c.launchStep(ctx, in); err != nil {
+			return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+		}
+		return engine.ActionResult{}, nil
+	}
+
+	// A launch refused as busy never reached the agent, so the prompt is still
+	// owed: queue it if the session is mid-turn, otherwise launch again. Every
+	// attempt shares one handoff claim so a refused attempt cannot consume it.
+	ctx, admissionErr := c.svc.withWorkflowAutoStartAdmission(ctx, in.State.TaskID, in.State.SessionID)
+	if admissionErr != nil {
+		return engine.ActionResult{}, admissionErr
+	}
+	handoffOnce := newStepHandoffOnce()
+	ctx = withWorkflowPromptFallback(ctx, in.State.TaskID, in.Step.ID)
+	ctx = withStepHandoffOnce(ctx, in.State.TaskID, in.Step.ID, handoffOnce)
+	// Each busy rejection, including the last, is followed by a mid-turn check.
+	var err error
+	for launches := 0; ; launches++ {
+		queued, queueErr := c.queueStepPromptIfBusy(ctx, in, handoffOnce)
+		if queueErr != nil {
+			return engine.ActionResult{}, queueErr
+		}
+		if queued {
+			return engine.ActionResult{}, nil
+		}
+		if launches == maxBusyAutoStartAttempts {
+			break
+		}
+		err = c.launchStep(ctx, in)
+		if err == nil {
+			return engine.ActionResult{}, nil
+		}
+		if !isPromptRejectedAsBusy(err) {
+			break
+		}
+		ctx = context.WithValue(ctx, workflowAutoStartRetryKey{}, true)
+	}
+	return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+}
+
+func (c *autoStartAgentCallback) launchStep(ctx context.Context, in engine.ActionInput) error {
+	if c.launch != nil {
+		return c.launch(ctx, in)
+	}
 	_, err := c.svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:         in.State.TaskID,
 		Intent:         IntentWorkflowStep,
 		SessionID:      in.State.SessionID,
 		WorkflowStepID: in.Step.ID,
 	})
+	return err
+}
+
+// queueStepPromptIfBusy queues the step's auto-start prompt when the session
+// is mid-turn, so the message queue delivers it once the current turn ends.
+// It reports false, without side effects, when the session can take a prompt
+// now and the caller should launch directly.
+func (c *autoStartAgentCallback) queueStepPromptIfBusy(
+	ctx context.Context, in engine.ActionInput, handoffOnce *stepHandoffOnce,
+) (bool, error) {
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
 	if err != nil {
-		return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+		return false, fmt.Errorf("load session for queued auto-start: %w", err)
 	}
-	return engine.ActionResult{}, nil
+	if err := c.svc.validateWorkflowAutoStartAdmission(ctx, session); err != nil {
+		return false, err
+	}
+	if !sessionMidTurn(session) {
+		return false, nil
+	}
+	if hook := c.svc.afterBusyAutoStartSessionRead; hook != nil {
+		hook()
+	}
+	step, err := c.svc.workflowStepGetter.GetStep(ctx, in.Step.ID)
+	if err != nil {
+		return false, fmt.Errorf("load workflow step for queued auto-start: %w", err)
+	}
+	task, err := c.svc.repo.GetTask(ctx, in.State.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("load task for queued auto-start: %w", err)
+	}
+	if err := c.svc.withWorkflowAutoStartInputAdmission(ctx, session, step, true, func() error {
+		prompt, promptReferenceContext, err := c.svc.buildWorkflowEntryPrompt(
+			ctx, task.Description, step, task.ID, session.ID, session.QueueIncarnationID, session.IsPassthrough,
+		)
+		if err != nil {
+			return fmt.Errorf("build workflow prompt for queued auto-start: %w", err)
+		}
+		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+		return c.svc.autoStartStepPromptWithPromptContext(
+			ctx, task.ID, session, step, prompt, planMode, true, handoffOnce, promptReferenceContext,
+		)
+	}); err != nil {
+		return false, fmt.Errorf("queue auto-start prompt: %w", err)
+	}
+
+	c.svc.logger.Info("queued workflow step auto-start until the current turn ends",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", session.ID),
+		zap.String("workflow_step_id", step.ID))
+	c.drainIfTurnEnded(ctx, session.ID)
+	return true, nil
+}
+
+// drainIfTurnEnded delivers the queued prompt when the turn ended while it was
+// being queued: that turn's ready handler may already have drained an empty
+// queue, and no later turn end would deliver it. The drain takes the session
+// guard, so it is skipped when the caller already holds it; that caller drains
+// the queue itself once it settles the turn.
+func (c *autoStartAgentCallback) drainIfTurnEnded(ctx context.Context, sessionID string) {
+	if workflowProfileSwitchGuardIsHeld(ctx, sessionID) || cancelInFlightGuardHeldForSession(ctx, sessionID) {
+		return
+	}
+	latest, err := c.svc.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest == nil || sessionMidTurn(latest) {
+		return
+	}
+	c.svc.drainQueuedMessageForPromptableSession(ctx, sessionID)
+}
+
+func sessionMidTurn(session *taskmodels.TaskSession) bool {
+	return session.State == taskmodels.TaskSessionStateRunning ||
+		session.State == taskmodels.TaskSessionStateStarting
+}
+
+// isPromptRejectedAsBusy reports whether a launch was refused before the
+// prompt was handed to the agent because the session was running a turn. A
+// failure after acceptance, such as a stream disconnect, is not one: queueing
+// that prompt again could start a duplicate turn.
+func isPromptRejectedAsBusy(err error) bool {
+	return isAgentAlreadyRunningError(err) || isSessionBusyError(err)
 }
 
 // runCodeReviewCallback starts a native code-review pass over the task's changed

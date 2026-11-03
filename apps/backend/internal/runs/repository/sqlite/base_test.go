@@ -13,11 +13,12 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
@@ -116,7 +117,7 @@ func seedCostEvent(
 }
 
 // mustCreateRun creates a run and fails the test on error.
-func mustCreateRun(t *testing.T, repo *runssqlite.Repository, run *models.Run) *models.Run {
+func mustCreateRun(t *testing.T, repo *runssqlite.Repository, run *runsmodels.Run) *runsmodels.Run {
 	t.Helper()
 	if err := repo.CreateRun(context.Background(), run); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -125,7 +126,7 @@ func mustCreateRun(t *testing.T, repo *runssqlite.Repository, run *models.Run) *
 }
 
 // mustGetRun reads a run back and fails the test when it is missing.
-func mustGetRun(t *testing.T, repo *runssqlite.Repository, id string) *models.Run {
+func mustGetRun(t *testing.T, repo *runssqlite.Repository, id string) *runsmodels.Run {
 	t.Helper()
 	run, err := repo.GetRunByID(context.Background(), id)
 	if err != nil {
@@ -198,7 +199,7 @@ func TestReadPathsUseTheReadOnlyHandle(t *testing.T) {
 	repo, writer, _ := newTestRepoWithHandles(t)
 	ctx := context.Background()
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		AgentProfileID: "a1",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,

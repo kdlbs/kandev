@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -44,7 +46,7 @@ func taskAgent() *models.AgentInstance {
 
 func TestBuild_TaskBoundRunScopesToTrimmedPayloadTaskID(t *testing.T) {
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"  task-1  "}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"  task-1  "}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -64,7 +66,7 @@ func TestBuild_TaskBoundRunScopesToTrimmedPayloadTaskID(t *testing.T) {
 func TestBuild_WhitespaceOnlyPayloadTaskIDIsTaskless(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"   "}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"   "}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -81,7 +83,7 @@ func TestBuild_WhitespaceOnlyPayloadTaskIDIsTaskless(t *testing.T) {
 func TestBuild_TasklessRunMaterializesRunnerSet(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1", "t2"}, total: 2}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -109,7 +111,7 @@ func TestBuild_TasklessRunMaterializesRunnerSet(t *testing.T) {
 
 func TestBuild_NilListerYieldsUnavailableProvisionalScope(t *testing.T) {
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -129,7 +131,7 @@ func TestBuild_EmptyRunWorkspaceIssuesNoQuery(t *testing.T) {
 		Agents:       &recordingAgentReader{agent: &models.AgentInstance{ID: "agent-1", WorkspaceID: ""}},
 		RunnerLister: lister,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -146,7 +148,7 @@ func TestBuild_EmptyRunWorkspaceIssuesNoQuery(t *testing.T) {
 func TestBuild_RunnerSetQueryErrorFailsClosed(t *testing.T) {
 	lister := &stubRunnerLister{err: errors.New("db down")}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -173,7 +175,7 @@ func TestBuild_RunnerSetQueryErrorFailsClosed(t *testing.T) {
 func TestBuild_WildcardPayloadTaskIDStaysTaskBoundWithEmptyScope(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"*"}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"*"}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -212,7 +214,7 @@ func TestBuild_WildcardPayloadTaskIDStaysTaskBoundWithEmptyScope(t *testing.T) {
 func TestBuild_RunnerSetScopeExcludesWildcard(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.Build(context.Background(), run)
 	if err != nil {
@@ -242,7 +244,7 @@ func TestBuildAndPersist_FinalRunnerSetMarkerIsReusedWithoutQuery(t *testing.T) 
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -269,7 +271,7 @@ func TestBuildAndPersist_ProvisionalUnavailableMarkerDerivesAgain(t *testing.T) 
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -291,7 +293,7 @@ func TestBuildAndPersist_UnrecognizedMarkerDerivesFresh(t *testing.T) {
 		Runs:         store,
 		RunnerLister: lister,
 	}
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`,
 		Capabilities: `{"task_scope_source":"something-else"}`,
 	}
@@ -316,7 +318,7 @@ func TestBuildAndPersist_UnparseableSnapshotDerivesFresh(t *testing.T) {
 		Runs:         store,
 		RunnerLister: lister,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: `not json`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: `not json`}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -343,7 +345,7 @@ func TestBuildAndPersist_CapabilityBooleansAlwaysRederiveOnReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`, Capabilities: persistedCaps}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -368,7 +370,7 @@ func TestBuildAndPersist_TruncationEmitsScopeTruncatedEvent(t *testing.T) {
 		RunnerLister: lister,
 		ScopeEvents:  events,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
 		t.Fatalf("BuildAndPersist: %v", err)
@@ -392,7 +394,7 @@ func TestBuildAndPersist_EmptyRunnerSetIsFinalAndNotReDerived(t *testing.T) {
 	lister := &stubRunnerLister{ids: nil, total: 0}
 	store := &recordingRunSnapshotStore{casWins: true}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -439,7 +441,7 @@ func TestBuildAndPersist_UnavailableEmitsScopeUnavailableEvent(t *testing.T) {
 		RunnerLister: lister,
 		ScopeEvents:  events,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
 		t.Fatalf("BuildAndPersist: %v", err)
@@ -453,7 +455,7 @@ func TestBuildAndPersist_TaskBoundRunEmitsNoScopeEvent(t *testing.T) {
 	store := &recordingRunSnapshotStore{casWins: true}
 	events := &recordingRunEvents{}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, ScopeEvents: events}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
 		t.Fatalf("BuildAndPersist: %v", err)
@@ -467,7 +469,7 @@ func TestBuildAndPersist_NoRunsStorePersistsAndEmitsNothing(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	events := &recordingRunEvents{}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, RunnerLister: lister, ScopeEvents: events}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -485,7 +487,7 @@ func TestBuildAndPersist_NoAppenderSkipsEventButStillPersists(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	store := &recordingRunSnapshotStore{casWins: true}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
 		t.Fatalf("BuildAndPersist: %v", err)
@@ -518,7 +520,7 @@ func TestBuildAndPersist_CASLoserAdoptsPersistedFinalScopeAndEmitsNoEvent(t *tes
 	}
 	store := &recordingRunSnapshotStore{
 		casWins: false,
-		runs: map[string]*models.Run{
+		runs: map[string]*runsmodels.Run{
 			"run-1": {ID: "run-1", Capabilities: winnerCaps, InputSnapshot: winnerInput},
 		},
 	}
@@ -529,7 +531,7 @@ func TestBuildAndPersist_CASLoserAdoptsPersistedFinalScopeAndEmitsNoEvent(t *tes
 		RunnerLister: lister,
 		ScopeEvents:  events,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	runCtx, err := builder.BuildAndPersist(context.Background(), run)
 	if err != nil {
@@ -552,14 +554,14 @@ func TestBuildAndPersist_CASExhaustsAttemptsWithNoFinalMarker(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	store := &recordingRunSnapshotStore{
 		casWins: false,
-		runs:    map[string]*models.Run{"run-1": {ID: "run-1", Capabilities: `{}`}},
+		runs:    map[string]*runsmodels.Run{"run-1": {ID: "run-1", Capabilities: `{}`}},
 	}
 	builder := ContextBuilder{
 		Agents:       &recordingAgentReader{agent: taskAgent()},
 		Runs:         store,
 		RunnerLister: lister,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	_, err := builder.BuildAndPersist(context.Background(), run)
 	if err == nil {
@@ -600,7 +602,7 @@ func TestBuildAndPersist_CASErrorReturnsError(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1"}, total: 1}
 	store := &recordingRunSnapshotStore{casErr: errors.New("db down")}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err == nil {
 		t.Fatal("expected the CAS error to propagate")
@@ -623,7 +625,7 @@ func TestBuildAndPersist_CASLoserReadFailureReturnsError(t *testing.T) {
 		Runs:         store,
 		RunnerLister: lister,
 	}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	_, err := builder.BuildAndPersist(context.Background(), run)
 	if err == nil {
@@ -638,7 +640,7 @@ func TestBuildAndPersist_PersistsSerializedRunnerSetScope(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"t1", "t2"}, total: 2}
 	store := &recordingRunSnapshotStore{casWins: true}
 	builder := ContextBuilder{Agents: &recordingAgentReader{agent: taskAgent()}, Runs: store, RunnerLister: lister}
-	run := &models.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
+	run := &runsmodels.Run{ID: "run-1", AgentProfileID: "agent-1", Payload: `{}`}
 
 	if _, err := builder.BuildAndPersist(context.Background(), run); err != nil {
 		t.Fatalf("BuildAndPersist: %v", err)

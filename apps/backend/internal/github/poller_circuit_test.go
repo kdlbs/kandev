@@ -200,3 +200,41 @@ func TestCheckPRWatches_BatchedAuthFailureSkipsPerWatchFallback(t *testing.T) {
 		t.Fatalf("FindPRByBranch calls = %d, want 0 after batched auth failure opens the workspace circuit", got)
 	}
 }
+
+// TestCheckPRWatches_SuccessClearsPriorCircuitFailure covers the batched poller
+// path: a completed workspace pass must reset the failure schedule so a later
+// failure starts fresh instead of continuing an earlier streak.
+func TestCheckPRWatches_SuccessClearsPriorCircuitFailure(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-circuit-success", false)
+	gh.prResponses = []string{`{"data":{"repo0":{"pr0":{
+		"state":"OPEN","title":"Circuit reset","url":"https://x/42",
+		"headRefName":"feat","baseRefName":"main","headRefOid":"abc",
+		"author":{"login":"alice"},
+		"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
+		"reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},
+		"commits":{"nodes":[]}
+	}}}}`}
+	watch := withTestWorkspace(&PRWatch{
+		SessionID: "session-circuit-success", TaskID: "task-circuit-success",
+		Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat",
+	})
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	// Seed an expired transient failure: the retry window has passed, so the
+	// workspace is attempted, but its failure count still lingers.
+	poller.circuits.recordOutcome(testWorkspaceID, authcircuit.FailureClassTransient,
+		time.Now().UTC().Add(-time.Minute))
+
+	poller.checkPRWatches(pollerContext(ctx))
+
+	poller.circuits.mu.Lock()
+	_, retained := poller.circuits.byWorkspace[testWorkspaceID]
+	poller.circuits.mu.Unlock()
+	if retained {
+		t.Fatal("a completed workspace pass must clear the recorded failure streak")
+	}
+}

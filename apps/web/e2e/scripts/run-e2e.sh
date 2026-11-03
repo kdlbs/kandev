@@ -254,6 +254,12 @@ fi
 e2e_validate_shards "$SHARDS" || die "unsafe shard count rejected"
 e2e_validate_playwright_args "${PW_ARGS[@]}" || die "unsafe Playwright worker count rejected"
 
+if [[ "$PROJECT" == upgrade-desktop || "$PROJECT" == upgrade-mobile ]]; then
+  if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || "${GITHUB_REF:-}" != refs/heads/main ]]; then
+    die "Release upgrade rehearsals run only in GitHub Actions on main"
+  fi
+fi
+
 # Resolve mode
 if [[ "$MODE" == auto ]]; then
   if docker_up && { [[ -n "$RUNTIME_IMAGE" ]] || docker image inspect kandev-ci:runtime-local >/dev/null 2>&1 || docker image inspect ghcr.io/kdlbs/kandev-ci:runtime-latest >/dev/null 2>&1; }; then

@@ -15,7 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // fakeHost is a minimal in-memory pluginsdk.Host for end-to-end tests: it

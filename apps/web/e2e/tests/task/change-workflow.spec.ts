@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -225,7 +225,11 @@ test.describe("Change workflow", () => {
         caption: "Desktop Change workflow form with its predicted destination recipient.",
       });
     }
-    await changeWorkflow.submit();
+    const [moveResponse] = await Promise.all([
+      waitForHttp(testPage, "POST", new RegExp(`/api/v1/tasks/${task.id}/move$`)),
+      changeWorkflow.submit(),
+    ]);
+    expect(moveResponse.ok()).toBe(true);
     await expect(changeWorkflow.desktopDialog).toBeHidden();
 
     await waitForWorkflowStep(apiClient, task.id, fixture.prStep.id);

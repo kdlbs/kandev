@@ -21,6 +21,12 @@ func (e *ACPInferenceExecutor) logProbeFailure(
 	stderr string,
 	failureCode, managedFailureCode ProbeFailureCode,
 ) {
+	if req.InferenceConfig != nil && !req.InferenceConfig.LaunchWrapper.IsZero() {
+		e.logger.Error(fmt.Sprintf("ACP wrapped probe failed: failure_code=%s", failureCode),
+			zap.String("agent_id", req.AgentID),
+			zap.String("failure_code", string(failureCode)))
+		return
+	}
 	message := "ACP probe failed"
 	if req.ProfileContext {
 		message = "ACP profile probe failed"

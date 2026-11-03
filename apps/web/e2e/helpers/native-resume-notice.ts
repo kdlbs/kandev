@@ -142,7 +142,7 @@ export async function verifyNativeResumeClearsRecoveryNotice(
     );
   }
   await expect(page.getByTestId("failed-session-banner")).toContainText(
-    "The prompt outcome is uncertain.",
+    "Kandev cannot confirm whether the agent processed your message.",
   );
   try {
     if (legacy) {

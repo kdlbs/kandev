@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"net/url"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		return nil, errStoreUnavailable
 	}
 
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := store.CreateIssueWatch(ctx, iw); err != nil {

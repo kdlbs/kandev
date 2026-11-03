@@ -444,6 +444,7 @@ func lastSessionByTaskState(taskID, sessionID string) map[string]string {
 type bootSessionRuntimeProvider interface {
 	taskdto.ForegroundActivityProvider
 	taskdto.CancellationPendingProvider
+	taskdto.RuntimeStorageHealthProvider
 	taskdto.ParkedProvider
 }
 
@@ -587,6 +588,7 @@ func (b bootStateBuilder) taskDetailActiveSessionDTO(ctx context.Context, sessio
 	}
 	taskdto.EnrichForegroundActivity(&fullDTO, projections)
 	taskdto.EnrichCancellationPending(&fullDTO, projections)
+	taskdto.EnrichRuntimeStorageHealth(&fullDTO, projections)
 	taskdto.EnrichParkedProjection(&fullDTO, projections)
 	fullDTO.PendingAction = bootPendingActionPtr(&session.ID, pending)
 	return fullDTO

@@ -12,6 +12,17 @@ export type AgentErrorCause = {
   requested_mode?: string;
   effective_mode?: string;
   prompt_not_sent?: boolean;
+  storage?: {
+    reason?: string;
+    location?: string;
+    executor_label?: string;
+    observed_at?: string;
+    disk_available_bytes?: number;
+    disk_required_bytes?: number;
+    retained_bytes?: number;
+    limit_bytes?: number;
+    event_bytes?: number;
+  };
 };
 
 export type TaskStatusSummaryActiveError = {
@@ -28,6 +39,17 @@ export type TaskStatusSummaryActiveError = {
   attempt_id?: string;
   causes?: AgentErrorCause[];
   recovery_actions?: TaskLaunchRecoveryAction[];
+};
+
+export type TaskStatusSummaryTurnError = {
+  /** Source session of the failed turn. Attention is task-wide but only this session can acknowledge it with a prompt. */
+  session_id?: string;
+  turn_id?: string;
+  /** Idempotent failed-turn message id; also the acknowledgement stamp. */
+  message_id?: string;
+  stamp: string;
+  occurred_at: string;
+  preview: string;
 };
 
 export type TaskStatusSummaryLaunchQueue = {
@@ -71,9 +93,13 @@ export type TaskStatusSummary = {
   /** Automatic session launch waiting for admission, independent of the selected session. */
   launch_queue?: TaskStatusSummaryLaunchQueue | null;
   completion_gate?: TaskStatusSummaryCompletionGate | null;
+  /** Sorted IDs of sessions with an unread transcript-visible message. */
+  unread_session_ids?: string[];
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;
+  /** Current failed-turn attention. Never blocks the composer or authorizes recovery. */
+  turn_error?: TaskStatusSummaryTurnError | null;
   git?: {
     additions?: number;
     deletions?: number;

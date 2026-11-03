@@ -272,6 +272,10 @@
   "notificationClarificationTitle": "代理程式需要您的回答",
   "notificationInboxItemBody": "有新條目需要您處理。",
   "notificationInboxItemTitle": "新的收件箱條目",
+  "notificationPermissionBody": "代理程式正在等待您的批准。",
+  "notificationPermissionTitle": "代理程式需要權限",
+  "notificationSessionFailedBody": "代理程式工作階段因錯誤而結束。",
+  "notificationSessionFailedTitle": "代理程式工作階段失敗",
   "notificationTurnFinishedBody": "代理程式完成了一輪。",
   "notificationTurnFinishedTitle": "代理程式本輪已完成",
   "notInstalled": "未安裝",
@@ -417,7 +421,7 @@
   "tasks": "任務",
   "taskReadRefreshFailureNotice": "無法重新整理任務詳情。目前檢視仍可使用。",
   "taskReadTemporarilyUnavailable": "任務暫時不可用",
-  "taskReadTemporarilyUnavailableDescription": "無法載入此任務。請檢查網路連線後重試。",
+  "taskReadTemporarilyUnavailableDescription": "Kandev 暫時無法載入此任務。請稍後重試。",
   "taskStateBlocked": "已阻塞",
   "taskStateCancelled": "已取消",
   "taskStateCompleted": "已完成",
@@ -552,6 +556,8 @@
   "integrationSettings": "整合設定",
   "pageNavigation": "本頁導覽",
   "viewOptions": "檢視選項",
+  "commandGoToArchivedTasks": "前往已歸檔任務",
+  "commandGoToArchivedTasksKeywords": "已歸檔任務, 歸檔, 歷史記錄",
   "conversationSearch_open": "搜尋任務",
   "conversationSearch_match": "對話匹配",
   "conversationSearch_searching": "正在搜尋對話…",
@@ -561,5 +567,8 @@
   "conversationSearch_query_too_short": "請使用至少 3 個字元搜尋對話。",
   "conversationSearch_query_too_long": "搜尋對話時請最多使用 200 個字元。",
   "conversationSearch_query_too_broad": "請使用至少 3 個連續的字母、漢字或數字。",
-  "conversationSearch_title": "命令面板"
+  "conversationSearch_title": "命令面板",
+  "offlineTitle": "目前處於離線狀態",
+  "offlineDescription": "Kandev 需要連線到伺服器。請檢查網路，然後重試。",
+  "offlineRetry": "重試"
 }

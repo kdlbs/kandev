@@ -63,3 +63,13 @@ func TestLegacyGitConfigOwnership(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveManagedCredentialsPreservesUserEnvironment(t *testing.T) {
+	env := map[string]string{"HOME": "/user", "USER_TOKEN": "user-secret", CredentialBrokerURLEnv: "old-broker", CredentialLeaseEnv: "old-lease", CredentialParentBashEnv: "old-parent", CredentialReissueCapabilityEnv: "old-capability", CredentialScopesEnv: "old-scopes"}
+	RemoveManagedCredentialEnvironment(env)
+	want := map[string]string{"HOME": "/user", "USER_TOKEN": "user-secret"}
+	if !reflect.DeepEqual(env, want) {
+		t.Fatalf("environment = %v, want %v", env, want)
+	}
+	RemoveManagedCredentialEnvironment(nil)
+}

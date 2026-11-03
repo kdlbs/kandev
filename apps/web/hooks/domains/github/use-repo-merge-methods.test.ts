@@ -41,7 +41,9 @@ describe("useRepoMergeMethods", () => {
 
     await waitFor(() => expect(result.current).toEqual(methods));
     expect(getRepoMergeMethodsMock).toHaveBeenCalledTimes(1);
-    expect(getRepoMergeMethodsMock).toHaveBeenCalledWith("ws-1", owner, repo);
+    expect(getRepoMergeMethodsMock).toHaveBeenCalledWith("ws-1", owner, repo, {
+      expectedHost: "github.com",
+    });
   });
 
   it("returns the cached value on subsequent mounts without refetching", async () => {

@@ -2,6 +2,7 @@ package streams
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -267,4 +268,90 @@ func mutateSnapshotSource(payload *NormalizedPayload) {
 			payload.BackgroundWork().WorkID = "after-task"
 		}
 	}
+}
+
+func TestAgentEventToolOutputBytesLegacyJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantJSON  string
+		wantValue *uint64
+		wantError bool
+	}{
+		{
+			name: "absent", input: `{"type":"tool_update"}`,
+			wantJSON: `{"type":"tool_update","supports_image":false,"supports_audio":false,"supports_embedded_context":false,"supports_prompt_queueing":false}`,
+		},
+		{
+			name: "null", input: `{"type":"tool_update","tool_output_bytes":null}`,
+			wantJSON: `{"type":"tool_update","supports_image":false,"supports_audio":false,"supports_embedded_context":false,"supports_prompt_queueing":false}`,
+		},
+		{
+			name: "zero", input: `{"type":"tool_update","tool_output_bytes":0}`,
+			wantJSON: `{"type":"tool_update","tool_output_bytes":0,"supports_image":false,"supports_audio":false,"supports_embedded_context":false,"supports_prompt_queueing":false}`, wantValue: uint64Pointer(0),
+		},
+		{
+			name: "nonzero", input: `{"type":"tool_update","tool_output_bytes":5}`,
+			wantJSON: `{"type":"tool_update","tool_output_bytes":5,"supports_image":false,"supports_audio":false,"supports_embedded_context":false,"supports_prompt_queueing":false}`, wantValue: uint64Pointer(5),
+		},
+		{
+			name: "maximum", input: `{"type":"tool_update","tool_output_bytes":18446744073709551615}`,
+			wantJSON:  `{"type":"tool_update","tool_output_bytes":18446744073709551615,"supports_image":false,"supports_audio":false,"supports_embedded_context":false,"supports_prompt_queueing":false}`,
+			wantValue: uint64Pointer(^uint64(0)),
+		},
+		{name: "string", input: `{"type":"tool_update","tool_output_bytes":"5"}`, wantError: true},
+		{name: "negative", input: `{"type":"tool_update","tool_output_bytes":-1}`, wantError: true},
+		{name: "fraction", input: `{"type":"tool_update","tool_output_bytes":1.5}`, wantError: true},
+		{name: "overflow", input: `{"type":"tool_update","tool_output_bytes":18446744073709551616}`, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var event AgentEvent
+			err := json.Unmarshal([]byte(test.input), &event)
+			if (err != nil) != test.wantError {
+				t.Fatalf("unmarshal error = %v, want error %t", err, test.wantError)
+			}
+			if test.wantError {
+				return
+			}
+			if test.wantValue == nil {
+				if event.ToolOutputBytes != nil {
+					t.Fatalf("decoded field = %d, want nil", *event.ToolOutputBytes)
+				}
+			} else if event.ToolOutputBytes == nil || *event.ToolOutputBytes != *test.wantValue {
+				t.Fatalf("decoded field = %v, want %d", event.ToolOutputBytes, *test.wantValue)
+			}
+			got, err := json.Marshal(event)
+			if err != nil {
+				t.Fatalf("marshal event: %v", err)
+			}
+			if string(got) != test.wantJSON {
+				t.Fatalf("serialized event = %s, want %s", got, test.wantJSON)
+			}
+		})
+	}
+}
+
+func TestAgentEventToolOutputBytesSerializationOrder(t *testing.T) {
+	zero := uint64(0)
+	encoded, err := json.Marshal(AgentEvent{
+		Type:              EventTypeToolUpdate,
+		ToolStatus:        "completed",
+		ToolOutputBytes:   &zero,
+		NormalizedPayload: NewGeneric("tool", nil),
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	wire := string(encoded)
+	status := strings.Index(wire, `"tool_status"`)
+	outputBytes := strings.Index(wire, `"tool_output_bytes"`)
+	normalized := strings.Index(wire, `"normalized"`)
+	if status < 0 || outputBytes <= status || normalized <= outputBytes {
+		t.Fatalf("serialized field order must be tool_status, tool_output_bytes, normalized: %s", wire)
+	}
+}
+
+func uint64Pointer(value uint64) *uint64 {
+	return &value
 }

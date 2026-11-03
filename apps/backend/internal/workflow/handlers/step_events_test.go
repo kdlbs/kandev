@@ -96,6 +96,13 @@ type workflowHarness struct {
 	db *sqlx.DB
 }
 
+// setWorkflowProvider attaches the harness DB to the fake provider so created
+// workflows are mirrored into the same store the step repository locks.
+func (h *workflowHarness) setWorkflowProvider(provider *fakeWorkflowProvider) {
+	provider.db = h.db
+	h.service.SetWorkflowProvider(provider)
+}
+
 // dispatch routes one WS message through the registered handlers.
 func (h *workflowHarness) dispatch(t *testing.T, action string, payload any) *ws.Message {
 	t.Helper()
@@ -149,6 +156,12 @@ func setupStepRouterWithDriver(t *testing.T, driverName string, logOverride ...*
 	repo, err := repository.NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("new repository: %v", err)
+	}
+	if _, err = db.Exec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES ('workflow-1','ws-1','Main',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed default workflow: %v", err)
 	}
 	log := logger.Default()
 	if len(logOverride) > 0 {

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
-updated: 2026-09-30
+updated: 2026-10-28
 owners:
   - kandev
 ---
@@ -54,6 +54,12 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
   acceptance; the destination shall use the existing full task or overview
   surface. Focus shall move to the destination or its loading status, without
   returning to a removed control.
+- **AC-TASKS-REMOVAL-NAVIGATION-001.6:** An automatic replacement shall exclude
+  every task under a pending removal in the current workspace. This includes
+  independently accepted actions. If a candidate enters another removal during
+  validation or session loading, the system shall select the next eligible
+  candidate or the overview. A later user navigation shall cancel automatic
+  selection.
 
 ### REQ-TASKS-REMOVAL-NAVIGATION-002: Recovery and concurrent navigation
 
@@ -79,6 +85,11 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
 - **AC-TASKS-REMOVAL-NAVIGATION-002.5:** The outgoing task shall not create or
   restart a session because removal empties its session list. After confirmed
   failure, ordinary task behavior shall resume only for an available task.
+- **AC-TASKS-REMOVAL-NAVIGATION-002.6:** Independent archive actions shall retain
+  separate pending states on desktop and phone. Completion or failure of one
+  action shall not clear another target's busy controls or duplicate protection.
+  Unrelated task actions, navigation, and list scrolling shall remain usable
+  before the archive requests complete.
 
 ### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
 
@@ -174,3 +185,4 @@ Undo, new settings, and a new mobile navigation composition are excluded.
 - [Archive progress feedback](../../../plans/archive-progress-feedback/plan.md)
 
 - [Sidebar delete loading](../../../plans/sidebar-delete-loading/plan.md)
+- [Rapid sidebar archive](../../../plans/rapid-sidebar-archive/plan.md)

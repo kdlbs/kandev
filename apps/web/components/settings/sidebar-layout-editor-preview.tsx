@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { integrationPluginLayout } from "@/lib/sidebar/integration-plugin-layout";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
 
 export function SidebarDraftPreview({
@@ -10,13 +11,14 @@ export function SidebarDraftPreview({
   nodes: ProjectedSidebarNode[];
   t: (key: string) => string;
 }) {
+  const { children, topLevel } = integrationPluginLayout(nodes);
   return (
     <Card data-testid="sidebar-layout-preview">
       <CardHeader>
         <CardTitle>{t("settings:sidebarPreview")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {nodes.map((node) => (
+        {topLevel.map((node) => (
           <div key={node.id} className="rounded-md border p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <node.icon className="h-4 w-4" />
@@ -25,6 +27,15 @@ export function SidebarDraftPreview({
                 <span className="text-xs text-muted-foreground">{node.shortcuts.length}</span>
               )}
             </div>
+            {node.destinationId === "integrations" &&
+              children
+                .filter((child) => child.visible)
+                .map((child) => (
+                  <div key={child.id} className="mt-2 ml-4 flex items-center gap-2 text-sm">
+                    <child.icon className="size-4" />
+                    <span>{child.label}</span>
+                  </div>
+                ))}
             {node.kind === "shortcuts" && node.shortcuts.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {node.shortcuts.map((shortcut) => {

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectTouchControl } from "../../helpers/control-sizing";
 
 test.describe("System Logs mobile", () => {
   test("keeps the one customizer action touch-accessible without horizontal overflow", async ({
@@ -10,7 +11,7 @@ test.describe("System Logs mobile", () => {
 
     const action = testPage.getByTestId("customize-diagnostic-bundle");
     await expect(action).toBeVisible();
-    expect((await action.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectTouchControl(action);
     await action.tap();
     const drawer = testPage.getByTestId("diagnostic-bundle-drawer");
     await expect(drawer).toBeVisible();
@@ -51,7 +52,7 @@ test.describe("System Logs mobile", () => {
       "unchecked",
     );
     const create = drawer.getByTestId("create-custom-diagnostic-bundle");
-    expect((await create.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectTouchControl(create);
     expect(
       await testPage.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

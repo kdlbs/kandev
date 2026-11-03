@@ -27,7 +27,7 @@ including target isolation and absence of agent callbacks, remain applicable.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1:** When a completed native rich-output image file card has no retained disclosure choice, it shall start expanded and request its preview without user interaction, on desktop and phone. This shall apply to new compositions and valid historical presentations.
+- **AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1:** When a completed native rich-output image file card has no retained disclosure choice, it shall use the device-local Show image previews by default preference, which defaults to enabled. When enabled, it shall start expanded and request its preview without user interaction. When disabled, it shall start collapsed without a preview read until opened. This shall work on desktop and phone. This shall apply to new compositions and valid historical presentations.
 - **AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.2:** Non-image file cards without a retained disclosure choice shall start collapsed and request no preview until explicitly expanded.
 - **AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.3:** Users shall be able to hide and reopen an image preview. Same-target rerenders, metadata changes, viewport changes, and retained transcript remounts shall preserve that choice. Separate cards shall remain independent, including cards referencing the same image.
 - **AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.4:** A target replacement shall discard the old content and pending read results and apply the new target's retained choice or image/non-image default. Automatic reads shall use the current session's authorization and exact repository and path; neither previewing nor opening a file shall mutate task state or call an agent action.
@@ -38,7 +38,7 @@ including target isolation and absence of agent callbacks, remain applicable.
 
 - Expansion of text, unknown-type, or non-image binary files by default.
 - Changes to accepted image formats, encoding, SVG rendering, or the file viewer.
-- New authoring properties, schema versions, preferences, permanent disclosure
+- New authoring properties, schema versions, permanent disclosure
   storage, artifact retention, feature flags, or backend authorization rules.
 - Attachment thumbnails, file-tree previews, or generic provider image results.
 

@@ -59,7 +59,9 @@ Kandev is working with.
 
 - **AC-AGENTS-HOST-CLI-001.1:** When an agent type declares a host CLI and the
   executable is detected, the system shall show the detected version next to
-  the detected path on the agent card in Settings > Agents.
+  the detected path inside the initially closed Diagnostics section on the agent
+  card in Settings > Agents, as defined by
+  [runtime identity display](runtime-identity-display.md).
 - **AC-AGENTS-HOST-CLI-001.2:** When the version command fails, times out, or
   prints no version, the system shall show that the version is unknown with a
   short reason and shall keep the agent available.

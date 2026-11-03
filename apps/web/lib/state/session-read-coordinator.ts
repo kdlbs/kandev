@@ -10,6 +10,7 @@ export type SessionReadOptions<T> = {
   resource: Resource;
   key: string;
   environmentId: string;
+  sessionId?: string;
   fetch: (isCurrent: () => boolean) => Promise<SessionReadResult<T>>;
   isCurrent: () => boolean;
   onLoading?: (loading: boolean) => void;
@@ -36,6 +37,9 @@ export class SessionRead<T> {
   get inactive() {
     return this.listeners.size === 0 && !this.flight;
   }
+  get hasListeners() {
+    return this.listeners.size > 0;
+  }
   get group() {
     const { resource, key, environmentId } = this.options;
     return JSON.stringify([resource, resource === "diff" ? key : environmentId]);
@@ -51,6 +55,7 @@ export class SessionRead<T> {
         this.clearTimer();
         if (!this.flight) this.update({ loading: false });
         this.scope.trim();
+        this.scope.releaseRetiredSession(this.options.sessionId);
       }
     };
   };
@@ -155,6 +160,7 @@ export class SessionRead<T> {
 export class SessionReadScope {
   private reads = new Map<Resource, Map<string, SessionRead<unknown>>>();
   private writers = new Map<string, unknown>();
+  private retiredSessions = new Set<string>();
   private live = true;
   readonly client = getWebSocketClient();
 
@@ -177,12 +183,65 @@ export class SessionReadScope {
   get<T>(options: SessionReadOptions<T>): SessionRead<T> {
     const reads = this.reads.get(options.resource) ?? new Map();
     this.reads.set(options.resource, reads);
+    if (options.sessionId && this.retiredSessions.has(options.sessionId)) {
+      const retired = [...reads.values()].find(
+        (entry) => entry.options.sessionId === options.sessionId,
+      );
+      if (retired) return retired as SessionRead<T>;
+      const read = new SessionRead<T>(this, options);
+      read.retire();
+      reads.set(options.key, read as SessionRead<unknown>);
+      return read;
+    }
     let read = reads.get(options.key) as SessionRead<T> | undefined;
     if (!read) read = new SessionRead<T>(this, options);
     read.options = options;
     reads.delete(options.key);
     reads.set(options.key, read as SessionRead<unknown>);
     return read;
+  }
+
+  retireSession(sessionId: string) {
+    this.retiredSessions.add(sessionId);
+    const vacatedGroups = new Set<string>();
+    for (const reads of this.reads.values()) {
+      for (const read of reads.values()) {
+        if (read.options.sessionId !== sessionId) continue;
+        if (this.owns(read)) {
+          vacatedGroups.add(read.group);
+          this.writers.delete(read.group);
+        }
+        read.retire();
+      }
+    }
+    this.promoteReaders(vacatedGroups);
+    this.releaseRetiredSession(sessionId);
+  }
+
+  private promoteReaders(vacatedGroups: Set<string>) {
+    for (const reads of this.reads.values()) {
+      for (const read of reads.values()) {
+        if (!vacatedGroups.has(read.group) || !read.hasListeners || this.writers.has(read.group))
+          continue;
+        if (read.options.sessionId && this.retiredSessions.has(read.options.sessionId)) continue;
+        read.ensure();
+        if (this.owns(read)) vacatedGroups.delete(read.group);
+      }
+    }
+  }
+
+  releaseRetiredSession(sessionId?: string) {
+    if (!sessionId || !this.retiredSessions.has(sessionId)) return;
+    for (const reads of this.reads.values()) {
+      for (const read of reads.values()) {
+        if (read.options.sessionId === sessionId && read.hasListeners) return;
+      }
+    }
+    for (const reads of this.reads.values()) {
+      for (const [key, read] of reads) {
+        if (read.options.sessionId === sessionId) reads.delete(key);
+      }
+    }
   }
 
   invalidate(resource: Resource, environmentId: string, delay = 0) {
@@ -194,6 +253,7 @@ export class SessionReadScope {
   retireInvalidBindings() {
     for (const reads of this.reads.values()) {
       for (const [key, read] of reads) {
+        if (read.options.sessionId && this.retiredSessions.has(read.options.sessionId)) continue;
         if (read.options.isCurrent()) continue;
         reads.delete(key);
         if (this.owns(read)) this.writers.delete(read.group);
@@ -223,6 +283,7 @@ export class SessionReadScope {
     }
     this.reads.clear();
     this.writers.clear();
+    this.retiredSessions.clear();
   }
 }
 
@@ -244,6 +305,10 @@ type ScopeOwner = {
   listeners: Set<() => void>;
 };
 const owners = new WeakMap<StoreApi<AppState>, ScopeOwner>();
+
+export function retireSessionReads(store: StoreApi<AppState>, sessionId: string) {
+  owners.get(store)?.scope.retireSession(sessionId);
+}
 
 export function getSessionReadScope(store: StoreApi<AppState>): SessionReadScope {
   let owner = owners.get(store);

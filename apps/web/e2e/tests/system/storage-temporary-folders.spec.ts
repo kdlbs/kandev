@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   mockStorageDiskCapacity,
   mockPartialSystemTemporaryOverview,
@@ -149,6 +150,7 @@ test.describe("System temporary folders", () => {
     await expect(entries).toContainText("Ownership unknown");
     await expect(entries).toContainText("5 other observed entries");
     await expect(entries).toContainText("1 stale candidate");
+    await waitForFiniteAnimations(testPage.getByTestId("storage-resource-system-temporary"));
     await prCapture.screenshot("system-temporary-largest-entries", {
       caption: "Storage labels measured temporary entries and explains registered cleanup scope",
     });

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 created: 2026-07-27
-updated: 2026-08-12
+updated: 2026-10-25
 owners:
   - kandev
 ---
@@ -96,9 +96,12 @@ GitHub-specific retry logic.
   tasks automatically from another step. Direct moves and automatic workflow
   transitions still queue in the destination when it is full.
 - The workflow step settings page explains that `Pull from` controls automatic
-  feeder intake through an info tooltip. Its help text also explains
-  destination-queue priority and is available by tap or focus on touch
-  devices.
+  feeder intake. Fine-pointer desktop uses an info tooltip. Phone and coarse
+  pointers use the existing `HelpTip` drawer with a 44-pixel target. The drawer
+  retains the guidance after a tap, supports Escape and normal drawer dismissal,
+  and restores focus to its trigger. Both surfaces share the same localized
+  guidance and preserve the feeder selection and unsaved draft. Block content
+  uses a div-backed drawer description so its paragraphs remain valid markup.
 - A queued move processes the source step's `on_exit` behavior immediately.
   The destination step's `on_enter` behavior runs only after admission.
 - Ephemeral tasks remain outside workflow WIP and queue behavior.

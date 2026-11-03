@@ -1,5 +1,12 @@
 "use client";
 
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import {
+  isRenameReserved,
+  trackRenameOpen,
+  waitForRenameRelease,
+} from "@/hooks/file-rename-continuity";
 import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -22,6 +29,7 @@ import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 export type FileTabRestorationOptions = {
+  store?: StoreApi<AppState>;
   activeSessionId: string | null;
   leftTab: string;
   setLeftTab: (tab: string) => void;
@@ -116,6 +124,7 @@ function restoreLoadedTabs({
 }
 
 export function useFileTabRestoration({
+  store,
   activeSessionId,
   leftTab,
   setLeftTab,
@@ -152,7 +161,24 @@ export function useFileTabRestoration({
     }
     restorationInProgressRef.current = true;
     const loadTabs = async (retryCount = 0): Promise<void> => {
+      if (store) {
+        while (
+          savedTabs.some((tab) => isRenameReserved(store, activeSessionId, tab.path, tab.repo))
+        ) {
+          await waitForRenameRelease(store, activeSessionId, savedTabs);
+        }
+      }
+      if (restoredTabsRef.current !== activeSessionId) return;
+      const pending = store
+        ? savedTabs.map((tab) => trackRenameOpen(store, activeSessionId, tab.path, tab.repo))
+        : [];
       const loadedTabs = await loadSavedFileTabs(activeSessionId, savedTabs);
+      const invalid = pending.some((entry) => !entry.current());
+      pending.forEach((entry) => entry.dispose());
+      if (invalid) {
+        void loadTabs(retryCount);
+        return;
+      }
       if (!loadedTabs) {
         if (retryCount < 5) {
           setTimeout(() => loadTabs(retryCount + 1), 200);

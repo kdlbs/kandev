@@ -30,6 +30,8 @@ type UseSessionFileReviewsReturn = {
 // Shared module-level cache so all hook instances share the same review state
 const reviewsCache: Record<string, Map<string, FileReviewState>> = {};
 const fetchedSessions = new Set<string>();
+type PendingReviewRead = { changedFiles: Set<string>; reset: boolean };
+const pendingReviewReads = new Map<string, PendingReviewRead>();
 let cacheVersion = 0;
 
 function notifyChange() {
@@ -46,14 +48,32 @@ function updateCache(sessionId: string, map: Map<string, FileReviewState>) {
 /** Create an optimistic update: clone the cache, apply mutation, update cache + local state. */
 function optimisticUpdate(
   sessionId: string,
+  filePath: string,
   mutate: (next: Map<string, FileReviewState>) => void,
   setReviews: (m: Map<string, FileReviewState>) => void,
 ) {
+  pendingReviewReads.get(sessionId)?.changedFiles.add(filePath);
   const next = new Map(reviewsCache[sessionId] ?? new Map());
   mutate(next);
   reviewsCache[sessionId] = next;
   setReviews(next);
   notifyChange();
+}
+
+/** Preserve local intent while still accepting untouched initial snapshot rows. */
+function reconcileReviewSnapshot(
+  sessionId: string,
+  snapshot: Map<string, FileReviewState>,
+  pending: PendingReviewRead,
+) {
+  const current = reviewsCache[sessionId];
+  if (pending.reset) return new Map(current);
+  for (const path of pending.changedFiles) {
+    const review = current?.get(path);
+    if (review) snapshot.set(path, review);
+    else snapshot.delete(path);
+  }
+  return snapshot;
 }
 
 function fetchSessionReviews(
@@ -64,6 +84,8 @@ function fetchSessionReviews(
   const client = getWebSocketClient();
   if (!client) return;
 
+  const pending: PendingReviewRead = { changedFiles: new Set(), reset: false };
+  pendingReviewReads.set(sessionId, pending);
   fetchedSessions.add(sessionId);
   queueMicrotask(() => setLoading(true));
 
@@ -76,13 +98,15 @@ function fetchSessionReviews(
           map.set(review.file_path, { reviewed: review.reviewed, diffHash: review.diff_hash });
         }
       }
-      updateCache(sessionId, map);
-      setReviews(map);
+      const reconciled = reconcileReviewSnapshot(sessionId, map, pending);
+      updateCache(sessionId, reconciled);
+      setReviews(reconciled);
     })
     .catch(() => {
       /* Ignore errors - reviews are not critical */
     })
     .finally(() => {
+      pendingReviewReads.delete(sessionId);
       setLoading(false);
     });
 }
@@ -187,6 +211,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
       const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
+        filePath,
         (next) => {
           next.set(filePath, { reviewed: true, diffHash });
         },
@@ -204,6 +229,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
         .catch(() => {
           optimisticUpdate(
             sessionId,
+            filePath,
             (reverted) => {
               reverted.delete(filePath);
             },
@@ -220,6 +246,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
       const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
+        filePath,
         (next) => {
           next.set(filePath, { reviewed: false, diffHash: "" });
         },
@@ -244,6 +271,8 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
   const resetReviews = useCallback(() => {
     if (!sessionId) return;
     const { setReviews } = capturePublisher();
+    const pending = pendingReviewReads.get(sessionId);
+    if (pending) pending.reset = true;
     reviewsCache[sessionId] = new Map();
     setReviews(new Map());
     notifyChange();

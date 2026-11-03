@@ -348,11 +348,16 @@ func (m *Manager) finalizeRemovedWorktree(ctx context.Context, wt *Worktree) err
 		}
 	}
 
-	// Removing a worktree affects only its repository cache entry; sibling
-	// repositories in the same session remain cached.
+	// Every session alias of the removed physical worktree becomes unavailable.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if wt.SessionID != "" {
+	if wt.ID != "" {
+		for key, cached := range m.worktrees {
+			if cached != nil && cached.ID == wt.ID {
+				delete(m.worktrees, key)
+			}
+		}
+	} else if wt.SessionID != "" {
 		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 	}
 	return nil

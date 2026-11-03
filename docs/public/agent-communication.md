@@ -25,7 +25,7 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. `task_id` defaults to the current task; another target must be an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. An unrelated task is denied, even in the same workspace. The compact output option is not a permission: `verbose` adds descriptions and never widens access. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
 
 ```
 list_related_tasks_kandev()
@@ -127,6 +127,120 @@ Each `ask_user_question_kandev` question can set `allow_custom_text` to `false`
 when the user must select one of the offered options. If omitted, the user can
 also provide a free-text answer. Native Codex questions use the same setting
 that Codex provides for an "Other" answer.
+
+The tool returns answers keyed by question ID. An option selection includes
+`selected_option` (the option ID) and `selected_label` (the exact displayed label):
+
+```json
+{
+  "flow": {
+    "selected_option": "q1_opt1",
+    "selected_label": "A"
+  }
+}
+```
+
+Read the label to understand the user's choice. Keep the ID when you need to
+distinguish options with identical labels. If the ID cannot identify exactly
+one offered option with a nonempty label, `selected_label` is omitted.
+Free-text-only answers return `custom_text` without a selected label.
+Selections can also retain accompanying `custom_text`.
+
+## Show an image with an operator question
+
+Add `images` to a question when the operator needs to inspect a screenshot or
+mockup before answering. The image appears above the prompt. Select **Inspect
+image**, then use **Fit** or **Actual size**. Close inspection to return to the
+same question and draft. On a phone, inspection fills the screen.
+
+Use a workspace-relative PNG or JPEG path from the session that asks the question.
+An optional `repo` selects an attached repository by its workspace-relative path.
+Do not use an absolute path, home shortcut, external URL, or data URL.
+
+For example, pass this payload to `ask_user_question_kandev`:
+
+```json
+{
+  "questions": [
+    {
+      "id": "layout",
+      "prompt": "Approve this layout?",
+      "images": [{"id": "screen", "path": "design/screen.png", "alt": "Proposed account page"}],
+      "options": [
+        {"label": "Approve", "description": "Keep this layout"},
+        {"label": "Revise", "description": "Change the layout"}
+      ]
+    },
+    {
+      "id": "copy",
+      "prompt": "Does the heading need a change?",
+      "images": [{"id": "screen", "path": "design/screen.png", "alt": "Proposed account page"}],
+      "options": [
+        {"label": "Keep", "description": "Keep this heading"},
+        {"label": "Shorten", "description": "Use fewer words"}
+      ]
+    }
+  ]
+}
+```
+
+Each question has its own answer. Kandev returns the completed bundle with answers
+keyed by question ID. The image does not add a field to the answer. For example,
+an approved layout can return `"layout": {"selected_option": "q1_opt1", "selected_label": "Approve"}`. Generated
+option IDs use one-based question and option positions. Read the offered choices
+to interpret these IDs. A custom answer uses `custom_text`.
+
+- A bundle accepts up to four questions and four distinct image IDs. Each question
+  accepts up to four image references in total, including images on its choices.
+  Each choice accepts at most one image. Reuse an image ID only with the same path,
+  repository, and description.
+- Each image must be at most 10 MiB and 16 million pixels. PNG and JPEG are the
+  supported formats. Supply a short, meaningful `alt` description of up to 300
+  characters.
+- A missing, damaged, large, or inaccessible image shows a local error. The operator
+  can still answer. Use **Retry** after the file or executor becomes available.
+  An older executor runtime can require an update before it supports previews.
+- Kandev stores the reference, not a copy of the file. Reloading or reopening a
+  historical preview reads the current file in the source workspace. A removed
+  workspace or source can make a historical preview unavailable. Unsent answer
+  drafts do not survive a full page reload.
+
+This is an operator-question feature. Parent-agent questions do not accept images.
+The accepted question call remains a user-input barrier until all answers or an
+explicit rejection return. Image loading does not answer or reject the question.
+
+### Show visual alternatives on choices
+
+Add `images` to an option when its image represents a specific alternative.
+Question images can provide shared context while choice images show the alternatives.
+The choice label selects the option. Its separate thumbnail or **Inspect image**
+control opens inspection without selecting, advancing, or submitting an answer.
+
+```json
+{
+  "questions": [{
+    "id": "layout",
+    "prompt": "Which layout do you prefer?",
+    "options": [
+      {
+        "label": "Wide layout",
+        "description": "Arrange the cards side by side",
+        "images": [{"id": "wide", "path": "design/wide.png", "alt": "Cards arranged side by side"}]
+      },
+      {
+        "label": "Compact layout",
+        "description": "Arrange the cards in one column",
+        "images": [{"id": "compact", "path": "design/compact.png", "alt": "Cards arranged in one column"}]
+      }
+    ]
+  }]
+}
+```
+
+Selecting **Compact layout** returns the existing option identifier, such as
+`"layout": {"selected_option": "q1_opt2", "selected_label": "Compact layout"}`. The image ID does not replace that
+identifier. A missing preview leaves its choice selectable. In history, each
+illustrated choice retains its label and a **Show images** control.
 
 ## Reading the thread
 

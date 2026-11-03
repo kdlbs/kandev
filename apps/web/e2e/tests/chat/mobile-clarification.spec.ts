@@ -1,8 +1,16 @@
 import { test, expect } from "../../fixtures/test-base";
-import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
+import {
+  activeSessionId,
+  expectCleanSupersededProjection,
+  expectNoActiveSupersededQuestion,
+  seedClarificationSession,
+  seedSupersededClarification,
+  type SupersededClarificationStatus,
+} from "../../helpers/clarification";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
+import { expectClarificationReferencePopup } from "../../helpers/clarification-markdown";
 
 type UpdateNotification = {
   version: string;
@@ -130,6 +138,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await testPage.getByTestId("queue-chip").tap();
     const panel = testPage.getByTestId("queued-ghost-list");
     await expect(panel).toBeVisible();
+    await waitForFiniteAnimations(panel);
     const autoRun = panel.getByTestId("queue-auto-run");
     await expect(autoRun).toHaveAttribute("data-state", "checked");
     await autoRun.tap();
@@ -524,6 +533,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(overlay).toBeVisible();
     const card = session.clarificationQuestionCardById("markdown");
     const option = session.clarificationOption("Postgres");
+    const context = session.clarificationContext();
 
     await expect(card.getByTestId("clarification-question-title").locator("code")).toHaveText("DB");
     await expect(card.locator("ol > li")).toHaveCount(2);
@@ -531,6 +541,19 @@ test.describe("Mobile clarification multiline answer", () => {
       option.getByTestId("clarification-option-description").locator("strong"),
     ).toHaveText("production");
     await expect(option.locator("a")).toHaveCount(0);
+    await expect(context.locator("strong")).toHaveText("Shared deployment context.");
+    await expect(context.locator("table tr")).toHaveCount(2);
+    const contextGuide = context.getByRole("link", { name: "context guide" });
+    await expectClarificationReferencePopup(
+      testPage,
+      () => contextGuide.tap(),
+      "https://example.com/context",
+    );
+    await expect(overlay).toBeVisible();
+
+    const guidance = card.getByRole("link", { name: "storage guidance" });
+    await expectClarificationReferencePopup(testPage, () => guidance.tap());
+    await expect(overlay).toBeVisible();
 
     await option.scrollIntoViewIfNeeded();
     const [optionBox, overlayBox] = await Promise.all([
@@ -562,6 +585,48 @@ test.describe("Mobile clarification multiline answer", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).resolves.toBe(true);
+  });
+
+  test("renders paragraph context Markdown and completes the question on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Context Paragraphs",
+      { scenario: "clarification-context-paragraphs" },
+    );
+    const overlay = session.clarificationOverlay();
+    const context = session.clarificationContext();
+
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+    await expect(context.locator("strong")).toHaveText("Shared deployment context.");
+    const tableRegion = context.locator("[data-clarification-context-table-scroll]");
+    await expect(context.locator("table tr")).toHaveCount(2);
+    await expect
+      .poll(() => tableRegion.evaluate((element) => element.scrollWidth > element.clientWidth))
+      .toBe(true);
+    const contextGuide = context.getByRole("link", { name: "context guide" });
+    await expectClarificationReferencePopup(
+      testPage,
+      () => contextGuide.tap(),
+      "https://example.com/context",
+    );
+    await expect(overlay).toBeVisible();
+    await expect(session.clarificationQuestionCardById("context-paragraphs")).toBeVisible();
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    const option = session.clarificationOption("PostgreSQL");
+    await option.scrollIntoViewIfNeeded();
+    await option.tap();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
   test("separates batch actions from the stepper while showing submission feedback", async ({
@@ -666,4 +731,125 @@ test.describe("Mobile clarification multiline answer", () => {
     }
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
+
+  test("expands within the phone host and keeps phone and desktop sizes separate with a draft", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 393, height: 852 });
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarification Resize",
+      { scenario: "clarification-context-paragraphs" },
+    );
+
+    const container = session.clarificationBar();
+    const input = session.clarificationInput();
+    await expect(container).toBeVisible({ timeout: 30_000 });
+    await input.fill("Phone draft remains here.");
+    const phoneHost = Number(await container.getAttribute("data-host-max-height"));
+    const [expand, reset] = [
+      container.getByTestId("clarification-panel-expand"),
+      container.getByTestId("clarification-panel-reset"),
+    ];
+    const [expandBox, resetBox] = await Promise.all([expand.boundingBox(), reset.boundingBox()]);
+    if (!expandBox || !resetBox) throw new Error("mobile resize controls are not measurable");
+    expect(expandBox.height).toBeGreaterThanOrEqual(44);
+    expect(resetBox.height).toBeGreaterThanOrEqual(44);
+    await expect(expand).toBeEnabled();
+    await expand.tap();
+    await expect(container).toHaveCSS("height", `${phoneHost}px`);
+
+    await testPage.setViewportSize({ width: 900, height: 900 });
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(input).toHaveValue("Phone draft remains here.");
+    await input.fill("Desktop draft remains here.");
+    const desktopHost = Number(await container.getAttribute("data-host-max-height"));
+    await expect(container.getByTestId("clarification-panel-expand")).toBeEnabled();
+    await container.getByTestId("clarification-panel-expand").click();
+    await expect(container).toHaveCSS("height", `${desktopHost}px`);
+
+    await testPage.setViewportSize({ width: 393, height: 852 });
+    await expect
+      .poll(() =>
+        container.evaluate((element, desiredHeight) => {
+          const hostHeight = Number(element.getAttribute("data-host-max-height"));
+          const effectiveHeight = Number.parseFloat(getComputedStyle(element).height);
+          return Math.abs(effectiveHeight - Math.min(desiredHeight, hostHeight)) <= 1;
+        }, phoneHost),
+      )
+      .toBe(true);
+    await expect(input).toHaveValue("Desktop draft remains here.");
+    await reset.tap();
+    await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+
+    await testPage.setViewportSize({ width: 900, height: 900 });
+    await expect(container).toHaveCSS("height", `${desktopHost}px`);
+    await expect(input).toHaveValue("Desktop draft remains here.");
+    await testPage.setViewportSize({ width: 393, height: 500 });
+    await expect(container.getByTestId("clarification-panel-reset")).toBeDisabled();
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+  });
+});
+
+test.describe("Mobile superseded detached clarification stays history", () => {
+  for (const status of ["answered", "rejected"] as SupersededClarificationStatus[]) {
+    test(`does not reactivate the older detached question after the current question is ${status}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(60_000);
+      const fixture = await seedSupersededClarification(
+        apiClient,
+        seedData,
+        `Mobile superseded detached clarification - ${status}`,
+        status,
+      );
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+
+      let responseAttempts = 0;
+      await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+        responseAttempts += 1;
+        await route.abort();
+      });
+
+      const firstWatcher = watchWs(testPage);
+      const firstMessages = firstWatcher.waitForResponse("message.list");
+      await testPage.goto(`/t/${fixture.taskId}`);
+      await firstMessages;
+
+      const firstLoad = await expectNoActiveSupersededQuestion(testPage, fixture);
+      const answerAction = firstLoad.historical.getByTestId("clarification-answer-as-new-message");
+      await expect(answerAction).toBeVisible();
+      await answerAction.tap();
+      const lateClose = firstLoad.historical.getByTestId("clarification-late-close");
+      await expect(lateClose).toBeVisible();
+      await expect(firstLoad.session.clarificationBar()).toBeHidden();
+      await lateClose.tap();
+      await expect(lateClose).toBeHidden();
+      expect(responseAttempts).toBe(0);
+
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+
+      const reloadWatcher = watchWs(testPage);
+      const reloadMessages = reloadWatcher.waitForResponse("message.list");
+      await testPage.reload();
+      await reloadMessages;
+
+      const reloaded = await expectNoActiveSupersededQuestion(testPage, fixture);
+      await expect(
+        reloaded.historical.getByTestId("clarification-answer-as-new-message"),
+      ).toBeVisible();
+      expect(responseAttempts).toBe(0);
+      await expectCleanSupersededProjection(apiClient, fixture.sessionId);
+    });
+  }
 });
