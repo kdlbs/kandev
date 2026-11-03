@@ -145,12 +145,11 @@ Illustrative: exact wording, color, and spacing. Maps to
   first startup after upgrade like any crash leftover: with a recovery-block
   store, startup parks the session behind an `unknown_send_now_outcome`
   recovery block, and resolving it runs the release step.
-- The release clears the exact claim and the source rows it still owns before
-  writing the message status, so a released source cannot run later. A failure
-  before that transaction commits leaves the claim for the next startup
-  reconciliation or recovery action. Transient message-status failures are
-  retried with the existing bounded claim mutation helper. A persistent status
-  failure leaves the claim and sources released but the message unmarked; the
-  error is logged and the user can resend manually.
+- The release verifies ownership, writes the message status while the claim is
+  still present, then clears the exact claim and the source rows it still owns.
+  A failed status write keeps the claim available for the bounded retry. A
+  failure before the release transaction commits leaves the claim for the next
+  startup reconciliation or recovery action. A persistent status failure leaves
+  the message unmarked and the claim in place; the error is logged.
 - The exact bridge frame in the first report is inferred from bridge 0.97.0. The
   backend rule depends only on the empty status, not on the frame's source.

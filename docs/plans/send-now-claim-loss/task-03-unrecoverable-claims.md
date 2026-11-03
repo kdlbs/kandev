@@ -28,13 +28,13 @@ not.
 - One release step for `ErrSendNowClaimChanged` after the retry budget, called
   from the restore in `executeSendNowClaimWithContext`, from
   `restorePendingSendNowClaimsForRecovery`, and from startup reconciliation
-  without a recovery-block store. It releases the exact claim and every source
-  row the claim still owns, so FIFO cannot later run it. When no successor owns
-  a surviving source, it sets `delivery_status: not_delivered` on the recorded
-  user message or records the message from the dispatch envelope in an
-  already-completed lifecycle-only turn, then publishes the message update and
-  queue status. It is idempotent per claim and retries transient failures with
-  the bounded claim mutation helper.
+  without a recovery-block store. It verifies that the exact claim still owns
+  its sources; when no successor owns a surviving source, it sets
+  `delivery_status: not_delivered` on the recorded user message or records the
+  message from the dispatch envelope in an already-completed lifecycle-only
+  turn, then releases the claim and every source row it owns. It is idempotent
+  per claim and retries transient failures with the bounded claim mutation
+  helper.
 - Apply it only while the claim's session identity is still current. A session
   identity mismatch keeps its existing handling.
 - `models.MessageDeliveryStatusNotDelivered`, and two narrow `MessageCreator`
@@ -136,11 +136,11 @@ Task 02.
 
 Implemented. All three `ErrSendNowClaimChanged` sites call one release step:
 the running restore in `executeSendNowClaimWithContext`, recovery restore, and
-startup reconciliation without a recovery-block store. The step releases the
-exact claim and every source row it still owns, so FIFO cannot later deliver a
-message already reported as undelivered. It marks the recorded message or
-records it from the dispatch envelope with `delivery_status: not_delivered`
-only when no successor owns a surviving source. A message that is absent from
+startup reconciliation without a recovery-block store. The step verifies the
+claim still owns its sources, marks the recorded message or records it from the
+dispatch envelope with `delivery_status: not_delivered` while the claim remains
+available for retry, then releases the claim and every source row it owns. A
+successor-owned source keeps the message unmarked. A message that is absent from
 history is recorded in an already-completed lifecycle-only turn, so release
 never starts or adopts an active conversation turn. The step retries transient
 failures with the existing bounded claim mutation helper. A session identity

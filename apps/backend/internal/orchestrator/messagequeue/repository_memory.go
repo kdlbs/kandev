@@ -1701,9 +1701,44 @@ func (r *memoryRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 	return nil
 }
 
+// CanReleaseSendNowClaim reports whether this exact claim still owns its
+// source set and no successor owns a surviving source.
+func (r *memoryRepository) CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return false, ErrSendNowEmpty
+	}
+	if err := r.validateSendNowClaimAuthority(ctx, claim); err != nil {
+		return false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sessionID := claim.Sources[0].SessionID
+	owned := r.sendNowClaims[sessionID]
+	if len(owned) == 0 || !sendNowClaimOwnsAllSources(owned, claim) {
+		return false, nil
+	}
+	return r.sendNowClaimSourcesReleaseableLocked(sessionID, claim), nil
+}
+
+func (r *memoryRepository) sendNowClaimSourcesReleaseableLocked(sessionID string, claim *SendNowClaim) bool {
+	sourcesByID := make(map[string]QueuedMessage, len(claim.Sources))
+	for _, source := range claim.Sources {
+		sourcesByID[source.ID] = source
+	}
+	for _, entry := range r.entries[sessionID] {
+		source, ok := sourcesByID[entry.ID]
+		if !ok {
+			continue
+		}
+		if !entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source) {
+			return false
+		}
+	}
+	return true
+}
+
 // ReleaseSendNowClaim removes an unrestorable claim and the source rows it
-// still owns. A false result means a successor owns a surviving source, so the
-// caller must not mark the message not delivered.
+// still owns.
 func (r *memoryRepository) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
 	if claim == nil || len(claim.Sources) == 0 {
 		return false, ErrSendNowEmpty

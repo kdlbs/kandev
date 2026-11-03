@@ -203,12 +203,12 @@ func (s *Service) restoreSendNowClaimWithRetry(
 }
 
 // releaseUnrecoverableSendNowClaim closes a claim that can be neither delivered
-// nor restored. It first releases the exact claim and the source rows it still
-// owns, so FIFO cannot run work already reported as undelivered. Only when no
-// successor owns a surviving source does it mark the user message not
-// delivered. The step is idempotent and retries transient failures, because a
-// leftover claim blocks its entry through the ownership rule until the next
-// reconciliation.
+// nor restored. It verifies the exact claim still owns its sources, marks the
+// user message not delivered while the claim remains available for retry, then
+// releases the claim and the source rows it still owns so FIFO cannot run work
+// already reported as undelivered. The step is idempotent and retries transient
+// failures, because a leftover claim blocks its entry through the ownership
+// rule until the next reconciliation.
 func (s *Service) releaseUnrecoverableSendNowClaim(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
@@ -225,27 +225,55 @@ func (s *Service) releaseUnrecoverableSendNowClaimOnce(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
 ) error {
-	if !s.queuedDispatchIdentityIsCurrent(ctx, claim.Identity) {
+	replaced, err := s.sendNowClaimIdentityReplaced(ctx, claim.Identity)
+	if err != nil {
+		return err
+	}
+	if replaced {
 		// A replaced or deleted session keeps its existing handling: discard
 		// the exact claim without marking a message that no longer belongs to
 		// the current session identity.
 		return s.discardSendNowClaim(ctx, claim)
 	}
-	settled, err := s.messageQueue.ReleaseSendNowClaim(ctx, claim)
+	canRelease, err := s.messageQueue.CanReleaseSendNowClaim(ctx, claim)
 	if err != nil {
 		return err
 	}
-	if !settled {
-		// A successor owns a surviving source and may deliver it. Never mark
-		// the message not delivered in that case.
+	if !canRelease {
+		// A successor owns a surviving source or the claim was already
+		// acknowledged. Never mark the message not delivered in that case.
 		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 		return nil
 	}
+	// Mark while the claim is still present, so a failed status write can be
+	// retried. The claim continues to block its sources until release succeeds.
 	if err := s.markSendNowClaimNotDelivered(ctx, claim); err != nil {
+		return err
+	}
+	if _, err := s.messageQueue.ReleaseSendNowClaim(ctx, claim); err != nil {
 		return err
 	}
 	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	return nil
+}
+
+// sendNowClaimIdentityReplaced distinguishes a confirmed replaced session from
+// a transient identity lookup error, so release retries the latter.
+func (s *Service) sendNowClaimIdentityReplaced(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+) (bool, error) {
+	if identity.SessionIncarnationID == "" {
+		return false, nil
+	}
+	current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
+	if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return current != identity, nil
 }
 
 func (s *Service) discardSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {

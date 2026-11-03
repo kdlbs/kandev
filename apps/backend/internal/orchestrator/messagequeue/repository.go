@@ -194,10 +194,15 @@ type Repository interface {
 	// prompt has been accepted. Ordinary sources were already removed by claim.
 	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
 
+	// CanReleaseSendNowClaim reports whether the exact claim still owns its
+	// session and no successor owns a surviving source. A false result means the
+	// caller must not mark the message not delivered; callers check this before
+	// writing the status so the claim remains available for retry.
+	CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
+
 	// ReleaseSendNowClaim removes the exact open claim and every source row it
 	// still owns, so FIFO cannot deliver a message already reported as
-	// undelivered. It reports whether no successor owns a surviving source; a
-	// false result means the caller must not mark the message not delivered.
+	// undelivered.
 	ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
 
 	// UpdateContent replaces the content/attachments of an entry. The session

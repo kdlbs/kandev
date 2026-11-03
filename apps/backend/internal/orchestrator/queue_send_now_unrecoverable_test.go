@@ -314,3 +314,17 @@ func TestSendNowAcceptedClaimNeverMarksNotDelivered(t *testing.T) {
 	require.Empty(t, fixture.userMessages(t),
 		"an accepted claim must not be marked not delivered")
 }
+
+// TestSendNowReleaseStatusFailureKeepsClaimForRetry pins the ordering: the
+// claim remains available when the not-delivered status cannot be written.
+func TestSendNowReleaseStatusFailureKeepsClaimForRetry(t *testing.T) {
+	fixture := newSendNowUnrecoverableFixture(t)
+	fixture.creator.failSetStatus = 10
+
+	err := fixture.svc.releaseUnrecoverableSendNowClaim(context.Background(), fixture.claim)
+	require.Error(t, err)
+	require.Empty(t, fixture.userMessages(t))
+	pending, listErr := fixture.queue.ListPendingSendNowClaims(context.Background())
+	require.NoError(t, listErr)
+	require.Len(t, pending, 1, "the claim must remain for a later retry")
+}

@@ -372,9 +372,54 @@ func (r *sqliteRepository) SetPendingSendNowClaimDelivery(
 	return tx.Commit()
 }
 
+// CanReleaseSendNowClaim reports whether this exact claim still owns its
+// session and no successor owns a surviving source.
+func (r *sqliteRepository) CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return false, ErrSendNowEmpty
+	}
+	sessionID := claim.Sources[0].SessionID
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin inspect Send Now claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	currentClaimID, found, err := r.sendNowClaimIDTx(ctx, tx, sessionID)
+	if err != nil || !found || currentClaimID != claim.ClaimID {
+		return false, err
+	}
+	return r.sendNowClaimSourcesReleaseableTx(ctx, tx, sessionID, claim)
+}
+
+func (r *sqliteRepository) sendNowClaimSourcesReleaseableTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	claim *SendNowClaim,
+) (bool, error) {
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, source := range claim.Sources {
+		entry, ok := stored[source.ID]
+		if !ok {
+			continue
+		}
+		if !entry.message.IsReservedInFlight() && !sameQueuedMessageContent(entry.message, &source) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // ReleaseSendNowClaim removes an unrestorable claim and the source rows it
-// still owns. A false result means a successor owns a surviving source, so the
-// caller must not mark the message not delivered.
+// still owns.
 func (r *sqliteRepository) ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error) {
 	if claim == nil || len(claim.Sources) == 0 {
 		return false, ErrSendNowEmpty

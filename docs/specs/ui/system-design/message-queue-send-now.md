@@ -139,12 +139,13 @@ reach that state: the running backend's restore in
 startup reconciliation without a recovery-block store. Today the first leaves
 the claim row behind, and the other two delete it silently.
 
-All three call one release step. It releases the exact claim and every source
-row the claim still owns, so FIFO cannot later deliver work already reported as
-undelivered. If a successor owns a surviving source, the step leaves the
+All three call one release step. It first verifies that the exact claim still
+owns its sources; if a successor owns a surviving source, the step leaves the
 message unmarked because that successor may deliver it. Otherwise the step
-marks the claim's user message as not delivered. When the message is already in
-the history (a durable source recorded by `prepareSendNowTranscript`, or a
+marks the claim's user message as not delivered while the claim is still
+present, then releases the claim and every source row it owns, so FIFO cannot
+later deliver work already reported as undelivered. When the message is
+already in the history (a durable source recorded by `prepareSendNowTranscript`, or a
 message recorded after the prompt claim), the step adds
 `delivery_status: not_delivered` to its metadata. When it is not, the step
 records it from the claim's dispatch envelope with that status in an
@@ -154,9 +155,9 @@ running indicators. The step then publishes the message update and queue
 status. It is idempotent per claim, so a retry or a second recovery pass does
 not duplicate it. Transient failures are retried with the bounded claim
 mutation helper. A failure before the release transaction commits leaves the
-claim in place for the next startup reconciliation or recovery action; a
-persistent failure while writing the message status leaves the claim and its
-sources released but the message unmarked, and the error is logged.
+claim in place for the next startup reconciliation or recovery action. A
+persistent failure while writing the message status keeps the claim available
+for retry and leaves the message unmarked, and the error is logged.
 
 Claims invalidated by deleting or replacing the task or session are not
 unrecoverable: restore already skips sources whose generation changed and
