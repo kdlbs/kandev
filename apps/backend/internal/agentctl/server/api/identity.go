@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
+	"github.com/kandev/kandev/internal/common/opencode"
 )
 
 // SurvivalCapabilities lists every named capability this build of agentctl
@@ -18,6 +19,7 @@ var SurvivalCapabilities = []string{
 	"agent-survival.v1",
 	"agent-delivery.v1",
 	launchwrapper.Capability,
+	opencode.CredentialCapability,
 	acpcompat.AntigravityPersonalAuthCapability,
 }
 

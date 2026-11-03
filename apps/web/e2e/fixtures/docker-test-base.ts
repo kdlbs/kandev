@@ -7,6 +7,7 @@ import {
   E2E_IMAGE_TAG,
   hasDocker,
   removeScopedKandevContainers,
+  restoreAgentSessionDirectoryOwnership,
   waitForScopedKandevContainersRemoved,
 } from "./docker-probe";
 import { ApiClient } from "../helpers/api-client";
@@ -151,6 +152,7 @@ export const dockerTest = backendFixture.extend<
         // The backend owns containers created by the test task. Do not sweep
         // the daemon here: another E2E shard may be using it concurrently.
         await waitForScopedKandevContainersRemoved();
+        restoreAgentSessionDirectoryOwnership(path.join(backend.tmpDir, ".kandev"));
       }
     },
     { scope: "worker", timeout: 120_000 },

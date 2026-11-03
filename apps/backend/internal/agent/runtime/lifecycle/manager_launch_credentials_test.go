@@ -2,10 +2,29 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/githubauth"
 )
+
+func TestConfigureAndStartAgentRejectsUnsupportedOpenCodeCredentialRuntime(t *testing.T) {
+	mgr := newTestManager(t)
+	var configuredEnv map[string]string
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv)
+	execution := &AgentExecution{
+		ID: "exec-opencode", AgentID: "opencode-acp", RuntimeName: agentruntime.RuntimeKubernetes,
+		OpenCodeRuntime: managedruntime.OpenCodeRuntime{Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, Version: "2.0.18"},
+		AgentArgs:       []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix, "@opencode/cli@2.0.18", "acp"},
+		WorkspacePath:   t.TempDir(), agentctl: client,
+		metadata: map[string]interface{}{"remote_credentials": `["agent:opencode-acp:files:0"]`},
+	}
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); !errors.Is(err, managedruntime.ErrOpenCodeCredentialRuntime) {
+		t.Fatalf("launch error = %v, want unsupported OpenCode credential runtime", err)
+	}
+}
 
 // A fresh launch has no per-run runtime_env overlay. The managed credential
 // broker values issued for that launch live only in the runtime snapshot, so

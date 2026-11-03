@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/filelock"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
 
@@ -36,6 +37,10 @@ func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec)
 }
 
 func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSpec) ([]byte, []byte, error) {
+	return m.runManagedCommandInput(parent, spec, nil)
+}
+
+func (m *Manager) runManagedCommandInput(parent context.Context, spec tools.CommandSpec, input []byte) ([]byte, []byte, error) {
 	ctx, release, err := m.BeginOwnedOperation(parent)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +71,13 @@ func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSp
 	if err != nil {
 		return nil, nil, err
 	}
-	_ = proc.Stdin.Close()
+	defer func() { _ = proc.Stdin.Close() }()
+	written := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(proc.Stdin, bytes.NewReader(input))
+		_ = proc.Stdin.Close()
+		written <- err
+	}()
 	stdout := collectManagedCommandOutput(proc.Stdout)
 	stderr := collectManagedCommandOutput(proc.Stderr)
 
@@ -88,16 +99,77 @@ func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSp
 		cancel()
 	}
 	if !finished {
+		m.holdCredentialAdmissionUntilReaped(proc)
 		return nil, nil, errors.Join(ctx.Err(), stopErr)
 	}
 
 	stdoutOutput := <-stdout
 	stderrOutput := <-stderr
 	waitErr := proc.Wait()
+	if proc.processReapError() != nil {
+		m.holdCredentialAdmissionUntilReaped(proc)
+	}
+	_ = proc.Stdin.Close()
+	waitErr = errors.Join(waitErr, <-written)
 	if canceled {
 		return stdoutOutput, stderrOutput, errors.Join(ctx.Err(), stopErr, waitErr)
 	}
 	return stdoutOutput, stderrOutput, waitErr
+}
+
+func (m *Manager) holdCredentialAdmissionUntilReaped(proc *PipedProcess) <-chan struct{} {
+	completed := make(chan struct{})
+	m.startMu.Lock()
+	if !m.credentialImport {
+		m.startMu.Unlock()
+		close(completed)
+		return completed
+	}
+	m.credentialImportBlocked = true
+	m.startMu.Unlock()
+
+	go func() {
+		defer close(completed)
+		<-proc.Done
+		if proc.processReapError() != nil {
+			return
+		}
+		m.startMu.Lock()
+		if !m.credentialImportBlocked {
+			m.startMu.Unlock()
+			return
+		}
+		storeLock := m.credentialStoreLock
+		m.credentialStoreLock = nil
+		m.startMu.Unlock()
+		if err := filelock.Release(storeLock); err != nil {
+			return
+		}
+		m.startMu.Lock()
+		m.credentialImport = false
+		m.credentialImportBlocked = false
+		m.startMu.Unlock()
+	}()
+	return completed
+}
+
+func (p *PipedProcess) processReapError() error {
+	p.process.mu.Lock()
+	defer p.process.mu.Unlock()
+	return p.process.reapErr
+}
+
+func (m *Manager) releaseOpenCodeCredentialAdmission() error {
+	m.startMu.Lock()
+	if m.credentialImportBlocked {
+		m.startMu.Unlock()
+		return nil
+	}
+	m.credentialImport = false
+	storeLock := m.credentialStoreLock
+	m.credentialStoreLock = nil
+	m.startMu.Unlock()
+	return filelock.Release(storeLock)
 }
 
 func collectManagedCommandOutput(reader io.ReadCloser) <-chan []byte {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -1876,6 +1877,7 @@ func (m *Manager) resetAgentRestartState(executionID string, preparation agentRe
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
 		exec.LaunchWrapper = commands.wrapper
+		exec.OpenCodeRuntime = commands.openCodeRuntime
 		if preparation.copilotPluginArgsPrepared {
 			exec.setRuntimeEnvironment(preparation.runtimeEnvironment)
 		}
@@ -3386,6 +3388,9 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		return agentCommands{}, err
 	}
 	commands := newAgentCommands(args, continueArgs)
+	commands.openCodeRuntime = managedruntime.OpenCodeRuntime{
+		Family: opts.ManagedRuntimeFamily, Source: opts.ManagedRuntimeSource, Version: opts.ManagedRuntimeVersion,
+	}
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
 }

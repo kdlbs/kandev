@@ -57,6 +57,7 @@ test.describe("Quick Chat cancellation palette and composer", () => {
     await backend.restart({
       KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF: "true",
       KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING: "true",
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
     });
   });
 

@@ -152,7 +152,7 @@ func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
 	if item == nil {
 		t.Fatal("runtime metadata missing")
 	}
-	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != "2.0.18" ||
+	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != "2.1.2" ||
 		item.ActiveVersion != "2.0.19" || item.EffectiveVersion != "2.0.19" {
 		t.Fatalf("OpenCode runtime metadata = %+v, want selected v2 package and version", item)
 	}

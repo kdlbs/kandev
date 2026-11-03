@@ -21,6 +21,43 @@ if [ "${3:-}" = "--prefix" ]; then
 	shift_count=5
 fi
 
+# Credential preflight is a separate CLI operation from ACP startup. Keep it
+# deterministic and out of the startup retry counter used by this fixture.
+case "$package_spec" in
+	@opencode/cli@*)
+		found_package=false
+		previous_command=
+		credential_operation=
+		for arg in "$@"; do
+			if [ "$found_package" != "true" ]; then
+				if [ "$arg" = "$package_spec" ]; then found_package=true; fi
+				continue
+			fi
+			case "$previous_command:$arg" in
+				debug:paths) previous_command=debug-paths ;;
+				debug-paths:db) credential_operation=store-path; break ;;
+				auth:export) credential_operation=export; break ;;
+				auth:import) credential_operation=import; break ;;
+				*) previous_command=$arg ;;
+			esac
+		done
+		case "$credential_operation" in
+			store-path)
+				printf '%s\n' "${HOME:-/tmp}/.config/opencode/opencode.db"
+				exit 0
+				;;
+			export)
+				printf '%s\n' '[{"id":"e2e-managed-runtime"}]'
+				exit 0
+				;;
+			import)
+				cat >/dev/null
+				exit 0
+				;;
+		esac
+		;;
+esac
+
 if [ "${KANDEV_E2E_NPX_BYPASS_FAILURE:-false}" = "true" ]; then
 	shift "$shift_count"
 	exec "$mock_agent" "$@"

@@ -98,7 +98,7 @@ func TestOpenCodeRuntimeFamiliesUseTrustedPackagesAndArguments(t *testing.T) {
 		version     string
 	}{
 		{name: "v1", family: managedruntime.OpenCodeFamilyV1, packageName: "opencode-ai", version: "1.18.32"},
-		{name: "v2", family: managedruntime.OpenCodeFamilyV2, packageName: "@opencode/cli", version: "2.0.18"},
+		{name: "v2", family: managedruntime.OpenCodeFamilyV2, packageName: "@opencode/cli", version: "2.1.2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
