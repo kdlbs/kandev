@@ -171,6 +171,16 @@ func (s *Store) ClearDeliveryMiss(pendingID string) {
 	delete(s.deliveryMisses, pendingID)
 }
 
+// HasWaiter reports whether an in-memory waiter currently owns pendingID. A
+// detached answer has no waiter and materializes files through its resume
+// prompt instead of the live delivery seam.
+func (s *Store) HasWaiter(pendingID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.pending[pendingID]
+	return ok
+}
+
 func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool) {
 
 	// Normalise in-place so dedup keys are stable even when the caller

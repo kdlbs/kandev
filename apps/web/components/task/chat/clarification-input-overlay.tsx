@@ -2,7 +2,15 @@
 
 /* eslint-disable max-lines -- the overlay keeps active and late-answer lifecycle states together. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import type {
   Message,
@@ -29,8 +37,11 @@ import {
 } from "./clarification-overlay-parts";
 import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
 import { ClarificationStatusBanner } from "./clarification-status-banner";
+import { ClarificationAnswerAttachments } from "./clarification-answer-attachments";
+import { useClarificationAnswerAttachments } from "./use-clarification-answer-attachments";
 import { QuestionImages } from "./question-images";
 import { useClarificationDraft } from "./clarification-draft-context";
+import { sameAttachmentIDs } from "./use-clarification-answer-attachments";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { useTranslation } from "react-i18next";
 
@@ -143,7 +154,22 @@ type CardProps = {
   onCustomDraftChange: (text: string) => void;
   onSubmitCustom: (text: string) => void;
   onRequestFinalSubmit: () => void;
+  attachmentActions?: ReactNode;
+  onPasteFiles?: (files: File[], issue?: "unreadable-image") => void;
+  showFinalSubmit?: boolean;
+  finalSubmitDisabled?: boolean;
+  onFinalSubmit?: () => void;
 };
+
+function clarificationAttachmentInputProps(props: CardProps) {
+  return {
+    attachmentActions: props.attachmentActions,
+    onPasteFiles: props.onPasteFiles,
+    showFinalSubmit: props.showFinalSubmit,
+    finalSubmitDisabled: props.finalSubmitDisabled,
+    onFinalSubmit: props.onFinalSubmit,
+  };
+}
 
 function ClarificationCard(props: CardProps) {
   const { t } = useTranslation();
@@ -238,6 +264,7 @@ function ClarificationCard(props: CardProps) {
           onChange={onCustomDraftChange}
           onSubmit={onSubmitCustom}
           onRequestFinalSubmit={onRequestFinalSubmit}
+          {...clarificationAttachmentInputProps(props)}
         />
       )}
     </div>
@@ -431,8 +458,11 @@ type CarouselBodyProps = {
   armedEventRef: RefObject<KeyboardEvent | null>;
   keyboardShortcutsEnabled: boolean;
   onSubmit: () => void;
-  submitAnswers: (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
-  autoSubmitSingleQuestion: boolean;
+  attachmentActions?: ReactNode;
+  onPasteFiles?: (files: File[], issue?: "unreadable-image") => void;
+  showFinalSubmit?: boolean;
+  finalSubmitDisabled?: boolean;
+  onFinalSubmit?: () => void;
   onDismiss: () => void;
 };
 
@@ -444,8 +474,6 @@ type QuestionHandlerCtx = {
   total: number;
   setActiveIndex: (idx: number) => void;
   setCustomDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  submitAnswers: (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
-  autoSubmitSingleQuestion: boolean;
 };
 
 type AnswerSubmitter = (override?: Record<string, ClarificationAnswer>) => void | Promise<void>;
@@ -491,26 +519,15 @@ function deriveSelectionState(
 }
 
 function buildQuestionHandlers(ctx: QuestionHandlerCtx): QuestionHandlers {
-  const {
-    meta,
-    group,
-    isSingleQuestion,
-    activeIndex,
-    total,
-    setActiveIndex,
-    setCustomDrafts,
-    submitAnswers,
-    autoSubmitSingleQuestion,
-  } = ctx;
+  const { meta, group, isSingleQuestion, activeIndex, total, setActiveIndex, setCustomDrafts } =
+    ctx;
 
-  // Records the answer, then auto-submits (single-question — uses the override
-  // path because setState is async) or auto-advances to the next step.
+  // Every answer now records a draft. Single-question bundles submit only
+  // through the explicit trailing Send action, so files can be attached after
+  // a choice is made.
   const commitAnswer = (answer: ClarificationAnswer) => {
     group.recordAnswer(meta.questionId, answer);
-    if (isSingleQuestion && autoSubmitSingleQuestion) {
-      void submitAnswers({ [meta.questionId]: answer });
-      return;
-    }
+    if (isSingleQuestion) return;
     if (activeIndex < total - 1) setActiveIndex(activeIndex + 1);
   };
 
@@ -573,8 +590,11 @@ function ClarificationCarouselBody({
   armedEventRef,
   keyboardShortcutsEnabled,
   onSubmit,
-  submitAnswers,
-  autoSubmitSingleQuestion,
+  attachmentActions,
+  onPasteFiles,
+  showFinalSubmit,
+  finalSubmitDisabled,
+  onFinalSubmit,
   onDismiss,
 }: CarouselBodyProps) {
   const total = sortedMessages.length;
@@ -601,8 +621,6 @@ function ClarificationCarouselBody({
     total,
     setActiveIndex,
     setCustomDrafts,
-    submitAnswers,
-    autoSubmitSingleQuestion,
   });
 
   return (
@@ -623,6 +641,11 @@ function ClarificationCarouselBody({
         onCustomDraftChange={onCustomDraftChange}
         onSubmitCustom={onSubmitCustom}
         onRequestFinalSubmit={onSubmit}
+        attachmentActions={attachmentActions}
+        onPasteFiles={onPasteFiles}
+        showFinalSubmit={showFinalSubmit}
+        finalSubmitDisabled={finalSubmitDisabled}
+        onFinalSubmit={onFinalSubmit}
       />
       {!isSingleQuestion && (
         <ClarificationCarouselNav
@@ -680,6 +703,19 @@ export function ClarificationInputOverlay({
     [messages],
   );
   const group = useClarificationGroup(sortedMessages, onOutcome, onLateAnswer);
+  const questionIds = useMemo(
+    () =>
+      sortedMessages
+        .map((message) => readSingleQuestionMeta(message)?.questionId)
+        .filter((questionId): questionId is string => Boolean(questionId)),
+    [sortedMessages],
+  );
+  const attachments = useClarificationAnswerAttachments({
+    messages: sortedMessages,
+    questionIds,
+    pendingId: group.pendingId,
+  });
+  const { readyAttachments, allReady: attachmentsReady } = attachments;
   const [lateStatus, setLateStatus] = useState<"idle" | "sending" | "sent" | "queued" | "error">(
     "idle",
   );
@@ -727,6 +763,48 @@ export function ClarificationInputOverlay({
   const activeMessage = sortedMessages[activeIndex] ?? null;
   const meta = activeMessage ? readSingleQuestionMeta(activeMessage) : null;
   const sharedContext = readSharedContext(sortedMessages[0]);
+  const allowCustomText = meta?.question.allow_custom_text !== false;
+  const attachmentActions = meta ? (
+    <ClarificationAnswerAttachments
+      questionId={meta.questionId}
+      controller={attachments}
+      disabled={isSubmitting}
+      variant={allowCustomText ? "input" : "header"}
+    />
+  ) : null;
+  const enrichAnswers = useCallback(
+    (answers: Record<string, ClarificationAnswer>) => {
+      const enriched: Record<string, ClarificationAnswer> = {};
+      for (const [questionId, answer] of Object.entries(answers)) {
+        const files = readyAttachments(questionId);
+        enriched[questionId] = files.length > 0 ? { ...answer, attachments: files } : answer;
+      }
+      return enriched;
+    },
+    [readyAttachments],
+  );
+  useEffect(() => {
+    for (const questionId of questionIds) {
+      const answer = group.answers[questionId];
+      if (!answer) continue;
+      const ready = readyAttachments(questionId);
+      if (sameAttachmentIDs(answer.attachments, ready)) continue;
+      group.recordAnswer(questionId, {
+        ...answer,
+        attachments: ready.length > 0 ? ready : undefined,
+      });
+    }
+  }, [group.answers, group.recordAnswer, questionIds, readyAttachments]);
+  useEffect(() => {
+    if (attachments.totalCount === 0) return;
+    if (
+      group.submitState === "ok" ||
+      group.lateAnswerState === "sent" ||
+      group.lateAnswerState === "queued"
+    ) {
+      attachments.clearAll();
+    }
+  }, [attachments.clearAll, attachments.totalCount, group.lateAnswerState, group.submitState]);
 
   useResolveCallback(lateMode ? "idle" : group.submitState, onResolved);
 
@@ -753,19 +831,26 @@ export function ClarificationInputOverlay({
     },
     [group.answers, onLateAnswer, sortedMessages],
   );
-  const submitAnswers = chooseSubmitter(
+  const baseSubmitter = chooseSubmitter(
     lateMode,
     lateInteraction,
     submitLateAnswer,
     group.retryLateAnswer,
     group.submitCollected,
   );
+  const submitAnswers = useCallback(
+    async (override?: Record<string, ClarificationAnswer>) => {
+      if (!attachmentsReady) return;
+      await baseSubmitter(enrichAnswers({ ...group.answers, ...(override ?? {}) }));
+    },
+    [attachmentsReady, baseSubmitter, enrichAnswers, group.answers],
+  );
   const handleSubmit = useCallback(() => {
-    if (allAnswered) void submitAnswers();
-  }, [allAnswered, submitAnswers]);
+    if (allAnswered && attachmentsReady) void submitAnswers();
+  }, [allAnswered, attachmentsReady, submitAnswers]);
   const retryLateAnswerForm = useCallback(() => {
-    if (effectiveLateSnapshot) void submitLateAnswer();
-  }, [effectiveLateSnapshot, submitLateAnswer]);
+    if (effectiveLateSnapshot) void submitAnswers();
+  }, [effectiveLateSnapshot, submitAnswers]);
   const retryLateAnswer = lateMode ? retryLateAnswerForm : group.retryLateAnswer;
 
   // Gated on the same resolved `meta` that decides whether
@@ -833,9 +918,11 @@ export function ClarificationInputOverlay({
         isSubmitting={isSubmitting}
         answeredCount={group.answeredCount}
         answerableTotal={group.total}
-        allAnswered={allAnswered}
+        allAnswered={allAnswered && attachmentsReady}
         onSubmit={handleSubmit}
         onSkip={() => void group.skipAll("User skipped")}
+        attachmentActions={meta && !allowCustomText ? attachmentActions : undefined}
+        showSingleQuestionSubmit={!lateInteraction && total === 1 && !allowCustomText}
         lateMode={lateInteraction}
         onLateClose={onDismiss}
         onCollapse={onCollapse}
@@ -846,12 +933,22 @@ export function ClarificationInputOverlay({
         collapseContentId={collapseContentId}
       />
       {group.submitState === "error" && (
-        <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
+        <ClarificationStatusBanner
+          state={group.submitState}
+          onRetry={() => {
+            if (attachmentsReady) void group.retry(enrichAnswers(group.answers));
+          }}
+        />
       )}
       {lateInteraction &&
         ((lateMode && effectiveLateStatus === "error") ||
           (!lateMode && group.lateAnswerState === "error")) && (
-          <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
+          <ClarificationStatusBanner
+            state="error"
+            onRetry={() => {
+              if (attachmentsReady) void retryLateAnswer(enrichAnswers(group.answers));
+            }}
+          />
         )}
       {sharedContext && (
         <div data-testid="clarification-context" className="mx-4 mt-3 mb-2 text-[13px]">
@@ -875,8 +972,13 @@ export function ClarificationInputOverlay({
         armedEventRef={armedEventRef}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled && !inspectingImage}
         onSubmit={handleSubmit}
-        submitAnswers={submitAnswers}
-        autoSubmitSingleQuestion={!lateInteraction}
+        attachmentActions={allowCustomText ? attachmentActions : undefined}
+        onPasteFiles={(files, issue) => {
+          if (meta) attachments.addFiles(meta.questionId, files, issue);
+        }}
+        showFinalSubmit={!lateInteraction && total === 1 && allowCustomText}
+        finalSubmitDisabled={!allAnswered || !attachmentsReady}
+        onFinalSubmit={handleSubmit}
         onDismiss={onDismiss}
       />
     </div>

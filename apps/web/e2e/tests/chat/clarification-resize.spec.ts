@@ -38,6 +38,7 @@ test.describe("Mock agent clarification slash commands", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 

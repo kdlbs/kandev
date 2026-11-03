@@ -35,6 +35,8 @@ function answerText(message: Message, answer: ClarificationAnswer | undefined): 
     return option?.label ?? optionId;
   });
   if (answer.custom_text?.trim()) selectedLabels.push(answer.custom_text.trim());
+  const filenames = (answer.attachments ?? []).map((attachment) => attachment.name);
+  if (filenames.length > 0) selectedLabels.push(filenames.join(", "));
   return selectedLabels.join(", ");
 }
 

@@ -130,8 +130,9 @@ test.describe("Clarification flow", () => {
       expect(descriptionBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
     });
 
-    // Single-question bundles still expose option click → instant resolve.
+    // A single-question option is a draft; explicit Send resolves it.
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText(/You answered|selected_option/);
@@ -170,6 +171,7 @@ test.describe("Clarification flow", () => {
 
     try {
       await session.clarificationOption("PostgreSQL").click();
+      await session.submitClarification();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
       await expect(status).toHaveCount(1);
@@ -236,6 +238,7 @@ test.describe("Clarification flow", () => {
 
     // The user picks a different option locally; the response above must win.
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("SQLite, decided by another answerer");
@@ -295,6 +298,7 @@ test.describe("Clarification flow", () => {
     await expect(reviewGroup).toBeVisible();
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
 
     await expect(
       session.sidebar.locator('[data-testid="sidebar-group-header"][data-group-key="IN_PROGRESS"]'),
@@ -703,6 +707,7 @@ test.describe("Clarification flow", () => {
     await expect(card).toBeVisible();
 
     await firstOption.locator("code").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     const resolved = session.activeChat().getByTestId("clarification-request-message");
@@ -745,6 +750,7 @@ test.describe("Clarification flow", () => {
     expect(pointerEvents).not.toBe("none");
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.planModeInput()).toBeVisible({ timeout: 30_000 });
   });
 });
@@ -882,6 +888,7 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.clarificationQuestionCardById("context-paragraphs")).toBeVisible();
 
     await session.clarificationOption("PostgreSQL").click();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 

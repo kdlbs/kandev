@@ -40,6 +40,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":             scenarioUntrackedFileSetup,
 	"untracked-file-modify":            scenarioUntrackedFileModify,
 	"clarification":                    scenarioClarification,
+	"clarification-files":              scenarioClarificationAttachments,
+	"clarification-files-choice":       scenarioClarificationAttachmentsChoiceOnly,
 	"clarification-no-other":           scenarioClarificationNoOther,
 	"clarification-markdown":           scenarioClarificationMarkdown,
 	"clarification-context-paragraphs": scenarioClarificationContextParagraphs,

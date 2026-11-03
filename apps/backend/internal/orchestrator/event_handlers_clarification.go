@@ -1,3 +1,4 @@
+//nolint:revive // file-length-limit: clarification lifecycle handlers share one ordered recovery contract.
 package orchestrator
 
 import (
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
@@ -114,15 +116,16 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 
 // clarificationAnsweredData is the event payload for ClarificationAnswered events.
 type clarificationAnsweredData struct {
-	SessionID           string `json:"session_id"`
-	TaskID              string `json:"task_id"`
-	PendingID           string `json:"pending_id"`
-	ClarificationTurnID string `json:"clarification_turn_id"`
-	Question            string `json:"question"`
-	AnswerText          string `json:"answer_text"`
-	Rejected            bool   `json:"rejected"`
-	RejectReason        string `json:"reject_reason"`
-	HandledInline       bool   `json:"handled_inline"`
+	SessionID           string                                 `json:"session_id"`
+	TaskID              string                                 `json:"task_id"`
+	PendingID           string                                 `json:"pending_id"`
+	ClarificationTurnID string                                 `json:"clarification_turn_id"`
+	Question            string                                 `json:"question"`
+	AnswerText          string                                 `json:"answer_text"`
+	Attachments         []models.ClarificationAnswerAttachment `json:"attachments,omitempty"`
+	Rejected            bool                                   `json:"rejected"`
+	RejectReason        string                                 `json:"reject_reason"`
+	HandledInline       bool                                   `json:"handled_inline"`
 }
 
 type clarificationWatchdogEntry struct {
@@ -196,6 +199,7 @@ func (s *Service) ResumeDetachedClarification(
 		ClarificationTurnID: request.ClarificationTurnID,
 		Question:            request.Question,
 		AnswerText:          request.AnswerText,
+		Attachments:         request.Attachments,
 		Rejected:            request.Rejected,
 		RejectReason:        request.RejectReason,
 	}, true, promptTaskOptions{
@@ -248,7 +252,8 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 
 	if _, err := s.promptTask(
-		ctx, data.TaskID, data.SessionID, prompt, "", false, nil, dispatchOnly, launchOriginManual, options,
+		ctx, data.TaskID, data.SessionID, prompt, "", false,
+		clarificationAnswerAttachmentsV1(data.Attachments), dispatchOnly, launchOriginManual, options,
 	); err != nil {
 		// The synchronous HTTP path must not turn an asynchronous queue handoff
 		// into false acknowledgement. Its handler restores the claimed bundle on
@@ -310,6 +315,7 @@ func (s *Service) HandleClarificationPrimaryAnswered(ctx context.Context, answer
 		ClarificationTurnID: answered.ClarificationTurnID,
 		Question:            answered.Question,
 		AnswerText:          answered.AnswerText,
+		Attachments:         answered.Attachments,
 		Rejected:            answered.Rejected,
 		RejectReason:        answered.RejectReason,
 	})
@@ -409,7 +415,7 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		prompt,
 		"",
 		false,
-		nil,
+		clarificationAnswerAttachmentsV1(data.Attachments),
 		false,
 		launchOriginAutomatic,
 		promptTaskOptions{
@@ -606,7 +612,8 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 		return fmt.Errorf("resolve clarification resume session: %w", err)
 	}
 	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
-		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false,
+		clarificationAnswerAttachmentsQueue(data.Attachments),
 		map[string]interface{}{
 			metaKeyUserMessageRecorded: true,
 			metaKeyCapacityOverride:    true,
@@ -1204,4 +1211,44 @@ func buildClarificationPrompt(data clarificationAnsweredData) string {
 	}
 	return fmt.Sprintf("You previously asked the user: %q\n%s\nPlease continue with this information.",
 		data.Question, data.AnswerText)
+}
+
+func clarificationAnswerAttachmentsV1(
+	attachments []models.ClarificationAnswerAttachment,
+) []v1.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]v1.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, v1.MessageAttachment{
+			Type:         attachment.Type,
+			AttachmentID: attachment.AttachmentID,
+			MimeType:     attachment.MimeType,
+			Name:         attachment.Name,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: "path",
+		})
+	}
+	return out
+}
+
+func clarificationAnswerAttachmentsQueue(
+	attachments []models.ClarificationAnswerAttachment,
+) []messagequeue.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]messagequeue.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, messagequeue.MessageAttachment{
+			Type:         attachment.Type,
+			AttachmentID: attachment.AttachmentID,
+			MimeType:     attachment.MimeType,
+			Name:         attachment.Name,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: "path",
+		})
+	}
+	return out
 }

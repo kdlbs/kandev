@@ -396,6 +396,15 @@ export type ClarificationQuestion = {
 // bundles, every message in the group shares the same pending_id and includes
 // question_index/question_total so the renderer can show "Question 2 of 3"
 // progress chips.
+export type ClarificationAnswerAttachment = {
+  attachment_id: string;
+  type: "image" | "audio" | "resource";
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  delivery_mode: "prompt" | "path";
+};
+
 export type ClarificationRequestMetadata = {
   pending_id: string;
   session_id: string;
@@ -407,6 +416,8 @@ export type ClarificationRequestMetadata = {
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
+  /** Server-retained answer files, present after a retryable delivery failure. */
+  attachments?: ClarificationAnswerAttachment[];
   agent_disconnected?: boolean;
 };
 
@@ -414,6 +425,7 @@ export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
+  attachments?: ClarificationAnswerAttachment[];
 };
 
 export type ClarificationResponse = {

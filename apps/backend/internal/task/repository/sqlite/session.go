@@ -482,6 +482,29 @@ func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID str
 	return turn, err
 }
 
+// CurrentClarificationTurnID returns the canonical current conversational turn
+// for a session using the same authority predicate and ordering as the
+// clarification claim and finalization transactions.
+func (r *Repository) CurrentClarificationTurnID(ctx context.Context, sessionID string) (string, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
+	query := fmt.Sprintf(`
+		SELECT turn_row.id
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY %s
+		LIMIT 1
+	`, predicate, orderBy)
+	var turnID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(&turnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve current clarification turn: %w", err)
+	}
+	return turnID, nil
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")

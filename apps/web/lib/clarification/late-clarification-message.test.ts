@@ -67,6 +67,33 @@ describe("formatLateClarificationMessage", () => {
     expect(result).not.toContain("<kandev-system>");
   });
 
+  it("keeps answer filenames with their question in the fallback message", () => {
+    const messages = [
+      questionMessage("q1-message", "q1", 0, "Pick a plan", [{ option_id: "fast", label: "Fast" }]),
+    ];
+    const result = formatLateClarificationMessage(
+      messages,
+      [
+        {
+          question_id: "q1",
+          selected_options: ["fast"],
+          attachments: [
+            {
+              attachment_id: "att-1",
+              type: "image",
+              name: "screenshot.png",
+              mime_type: "image/png",
+              size_bytes: 3,
+              delivery_mode: "path",
+            },
+          ],
+        },
+      ],
+      { questionLabel: "Question", answerLabel: "Answer", contextLabel: "Context" },
+    );
+    expect(result).toContain("Answer: Fast, screenshot.png");
+  });
+
   it("neutralizes internal system tags in copied question content", () => {
     const messages = [
       questionMessage(

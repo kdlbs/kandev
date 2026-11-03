@@ -1985,6 +1985,24 @@ const askUserQuestionOutputSchema = `{
       "selected_option": {"type": "string", "description": "ID of the selected option."},
       "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
       "custom_text": {"type": "string"},
+      "attachments": {
+        "type": "array",
+        "description": "Files the user attached to this answer. Read each path with your file tools; the path is readable in this execution.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "attachment_id": {"type": "string"},
+            "type": {"type": "string"},
+            "name": {"type": "string"},
+            "mime_type": {"type": "string"},
+            "size_bytes": {"type": "integer"},
+            "delivery_mode": {"type": "string"},
+            "path": {"type": "string", "description": "Readable path inside the current execution."}
+          },
+          "required": ["attachment_id", "name", "path"],
+          "additionalProperties": false
+        }
+      },
       "answered": {"type": "boolean"},
       "rejected": {"type": "boolean"}
     },
@@ -1995,7 +2013,7 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option ID and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions; wait for all answers. Each needs a prompt and 2-6 labeled, described options. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Ask only when input is needed. Keep context to 1-3 short sentences or brief bullets, about 100 words or fewer. Put full reports, logs, and repeated conversation outside this call, before it; keep questions and options self-contained. Returns answers by question ID with selected_option and selected_label for matches. Rejections include rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),

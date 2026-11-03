@@ -55,6 +55,7 @@ test.describe("Needs-you Inbox answer flow", () => {
     });
 
     await overlay.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
+    await overlay.getByTestId("clarification-custom-submit").click();
 
     // The outcome callback fires a convergence re-read; the row disappears
     // because the answered bundle is no longer answerable, not because the
@@ -69,5 +70,61 @@ test.describe("Needs-you Inbox answer flow", () => {
     // tool call was actually released and the turn ran to completion.
     await waitForAgentMessage(apiClient, task.session_id, "You answered:", 30_000);
     prCapture.flush();
+  });
+});
+
+test.describe("Needs-you Inbox answer attachments", () => {
+  test("uploads a file from the inbox row and preserves its source task scope", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const title = "Inbox Answer Attachment Scope";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-files",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected a clarification session");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification session should reach its blocking state before the Inbox is opened",
+      timeout: 60_000,
+    });
+    await testPage.goto("/needs-you-inbox");
+    const row = testPage.getByTestId("needs-you-inbox-row").filter({ hasText: title });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.getByTestId("needs-you-inbox-row-toggle").click();
+    const overlay = row.getByTestId("clarification-overlay");
+    await expect(overlay).toBeVisible({ timeout: 15_000 });
+
+    await overlay.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
+    const upload = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().includes("/api/v1/attachments"),
+    );
+    await overlay.getByTestId("clarification-attachment-input").setInputFiles({
+      name: "inbox.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X3pZQAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+    expect((await upload).ok()).toBe(true);
+    await expect(overlay.getByTestId("clarification-attachment-badge")).toHaveText("1");
+    await overlay.getByTestId("clarification-custom-submit").click();
+
+    await expect(row).toHaveCount(0, { timeout: 15_000 });
+    await waitForAgentMessage(apiClient, task.session_id, "Attachment proof: inbox.png", 30_000);
   });
 });

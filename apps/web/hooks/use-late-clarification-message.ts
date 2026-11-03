@@ -161,6 +161,19 @@ async function hydrateSourceSession({
   }
 }
 
+function snapshotAttachments(snapshot: LateClarificationSnapshot) {
+  return snapshot.answers.flatMap((answer) =>
+    (answer.attachments ?? []).map((attachment) => ({
+      type: attachment.type,
+      attachment_id: attachment.attachment_id,
+      mime_type: attachment.mime_type,
+      name: attachment.name,
+      size_bytes: attachment.size_bytes,
+      delivery_mode: attachment.delivery_mode,
+    })),
+  );
+}
+
 export function useLateClarificationMessage(sourceMessage: Message | undefined) {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
@@ -226,6 +239,7 @@ export function useLateClarificationMessage(sourceMessage: Message | undefined) 
           const outcome = await handleSendMessageWithOutcome({
             message,
             clientMessageId: record.clientMessageId,
+            attachments: snapshotAttachments(snapshot),
           });
           if (outcome === false || outcome === undefined) {
             throw new MessageSendError("late-answer-admission-failed", t("task:lateAnswerFailed"));
