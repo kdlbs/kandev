@@ -1,7 +1,7 @@
 ---
 id: "01-cache-scan-recovery"
 title: "Recover stale cache scans"
-status: completed
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -58,8 +58,9 @@ Run from the repository root. Use `/tdd` and the scoped backend test conventions
 Run the named regression before implementation and retain its expected failure.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/system/storage/gocache -run '^TestCleanupRestartsRecreatedShardBeforeResume$' -count=1 -v)
-(cd apps/backend && go test -trimpath -race ./internal/system/storage/gocache -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/system/storage/gocache -run '^TestCleanupRestartsRecreatedShardBeforeResume$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/system/storage/gocache -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/system/storage/... -count=1)
 bash scripts/lint-go-changed apps/backend/internal/system/storage/gocache/cleanup_session.go apps/backend/internal/system/storage/gocache/cleanup_session_recovery_test.go
 git diff --check
 ```
@@ -105,16 +106,26 @@ return `cache_parent_changed` with reason `cache_scan_invalidated`, and keep
 successful unlink bytes. Review remediation added regressions that retain an
 above-threshold delete cursor and a partial-unlink cursor before replacing the
 shard with below-threshold content. Both require fresh `BytesBefore`/`BytesAfter`
-measurement and verify that replacement files survive.
+measurement and verify that replacement files survive. Review remediation added
+mount-identity classification before the stale restart, parent-disappearance
+invalidation, focused remainder-entry and directory-removal retirement tests,
+and reservation of the stable `cache_parent_changed` issue when the bounded
+sample is full.
 
 Verification:
 
-- `go test -trimpath ./internal/system/storage/gocache -run '^TestCleanupRestartsRecreatedShardBeforeResume$' -count=1 -v`
+- `go test -trimpath -tags fts5 ./internal/system/storage/gocache -run '^TestCleanupRestartsRecreatedShardBeforeResume$' -count=1 -v`
   failed before the fix with repeated `go-cache parent changed after scan` errors
   and passed after it.
-- `go test -trimpath -race ./internal/system/storage/gocache -count=1` passed.
-- `go test -trimpath ./internal/system/storage/... -count=1` passed.
+- `go test -trimpath -tags fts5 -race ./internal/system/storage/gocache -count=1` passed.
+- `go test -trimpath -tags fts5 ./internal/system/storage/... -count=1` passed.
 - Changed-file Go lint reported 0 issues.
 - With retained-frame validation temporarily disabled, both replacement
   regressions fail with `cache_scan_invalidated` and stale `BytesBefore: 6`, so
   they exercise the discarded threshold authority rather than only a fresh scan.
+
+Remaining issue-closure gate: mount-identity behavior on macOS and Windows and
+validation against a physical alternate mount were not exercised in this Linux
+environment. The Linux unit and race regressions cover the shared logic, but
+native-platform and physical-device confirmation remains required before closing
+the mount-safety acceptance criteria.

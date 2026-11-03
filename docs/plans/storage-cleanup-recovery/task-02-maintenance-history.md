@@ -1,7 +1,7 @@
 ---
 id: "02-maintenance-history"
 title: "Clarify maintenance history"
-status: completed
+status: done
 wave: 2
 depends_on:
   - "01-cache-scan-recovery"
@@ -113,7 +113,7 @@ The first E2E command builds fresh production artifacts. Run projects sequential
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/settings/system/storage/storage-run-summary.test.ts components/settings/system/storage/storage-run-history.test.tsx components/settings/system/storage/storage-overview-card-go-cache-result.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint components/settings/system/storage/storage-run-summary.ts components/settings/system/storage/storage-run-summary.test.ts components/settings/system/storage/storage-run-history.tsx components/settings/system/storage/storage-run-history.test.tsx components/settings/system/storage/storage-go-cache-result.tsx e2e/tests/system/storage-maintenance.spec.ts e2e/tests/system/mobile-storage-maintenance.spec.ts)
+(cd apps/web && pnpm exec eslint components/settings/system/storage/storage-run-summary.ts components/settings/system/storage/storage-run-summary.test.ts components/settings/system/storage/storage-run-history.tsx components/settings/system/storage/storage-run-history.test.tsx components/settings/system/storage/storage-go-cache-result.tsx e2e/helpers/storage-maintenance.ts e2e/tests/system/storage-maintenance.spec.ts e2e/tests/system/mobile-storage-maintenance.spec.ts)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:pseudo)
 (cd apps/web && pnpm run i18n:check)
@@ -179,17 +179,24 @@ remaining or unknown bytes and deduplicates issue explanations. Review remediati
 keeps the existing partial warning when no issue codes are retained, adds one
 generic explanation for raw-only or uncovered errors, maps read and delete
 failures to their own explanations, and folds legacy codes into the changed-entry
-explanation only when parent-change evidence exists.
+explanation only when parent-change evidence exists without an unrelated cause.
+Non-Go provider failures remain visible on failed runs, and the technical-details
+and temporary-artifact renderers moved to a separate feature component to keep
+the history file within the web size limit.
 
 Verification:
 
 - `pnpm exec vitest run` for the new summary test, the history component test, and
-  the Go result component test: 35 passed. The full storage component and
-  maintenance hook run passed 178 tests.
+  the Go result component test: 37 passed. The full storage component and
+  maintenance hook run passed 180 tests.
 - `pnpm run typecheck` passed. Changed-file ESLint reported no errors or warnings.
 - `pnpm run i18n:zh-hant`, `pnpm run i18n:pseudo`, `pnpm run i18n:check`, and
   `pnpm run i18n:ratchet` passed with all seven catalogs updated.
 - Desktop Chromium maintenance spec: 11 passed. Mobile Chrome maintenance spec:
   10 passed, including 767px and 768px geometry and 44px touch targets.
+
+Remaining issue-closure gate: the mobile run uses browser and device emulation.
+Physical-device validation was not available in this environment and remains
+required before closing the phone acceptance criteria.
 - `node scripts/validate-public-docs.mjs` validated 54 pages after
   `docs/public/operations.md` gained the history outcome guidance.

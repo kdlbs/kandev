@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: completed
+status: done
 requirements:
   - REQ-SYSTEM-PAGE-GO-CACHE-004
   - REQ-SYSTEM-PAGE-GO-CACHE-005
@@ -215,7 +215,7 @@ Each work order owns its exact verification commands and implementation results.
 Design-stage checks passed on 2026-11-03:
 
 - Temporary Go overlay diagnostic: both unchanged and recreated-shard cases passed.
-  Command: `(cd apps/backend && GOCACHE=/tmp/kandev-storage-repro-cache go test -trimpath -overlay=/tmp/kandev-storage-repro-overlay.json ./internal/system/storage/gocache -run '^TestReproStorageResumedShardIdentity$' -count=1 -v)`.
+  Command: `(cd apps/backend && GOCACHE=/tmp/kandev-storage-repro-cache go test -trimpath -tags fts5 -overlay=/tmp/kandev-storage-repro-overlay.json ./internal/system/storage/gocache -run '^TestReproStorageResumedShardIdentity$' -count=1 -v)`.
 - `python3 scripts/list-docs.py validate`: 427 decisions and 1,893 specifications validated.
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
@@ -233,7 +233,7 @@ Implementation results on 2026-11-03:
   passed after it. The package race run and all `internal/system/storage/...`
   tests passed. Changed-file Go lint reported 0 issues.
 - The frontend summary, history component, Go result component, seven catalogs,
-  and desktop/phone maintenance specs are implemented. Vitest ran 178 storage
+  and desktop/phone maintenance specs are implemented. Vitest ran 180 storage
   tests, `pnpm run typecheck` passed, and changed-file ESLint reported no errors
   or warnings. Raw-only and partial-only Go failures keep a visible generic
   explanation, read/delete failures no longer claim directory replacement, and

@@ -279,6 +279,17 @@ describe("storageGoCacheResultSummary evidence", () => {
     expect(deleted?.issueCategories).toEqual(["delete_failed"]);
   });
 
+  it("keeps an unrelated read failure visible beside a parent change", () => {
+    const outcome = storageGoCacheResultSummary({
+      go_cache: {
+        result: { reclaimed_bytes: 1, errors: ["cache_parent_changed", "entry_read_failed"] },
+        error: "go-cache parent changed after scan\npermission denied\nentry_read_failed",
+      },
+    });
+
+    expect(outcome?.issueCategories).toEqual(["entries_changed", "unreadable"]);
+  });
+
   it("keeps the incident deduplicated when legacy codes accompany parent change", () => {
     const outcome = storageGoCacheResultSummary({
       go_cache: {
@@ -335,9 +346,12 @@ describe("storageRunSummary compatibility", () => {
     ).toBe("succeeded");
     expect(
       storageRunSummary(
-        makeRun({ state: "succeeded", result: { workspaces: { result: { quarantine: 2 } } } }),
+        makeRun({
+          state: "failed",
+          result: { workspaces: { result: { quarantine: 2 }, error: "purge failed" } },
+        }),
       ).status,
-    ).toBe("succeeded");
+    ).toBe("failed");
     expect(
       storageRunSummary(
         makeRun({

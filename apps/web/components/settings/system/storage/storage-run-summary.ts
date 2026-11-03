@@ -206,6 +206,14 @@ function goCacheIssueCategories(
 ): { categories: StorageHistoryIssueCategory[]; hasUnknownIssue: boolean } {
   const texts = [providerError, message].filter((text): text is string => typeof text === "string");
   const identityChanged = hasIdentityEvidence(issues, texts);
+  let unrelatedCause = false;
+  if (typeof providerError === "string") {
+    for (const token of rawErrorTokens(providerError)) {
+      if (legacyParentChange(token)) continue;
+      if (categoryForCode(token) === undefined) unrelatedCause = true;
+    }
+  }
+  const foldIdentityFailures = identityChanged && !unrelatedCause;
   const categories: StorageHistoryIssueCategory[] = [];
   const seen = new Set<StorageHistoryIssueCategory>();
   let hasUnknownIssue = false;
@@ -217,19 +225,10 @@ function goCacheIssueCategories(
   };
   if (issues !== undefined && issues !== null) {
     const list = Array.isArray(issues) ? issues : [undefined];
-    for (const issue of list) add(issueCategory(issue, identityChanged));
+    for (const issue of list) add(issueCategory(issue, foldIdentityFailures));
   }
-  let uncoveredError = false;
-  if (typeof providerError === "string") {
-    for (const token of rawErrorTokens(providerError)) {
-      if (legacyParentChange(token)) {
-        add("entries_changed");
-        continue;
-      }
-      if (categoryForCode(token) === undefined) uncoveredError = true;
-    }
-  }
-  if (uncoveredError && !categories.some((category) => FAILURE_CATEGORIES.has(category))) {
+  if (identityChanged) add("entries_changed");
+  if (unrelatedCause && !categories.some((category) => FAILURE_CATEGORIES.has(category))) {
     add("other");
   }
   return { categories, hasUnknownIssue };

@@ -17,6 +17,11 @@ const (
 	cleanupDelete
 )
 
+const (
+	cleanupReasonScanInvalidated = "cache_scan_invalidated"
+	issueCacheParentChanged      = "cache_parent_changed"
+)
+
 var (
 	// errCacheScanStale reports an ordinary cache-directory replacement that a
 	// retained scan cannot continue through. Fresh discovery is safe.
@@ -253,7 +258,7 @@ func (p *Provider) finishInvalidatedCleanup(
 	result.BytesBefore = session.bytes
 	result.BytesBeforeComplete = session.discoveryComplete
 	result.Partial = true
-	result.Reason = "cache_scan_invalidated"
+	result.Reason = cleanupReasonScanInvalidated
 	result.Errors = boundedCleanupIssues(append([]string(nil), session.issues...))
 	err := session.failure()
 	p.finishCleanupSession(session)
@@ -405,6 +410,9 @@ func (s *cleanupSession) validateRetainedFrame(frame *cleanupFrame) error {
 	if current.Mode()&os.ModeSymlink != 0 || !current.IsDir() {
 		return errors.New("go-cache retained directory was replaced by an unsafe entry")
 	}
+	if err := s.verifyEntryPathMount(frame.relative); err != nil {
+		return err
+	}
 	if !os.SameFile(frame.info, current) {
 		return fmt.Errorf("%w: retained directory was recreated", errCacheScanStale)
 	}
@@ -430,14 +438,7 @@ func (s *cleanupSession) validateRetainedFrame(frame *cleanupFrame) error {
 	if descriptorIdentity != s.rootHandle.descriptorFilesystem {
 		return errors.New("go-cache retained directory crosses a mount boundary")
 	}
-	pathIdentity, err := s.identity(filepath.Join(s.cachePath, frame.relative))
-	if err != nil {
-		return err
-	}
-	if pathIdentity != s.filesystem {
-		return errors.New("go-cache retained directory mount changed")
-	}
-	return nil
+	return s.verifyEntryPathMount(frame.relative)
 }
 
 func (s *cleanupSession) close() {
@@ -721,7 +722,12 @@ func (s *cleanupSession) retireInvalidatedScan() {
 		return
 	}
 	s.scanInvalidated = true
-	s.addIssue("cache_parent_changed", errCacheScanInvalidated)
+	if len(s.issues) >= cleanupIssueLimit {
+		s.issues[len(s.issues)-1] = issueCacheParentChanged
+	} else {
+		s.issues = append(s.issues, issueCacheParentChanged)
+	}
+	s.cause = errors.Join(s.cause, errCacheScanInvalidated)
 }
 
 func (s *cleanupSession) markTraversalDone() {
@@ -859,6 +865,9 @@ func (s *cleanupSession) openEntryDirectory(parent *os.Root, component, relative
 		return nil, errors.New("invalid Go-cache parent path")
 	}
 	before, err := parent.Lstat(component)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: go-cache parent disappeared after scan", errCacheScanInvalidated)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -870,6 +879,9 @@ func (s *cleanupSession) openEntryDirectory(parent *os.Root, component, relative
 		return nil, fmt.Errorf("%w: go-cache parent changed after scan", errCacheScanInvalidated)
 	}
 	next, err := parent.OpenRoot(component)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: go-cache parent disappeared after scan", errCacheScanInvalidated)
+	}
 	if err != nil {
 		return nil, err
 	}

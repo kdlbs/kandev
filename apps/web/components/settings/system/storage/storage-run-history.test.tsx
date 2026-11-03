@@ -126,7 +126,7 @@ describe("StorageRunHistory states", () => {
     expect(screen.getByTestId(RUN_STATUS).textContent).toBe("Failed");
     openRun("non-go-run");
     expect(screen.getByTestId("storage-run-generic-explanation").textContent).toBe(
-      "Cleanup could not complete. View technical details.",
+      "Other cleanup did not complete. View technical details.",
     );
     expect(screen.queryByTestId("storage-go-cache-result")).toBeNull();
   });
@@ -172,6 +172,34 @@ describe("StorageRunHistory partial explanations", () => {
       "Some cleanup did not finish.",
     );
   });
+  it("shows a non-Go failure explanation on a failed run with Go categories", () => {
+    renderRuns([
+      makeRun({
+        id: "mixed-failure",
+        state: FAILED,
+        result: {
+          go_cache: {
+            result: {
+              reclaimed_bytes: 0,
+              bytes_after: null,
+              reason: "cleanup_in_progress",
+              errors: ["entry_limit_reached"],
+            },
+            error: "entry_limit_reached",
+          },
+          workspaces: { result: {}, error: "permission denied" },
+        },
+        message: "go_cache: entry_limit_reached\nworkspaces: permission denied",
+      }),
+    ]);
+
+    expect(screen.getByTestId(RUN_STATUS).textContent).toBe("Failed");
+    openRun("mixed-failure");
+    expect(screen.getByTestId("storage-run-generic-explanation").textContent).toBe(
+      "Other cleanup did not complete. View technical details.",
+    );
+  });
+
   it("shows a generic explanation beside a known budget explanation", () => {
     renderRuns([
       makeRun({

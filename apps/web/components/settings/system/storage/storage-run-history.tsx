@@ -1,4 +1,3 @@
-import { IconChevronRight } from "@tabler/icons-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -8,11 +7,14 @@ import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageMaintenanceRun } from "@/lib/types/system";
 import { StorageGoCacheResult } from "./storage-go-cache-result";
 import {
+  StorageRunTechnicalDetails,
+  TemporaryArtifactRunResult,
+} from "./storage-run-result-details";
+import {
   storageRunSummary,
   type StorageRunDisplayStatus,
   type StorageRunSummary,
 } from "./storage-run-summary";
-import { formatGigabytes } from "./storage-units";
 
 const STATUS_LABEL_KEYS: Record<StorageRunDisplayStatus, string> = {
   queued: "system:storageRunStatusQueued",
@@ -37,52 +39,8 @@ function dateLabel(value: string): string {
   return Number.isNaN(parsed.getTime()) ? value : formatDateTime(parsed);
 }
 
-function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function temporaryArtifactResult(result: Record<string, unknown>): {
-  quarantinedBytes: number;
-  failed: number;
-} | null {
-  const outer = recordValue(result.result) ?? result;
-  const provider = recordValue(outer.temporary_artifacts);
-  const cleanup = recordValue(provider?.result) ?? provider;
-  if (!cleanup) return null;
-  const rawBytes = cleanup.quarantined_bytes ?? cleanup.reclaimed_bytes;
-  if (typeof rawBytes !== "number" || !Number.isFinite(rawBytes) || rawBytes < 0) return null;
-  const rawFailed = cleanup.failed;
-  return {
-    quarantinedBytes: rawBytes,
-    failed: typeof rawFailed === "number" && Number.isFinite(rawFailed) ? rawFailed : 0,
-  };
-}
-
-function TemporaryArtifactRunResult({ result }: { result: Record<string, unknown> }) {
-  const { t } = useTranslation();
-  const cleanup = temporaryArtifactResult(result);
-  if (!cleanup) return null;
-  return (
-    <div className="space-y-1 text-sm" data-testid="storage-temporary-artifacts-result">
-      <div>
-        {t("system:storageTemporaryArtifactsQuarantinedResult", {
-          size: formatGigabytes(cleanup.quarantinedBytes),
-        })}
-      </div>
-      <div className="text-muted-foreground">
-        {t("system:storageTemporaryArtifactsFreedAfterDelete")}
-      </div>
-      {cleanup.failed > 0 && (
-        <div className="text-amber-600">{t("system:storageTemporaryArtifactsMoveFailed")}</div>
-      )}
-    </div>
-  );
-}
-
 function genericExplanationKey(summary: StorageRunSummary): string | null {
-  if (summary.status === "partial" && summary.hasNonGoProviderError) {
+  if (summary.hasNonGoProviderError) {
     return "system:storageHistoryOtherCleanupFailed";
   }
   if (
@@ -93,49 +51,6 @@ function genericExplanationKey(summary: StorageRunSummary): string | null {
     return "system:storageHistoryCouldNotComplete";
   }
   return null;
-}
-
-function StorageRunTechnicalDetails({
-  message,
-  result,
-}: {
-  message: string;
-  result: Record<string, unknown>;
-}) {
-  const { t } = useTranslation();
-  return (
-    <details className="group" data-testid="storage-run-technical-details">
-      <summary
-        className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 text-sm text-muted-foreground md:min-h-7 [&::-webkit-details-marker]:hidden"
-        data-testid="storage-run-technical-trigger"
-      >
-        <IconChevronRight
-          className="size-4 transition-transform group-open:rotate-90"
-          aria-hidden="true"
-        />
-        {t("system:storageHistoryTechnicalDetails")}
-      </summary>
-      <div
-        className="mt-2 max-h-64 space-y-2 overflow-auto rounded-md border bg-muted/40 p-3"
-        data-testid="storage-run-technical-content"
-      >
-        {message && (
-          <div
-            className="break-words whitespace-pre-wrap text-muted-foreground"
-            data-testid="storage-run-technical-message"
-          >
-            {message}
-          </div>
-        )}
-        <pre
-          className="max-w-full whitespace-pre-wrap break-words text-xs"
-          data-testid="storage-run-technical-json"
-        >
-          {JSON.stringify(result, null, 2)}
-        </pre>
-      </div>
-    </details>
-  );
 }
 
 function StorageRunRow({ run }: { run: StorageMaintenanceRun }) {

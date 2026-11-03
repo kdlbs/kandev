@@ -334,9 +334,9 @@ gate and avoid preemption. A run that cleans only the Go cache does not purge qu
 **Maintenance history** lists each run with a localized status and trigger. **Incomplete** means the
 run reached its bounded entry limit and can continue on a later run. **Partial** means some cleanup
 succeeded before a genuine error. **Failed** means no successful cleanup was recorded. The expanded
-result shows removed and remaining bytes, or an unknown remaining size, and one explanation per
-distinct issue. Skipped resources are reported separately and do not turn bounded progress into a
-failure.
+Go-cache result shows removed and remaining bytes, or an unknown remaining size, with one
+explanation per distinct issue. Other providers show their own result facts when available. Skipped
+resources are reported separately and do not turn bounded progress into a failure.
 
 **Technical details** opens the original diagnostic message and raw result JSON. It is collapsed by
 default. Long diagnostics scroll inside that disclosure instead of widening the page.

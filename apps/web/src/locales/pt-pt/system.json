@@ -551,7 +551,7 @@
   "storageHistoryUnreadable": "Não foi possível ler alguns ficheiros ou diretórios da cache.",
   "storageHistoryDeleteFailed": "Não foi possível remover algumas entradas da cache.",
   "storageHistoryOtherError": "Alguma limpeza não foi concluída.",
-  "storageHistoryBoundaryPreserved": "A limpeza preservou dados fora da cache de compilação Go.",
+  "storageHistoryBoundaryPreserved": "A limpeza preservou dados fora da cache de compilação do Go.",
   "storageHistoryEntryLimit": "O limite de entradas foi atingido. A limpeza pode continuar numa execução posterior.",
   "storageHistoryDeadline": "A limpeza atingiu o limite de tempo. Pode continuar numa execução posterior.",
   "storageHistoryCancelled": "A limpeza foi cancelada.",

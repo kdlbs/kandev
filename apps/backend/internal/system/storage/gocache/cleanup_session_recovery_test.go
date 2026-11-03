@@ -174,9 +174,252 @@ func TestCleanupRestartsAfterReplacementFollowingPartialUnlink(t *testing.T) {
 		t.Fatalf("resumed pass reclaimed %d below-threshold bytes", second.ReclaimedBytes)
 	}
 	assertCleanupFixtures(t, shardPath, replacement)
-	assertCleanupFixtures(t, backup, map[string]string{
-		"three": "xx", "four": "xx", "five": "xx",
-	})
+	assertCleanupFixtureCount(t, backup, 3, "xx")
+}
+
+// TestCleanupFailsClosedOnRetainedMountReplacement keeps a retained directory
+// on a different mount from restarting as ordinary cache churn.
+func TestCleanupFailsClosedOnRetainedMountReplacement(t *testing.T) {
+	provider, cachePath := newManagedCacheForCleanupTest(t, 5)
+	shardPath := filepath.Join(cachePath, "00")
+	files := map[string]string{"one": "xx", "two": "xx", "three": "xx"}
+	for name, contents := range files {
+		writeCleanupFixture(t, filepath.Join(shardPath, name), contents)
+	}
+	var replacementMount atomic.Bool
+	identity := func(path string) (string, error) {
+		value, err := cacheFilesystemIdentity(path)
+		if err != nil {
+			return "", err
+		}
+		if replacementMount.Load() && filepath.Base(path) == "00" {
+			return value + "\x00other-mount", nil
+		}
+		return value, nil
+	}
+
+	first, err := provider.cleanupContentsWithLimit(
+		context.Background(), cachePath, false, 5, 3, identity,
+	)
+	if err == nil || !first.Partial {
+		t.Fatalf("first pass = (%#v, %v), want a retained entry-limit cursor", first, err)
+	}
+
+	backup := filepath.Join(t.TempDir(), "00")
+	if err := os.Rename(shardPath, backup); err != nil {
+		t.Fatalf("move retained shard: %v", err)
+	}
+	for name, contents := range files {
+		writeCleanupFixture(t, filepath.Join(shardPath, name), contents)
+	}
+	replacementMount.Store(true)
+
+	second, err := provider.cleanupContentsWithLimit(
+		context.Background(), cachePath, false, 5, cleanupEntryLimit, identity,
+	)
+	if err == nil || !second.Partial {
+		t.Fatalf("mount replacement = (%#v, %v), want a closed safety failure", second, err)
+	}
+	if !strings.Contains(strings.Join(second.Errors, ","), "cache_root_changed") {
+		t.Fatalf("mount replacement errors = %#v, want cache_root_changed", second.Errors)
+	}
+	assertCleanupFixtures(t, shardPath, files)
+	assertCleanupFixtures(t, backup, files)
+}
+
+// TestCleanupRetiresRemainderEntryInvalidation covers invalidation detected
+// while deleting the remainder of a scan, not a discovered candidate.
+func TestCleanupRetiresRemainderEntryInvalidation(t *testing.T) {
+	provider, cachePath := newManagedCacheForCleanupTest(t, 100)
+	shardPath := filepath.Join(cachePath, "00")
+	writeCleanupFixture(t, filepath.Join(shardPath, "one"), "xx")
+	writeCleanupFixture(t, filepath.Join(shardPath, "two"), "xx")
+
+	rootHandle, err := provider.openValidatedCacheRoot(cachePath, false, cacheFilesystemIdentity)
+	if err != nil {
+		t.Fatalf("open cache root: %v", err)
+	}
+	session, err := newCleanupSessionWithRoot(
+		cachePath, false, 100, "remainder-invalidation-test", cacheFilesystemIdentity, rootHandle,
+	)
+	if err != nil {
+		t.Fatalf("open cleanup session: %v", err)
+	}
+	provider.cleanupState = session
+	if _, err := session.discover(context.Background(), 1); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if session.directories["00"] == nil {
+		t.Fatalf("session = %#v, want a retained shard frame", session)
+	}
+	session.entries = nil
+	session.nextDelete = 0
+
+	backup := filepath.Join(t.TempDir(), "00")
+	if err := os.Rename(shardPath, backup); err != nil {
+		t.Fatalf("move retained shard: %v", err)
+	}
+	writeCleanupFixture(t, filepath.Join(shardPath, "one"), "new")
+	writeCleanupFixture(t, filepath.Join(shardPath, "two"), "new")
+
+	result, err := provider.deleteCleanupPass(
+		context.Background(), session, cachePath,
+		&cleanupEntryBudget{remaining: cleanupEntryLimit}, CleanupResult{}, nil,
+	)
+	if err == nil || !result.Partial {
+		t.Fatalf("remainder invalidation = (%#v, %v), want a partial result", result, err)
+	}
+	if result.Reason != "cache_scan_invalidated" {
+		t.Fatalf("remainder invalidation reason = %q, want cache_scan_invalidated", result.Reason)
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "cache_parent_changed" {
+		t.Fatalf("remainder invalidation errors = %#v, want one cache_parent_changed issue", result.Errors)
+	}
+	if provider.cleanupState != nil {
+		t.Fatal("remainder invalidation retained its stale cursor")
+	}
+}
+
+// TestCleanupRetiresDisappearedParentInvalidation covers a retained parent
+// directory removed between passes while a discovered candidate remains.
+func TestCleanupRetiresDisappearedParentInvalidation(t *testing.T) {
+	provider, cachePath := newManagedCacheForCleanupTest(t, 1)
+	shardPath := filepath.Join(cachePath, "00")
+	writeCleanupFixture(t, filepath.Join(shardPath, "one"), "xx")
+	writeCleanupFixture(t, filepath.Join(shardPath, "two"), "xx")
+
+	rootHandle, err := provider.openValidatedCacheRoot(cachePath, false, cacheFilesystemIdentity)
+	if err != nil {
+		t.Fatalf("open cache root: %v", err)
+	}
+	session, err := newCleanupSessionWithRoot(
+		cachePath, false, 1, "disappeared-parent-test", cacheFilesystemIdentity, rootHandle,
+	)
+	if err != nil {
+		t.Fatalf("open cleanup session: %v", err)
+	}
+	provider.cleanupState = session
+	if _, err := session.discover(context.Background(), cleanupEntryLimit); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if session.phase != cleanupDelete || len(session.entries) == 0 {
+		t.Fatalf("session = %#v, want a retained delete candidate", session)
+	}
+	if err := os.RemoveAll(shardPath); err != nil {
+		t.Fatalf("remove retained shard: %v", err)
+	}
+
+	result, err := provider.deleteCleanupPass(
+		context.Background(), session, cachePath,
+		&cleanupEntryBudget{remaining: cleanupEntryLimit}, CleanupResult{}, nil,
+	)
+	if err == nil || !result.Partial {
+		t.Fatalf("disappeared parent = (%#v, %v), want a partial result", result, err)
+	}
+	if result.Reason != "cache_scan_invalidated" {
+		t.Fatalf("disappeared parent reason = %q, want cache_scan_invalidated", result.Reason)
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "cache_parent_changed" {
+		t.Fatalf("disappeared parent errors = %#v, want one cache_parent_changed issue", result.Errors)
+	}
+	if provider.cleanupState != nil {
+		t.Fatal("disappeared parent retained its stale cursor")
+	}
+}
+
+// TestCleanupRetiresDirectoryRemovalInvalidation covers invalidation detected
+// while removing a nested directory frame.
+func TestCleanupRetiresDirectoryRemovalInvalidation(t *testing.T) {
+	provider, cachePath := newManagedCacheForCleanupTest(t, 1)
+	shardPath := filepath.Join(cachePath, "00")
+	nestedPath := filepath.Join(shardPath, "sub")
+	writeCleanupFixture(t, filepath.Join(nestedPath, "artifact"), "xx")
+
+	rootHandle, err := provider.openValidatedCacheRoot(cachePath, false, cacheFilesystemIdentity)
+	if err != nil {
+		t.Fatalf("open cache root: %v", err)
+	}
+	session, err := newCleanupSessionWithRoot(
+		cachePath, false, 1, "directory-invalidation-test", cacheFilesystemIdentity, rootHandle,
+	)
+	if err != nil {
+		t.Fatalf("open cleanup session: %v", err)
+	}
+	provider.cleanupState = session
+	if _, err := session.discover(context.Background(), 3); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if session.phase != cleanupDelete || len(session.stack) != 3 {
+		t.Fatalf("session = %#v, want a retained nested delete frame", session)
+	}
+	session.entries = nil
+	session.nextDelete = 0
+
+	backup := filepath.Join(t.TempDir(), "00")
+	if err := os.Rename(shardPath, backup); err != nil {
+		t.Fatalf("move retained shard: %v", err)
+	}
+	writeCleanupFixture(t, filepath.Join(nestedPath, "artifact"), "new")
+
+	result, err := provider.deleteCleanupPass(
+		context.Background(), session, cachePath,
+		&cleanupEntryBudget{remaining: cleanupEntryLimit}, CleanupResult{}, nil,
+	)
+	if err == nil || !result.Partial {
+		t.Fatalf("directory invalidation = (%#v, %v), want a partial result", result, err)
+	}
+	if result.Reason != "cache_scan_invalidated" {
+		t.Fatalf("directory invalidation reason = %q, want cache_scan_invalidated", result.Reason)
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "cache_parent_changed" {
+		t.Fatalf("directory invalidation errors = %#v, want one cache_parent_changed issue", result.Errors)
+	}
+	if provider.cleanupState != nil {
+		t.Fatal("directory invalidation retained its stale cursor")
+	}
+}
+
+// TestCleanupRetainsInvalidationIssueWhenSamplesFull keeps the stable issue
+// when the bounded sample is already full.
+func TestCleanupRetainsInvalidationIssueWhenSamplesFull(t *testing.T) {
+	session := &cleanupSession{}
+	for index := 0; index < cleanupIssueLimit; index++ {
+		session.issues = append(session.issues, "entry_delete_failed")
+	}
+	session.retireInvalidatedScan()
+
+	if !session.scanInvalidated {
+		t.Fatal("invalidation was not recorded")
+	}
+	if len(session.issues) != cleanupIssueLimit {
+		t.Fatalf("issues = %#v, want a bounded sample", session.issues)
+	}
+	count := 0
+	for _, issue := range session.issues {
+		if issue == "cache_parent_changed" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("issues = %#v, want one cache_parent_changed marker", session.issues)
+	}
+}
+
+func assertCleanupFixtureCount(t *testing.T, root string, wantCount int, wantContents string) {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read fixture directory: %v", err)
+	}
+	if len(entries) != wantCount {
+		t.Fatalf("fixture directory has %d entries, want %d", len(entries), wantCount)
+	}
+	for _, entry := range entries {
+		data, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if err != nil || string(data) != wantContents {
+			t.Fatalf("fixture %s changed: data=%q err=%v", entry.Name(), data, err)
+		}
+	}
 }
 
 func assertCleanupFixtures(t *testing.T, root string, fixtures map[string]string) {
