@@ -220,15 +220,15 @@ Design-package validation passed on 2026-11-03:
 
 Implementation verification passed on 2026-11-03:
 
-- Focused Vitest: 4 files and 103 tests passed across the resize hook, provider cache, panel section, and input overlay.
+- Focused Vitest: 4 files and 105 tests passed across the resize hook, provider cache, panel section, and input overlay.
 - `pnpm run typecheck` and `pnpm run build` passed.
 - Changed-file ESLint with `--max-warnings 0` passed for the four source files, four unit files, header, and six browser specs.
 - `pnpm run i18n:check` passed with all six translated catalogs and pseudo complete; `pnpm run i18n:ratchet` reported 0 added and 5 modified files clean.
 - Managed Chromium: 27 tests passed in `clarification-resize`, `clarification-context-hosts`, `coordinator/needs-you`, and `task/threads-composer-disclosure`.
 - Managed Mobile Chrome: 24 tests passed in `chat/mobile-clarification` and `task/mobile-threads-composer-disclosure`.
 - The browser runs covered auto/manual Restore, repeated cycles, keyboard focus continuity through both Expand and Restore, tooltips, no-headroom disabled Expand, grip reset, host contraction/growth, 767px/768px and coarse-pointer sizing, and desktop/phone record separation with a preserved draft.
-- Review remediation kept one stable native button using `aria-disabled` with guarded activation, so focus survives Restore while panel measurements catch up or the contracted host has no headroom. Drag movement continues to update the manual height after the pointer returns to its starting Y.
-- Physical device keyboard behavior remains a hardware-check limitation beyond viewport emulation.
+- Review remediation kept one stable native button using `aria-disabled` with guarded activation, so focus survives Restore while panel measurements catch up or the contracted host has no headroom. Expand accepts only fresh panel and host measurements at click time. Drag movement continues to update the manual height after the pointer returns to its starting Y.
+- Physical-device software keyboard behavior is not available in this environment. It is recorded as a platform-level hardware check, not a closure gate for this presentation-only control; the host owns keyboard containment, matching the completed host-bounded expansion work.
 - Public instructions were updated in `docs/public/sessions-and-review.md`.
 
 ## Risks

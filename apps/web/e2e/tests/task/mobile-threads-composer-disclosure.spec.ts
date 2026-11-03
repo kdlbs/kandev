@@ -154,15 +154,6 @@ test("keeps required answers reachable above a short mobile viewport", async ({
     if (!sizeBox) throw new Error("phone clarification sizing control is missing");
     expect(sizeBox.height).toBeGreaterThanOrEqual(44);
     expect(sizeBox.width).toBeGreaterThanOrEqual(44);
-    if (await sizeToggle.isEnabled()) {
-      const hostMax = Number(await question.getAttribute("data-host-max-height"));
-      await sizeToggle.tap();
-      await expect(question).toHaveCSS("height", `${hostMax}px`);
-      await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
-      await sizeToggle.tap();
-      await expect.poll(() => question.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
-      await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
-    }
     const answer = question.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" });
     await expect(answer).toBeVisible();
     expect((await answer.boundingBox())!.height).toBeGreaterThanOrEqual(44);

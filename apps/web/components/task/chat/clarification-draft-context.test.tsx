@@ -251,6 +251,11 @@ const EXPANDED_AUTO_SIZE = {
   height: null,
   restore: { mode: "auto", height: null },
 };
+const EXPANDED_MANUAL_SIZE = {
+  mode: "expanded",
+  height: null,
+  restore: { mode: "manual", height: 810 },
+};
 
 function ResizeState({ bundle = CLARIFICATION_BUNDLE }: { bundle?: string }) {
   const sizing = useClarificationResizeState(bundle);
@@ -272,6 +277,17 @@ function ResizeState({ bundle = CLARIFICATION_BUNDLE }: { bundle?: string }) {
         }
       >
         Expand desktop from auto
+      </button>
+      <button
+        onClick={() =>
+          sizing.setDesktopSize({
+            mode: "expanded",
+            height: null,
+            restore: { mode: "manual", height: 810 },
+          })
+        }
+      >
+        Expand desktop from manual
       </button>
       <output data-testid={RESIZE_STATE_TEST_ID}>
         {JSON.stringify([sizing.desktop, sizing.phone])}
@@ -340,6 +356,19 @@ it("retains an expanded auto target with no pixel height across responsive remou
   rerender(resizePage("return"));
   expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
     JSON.stringify([EXPANDED_AUTO_SIZE, AUTO_SIZE]),
+  );
+});
+
+it("retains an expanded manual Restore height across responsive remounts", () => {
+  const { rerender } = render(resizePage("desktop"));
+  act(() => screen.getByRole("button", { name: "Expand desktop from manual" }).click());
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_MANUAL_SIZE, AUTO_SIZE]),
+  );
+
+  rerender(resizePage("phone"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_MANUAL_SIZE, AUTO_SIZE]),
   );
 });
 

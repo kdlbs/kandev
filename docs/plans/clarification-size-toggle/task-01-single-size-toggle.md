@@ -188,9 +188,9 @@ Implemented and verified on 2026-11-03.
 
 - The hook stores `auto`, `manual`, and `expanded` records with an atomic normal-state Restore target per presentation.
 - The header renders one 28px icon-only toggle (44px on phone and coarse pointers) with action-specific labels and tooltips.
-- Focus remains on the same toggle through Expand and Restore, including while measurements catch up and after host contraction; `aria-disabled` with guarded activation keeps the DOM identity stable. The grip and double-click reset remain unchanged.
+- Focus remains on the same toggle through Expand and Restore, including while measurements catch up and after host contraction; `aria-disabled` with guarded activation keeps the DOM identity stable. Expand accepts only fresh panel and host measurements at click time. The grip and double-click reset remain unchanged.
 - Drag updates keep applying after the pointer returns to the starting Y; a no-movement click still leaves auto sizing unchanged.
 - Provider cache tests cover expanded-auto retention, presentation separation, task isolation, and the eight-bundle bound.
-- Focused Vitest: 4 files and 103 tests passed. Typecheck, the production build, changed-file ESLint, i18n checks, and the i18n ratchet passed.
+- Focused Vitest: 4 files and 105 tests passed. Typecheck, the production build, changed-file ESLint, i18n checks, and the i18n ratchet passed.
 - Managed browser runs passed: 27 Chromium tests and 24 Mobile Chrome tests across task chat, Quick Chat, Needs You, Coordinator, Threads, and phone hosts.
 - Public instructions now describe Expand, Restore, dragging, and double-click content sizing.

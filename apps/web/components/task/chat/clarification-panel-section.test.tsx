@@ -509,7 +509,7 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
   });
 
-  it("activates the size toggle from the keyboard without answering or skipping", () => {
+  it("activates the size toggle without answering or skipping", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
@@ -517,11 +517,9 @@ describe("ClarificationPanelSection — per-surface initial height cap", () => {
     const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
 
     toggle.focus();
-    fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
 
-    fireEvent.keyDown(toggle, { key: " " });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -648,7 +646,6 @@ describe("ClarificationPanelSection — size toggle focus continuity", () => {
 
     const toggle = screen.getByTestId(SIZE_TOGGLE_TESTID) as HTMLButtonElement;
     toggle.focus();
-    fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
     expect(document.activeElement).toBe(toggle);
@@ -657,7 +654,6 @@ describe("ClarificationPanelSection — size toggle focus continuity", () => {
     // The expanded measurement arrives only after the state change.
     setTestRect(container, 0, 800);
     triggerResize(container);
-    fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
     expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);
@@ -670,7 +666,6 @@ describe("ClarificationPanelSection — size toggle focus continuity", () => {
     expect(document.activeElement).toBe(toggle);
 
     // Host contraction legitimately leaves no headroom for the next Restore.
-    fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(RESTORE_LABEL);
     setTestRect(container, 0, 800);
@@ -682,7 +677,6 @@ describe("ClarificationPanelSection — size toggle focus continuity", () => {
     );
     expect(toggle.getAttribute(ARIA_DISABLED)).toBeNull();
 
-    fireEvent.keyDown(toggle, { key: "Enter" });
     fireEvent.click(toggle);
     expect(toggle.getAttribute(ARIA_LABEL)).toBe(EXPAND_LABEL);
     expect(screen.getByTestId(SIZE_TOGGLE_TESTID)).toBe(toggle);

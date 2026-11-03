@@ -438,23 +438,26 @@ export function useResizableClarificationOverlay({
     setDesktopSize(DEFAULT_CLARIFICATION_PANEL_SIZE);
     setPhoneSize(DEFAULT_CLARIFICATION_PANEL_SIZE);
   }, [setDesktopSize, setPhoneSize]);
-  const expandHeight = useCallback(() => {
-    setSize((current) => {
-      if (current.mode === "expanded") return current;
-      if (!canExpandToHost(hostHeight, renderedHeight)) return current;
-      return expandedPanelSize(current);
-    });
-  }, [hostHeight, renderedHeight, setSize]);
-  const restoreHeight = useCallback(() => {
-    setSize((current) => restoredPanelSize(current));
-  }, [setSize]);
+  const measureLiveHostHeight = useCallback(
+    () =>
+      measuredHostHeight(
+        allocationRef?.current ?? null,
+        anchorRef?.current ?? null,
+        reservedSiblingRefs,
+        reservedHeightPx,
+      ),
+    [allocationRef, anchorRef, reservedHeightPx, reservedSiblingRefs],
+  );
   const toggleHeight = useCallback(() => {
     setSize((current) => {
       if (current.mode === "expanded") return restoredPanelSize(current);
-      if (!canExpandToHost(hostHeight, renderedHeight)) return current;
+      const liveHostHeight = measureLiveHostHeight() ?? hostHeight;
+      const livePanelHeight =
+        containerElementRef.current?.getBoundingClientRect().height ?? renderedHeight;
+      if (!canExpandToHost(liveHostHeight, livePanelHeight)) return current;
       return expandedPanelSize(current);
     });
-  }, [hostHeight, renderedHeight, setSize]);
+  }, [hostHeight, measureLiveHostHeight, renderedHeight, setSize]);
   const handleMouseDown = useResizeDrag(
     containerElementRef,
     hostHeight,
@@ -464,7 +467,6 @@ export function useResizableClarificationOverlay({
   );
 
   return {
-    mode: size.mode,
     expanded: size.mode === "expanded",
     height,
     effectiveHeight,
@@ -473,8 +475,6 @@ export function useResizableClarificationOverlay({
     minHeight,
     canExpand: size.mode !== "expanded" && canExpandToHost(hostHeight, renderedHeight),
     containerRef,
-    expandHeight,
-    restoreHeight,
     toggleHeight,
     resetHeight,
     resetAllHeights,

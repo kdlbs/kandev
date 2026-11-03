@@ -801,6 +801,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await testPage.setViewportSize({ width: 393, height: 500 });
     await expect(sizeToggle).toBeVisible();
     await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toHaveAttribute("aria-disabled", "true");
     const constrainedBox = await sizeToggle.boundingBox();
     expect(constrainedBox).not.toBeNull();
     expect(constrainedBox!.height).toBeGreaterThanOrEqual(44);

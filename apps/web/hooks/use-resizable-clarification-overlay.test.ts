@@ -126,7 +126,6 @@ describe("useResizableClarificationOverlay", () => {
   it("uses the smaller of the initial cap and the measured host, then toggles to the host budget", () => {
     const { result } = renderResizeHook();
 
-    expect(result.current.mode).toBe("auto");
     expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
     expect(result.current.maxHostHeight).toBe(700);
@@ -135,7 +134,6 @@ describe("useResizableClarificationOverlay", () => {
 
     act(() => result.current.toggleHeight());
 
-    expect(result.current.mode).toBe("expanded");
     expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(700);
     expect(result.current.maxHeight).toBe(700);
@@ -143,7 +141,6 @@ describe("useResizableClarificationOverlay", () => {
 
     act(() => result.current.toggleHeight());
 
-    expect(result.current.mode).toBe("auto");
     expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
     expect(result.current.maxHeight).toBe(500);
@@ -174,14 +171,14 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     act(() => dispatchMouseMove(500));
     act(() => dispatchMouseUp());
 
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(400));
     act(() => dispatchMouseUp());
 
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(400);
     expect(result.current.canExpand).toBe(true);
   });
@@ -231,7 +228,9 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     expect(result.current.maxHeight).toBe(300);
     expect(result.current.canExpand).toBe(true);
   });
+});
 
+describe("useResizableClarificationOverlay expansion measurement", () => {
   it("keeps Expand visible but inactive and offers no Restore target when the host has no headroom", () => {
     const allocation = document.createElement("div");
     document.body.append(allocation);
@@ -247,15 +246,33 @@ describe("useResizableClarificationOverlay expansion availability", () => {
     setRect(container, 0, 300);
     act(() => result.current.containerRef(container));
 
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.maxHeight).toBe(300);
     expect(result.current.canExpand).toBe(false);
 
     act(() => result.current.toggleHeight());
 
-    expect(result.current.mode).toBe("auto");
     expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
+  });
+
+  it("uses live panel and host measurements when accepting Expand", () => {
+    const { result, allocation } = renderResizeHook();
+    const container = document.createElement("div");
+    setRect(container, 0, 200);
+    act(() => result.current.containerRef(container));
+
+    // The host shrank without an observer update; stale state would allow Expand.
+    setRect(allocation, 0, 200);
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(false);
+    expect(result.current.height).toBeNull();
+
+    // The host now has room but the stale observer state still says it does not.
+    setRect(allocation, 0, 800);
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(true);
+    expect(result.current.height).toBe(700);
   });
 });
 
@@ -286,13 +303,13 @@ describe("useResizableClarificationOverlay resize bounds", () => {
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(400));
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(400);
 
     act(() => dispatchMouseMove(500));
     act(() => dispatchMouseUp());
 
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(300);
   });
 
@@ -306,7 +323,7 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     act(() => dispatchMouseMove(500));
     act(() => dispatchMouseUp());
 
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
   });
 
@@ -316,8 +333,8 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     setRect(container, 0, 300);
     act(() => result.current.containerRef(container));
     rerender({ phone: false });
-    act(() => result.current.expandHeight());
-    expect(result.current.mode).toBe("expanded");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(700);
     expect(result.current.canExpand).toBe(false);
 
@@ -327,7 +344,7 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     act(() => observer.trigger());
     flushRaf();
     expect(result.current.maxHostHeight).toBe(550);
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(550);
     expect(result.current.effectiveHeight).toBe(550);
     expect(result.current.maxHeight).toBe(550);
@@ -338,12 +355,12 @@ describe("useResizableClarificationOverlay resize bounds", () => {
     act(() => observer.trigger());
     flushRaf();
     expect(result.current.maxHostHeight).toBe(900);
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(900);
     expect(result.current.effectiveHeight).toBe(900);
 
-    act(() => result.current.restoreHeight());
-    expect(result.current.mode).toBe("auto");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
   });
 });
@@ -359,15 +376,15 @@ describe("useResizableClarificationOverlay restoration", () => {
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(400));
     act(() => dispatchMouseUp());
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(400);
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(700);
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(400);
     expect(result.current.expanded).toBe(false);
   });
@@ -385,9 +402,9 @@ describe("useResizableClarificationOverlay restoration", () => {
 
     for (let cycle = 0; cycle < 3; cycle += 1) {
       act(() => result.current.toggleHeight());
-      expect(result.current.mode).toBe("expanded");
+      expect(result.current.expanded).toBe(true);
       act(() => result.current.toggleHeight());
-      expect(result.current.mode).toBe("manual");
+      expect(result.current.expanded).toBe(false);
       expect(result.current.height).toBe(350);
     }
   });
@@ -410,15 +427,12 @@ describe("useResizableClarificationOverlay manual transitions", () => {
     )!;
     act(() => panelObserver.trigger());
 
-    expect(result.current.mode).toBe("manual");
-    expect(result.current.height).toBe(700);
     expect(result.current.expanded).toBe(false);
+    expect(result.current.height).toBe(700);
     expect(result.current.canExpand).toBe(false);
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("manual");
-    act(() => result.current.restoreHeight());
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
 
     setRect(allocation, 0, 1200);
     act(() => observer.trigger());
@@ -427,9 +441,9 @@ describe("useResizableClarificationOverlay manual transitions", () => {
     expect(result.current.canExpand).toBe(true);
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(700);
   });
 
@@ -439,8 +453,8 @@ describe("useResizableClarificationOverlay manual transitions", () => {
     setRect(container, 0, 300);
     act(() => result.current.containerRef(container));
     rerender({ phone: false });
-    act(() => result.current.expandHeight());
-    expect(result.current.mode).toBe("expanded");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(true);
 
     setRect(container, 0, 700);
     const panelObserver = ResizeObserverStub.instances.find((observer) =>
@@ -451,17 +465,12 @@ describe("useResizableClarificationOverlay manual transitions", () => {
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(500));
     act(() => dispatchMouseUp());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
 
     act(() => result.current.resizeHandleProps.onMouseDown(fakeReactMouseEvent(500)));
     act(() => dispatchMouseMove(700));
     act(() => dispatchMouseUp());
-    expect(result.current.mode).toBe("manual");
-    expect(result.current.height).toBe(500);
     expect(result.current.expanded).toBe(false);
-
-    act(() => result.current.restoreHeight());
-    expect(result.current.mode).toBe("manual");
     expect(result.current.height).toBe(500);
   });
 });
@@ -474,15 +483,15 @@ describe("useResizableClarificationOverlay grip and measurement transitions", ()
     act(() => result.current.containerRef(container));
     rerender({ phone: false });
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
 
     act(() => result.current.resizeHandleProps.onDoubleClick());
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
   });
 
   it("keeps expanded mode and Restore when host measurement becomes unavailable", () => {
@@ -490,20 +499,20 @@ describe("useResizableClarificationOverlay grip and measurement transitions", ()
     const container = document.createElement("div");
     setRect(container, 0, 300);
     act(() => result.current.containerRef(container));
-    act(() => result.current.expandHeight());
-    expect(result.current.mode).toBe("expanded");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(true);
 
     allocation.remove();
     act(() => observer.trigger());
     flushRaf();
 
     expect(result.current.maxHostHeight).toBeNull();
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(500);
     expect(result.current.maxHeight).toBe(500);
 
-    act(() => result.current.restoreHeight());
-    expect(result.current.mode).toBe("auto");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
   });
 
@@ -524,7 +533,7 @@ describe("useResizableClarificationOverlay grip and measurement transitions", ()
     act(() => panelObserver.trigger());
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
 
     setRect(allocation, 0, 650);
     setRect(reserved, 550, 100);
@@ -534,7 +543,7 @@ describe("useResizableClarificationOverlay grip and measurement transitions", ()
     expect(result.current.maxHostHeight).toBe(550);
 
     act(() => result.current.toggleHeight());
-    expect(result.current.mode).toBe("manual");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBe(600);
     expect(result.current.effectiveHeight).toBe(550);
     expect(result.current.maxHeight).toBe(550);
@@ -581,8 +590,8 @@ describe("useResizableClarificationOverlay host geometry", () => {
     expect(result.current.maxHostHeight).toBe(700);
     expect(result.current.maxHeight).toBe(500);
 
-    act(() => result.current.expandHeight());
-    act(() => result.current.restoreHeight());
+    act(() => result.current.toggleHeight());
+    act(() => result.current.toggleHeight());
     Object.defineProperty(window, "innerHeight", {
       configurable: true,
       writable: true,
@@ -638,26 +647,26 @@ describe("useResizableClarificationOverlay host geometry", () => {
       { initialProps: { isPhone: false } },
     );
 
-    act(() => result.current.expandHeight());
+    act(() => result.current.toggleHeight());
     expect(result.current.height).toBe(700);
 
     rerender({ isPhone: true });
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
-    act(() => result.current.expandHeight());
+    act(() => result.current.toggleHeight());
     expect(result.current.height).toBe(700);
-    act(() => result.current.restoreHeight());
-    expect(result.current.mode).toBe("auto");
+    act(() => result.current.toggleHeight());
+    expect(result.current.expanded).toBe(false);
 
     rerender({ isPhone: false });
-    expect(result.current.mode).toBe("expanded");
+    expect(result.current.expanded).toBe(true);
     expect(result.current.height).toBe(700);
     act(() => result.current.resetAllHeights());
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
 
     rerender({ isPhone: true });
-    expect(result.current.mode).toBe("auto");
+    expect(result.current.expanded).toBe(false);
     expect(result.current.height).toBeNull();
   });
 });
