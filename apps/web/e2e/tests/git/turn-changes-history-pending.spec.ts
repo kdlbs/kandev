@@ -15,7 +15,7 @@ import {
 test.describe("paused turn content preservation", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("reads retained content while local export is pending without another agent turn", async ({
+  test("shows the pending state, then opens saved content without another agent turn", async ({
     testPage,
     apiClient,
     seedData,
@@ -66,7 +66,7 @@ test.describe("paused turn content preservation", () => {
       await pendingFile.click();
       const viewer = testPage.getByTestId("historical-turn-diff");
       await expect(viewer).toBeVisible();
-      await waitForDiffText(testPage, "INITIAL_CONTENT");
+      await expect(viewer.getByText("Loading changed files...")).toBeVisible();
       await session.showSessionContext();
 
       resumeTurnFileContent(`${backend.tmpDir}/kandev.db`, changeSetId!, paused);
