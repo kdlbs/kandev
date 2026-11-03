@@ -985,6 +985,9 @@ func (r *memoryRepository) reserveHeadLocked(
 	}
 	headIndex := lowestPositionIndex(list)
 	head := list[headIndex]
+	if r.sendNowClaimContainsLocked(sessionID, head.ID) {
+		return nil
+	}
 	if head.IsDeliveryAttempted() && !isManagedInputQueueEntry(head) {
 		r.removeEntryLocked(sessionID, headIndex)
 		return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
@@ -1502,7 +1505,7 @@ func (r *memoryRepository) claimSendNowLocked(
 	}
 	claimIDs := make(map[string]struct{}, len(sources))
 	for _, source := range sources {
-		if source.IsDurableLifecycle() {
+		if source.IsDurableDelivery() {
 			claimIDs[source.ID] = struct{}{}
 		}
 	}

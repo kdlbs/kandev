@@ -508,8 +508,15 @@ func (s *Service) executeSendNowClaimWithContext(
 
 	restore := func() {
 		if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
-			s.logger.Error("failed to restore send-now queue claim",
-				zap.String("session_id", sessionID), zap.Error(err))
+			if errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+				if releaseErr := s.releaseUnrecoverableSendNowClaim(ctx, claim); releaseErr != nil {
+					s.logger.Error("failed to release unrestorable send-now queue claim",
+						zap.String("session_id", sessionID), zap.Error(releaseErr))
+				}
+			} else {
+				s.logger.Error("failed to restore send-now queue claim",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
 		} else {
 			// A restore is a delivery trigger: the readiness drain may already
 			// have run while this claim was held, so nothing else would pick

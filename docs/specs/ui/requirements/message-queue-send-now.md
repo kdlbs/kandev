@@ -32,12 +32,15 @@ When an agent is in a long-running turn, an urgent correction can sit in the que
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.10:** A request that observes an older turn shall not cancel a newer successor. Overlapping cancellation requests remain conflicts. Late completion from an interrupted turn shall not settle the replacement or release its pending queue work.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.11:** Desktop and phone Send Now actions shall show the existing localized conflict feedback for a genuine handoff conflict and refresh the authoritative queue. They shall allow a later request after handoff without a page reload.
 - **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.12:** When an accepted Send Now cannot deliver its prompt and restores its entries, a promptable session with Auto-run ON shall deliver them through ordinary FIFO without another user action. Each entry shall run once, and a failed FIFO attempt shall not start another Send Now. Entries restored by recovery after a backend restart shall stay pending instead.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.13:** While an accepted Send Now claim owns an entry, FIFO shall not reserve or remove it, even after its lease expires. An undelivered claim restores the entry once.
+- **AC-UI-MESSAGE-QUEUE-SEND-NOW-001.14:** When an accepted Send Now claim can neither deliver its prompt nor restore its entries, the backend shall release the claim, and the history shall mark the message not delivered on desktop and phone, adding it if absent. Task or session deletion and replacement keep their behavior.
 
 ## Design and delivery
 
 - [System design](../system-design/message-queue-send-now.md)
 - [FIFO interruption repair package](../../../plans/queue-send-now-live-fifo/plan.md)
 - [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
+- [Send Now claim loss repair](../../../plans/send-now-claim-loss/plan.md)
 
 ## Migrated source detail
 
@@ -239,7 +242,7 @@ not undo that explicit resume instruction.
   because the operation was already accepted as a resume. Existing ordinary
   queue delivery retains its current process-crash window after a destructive
   claim; durable lifecycle rows retain their accepted-until-acknowledged
-  guarantee.
+  guarantee (`.13`, `.14`).
 - **Successor turn appears:** the operation fails with `turn_changed`, leaves
   the successor running, and does not claim queue entries.
 - **Conflicting explicit Cancel:** the already accepted operation wins. Send Now

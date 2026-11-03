@@ -215,6 +215,37 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	return nil
 }
 
+// sendNowClaimOwnsEntryTx reports whether the session's open Send Now claim
+// owns the given queue row. The claim, not the row's delivery lease, governs
+// reservation: the replacement prompt may outlive DeliveryReservationTTL, and
+// FIFO must not take the row while the claim still owns it.
+func (r *sqliteRepository) sendNowClaimOwnsEntryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, entryID string,
+) (bool, error) {
+	var claimJSON string
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT claim_json FROM queue_send_now_claims WHERE session_id = ?
+	`), sessionID).Scan(&claimJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Send Now claim ownership: %w", err)
+	}
+	var claim SendNowClaim
+	if err := json.Unmarshal([]byte(claimJSON), &claim); err != nil {
+		return false, fmt.Errorf("decode Send Now claim ownership: %w", err)
+	}
+	for i := range claim.Sources {
+		if claim.Sources[i].ID == entryID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *sqliteRepository) ListPendingSendNowClaims(ctx context.Context) ([]PendingSendNowClaim, error) {
 	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
 		return nil, err

@@ -202,6 +202,123 @@ func (s *Service) restoreSendNowClaimWithRetry(
 	})
 }
 
+// releaseUnrecoverableSendNowClaim closes a claim that can be neither delivered
+// nor restored. The message is marked not delivered first, so a failure leaves
+// the claim in place for a later pass instead of losing the evidence. The step
+// is idempotent and retries transient failures, because a leftover claim blocks
+// its entry through the ownership rule until the next reconciliation.
+func (s *Service) releaseUnrecoverableSendNowClaim(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+) error {
+	if claim == nil || s.messageQueue == nil {
+		return nil
+	}
+	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.releaseUnrecoverableSendNowClaimOnce(recoveryCtx, claim)
+	})
+}
+
+func (s *Service) releaseUnrecoverableSendNowClaimOnce(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+) error {
+	releaseCtx := context.WithoutCancel(ctx)
+	if !s.queuedDispatchIdentityIsCurrent(releaseCtx, claim.Identity) {
+		// A replaced or deleted session keeps its existing handling: discard
+		// the exact claim without marking a message that no longer belongs to
+		// the current session identity.
+		return s.discardSendNowClaim(releaseCtx, claim)
+	}
+	if err := s.markSendNowClaimNotDelivered(releaseCtx, claim); err != nil {
+		return err
+	}
+	if err := s.discardSendNowClaim(releaseCtx, claim); err != nil {
+		return err
+	}
+	s.publishQueueStatusEventForIdentity(releaseCtx, claim.Identity)
+	return nil
+}
+
+func (s *Service) discardSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+	err := s.messageQueue.DeletePendingSendNowClaim(context.WithoutCancel(ctx), claim)
+	if err != nil && !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) markSendNowClaimNotDelivered(
+	ctx context.Context,
+	claim *messagequeue.SendNowClaim,
+) error {
+	if s.messageCreator == nil {
+		return errors.New("message creator is unavailable for an undeliverable Send Now claim")
+	}
+	messageID := sendNowClaimTranscriptMessageID(claim)
+	if messageID == "" {
+		return errors.New("send-now claim has no transcript message identity")
+	}
+	marked, err := s.messageCreator.SetUserMessageDeliveryStatus(
+		ctx, messageID, claim.Dispatch.SessionID, models.MessageDeliveryStatusNotDelivered,
+	)
+	if err != nil {
+		return err
+	}
+	if marked {
+		return nil
+	}
+	// The prompt failed before any path recorded its user message. Record it
+	// from the dispatch envelope in a completed lifecycle-only turn so the
+	// release never starts or adopts a conversation turn.
+	dispatch := claim.Dispatch
+	metadata := make(map[string]interface{}, len(dispatch.Metadata)+1)
+	for key, value := range dispatch.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = models.MessageDeliveryStatusNotDelivered
+	delete(metadata, metaKeyUserMessageRecorded)
+	dispatch.Metadata = metadata
+	attachments := queuedMessageAttachmentsToV1(dispatch.Attachments)
+	record, err := queuedUserMessageRecordFor(
+		&dispatch, attachments, nil, sendNowClaimTranscriptSourceIDs(claim),
+	)
+	if err != nil {
+		return err
+	}
+	if record.messageID != messageID {
+		return fmt.Errorf("send-now message identity changed: %s != %s", record.messageID, messageID)
+	}
+	return s.messageCreator.CreateCompletedUserMessageIdempotent(
+		ctx, record.messageID, dispatch.TaskID, record.content, dispatch.SessionID, record.metadata,
+	)
+}
+
+// sendNowClaimTranscriptMessageID reproduces the identity used when the claim's
+// replacement prompt records its user message. A durable plan comment records
+// one message for the whole source set; every other dispatch records one for
+// the dispatch envelope itself.
+func sendNowClaimTranscriptMessageID(claim *messagequeue.SendNowClaim) string {
+	if claim == nil {
+		return ""
+	}
+	return queuedTranscriptMessageID(&claim.Dispatch, sendNowClaimTranscriptSourceIDs(claim))
+}
+
+func sendNowClaimTranscriptSourceIDs(claim *messagequeue.SendNowClaim) []string {
+	if claim == nil {
+		return nil
+	}
+	if !claim.HasDurablePlanComment() {
+		return []string{claim.Dispatch.ID}
+	}
+	sourceIDs := make([]string, 0, len(claim.Sources))
+	for i := range claim.Sources {
+		sourceIDs = append(sourceIDs, claim.Sources[i].ID)
+	}
+	return sourceIDs
+}
+
 func (s *Service) acknowledgeSendNowClaimWithRetry(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
@@ -257,36 +374,54 @@ func (s *Service) reconcilePendingSendNowClaimsOnStartup(ctx context.Context) er
 	}
 	for i := range claims {
 		pending := &claims[i]
-		claim := &pending.Claim
-		var recoveryErr error
-		if pending.Accepted {
-			recoveryErr = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
-		} else if _, supported := s.repo.(sessionRecoveryBlockStore); supported {
-			recoverySignal := &sessionRecoveryRequiredError{
-				Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
-			}
-			recoveryErr = s.recordSessionRecoveryBlock(
-				ctx, claim.Dispatch.SessionID, "send_now", recoverySignal,
-			)
-			if recoveryErr == nil {
-				s.logger.Warn("parked Send Now claim with unknown pre-crash delivery outcome",
-					zap.String("claim_id", claim.ClaimID),
-					zap.String("session_id", claim.Dispatch.SessionID))
-			}
-		} else {
-			recoveryErr = s.restoreSendNowClaimWithRetry(ctx, claim)
+		if err := s.reconcilePendingSendNowClaimOnStartup(ctx, pending); err != nil {
+			return err
 		}
+		s.publishQueueStatusEvent(ctx, pending.Claim.Dispatch.SessionID)
+	}
+	return nil
+}
+
+func (s *Service) reconcilePendingSendNowClaimOnStartup(
+	ctx context.Context,
+	pending *messagequeue.PendingSendNowClaim,
+) error {
+	claim := &pending.Claim
+	sessionID := claim.Dispatch.SessionID
+	if pending.Accepted {
+		if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
+			if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+				return fmt.Errorf("recover pending Send Now claim for session %s: %w", sessionID, err)
+			}
+			// An accepted claim was delivered; a superseded record must not
+			// mark its message not delivered.
+			return s.discardSendNowClaim(ctx, claim)
+		}
+		return nil
+	}
+	if _, supported := s.repo.(sessionRecoveryBlockStore); supported {
+		recoverySignal := &sessionRecoveryRequiredError{
+			Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
+		}
+		recoveryErr := s.recordSessionRecoveryBlock(ctx, sessionID, "send_now", recoverySignal)
 		if recoveryErr != nil {
 			if !errors.Is(recoveryErr, messagequeue.ErrSendNowClaimChanged) {
-				return fmt.Errorf("recover pending Send Now claim for session %s: %w", claim.Dispatch.SessionID, recoveryErr)
+				return fmt.Errorf("recover pending Send Now claim for session %s: %w", sessionID, recoveryErr)
 			}
-			if deleteErr := s.messageQueue.DeletePendingSendNowClaim(
-				context.WithoutCancel(ctx), claim,
-			); deleteErr != nil && !errors.Is(deleteErr, messagequeue.ErrSendNowClaimChanged) {
-				return fmt.Errorf("discard superseded Send Now claim for session %s: %w", claim.Dispatch.SessionID, deleteErr)
-			}
+			return s.discardSendNowClaim(ctx, claim)
 		}
-		s.publishQueueStatusEvent(ctx, claim.Dispatch.SessionID)
+		s.logger.Warn("parked Send Now claim with unknown pre-crash delivery outcome",
+			zap.String("claim_id", claim.ClaimID),
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
+		if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+			return fmt.Errorf("recover pending Send Now claim for session %s: %w", sessionID, err)
+		}
+		if releaseErr := s.releaseUnrecoverableSendNowClaim(ctx, claim); releaseErr != nil {
+			return fmt.Errorf("release unrecoverable Send Now claim for session %s: %w", sessionID, releaseErr)
+		}
 	}
 	return nil
 }
@@ -306,17 +441,24 @@ func (s *Service) restorePendingSendNowClaimsForRecovery(ctx context.Context, se
 			continue
 		}
 		if pending.Accepted {
-			err = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
-		} else {
-			err = s.restoreSendNowClaimWithRetry(context.WithoutCancel(ctx), claim)
+			if err := s.acknowledgeSendNowClaimWithRetry(ctx, claim); err != nil {
+				if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+					return fmt.Errorf("release pending Send Now claim for session %s: %w", sessionID, err)
+				}
+				// An accepted claim was delivered; a superseded record must not
+				// mark its message not delivered.
+				if discardErr := s.discardSendNowClaim(ctx, claim); discardErr != nil {
+					return fmt.Errorf("discard superseded Send Now claim for session %s: %w", sessionID, discardErr)
+				}
+			}
+			continue
 		}
-		if err != nil {
+		if err := s.restoreSendNowClaimWithRetry(context.WithoutCancel(ctx), claim); err != nil {
 			if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
 				return fmt.Errorf("release pending Send Now claim for session %s: %w", sessionID, err)
 			}
-			if deleteErr := s.messageQueue.DeletePendingSendNowClaim(context.WithoutCancel(ctx), claim); deleteErr != nil &&
-				!errors.Is(deleteErr, messagequeue.ErrSendNowClaimChanged) {
-				return fmt.Errorf("discard superseded Send Now claim for session %s: %w", sessionID, deleteErr)
+			if releaseErr := s.releaseUnrecoverableSendNowClaim(ctx, claim); releaseErr != nil {
+				return fmt.Errorf("release unrecoverable Send Now claim for session %s: %w", sessionID, releaseErr)
 			}
 		}
 	}

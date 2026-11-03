@@ -3056,5 +3056,6 @@
   "contextCompactionSummary": "Resumo",
   "contextCompactionTokenCounts": "{{preTokens}} tokens antes → {{postTokens}} tokens depois",
   "contextCompactionTrigger": "Origem: {{trigger}}",
-  "contextCompactionDuration": "Duração: {{duration}}"
+  "contextCompactionDuration": "Duração: {{duration}}",
+  "deliveryMessageNotDelivered": "Não entregue. Envie novamente."
 }

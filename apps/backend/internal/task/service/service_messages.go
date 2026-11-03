@@ -404,6 +404,42 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 	return nil, err
 }
 
+// CreateCompletedUserMessageIdempotent persists a caller-owned user message in
+// an already-completed lifecycle-only turn. It never starts or adopts an active
+// conversation turn, so history-only records cannot alter turn timing.
+func (s *Service) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, error) {
+	if messageID == "" {
+		return nil, errors.New("message id is required for idempotent creation")
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("check existing completed user message: %w", err)
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, req.TaskSessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.createCompletedTurn(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	req.TurnID = turn.ID
+	req.CompletedTurn = true
+	return s.CreateMessageIdempotent(ctx, messageID, req)
+}
+
 type planCommentMessageValidator interface {
 	ValidateMessagePlanComments(
 		context.Context,
@@ -1277,6 +1313,43 @@ func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.
 		return writer.UpdateMessageWithConversationReceipt(ctx, message)
 	}
 	return nil, s.messages.UpdateMessage(ctx, message)
+}
+
+// SetUserMessageDeliveryStatus sets the delivery status on an exact
+// session-owned user message. It reports whether such a message exists, so a
+// caller can record the message when it is absent. Reapplying the same status
+// is a no-op and does not publish a duplicate update.
+func (s *Service) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	if messageID == "" || sessionID == "" || status == "" {
+		return false, nil
+	}
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if message == nil || message.TaskSessionID != sessionID ||
+		message.AuthorType != models.MessageAuthorUser {
+		return false, nil
+	}
+	if message.Metadata != nil && message.Metadata[models.MessageMetaKeyDeliveryStatus] == status {
+		return true, nil
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = status
+	message.Metadata = metadata
+	if err := s.UpdateMessage(ctx, message); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AppendMessageContent appends additional content to an existing message.

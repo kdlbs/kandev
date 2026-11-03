@@ -836,6 +836,15 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
+// isStatuslessToolUpdate reports a tool_update that carries no status. The
+// adapter synthesizes in_progress for an update with a title, input, content,
+// or locations, so an empty status means metadata only. The agentctl finalizer
+// ignores that update, so it must not start a turn the finalizer will never
+// close.
+func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
+	return event.Type == "tool_update" && event.ToolStatus == ""
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -850,7 +859,9 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 //
 // The flip is gated on `turnContentEventTypes` so post-boot metadata events
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
-// accidentally re-arm a freshly-booted no-prompt session as Running.
+// accidentally re-arm a freshly-booted no-prompt session as Running. A
+// tool_update with no status carries metadata only and is treated like a
+// terminal update here: the finalizer ignores it, so it must not start a turn.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	promptLifecycleLocked := false
 	unlockPromptLifecycle := func() {
@@ -913,7 +924,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		unlockPromptLifecycle()
 		return
 	}
-	if isTerminalToolUpdate(event) {
+	if isTerminalToolUpdate(event) || isStatuslessToolUpdate(event) {
 		unlockPromptLifecycle()
 		return
 	}
