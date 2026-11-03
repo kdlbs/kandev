@@ -506,9 +506,6 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitCreateSubtask(e, cmd, model)
 	case strings.EqualFold(cmd, "/e2e:utility-profile"):
 		e.text("utility profile model: " + model)
-	case strings.HasPrefix(cmd, "/e2e:async-followup-gate "):
-		gatePath := strings.TrimSpace(strings.TrimPrefix(cmd, "/e2e:async-followup-gate "))
-		emitAsyncFollowup(e, gatePath)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
@@ -541,8 +538,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitAsyncSubagentLifecycle(e, cmd, true)
 	case strings.EqualFold(cmd, "/async-subagent-teardown"):
 		emitAsyncSubagentLifecycle(e, cmd, false)
-	case strings.EqualFold(cmd, "/async-followup"):
-		emitAsyncFollowup(e, "")
+	case strings.EqualFold(cmd, "/async-followup") || strings.HasPrefix(strings.ToLower(cmd), "/async-followup "):
+		emitAsyncFollowup(e, strings.TrimSpace(cmd[len("/async-followup"):]))
 	default:
 		emitRandomResponse(e, cmd, model)
 	}

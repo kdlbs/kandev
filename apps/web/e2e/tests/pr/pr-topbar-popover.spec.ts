@@ -97,9 +97,7 @@ function manyRunningChecks(count: number) {
 
 async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Locator) {
   const metrics = await locator.evaluate((node) => {
-    const content = node.classList.contains("overflow-y-auto")
-      ? node
-      : node.closest(".overflow-y-auto");
+    const content = node.querySelector('[data-testid="pr-popover-scroll-body"]');
     const rect = content?.getBoundingClientRect();
     return {
       top: rect?.top ?? -1,

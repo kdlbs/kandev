@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001
+  - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002
   - REQ-TASKS-CLARIFICATION-LIFECYCLE-001
 ---
 
@@ -25,6 +26,7 @@ clarification hook owns the client deadline and desktop/phone recovery state.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001` | [Pending-ID access path](#pending-id-access-path), [Bounded response flow](#bounded-response-flow), [Client recovery](#client-recovery), and [Failure and recovery](#failure-and-recovery) |
+| `REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-002` | [Unsubmitted drafts across navigation](#unsubmitted-drafts-across-navigation) |
 
 ## Components and responsibilities
 
@@ -134,6 +136,103 @@ winner when the first request committed, or claims the still-pending bundle
 when the first request did not. A 409 `not_active` remains an expired outcome,
 not a successful submission.
 
+### Unsubmitted drafts across navigation
+
+The browser application store owns answer retention across task-page mounts.
+`ClarificationDraftProvider` supplies task identity and local resize state.
+It does not own the retained answer cache. See the
+[ownership decision](../../../decisions/2026-11-03-clarification-answer-draft-ownership.md).
+
+#### Cache ownership and identity
+
+A dependency-neutral helper in `apps/web/lib/clarification/answer-draft-cache.ts`
+owns a `WeakMap` keyed by the actual application store. This follows the
+store ownership pattern in `apps/web/lib/rich-output/view-state.ts`.
+It does not add drafts to hydration, server messages, or browser storage.
+
+Each entry has an exact identity: task ID, source session ID, pending ID,
+and form mode. It stores custom-text drafts, answers keyed by question ID,
+and the active question index. Restoration validates those entries against the
+current bundle's question and option identities. The cache contains no image
+bytes, DOM nodes, or component instances.
+
+The cache holds at most eight entries across tasks. Reads and edits refresh
+recency. Admission of a ninth entry removes the oldest entry. Empty form
+mounts do not evict an edited draft. Existing answer and text limits still apply.
+
+The application-store factory installs one authority observer per store,
+following `observeSettingsAgentRemovals`. Its identity includes auth mode,
+authenticated state, user ID, role, and status. Any change clears the old
+cache and replaces its generation. This observer remains active without a
+mounted task page. Auth-disabled local installations receive a valid store-local
+identity without a user ID. Unauthenticated enabled-auth surfaces cannot retain drafts.
+
+Captured callbacks belong to one cache generation. Delayed writes from an old
+generation cannot populate the replacement cache. A later login by the same
+user receives an empty cache. Independent stores never share drafts.
+
+#### Provider and hook integration
+
+`ClarificationDraftProvider` resolves the retained cache through the
+application store API and subscribes to the current auth identity. It combines its task ID with the
+existing source-session, pending-ID, and mode key from `ClarificationInputOverlay`.
+A missing source identity uses component-local state without shared retention.
+
+Keep the provider's resize map local to the mounted task layout. Preserve its
+existing eight-entry bound, responsive restoration, and reset on task change.
+Do not key or remount the responsive task layout to change draft ownership.
+This preserves pending panel-focus state.
+
+`useClarificationDraft` restores a snapshot for the exact identity before
+publishing edits. A new identity cannot write the previous form's state or
+overwrite a retained draft with the hook's empty initial answer map.
+Navigation saves already-entered text and choices without requiring blur,
+Enter, Send, or Submit. Restoration clamps the question index to the current
+bundle and accepts only question and option identities still present in it.
+
+The overlay continues to use `useClarificationGroup.recordAnswer` for local
+choices. Cache reads never call `submitCollected`, `skipAll`, or late-message
+admission. Single-question choice clicks retain their existing submission behavior.
+Multi-question bundles still require their existing explicit final action.
+
+Only active pending-question forms gain navigation retention. Historical
+late-answer forms retain their existing host-owned admission state and mode
+isolation. Quick Chat and Inbox do not gain a new cache owner through this change.
+
+#### Settlement and recovery
+
+Successful answer and Skip outcomes retire the captured source entry.
+Authoritative terminal messages cannot restore it. Validate restoration against
+the current source bundle through existing clarification predicates and
+current-turn selection. Do not derive authority from cache presence.
+
+Missing or loading message data is not a terminal outcome. Keep the retained
+entry until current source data permits restoration or proves it obsolete.
+Do not scan every transcript to retire inactive entries. An offscreen terminal
+entry can be removed when next inspected or through bounded eviction.
+
+Retryable errors retain text and choices. Submission mutexes, request generations,
+progress banners, and replay actions remain owned by `useClarificationGroup`.
+They are not restored from the answer cache. A late completion can retire only
+its captured identity and generation, never the task currently on screen.
+
+#### Desktop and phone
+
+Reuse `TaskLayout`'s desktop, tablet, and phone branches and the existing
+`ClarificationPanelSection`. The desktop sidebar and phone task picker remain
+the task navigation entry points. The phone picker uses the shipped
+`session-task-switcher-sheet.tsx` pattern.
+
+The question panel retains its current internal scroller, carousel controls,
+safe-area clearance, and touch targets. The primary action remains the existing
+Submit action. Returning to a task restores its question, selected options,
+and exact unfinished text. No new surface, label, or focus transfer is introduced.
+
+Component tests cover identity, lifecycle, store replacement, offscreen auth
+changes, settlement, and responsive remounts. Chromium and Pixel 5 tests use
+real client task navigation, then submit the restored bundle exactly once.
+A full page navigation cannot substitute for client navigation in these tests.
+
 ### Inactive-response reconciliation and late answers
 
 This section also maps `REQ-TASKS-CLARIFICATION-LIFECYCLE-001`, criteria
@@ -227,6 +326,10 @@ No message row, metadata field, or clarification status is added. The only
 persistent change is an additive partial expression index. Existing response
 delivery intents and turn reservations remain the recovery source of truth.
 
+Unsubmitted answer drafts use application-owned browser memory. Reload and
+store disposal discard them. Logout and authority changes clear them even
+while their task pages are absent. They never enter logs or telemetry.
+
 The old session-leading pending-ID index is retained because removing it is not
 required for this fix and could regress other session-scoped queries.
 
@@ -253,3 +356,4 @@ regression. Production does not run `EXPLAIN` per request.
 
 - [Current-turn clarification ownership](../../../decisions/2026-08-14-current-turn-clarification-ownership.md)
 - [Bound clarification responses with indexed lookup](../../../decisions/2026-09-05-bounded-clarification-response-path.md)
+- [Clarification answer draft ownership](../../../decisions/2026-11-03-clarification-answer-draft-ownership.md)

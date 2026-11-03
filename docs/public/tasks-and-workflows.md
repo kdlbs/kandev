@@ -833,6 +833,13 @@ fails, the form keeps your answer so you can retry. **Close question** removes
 the answer surface without sending anything, while the question stays in the
 conversation history.
 
+Unfinished answers stay with their question when you switch tasks or sessions
+and come back. This includes text you have typed but not sent, selected options,
+and your position in a multi-question bundle. Drafts last for the current
+browser page: a reload, logout, or different signed-in user clears them. Kandev
+keeps up to eight unfinished question bundles at a time and discards the least
+recently used one after that.
+
 ## Task dependencies
 
 A task can declare that it **depends on** one or more other tasks. This is a

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -12,7 +12,7 @@ import (
 // ends normally, then an agent-started follow-up emits output and a
 // metadata-only tool_call_update for a tool that already reported completion.
 // The status-less update must not keep the follow-up turn open.
-func emitAsyncFollowup(e *emitter, gatePath string) {
+func emitAsyncFollowup(e *emitter, releasePath string) {
 	e.text("Foreground response before the async follow-up.")
 	e.startTool("async-followup-check", "Check follow-up", acp.ToolKindRead, nil)
 	e.completeTool("async-followup-check", "follow-up check complete")
@@ -26,27 +26,34 @@ func emitAsyncFollowup(e *emitter, gatePath string) {
 		background.text("Background follow-up started.")
 		background.startTool("async-followup-work", "Follow-up work", acp.ToolKindOther, nil)
 
-		// The gated variant keeps the follow-up turn open until the browser has
-		// queued its message, so loaded CI workers do not race the fixed hold.
-		if gatePath != "" {
-			waitForAsyncFollowupGate(gatePath, 90*time.Second)
-		} else {
-			time.Sleep(15 * time.Second)
-		}
 		time.Sleep(time.Second)
 		// PostToolUse metadata-only frame for the tool that already finished
 		// in the foreground turn.
 		background.metadataOnlyToolUpdate("async-followup-check")
 
-		time.Sleep(time.Second)
+		if !waitForAsyncFollowupRelease(background, releasePath) {
+			return
+		}
 		background.completeTool("async-followup-work", "follow-up work complete")
 		background.text("Background follow-up finished.")
-
-		// Keep the follow-up turn open long enough for loaded CI workers to open
-		// queue mode and submit a message while it runs.
-		time.Sleep(15 * time.Second)
-		background.text("Background follow-up still running.")
 	}()
+}
+
+// waitForAsyncFollowupRelease keeps the tool active until the browser confirms
+// queue admission. Manual scenarios without a marker use a bounded delay.
+func waitForAsyncFollowupRelease(e *emitter, path string) bool {
+	if path == "" {
+		time.Sleep(15 * time.Second)
+		return true
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Minute)
+	defer cancel()
+	if err := waitForScriptFile(ctx, path); err != nil {
+		// Release failure retains the active tool and blocks queue delivery.
+		e.text(fmt.Sprintf("Async follow-up release failed: %v", err))
+		return false
+	}
+	return true
 }
 
 // metadataOnlyToolUpdate emits the status-less tool_call_update Claude's
@@ -57,14 +64,4 @@ func (e *emitter) metadataOnlyToolUpdate(id acp.ToolCallId) {
 		SessionId: e.sid,
 		Update:    acp.UpdateToolCall(id),
 	})
-}
-
-func waitForAsyncFollowupGate(path string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
 }
