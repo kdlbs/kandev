@@ -115,10 +115,14 @@ type sessionCeilingController struct {
 	mu           sync.Mutex
 	ceiling      int
 	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
+	// turnReservations are message-turn tickets. They are owned by the attempt
+	// token that created them, never by the session ID, so a successor turn or
+	// a delayed callback cannot release the wrong ticket.
+	turnReservations map[string]*messageTurnReservation
+	lister           admittedSessionLister
+	logger           *zap.Logger
+	now              func() time.Time
+	newKey           func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -126,12 +130,13 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 		logger = zap.NewNop()
 	}
 	return &sessionCeilingController{
-		ceiling:      ceiling,
-		reservations: make(map[string]*ceilingReservation),
-		lister:       lister,
-		logger:       logger,
-		now:          time.Now,
-		newKey:       func() string { return "launch-" + uuid.NewString() },
+		ceiling:          ceiling,
+		reservations:     make(map[string]*ceilingReservation),
+		turnReservations: make(map[string]*messageTurnReservation),
+		lister:           lister,
+		logger:           logger,
+		now:              time.Now,
+		newKey:           func() string { return "launch-" + uuid.NewString() },
 	}
 }
 
@@ -250,15 +255,28 @@ func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[s
 // with no row because no row for it exists yet. It is deliberately not the sum of
 // two independent numbers.
 func (c *sessionCeilingController) populationLocked(counted map[string]struct{}) int {
+	seen := make(map[string]struct{}, len(counted)+len(c.reservations)+len(c.turnReservations))
+	for id := range counted {
+		seen[id] = struct{}{}
+	}
 	population := len(counted)
+	countSession := func(sessionID string) {
+		if sessionID == "" {
+			// A launch-scoped reservation has no row yet, so it always adds one.
+			population++
+			return
+		}
+		if _, ok := seen[sessionID]; ok {
+			return
+		}
+		seen[sessionID] = struct{}{}
+		population++
+	}
 	for _, reservation := range c.reservations {
-		if reservation.sessionID == "" {
-			population++
-			continue
-		}
-		if _, alreadyCounted := counted[reservation.sessionID]; !alreadyCounted {
-			population++
-		}
+		countSession(reservation.sessionID)
+	}
+	for _, reservation := range c.turnReservations {
+		countSession(reservation.sessionID)
 	}
 	return population
 }
@@ -365,6 +383,12 @@ func (c *sessionCeilingController) alreadyAdmittedLocked(req admissionRequest, c
 	}
 	if _, held := c.reservations[req.sessionID]; held {
 		decision.reservationKey = req.sessionID
+		return decision, true
+	}
+	if c.hasTurnReservationLocked(req.sessionID) {
+		// A message turn already owns this session's capacity. A nested launch
+		// must not take a second unit or release the turn ticket as if it were
+		// a launch reservation.
 		return decision, true
 	}
 	if _, isCounted := counted[req.sessionID]; isCounted {
@@ -548,6 +572,9 @@ func (c *sessionCeilingController) isSessionCeilingBacked(ctx context.Context, s
 	if _, reserved := c.reservations[sessionID]; reserved {
 		return true, nil
 	}
+	if c.hasTurnReservationLocked(sessionID) {
+		return true, nil
+	}
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
 		return false, err
@@ -574,6 +601,18 @@ func (c *sessionCeilingController) expireStaleReservations() int {
 		released++
 		c.logger.Warn("session ceiling released a reservation whose launch never reached a counted state",
 			zap.String("reservation_key", key),
+			zap.String("session_id", reservation.sessionID),
+			zap.Duration("held_for", now.Sub(reservation.takenAt)),
+			zap.Duration("budget", budget))
+	}
+	for token, reservation := range c.turnReservations {
+		if now.Sub(reservation.takenAt) <= budget {
+			continue
+		}
+		delete(c.turnReservations, token)
+		released++
+		c.logger.Warn("session ceiling released a message-turn ticket whose dispatch never reached a counted state",
+			zap.String("reservation_key", token),
 			zap.String("session_id", reservation.sessionID),
 			zap.Duration("held_for", now.Sub(reservation.takenAt)),
 			zap.Duration("budget", budget))

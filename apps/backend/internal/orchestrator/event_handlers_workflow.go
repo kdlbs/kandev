@@ -6517,6 +6517,7 @@ func (s *Service) retryAutoStartStepPrompt(state *autoStartStepPromptState) erro
 		_, err := s.promptTask(
 			state.ctx, state.taskID, state.sessionID, state.dispatchPrompt, "",
 			state.planMode, state.attachments, false, launchOriginAutomatic, promptTaskOptions{
+				capacityIntent:            turnCapacityOverride,
 				requireNonterminalSession: true,
 				promptAlreadyComposed:     true,
 				fallbackLaunchPrompt:      state.recordedPrompt,

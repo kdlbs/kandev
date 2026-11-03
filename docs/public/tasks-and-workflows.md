@@ -1056,12 +1056,19 @@ A workflow sets task steps, prompts, agent profiles, session rules, and automati
 
 Workflow WIP limits and the instance-wide session limit control different things:
 
-| Limit             | Scope and effect                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior. |
-| **Session limit** | Caps automatic agent starts across the instance. When reached, Kandev keeps the selected destination and retries later.                                                                  |
+| Limit             | Scope and effect                                                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **WIP limit**     | Caps active, non-archived, non-ephemeral tasks in one step. Kandev keeps overflow visible and queued. See [Workflow Tips](workflow-tips.md#build-a-custom-workflow) for feeder behavior.                          |
+| **Session limit** | Caps automatic agent starts and new message turns across the instance. When reached, Kandev keeps the selected destination or pending message and retries later.                                                  |
 
-The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
+The session limit is off by default. Explicit **Start**, **Resume**, and
+**Send Now** can override it. Ordinary messages, including chat and
+`message_task_kandev`, wait when the limit is full: Kandev keeps the accepted
+input in the existing prompt queue and starts one new turn when capacity
+becomes available. Auto-run OFF keeps that input pending. Set a positive limit
+in **Settings → Preferences → Task Behavior → Runtime**.
+`KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the
+limit. Change the environment variable and restart Kandev.
 
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 

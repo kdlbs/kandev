@@ -232,6 +232,8 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	if options.deliverySubmissionID == "" {
 		options.deliverySubmissionID = "clarification:" + uuid.NewString()
 	}
+	// A clarification answer continues an already-accepted turn.
+	options.capacityIntent = turnCapacityOverride
 	prompt := buildClarificationPrompt(data)
 
 	s.logger.Info("resuming agent with clarification answer",
@@ -411,6 +413,7 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		false,
 		launchOriginAutomatic,
 		promptTaskOptions{
+			capacityIntent:        turnCapacityOverride,
 			expectedCurrentTurnID: data.ClarificationTurnID,
 			deliverySubmissionID:  "clarification:" + uuid.NewString(),
 		},
