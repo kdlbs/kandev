@@ -239,6 +239,36 @@ func TestAntigravityCurrentTurnOutcome(t *testing.T) {
 		}
 	})
 
+	t.Run("no-store boundary inspects a journal created during the turn", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), acpcompat.AntigravityConfigRelDir)
+		path := filepath.Join(root, acpcompat.AntigravityConversationsDir, antigravityOutcomeSessionID+".db")
+		fake := &antigravityOutcomeAgent{
+			sessionID: antigravityOutcomeSessionID,
+			version:   acpcompat.AntigravityQuotaRefusalVersion,
+			onPrompt: func() {
+				if err := os.MkdirAll(filepath.Join(root, acpcompat.AntigravityConversationsDir), 0o700); err != nil {
+					t.Errorf("create journal root: %v", err)
+					return
+				}
+				if err := tryCreateAntigravityJournal(root, antigravityOutcomeSessionID, antigravityStepsSchema); err != nil {
+					t.Errorf("create new journal: %v", err)
+					return
+				}
+				if err := tryInsertAntigravityStep(path, 0, acpcompat.AntigravityErrorStepType, []byte(antigravityNewQuotaPayload)); err != nil {
+					t.Errorf("insert error step: %v", err)
+				}
+			},
+		}
+		a := newAntigravityOutcomeFixture(t, fake, root)
+		if err := a.Prompt(context.Background(), "do work", nil, 1); err != nil {
+			t.Fatalf("Prompt: %v", err)
+		}
+		event := antigravityErrorEvent(t, a)
+		if !strings.Contains(event.Error, "Antigravity quota reached") {
+			t.Fatalf("error = %q, want quota failure", event.Error)
+		}
+	})
+
 	t.Run("new database is inspected", func(t *testing.T) {
 		root := newAntigravityJournalRoot(t)
 		path := filepath.Join(root, acpcompat.AntigravityConversationsDir, antigravityOutcomeSessionID+".db")
