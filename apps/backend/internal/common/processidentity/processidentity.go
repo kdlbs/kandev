@@ -41,19 +41,23 @@ var ownWindowsJobName struct {
 // of this process. agentctl calls it first at startup, before it starts any
 // process, so agents, scripts and nested agentctl processes do not inherit the
 // outer job name and cannot record the outer job as their own. Only the first
-// call that finds the variable is kept.
-func TakeWindowsJobNameFromEnv() {
+// call that finds the variable is kept. A variable that cannot be removed is
+// reported so startup does not continue while descendants could inherit it.
+func TakeWindowsJobNameFromEnv() error {
 	name, ok := os.LookupEnv(WindowsJobNameEnv)
 	if !ok {
-		return
+		return nil
 	}
-	_ = os.Unsetenv(WindowsJobNameEnv)
+	if err := os.Unsetenv(WindowsJobNameEnv); err != nil {
+		return fmt.Errorf("remove %s from the process environment: %w", WindowsJobNameEnv, err)
+	}
 	ownWindowsJobName.Lock()
 	defer ownWindowsJobName.Unlock()
 	if !ownWindowsJobName.taken {
 		ownWindowsJobName.name = name
 		ownWindowsJobName.taken = true
 	}
+	return nil
 }
 
 // takenWindowsJobName returns the job name taken at startup, or empty.

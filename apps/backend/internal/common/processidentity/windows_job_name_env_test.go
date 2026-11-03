@@ -23,7 +23,9 @@ func TestTakeWindowsJobNameFromEnvRemovesItFromDescendants(t *testing.T) {
 	outer := WindowsJobNamePrefix + "outer"
 	t.Setenv(WindowsJobNameEnv, outer)
 
-	TakeWindowsJobNameFromEnv()
+	if err := TakeWindowsJobNameFromEnv(); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, ok := os.LookupEnv(WindowsJobNameEnv); ok {
 		t.Fatal("job name is still in the process environment after it was taken")
@@ -38,7 +40,9 @@ func TestTakeWindowsJobNameFromEnvRemovesItFromDescendants(t *testing.T) {
 	}
 
 	t.Setenv(WindowsJobNameEnv, WindowsJobNamePrefix+"later")
-	TakeWindowsJobNameFromEnv()
+	if err := TakeWindowsJobNameFromEnv(); err != nil {
+		t.Fatal(err)
+	}
 	if got := takenWindowsJobName(); got != outer {
 		t.Fatalf("takenWindowsJobName() after a later value = %q, want the first %q", got, outer)
 	}
@@ -49,7 +53,9 @@ func TestTakeWindowsJobNameFromEnvWithoutVariable(t *testing.T) {
 	t.Setenv(WindowsJobNameEnv, "")
 	_ = os.Unsetenv(WindowsJobNameEnv)
 
-	TakeWindowsJobNameFromEnv()
+	if err := TakeWindowsJobNameFromEnv(); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := takenWindowsJobName(); got != "" {
 		t.Fatalf("takenWindowsJobName() = %q, want empty", got)

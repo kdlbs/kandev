@@ -53,8 +53,12 @@ func main() {
 
 func runMain() int {
 	// Take the launcher's job name before anything can start a process, so no
-	// descendant inherits it and records the outer job as its own.
-	processidentity.TakeWindowsJobNameFromEnv()
+	// descendant inherits it and records the outer job as its own. Startup fails
+	// closed when the variable cannot be removed.
+	if err := processidentity.TakeWindowsJobNameFromEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 
 	if acpcompat.IsAntigravityNoopBrowserInvocation(os.Args) {
 		// The Antigravity vendor server may invoke BROWSER while a background

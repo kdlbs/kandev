@@ -205,7 +205,7 @@ func TestWindowsOwnedJobHelper(t *testing.T) {
 		defer timer.Stop()
 		<-timer.C
 	case "root":
-		TakeWindowsJobNameFromEnv()
+		require.NoError(t, TakeWindowsJobNameFromEnv())
 		identity, err := Capture(os.Getpid())
 		require.NoError(t, err)
 		child := exec.Command(os.Args[0], "-test.run=^TestWindowsOwnedJobHelper$")
