@@ -571,6 +571,7 @@
   "pressCmdCtrlEnterToSend": "按 Cmd/Ctrl+Enter 发送消息。按 Enter 换行。",
   "pressEnterToSendMessagesPress": "按 Enter 发送消息。按 Shift+Enter 换行。",
   "previewSound": "试听声音",
+  "previewSoundUnavailable": "启用通知声音即可预览。",
   "profileForTasksCreatedByAgents": "智能体创建任务时使用的配置",
   "programming": "编程",
   "promptAdd": "添加提示词",

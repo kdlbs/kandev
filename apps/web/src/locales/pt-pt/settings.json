@@ -557,6 +557,7 @@
   "pressCmdCtrlEnterToSend": "Prima Cmd/Ctrl+Enter para enviar mensagens. Prima Enter para mudar de linha.",
   "pressEnterToSendMessagesPress": "Prima Enter para enviar mensagens. Prima Shift+Enter para mudar de linha.",
   "previewSound": "Pré-visualizar o som",
+  "previewSoundUnavailable": "Ative o som de notificação para o pré-visualizar.",
   "profileForTasksCreatedByAgents": "Perfil das tarefas criadas por agentes",
   "programming": "Programação",
   "promptAdd": "Adicionar prompt",

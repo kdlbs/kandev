@@ -568,6 +568,7 @@
   "pressCmdCtrlEnterToSend": "Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines.",
   "pressEnterToSendMessagesPress": "Press Enter to send messages. Press Shift+Enter for newlines.",
   "previewSound": "Preview sound",
+  "previewSoundUnavailable": "Enable notification sound to preview it.",
   "profileForTasksCreatedByAgents": "Profile for Tasks Created by Agents",
   "programming": "Programming",
   "profileStartModelNotAdvertisedOnHost": "The host probe did not advertise {{model}}. The selected executor will decide the model at launch.",

@@ -571,6 +571,7 @@
   "pressCmdCtrlEnterToSend": "按 Cmd/Ctrl+Enter 傳送訊息。按 Enter 換行。",
   "pressEnterToSendMessagesPress": "按 Enter 傳送訊息。按 Shift+Enter 換行。",
   "previewSound": "試聽聲音",
+  "previewSoundUnavailable": "啓用通知聲音即可預覽。",
   "profileForTasksCreatedByAgents": "代理程式建立任務時使用的設定",
   "programming": "編程",
   "promptAdd": "新增提示詞",

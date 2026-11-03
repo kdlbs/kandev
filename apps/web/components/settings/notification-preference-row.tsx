@@ -43,7 +43,10 @@ export function NotificationPreferenceRow({
         className,
       )}
     >
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 md:flex md:flex-wrap md:gap-x-4">
+      <div
+        className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 md:flex md:gap-x-4"
+        data-notification-preference-body="true"
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-2 md:flex-1">
           <SettingsFieldLabel htmlFor={labelFor}>{label}</SettingsFieldLabel>
           {isDirty && <UnsavedChangesBadge />}

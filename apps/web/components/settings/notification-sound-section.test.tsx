@@ -122,11 +122,13 @@ describe("NotificationSoundSection controls", () => {
     expect((selector as HTMLButtonElement).disabled).toBe(true);
     expect((preview as HTMLButtonElement).disabled).toBe(true);
     expect(selector.textContent).toContain("Ding");
+    expect(screen.getByLabelText("Enable notification sound to preview it.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("switch", { name: SOUND_TOGGLE_NAME }));
 
     expect((selector as HTMLButtonElement).disabled).toBe(false);
     expect((preview as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByLabelText("Enable notification sound to preview it.")).toBeNull();
   });
 
   it("preserves the chosen preset across sound toggles", async () => {

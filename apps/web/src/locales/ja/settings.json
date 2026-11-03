@@ -568,6 +568,7 @@
   "pressCmdCtrlEnterToSend": "メッセージを送信するには Cmd/Ctrl+Enter を押してください。改行するには Enter を押してください。",
   "pressEnterToSendMessagesPress": "メッセージを送信するには Enter を押してください。改行するには Shift+Enter を押してください。",
   "previewSound": "音をプレビュー",
+  "previewSoundUnavailable": "通知音を有効にするとプレビューできます。",
   "profileForTasksCreatedByAgents": "エージェントが作成したタスク用のプロファイル",
   "programming": "プログラミング",
   "profileStartModelNotAdvertisedOnHost": "ホストの probe は {{model}} を通知しませんでした。選択された executor が起動時にモデルを決定します。",

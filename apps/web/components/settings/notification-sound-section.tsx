@@ -32,6 +32,43 @@ const SOUND_PRESET_LABEL_KEYS: Record<SoundPresetId, string> = {
   pop: "settings:soundPresetPop",
 };
 
+function SoundPreviewButton({
+  presetId,
+  disabled,
+}: {
+  presetId: SoundPresetId;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={disabled ? 0 : -1}
+            className="inline-flex"
+            aria-label={disabled ? t("settings:previewSoundUnavailable") : undefined}
+          >
+            <Button
+              variant="outline"
+              size="icon"
+              className="cursor-pointer"
+              aria-label={t("settings:previewSound")}
+              disabled={disabled}
+              onClick={() => playSoundPreset(presetId)}
+            >
+              <IconVolume className="h-4 w-4" />
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          {disabled ? t("settings:previewSoundUnavailable") : t("settings:previewSound")}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export function NotificationSoundSection({
   onDirtyChange,
 }: {
@@ -108,25 +145,7 @@ export function NotificationSoundSection({
           ))}
         </SelectContent>
       </Select>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={controlsDisabled ? 0 : -1} className="inline-flex">
-              <Button
-                variant="outline"
-                size="icon"
-                className="cursor-pointer"
-                aria-label={t("settings:previewSound")}
-                disabled={controlsDisabled}
-                onClick={() => playSoundPreset(prefs.presetId)}
-              >
-                <IconVolume className="h-4 w-4" />
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{t("settings:previewSound")}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <SoundPreviewButton presetId={prefs.presetId} disabled={controlsDisabled} />
     </NotificationPreferenceRow>
   );
 }

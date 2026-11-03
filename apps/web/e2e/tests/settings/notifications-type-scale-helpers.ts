@@ -123,16 +123,20 @@ export function requirePreferenceBox(
 
 const requireBox = requirePreferenceBox;
 
-/** Two controls share a row when their vertical ranges overlap. */
+/** Two controls share a row when their overlap covers most of the smaller box. */
 export async function expectSameRow(first: Locator, second: Locator, label: string): Promise<void> {
   const firstBox = requireBox(await first.boundingBox(), `${label}: first`);
   const secondBox = requireBox(await second.boundingBox(), `${label}: second`);
+  const overlap = Math.max(
+    0,
+    Math.min(firstBox.y + firstBox.height, secondBox.y + secondBox.height) -
+      Math.max(firstBox.y, secondBox.y),
+  );
+  const smallerHeight = Math.min(firstBox.height, secondBox.height);
   expect(
-    firstBox.y < secondBox.y + secondBox.height && secondBox.y < firstBox.y + firstBox.height,
-    `${label}: expected overlapping rows, got ${firstBox.y.toFixed(1)}-${(
-      firstBox.y + firstBox.height
-    ).toFixed(1)} and ${secondBox.y.toFixed(1)}-${(secondBox.y + secondBox.height).toFixed(1)}`,
-  ).toBe(true);
+    overlap,
+    `${label}: expected overlapping rows, got ${overlap.toFixed(1)}px overlap for a ${smallerHeight.toFixed(1)}px control`,
+  ).toBeGreaterThanOrEqual(smallerHeight * 0.5);
 }
 
 /** The lower control starts on a later row than the upper control. */
@@ -196,6 +200,39 @@ export async function expectNormalPermissionLayout(page: Page): Promise<void> {
   // A warning footer would reserve a second body row; normal states have none.
   await expect(footer).toHaveCount(0);
   await expect(group.locator('[data-settings-group-card="true"]')).toHaveCount(0);
+
+  // Measured bounds keep a blank body area from passing the count assertions:
+  // the compact row is body + its own vertical padding, followed by the 12px
+  // preference-row gap.
+  const geometry = await group.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const body = element.querySelector('[data-notification-preference-body="true"]');
+    const next = element.nextElementSibling;
+    const rowBox = element.getBoundingClientRect();
+    return {
+      paddingTop: parseFloat(style.paddingTop),
+      paddingBottom: parseFloat(style.paddingBottom),
+      clientHeight: element.clientHeight,
+      bodyHeight: body?.getBoundingClientRect().height ?? null,
+      nextGap: next ? next.getBoundingClientRect().top - rowBox.bottom : null,
+    };
+  });
+
+  expect(geometry.bodyHeight).not.toBeNull();
+  if (geometry.bodyHeight === null) throw new Error("normal permission row has no body");
+  expect(geometry.paddingTop).toBeGreaterThanOrEqual(10);
+  expect(geometry.paddingTop).toBeLessThanOrEqual(12);
+  expect(geometry.paddingBottom).toEqual(geometry.paddingTop);
+  expect(
+    Math.abs(
+      geometry.clientHeight - geometry.bodyHeight - geometry.paddingTop - geometry.paddingBottom,
+    ),
+  ).toBeLessThanOrEqual(1);
+  expect(geometry.nextGap).not.toBeNull();
+  if (geometry.nextGap !== null) {
+    expect(geometry.nextGap).toBeGreaterThanOrEqual(11);
+    expect(geometry.nextGap).toBeLessThanOrEqual(13);
+  }
 }
 
 /** Asserts the warning sits inside its row and inside the viewport width. */
