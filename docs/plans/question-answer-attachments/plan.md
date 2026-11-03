@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: complete
+status: in_progress
 requirements:
   - REQ-TASKS-ANSWER-ATTACHMENTS-001
   - REQ-TASKS-ANSWER-ATTACHMENTS-002
@@ -227,15 +227,15 @@ Work-order commands also run the affected existing contract tests.
 
 | Acceptance criteria | Evidence |
 | --- | --- |
-| 001.1, 001.2, 001.4, 001.6 | Overlay and group-hook tests for selection, custom text, explicit submission, and file-free compatibility. |
-| 001.3, 002.3, 003.6 | `TestAnswerAttachmentLiveDelivery`, `TestAnswerAttachmentNativeCodexDelivery`, and `TestAnswerAttachmentDetachedDelivery`. Read actual materialized bytes before waiter release. |
-| 001.5, 002.1 | `TestAnswerAttachmentAdmissionBounds` and `TestAnswerAttachmentAdmissionMixedInvalid` with real registry rows. Include one valid and one foreign, expired, or missing row. |
-| 002.2 | `TestAnswerAttachmentClaimRace` and `TestAnswerAttachmentWinnerReplay`. Use different file sets from competing callers. |
-| 002.4, 002.5 | `TestAnswerAttachmentRestoreRetainsFiles`, `TestAnswerAttachmentRetryRemoveAndSkip`, and `TestAnswerAttachmentRestartRecovery`. |
-| 002.2, 002.6 | `TestAnswerAttachmentMixedTerminalSiblings` and stale-turn, detached, watchdog, and late-message cases. |
-| 003.1 through 003.8 | Component/hook tests and the desktop/phone scenarios in task 04. |
+| 001.1, 001.2, 001.4, 001.6 | `clarification-input-overlay.test.tsx`, `clarification-custom-input.test.tsx`, `clarification-answer-attachment-submit.test.tsx`, and the desktop/phone Playwright suites for explicit submission and file-free compatibility. |
+| 001.3, 002.3, 003.6 | `TestMaterializationUsesPostClaimDeliveryBudget`, `TestMaterializationFailureRestoresClaim`, `TestToolUserInputAppendsAnswerAttachmentPaths`, `TestResumeDetachedClarificationCarriesAnswerAttachments`, and the byte/hash proof in `question-answer-attachments.spec.ts`. |
+| 001.5, 002.1 | `TestValidateOutcomeRejectsAnswerAttachmentShapes` and `TestCompleteActiveClarificationBundleWithAttachments*` with real registry rows, including mixed valid/foreign rollback and count/byte bounds. |
+| 002.2 | `TestCompleteActiveClarificationBundleWithAttachmentsLosingCallerDoesNotAdopt` plus the existing exactly-once claim and race suites. |
+| 002.4, 002.5 | `TestCompleteActiveClarificationBundleWithAttachmentsAdoptsCanonicalSet`, `TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure`, and `TestCompleteActiveClarificationBundleWithAttachmentsHandlesMixedSiblingsWithoutFiles`. |
+| 002.2, 002.6 | `TestCompleteActiveClarificationBundleWithAttachmentsPreservesMixedTerminalSibling`, `TestMaterializationRejectsSupersededConversationalTurn`, and the late ordinary-message Playwright case. |
+| 003.1 through 003.8 | `use-clarification-answer-attachments.test.tsx`, `clarification-answer-attachments.test.tsx`, `clarification-custom-input.test.tsx`, and the desktop/phone scenarios in task 04. |
 | 003.7 | Image-only, multiple-image, mixed-text, ordinary-text, and unreadable-image paste tests using the current clipboard helper. |
-| 003.8 | Measured equal input-row/panel height across empty, uploading, ready, and failed states with unchanged text. Include choice-only, phone, and breakpoint cases. |
+| 003.8 | Measured equal compact row height across empty/uploading/ready/failed states (assertion `<= 48px`), plus choice-only and narrow fine-pointer viewport coverage. |
 
 ## E2E tests
 
@@ -356,6 +356,21 @@ workspace resolution, overlapping additions, and abandoned uploads; remount and 
 post-claim transfer budget and restore-on-transfer-failure; canonical turn-authority ordering;
 mixed terminal/pending attachment claims; execution replacement during transfer; and desktop/phone
 compact geometry and manager touch targets.
+
+## Coverage gates
+
+The implementation is complete, but the following verification gates remain open and are not claimed
+as passing evidence:
+
+- PostgreSQL: no disposable DSN was available for the attachment-aware claim, lock-order, and
+  mixed-bundle repository tests. SQLite and dialect-neutral tests pass; PostgreSQL concurrency remains
+  to be exercised in CI or a dedicated environment.
+- Detached resume: descriptor construction is unit-tested, but a full detached prompt resume carrying
+  files was not exercised in Playwright.
+- Shared hosts: Quick Chat, Threads, and Coordinator attachment uploads were not separately scripted;
+  they share the panel, upload hook, and source-task resolver exercised through task chat and Inbox.
+- Native providers: native Codex answer-array delivery is unit-tested; no live native-provider run was
+  performed, and native image result blocks remain out of scope.
 
 ## Risks
 

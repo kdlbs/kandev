@@ -343,7 +343,6 @@ func (r *Repository) CompleteActiveClarificationBundleWithAttachments(
 	return r.completeActiveClarificationBundle(ctx, pendingID, status, responses, plan)
 }
 
-//nolint:cyclop // Every transaction boundary must stay explicit; splitting it would hide rollback scope.
 func (r *Repository) completeActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, status string,
@@ -360,21 +359,13 @@ func (r *Repository) completeActiveClarificationBundle(
 	defer func() { _ = tx.Rollback() }()
 
 	drv := r.db.DriverName()
-	if plan != nil && plan.scope.TaskID != "" {
-		result, err := tx.ExecContext(ctx, tx.Rebind(`
-			UPDATE tasks SET updated_at = updated_at WHERE id = ?
-		`), plan.scope.TaskID)
-		if err != nil {
-			return nil, false, nil, fmt.Errorf("lock clarification task %q: %w", plan.scope.TaskID, err)
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			return nil, false, nil, fmt.Errorf("%w: %s", ErrTaskNotFound, plan.scope.TaskID)
-		}
-	}
 	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
 		return nil, false, nil, err
 	}
+	if err := r.lockClarificationAnswerTask(ctx, tx, plan); err != nil {
+		return nil, false, nil, err
+	}
+
 	claimedRows, err := r.claimActiveClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
 		return nil, false, nil, err

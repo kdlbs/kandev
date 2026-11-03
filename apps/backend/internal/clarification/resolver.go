@@ -1281,8 +1281,8 @@ func withAnswerFiles(body string, a Answer) string {
 	}
 	names := make([]string, 0, len(a.Attachments))
 	for _, attachment := range a.Attachments {
-		if attachment.Name != "" {
-			names = append(names, attachment.Name)
+		if name := strings.Join(strings.Fields(attachment.Name), " "); name != "" {
+			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {

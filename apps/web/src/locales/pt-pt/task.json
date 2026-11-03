@@ -170,7 +170,7 @@
   "answerAttachments": "Ficheiros da resposta",
   "answerAttachmentsHint": "Anexe capturas de ecrã ou ficheiros a esta resposta.",
   "answerAttachmentsLimit": "Até {{maxFiles}} ficheiros, {{maxSize}} no total.",
-  "answerAttachmentsStatus": "{{total}} ficheiros da resposta, {{failed}} com falha",
+  "answerAttachmentsStatus": "Ficheiros: {{total}}. Falhas: {{failed}}.",
   "attachmentFailed": "Falha no envio",
   "attachmentReady": "Pronto",
   "attachmentUploading": "A enviar",

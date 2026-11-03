@@ -26,7 +26,8 @@ func TestClarificationAttachmentProofReadsBytes(t *testing.T) {
 }
 
 func TestClarificationAttachmentProofReportsUnreadableFiles(t *testing.T) {
-	result := `{"db":{"attachments":[{"name":"missing.png","path":"/definitely/missing/file.png"}]}}`
+	result := `{"db":{"attachments":[{"name":"missing.png","path":` +
+		quoteJSON(filepath.Join(t.TempDir(), "missing.png")) + `}]}}`
 	if got := clarificationAttachmentProof(result); got != "missing.png unreadable" {
 		t.Fatalf("proof = %q", got)
 	}

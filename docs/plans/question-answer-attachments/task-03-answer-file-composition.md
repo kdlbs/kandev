@@ -202,6 +202,6 @@ Verification passed: web typecheck, scoped ESLint, `i18n:check`, `i18n:ratchet`,
 across overlay, custom input, draft context, panel, history, hook, clipboard, and late-answer suites.
 Review remediation replaced the per-hook cache with a source-scoped reactive store: processing is
 reserved synchronously, stale completions are fenced by source and generation, removals delete
-abandoned staged uploads, and remounts/two hosts share completion. Phone controls use
-`isMobile || coarse pointer`, all manager actions meet 44px, and the custom row stays at 46px with
+abandoned staged uploads, eviction releases staged uploads, and remounts/two hosts share completion. Phone controls use
+`isMobile || coarse pointer`, all manager actions meet 44px, and the custom row stays at approximately 46px with
 unchanged text. No file bytes enter web storage.

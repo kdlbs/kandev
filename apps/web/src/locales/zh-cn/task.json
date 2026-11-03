@@ -170,7 +170,7 @@
   "answerAttachments": "回答文件",
   "answerAttachmentsHint": "为此回答附加截图或文件。",
   "answerAttachmentsLimit": "最多 {{maxFiles}} 个文件，总计 {{maxSize}}。",
-  "answerAttachmentsStatus": "{{total}} 个回答文件，{{failed}} 个失败",
+  "answerAttachmentsStatus": "文件：{{total}} 个，失败：{{failed}} 个。",
   "attachmentFailed": "上传失败",
   "attachmentReady": "就绪",
   "attachmentUploading": "正在上传",

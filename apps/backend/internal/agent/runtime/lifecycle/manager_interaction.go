@@ -2011,8 +2011,9 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
-// ErrNoActiveAnswerExecution means no live execution owns the answering
-// session, so answer files must be delivered through a resume prompt instead.
+// ErrNoActiveAnswerExecution means no live execution currently owns the
+// answering session. Callers treat it as a retryable materialization failure;
+// detached answers materialize through their resume prompt instead.
 var ErrNoActiveAnswerExecution = errors.New("no active execution for answer attachments")
 
 // MaterializeAnswerAttachments streams already-claimed answer files into the

@@ -329,12 +329,11 @@ function ClarificationRuneCounter({
 // hardware keyboard performs it after the live draft has already been recorded.
 function handleFinalSubmitEnter(
   event: KeyboardEvent<HTMLTextAreaElement>,
-  trimmed: string,
   overLimit: boolean,
   onRequestFinalSubmit?: () => void,
 ): void {
   event.preventDefault();
-  if (!event.repeat && trimmed && !overLimit) onRequestFinalSubmit?.();
+  if (!event.repeat && !overLimit) onRequestFinalSubmit?.();
 }
 
 function buildPasteHandler(onPasteFiles?: (files: File[], issue?: "unreadable-image") => void) {
@@ -351,16 +350,16 @@ function buildPasteHandler(onPasteFiles?: (files: File[], issue?: "unreadable-im
   };
 }
 
-// Builds the Textarea's onKeyDown handler. Extracted so ClarificationCustomInput
-// stays under the file's function-length lint limit; behavior (Enter submits,
-// Shift+Enter newlines, Cmd/Ctrl+Enter finalizes, overLimit blocks both submit
-// paths) is unchanged from having this inline.
 function isPlainEnter(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
   return (
     event.key === "Enter" && !event.shiftKey && !event.altKey && !event.nativeEvent.isComposing
   );
 }
 
+// Builds the Textarea's onKeyDown handler. Extracted so ClarificationCustomInput
+// stays under the file's function-length lint limit; behavior (Enter submits,
+// Shift+Enter newlines, Cmd/Ctrl+Enter finalizes, overLimit blocks both submit
+// paths) is unchanged from having this inline.
 function buildCustomInputKeyDown(ctx: {
   isFinePointer: boolean;
   trimmed: string;
@@ -389,7 +388,7 @@ function buildCustomInputKeyDown(ctx: {
       return;
     }
     if (finalSubmitMode && isFinePointer) {
-      handleFinalSubmitEnter(e, trimmed, overLimit, onRequestFinalSubmit);
+      handleFinalSubmitEnter(e, overLimit, onRequestFinalSubmit);
       return;
     }
     // On touch devices Enter inserts a newline (submit via the button).

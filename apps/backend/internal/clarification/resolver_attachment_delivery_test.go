@@ -195,9 +195,8 @@ func TestMaterializationFailureRestoresClaim(t *testing.T) {
 	if status := stringFromMetadata(detail.Metadata, metaStatusKey); status != string(StatusPending) {
 		t.Fatalf("restored status = %q", status)
 	}
-	if _, ok := detail.Metadata["attachments"]; !ok {
-		t.Fatal("retry manifest was not preserved on restore")
-	}
+	// Manifest preservation on restore is repository behavior, covered by
+	// TestCompleteActiveClarificationBundleWithAttachmentsAdoptsCanonicalSet.
 	store.CancelRequest(pendingID)
 	select {
 	case <-waitDone:

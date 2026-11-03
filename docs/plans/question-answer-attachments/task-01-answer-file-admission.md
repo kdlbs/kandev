@@ -1,7 +1,7 @@
 ---
 id: "01-answer-file-admission"
 title: "Admit and retain answer files atomically"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -62,18 +62,14 @@ The mixed-sibling test must include a terminal row and a pending row with differ
 Run from the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/clarification/... ./internal/task/service ./internal/task/repository/sqlite -run 'AnswerAttachment|SerializeResponse|NormalizeAnswered|Clarification.*Claim' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/clarification/... ./internal/task/service ./internal/task/repository/sqlite -run 'AnswerAttachment|SerializeResponse|NormalizeAnswered|Clarification.*Claim|CompleteActiveClarificationBundleWithAttachments' -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
 ```
 
-For real PostgreSQL evidence, use a disposable database and run:
-
-```bash
-(cd apps/backend && : "${KANDEV_TEST_POSTGRES_DSN:?Set a disposable PostgreSQL test DSN}" && go test -trimpath -race ./internal/task/repository/sqlite -run 'TestAnswerAttachment.*Postgres' -count=1)
-```
-
-Record a missing PostgreSQL fixture as a coverage limitation. A skipped test is not PostgreSQL evidence.
+PostgreSQL coverage gate: no disposable `KANDEV_TEST_POSTGRES_DSN` was available. The attachment-aware
+claim tests run on SQLite; a PostgreSQL lock-order/concurrency regression remains open and is recorded
+in the plan's coverage gates. A skipped test is not PostgreSQL evidence.
 Run `scripts/lint-go-changed` against the final owned Go file list before completion.
 
 ## Files likely touched
@@ -82,17 +78,15 @@ Run `scripts/lint-go-changed` against the final owned Go file list before comple
 - `apps/backend/internal/clarification/response_serialization.go`
 - `apps/backend/internal/clarification/outcome_validation.go`
 - `apps/backend/internal/clarification/resolver.go`
-- `apps/backend/internal/clarification/answer_attachments.go` (new)
 - `apps/backend/internal/clarification/answer_attachments_test.go` (new)
 - `apps/backend/internal/task/models/clarification_attachments.go` (new)
 - `apps/backend/internal/task/service/service_clarification_attachments.go` (new)
-- `apps/backend/internal/task/service/service_messages.go`
 - `apps/backend/internal/task/repository/interface.go`
 - `apps/backend/internal/task/repository/sqlite/message_clarification_response.go`
+- `apps/backend/internal/task/repository/sqlite/message_clarification_attachment_lock.go` (new)
 - `apps/backend/internal/task/repository/sqlite/message_clarification_attachments.go` (new)
 - `apps/backend/internal/task/repository/sqlite/message_clarification_attachments_test.go` (new)
-- `apps/backend/internal/task/repository/sqlite/attachment.go`
-- `apps/backend/internal/backendapp/adapters.go`
+- `apps/backend/internal/backendapp/clarification_attachments.go` (new)
 
 New production helpers need adjacent tests. Update interface stubs only where the new completion operation requires them.
 

@@ -171,9 +171,9 @@ func (s *Store) ClearDeliveryMiss(pendingID string) {
 	delete(s.deliveryMisses, pendingID)
 }
 
-// HasWaiter reports whether an in-memory waiter currently owns pendingID. A
-// detached answer has no waiter and materializes files through its resume
-// prompt instead of the live delivery seam.
+// HasWaiter reports whether an in-memory pending entry exists for pendingID.
+// The entry can outlive a cancelled parent wait, but a detached answer has no
+// entry at all and materializes files through its resume prompt instead.
 func (s *Store) HasWaiter(pendingID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

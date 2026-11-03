@@ -52,6 +52,7 @@ type AttachmentStore = {
   key: string;
   taskId: string | null;
   files: AnswerAttachmentFiles;
+  initialized: Set<string>;
   processing: number;
   generation: number;
   workspaceId: string | null;
@@ -76,7 +77,15 @@ function publish(store: AttachmentStore) {
 
 function disposeStore(store: AttachmentStore) {
   store.disposed = true;
+  store.generation += 1;
   store.listeners.clear();
+  for (const list of Object.values(store.files)) {
+    for (const file of list) {
+      if (file.file && file.attachmentId) {
+        void deleteAttachment(file.attachmentId).catch(() => undefined);
+      }
+    }
+  }
   if (storesByBundle.get(store.key) === store) storesByBundle.delete(store.key);
 }
 
@@ -96,12 +105,7 @@ function getStore(bundleKey: string | null, taskId: string | null): AttachmentSt
   while (storesByBundle.size > MAX_CACHED_BUNDLES) {
     let victimKey: string | undefined;
     for (const [key, candidate] of storesByBundle) {
-      if (
-        key !== bundleKey &&
-        candidate.listeners.size === 0 &&
-        candidate.processing === 0 &&
-        countFiles(candidate.files) === 0
-      ) {
+      if (key !== bundleKey && candidate.listeners.size === 0) {
         victimKey = key;
         break;
       }
@@ -118,6 +122,7 @@ function createStore(key: string, taskId: string | null): AttachmentStore {
     key,
     taskId,
     files: {},
+    initialized: new Set(),
     processing: 0,
     generation: 0,
     workspaceId: null,
@@ -248,7 +253,7 @@ function ensureWorkspace(store: AttachmentStore): Promise<string | null> {
   }
   const request = store.workspacePromise;
   return request.then((workspaceId) => {
-    if (store.disposed || store.listeners.size === 0) return null;
+    if (store.disposed) return null;
     if (workspaceId) store.workspaceId = workspaceId;
     return workspaceId;
   });
@@ -267,7 +272,7 @@ async function uploadFile(
   const generation = store.generation;
   const promise = (async () => {
     const workspaceId = await ensureWorkspace(store);
-    if (store.disposed || store.listeners.size === 0 || store.generation !== generation) return;
+    if (store.disposed || store.generation !== generation) return;
     if (!workspaceId) {
       if (findFile(store.files, questionId, fileId)) {
         updateFile(store, questionId, fileId, (current) => ({
@@ -291,12 +296,7 @@ async function uploadFile(
         deliveryMode: "path",
       });
       const stillExists = Boolean(findFile(store.files, questionId, fileId));
-      if (
-        store.disposed ||
-        store.listeners.size === 0 ||
-        store.generation !== generation ||
-        !stillExists
-      ) {
+      if (store.disposed || store.generation !== generation || !stillExists) {
         await deleteAttachment(descriptor.attachment_id).catch(() => undefined);
         return;
       }
@@ -410,6 +410,7 @@ function addFilesToStore(
     feedback.total();
     return;
   }
+  store.initialized.add(questionId);
   const placeholders = filtered.map(placeholderFor);
   store.processing += placeholders.length;
   setFiles(store, {
@@ -424,6 +425,7 @@ function addFilesToStore(
 function removeFromStore(store: AttachmentStore, questionId: string, fileId: string) {
   const file = findFile(store.files, questionId, fileId);
   if (!file) return;
+  store.initialized.add(questionId);
   if (file.attachmentId && file.file) {
     void deleteAttachment(file.attachmentId).catch(() => undefined);
   }
@@ -441,6 +443,8 @@ function mergeRetained(store: AttachmentStore, retained: AnswerAttachmentFiles) 
   let changed = false;
   const next = { ...store.files };
   for (const [questionId, list] of Object.entries(retained)) {
+    if (store.initialized.has(questionId)) continue;
+    store.initialized.add(questionId);
     if ((next[questionId]?.length ?? 0) > 0) continue;
     next[questionId] = list;
     changed = true;
@@ -540,6 +544,7 @@ export function useClarificationAnswerAttachments(options: {
     clearAll: useCallback(() => {
       store.generation += 1;
       store.processing = 0;
+      for (const questionId of questionIdsRef.current) store.initialized.add(questionId);
       setFiles(store, {});
     }, [store]),
     totalCount,

@@ -176,6 +176,9 @@ func validateAnswerAttachment(i int, attachment AnswerAttachment, seen map[strin
 		return 0, newValidationError("answer attachments repeat attachment_id %q", attachment.AttachmentID)
 	}
 	seen[attachment.AttachmentID] = true
+	if strings.TrimSpace(attachment.Path) != "" {
+		return 0, newValidationError("answer %d attachment %q must not supply a path", i+1, attachment.AttachmentID)
+	}
 	if attachment.DeliveryMode != "path" {
 		return 0, newValidationError("answer %d attachment %q must use path delivery", i+1, attachment.AttachmentID)
 	}

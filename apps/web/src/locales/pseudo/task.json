@@ -201,7 +201,7 @@
   "answerAttachments": "Àńśŵēŕ ƒĩĺēś",
   "answerAttachmentsHint": "Àţţàćĥ śćŕēēńśĥōţś ōŕ ƒĩĺēś ţō ţĥĩś àńśŵēŕ.",
   "answerAttachmentsLimit": "Ũƥ ţō {{maxFiles}} ƒĩĺēś, {{maxSize}} ţōţàĺ.",
-  "answerAttachmentsStatus": "{{total}} àńśŵēŕ ƒĩĺēś, {{failed}} ƒàĩĺēď",
+  "answerAttachmentsStatus": "Ƒĩĺēś: {{total}}. Ƒàĩĺēď: {{failed}}.",
   "attachmentFailed": "Ũƥĺōàď ƒàĩĺēď",
   "attachmentReady": "Ŕēàďŷ",
   "attachmentUploading": "Ũƥĺōàďĩńĝ",

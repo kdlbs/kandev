@@ -392,10 +392,6 @@ export type ClarificationQuestion = {
   allow_custom_text?: boolean;
 };
 
-// Each per-question chat message carries its own metadata. For multi-question
-// bundles, every message in the group shares the same pending_id and includes
-// question_index/question_total so the renderer can show "Question 2 of 3"
-// progress chips.
 export type ClarificationAnswerAttachment = {
   attachment_id: string;
   type: "image" | "audio" | "resource";
@@ -405,6 +401,10 @@ export type ClarificationAnswerAttachment = {
   delivery_mode: "prompt" | "path";
 };
 
+// Each per-question chat message carries its own metadata. For multi-question
+// bundles, every message in the group shares the same pending_id and includes
+// question_index/question_total so the renderer can show "Question 2 of 3"
+// progress chips.
 export type ClarificationRequestMetadata = {
   pending_id: string;
   session_id: string;

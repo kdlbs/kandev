@@ -1,7 +1,7 @@
 ---
 id: "04-answer-file-e2e-and-docs"
 title: "Prove browser workflows and document the feature"
-status: done
+status: in_progress
 wave: 4
 depends_on:
   - "03-answer-file-composition"
@@ -157,9 +157,15 @@ Playwright suites covering choice-only files, custom-answer files, pasted images
 explicit submit, 44px touch targets, right-of-input placement, and zero document overflow. Updated
 existing clarification suites to explicit submission and documented the feature.
 
-Verification passed: all six new desktop scenarios, all listed desktop regressions, an added Inbox
-source-scope attachment case, all three new phone scenarios (including failed-upload retry), and all
-listed mobile regressions. Phone coverage measures the 46px compact row across empty/ready/failed
-states and Add/Retry/Remove/Inspect targets at or above 44px. Public documentation
-validation passed 63 tests and 54 pages; documentation catalogs and specification lint passed.
-Coverage limits: no live SSH/Kubernetes executor runs and no native image result blocks.
+Verification passed: the mock-agent Go test `TestClarificationAttachmentProof*`; the six new desktop
+Playwright scenarios; the listed desktop regressions; the added Inbox source-scope attachment case;
+the three new phone attachment scenarios, including failed-upload retry; and the listed mobile
+regressions. Phone coverage asserts equal compact row height `<= 48px` across empty/uploading/ready/
+failed states and Add/Retry/Remove/Inspect targets at or above 44px; it does not assert an exact pixel
+value. Public documentation validation passed 63 tests and 54 pages. `node --test
+scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, `python3
+scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, `python3
+scripts/lint-spec-files.py --all`, and `git diff --check` passed.
+Coverage limits: no live SSH or Kubernetes executor runs, no native image result blocks, no PostgreSQL
+DSN, no full detached resume with files, and no separately scripted Quick Chat, Threads, or Coordinator
+attachment uploads.

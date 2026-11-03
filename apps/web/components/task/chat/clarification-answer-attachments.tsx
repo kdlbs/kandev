@@ -150,7 +150,7 @@ function AttachmentFileRow({
             onClick={() => controller.retry(questionId, file.id)}
             data-testid="clarification-attachment-retry"
             className={cn(
-              "rounded px-1.5 text-[11px] text-foreground/80 hover:bg-muted",
+              "cursor-pointer rounded px-1.5 text-[11px] text-foreground/80 hover:bg-muted",
               touch ? "min-h-11 px-3" : "h-7",
             )}
           >
@@ -163,7 +163,7 @@ function AttachmentFileRow({
           data-testid="clarification-attachment-remove"
           aria-label={t("task:removeAttachment", { name: file.fileName })}
           className={cn(
-            "flex items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground",
+            "flex cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground",
             touch ? "h-11 w-11" : "h-7 w-7",
           )}
         >
@@ -199,7 +199,7 @@ function AttachmentManager({
           onClick={onPickFiles}
           data-testid="clarification-attachment-add"
           className={cn(
-            "rounded text-[11px] font-medium text-blue-600 hover:bg-blue-500/10 dark:text-blue-300",
+            "cursor-pointer rounded text-[11px] font-medium text-blue-600 hover:bg-blue-500/10 dark:text-blue-300",
             touch ? "min-h-11 px-3" : "px-2 py-1",
           )}
         >

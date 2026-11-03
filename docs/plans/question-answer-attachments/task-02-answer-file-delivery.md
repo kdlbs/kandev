@@ -1,7 +1,7 @@
 ---
 id: "02-answer-file-delivery"
 title: "Deliver files through question response transports"
-status: done
+status: in_progress
 wave: 2
 depends_on:
   - "01-answer-file-admission"
@@ -53,8 +53,11 @@ New native provider protocols, inline image result blocks, new prompts during a 
 
 ## TDD and verification
 
-Add `TestAnswerAttachmentLiveDelivery`, `TestAnswerAttachmentNativeCodexDelivery`, and `TestAnswerAttachmentDetachedDelivery`.
-The first RED assertion must show that an actual returned answer lacks its uploaded file reference or readable bytes.
+Actual delivery evidence is `TestMaterializationUsesPostClaimDeliveryBudget`,
+`TestMaterializationFailureRestoresClaim`, `TestMaterializationRejectsSupersededConversationalTurn`,
+`TestMaterializeAnswerAttachmentsRejectsExecutionReplacement`,
+`TestToolUserInputAppendsAnswerAttachmentPaths`, `TestResumeDetachedClarificationCarriesAnswerAttachments`,
+and the mock-agent byte/hash proof in `question-answer-attachments.spec.ts`.
 Use the existing materialization client seam and real private attachment storage.
 Block the streaming result to prove that the waiter cannot return early.
 Include different filenames with identical question labels to expose positional matching errors.
@@ -76,11 +79,9 @@ Tests through the materialization seam establish transport behavior. Record any 
 - `apps/backend/internal/clarification/types.go`
 - `apps/backend/internal/clarification/protocol/types.go`
 - `apps/backend/internal/clarification/handlers.go`
-- `apps/backend/internal/clarification/answer_attachment_delivery.go` (new) and adjacent tests
 - `apps/backend/internal/agent/runtime/lifecycle/session.go` and attachment tests
 - `apps/backend/internal/agent/runtime/runtime.go`
 - `apps/backend/internal/agent/runtime/facade.go`
-- `apps/backend/internal/agent/runtime/answer_attachments.go` (new) and adjacent facade tests
 - `apps/backend/internal/backendapp/adapters.go`
 - `apps/backend/internal/backendapp/helpers.go`
 - `apps/backend/internal/mcp/handlers/handlers_ask.go`
@@ -88,6 +89,8 @@ Tests through the materialization seam establish transport behavior. Record any 
 - `apps/backend/internal/mcp/server/handlers.go`
 - `apps/backend/internal/mcp/server/server.go`
 - `apps/backend/internal/mcp/server/ask_user_question_answer_attachments_test.go` (new)
+- `apps/backend/internal/clarification/resolver_attachment_delivery_test.go` (new)
+- `apps/backend/internal/agent/runtime/lifecycle/manager_answer_attachments_test.go` (new)
 - `apps/backend/internal/agentctl/server/api/codex_user_input.go` and tests
 - `apps/backend/internal/agentctl/types/user_input.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/codexappserver/user_input_requests.go` and tests

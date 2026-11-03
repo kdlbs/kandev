@@ -145,6 +145,9 @@ func (h *Handlers) replayClarificationRetry(ctx context.Context, msg *ws.Message
 	}
 	if h.clarificationResolver != nil {
 		if err := h.clarificationResolver.MaterializeRecordedAnswerAttachments(ctx, sessionID, recorded); err != nil {
+			if retry.isNew {
+				h.clarificationSvc.CancelRequest(retry.pendingID)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to materialize clarification answer attachments", nil)
 		}

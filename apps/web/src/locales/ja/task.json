@@ -201,7 +201,7 @@
   "answerAttachments": "回答ファイル",
   "answerAttachmentsHint": "この回答にスクリーンショットやファイルを添付します。",
   "answerAttachmentsLimit": "最大 {{maxFiles}} ファイル、合計 {{maxSize}}。",
-  "answerAttachmentsStatus": "回答ファイル {{total}} 件、失敗 {{failed}} 件",
+  "answerAttachmentsStatus": "ファイル: {{total}} 件、失敗: {{failed}} 件。",
   "attachmentFailed": "アップロード失敗",
   "attachmentReady": "準備完了",
   "attachmentUploading": "アップロード中",

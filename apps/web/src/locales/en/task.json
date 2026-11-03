@@ -201,7 +201,7 @@
   "answerAttachments": "Answer files",
   "answerAttachmentsHint": "Attach screenshots or files to this answer.",
   "answerAttachmentsLimit": "Up to {{maxFiles}} files, {{maxSize}} total.",
-  "answerAttachmentsStatus": "{{total}} answer files, {{failed}} failed",
+  "answerAttachmentsStatus": "Files: {{total}}. Failed: {{failed}}.",
   "attachmentFailed": "Upload failed",
   "attachmentReady": "Ready",
   "attachmentUploading": "Uploading",

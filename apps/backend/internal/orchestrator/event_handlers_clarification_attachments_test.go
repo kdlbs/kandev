@@ -19,7 +19,8 @@ func TestClarificationAnswerAttachmentsV1UsesPathDelivery(t *testing.T) {
 		t.Fatalf("attachments = %#v", attachments)
 	}
 	got := attachments[0]
-	if got.AttachmentID != "att-1" || got.DeliveryMode != "path" || got.Name != "screen.png" {
+	if got.AttachmentID != "att-1" || got.Type != "image" || got.Name != "screen.png" ||
+		got.MimeType != "image/png" || got.SizeBytes != 123 || got.DeliveryMode != "path" {
 		t.Fatalf("attachment = %+v", got)
 	}
 }
@@ -34,6 +35,8 @@ func TestClarificationAnswerAttachmentsQueueUsesPathDelivery(t *testing.T) {
 		DeliveryMode: "path",
 	}})
 	if len(attachments) != 1 || attachments[0].AttachmentID != "att-1" ||
+		attachments[0].Type != "resource" || attachments[0].Name != "log.txt" ||
+		attachments[0].MimeType != "text/plain" || attachments[0].SizeBytes != 10 ||
 		attachments[0].DeliveryMode != "path" {
 		t.Fatalf("attachments = %#v", attachments)
 	}

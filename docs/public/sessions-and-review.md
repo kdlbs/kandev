@@ -24,6 +24,19 @@ The expanded question supports the same formatting and reference links.
 Selecting a reference label in the collapsed summary expands the row.
 Opening a reference does not answer the question or change its status.
 
+Pending shared context supports paragraphs, line breaks, links, bold, italic,
+strikethrough, inline code, simple lists, and tables. Table overflow stays
+inside the table area. HTTP and HTTPS references open in another tab. Resolved
+context in History, permission requests, and custom answers remain literal text.
+Clarification questions do not display embedded HTML, images, headings,
+blockquotes, or code panels. Tables are supported only in pending shared context.
+File references remain labels rather than opening workspace files.
+
+Long context starts at its content height, up to an initial limit. Select
+**Expand to available space** or drag the panel's top edge to use more of the
+visible host. Select **Reset panel size** to return to content sizing. The
+panel keeps space for the chat input and, in Threads, a minimum transcript area.
+
 ### Attach files to an answer
 
 Use the paperclip beside the custom answer, or in the question header when
@@ -45,19 +58,6 @@ Kandev delivers each file as a readable path in the agent's execution. It does
 not add a native image block to the tool result, so the agent inspects images
 with its file-reading tools. If an upload or the runtime cannot deliver a file,
 the answer fails visibly instead of reaching the agent with a missing file.
-
-Pending shared context supports paragraphs, line breaks, links, bold, italic,
-strikethrough, inline code, simple lists, and tables. Table overflow stays
-inside the table area. HTTP and HTTPS references open in another tab. Resolved
-context in History, permission requests, and custom answers remain literal text.
-Clarification questions do not display embedded HTML, images, headings,
-blockquotes, or code panels. Tables are supported only in pending shared context.
-File references remain labels rather than opening workspace files.
-
-Long context starts at its content height, up to an initial limit. Select
-**Expand to available space** or drag the panel's top edge to use more of the
-visible host. Select **Reset panel size** to return to content sizing. The
-panel keeps space for the chat input and, in Threads, a minimum transcript area.
 
 ## Start a parallel session
 

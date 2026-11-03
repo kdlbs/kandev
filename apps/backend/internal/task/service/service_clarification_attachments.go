@@ -51,6 +51,15 @@ func (s *Service) clarificationAttachmentScope(
 		return models.ClarificationAttachmentScope{}, err
 	}
 	sessionID, taskID := clarificationBundleIdentity(messages)
+	if sessionID != "" && taskID == "" {
+		session, sessionErr := s.sessions.GetTaskSession(ctx, sessionID)
+		if sessionErr != nil {
+			return models.ClarificationAttachmentScope{}, sessionErr
+		}
+		if session != nil {
+			taskID = session.TaskID
+		}
+	}
 	if sessionID == "" || taskID == "" {
 		return models.ClarificationAttachmentScope{}, fmt.Errorf("clarification bundle %s has no task or session identity", pendingID)
 	}

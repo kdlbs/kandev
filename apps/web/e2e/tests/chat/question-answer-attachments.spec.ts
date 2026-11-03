@@ -189,27 +189,46 @@ test.describe("question answer attachments", () => {
     );
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    const upload = testPage.waitForResponse(
+    const uploadFirst = testPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" && response.url().includes("/api/v1/attachments"),
     );
     await session.clarificationAttachmentInput().setInputFiles({
-      name: "multi.png",
+      name: "multi-db.png",
       mimeType: "image/png",
       buffer: PNG_BYTES,
     });
-    expect((await upload).ok()).toBe(true);
+    expect((await uploadFirst).ok()).toBe(true);
     await expect(session.clarificationAttachmentBadge()).toHaveText("1");
-
+    await session.clarificationAttachmentTrigger().click();
+    await expect(session.clarificationAttachmentManager()).toContainText("multi-db.png");
+    await testPage.keyboard.press("Escape");
     await session.clarificationOption("PostgreSQL").click();
+
+    const uploadSecond = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().includes("/api/v1/attachments"),
+    );
+    await session.clarificationAttachmentInput().setInputFiles({
+      name: "multi-language.png",
+      mimeType: "image/png",
+      buffer: PNG_BYTES,
+    });
+    expect((await uploadSecond).ok()).toBe(true);
+    await expect(session.clarificationAttachmentBadge()).toHaveText("1");
+    await session.clarificationAttachmentTrigger().click();
+    await expect(session.clarificationAttachmentManager()).toContainText("multi-language.png");
+    await expect(session.clarificationAttachmentManager()).not.toContainText("multi-db.png");
+    await testPage.keyboard.press("Escape");
     await session.clarificationOption("Go").click();
     await session.clarificationOption("Docker").click();
+
     const submit = session.clarificationSubmit();
     await expect(submit).toBeEnabled();
     await submit.click();
-
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat).toContainText("multi.png", { timeout: 30_000 });
+    await expect(session.chat).toContainText("multi-db.png", { timeout: 30_000 });
+    await expect(session.chat).toContainText("multi-language.png", { timeout: 30_000 });
     await expect(session.chat).toContainText("/.kandev/attachments/", { timeout: 30_000 });
   });
 

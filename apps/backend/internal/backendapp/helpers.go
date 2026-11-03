@@ -1,4 +1,3 @@
-//nolint:revive // file-length-limit: this file owns the shared backend wiring table; new behavior lands in sibling files.
 package backendapp
 
 import (

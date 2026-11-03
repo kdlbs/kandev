@@ -181,7 +181,7 @@
   "answerAttachments": "답변 파일",
   "answerAttachmentsHint": "이 답변에 스크린샷이나 파일을 첨부하세요.",
   "answerAttachmentsLimit": "최대 {{maxFiles}}개 파일, 총 {{maxSize}}.",
-  "answerAttachmentsStatus": "답변 파일 {{total}}개, 실패 {{failed}}개",
+  "answerAttachmentsStatus": "파일: {{total}}개, 실패: {{failed}}개.",
   "attachmentFailed": "업로드 실패",
   "attachmentReady": "준비됨",
   "attachmentUploading": "업로드 중",

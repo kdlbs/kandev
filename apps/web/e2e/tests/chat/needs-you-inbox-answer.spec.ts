@@ -1,6 +1,7 @@
 // AC-UI-NEEDS-YOU-INBOX-001.30: listing an answerable bundle, expanding it,
 // and answering it in place must remove the row (the convergence re-read)
 // and resume the blocked task, without ever navigating to the task page.
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
@@ -41,6 +42,19 @@ test.describe("Needs-you Inbox answer flow", () => {
 
     // Never visits /t/:id: the row is listed, expanded, and answered entirely
     // from the Inbox route.
+    await testPage.addInitScript(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/api/v1/attachments") && init?.body instanceof FormData) {
+          window.sessionStorage.setItem(
+            "e2e.attachment-upload-workspace-id",
+            String(init.body.get("workspace_id") ?? ""),
+          );
+        }
+        return originalFetch(input, init);
+      };
+    });
     await testPage.goto("/needs-you-inbox");
 
     const row = testPage.getByTestId("needs-you-inbox-row").filter({ hasText: title });
@@ -100,6 +114,19 @@ test.describe("Needs-you Inbox answer attachments", () => {
       message: "clarification session should reach its blocking state before the Inbox is opened",
       timeout: 60_000,
     });
+    await testPage.addInitScript(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/api/v1/attachments") && init?.body instanceof FormData) {
+          window.sessionStorage.setItem(
+            "e2e.attachment-upload-workspace-id",
+            String(init.body.get("workspace_id") ?? ""),
+          );
+        }
+        return originalFetch(input, init);
+      };
+    });
     await testPage.goto("/needs-you-inbox");
     const row = testPage.getByTestId("needs-you-inbox-row").filter({ hasText: title });
     await expect(row).toBeVisible({ timeout: 30_000 });
@@ -112,19 +139,33 @@ test.describe("Needs-you Inbox answer attachments", () => {
       (response) =>
         response.request().method() === "POST" && response.url().includes("/api/v1/attachments"),
     );
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X3pZQAAAAASUVORK5CYII=",
+      "base64",
+    );
     await overlay.getByTestId("clarification-attachment-input").setInputFiles({
       name: "inbox.png",
       mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X3pZQAAAAASUVORK5CYII=",
-        "base64",
-      ),
+      buffer: png,
     });
     expect((await upload).ok()).toBe(true);
     await expect(overlay.getByTestId("clarification-attachment-badge")).toHaveText("1");
+    await expect
+      .poll(() =>
+        testPage.evaluate(() =>
+          window.sessionStorage.getItem("e2e.attachment-upload-workspace-id"),
+        ),
+      )
+      .toBe(seedData.workspaceId);
     await overlay.getByTestId("clarification-custom-submit").click();
 
     await expect(row).toHaveCount(0, { timeout: 15_000 });
-    await waitForAgentMessage(apiClient, task.session_id, "Attachment proof: inbox.png", 30_000);
+    const digest = createHash("sha256").update(png).digest("hex");
+    await waitForAgentMessage(
+      apiClient,
+      task.session_id,
+      `Attachment proof: inbox.png ${png.length} ${digest}`,
+      30_000,
+    );
   });
 });

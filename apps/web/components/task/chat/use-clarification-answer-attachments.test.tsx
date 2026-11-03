@@ -257,7 +257,6 @@ describe("useClarificationAnswerAttachments source isolation and limits", () => 
     await act(async () => workspace.resolve({ workspace_id: "workspace-old" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.getByTestId("total").textContent).toBe("0");
-    expect(API.upload).not.toHaveBeenCalled();
   });
 
   it("shares upload completion with every live host of the same bundle", async () => {
@@ -286,6 +285,7 @@ describe("useClarificationAnswerAttachments source isolation and limits", () => 
     );
     await waitFor(() => expect(screen.getByTestId("ready-host-a").textContent).toBe("yes"));
     await waitFor(() => expect(screen.getByTestId("ready-host-b").textContent).toBe("yes"));
+    expect(API.upload).toHaveBeenCalledTimes(1);
   });
 
   it("rejects overlapping additions that exceed the bundle limit", async () => {
@@ -364,10 +364,14 @@ describe("useClarificationAnswerAttachments remounts and abandoned uploads", () 
     API.upload.mockImplementationOnce(() => uploading.promise);
     renderHook();
     fireEvent.click(screen.getByTestId("add"));
-    await waitFor(() => expect(screen.getByTestId("total").textContent).toBe("1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("total").textContent).toBe("1");
+      expect(API.upload).toHaveBeenCalledTimes(1);
+    });
     const files = controller?.filesFor("q1") ?? [];
+    const removalsBefore = API.remove.mock.calls.length;
     act(() => controller?.remove("q1", files[0].id));
-    expect(API.remove).not.toHaveBeenCalled();
+    expect(API.remove.mock.calls.length).toBe(removalsBefore);
 
     await act(async () =>
       uploading.resolve({
@@ -380,6 +384,65 @@ describe("useClarificationAnswerAttachments remounts and abandoned uploads", () 
       }),
     );
     await waitFor(() => expect(API.remove).toHaveBeenCalledWith("att-abandoned"));
+  });
+});
+
+describe("useClarificationAnswerAttachments retained drafts", () => {
+  it("does not re-import a retained file after the user removes it", async () => {
+    const retained = message(
+      {
+        attachments: [
+          {
+            attachment_id: "att-retained-removed",
+            type: "resource",
+            name: "evidence.txt",
+            mime_type: "text/plain",
+            size_bytes: 5,
+            delivery_mode: "path",
+          },
+        ],
+      },
+      "pending-retained-removed",
+    );
+    const view = render(<Harness messages={[retained]} pendingId="pending-retained-removed" />);
+    await waitFor(() => expect(screen.getByTestId("total").textContent).toBe("1"));
+    const files = controller?.filesFor("q1") ?? [];
+    act(() => controller?.remove("q1", files[0].id));
+    await waitFor(() => expect(screen.getByTestId("total").textContent).toBe("0"));
+
+    view.rerender(<Harness messages={[retained]} pendingId="pending-retained-removed" />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("total").textContent).toBe("0");
+    expect(screen.getByTestId("ready").textContent).toBe("yes");
+  });
+
+  it("finishes an upload that was still waiting for workspace after unmount", async () => {
+    const workspace = deferred<{ workspace_id: string }>();
+    const uploading = deferred<Awaited<ReturnType<typeof API.upload>>>();
+    API.fetchTask.mockImplementationOnce(() => workspace.promise);
+    API.upload.mockImplementationOnce(() => uploading.promise);
+    const value = message({}, "pending-upload-unmounted");
+    const first = render(<Harness messages={[value]} pendingId="pending-upload-unmounted" />);
+    fireEvent.click(screen.getByTestId("add"));
+    await waitFor(() => expect(screen.getByTestId("total").textContent).toBe("1"));
+    first.unmount();
+
+    await act(async () => workspace.resolve({ workspace_id: "workspace-1" }));
+    await waitFor(() => expect(API.upload).toHaveBeenCalledTimes(1));
+    render(<Harness messages={[value]} pendingId="pending-upload-unmounted" />);
+    expect(screen.getByTestId("ready").textContent).toBe("no");
+
+    await act(async () =>
+      uploading.resolve({
+        attachment_id: "att-after-unmount",
+        name: "a.png",
+        mime_type: "image/png",
+        kind: "image",
+        delivery_mode: "path",
+        size_bytes: 3,
+      }),
+    );
+    await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("yes"));
   });
 });
 

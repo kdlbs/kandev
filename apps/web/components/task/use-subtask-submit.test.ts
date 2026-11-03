@@ -24,6 +24,7 @@ const mockEnhancePrompt = vi.fn();
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
+  useOptionalToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock("@/hooks/use-utility-agent-generator", () => ({

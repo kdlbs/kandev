@@ -94,7 +94,8 @@ type MessageCreator interface {
 	// CompleteActiveClarificationBundle atomically transitions a bundle only
 	// when it still belongs to the session's current durable turn (P1's single
 	// claim mechanism).
-	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error) // FinalizeClarificationResponseDelivery clears the durable recovery intent
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
+	// FinalizeClarificationResponseDelivery clears the durable recovery intent
 	// after the response reaches a live waiter or detached-resume boundary.
 	FinalizeClarificationResponseDelivery(
 		ctx context.Context,
@@ -645,10 +646,10 @@ func clarificationPersistenceContext(ctx context.Context) (context.Context, cont
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 
-// clarificationPostClaimDeliveryContext bounds every post-claim handoff that
-// can stream answer files or release the live waiter. It intentionally starts
-// after the claim and survives caller cancellation; reuse it for the whole
-// handoff instead of starting nested delivery windows.
+// clarificationPostClaimDeliveryContext bounds the direct post-claim materialization
+// and live-waiter release. Nested finalize, restore, and publish phases detach
+// with their own persistence windows. It starts after the claim and survives
+// caller cancellation.
 func clarificationPostClaimDeliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout+5*time.Second)
 }
