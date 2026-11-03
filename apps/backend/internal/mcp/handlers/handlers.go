@@ -397,6 +397,9 @@ type Handlers struct {
 	// coordinatorPhase2ForTest overrides the phase-2 gate in focused handler
 	// tests that do not construct the full coordinator service.
 	coordinatorPhase2ForTest func() bool
+	// coordinatorConversationForTest overrides the live conversation lookup in
+	// focused handler tests that do not construct the full coordinator service.
+	coordinatorConversationForTest func(context.Context, string) (string, bool, error)
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
 }

@@ -407,8 +407,11 @@ func (s *Service) invokeDeclaredAgentTool(
 	validateRecord func(*store.Record) error,
 ) (*pluginsdk.AgentToolResult, error) {
 	dispatchLock := s.dispatchLocks.lockFor(pluginID)
-	dispatchLock.RLock()
-	defer dispatchLock.RUnlock()
+	release, err := dispatchLock.RLockContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	record, err := s.Get(pluginID)
 	if err != nil {

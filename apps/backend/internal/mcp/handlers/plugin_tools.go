@@ -168,7 +168,7 @@ func (h *Handlers) handleListCoordinatorPluginTools(ctx context.Context, msg *ws
 		h.logPluginToolDenial(ctx, msg.Action, "phase2_disabled")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator plugin tools require phase 2", nil)
 	}
-	binding, ok := coordinatorPluginBinding(ctx, principal)
+	binding, ok := h.coordinatorPluginBinding(ctx, principal)
 	if !ok {
 		return ws.NewResponse(msg.ID, msg.Action, emptyCoordinatorPluginToolSnapshot(principal.CallerTaskID))
 	}
@@ -206,7 +206,7 @@ func emptyCoordinatorPluginToolSnapshot(conversationTaskID string) plugintools.S
 	return plugintools.Snapshot{Generation: "coordinator-" + conversationTaskID, Revision: 1, Tools: []plugintools.Definition{}}
 }
 
-func coordinatorPluginBinding(ctx context.Context, principal mcpscope.Principal) (*mcpprofile.CoordinatorToolPolicy, bool) {
+func (h *Handlers) coordinatorPluginBinding(ctx context.Context, principal mcpscope.Principal) (*mcpprofile.CoordinatorToolPolicy, bool) {
 	execution, ok := streams.MCPExecutionContextFromContext(ctx)
 	if !ok || execution.CoordinatorToolPolicy == nil {
 		return nil, false
@@ -215,7 +215,22 @@ func coordinatorPluginBinding(ctx context.Context, principal mcpscope.Principal)
 	if binding.Version != mcpprofile.CoordinatorToolPolicyVersionV2 || !coordinatorBindingMatches(binding, principal) {
 		return nil, false
 	}
+	if !h.coordinatorConversationCurrent(ctx, principal) {
+		return nil, false
+	}
 	return binding, true
+}
+
+func (h *Handlers) coordinatorConversationCurrent(ctx context.Context, principal mcpscope.Principal) bool {
+	if h.coordinatorConversationForTest != nil {
+		coordinatorID, ok, err := h.coordinatorConversationForTest(ctx, principal.CallerTaskID)
+		return err == nil && ok && coordinatorID == principal.CoordinatorID
+	}
+	if h.coordinatorSvc == nil {
+		return false
+	}
+	coordinatorID, ok, err := h.coordinatorSvc.CoordinatorForConversationTask(ctx, principal.CallerTaskID)
+	return err == nil && ok && coordinatorID == principal.CoordinatorID
 }
 
 func (h *Handlers) authorizeExternalPluginToolRequest(ctx context.Context) error {
@@ -383,7 +398,7 @@ func (h *Handlers) handleInvokeCoordinatorPluginTool(ctx context.Context, msg *w
 		h.logPluginToolDenial(ctx, msg.Action, "phase2_disabled")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator plugin tools require phase 2", nil)
 	}
-	binding, ok := coordinatorPluginBinding(ctx, principal)
+	binding, ok := h.coordinatorPluginBinding(ctx, principal)
 	if !ok {
 		h.logPluginToolDenial(ctx, msg.Action, "binding_missing_or_invalid")
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "coordinator plugin tool is not bound", nil)

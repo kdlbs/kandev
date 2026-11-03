@@ -56,6 +56,9 @@ func instanceReadHandler(t *testing.T) (*Handlers, *plugins.Registry) {
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetPluginService(pluginService)
 	h.coordinatorPhase2ForTest = func() bool { return true }
+	h.coordinatorConversationForTest = func(context.Context, string) (string, bool, error) {
+		return "coordinator-1", true, nil
+	}
 	return h, registry
 }
 
@@ -289,4 +292,27 @@ func TestCoordinatorPluginToolsRequirePhase2(t *testing.T) {
 		require.Equal(t, string(ws.MessageTypeError), string(response.Type))
 		require.Contains(t, string(response.Payload), "require phase 2")
 	}
+}
+
+func TestCoordinatorPluginToolsRequireCurrentConversation(t *testing.T) {
+	h, _ := instanceReadHandler(t)
+	h.coordinatorConversationForTest = func(context.Context, string) (string, bool, error) {
+		return "other-coordinator", true, nil
+	}
+	ctx := coordinatorInstanceReadContext(coordinatorBindingV2("installation-1", "policy-1"))
+	list, err := h.handleListPluginTools(ctx, makeWSMessage(t, ws.ActionMCPListPluginTools, map[string]any{
+		"surface": manifest.AgentToolSurfaceCoordinator,
+	}))
+	require.NoError(t, err)
+	var snapshot plugintools.Snapshot
+	require.NoError(t, json.Unmarshal(list.Payload, &snapshot))
+	require.Empty(t, snapshot.Tools)
+
+	call, err := h.handleInvokePluginTool(ctx, makeWSMessage(t, ws.ActionMCPInvokePluginTool, map[string]any{
+		"plugin_id": "kandev-provider-usage", "local_name": "get_provider_usage",
+		"invocation_id": "invocation-1", "surface": manifest.AgentToolSurfaceCoordinator,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, string(ws.MessageTypeError), string(call.Type))
+	require.Contains(t, string(call.Payload), "not bound")
 }
