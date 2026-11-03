@@ -139,7 +139,7 @@ func scenarioSavedPromptDelivery(e *emitter) {
 // scenarioAsyncFollowup runs the agent-started follow-up fixture that emits a
 // status-less tool update for an already finished tool.
 func scenarioAsyncFollowup(e *emitter) {
-	emitAsyncFollowup(e)
+	emitAsyncFollowup(e, "")
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.

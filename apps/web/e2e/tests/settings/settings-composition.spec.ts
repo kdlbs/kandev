@@ -95,7 +95,17 @@ test.describe("Settings composition", () => {
     const notificationsContent = testPage.locator('[data-settings-page-content="true"]');
     await expect(notificationsContent).toBeVisible();
     await expect(notificationsContent.locator(':scope > [data-slot="card"]')).toHaveCount(0);
-    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(6);
+    // Permission and sound are compact preference rows; the four provider
+    // sections remain shared settings groups.
+    await expect(notificationsContent.locator('[data-settings-group="true"]')).toHaveCount(4);
+    await expect(testPage.getByTestId("notification-permission-group")).toHaveAttribute(
+      "data-notification-preference-row",
+      "true",
+    );
+    await expect(testPage.getByTestId("notification-sound-group")).toHaveAttribute(
+      "data-notification-preference-row",
+      "true",
+    );
     await expect(notificationsContent.getByTestId("web-push-status")).toBeVisible();
 
     await testPage.goto("/settings/preferences/terminal-editors");

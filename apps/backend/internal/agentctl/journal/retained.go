@@ -112,7 +112,7 @@ func ReadRetainedReconstructionEvidence(
 	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
-			if terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime); err == nil {
+			if terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime); err == nil {
 				result.ProcessTerminated = &terminated
 			}
 		}
@@ -307,7 +307,7 @@ func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) 
 			return nil, err
 		}
 	}
-	terminated, _ := processidentity.OwnedSessionTerminated(request.OriginalRuntime)
+	terminated, _ := processidentity.OriginalOwnerTerminated(request.OriginalRuntime)
 	submission.Payload = nil
 	return &RetainedRecoveryResponse{Descriptor: descriptor, Submission: submission, Events: events, ProcessTerminated: terminated}, nil
 }
