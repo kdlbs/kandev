@@ -718,3 +718,45 @@ smoke. The original import failure's cause remains unknown because stderr was
 discarded. No Kubernetes or product code changed; this does not replace the
 separate navigation fixture repair. Fresh CI is still required after publication.
 Public docs, package UI screenshots, and durable package contracts are unchanged.
+
+### Current-main compatibility and publication (2026-11-04)
+
+Rebased all 16 owned patches onto main
+`e180953eae3e433ed91fd15844ad3fe4571b7b76`. The pre-rebase branch is preserved
+in `backup/builtin-mcp-before-main4-20261103`; range-diff reports every patch
+unchanged. The resulting code checkpoint is
+`cb45990ad848151e58f71f1b4ab67bebbcd70a00`. Main's clarification-answer
+attachment schema, caller checks, and idle-suspended prevent-auto-start behavior
+are preserved. No new package behavior or permission was introduced in this
+integration. The navigation fixture repair remains test-only.
+
+Five affected backend packages pass under the race detector. Both frontend
+test files pass (65 tests), full web typecheck passes, all locale checks pass,
+and changed-package Go lint reports zero issues. All 11 changed JSON files
+parse without duplicate keys. Exact commands:
+
+```sh
+GOMAXPROCS=2 GOMEMLIMIT=6GiB go -C apps/backend test -trimpath -race -p=1 ./internal/mcp/profile ./internal/mcp/server ./internal/mcp/handlers ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'Builtin|Package|Registration|AskUserQuestion|Clarification|AnswerAttachment|RecoveryProgress' -count=1 -timeout=5m
+pnpm --dir apps/web exec vitest run hooks/domains/session/use-session-resumption.test.ts hooks/domains/workspace/use-builtin-mcp-management.test.ts
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web run i18n:check
+bash scripts/lint-go-changed apps/backend/internal/mcp/server/server.go apps/backend/internal/agent/runtime/lifecycle/session.go
+```
+
+The managed runner rebuilt the backend, web, plugin fixtures, and Send Now
+fixture from this source. Seven desktop cases and three phone cases pass with
+one worker and retries disabled. These cover the complete desktop navigation
+file, phone Files navigation, executor discovery, phone package selection and
+pruning, and clarification attachments on both screen sizes. Commands use the
+clean launch-variable environment and resource bounds recorded above.
+
+```sh
+pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/task/task-navigation-responsiveness.spec.ts e2e/tests/settings/config-management.spec.ts e2e/tests/chat/question-answer-attachments.spec.ts -- --retries=0 -g 'navigation branch setup|navigation task setup|Files stays usable|mounted task panels|overview keeps|executor listing|a choice-only answer accepts'
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts e2e/tests/settings/mobile-builtin-mcp-management.spec.ts e2e/tests/chat/mobile-question-answer-attachments.spec.ts -- --retries=0 -g 'phone Files remains|opts in and prunes|a choice-only answer uses'
+```
+
+Logs: `/tmp/kandev-4762-main4-{backend,web-unit,typecheck,i18n,go-lint,desktop,phone}.log`.
+The user's preview and main runtime remain untouched. Kubernetes has no local
+Docker host; its successful prior same-source retry is recorded above. Fresh
+published-head CI, review-thread state, and mergeability remain delivery gates
+tracked in the saved task plan, rather than claims made by this local receipt.

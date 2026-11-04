@@ -13,6 +13,25 @@ legacy_specs: []
 
 # Implementation plan: Selectable built-in MCP packages
 
+## Current CI and main integration (2026-11-04)
+
+The user's current CI/conflict requests and later "continue" authorize repair,
+rebasing, publication to the existing PR, and remote verification. No merge is
+authorized. These requests supersede the older no-CI delivery checkpoints below.
+The approved requirements, package boundaries, and implementation scope remain.
+
+The current integration base is main `e180953eae3e433ed91fd15844ad3fe4571b7b76`.
+All 16 owned patches were preserved by the rebase, including the recovery-ledger
+and navigation-readiness repairs. Main's clarification attachment schemas,
+caller checks, and prevent-auto-start behavior are preserved. Earlier baseline
+and publication sections are historical receipts; keep the current owned branch.
+
+Work orders 01, 02 and 03 remain implemented. Current-source compatibility
+checks and delivery evidence are recorded in
+[implementation results](implementation-results.md). Exact published-head CI and
+mergeability remain separate delivery gates, tracked in the saved Kandev plan.
+The existing user preview and main runtime are outside this repair.
+
 ## Active UI-02 save-feedback remediation (2026-11-02)
 
 Work order 03 was reopened for the user's PR findings: Configuration saves but

@@ -485,3 +485,13 @@ fixes the sequence without increasing the Git assertion timeout. The full five
 case desktop file and the phone journey pass with retries disabled; diagnostic
 instrumentation is removed. See the [implementation results](implementation-results.md#navigation-fixture-follow-up-from-published-head-ci-2026-11-03).
 No package UI or runtime behavior changes. Fresh-head CI remains required.
+
+### Current-main integration checks (2026-11-04)
+
+All 16 owned patches are preserved on main `e180953eae3e`. Five backend packages
+pass race-enabled checks, 65 frontend tests pass, and typecheck, localization,
+and Go lint pass. A fresh managed build passes seven desktop and three phone
+cases, including Files restoration, executor discovery, package opt-in/pruning,
+and main's clarification attachments. See the [current-main receipt](implementation-results.md#current-main-compatibility-and-publication-2026-11-04).
+No new package behavior or public documentation change. Publication and fresh
+remote CI remain separate delivery gates.
