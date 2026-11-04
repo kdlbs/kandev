@@ -241,6 +241,51 @@ export function ProfileNameField({
   );
 }
 
+type ProfileModelConfigurationProps = Pick<
+  ProfileFormFieldsProps,
+  "agentName" | "capabilityProfileId" | "profile" | "baselineProfile" | "onChange" | "modelConfig"
+> & { isCompact: boolean; result: ReturnType<typeof useProfileFormCapabilities> };
+
+function ProfileModelConfiguration({
+  agentName,
+  capabilityProfileId,
+  profile,
+  baselineProfile,
+  onChange,
+  modelConfig,
+  isCompact,
+  result,
+}: ProfileModelConfigurationProps) {
+  const { resolveConfigurationOptions, applyConfiguration } = useProfileCompositionDraft({
+    agentName,
+    profileId: capabilityProfileId,
+    profile,
+    onChange,
+  });
+  return (
+    <>
+      <ProfileCapabilitiesSection
+        profile={profile}
+        baselineProfile={baselineProfile}
+        onChange={onChange}
+        modelConfig={modelConfig}
+        agentName={agentName}
+        isCompact={isCompact}
+        result={result}
+        resolveConfigurationOptions={resolveConfigurationOptions}
+        onConfigurationApply={applyConfiguration}
+      />
+
+      <DevinSandboxPreferenceField
+        agentName={agentName}
+        profile={profile}
+        smartAvailable={result.capabilities.modes.some((mode) => mode.id === "smart")}
+        onChange={onChange}
+      />
+    </>
+  );
+}
+
 export function ProfileFormFields({
   sandboxControl,
   profile,
@@ -268,12 +313,6 @@ export function ProfileFormFields({
     onPendingChange: onModelConfigResolutionPendingChange,
     savedLaunchSettings: savedProfileLaunchSettings(baselineProfile),
   });
-  const { resolveConfigurationOptions, applyConfiguration } = useProfileCompositionDraft({
-    agentName,
-    profileId: capabilityProfileId,
-    profile,
-    onChange,
-  });
 
   return (
     <div className={isCompact ? "space-y-3" : "space-y-4"}>
@@ -286,23 +325,17 @@ export function ProfileFormFields({
         visible={!hideNameField}
       />
 
-      <ProfileCapabilitiesSection
-        profile={profile}
-        baselineProfile={baselineProfile}
-        onChange={onChange}
-        modelConfig={modelConfig}
-        agentName={agentName}
-        isCompact={isCompact}
+      <ProfileModelConfiguration
+        {...{
+          agentName,
+          capabilityProfileId,
+          profile,
+          baselineProfile,
+          onChange,
+          modelConfig,
+          isCompact,
+        }}
         result={capabilityResult}
-        resolveConfigurationOptions={resolveConfigurationOptions}
-        onConfigurationApply={applyConfiguration}
-      />
-
-      <DevinSandboxPreferenceField
-        agentName={agentName}
-        profile={profile}
-        smartAvailable={capabilityResult.capabilities.modes.some((mode) => mode.id === "smart")}
-        onChange={onChange}
       />
 
       <PermissionToggles
