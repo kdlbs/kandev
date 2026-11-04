@@ -182,7 +182,7 @@ summary whose list empties. An open overview or detail remains inspectable.
 - Retain `background-work-clear-window.test.tsx` and its real-store assertions
   after changing the phone entry path. No output-clear redesign. AC-005.8.
 - Repository locale checks cover all new tab/search/empty/accessibility copy.
-  AC-005.5. Generate Traditional Chinese through `pnpm run i18n:zh-hant`.
+  AC-005.5. Generate Traditional Chinese through `cd apps/web && pnpm run i18n:zh-hant`.
 
 ## E2E tests
 
@@ -219,7 +219,7 @@ Implementation and product checks completed 2026-11-03.
 
 - Focused Vitest set (selector, hook, chip/panel, initial-read regression,
   clear-window, desktop menu, phone picker/bottom nav, panel actions): 10 files,
-  139 tests passed.
+  143 tests passed.
 - `pnpm exec tsc --noEmit` with an 8 GB Node heap passed; `pnpm run
   i18n:check` passed with all seven catalogs complete.
 - Scoped ESLint over every changed TS/TSX path reported 0 errors.

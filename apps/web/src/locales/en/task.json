@@ -320,6 +320,7 @@
   "backgroundWorkClose": "Close background work",
   "backgroundWorkDetailsTitle": "Background Work",
   "backgroundWorkDetailsDescription": "Active processes and subagents running in the background.",
+  "backgroundWorkLoadFailed": "Could not load background work.",
   "backgroundWorkIsRunning": "Background work is running",
   "baseBranch": "Base branch",
   "baseBranch2": "Base Branch",

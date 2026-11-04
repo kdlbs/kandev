@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconX } from "@tabler/icons-react";
+import { IconPlayerPause, IconPlayerStop, IconX } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { useBackgroundWork } from "@/hooks/domains/session/use-background-work";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
+import { canRunWorkloadAction } from "@/lib/background-work/capabilities";
+import { isActiveWorkload } from "@/lib/background-work/workload-views";
 import { cn } from "@/lib/utils";
 import { BackgroundWorkOverview } from "./background-work-overview";
 import { RunningWorkSummary } from "./background-work-summary";
@@ -23,7 +25,11 @@ function focusWorkloadRow(workId: string | null) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       const selector = `[data-testid="background-work-open-button-${workId}"], [data-testid="open-workload-${workId}"]`;
-      document.querySelector<HTMLElement>(selector)?.focus();
+      const target = document.querySelector<HTMLElement>(selector);
+      const fallback = document.querySelector<HTMLElement>(
+        '[data-testid^="open-workload-"], [data-testid^="background-work-open-button-"], [data-testid="background-work-chip"]',
+      );
+      (target ?? fallback)?.focus();
     });
   });
 }
@@ -36,6 +42,9 @@ type BackgroundWorkMobileSurfaceProps = {
   initialView: "summary" | "overview";
   onClose: () => void;
   closeOnSummary?: boolean;
+  loadError?: boolean;
+  onRetry?: () => void;
+  onAction?: (req: { action: "stop" | "interrupt"; work_id?: string }) => Promise<unknown>;
   /** True when the user left the inset summary for the overview or a detail. */
   onInspectionChange?: (inspectionActive: boolean) => void;
 };
@@ -49,13 +58,11 @@ type BackgroundWorkMobileSurfaceProps = {
 function useMobileSurfaceNavigation({
   initialView,
   workloads,
-  runningWorkloads,
   onClose,
   onInspectionChange,
 }: {
   initialView: "summary" | "overview";
   workloads: WorkloadRunObservation[];
-  runningWorkloads: WorkloadRunObservation[];
   onClose: () => void;
   onInspectionChange?: (inspectionActive: boolean) => void;
 }) {
@@ -89,13 +96,14 @@ function useMobileSurfaceNavigation({
   const backFromDetail = () => {
     const workId = selectedWorkId;
     setSelectedWorkId(null);
-    const returnsToSummary = detailOrigin === "summary" && runningWorkloads.length > 0;
-    if (returnsToSummary) {
+    const inspectedIsRunning = inspected?.state === "running";
+    if (detailOrigin === "summary" && inspectedIsRunning) {
       setMode("summary");
     } else {
       if (detailOrigin === "summary") {
+        const targetTab = inspected && isActiveWorkload(inspected) ? "active" : "history";
         tabRequestTokenRef.current += 1;
-        setRequestedTab({ tab: "history", token: tabRequestTokenRef.current });
+        setRequestedTab({ tab: targetTab, token: tabRequestTokenRef.current });
       }
       setMode("overview");
     }
@@ -125,13 +133,15 @@ export function BackgroundWorkMobileSurface({
   onClose,
   closeOnSummary = true,
   onInspectionChange,
+  loadError = false,
+  onRetry,
+  onAction,
 }: BackgroundWorkMobileSurfaceProps) {
   const { t } = useTranslation();
   const { mode, inspected, requestedTab, openDetail, backFromDetail, openOverview, close } =
     useMobileSurfaceNavigation({
       initialView,
       workloads,
-      runningWorkloads,
       onClose,
       onInspectionChange,
     });
@@ -163,6 +173,8 @@ export function BackgroundWorkMobileSurface({
           <BackgroundWorkOverview
             workloads={workloads}
             isLoading={isLoading}
+            loadError={loadError}
+            onRetry={onRetry}
             resetKey={sessionId}
             onOpenWorkload={openDetail}
             onClose={close}
@@ -178,10 +190,52 @@ export function BackgroundWorkMobileSurface({
           workload={inspected}
           onBack={backFromDetail}
           onClose={close}
-          running={runningWorkloads.length > 0}
+          onAction={onAction}
         />
       )}
     </div>
+  );
+}
+
+function MobileWorkloadActions({
+  workload,
+  onAction,
+}: {
+  workload: WorkloadRunObservation;
+  onAction?: (req: { action: "stop" | "interrupt"; work_id?: string }) => Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const canStop = Boolean(onAction) && canRunWorkloadAction(workload, "stop");
+  const canInterrupt = Boolean(onAction) && canRunWorkloadAction(workload, "interrupt");
+  return (
+    <>
+      {canInterrupt && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void onAction?.({ work_id: workload.work_id, action: "interrupt" })}
+          className="min-h-11 shrink-0 cursor-pointer px-2 text-[11px]"
+          data-testid="interrupt-workload-button"
+        >
+          <IconPlayerPause className="mr-1 h-3 w-3" aria-hidden="true" />
+          {t("task:interruptBackgroundWork")}
+        </Button>
+      )}
+      {canStop && (
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={() => void onAction?.({ work_id: workload.work_id, action: "stop" })}
+          className="min-h-11 shrink-0 cursor-pointer px-2 text-[11px]"
+          data-testid="stop-workload-button"
+        >
+          <IconPlayerStop className="mr-1 h-3 w-3" aria-hidden="true" />
+          {t("task:stopBackgroundWork")}
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -189,12 +243,12 @@ function MobileWorkloadDetail({
   workload,
   onBack,
   onClose,
-  running,
+  onAction,
 }: {
   workload: WorkloadRunObservation;
   onBack: () => void;
   onClose: () => void;
-  running: boolean;
+  onAction?: (req: { action: "stop" | "interrupt"; work_id?: string }) => Promise<unknown>;
 }) {
   const { t } = useTranslation();
   const exitKey = workloadExitStatusKey(workload);
@@ -216,7 +270,9 @@ function MobileWorkloadDetail({
             {t("task:back")}
           </Button>
           <span className="min-w-0 flex-1 truncate text-xs font-semibold">
-            {running ? t("task:backgroundWorkDetailsTitle") : t("task:backgroundWorkHistoryTitle")}
+            {isActiveWorkload(workload)
+              ? t("task:backgroundWorkDetailsTitle")
+              : t("task:backgroundWorkHistoryTitle")}
           </span>
           <Button
             type="button"
@@ -244,6 +300,7 @@ function MobileWorkloadDetail({
           <span className="min-w-0 truncate text-[10px] text-muted-foreground">
             {t(workloadKindLabelKey(workload.kind))}
           </span>
+          <MobileWorkloadActions workload={workload} onAction={onAction} />
         </div>
       </div>
       <div
@@ -281,7 +338,15 @@ export function BackgroundWorkMobilePanel({
   sessionId: string | null;
   onClose: () => void;
 }) {
-  const { workloads, runningWorkloads, isLoading, isInitialLoading } = useBackgroundWork(sessionId);
+  const {
+    workloads,
+    runningWorkloads,
+    isLoading,
+    isInitialLoading,
+    loadError,
+    fetchWorkloads,
+    executeAction,
+  } = useBackgroundWork(sessionId);
   return (
     <BackgroundWorkMobileSurface
       sessionId={sessionId}
@@ -291,6 +356,9 @@ export function BackgroundWorkMobilePanel({
       initialView="overview"
       onClose={onClose}
       closeOnSummary={false}
+      loadError={loadError}
+      onRetry={fetchWorkloads}
+      onAction={executeAction}
     />
   );
 }

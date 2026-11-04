@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import {
   Drawer,
@@ -39,12 +39,17 @@ export function BackgroundWorkChip(props: BackgroundWorkChipProps) {
   const [open, setOpen] = useState(false);
   const [phoneInspectionActive, setPhoneInspectionActive] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const { workloads, isLoading, isInitialLoading, runningWorkloads } = useBackgroundWork(
-    sessionId,
-    {
-      detailActive,
-    },
-  );
+  const {
+    workloads,
+    isLoading,
+    isInitialLoading,
+    loadError,
+    runningWorkloads,
+    fetchWorkloads,
+    executeAction,
+  } = useBackgroundWork(sessionId, {
+    detailActive,
+  });
   const runningCount = runningWorkloads.length;
   const showChip = runningCount > 0;
   const keepPhoneSurface = usesDrawer && open && phoneInspectionActive;
@@ -94,6 +99,9 @@ export function BackgroundWorkChip(props: BackgroundWorkChipProps) {
         workloads={workloads}
         runningWorkloads={runningWorkloads}
         isLoading={isLoading || isInitialLoading}
+        loadError={loadError}
+        onRetry={fetchWorkloads}
+        onAction={executeAction}
         sessionId={sessionId}
         triggerRef={triggerRef}
         inspectionActive={phoneInspectionActive}
@@ -110,7 +118,6 @@ export function BackgroundWorkChip(props: BackgroundWorkChipProps) {
           ref={triggerRef}
           count={runningCount}
           open={open}
-          setOpen={close}
           usesDrawer={false}
         />
       </PopoverTrigger>
@@ -139,6 +146,9 @@ function BackgroundWorkDrawer({
   workloads,
   runningWorkloads,
   isLoading,
+  loadError,
+  onRetry,
+  onAction,
   sessionId,
   triggerRef,
   inspectionActive,
@@ -152,6 +162,9 @@ function BackgroundWorkDrawer({
   workloads: WorkloadRunObservation[];
   runningWorkloads: WorkloadRunObservation[];
   isLoading: boolean;
+  loadError: boolean;
+  onRetry: () => Promise<void>;
+  onAction: (req: { action: "stop" | "interrupt"; work_id?: string }) => Promise<unknown>;
   sessionId: string | null;
   triggerRef: React.RefObject<HTMLButtonElement | null>;
   inspectionActive: boolean;
@@ -163,13 +176,7 @@ function BackgroundWorkDrawer({
     <Drawer open={open} onOpenChange={setOpen}>
       {showChip && (
         <DrawerTrigger asChild>
-          <BackgroundWorkTrigger
-            ref={triggerRef}
-            count={runningCount}
-            open={open}
-            setOpen={setOpen}
-            usesDrawer
-          />
+          <BackgroundWorkTrigger ref={triggerRef} count={runningCount} open={open} usesDrawer />
         </DrawerTrigger>
       )}
       <DrawerContent
@@ -192,6 +199,9 @@ function BackgroundWorkDrawer({
           sessionId={sessionId}
           workloads={workloads}
           isLoading={isLoading}
+          loadError={loadError}
+          onRetry={onRetry}
+          onAction={onAction}
           runningWorkloads={runningWorkloads}
           initialView="summary"
           onClose={() => setOpen(false)}
@@ -202,30 +212,34 @@ function BackgroundWorkDrawer({
   );
 }
 
+type BackgroundWorkTriggerProps = {
+  ref: React.RefObject<HTMLButtonElement | null>;
+  count: number;
+  open: boolean;
+  usesDrawer: boolean;
+} & Omit<
+  ComponentPropsWithoutRef<"button">,
+  "ref" | "type" | "children" | "aria-label" | "aria-haspopup" | "aria-expanded"
+>;
+
 function BackgroundWorkTrigger({
   ref,
   count,
   open,
-  setOpen,
   usesDrawer,
-}: {
-  ref: React.RefObject<HTMLButtonElement | null>;
-  count: number;
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  usesDrawer: boolean;
-}) {
+  ...buttonProps
+}: BackgroundWorkTriggerProps) {
   const { t } = useTranslation();
   const label = t("task:backgroundJobs", { count });
   return (
     <button
+      {...buttonProps}
       type="button"
       ref={ref}
       data-testid="background-work-chip"
       aria-label={label}
       aria-haspopup="dialog"
       aria-expanded={open}
-      onClick={() => setOpen(!open)}
       className={cn(
         "inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         usesDrawer ? "min-h-11 min-w-11 px-3" : "h-6 px-2.5",

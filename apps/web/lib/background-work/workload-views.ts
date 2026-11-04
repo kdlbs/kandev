@@ -1,15 +1,6 @@
-import type { RunState, WorkloadRunObservation } from "@/lib/types/background-work";
+import type { WorkloadRunObservation } from "@/lib/types/background-work";
 
 export type BackgroundWorkTab = "active" | "history";
-
-const ACTIVE_STATES: ReadonlySet<RunState> = new Set(["running", "waiting"]);
-const HISTORY_STATES: ReadonlySet<RunState> = new Set([
-  "completed",
-  "failed",
-  "interrupted",
-  "ended",
-  "unknown",
-]);
 
 /** True for the workloads the composer chip counts and summarizes. */
 export function isRunningWorkload(workload: WorkloadRunObservation): boolean {
@@ -24,10 +15,7 @@ export function isActiveWorkload(workload: WorkloadRunObservation): boolean {
 /** True for the workloads the overview History tab lists. Unknown is history,
  *  not terminal: its actual status is preserved and it can return to Active. */
 export function isHistoryWorkload(workload: WorkloadRunObservation): boolean {
-  if (isActiveWorkload(workload)) return false;
-  if (HISTORY_STATES.has(workload.state)) return true;
-  // Unrecognized states remain inspectable instead of disappearing.
-  return !ACTIVE_STATES.has(workload.state);
+  return !isActiveWorkload(workload);
 }
 
 /**

@@ -1,5 +1,6 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { expect, test } from "../../fixtures/test-base";
+import { watchWs, type WsWatcher } from "../../helpers/causal-waits";
 import { firstSessionId } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -20,8 +21,10 @@ async function seedWorkloads(
     state: string;
     exit_code?: number;
   }>,
+  ws?: WsWatcher,
 ) {
   for (const row of rows) {
+    const update = ws?.waitForEvent("session.background_work.updated");
     await apiClient.recordBackgroundWorkload(sessionId, {
       work_id: row.work_id,
       run_id: row.work_id,
@@ -31,6 +34,7 @@ async function seedWorkloads(
       exit_code: row.exit_code,
       revision: 10,
     });
+    await update;
   }
 }
 
@@ -59,19 +63,21 @@ test.describe("Background work viewer on a phone", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: UNKNOWN_ID, title: LONG_COMMAND, state: "unknown" },
-      { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
-    ]);
-    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0, {
-      timeout: 30_000,
-    });
-
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [
+        { work_id: UNKNOWN_ID, title: LONG_COMMAND, state: "unknown" },
+        { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
+      ],
+      ws,
+    );
     const editor = await session.fillMessage("keep this draft while inspecting history");
     await openBackgroundWorkFromPanels(testPage);
 
@@ -83,6 +89,7 @@ test.describe("Background work viewer on a phone", () => {
     );
     await expect(testPage.getByTestId(`background-workload-card-${UNKNOWN_ID}`)).toBeVisible();
     await expect(testPage.getByTestId(`background-workload-card-${COMPLETED_ID}`)).toBeVisible();
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
     await prCapture.screenshot("mobile-background-work-history", {
       caption: "Phone Background Work separates Active and History after Panels opens it",
     });
@@ -153,16 +160,22 @@ test.describe("Background work viewer on a phone", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
-      { work_id: WAITING_ID, title: "Waiting subagent", kind: "subagent", state: "waiting" },
-      { work_id: UNKNOWN_ID, title: "Unknown poller", state: "unknown" },
-    ]);
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [
+        { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
+        { work_id: WAITING_ID, title: "Waiting subagent", kind: "subagent", state: "waiting" },
+        { work_id: UNKNOWN_ID, title: "Unknown poller", state: "unknown" },
+      ],
+      ws,
+    );
 
     const editor = await session.fillMessage("draft survives the running summary");
     const chip = testPage.getByTestId("background-work-chip");
@@ -243,14 +256,18 @@ test.describe("Background work viewer on a phone", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
-    ]);
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [{ work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" }],
+      ws,
+    );
     const editor = await session.fillMessage("draft survives summary dismissal");
     const chip = testPage.getByTestId("background-work-chip");
     await expect(chip).toBeVisible({ timeout: 30_000 });

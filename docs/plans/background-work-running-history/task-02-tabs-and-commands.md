@@ -168,7 +168,7 @@ Completed 2026-11-03.
 Verification:
 
 - The Task 02 focused Vitest set, including the retained clear-window suite and
-  the deferred first-read regression: 10 files, 139 tests passed.
+  the deferred first-read regression: 10 files, 143 tests passed.
 - `pnpm exec tsc --noEmit` (with an 8 GB Node heap): passed.
 - `pnpm run i18n:check`: passed; all seven catalogs complete.
 - Scoped ESLint over every changed TS/TSX path: 0 errors.
@@ -201,8 +201,13 @@ Browser checks:
   `aria-controls`, and keyboard-navigation tests.
 - Moved the complete command into the shared detail scroll region on desktop
   and phone. The fixed header keeps navigation, status, and actions visible.
-- Added the summary-to-detail Back fallback: when the last running job ends
-  while its detail is open, Back selects History and restores focus to the
-  inspected row. Overview-origin tab/search/scroll state remains untouched.
+- Added the summary-to-detail Back fallback: when the inspected job leaves the
+  running summary, Back selects the inspected record's Active or History tab
+  and restores focus to its row. Overview-origin tab/search/scroll state remains
+  untouched.
+- Tracked a failed first read as an explicit localized error with Retry, so an
+  unverified empty list is never presented as history.
+- Added capability-gated Stop and Interrupt controls to the phone detail and
+  row-specific accessible names for every Open action.
 
 

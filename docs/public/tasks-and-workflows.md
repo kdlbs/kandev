@@ -666,7 +666,8 @@ truncate in the list, while the detail view shows the complete command and wraps
 it inside the available width.
 
 Background Work stays reachable without the chip. On desktop, open it from the
-**+** panel menu. On a phone, open it from **Panels**. A job with unknown activity
+**+** panel menu. On a phone in a managed session, open it from **Panels**;
+passthrough terminal sessions do not expose it. A job with unknown activity
 appears in History with its actual **Unknown** status and never implies
 completion. Unknown work can return to Active when new evidence arrives.
 

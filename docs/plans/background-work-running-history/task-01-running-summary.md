@@ -130,8 +130,8 @@ the shared store or accidentally change prompt-admission estimates.
 Completed 2026-11-03.
 
 - Added shared state selectors in `apps/web/lib/background-work/workload-views.ts`
-  with unique accepted rows, running-only membership, Active/History membership,
-  initial-tab resolution, and tab-scoped search.
+  with unique accepted rows and running-only, Active, and History membership.
+  Tab selection, tab-scoped search, and their rendered states belong to Task 02.
 - `useBackgroundWork` now publishes `runningWorkloads`, `activeWorkloads`, and
   `historyWorkloads` alongside the unchanged counts and raw list. The only
   count consumers were the chip and tests; prompt admission, parked activity,
@@ -151,7 +151,7 @@ Completed 2026-11-03.
 
 Verification:
 
-- `pnpm exec vitest run` for the ten focused files: 10 files, 139 tests
+- `pnpm exec vitest run` for the ten focused files: 10 files, 143 tests
   passed (including a deferred first-read regression through the real hook and
   store).
 - `pnpm exec tsc --noEmit` (with an 8 GB Node heap): passed.

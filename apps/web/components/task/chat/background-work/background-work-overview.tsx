@@ -36,6 +36,9 @@ export type BackgroundWorkOverviewProps = {
   touchTargets?: boolean;
   /** One-shot tab navigation from the mobile detail Back fallback. */
   requestedTab?: { tab: BackgroundWorkTab; token: number } | null;
+  /** The last read failed; do not present an unverified empty list. */
+  loadError?: boolean;
+  onRetry?: () => void;
 };
 
 function useOverviewSelection(
@@ -79,9 +82,14 @@ export function BackgroundWorkOverview({
   showHeader = true,
   touchTargets = false,
   requestedTab = null,
+  loadError = false,
+  onRetry,
 }: BackgroundWorkOverviewProps) {
-  const { tab, search, setSearch, setTab } = useOverviewSelection(workloads, isLoading, resetKey);
-  const { t } = useTranslation();
+  const { tab, search, setSearch, setTab } = useOverviewSelection(
+    workloads,
+    isLoading || (loadError && workloads.length === 0),
+    resetKey,
+  );
   const activeCount = useMemo(() => selectActiveWorkloads(workloads).length, [workloads]);
   const historyCount = useMemo(() => selectHistoryWorkloads(workloads).length, [workloads]);
 
@@ -94,16 +102,11 @@ export function BackgroundWorkOverview({
       {showHeader && (
         <OverviewTopBar onClose={onClose} closeLabel={closeLabel} touchTargets={touchTargets} />
       )}
-      {tab === null ? (
-        <div
-          className="flex min-h-0 flex-1 items-center justify-center px-3 py-8 text-center text-xs text-muted-foreground"
-          role="status"
-        >
-          {t("task:loadingBackgroundWork")}
-        </div>
+      {showOverviewPlaceholder(loadError, workloads.length, tab) ? (
+        <OverviewPlaceholder loadError={loadError && workloads.length === 0} onRetry={onRetry} />
       ) : (
         <Tabs
-          value={tab}
+          value={tab ?? "active"}
           onValueChange={(value) => setTab(value === "history" ? "history" : "active")}
           className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
         >
@@ -143,6 +146,48 @@ export function BackgroundWorkOverview({
             </TabsContent>
           </div>
         </Tabs>
+      )}
+    </div>
+  );
+}
+
+function showOverviewPlaceholder(
+  loadError: boolean,
+  workloadCount: number,
+  tab: BackgroundWorkTab | null,
+): boolean {
+  return tab === null || (loadError && workloadCount === 0);
+}
+
+function OverviewPlaceholder({ loadError, onRetry }: { loadError: boolean; onRetry?: () => void }) {
+  const { t } = useTranslation();
+  if (!loadError) {
+    return (
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center px-3 py-8 text-center text-xs text-muted-foreground"
+        role="status"
+      >
+        {t("task:loadingBackgroundWork")}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground"
+      role="alert"
+    >
+      <span>{t("task:backgroundWorkLoadFailed")}</span>
+      {onRetry && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onRetry}
+          className="h-7 cursor-pointer text-xs"
+          data-testid="background-work-retry"
+        >
+          {t("task:retry")}
+        </Button>
       )}
     </div>
   );
@@ -382,6 +427,7 @@ function OpenWorkloadButton({
       size="sm"
       className={cn("shrink-0 cursor-pointer text-xs", touchTargets ? TOUCH_TARGET_CLASS : "h-7")}
       onClick={() => onOpenWorkload(workload)}
+      aria-label={`${t("task:openBackgroundWork")} ${workload.title}`}
       data-testid={`open-workload-${workload.work_id}`}
     >
       {t("task:openBackgroundWork")}

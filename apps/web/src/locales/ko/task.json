@@ -300,6 +300,7 @@
   "backgroundWorkClose": "백그라운드 작업 닫기",
   "backgroundWorkDetailsTitle": "백그라운드 작업",
   "backgroundWorkDetailsDescription": "백그라운드에서 실행 중인 프로세스와 하위 에이전트입니다.",
+  "backgroundWorkLoadFailed": "백그라운드 작업을 불러오지 못했습니다.",
   "backgroundWorkIsRunning": "백그라운드 작업이 실행 중입니다",
   "baseBranch": "기본 브랜치",
   "baseBranch2": "기본 브랜치",

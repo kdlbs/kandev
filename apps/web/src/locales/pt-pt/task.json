@@ -289,6 +289,7 @@
   "backgroundWorkClose": "Fechar trabalho em segundo plano",
   "backgroundWorkDetailsTitle": "Trabalho em segundo plano",
   "backgroundWorkDetailsDescription": "Processos ativos e subagentes em execução em segundo plano.",
+  "backgroundWorkLoadFailed": "Não foi possível carregar o trabalho em segundo plano.",
   "backgroundWorkIsRunning": "Há trabalho em segundo plano em execução",
   "baseBranch": "Branch de base",
   "baseBranch2": "Branch de base",

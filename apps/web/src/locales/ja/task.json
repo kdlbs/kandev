@@ -320,6 +320,7 @@
   "backgroundWorkClose": "バックグラウンド作業を閉じる",
   "backgroundWorkDetailsTitle": "バックグラウンド作業",
   "backgroundWorkDetailsDescription": "バックグラウンドで実行中のプロセスとサブエージェント。",
+  "backgroundWorkLoadFailed": "バックグラウンド作業を読み込めませんでした。",
   "backgroundWorkIsRunning": "バックグラウンド作業が実行中",
   "baseBranch": "ベースブランチ",
   "baseBranch2": "ベースブランチ",

@@ -30,27 +30,23 @@ export async function expectProcessEndClearsBackgroundWork(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const activeChip = testPage.getByTestId("background-work-chip");
-  await expect(activeChip).toBeVisible({ timeout: 30_000 });
-  await expect(activeChip).toContainText("Background Job");
-
   const sessionId = await firstSessionId(apiClient, task.id);
-  const activeWorkloadCount = async (): Promise<number> => {
-    const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
-    return workloads.filter((w) => ["running", "waiting", "unknown"].includes(w.state)).length;
-  };
   const runningWorkloadCount = async (): Promise<number> => {
     const { workloads } = await apiClient.listBackgroundWorkloads(sessionId);
     return workloads.filter((w) => w.state === "running").length;
   };
-  // The provider shape may register more than one workload; only the fact that
-  // work is active before the process ends matters here.
+  // The composer chip is running-only, so wait for the authoritative running
+  // projection before asserting its rendered shadow.
   await expect
-    .poll(activeWorkloadCount, {
-      message: "the detached launch should register active background work",
+    .poll(runningWorkloadCount, {
+      message: "the detached launch should register a running background workload",
       timeout: 30_000,
     })
     .toBeGreaterThan(0);
+
+  const activeChip = testPage.getByTestId("background-work-chip");
+  await expect(activeChip).toBeVisible();
+  await expect(activeChip).toContainText("Background Job");
 
   // Restart the session exactly as the UI does: stop the owning process, then
   // resume the conversation under a new execution.

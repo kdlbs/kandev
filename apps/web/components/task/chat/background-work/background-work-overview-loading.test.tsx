@@ -7,15 +7,20 @@ import { BackgroundWorkPanel } from "./background-work-panel";
 
 const backgroundWorkApi = vi.hoisted(() => {
   let resolveList: ((value: { workloads: unknown[] }) => void) | undefined;
+  let rejectList: ((reason: Error) => void) | undefined;
   return {
     listBackgroundWorkloads: vi.fn(
       () =>
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
           resolveList = resolve;
+          rejectList = reject;
         }),
     ),
     resolveList: (workloads: unknown[]) => {
       resolveList?.({ workloads });
+    },
+    rejectList: (reason: Error) => {
+      rejectList?.(reason);
     },
   };
 });
@@ -76,6 +81,19 @@ describe("BackgroundWorkPanel initial tab readiness", () => {
       expect(screen.getByTestId("background-workload-card-active-work")).toBeTruthy();
     },
   );
+
+  it("shows a failed read instead of an unverified empty state", async () => {
+    renderPanel();
+
+    expect(screen.getByText("Loading background work...")).toBeTruthy();
+    act(() => backgroundWorkApi.rejectList(new Error("read failed")));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("Could not load background work.");
+    });
+    expect(screen.queryByTestId("background-work-empty")).toBeNull();
+    expect(screen.queryByTestId("background-work-tab-history")).toBeNull();
+  });
 
   it("waits for the first read and then selects History for terminal-only work", async () => {
     renderPanel();

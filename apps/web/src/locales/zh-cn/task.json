@@ -289,6 +289,7 @@
   "backgroundWorkClose": "关闭后台任务",
   "backgroundWorkDetailsTitle": "后台任务",
   "backgroundWorkDetailsDescription": "在后台运行的活动进程和子代理。",
+  "backgroundWorkLoadFailed": "无法加载后台工作。",
   "backgroundWorkIsRunning": "后台工作正在运行",
   "baseBranch": "基准分支",
   "baseBranch2": "基础分支",

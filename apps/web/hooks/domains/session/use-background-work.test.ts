@@ -101,6 +101,20 @@ describe("useBackgroundWork fetching", () => {
     await waitFor(() => {
       expect(result.current.isInitialLoading).toBe(false);
     });
+    expect(result.current.workloads.map((row) => row.work_id)).toEqual(["work-1"]);
+    expect(result.current.loadError).toBe(false);
+  });
+
+  it("marks a failed first read instead of treating it as verified empty", async () => {
+    listBackgroundWorkloads.mockRejectedValueOnce(new Error("read failed"));
+
+    const { result } = renderHook(() => useBackgroundWork(SESSION_ID));
+
+    await waitFor(() => {
+      expect(result.current.isInitialLoading).toBe(false);
+    });
+    expect(result.current.loadError).toBe(true);
+    expect(result.current.workloads).toEqual([]);
   });
 
   it("does not report initial loading without a fetched session", () => {

@@ -82,6 +82,7 @@ export function RunningWorkSummary({
                   drawer ? "min-h-11 min-w-11" : "h-6",
                 )}
                 onClick={() => onOpenWorkload(workload.work_id, workload.title)}
+                aria-label={`${t("task:openBackgroundWork")} ${workload.title}`}
                 data-testid={`background-work-open-button-${workload.work_id}`}
               >
                 {t("task:openBackgroundWork")}

@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { watchWs, type WsWatcher } from "../../helpers/causal-waits";
 import { firstSessionId } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -28,8 +29,10 @@ async function seedWorkloads(
     state: string;
     exit_code?: number;
   }>,
+  ws?: WsWatcher,
 ) {
   for (const row of rows) {
+    const update = ws?.waitForEvent("session.background_work.updated");
     await apiClient.recordBackgroundWorkload(sessionId, {
       work_id: row.work_id,
       run_id: row.work_id,
@@ -39,6 +42,7 @@ async function seedWorkloads(
       exit_code: row.exit_code,
       revision: 10,
     });
+    await update;
   }
 }
 
@@ -61,20 +65,26 @@ test.describe("Background work viewer", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
-      { work_id: WAITING_ID, title: "Waiting subagent", kind: "subagent", state: "waiting" },
-      { work_id: UNKNOWN_ID, title: "Unknown poller", state: "unknown" },
-      { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
-    ]);
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [
+        { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
+        { work_id: WAITING_ID, title: "Waiting subagent", kind: "subagent", state: "waiting" },
+        { work_id: UNKNOWN_ID, title: "Unknown poller", state: "unknown" },
+        { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
+      ],
+      ws,
+    );
 
     const chip = testPage.getByTestId("background-work-chip");
-    await expect(chip).toBeVisible({ timeout: 30_000 });
+    await expect(chip).toBeVisible();
     await expect(chip).toContainText("1 Background Job");
 
     await chip.click();
@@ -150,19 +160,21 @@ test.describe("Background work viewer", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: UNKNOWN_ID, title: LONG_COMMAND, state: "unknown" },
-      { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
-    ]);
-
-    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0, {
-      timeout: 30_000,
-    });
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [
+        { work_id: UNKNOWN_ID, title: LONG_COMMAND, state: "unknown" },
+        { work_id: COMPLETED_ID, title: "Finished job", state: "completed", exit_code: 0 },
+      ],
+      ws,
+    );
 
     await openBackgroundWorkFromPanelMenu(testPage);
     await expect(testPage.getByTestId("background-work-tab-history")).toHaveAttribute(
@@ -171,6 +183,7 @@ test.describe("Background work viewer", () => {
     );
     await expect(testPage.getByTestId(`background-workload-card-${UNKNOWN_ID}`)).toBeVisible();
     await expect(testPage.getByTestId(`background-workload-card-${COMPLETED_ID}`)).toBeVisible();
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
 
     await testPage.getByTestId(`open-workload-${UNKNOWN_ID}`).click();
     const detail = testPage.getByTestId(`background-work-detail-${UNKNOWN_ID}`);
@@ -207,17 +220,21 @@ test.describe("Background work viewer", () => {
         workflow_step_id: seedData.startStepId,
       },
     );
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const sessionId = await firstSessionId(apiClient, task.id);
 
-    await seedWorkloads(apiClient, sessionId, [
-      { work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" },
-    ]);
+    await seedWorkloads(
+      apiClient,
+      sessionId,
+      [{ work_id: RUNNING_ID, title: LONG_COMMAND, state: "running" }],
+      ws,
+    );
 
     const chip = testPage.getByTestId("background-work-chip");
-    await expect(chip).toBeVisible({ timeout: 30_000 });
+    await expect(chip).toBeVisible();
     const chipBox = await chip.boundingBox();
     expect(chipBox).not.toBeNull();
     expect(chipBox!.height).toBeGreaterThanOrEqual(44);

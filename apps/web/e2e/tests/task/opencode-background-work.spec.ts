@@ -14,6 +14,7 @@
  */
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { firstSessionId } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 const OPENCODE_FIXTURE_SCRIPT = "/opencode-background-fixture";
@@ -69,15 +70,24 @@ test.describe("OpenCode background inspection", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const settledSessionId = await firstSessionId(apiClient, task.id);
+    await expect
+      .poll(
+        async () => {
+          const { workloads } = await apiClient.listBackgroundWorkloads(settledSessionId);
+          return {
+            count: workloads.length,
+            running: workloads.filter((workload) => workload.state === "running").length,
+          };
+        },
+        { message: "the three legacy launches should settle to unknown", timeout: 30_000 },
+      )
+      .toEqual({ count: SHELL_IDS.length, running: 0 });
 
     // AC-007.1: each confirmed launch keeps one shared workload identity, even
     // after the launch tool finished and the foreground prompt settled. Legacy
     // delivery cannot establish liveness, so no composer chip is claimed; the
     // independent entry keeps all three unknown records inspectable.
-    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0, {
-      timeout: 30_000,
-    });
-
     await testPage.getByTestId("dockview-add-panel-btn").first().click();
     await testPage.getByTestId("add-panel-background-work").click();
     const overview = testPage.getByTestId("background-work-overview");
@@ -89,6 +99,7 @@ test.describe("OpenCode background inspection", () => {
     for (const shellID of SHELL_IDS) {
       await expect(testPage.getByTestId(`background-workload-card-${shellID}`)).toBeVisible();
     }
+    await expect(testPage.getByTestId("background-work-chip")).toHaveCount(0);
 
     // AC-007.4 / AC-008.5: legacy delivery cannot establish liveness, so
     // History keeps the honest unknown status instead of claiming completion.

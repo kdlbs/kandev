@@ -37,7 +37,8 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
   const sessionId =
     typeof params?.sessionId === "string" && params.sessionId ? params.sessionId : activeSessionId;
   const workId = typeof params?.workId === "string" ? params.workId : undefined;
-  const { workloads, isLoading, isInitialLoading, executeAction } = useBackgroundWork(sessionId);
+  const { workloads, isLoading, isInitialLoading, loadError, executeAction, fetchWorkloads } =
+    useBackgroundWork(sessionId);
 
   const selectedWorkload = useMemo(() => {
     if (!workId) return null;
@@ -59,6 +60,8 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
       <BackgroundWorkOverview
         workloads={workloads}
         isLoading={isLoading || isInitialLoading}
+        loadError={loadError}
+        onRetry={fetchWorkloads}
         resetKey={sessionId}
         onOpenWorkload={(workload) => {
           useDockviewStore.getState().addBackgroundWorkPanel?.({

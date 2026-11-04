@@ -27,6 +27,10 @@ const WAITING_TITLE = "Waiting subagent";
 const UNKNOWN_TITLE = "Unknown poller";
 const CARD_WORK_1_TEST_ID = "background-workload-card-work-1";
 const DETAIL_COMMAND_TEST_ID = "background-work-detail-command";
+const SUMMARY_OPEN_BUTTON_TEST_ID = "background-work-open-button-work-1";
+const DRAWER_DETAIL_TEST_ID = "background-work-drawer-detail";
+const STOP_BUTTON_TEST_ID = "stop-workload-button";
+const INTERRUPT_BUTTON_TEST_ID = "interrupt-workload-button";
 const ACTIVE_TAB_STATE = "active";
 const DATA_STATE_ATTR = "data-state";
 
@@ -104,26 +108,30 @@ describe("BackgroundWorkChip", () => {
 
   it("renders a running-only chip and opens the running summary", async () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running" }),
+      workload({ work_id: WORK_ID, state: "running" }),
       workload({ work_id: "work-2", state: "completed", title: "Finished job" }),
     ];
     render(<BackgroundWorkChip sessionId={SESSION_ID} />);
 
     const chip = screen.getByTestId(CHIP_TEST_ID);
     expect(chip.getAttribute("aria-label")).toBe("1 Background Job");
+    expect(chip.getAttribute("aria-controls")).toBeTruthy();
 
     fireEvent.click(chip);
 
     const summary = await screen.findByTestId(SUMMARY_TEST_ID);
     expect(summary.textContent).toContain(RUNNING_TITLE);
-    expect(summary.textContent).toContain("Build Watcher");
+    expect(summary.textContent).toContain(WORK_TITLE);
     expect(summary.textContent).not.toContain("Finished job");
     expect(screen.queryByTestId("background-work-summary-counts")).toBeNull();
+    expect(screen.getByTestId(SUMMARY_OPEN_BUTTON_TEST_ID).getAttribute("aria-label")).toContain(
+      WORK_TITLE,
+    );
 
-    fireEvent.click(screen.getByTestId("background-work-open-button-work-1"));
+    fireEvent.click(screen.getByTestId(SUMMARY_OPEN_BUTTON_TEST_ID));
     expect(addBackgroundWorkPanel).toHaveBeenCalledWith({
       sessionId: SESSION_ID,
-      workId: "work-1",
+      workId: WORK_ID,
       title: WORK_TITLE,
       inCenter: true,
     });
@@ -147,7 +155,7 @@ describe("BackgroundWorkChip", () => {
 
   it("keeps waiting and unknown records out of the running summary", async () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running" }),
+      workload({ work_id: WORK_ID, state: "running" }),
       workload({ work_id: "work-2", state: "waiting", title: WAITING_TITLE }),
       workload({ work_id: "work-3", state: "unknown", title: UNKNOWN_TITLE }),
     ];
@@ -193,7 +201,7 @@ describe("BackgroundWorkChip", () => {
   });
 });
 
-describe("BackgroundWorkChip on a phone", () => {
+describe("BackgroundWorkChip phone details", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -202,20 +210,56 @@ describe("BackgroundWorkChip on a phone", () => {
     cleanup();
   });
 
+  it("lands on History when the inspected detail finishes while another job keeps running", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      mockWorkloads = [
+        workload({ work_id: WORK_ID, state: "running" }),
+        workload({ work_id: "work-2", state: "running", title: "Second job" }),
+      ];
+      const { rerender } = render(<BackgroundWorkChip sessionId={SESSION_ID} />);
+
+      fireEvent.click(screen.getByTestId(CHIP_TEST_ID));
+      fireEvent.click(await screen.findByTestId(SUMMARY_OPEN_BUTTON_TEST_ID));
+      expect(await screen.findByTestId(DRAWER_DETAIL_TEST_ID)).toBeTruthy();
+
+      mockWorkloads = [
+        workload({ work_id: WORK_ID, state: "completed" }),
+        workload({ work_id: "work-2", state: "running", title: "Second job" }),
+      ];
+      rerender(<BackgroundWorkChip sessionId={SESSION_ID} />);
+      fireEvent.click(screen.getByTestId("background-work-drawer-back"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId(TAB_HISTORY_TEST_ID).getAttribute(DATA_STATE_ATTR)).toBe(
+          ACTIVE_TAB_STATE,
+        );
+      });
+      expect(screen.getByTestId("background-workload-card-work-1")).toBeTruthy();
+      await waitFor(() => {
+        expect(screen.getByTestId("open-workload-work-1")).toBe(document.activeElement);
+      });
+    } finally {
+      cleanup();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+
   it("falls back to History and restores row focus after a summary detail finishes", async () => {
     const previousWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
-      mockWorkloads = [workload({ work_id: "work-1", state: "running" })];
+      mockWorkloads = [workload({ work_id: WORK_ID, state: "running" })];
       const { rerender } = render(<BackgroundWorkChip sessionId={SESSION_ID} />);
 
       fireEvent.click(screen.getByTestId(CHIP_TEST_ID));
-      fireEvent.click(await screen.findByTestId("background-work-open-button-work-1"));
-      expect(await screen.findByTestId("background-work-drawer-detail")).toBeTruthy();
+      fireEvent.click(await screen.findByTestId(SUMMARY_OPEN_BUTTON_TEST_ID));
+      expect(await screen.findByTestId(DRAWER_DETAIL_TEST_ID)).toBeTruthy();
 
-      mockWorkloads = [workload({ work_id: "work-1", state: "completed" })];
+      mockWorkloads = [workload({ work_id: WORK_ID, state: "completed" })];
       rerender(<BackgroundWorkChip sessionId={SESSION_ID} />);
-      expect(screen.getByTestId("background-work-drawer-detail")).toBeTruthy();
+      expect(screen.getByTestId(DRAWER_DETAIL_TEST_ID)).toBeTruthy();
 
       fireEvent.click(screen.getByTestId("background-work-drawer-back"));
 
@@ -234,13 +278,22 @@ describe("BackgroundWorkChip on a phone", () => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
     }
   });
+});
+describe("BackgroundWorkChip phone overview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
 
   it("keeps the phone summary and full-height overview on the shared tabs", async () => {
     const previousWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
       mockWorkloads = [
-        workload({ work_id: "work-1", state: "running" }),
+        workload({ work_id: WORK_ID, state: "running" }),
         workload({ work_id: "work-2", state: "waiting", title: WAITING_TITLE }),
         workload({ work_id: "work-3", state: "unknown", title: UNKNOWN_TITLE }),
       ];
@@ -258,7 +311,7 @@ describe("BackgroundWorkChip on a phone", () => {
 
       fireEvent.mouseDown(screen.getByTestId(TAB_HISTORY_TEST_ID));
       fireEvent.click(screen.getByTestId("open-workload-work-3"));
-      const detail = await screen.findByTestId("background-work-drawer-detail");
+      const detail = await screen.findByTestId(DRAWER_DETAIL_TEST_ID);
       expect(detail).toBeTruthy();
       expect(screen.getByTestId(DETAIL_COMMAND_TEST_ID).textContent).toContain(UNKNOWN_TITLE);
 
@@ -272,6 +325,55 @@ describe("BackgroundWorkChip on a phone", () => {
       expect(
         screen.getByTestId("background-work-drawer-content").getAttribute(DATA_STATE_ATTR),
       ).not.toBe("open");
+    } finally {
+      cleanup();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+});
+
+describe("BackgroundWorkChip phone actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("offers capability-gated stop and interrupt actions in the phone detail", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      mockWorkloads = [
+        workload({
+          work_id: WORK_ID,
+          state: "running",
+          capabilities: {
+            discovery: "snapshot",
+            output: "stream",
+            transcript: false,
+            parentage: false,
+            reasoning_summary: false,
+            attributable_usage: false,
+            actions: {
+              stop: { supported: true, available: true },
+              interrupt: { supported: false, available: false },
+            },
+          },
+        }),
+      ];
+      render(<BackgroundWorkChip sessionId={SESSION_ID} />);
+
+      fireEvent.click(screen.getByTestId(CHIP_TEST_ID));
+      fireEvent.click(await screen.findByTestId(SUMMARY_OPEN_BUTTON_TEST_ID));
+      expect(await screen.findByTestId(DRAWER_DETAIL_TEST_ID)).toBeTruthy();
+      expect(screen.queryByTestId(INTERRUPT_BUTTON_TEST_ID)).toBeNull();
+      fireEvent.click(screen.getByTestId(STOP_BUTTON_TEST_ID));
+      expect(executeActionMock).toHaveBeenCalledWith({
+        work_id: WORK_ID,
+        action: "stop",
+      });
     } finally {
       cleanup();
       Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
@@ -302,7 +404,7 @@ describe("BackgroundWorkPanel", () => {
     expect(screen.getByTestId("background-work-detail-work-1")).toBeTruthy();
     expect(screen.getByText("Listening for changes...")).toBeTruthy();
 
-    const stopBtn = screen.getByTestId("stop-workload-button");
+    const stopBtn = screen.getByTestId(STOP_BUTTON_TEST_ID);
     fireEvent.click(stopBtn);
 
     expect(executeActionMock).toHaveBeenCalledWith({
@@ -327,8 +429,8 @@ describe("BackgroundWorkPanel", () => {
     ];
     render(<BackgroundWorkPanel panelId="background-work:work-1" params={{ workId: WORK_ID }} />);
 
-    expect(screen.queryByTestId("stop-workload-button")).toBeNull();
-    expect(screen.queryByTestId("interrupt-workload-button")).toBeNull();
+    expect(screen.queryByTestId(STOP_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(INTERRUPT_BUTTON_TEST_ID)).toBeNull();
     expect(screen.getByTestId("background-work-actions-unavailable")).toBeTruthy();
     expect(screen.getByText("Output is not available for this job")).toBeTruthy();
   });
@@ -357,7 +459,7 @@ describe("BackgroundWorkPanel", () => {
     expect(screen.getByTestId("background-work-state-work-1").textContent).toBe("Failed");
     expect(screen.getByText("Exit 2")).toBeTruthy();
     expect(screen.getByText("checks failed")).toBeTruthy();
-    expect(screen.queryByTestId("stop-workload-button")).toBeNull();
+    expect(screen.queryByTestId(STOP_BUTTON_TEST_ID)).toBeNull();
   });
 
   it("keeps an explicit supported write-input control", () => {
@@ -378,7 +480,7 @@ describe("BackgroundWorkPanel overview", () => {
 
   it("defaults the overview to Active and separates History by state", () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running" }),
+      workload({ work_id: WORK_ID, state: "running" }),
       workload({ work_id: "work-2", state: "waiting", title: "Waiting agent", kind: "subagent" }),
       workload({ work_id: "work-3", state: "unknown", title: UNKNOWN_TITLE }),
       workload({ work_id: "work-4", state: "completed", title: "Finished job" }),
@@ -400,7 +502,7 @@ describe("BackgroundWorkPanel overview", () => {
 
   it("opens History first when no active work exists", () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "unknown", title: UNKNOWN_TITLE }),
+      workload({ work_id: WORK_ID, state: "unknown", title: UNKNOWN_TITLE }),
       workload({ work_id: "work-2", state: "failed", title: "Failed job" }),
     ];
     render(<BackgroundWorkPanel panelId="background-work" params={{}} />);
@@ -414,7 +516,7 @@ describe("BackgroundWorkPanel overview", () => {
 
   it("searches the selected tab and keeps counts independent from the query", () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running", title: "Build watcher" }),
+      workload({ work_id: WORK_ID, state: "running", title: "Build watcher" }),
       workload({ work_id: "work-2", state: "running", title: "Review auth", kind: "subagent" }),
       workload({ work_id: "work-3", state: "completed", title: "Build once more" }),
     ];
@@ -438,14 +540,14 @@ describe("BackgroundWorkPanel overview", () => {
   });
 
   it("keeps the selected tab after live membership changes", () => {
-    mockWorkloads = [workload({ work_id: "work-1", state: "running" })];
+    mockWorkloads = [workload({ work_id: WORK_ID, state: "running" })];
     const { rerender } = render(<BackgroundWorkPanel panelId="background-work" params={{}} />);
     fireEvent.mouseDown(screen.getByTestId(TAB_HISTORY_TEST_ID));
     expect(screen.getByTestId("background-work-empty").textContent).toBe(
       "No background work history.",
     );
 
-    mockWorkloads = [workload({ work_id: "work-1", state: "completed" })];
+    mockWorkloads = [workload({ work_id: WORK_ID, state: "completed" })];
     rerender(<BackgroundWorkPanel panelId="background-work" params={{}} />);
 
     expect(screen.getByTestId(TAB_HISTORY_TEST_ID).getAttribute(DATA_STATE_ATTR)).toBe(
@@ -472,7 +574,7 @@ describe("BackgroundWorkPanel tab semantics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running" }),
+      workload({ work_id: WORK_ID, state: "running" }),
       workload({ work_id: "work-2", state: "completed" }),
     ];
   });
@@ -483,7 +585,7 @@ describe("BackgroundWorkPanel tab semantics", () => {
 
   it("links each tab to its panel and supports keyboard navigation", async () => {
     mockWorkloads = [
-      workload({ work_id: "work-1", state: "running" }),
+      workload({ work_id: WORK_ID, state: "running" }),
       workload({ work_id: "work-2", state: "completed" }),
     ];
     render(<BackgroundWorkPanel panelId="background-work" params={{}} />);
@@ -520,7 +622,7 @@ describe("BackgroundWorkMobilePanel", () => {
   });
 
   it("opens the independent Panels surface on History and closes through its invoker", () => {
-    mockWorkloads = [workload({ work_id: "work-1", state: "unknown", title: UNKNOWN_TITLE })];
+    mockWorkloads = [workload({ work_id: WORK_ID, state: "unknown", title: UNKNOWN_TITLE })];
     const onClose = vi.fn();
     render(<BackgroundWorkMobilePanel sessionId={SESSION_ID} onClose={onClose} />);
 
