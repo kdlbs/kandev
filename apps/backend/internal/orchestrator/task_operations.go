@@ -1510,6 +1510,10 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// PreserveWorkflowSourceBinding marks a spawn_session_kandev launch. The
+	// helper session receives the prompt but must not become the workflow
+	// step's recorded recipient for later explicit targets.
+	PreserveWorkflowSourceBinding bool
 	// EntryOptions carries one-shot workflow-move overrides for a fresh
 	// auto-started session. The profile override is applied via the profile
 	// argument (with ProfileExplicit); the instructions are appended once to the
@@ -2005,7 +2009,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, failPreparedLaunch(fmt.Errorf("failed to reload launch session: %w", err))
 	}
-	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
+	if explicitStartRoute == nil && !opts.PreserveWorkflowSourceBinding &&
+		workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
 		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
 			return nil, failPreparedLaunch(fmt.Errorf("load workflow source step for session binding: %w", stepErr))
 		} else if sourceStep != nil {
