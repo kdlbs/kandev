@@ -1,4 +1,5 @@
 {
+  "openPr": "Open PR",
   "views": "Views",
   "viewPicker": "Views: {{view}}",
   "loadingSavedQueries": "Loading saved queries...",

@@ -243,64 +243,152 @@ it("keeps the task workbench mounted when the task changes", () => {
   expect(mounted).toHaveBeenCalledTimes(1);
 });
 
+const AUTO_SIZE = { mode: "auto", height: null, restore: null };
+const MANUAL_DESKTOP_SIZE = { mode: "manual", height: 810, restore: null };
+const MANUAL_PHONE_SIZE = { mode: "manual", height: 432, restore: null };
+const EXPANDED_AUTO_SIZE = {
+  mode: "expanded",
+  height: null,
+  restore: { mode: "auto", height: null },
+};
+const EXPANDED_MANUAL_SIZE = {
+  mode: "expanded",
+  height: null,
+  restore: { mode: "manual", height: 810 },
+};
+
 function ResizeState({ bundle = CLARIFICATION_BUNDLE }: { bundle?: string }) {
   const sizing = useClarificationResizeState(bundle);
   return (
     <>
-      <button onClick={() => sizing.setDesktopHeight(810)}>Set desktop size</button>
-      <button onClick={() => sizing.setPhoneHeight(432)}>Set phone size</button>
+      <button onClick={() => sizing.setDesktopSize({ mode: "manual", height: 810, restore: null })}>
+        Set desktop size
+      </button>
+      <button onClick={() => sizing.setPhoneSize({ mode: "manual", height: 432, restore: null })}>
+        Set phone size
+      </button>
+      <button
+        onClick={() =>
+          sizing.setDesktopSize({
+            mode: "expanded",
+            height: null,
+            restore: { mode: "auto", height: null },
+          })
+        }
+      >
+        Expand desktop from auto
+      </button>
+      <button
+        onClick={() =>
+          sizing.setDesktopSize({
+            mode: "expanded",
+            height: null,
+            restore: { mode: "manual", height: 810 },
+          })
+        }
+      >
+        Expand desktop from manual
+      </button>
       <output data-testid={RESIZE_STATE_TEST_ID}>
-        {JSON.stringify([sizing.desktopHeight, sizing.phoneHeight])}
+        {JSON.stringify([sizing.desktop, sizing.phone])}
       </output>
     </>
   );
 }
 
-it("retains phone and desktop sizes across responsive remounts by bundle", () => {
-  const page = (mount: string, bundle = CLARIFICATION_BUNDLE, taskId = TASK_ID) => (
+function resizePage(mount: string, bundle = CLARIFICATION_BUNDLE, taskId = TASK_ID) {
+  return (
     <ClarificationDraftProvider taskId={taskId}>
       <ResizeState key={mount} bundle={bundle} />
     </ClarificationDraftProvider>
   );
-  const { rerender } = render(page("desktop"));
+}
+
+it("retains phone and desktop sizes across responsive remounts by bundle", () => {
+  const { rerender } = render(resizePage("desktop"));
   act(() => {
     screen.getByRole("button", { name: "Set desktop size" }).click();
     screen.getByRole("button", { name: "Set phone size" }).click();
   });
 
-  rerender(page("phone"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([810, 432]));
+  rerender(resizePage("phone"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([MANUAL_DESKTOP_SIZE, MANUAL_PHONE_SIZE]),
+  );
 
-  rerender(page("new-phone", "other:bundle"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
+  rerender(resizePage("new-phone", "other:bundle"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([AUTO_SIZE, AUTO_SIZE]),
+  );
 
-  rerender(page("desktop-again"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([810, 432]));
+  rerender(resizePage("desktop-again"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([MANUAL_DESKTOP_SIZE, MANUAL_PHONE_SIZE]),
+  );
 
-  rerender(page("task-switch", CLARIFICATION_BUNDLE, "other-task"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
-  rerender(page("task-return"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
+  rerender(resizePage("task-switch", CLARIFICATION_BUNDLE, "other-task"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([AUTO_SIZE, AUTO_SIZE]),
+  );
+  rerender(resizePage("task-return"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([AUTO_SIZE, AUTO_SIZE]),
+  );
+});
+
+it("retains an expanded auto target with no pixel height across responsive remounts", () => {
+  const { rerender } = render(resizePage("desktop"));
+  act(() => screen.getByRole("button", { name: "Expand desktop from auto" }).click());
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_AUTO_SIZE, AUTO_SIZE]),
+  );
+
+  rerender(resizePage("phone"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_AUTO_SIZE, AUTO_SIZE]),
+  );
+
+  rerender(resizePage("other-bundle", "other:bundle"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([AUTO_SIZE, AUTO_SIZE]),
+  );
+
+  rerender(resizePage("return"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_AUTO_SIZE, AUTO_SIZE]),
+  );
+});
+
+it("retains an expanded manual Restore height across responsive remounts", () => {
+  const { rerender } = render(resizePage("desktop"));
+  act(() => screen.getByRole("button", { name: "Expand desktop from manual" }).click());
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_MANUAL_SIZE, AUTO_SIZE]),
+  );
+
+  rerender(resizePage("phone"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([EXPANDED_MANUAL_SIZE, AUTO_SIZE]),
+  );
 });
 
 it("bounds retained clarification sizes to the most recently used bundles", () => {
-  const page = (mount: string, bundle: string) => (
-    <ClarificationDraftProvider taskId={TASK_ID}>
-      <ResizeState key={mount} bundle={bundle} />
-    </ClarificationDraftProvider>
-  );
-  const { rerender } = render(page("bundle-0", "bundle-0"));
+  const { rerender } = render(resizePage("bundle-0", "bundle-0"));
   act(() => screen.getByRole("button", { name: "Set desktop size" }).click());
 
   for (let index = 1; index <= 8; index += 1) {
-    rerender(page(`bundle-${index}`, `bundle-${index}`));
+    rerender(resizePage(`bundle-${index}`, `bundle-${index}`));
     act(() => screen.getByRole("button", { name: "Set desktop size" }).click());
   }
 
-  rerender(page("old-bundle", "bundle-0"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([null, null]));
-  rerender(page("recent-bundle", "bundle-8"));
-  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(JSON.stringify([810, null]));
+  rerender(resizePage("old-bundle", "bundle-0"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([AUTO_SIZE, AUTO_SIZE]),
+  );
+  rerender(resizePage("recent-bundle", "bundle-8"));
+  expect(screen.getByTestId(RESIZE_STATE_TEST_ID).textContent).toBe(
+    JSON.stringify([MANUAL_DESKTOP_SIZE, AUTO_SIZE]),
+  );
 });
 
 type AppStore = ReturnType<typeof useAppStoreApi>;

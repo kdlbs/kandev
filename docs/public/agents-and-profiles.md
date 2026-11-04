@@ -54,7 +54,7 @@ After a completed turn, use **Fork conversation** to create another session thro
 
 ### Inspect agent background work
 
-Agents that report background shell commands, subagents, or monitors feed the shared background-work chip above the message box. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
+Agents that report background shell commands, subagents, or monitors feed the shared background-work view. A composer chip appears only while at least one job is running; it counts and summarizes that running subset. The overview separates **Active** (running and waiting) from **History** (completed, failed, interrupted, ended, and unknown). Open it from **View all work**, the desktop **+** panel menu, or the phone **Panels** menu in a managed session, even when no chip is visible; passthrough terminal sessions do not expose the phone entry. Unknown activity keeps its status and never implies completion. The chip is enabled by default in the shipped profiles; the operator toggle is **Agent background work** in **Settings > System > Feature Toggles**. The same experience, counts, and detail views apply on desktop and phone, and the chip never changes how a prompt is admitted. See [Tasks and workflows](tasks-and-workflows.md#inspect-background-work).
 
 Provider support differs, and Kandev shows only what the connected runtime verifies:
 
@@ -702,7 +702,9 @@ full, it stays parked without a manual-override notice. A queued focus resume,
 including a completed conversation, retries when capacity is available and
 only while the same conversation remains idle-suspended. Explicit **Resume**
 and **Send Now** keep manual admission. Ordinary message delivery waits for
-capacity through the same ceiling.
+capacity through the same ceiling. When **Prevent auto-start on open** is
+enabled in the web app, focus does not send that resume; the composer shows the
+start hint and a message to the parked conversation resumes it instead.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
@@ -1125,6 +1127,8 @@ certification.
 
 Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
 
+The **Built-in** section manages Kandev's native tool packages separately from these definitions. See [Choose built-in MCP packages](builtin-mcp-packages.md) for task opt-in, workspace limits, defaults, and next-start timing.
+
 Choose **Add MCP server** for one of these setup modes:
 
 - **Remote endpoint** connects to an HTTP or SSE endpoint when an agent uses the definition.
@@ -1181,7 +1185,8 @@ After a definition is configured, select it where it should apply:
   additions under **Additional servers**. Inherited entries retain all contributing
   origins. Choose **Exclude for this session** to leave out one inherited server,
   or **Restore inheritance** to use its current inherited selections again.
-  Check **Connections** for evidence of delivery or loaded tools.
+  Exclusion help appears only when there are inherited servers or saved
+  exclusions. Check **Connections** for evidence of delivery or loaded tools.
 
 Selections combine every repository attached to the task, its profile, task,
 and session additions. An existing session can exclude a definition from this

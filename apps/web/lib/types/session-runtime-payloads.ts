@@ -1,4 +1,9 @@
 import type { ModelCatalog } from "@kandev/types/model-catalog";
+import type {
+  BuiltinMCPPackage,
+  BuiltinMCPManifest,
+  BuiltinMCPAcceptedBinding,
+} from "@/lib/types/builtin-mcp";
 
 export type AuthMethodInfoPayload = {
   id: string;
@@ -88,6 +93,8 @@ export type SessionModelSelectionWarningPayload = {
 };
 
 export type MCPAttachmentServerPayload = {
+  builtin_package?: BuiltinMCPPackage;
+  accepted_at?: string;
   name: string;
   source?: "kandev" | "profile";
   transport?: string;
@@ -110,6 +117,10 @@ export type MCPAttachmentServerPayload = {
 };
 
 export type MCPAttachmentAttemptPayload = {
+  task_id?: string;
+  session_id?: string;
+  execution_id?: string;
+  builtin_packages?: BuiltinMCPManifest;
   attachment_attempt_id: string;
   started_at: string;
   updated_at?: string;
@@ -117,6 +128,7 @@ export type MCPAttachmentAttemptPayload = {
 };
 
 export type MCPAttachmentHistoryPayload = {
+  builtin_binding?: BuiltinMCPAcceptedBinding;
   version: number;
   current: MCPAttachmentAttemptPayload;
   previous?: MCPAttachmentAttemptPayload[];

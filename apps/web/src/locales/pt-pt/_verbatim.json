@@ -15,5 +15,6 @@
   "task:promptHistoryPromptLabel": "Technical term kept in English across localized developer tooling.",
   "task:promptHistoryPromptLabelGeneric": "Technical term kept in English across localized developer tooling.",
   "automations:triggerLabelManual": "Manual is the ordinary Portuguese adjective for a non-automatic trigger, spelled identically in English.",
-  "agents:copilotPluginsTitle": "\"Plugin\" is the established Portuguese term for software extensions and is spelled identically."
+  "agents:copilotPluginsTitle": "\"Plugin\" is the established Portuguese term for software extensions and is spelled identically.",
+  "system:storageRunTriggerManual": "\"Manual\" is the ordinary Portuguese word for a non-automatic run; translating it would change nothing."
 }
