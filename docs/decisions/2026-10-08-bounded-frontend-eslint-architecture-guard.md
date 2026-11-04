@@ -40,8 +40,10 @@ four owner paths, and independent Python architecture engine are unchanged;
 ## Consequences
 
 The guard uses an installed TypeScript-aware parser, adds no dependency or
-baseline, and gets diagnostics from ESLint at the source location. Its scope is
-limited to statically recognizable shapes in four named owner files. It does
+baseline, and gets its production diagnostic from the Oxlint JS-plugin host at
+the source location; the retained ESLint RuleTester and focused adapter suites
+exercise the same rule implementation. Its scope is limited to statically
+recognizable shapes in four named owner files. It does
 not prove aliases, dynamic keys, arbitrary data flow, or mirrors outside those
 paths. Frontend CI and web tests verify rule execution and configuration;
 make lint-architecture continues to run only the Python architecture engine.

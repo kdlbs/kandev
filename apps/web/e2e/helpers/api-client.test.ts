@@ -438,6 +438,8 @@ describe("ApiClient.createSentryInstance", () => {
         if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
           return Response.json({ interimSettingsInterlockToken: "test-token" });
         }
+        expect(url).toBe("http://backend.test/api/v1/sentry/instances?workspace_id=workspace-1");
+        expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toMatchObject({ url: "https://sentry.io" });
         return Response.json({ id: "instance-2" });
       }),

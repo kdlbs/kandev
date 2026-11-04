@@ -323,6 +323,27 @@ class EvidenceHarnessTest(unittest.TestCase):
         self.assertFalse(comparison.ok)
         self.assertEqual(len(comparison.extra), 1)
 
+    def test_lint_comparison_uses_complete_finding_tuples(self) -> None:
+        finding = {
+            "file": "a.ts",
+            "line": 3,
+            "column": 7,
+            "rule": "no-debugger",
+            "severity": "error",
+            "message": "debugger",
+        }
+        for field, value in (("column", 8), ("severity", "warning"), ("message", "other")):
+            changed = dict(finding)
+            changed[field] = value
+            comparison = MODULE.compare_lint_findings([finding], [changed])
+            self.assertFalse(comparison.ok, field)
+            self.assertEqual(len(comparison.missing), 1)
+            self.assertEqual(len(comparison.extra), 1)
+        reordered = [finding, {**finding, "line": 9}]
+        comparison = MODULE.compare_lint_findings(reordered, list(reversed(reordered)))
+        self.assertTrue(comparison.ok)
+        self.assertTrue(comparison.order_only)
+
     def test_malformed_lint_reports_fail(self) -> None:
         with self.assertRaises(MODULE.EvidenceError):
             MODULE.parse_eslint_json("{}")
@@ -529,6 +550,64 @@ class EvidenceHarnessTest(unittest.TestCase):
         )
         self.assertFalse(result["ok"])
         self.assertFalse(result["projects"][0]["ok"])
+
+    def test_exact_corpus_count_rejects_extra_negative_diagnostics(self) -> None:
+        entry = {
+            "expected": "errors",
+            "minimum_count": 1,
+            "exact_count": 1,
+            "required_codes": ["TS2322"],
+        }
+        one = [MODULE.NormalizedDiagnostic("index.ts", 1, 1, "TS2322", "error", "x")]
+        self.assertTrue(MODULE._corpus_expectation_ok(entry, one))
+        extra = one + [MODULE.NormalizedDiagnostic("index.ts", 2, 1, "TS2339", "error", "y")]
+        self.assertFalse(MODULE._corpus_expectation_ok(entry, extra))
+
+    def test_warm_only_comparison_is_rejected(self) -> None:
+        code, report = self._compare(["--cache-state", "warm"])
+        self.assertEqual(code, 2)
+        self.assertFalse(report["ok"])
+        self.assertTrue(any("warm-only" in item for item in report["failures"]))
+
+    def test_compare_lint_writes_partial_report_on_failure(self) -> None:
+        output = self.root / "lint-report.json"
+        code = MODULE.main(
+            [
+                "compare-lint",
+                "--web-root",
+                str(self.web_root),
+                "--config",
+                "missing-config.mjs",
+                "--output",
+                str(output),
+            ]
+        )
+        self.assertEqual(code, 2)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["complete"])
+        self.assertTrue(report["failures"])
+
+    def test_benchmark_writes_partial_report_on_failure(self) -> None:
+        output = self.root / "benchmark"
+        code = MODULE.main(
+            [
+                "benchmark",
+                "--web-root",
+                str(self.web_root),
+                "--output",
+                str(output),
+                "--pairs",
+                "1",
+                "--tsc",
+                str(self.root / "missing-tsc"),
+            ]
+        )
+        self.assertEqual(code, 2)
+        report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["complete"])
+        self.assertTrue(any("incomplete evidence" in item for item in report["failures"]))
 
     def test_required_corpus_must_exist(self) -> None:
         missing = self.root / "missing-corpus"

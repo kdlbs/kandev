@@ -573,6 +573,9 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
+	@python3 .github/scripts/web-toolchain-evidence_test.py
+	@python3 .github/scripts/upgrade-regression-workflow-contract_test.py
+	@node --test scripts/web-native-toolchain.test.mjs
 	@python3 .github/scripts/notify-release-contributors_test.py
 	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
 	@python3 .github/scripts/discord-release-content_test.py

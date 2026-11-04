@@ -100,7 +100,7 @@ Completed on November 3, 2026.
   timeout, error, and interruption; output, inventories, and timeouts are
   bounded; missing binaries, malformed output, empty selections, and
   cross-tool inventory differences fail the comparison.
-- Added `.github/scripts/web-toolchain-evidence_test.py`. All 34 tests pass,
+- Added `.github/scripts/web-toolchain-evidence_test.py`. All 39 tests pass,
   including the installed legacy compiler over the curated corpus, missing and
   extra diagnostics, stale incremental success, parser failure, timeout cleanup,
   duplicate lint findings, and malformed lint reports.

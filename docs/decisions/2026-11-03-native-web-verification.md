@@ -33,7 +33,9 @@ Broad suppressions, weaker assertions, omitted files, and automatic success fall
 The selected fast mode must not become ordinary mode silently.
 
 This decision selects the implementation target.
-It does not authorize implementation, publication, hosted dispatch, or paid capacity.
+It does not authorize publication, hosted dispatch, or paid capacity.
+The command cutover may land as a conditional rollout with the prior commands retained as a tested rollback path;
+the performance claim and removal of that rollback remain gated on three hosted acceptance pairs.
 The [draft design](../specs/platform/system-design/web-native-verification.md) and [work orders](../plans/native-web-verification/plan.md) own the cutover conditions.
 The earlier ESLint-host decision remains current until that cutover passes.
 At cutover, its host choice is superseded by this decision.

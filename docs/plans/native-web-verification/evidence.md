@@ -100,7 +100,8 @@ The implementation ran on November 3, 2026 on the repaired source.
 provisioned TypeScript `7.1.0-beta` in an isolated temporary installation and compared it with the
 workspace `tsc` 5.9.3, tsrs default, and `tsrs --fast` on the same 7,581-file non-dependency input
 set. All four compilers passed with zero project diagnostics in cold and fresh incremental runs,
-and every tool reported an equal input inventory. Each tool used its own temporary `tsBuildInfoFile`,
+and every tool reported an equal input inventory. The project comparison used the supported
+four-checker setting; corpus comparisons also passed at one, four, and eight checkers. Each tool used its own temporary `tsBuildInfoFile`,
 so neither the reference nor either tsrs mode could read another compiler's cache. The comparison
 passed `--checkers 4` to both the pinned reference and tsrs; classic TypeScript 5 kept its unsupported
 CLI untouched.
@@ -132,7 +133,7 @@ The 37 candidate findings were resolved without exclusions: 23 JSX entities beca
 punctuation characters in Unicode form, 12 unsafe optional-chain expressions were rewritten with
 explicit callback or state guards, and the two shadowed `ApiClient.createSentryInstance` and
 `SessionPage.prStatusChip` declarations were removed while retaining the effective later
-implementations. `rule-ledger.json` records all 81 configured rule registrations, severities, options,
+implementations. `rule-ledger.json` records all 96 configured rule registrations, severities, options,
 scopes, exemptions, and native targets, plus the disabled rules and the compiler-covered `no-octal`
 gap.
 

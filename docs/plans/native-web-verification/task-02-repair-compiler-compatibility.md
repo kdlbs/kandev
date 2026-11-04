@@ -112,7 +112,8 @@ Completed on November 3, 2026.
 - `compare-types` passed for workspace `tsc` 5.9.3, reference TypeScript
   `7.1.0-beta`, tsrs default, and `tsrs --fast` on the repaired project in cold
   and fresh incremental runs. Matching `--checkers 4` settings applied to the
-  reference and both tsrs modes. The required corpus reported eight diagnostics
+  reference and both tsrs modes on the project; the corpus also passed at the
+  supported one-, four-, and eight-checker settings. The required corpus reported eight diagnostics
   in every compiler and mode for the invalid project, zero for the valid
   project, and the expected TS2589 for the instantiation project. A cold, warm,
   and changed-invalid probe rejected stale cached success. Input inventories

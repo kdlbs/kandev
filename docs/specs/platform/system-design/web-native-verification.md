@@ -177,6 +177,8 @@ Classic API adapters remain explicit until they have an equivalent supported rep
 
 The existing web pre-commit hook forwards the same changed filenames to Oxlint.
 Package commands and hooks use the same version and rule scopes.
+The routing may land before hosted acceptance; the prior commands remain a tested rollback path,
+and Task 05 owns the hosted performance claim and final adoption decision.
 The targeted ESLint CLI invocation in `upgrade-regression.yml` moves to the accepted native configuration.
 Existing workflow contract tests protect required command exits and dependency joins.
 Helper tests join the existing action-pinning workflow job without adding a job or permission.
@@ -214,8 +216,8 @@ Earlier fifteen-minute CI and cache-rollout requirements remain separate.
 
 ## Failure and rollback
 
-Missing diagnostics, lost file coverage, unresolved rule differences, incompatible APIs, or a missed performance bound prevent cutover.
-The implementer retains the prior commands and records the exact unmet condition.
+Missing diagnostics, lost file coverage, unresolved rule differences, incompatible APIs, or a missed performance bound prevent the performance adoption claim and removal of the tested rollback.
+The conditional command routing may remain in service only with that rollback documented; the implementer records the exact unmet condition.
 The implementer does not substitute the hybrid linter, ordinary tsrs mode, or disabled fast features silently.
 An incompatible pin needs a corrected upstream release and new evidence, or a new explicit scope decision.
 

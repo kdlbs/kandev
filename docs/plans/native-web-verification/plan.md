@@ -80,6 +80,10 @@ Focused lint commands and the changed-file hook use the same policy and version.
 The targeted upgrade-regression lint invocation uses the accepted native configuration.
 ESLint remains available for RuleTester and existing API-based ratchets and inventory tools.
 
+Task 04 performs this command routing as a conditional cutover.
+Task 05 remains the adoption gate: the prior commands stay a tested rollback path,
+and no performance claim is adopted until three hosted pairs pass.
+
 The workflow graph, runner selection, permissions, required check names, and native test commands stay intact.
 New helper tests join an existing validation job.
 Task 04 updates tool-specific engineering guidance and the existing Query/architecture guard designs at cutover.
@@ -166,7 +170,7 @@ Design validation passed on November 3, 2026:
 
 Implementation checks passed for Tasks 01-04 on November 3, 2026:
 
-- The evidence helper tests (34), routing contract (9), upgrade-regression
+- The evidence helper tests (39), routing contract (9), upgrade-regression
   contract (3), existing workflow contracts, `actionlint`, full web lint,
   full typecheck, i18n checks, the E2E wait ratchet, the complete frontend
   suite (3,261 files, 29,610 tests), the Vite build, and plugin SDK checks pass.

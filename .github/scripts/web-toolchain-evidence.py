@@ -63,6 +63,10 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 class EvidenceError(RuntimeError):
     """Evidence could not be produced or is not trustworthy."""
 
+    def __init__(self, message: str, attempt: "Attempt | None" = None) -> None:
+        super().__init__(message)
+        self.attempt = attempt
+
 
 @dataclass
 class Attempt:
@@ -206,12 +210,6 @@ def run_process(
     started_at = _now_iso()
     start = time.monotonic()
     before_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-    stdout_file = tempfile.NamedTemporaryFile(delete=False)
-    stderr_file = tempfile.NamedTemporaryFile(delete=False)
-    stdout_path = Path(stdout_file.name)
-    stderr_path = Path(stderr_file.name)
-    stdout_file.close()
-    stderr_file.close()
 
     child_env = os.environ.copy()
     for key in unset_env or []:
@@ -221,6 +219,7 @@ def run_process(
 
     max_rss_kb: int | None = None
     stop_monitor = threading.Event()
+    truncated = {"stdout": False, "stderr": False}
 
     def monitor() -> None:
         nonlocal max_rss_kb
@@ -230,41 +229,66 @@ def run_process(
                 max_rss_kb = rss
             stop_monitor.wait(0.02)
 
+    def read_stream(stream, buffer: bytearray, key: str) -> None:
+        total = 0
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            remaining = MAX_OUTPUT_BYTES - total
+            if remaining > 0:
+                buffer.extend(chunk[:remaining])
+                total += min(len(chunk), remaining)
+            if total >= MAX_OUTPUT_BYTES:
+                truncated[key] = True
+                _kill_process_group(process)
+                return
+
     timed_out = False
     interrupted = False
     exit_code: int | None = None
+    stdout_buffer = bytearray()
+    stderr_buffer = bytearray()
+    process = subprocess.Popen(
+        argv,
+        cwd=str(cwd),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=child_env,
+        start_new_session=True,
+    )
+    stdout_thread = threading.Thread(
+        target=read_stream, args=(process.stdout, stdout_buffer, "stdout"), daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=read_stream, args=(process.stderr, stderr_buffer, "stderr"), daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    monitor_thread = threading.Thread(target=monitor, daemon=True)
+    monitor_thread.start()
     try:
-        with open(stdout_path, "wb") as out, open(stderr_path, "wb") as err:
-            process = subprocess.Popen(
-                argv,
-                cwd=str(cwd),
-                stdin=subprocess.DEVNULL,
-                stdout=out,
-                stderr=err,
-                env=child_env,
-                start_new_session=True,
-            )
-            monitor_thread = threading.Thread(target=monitor, daemon=True)
-            monitor_thread.start()
-            try:
-                exit_code = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                _kill_process_group(process)
-                exit_code = process.wait()
-            except KeyboardInterrupt:
-                interrupted = True
-                _kill_process_group(process)
-                exit_code = process.wait()
-            finally:
-                stop_monitor.set()
-                monitor_thread.join(timeout=1.0)
+        exit_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_process_group(process)
+        exit_code = process.wait()
+    except KeyboardInterrupt:
+        interrupted = True
+        _kill_process_group(process)
+        exit_code = process.wait()
     finally:
-        elapsed = time.monotonic() - start
-        stdout, stdout_truncated = _read_bounded(stdout_path)
-        stderr, stderr_truncated = _read_bounded(stderr_path)
-        stdout_path.unlink(missing_ok=True)
-        stderr_path.unlink(missing_ok=True)
+        stop_monitor.set()
+        monitor_thread.join(timeout=1.0)
+        stdout_thread.join(timeout=5.0)
+        stderr_thread.join(timeout=5.0)
+        for stream in (process.stdout, process.stderr):
+            try:
+                stream.close()
+            except (AttributeError, OSError):
+                pass
+    elapsed = time.monotonic() - start
 
     after_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
     cpu_seconds = max(
@@ -283,13 +307,15 @@ def run_process(
         elapsed_seconds=round(elapsed, 3),
         cpu_seconds=round(cpu_seconds, 3),
         max_rss_kb=max_rss_kb,
-        stdout=stdout,
-        stderr=stderr,
-        stdout_truncated=stdout_truncated,
-        stderr_truncated=stderr_truncated,
+        stdout=bytes(stdout_buffer).decode("utf-8", errors="replace"),
+        stderr=bytes(stderr_buffer).decode("utf-8", errors="replace"),
+        stdout_truncated=truncated["stdout"],
+        stderr_truncated=truncated["stderr"],
     )
     if interrupted:
-        raise EvidenceError(f"{label}: interrupted after joining the child")
+        raise EvidenceError(
+            f"{label}: interrupted after joining the child", attempt=attempt
+        )
     return attempt
 
 
@@ -762,6 +788,8 @@ def compare_types_command(args: argparse.Namespace) -> int:
     try:
         _run_compare_types(args, report)
     except EvidenceError as error:
+        if error.attempt is not None:
+            report["attempts"].append(error.attempt)
         report["failures"].append(f"incomplete evidence: {error}")
     report["ok"] = bool(report["complete"]) and not report["failures"]
     _write_report(Path(args.output) if args.output else None, report)
@@ -778,6 +806,11 @@ def _run_compare_types(args: argparse.Namespace, report: dict) -> None:
         raise EvidenceError(f"invalid mode: {args.mode}")
     if args.cache_state not in {"cold", "warm", "unknown"}:
         raise EvidenceError(f"invalid cache state: {args.cache_state}")
+    if args.cache_state == "warm":
+        raise EvidenceError(
+            "warm-only comparison has no seeded cache; use --cache-state unknown "
+            "to measure cold and fresh incremental runs"
+        )
     scenarios = CACHE_SCENARIOS if args.cache_state == "unknown" else (args.cache_state,)
     _checker_arguments(args.checkers)
     report["settings"]["cache_scenarios"] = list(scenarios)
@@ -1133,12 +1166,22 @@ def _load_corpus_manifest(corpus_root: Path) -> dict[str, dict]:
                 raise EvidenceError(
                     f"corpus manifest entry {name!r} must declare minimum_count"
                 )
+            exact = entry.get("exact_count")
+            if exact is not None and (
+                not isinstance(exact, int) or exact < minimum
+            ):
+                raise EvidenceError(
+                    f"corpus manifest entry {name!r} has an invalid exact_count"
+                )
     return projects
 
 
 def _corpus_expectation_ok(entry: dict, diagnostics: list[NormalizedDiagnostic]) -> bool:
     if entry["expected"] == "clean":
         return not diagnostics
+    exact = entry.get("exact_count")
+    if exact is not None and len(diagnostics) != int(exact):
+        return False
     codes = {diagnostic.code for diagnostic in diagnostics}
     return (
         len(diagnostics) >= int(entry["minimum_count"])
@@ -1329,10 +1372,20 @@ def compare_lint_findings(
     *,
     label: str = "full",
 ) -> Comparison:
+    def key_for(item: dict) -> tuple:
+        return (
+            item["file"],
+            item["rule"],
+            item["line"],
+            item.get("column", 0),
+            item["severity"],
+            item["message"],
+        )
+
     def counts(items: list[dict]) -> dict[tuple, int]:
         output: dict[tuple, int] = {}
         for item in items:
-            key = (item["file"], item["rule"], item["line"])
+            key = key_for(item)
             output[key] = output.get(key, 0) + 1
         return output
 
@@ -1359,8 +1412,7 @@ def compare_lint_findings(
     order_only = (
         not missing
         and not extra
-        and [(item["file"], item["rule"], item["line"]) for item in baseline]
-        != [(item["file"], item["rule"], item["line"]) for item in candidate]
+        and [key_for(item) for item in baseline] != [key_for(item) for item in candidate]
     )
     ok = not missing and not extra
     return Comparison(
@@ -1377,13 +1429,25 @@ def compare_lint_findings(
 
 def _finding_for_key(key: tuple, findings: list[dict]) -> dict:
     for finding in findings:
-        if (finding["file"], finding["rule"], finding["line"]) == key:
+        candidate = (
+            finding["file"],
+            finding["rule"],
+            finding["line"],
+            finding.get("column", 0),
+            finding["severity"],
+            finding["message"],
+        )
+        if candidate == key:
             return finding
     raise AssertionError("lint finding key missing from its own list")
 
 
-def _pnpm_tool_version(pnpm: str, tool: str, cwd: Path) -> str:
+def _pnpm_tool_version(
+    pnpm: str, tool: str, cwd: Path, attempts: list[Attempt] | None = None
+) -> str:
     attempt = run_process("version", [pnpm, "exec", tool, "--version"], cwd, timeout=120.0)
+    if attempts is not None:
+        attempts.append(attempt)
     if attempt.exit_code != 0:
         raise EvidenceError(f"could not read {tool} version: {attempt.stderr[:300]}")
     output = (attempt.stdout or attempt.stderr).strip().splitlines()
@@ -1392,10 +1456,66 @@ def _pnpm_tool_version(pnpm: str, tool: str, cwd: Path) -> str:
     return output[0]
 
 
+def _validate_file_list_attempt(attempt: Attempt, root: Path, label: str) -> list[str]:
+    if attempt.timed_out or attempt.interrupted or not attempt.completed:
+        raise EvidenceError(f"{label}: file inventory did not complete")
+    if attempt.exit_code != 0:
+        raise EvidenceError(
+            f"{label}: file inventory exited {attempt.exit_code}; stderr starts with "
+            f"{attempt.stderr[:300]!r}"
+        )
+    if attempt.stdout_truncated or attempt.stderr_truncated:
+        raise EvidenceError(f"{label}: file inventory output exceeded the bound")
+    files: list[str] = []
+    for line in attempt.stdout.splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        if value.lower().startswith(("warning", "error", "found ")):
+            raise EvidenceError(f"{label}: unexpected file inventory line {value[:200]!r}")
+        files.append(_normalize_path(value, root))
+    if not files:
+        raise EvidenceError(f"{label}: file inventory is empty")
+    return sorted(set(files))
+
+
+def _base_lint_report(args: argparse.Namespace) -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "operation": "compare-lint",
+        "generated_at": _now_iso(),
+        "ok": False,
+        "complete": False,
+        "failures": [],
+        "web_root": str(Path(args.web_root).resolve()) if args.web_root else args.web_root,
+        "config": args.config,
+        "baseline_config": args.baseline_config,
+        "source": None,
+        "pins": {},
+        "inventory": None,
+        "attempts": [],
+        "findings": None,
+    }
+
+
 def compare_lint_command(args: argparse.Namespace) -> int:
+    report = _base_lint_report(args)
+    try:
+        _run_compare_lint(args, report)
+    except EvidenceError as error:
+        if error.attempt is not None:
+            report["attempts"].append(error.attempt)
+        report["failures"].append(f"incomplete evidence: {error}")
+    report["ok"] = bool(report["complete"]) and not report["failures"]
+    _write_report(Path(args.output) if args.output else None, report)
+    return 0 if report["ok"] else 2
+
+
+def _run_compare_lint(args: argparse.Namespace, report: dict) -> None:
     web_root = Path(args.web_root).resolve()
     if not web_root.is_dir():
         raise EvidenceError(f"web root does not exist: {web_root}")
+
     def resolve_config(value: str, label: str) -> Path:
         candidate = Path(value)
         if not candidate.is_absolute() and not candidate.is_file():
@@ -1406,10 +1526,16 @@ def compare_lint_command(args: argparse.Namespace) -> int:
 
     config = resolve_config(args.config, "candidate")
     baseline_config = resolve_config(args.baseline_config, "baseline")
+    report["config"] = str(config)
+    report["baseline_config"] = str(baseline_config)
 
     pnpm = _require_executable("pnpm", "pnpm")
+    report["pins"] = {
+        "eslint": _pnpm_tool_version(pnpm, "eslint", web_root, report["attempts"]),
+        "oxlint": _pnpm_tool_version(pnpm, "oxlint", web_root, report["attempts"]),
+    }
     paths = args.paths or ["."]
-    attempts: list[Attempt] = []
+    attempts: list[Attempt] = report["attempts"]
     baseline = run_process(
         "eslint",
         [
@@ -1418,6 +1544,8 @@ def compare_lint_command(args: argparse.Namespace) -> int:
             "eslint",
             "--config",
             str(baseline_config),
+            "--max-warnings",
+            "0",
             "--format",
             "json",
             *paths,
@@ -1426,6 +1554,10 @@ def compare_lint_command(args: argparse.Namespace) -> int:
         timeout=args.timeout,
     )
     attempts.append(baseline)
+    if baseline.timed_out or baseline.interrupted or not baseline.completed:
+        raise EvidenceError("eslint did not complete")
+    if baseline.stdout_truncated or baseline.stderr_truncated:
+        raise EvidenceError("eslint output exceeded the bound")
     if baseline.exit_code not in (0, 1):
         raise EvidenceError(
             f"eslint failed with exit {baseline.exit_code}: {baseline.stderr[:500]}"
@@ -1440,6 +1572,7 @@ def compare_lint_command(args: argparse.Namespace) -> int:
             "oxlint",
             "-c",
             str(config),
+            "--deny-warnings",
             "--format",
             "json",
             *paths,
@@ -1448,11 +1581,16 @@ def compare_lint_command(args: argparse.Namespace) -> int:
         timeout=args.timeout,
     )
     attempts.append(candidate)
+    if candidate.timed_out or candidate.interrupted or not candidate.completed:
+        raise EvidenceError("oxlint did not complete")
+    if candidate.stdout_truncated or candidate.stderr_truncated:
+        raise EvidenceError("oxlint output exceeded the bound")
     if candidate.exit_code not in (0, 1):
         raise EvidenceError(
             f"oxlint failed with exit {candidate.exit_code}: {candidate.stderr[:500]}"
         )
     candidate_findings = parse_oxlint_json(candidate.stdout)
+
     candidate_files_attempt = run_process(
         "oxlint-files",
         [pnpm, "exec", "oxlint", "-c", str(config), "--debug=files", *paths],
@@ -1461,10 +1599,8 @@ def compare_lint_command(args: argparse.Namespace) -> int:
     )
     attempts.append(candidate_files_attempt)
     candidate_inventory = Inventory(
-        files=sorted(
-            _normalize_path(line.strip(), web_root)
-            for line in candidate_files_attempt.stdout.splitlines()
-            if line.strip()
+        files=_validate_file_list_attempt(
+            candidate_files_attempt, web_root, "oxlint-files"
         )
     )
     if not baseline_inventory.files or not candidate_inventory.files:
@@ -1476,48 +1612,32 @@ def compare_lint_command(args: argparse.Namespace) -> int:
     extra_files = sorted(candidate_paths - baseline_paths)
 
     comparison = compare_lint_findings(baseline_findings, candidate_findings)
-    failures: list[str] = []
+    failures: list[str] = report["failures"]
     if missing_files or extra_files:
         failures.append("lint file inventories differ")
     if not comparison.ok:
         failures.append("lint findings differ")
-    if baseline.exit_code != 0:
-        failures.append("baseline lint reported findings")
-    if candidate.exit_code != 0:
-        failures.append("candidate lint reported findings")
+    if baseline_findings or candidate_findings:
+        failures.append("lint findings are not zero")
+    if baseline.exit_code != 0 or candidate.exit_code != 0:
+        failures.append("a lint command rejected its findings under the zero-warning policy")
 
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "operation": "compare-lint",
-        "generated_at": _now_iso(),
-        "ok": not failures,
-        "failures": failures,
-        "web_root": str(web_root),
-        "config": str(config),
-        "baseline_config": str(baseline_config),
-        "source": source_identity(web_root, LINT_EXTENSIONS),
-        "pins": {
-            "eslint": _pnpm_tool_version(pnpm, "eslint", web_root),
-            "oxlint": _pnpm_tool_version(pnpm, "oxlint", web_root),
-        },
-        "inventory": {
-            "baseline": baseline_inventory.to_dict(),
-            "candidate": candidate_inventory.to_dict(),
-            "equal": not missing_files and not extra_files,
-            "missing": missing_files,
-            "extra": extra_files,
-        },
-        "attempts": [attempt.to_dict() for attempt in attempts],
-        "findings": {
-            "baseline": baseline_findings,
-            "candidate": candidate_findings,
-            "missing": comparison.missing,
-            "extra": comparison.extra,
-            "order_only": comparison.order_only,
-        },
+    report["source"] = source_identity(web_root, LINT_EXTENSIONS)
+    report["inventory"] = {
+        "baseline": baseline_inventory.to_dict(),
+        "candidate": candidate_inventory.to_dict(),
+        "equal": not missing_files and not extra_files,
+        "missing": missing_files,
+        "extra": extra_files,
     }
-    _write_report(Path(args.output) if args.output else None, report)
-    return 0 if report["ok"] else 2
+    report["findings"] = {
+        "baseline": baseline_findings,
+        "candidate": candidate_findings,
+        "missing": comparison.missing,
+        "extra": comparison.extra,
+        "order_only": comparison.order_only,
+    }
+    report["complete"] = True
 
 
 def _clear_incremental_caches(web_root: Path, output: Path) -> list[str]:
@@ -1548,7 +1668,41 @@ def _median(values: list[float]) -> float | None:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
+def _base_benchmark_report(args: argparse.Namespace) -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "operation": "benchmark",
+        "generated_at": _now_iso(),
+        "ok": False,
+        "complete": False,
+        "failures": [],
+        "web_root": args.web_root,
+        "source": None,
+        "pins": {},
+        "settings": {},
+        "samples": [],
+        "attempts": [],
+        "medians": {},
+        "reductions": {},
+        "thresholds": {},
+        "costs": {},
+    }
+
+
 def benchmark_command(args: argparse.Namespace) -> int:
+    report = _base_benchmark_report(args)
+    try:
+        _run_benchmark(args, report)
+    except EvidenceError as error:
+        if error.attempt is not None:
+            report["attempts"].append(error.attempt)
+        report["failures"].append(f"incomplete evidence: {error}")
+    report["ok"] = bool(report["complete"]) and not report["failures"]
+    _write_report(Path(args.output) / "report.json", report)
+    return 0 if report["ok"] else 2
+
+
+def _run_benchmark(args: argparse.Namespace, report: dict) -> None:
     web_root = Path(args.web_root).resolve()
     if not web_root.is_dir():
         raise EvidenceError(f"web root does not exist: {web_root}")
@@ -1582,9 +1736,9 @@ def benchmark_command(args: argparse.Namespace) -> int:
     cleared_caches: list[str] = []
 
     source_before = source_identity(web_root, TYPE_EXTENSIONS + LINT_EXTENSIONS)
-    samples: list[dict] = []
-    attempts: list[Attempt] = []
-    failures: list[str] = []
+    samples: list[dict] = report["samples"]
+    attempts: list[Attempt] = report["attempts"]
+    failures: list[str] = report["failures"]
     for pair_index in range(args.pairs):
         order = ("baseline", "candidate") if pair_index % 2 == 0 else ("candidate", "baseline")
         pair: dict = {"pair": pair_index + 1, "order": list(order), "samples": {}}
@@ -1693,12 +1847,7 @@ def benchmark_command(args: argparse.Namespace) -> int:
     if combined_reduction is None or combined_reduction <= 0:
         failures.append("combined occupied frontend execution did not decrease")
 
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "operation": "benchmark",
-        "generated_at": _now_iso(),
-        "ok": not failures,
-        "failures": failures,
+    report.update({
         "web_root": str(web_root),
         "source": {"before": source_before, "after": source_after, "stable": source_stable},
         "pins": {
@@ -1751,9 +1900,8 @@ def benchmark_command(args: argparse.Namespace) -> int:
             ),
             "note": "reported per attempt in `attempts`; unavailable classes remain null",
         },
-    }
-    _write_report(output / "report.json", report)
-    return 0 if report["ok"] else 2
+    })
+    report["complete"] = True
 
 
 def build_parser() -> argparse.ArgumentParser:

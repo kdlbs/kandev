@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SLEEP_EXEMPT_FILES } from "../../eslint-rules/no-unsanctioned-sleep.mjs";
 
 const WEB_DIR = path.resolve(import.meta.dirname, "../..");
-const OXLINT = path.join(WEB_DIR, "node_modules", ".bin", "oxlint");
+const OXLINT_SCRIPT = path.join(WEB_DIR, "node_modules", "oxlint", "bin", "oxlint");
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const SYSTEM_OWNER_RULE = "system-query-owner(no-migrated-system-zustand-owner)";
@@ -60,10 +60,14 @@ function runOxlint(
   paths: string[],
   config = MAIN_CONFIG,
 ): { status: number | null; output: string } {
-  const result = spawnSync(OXLINT, ["-c", config, "--deny-warnings", ...paths], {
-    cwd: project,
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [OXLINT_SCRIPT, "-c", config, "--deny-warnings", ...paths],
+    {
+      cwd: project,
+      encoding: "utf8",
+    },
+  );
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
@@ -76,7 +80,9 @@ function expectFinding(relative: string, rule: string): void {
 function expectClean(relative: string, config = MAIN_CONFIG): void {
   const result = runOxlint([relative], config);
   expect(result.status, result.output).toBe(0);
-  expect(result.output).not.toContain("error");
+  // Oxlint prints a success summary containing "0 errors"; only diagnostic
+  // lines have the `: error <rule>` shape.
+  expect(result.output).not.toMatch(/:\s*(error|warning)\s/);
 }
 
 beforeEach(() => {
@@ -103,6 +109,16 @@ describe("native rule execution", () => {
       "export function Probe() {\n  // eslint-disable-next-line no-debugger\n  debugger;\n  // oxlint-disable-next-line no-debugger\n  debugger;\n  return null;\n}\n",
     );
     expectClean("components/suppressed-probe.tsx");
+  });
+
+  it("keeps the JavaScript-only core checks from the previous recommended set", () => {
+    write(
+      "scripts/unsafe-negation.mjs",
+      'const key = "a";\nif (!key in { a: 1 }) {\n  console.log("x");\n}\n',
+    );
+    expectFinding("scripts/unsafe-negation.mjs", "eslint(no-unsafe-negation)");
+    write("scripts/unreachable.js", 'export function f() {\n  return 1;\n  console.log("x");\n}\n');
+    expectFinding("scripts/unreachable.js", "eslint(no-unreachable)");
   });
 
   it("reports a TypeScript parser error instead of silently skipping the file", () => {

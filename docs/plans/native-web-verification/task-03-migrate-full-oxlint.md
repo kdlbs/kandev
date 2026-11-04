@@ -112,7 +112,7 @@ Completed on November 3, 2026.
   focused previews keep the same imported options and exemptions in
   `oxlint.i18n.config.mjs` and `oxlint.e2e-sleeps.config.mjs`. Default Oxlint
   categories and plugins are off, so no unrelated recommended preset runs.
-- `rule-ledger.json` records all 81 configured registrations with severity,
+- `rule-ledger.json` records all 96 configured registrations with severity,
   options, scope, exclusions, inline-suppression policy, native target, and
   fixture, plus the disabled rules and the compiler-covered `no-octal` gap.
 - Resolved all 37 migration findings without a new exclusion: 23 JSX entities

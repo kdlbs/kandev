@@ -213,7 +213,7 @@
     },
     {
       "from": "@typescript-eslint/no-unused-vars",
-      "to": "typescript/no-unused-vars",
+      "to": "no-unused-vars",
       "severity": "warn",
       "options": [
         {
@@ -280,6 +280,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "constructor-super",
+      "to": "constructor-super",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "e2e-sleeps/no-unsanctioned-sleep",
       "to": "e2e-sleeps/no-unsanctioned-sleep",
       "severity": "error",
@@ -300,6 +310,20 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "getter-return",
+      "to": "getter-return",
+      "severity": "error",
+      "options": [
+        {
+          "allowImplicit": false
+        }
+      ],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "i18next/no-literal-string",
@@ -490,6 +514,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-class-assign",
+      "to": "no-class-assign",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-compare-neg-zero",
       "to": "no-compare-neg-zero",
       "severity": "error",
@@ -510,6 +544,16 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "no-const-assign",
+      "to": "no-const-assign",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-constant-binary-expression",
@@ -556,6 +600,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-dupe-class-members",
+      "to": "no-dupe-class-members",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-dupe-else-if",
       "to": "no-dupe-else-if",
       "severity": "error",
@@ -564,6 +618,16 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "no-dupe-keys",
+      "to": "no-dupe-keys",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-duplicate-case",
@@ -647,6 +711,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-func-assign",
+      "to": "no-func-assign",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-global-assign",
       "to": "no-global-assign",
       "severity": "error",
@@ -659,6 +733,16 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "no-import-assign",
+      "to": "no-import-assign",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-invalid-regexp",
@@ -725,6 +809,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-new-native-nonconstructor",
+      "to": "no-new-native-nonconstructor",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-nonoctal-decimal-escape",
       "to": "no-nonoctal-decimal-escape",
       "severity": "error",
@@ -735,14 +829,14 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
-      "from": "no-octal",
-      "to": "no-octal",
+      "from": "no-obj-calls",
+      "to": "no-obj-calls",
       "severity": "error",
       "options": [],
-      "scope": "all linted JavaScript and TypeScript files",
+      "scope": "**/*.{js,jsx,mjs,cjs}",
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
-      "fixture": "covered by the required lint command and focused adapter suites"
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-prototype-builtins",
@@ -753,6 +847,20 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "no-redeclare",
+      "to": "no-redeclare",
+      "severity": "error",
+      "options": [
+        {
+          "builtinGlobals": true
+        }
+      ],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-regex-spaces",
@@ -779,6 +887,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-setter-return",
+      "to": "no-setter-return",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-shadow-restricted-names",
       "to": "no-shadow-restricted-names",
       "severity": "error",
@@ -803,6 +921,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-this-before-super",
+      "to": "no-this-before-super",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "no-unexpected-multiline",
       "to": "no-unexpected-multiline",
       "severity": "error",
@@ -811,6 +939,30 @@
       "exclusions": [],
       "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
       "fixture": "covered by the required lint command and focused adapter suites"
+    },
+    {
+      "from": "no-unreachable",
+      "to": "no-unreachable",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
+      "from": "no-unsafe-negation",
+      "to": "no-unsafe-negation",
+      "severity": "error",
+      "options": [
+        {
+          "enforceForOrderingRelations": false
+        }
+      ],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
     },
     {
       "from": "no-unsafe-optional-chaining",
@@ -891,6 +1043,16 @@
       "fixture": "covered by the required lint command and focused adapter suites"
     },
     {
+      "from": "no-with",
+      "to": "no-with",
+      "severity": "error",
+      "options": [],
+      "scope": "**/*.{js,jsx,mjs,cjs}",
+      "exclusions": [],
+      "suppressions": "inline eslint-disable / oxlint-disable directives are evaluated by the host",
+      "fixture": "scripts/lib/native-lint-wiring.test.ts#native rule execution"
+    },
+    {
       "from": "prefer-const",
       "to": "prefer-const",
       "severity": "error",
@@ -953,8 +1115,7 @@
       "severity": "warn",
       "options": [
         {
-          "threshold": 4,
-          "ignoreStrings": "application/json"
+          "threshold": 4
         }
       ],
       "scope": "all linted JavaScript and TypeScript files",
@@ -1080,6 +1241,11 @@
       "from": "no-octal",
       "disposition": "typescript-compiler",
       "reason": "TypeScript rejects legacy octal literals with TS1121; the web tree has no JavaScript legacy octal literal. No silent rule replacement."
+    },
+    {
+      "from": "no-dupe-args",
+      "disposition": "not-implemented",
+      "reason": "Oxlint has no native equivalent. The TypeScript parser rejects duplicate parameters in modules; no JavaScript source in the web tree uses the pattern."
     }
   ],
   "exemptions": {

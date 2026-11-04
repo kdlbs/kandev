@@ -157,6 +157,30 @@ export default {
   },
   overrides: [
     {
+      // JavaScript-only rules from the previous `js.configs.recommended`
+      // scope. TypeScript owns the corresponding checks in TS files through
+      // `typescript-eslint`'s recommended set.
+      files: ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
+      rules: {
+        "constructor-super": "error",
+        "getter-return": ["error", { allowImplicit: false }],
+        "no-class-assign": "error",
+        "no-const-assign": "error",
+        "no-dupe-class-members": "error",
+        "no-dupe-keys": "error",
+        "no-func-assign": "error",
+        "no-import-assign": "error",
+        "no-new-native-nonconstructor": "error",
+        "no-obj-calls": "error",
+        "no-redeclare": ["error", { builtinGlobals: true }],
+        "no-setter-return": "error",
+        "no-this-before-super": "error",
+        "no-unreachable": "error",
+        "no-unsafe-negation": ["error", { enforceForOrderingRelations: false }],
+        "no-with": "error",
+      },
+    },
+    {
       // These four are TypeScript-only in `typescript-eslint`'s recommended
       // set. Every category is off, so the compiler-owned checks stay off
       // without repeating each disabled rule here.
