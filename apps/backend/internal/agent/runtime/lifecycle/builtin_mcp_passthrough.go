@@ -29,7 +29,11 @@ func builtinPassthroughMCPServers(execution *AgentExecution, coreURL string, req
 	if err != nil {
 		return nil, err
 	}
-	native, err := agentctlconfig.BuiltinMCPServers(manifest, host, port)
+	launch, err := execution.sandboxLaunchForMCP()
+	if err != nil {
+		return nil, err
+	}
+	native, err := agentctlconfig.BuiltinMCPServersForLaunch(manifest, host, port, launch)
 	if err != nil {
 		return nil, err
 	}

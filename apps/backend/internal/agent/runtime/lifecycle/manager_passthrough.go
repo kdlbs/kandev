@@ -538,6 +538,9 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
+	if err := m.prepareSandboxMCP(ctx, execution); err != nil {
+		return nil, err
+	}
 	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
 }
 

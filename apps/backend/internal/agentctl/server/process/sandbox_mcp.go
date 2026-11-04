@@ -3,28 +3,33 @@ package process
 import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/common/sandbox"
+	"github.com/kandev/kandev/internal/mcp/profile"
 	"strconv"
 )
 
 const sandboxMCPSSETransport = "sse"
 
-// configureSandboxMCP replaces automatic local access with the captured grant.
-// The caller holds the configuration lock and has validated the launch envelope.
-func (m *Manager) configureSandboxMCP() {
-	if m.cfg.Sandbox == nil {
-		return
+// configuredSandboxMCP computes automatic access before configuration changes.
+func configuredSandboxMCP(cfg *config.InstanceConfig, launch *sandbox.Launch) ([]config.McpServerConfig, bool, error) {
+	if launch == nil {
+		return cfg.McpServers, cfg.InjectedKandevMCP, nil
 	}
-	servers := make([]config.McpServerConfig, 0, len(m.cfg.McpServers))
-	if m.cfg.Sandbox.MCPURL != "" {
-		servers = append(servers, config.McpServerConfig{Name: injectedKandevMCPServerName, Type: managedMCPHTTPTransport, URL: m.cfg.Sandbox.MCPURL})
+	var manifest *profile.BuiltinManifest
+	if cfg.McpProfile != nil {
+		manifest = cfg.McpProfile.BuiltinPackages
 	}
-	for _, server := range m.cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName {
-			servers = append(servers, server)
+	servers, err := config.BuiltinMCPServersForLaunch(manifest, cfg.MCPHost, cfg.Port, launch)
+	if err != nil {
+		return nil, false, err
+	}
+	injected := len(servers) > 0
+	for _, server := range cfg.McpServers {
+		if server.Name == injectedKandevMCPServerName || (manifest != nil && profile.ReservedBuiltinRuntimeName(server.Name)) {
+			continue
 		}
+		servers = append(servers, server)
 	}
-	m.cfg.McpServers = servers
-	m.cfg.InjectedKandevMCP = m.cfg.Sandbox.MCPURL != ""
+	return servers, injected, nil
 }
 
 func canonicalKandevMCPURL(cfg *config.InstanceConfig, transport string) string {
@@ -45,9 +50,17 @@ func canonicalKandevMCPURL(cfg *config.InstanceConfig, transport string) string 
 
 // AdmitSandboxMCP fences the control route to the retained, live launch owner.
 func (m *Manager) AdmitSandboxMCP(attemptID, generation, digest string) bool {
+	return m.AdmitSandboxMCPPath(attemptID, generation, digest, sandbox.MCPRootPath)
+}
+
+// AdmitSandboxMCPPath also bounds the request to the captured package routes.
+func (m *Manager) AdmitSandboxMCPPath(attemptID, generation, digest, path string) bool {
 	m.mu.RLock()
 	launch := m.cfg.Sandbox.Clone()
 	m.mu.RUnlock()
+	if _, err := launch.MCPURLForPath(path); err != nil {
+		return false
+	}
 	return sandboxMCPMatches(launch, attemptID, generation, digest) && m.sandboxMCPLive(launch)
 }
 

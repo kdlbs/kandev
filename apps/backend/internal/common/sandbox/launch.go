@@ -18,6 +18,7 @@ type Launch struct {
 	ChildHome       string                       `json:"child_home,omitempty"`
 	Containment     *processcontainment.Identity `json:"containment,omitempty"`
 	MCPURL          string                       `json:"mcp_url,omitempty"`
+	MCPPaths        []string                     `json:"mcp_paths,omitempty"`
 	Version         int                          `json:"version"`
 	AttemptID       string                       `json:"attempt_id"`
 	Generation      uint64                       `json:"generation"`
@@ -67,8 +68,8 @@ func (l *Launch) Validate() error {
 	if l.ChildHome != "" && !validRuntimeDirectory(l.ChildHome) {
 		return ErrInvalidPolicy
 	}
-	if !validMCPRoute(l.MCPURL) {
-		return ErrInvalidPolicy
+	if err := l.validateMCP(); err != nil {
+		return err
 	}
 	if err := l.validatePrefix(); err != nil {
 		return err
@@ -101,6 +102,7 @@ func (l *Launch) Clone() *Launch {
 	result.Prefix = slices.Clone(l.Prefix)
 	result.Digests = maps.Clone(l.Digests)
 	result.EnvironmentKeys = slices.Clone(l.EnvironmentKeys)
+	result.MCPPaths = slices.Clone(l.MCPPaths)
 	return &result
 }
 

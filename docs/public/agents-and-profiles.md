@@ -926,6 +926,8 @@ Choose preview context when a profile or workflow can use different agents or ex
 
 Select **Restart session** to review a sandbox restart before stopping it. Compare the captured policy with the current approved policy, including their permissions and ceiling. **Keep captured and restart** preserves the captured policy. An operator can choose **Use current policy and restart** after reviewing the change. If the selection changes during confirmation, review it again. **Close** or phone **Back** cancels without stopping the session. Automatic recovery keeps the captured policy and cannot reuse a manual review.
 
+A sandbox policy needs an explicit Kandev MCP grant for built-in tools. Selected built-in packages keep their separate tool sets through the private session route. An ordinary restart retains the captured route set. If the execution helper lacks support for selected package routes, update the runtime before retrying. Kandev refuses the launch instead of using an unrestricted endpoint.
+
 A sandboxed session retains its captured working directory. Attach repository sources before starting it, or start a new session in the changed workspace.
 
 Deleting a sandboxed session removes its private agent state after owned processes stop. It preserves the task workspace and other sessions. Task deletion uses its retryable cleanup job. Archive and retained-workspace operations keep session state. If ownership or runtime cleanup is unavailable, cleanup reports a failure and preserves the state. Restore runtime availability and retry.

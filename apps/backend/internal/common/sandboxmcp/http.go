@@ -5,7 +5,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
+
+const contentTypeHeader = "Content-Type"
 
 func (r *Relay) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Connection", "close")
@@ -29,7 +33,11 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	defer cancel()
-	response, err := r.forward(ctx, request.Method, requestHeaders(request.Header), body)
+	headers := requestHeaders(request.Header)
+	if path := r.paths[request.URL.EscapedPath()]; path != contract.MCPRootPath {
+		headers.Set(MCPPathHeader, path)
+	}
+	response, err := r.forward(ctx, request.Method, headers, body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
@@ -43,7 +51,7 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
-	for _, key := range []string{"Content-Type", "Mcp-Session-Id", "MCP-Protocol-Version"} {
+	for _, key := range []string{contentTypeHeader, "Mcp-Session-Id", "MCP-Protocol-Version"} {
 		if value := response.Header.Get(key); value != "" {
 			w.Header().Set(key, value)
 		}
@@ -54,7 +62,8 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 }
 
 func (r *Relay) accepts(request *http.Request) bool {
-	if r.ctx.Err() != nil || request.URL.EscapedPath() != r.path || request.URL.RawQuery != "" || request.URL.ForceQuery || request.Host != r.address || request.Header.Get("Origin") != "" || request.Header.Get("Upgrade") != "" {
+	_, selected := r.paths[request.URL.EscapedPath()]
+	if r.ctx.Err() != nil || !selected || request.URL.RawQuery != "" || request.URL.ForceQuery || request.Host != r.address || request.Header.Get("Origin") != "" || request.Header.Get("Upgrade") != "" {
 		return false
 	}
 	switch request.Method {
@@ -69,7 +78,7 @@ func (r *Relay) accepts(request *http.Request) bool {
 
 func requestHeaders(input http.Header) http.Header {
 	output := make(http.Header)
-	for _, key := range []string{"Content-Type", "Accept", "Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-Id", "Mcp-Method"} {
+	for _, key := range []string{contentTypeHeader, "Accept", "Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-Id", "Mcp-Method"} {
 		if value := input.Get(key); value != "" {
 			output.Set(key, value)
 		}

@@ -84,7 +84,7 @@ func capturedMCPEndpoint(raw string) (*pluginsdk.SandboxEndpoint, error) {
 		return nil, policy.ErrConflict
 	}
 	// The private relay path is a capability. Compilation receives only endpoint intent.
-	return &pluginsdk.SandboxEndpoint{Key: "kandev.mcp", Host: endpoint.Hostname(), Port: uint32(port), Scheme: endpoint.Scheme, Path: "/mcp"}, nil
+	return &pluginsdk.SandboxEndpoint{Key: "kandev.mcp", Host: endpoint.Hostname(), Port: uint32(port), Scheme: endpoint.Scheme, Path: contract.MCPRootPath}, nil
 }
 
 func learningGrants(value *pluginsdk.SandboxGrants) (contract.Grants, error) {

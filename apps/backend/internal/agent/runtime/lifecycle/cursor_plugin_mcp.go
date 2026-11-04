@@ -116,6 +116,9 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	if err := prepCtx.Err(); err != nil {
 		return err
 	}
+	if err := m.prepareSandboxMCP(prepCtx, execution); err != nil {
+		return err
+	}
 	release, err := acquireCursorMCPWorkspacePreparation(prepCtx, workspaceKey)
 	if err != nil {
 		return err

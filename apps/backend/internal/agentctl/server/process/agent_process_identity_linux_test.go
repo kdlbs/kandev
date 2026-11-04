@@ -68,7 +68,7 @@ func TestAgentProcessIdentityAbsentAfterFailedStartup(t *testing.T) {
 		_ = m.adapter.Close()
 	})
 
-	_, err := m.startManagedProcess()
+	_, err := m.startManagedProcess(nil)
 	require.ErrorContains(t, err, "adapter connection failed")
 	require.NotNil(t, m.cmd.ProcessState)
 	require.Nil(t, m.AgentProcessIdentity())

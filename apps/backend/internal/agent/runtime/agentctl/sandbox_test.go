@@ -80,6 +80,49 @@ func TestSandboxLaunchRequiresPeerCapabilityBeforeUtilityDispatch(t *testing.T) 
 	}
 }
 
+func TestSandboxMCPPackageRoutesRequirePeerCapability(t *testing.T) {
+	content := []byte("fixture runtime")
+	digest := sha256.Sum256(content)
+	files, err := sandbox.MaterializeRuntime(t.Context(), t.TempDir(), content, hex.EncodeToString(digest[:]), nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, files.Close()) })
+	for _, supported := range []bool{false, true} {
+		t.Run(strconv.FormatBool(supported), func(t *testing.T) {
+			dispatched := 0
+			peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/identity" {
+					capabilities := []string{sandbox.LaunchCapability}
+					if supported {
+						capabilities = append(capabilities, "sandbox-mcp-routes.v1")
+					}
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"capabilities": capabilities}))
+					return
+				}
+				dispatched++
+				require.NoError(t, json.NewEncoder(w).Encode(utility.PromptResponse{Success: true}))
+			}))
+			t.Cleanup(peer.Close)
+			client := newHTTPOnlyClient(peer.URL)
+			launch := &sandbox.Launch{Version: 1, AttemptID: "attempt", Generation: 1, PolicyDigest: strings.Repeat("a", 64), PackageDigest: strings.Repeat("b", 64), Root: files.Root, Prefix: []string{files.Executable}, Digests: files.Digests,
+				MCPURL: "http://127.0.0.1:45679/" + strings.Repeat("c", 64) + "/mcp", MCPPaths: []string{"/mcp", "/mcp/packages/rich-output"}}
+			configureErr := client.ConfigureAgentWithSandbox(t.Context(), "fixture", []string{"fixture"}, nil, "", nil, launch, launchwrapper.Spec{})
+			_, probeErr := client.Probe(t.Context(), &utility.ProbeRequest{InferenceConfig: &utility.InferenceConfigDTO{Sandbox: launch}})
+			validationErr := client.ValidateSandboxLaunch(t.Context(), launch)
+			if supported {
+				require.NoError(t, configureErr)
+				require.NoError(t, probeErr)
+				require.NoError(t, validationErr)
+				require.Equal(t, 2, dispatched)
+			} else {
+				require.ErrorIs(t, configureErr, ErrSandboxLaunchUnsupported)
+				require.ErrorIs(t, probeErr, ErrSandboxLaunchUnsupported)
+				require.ErrorIs(t, validationErr, ErrSandboxLaunchUnsupported)
+				require.Zero(t, dispatched)
+			}
+		})
+	}
+}
+
 func TestSandboxOwnerResponseBindsExpectedAttempt(t *testing.T) {
 	for _, kind := range []string{"valid", "wrong-attempt", "missing-birth", "server-error"} {
 		t.Run(kind, func(t *testing.T) {

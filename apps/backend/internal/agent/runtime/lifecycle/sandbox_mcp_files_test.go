@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -20,7 +21,7 @@ func TestSandboxMCPPiUsesPrivateAgentConfigWithoutProjectTrust(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			manager := newTestManager(t)
 			home, work, shared := t.TempDir(), t.TempDir(), t.TempDir()
-			attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "attempt", ChildHome: home, MCPURL: "http://127.0.0.1:45679/mcp"}}
+			attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "attempt", ChildHome: home, MCPURL: "http://127.0.0.1:45679/" + strings.Repeat("a", 64) + "/mcp"}}
 			execution := &AgentExecution{ID: "execution", SessionID: "session", TaskID: "task", WorkspacePath: work, standalonePort: 45678, SandboxSelection: &policy.SelectionContext{ExecutorID: "local"}, sandboxAttempt: attempt}
 			configDir := filepath.Join(home, ".pi", "agent")
 			switch mode {
@@ -119,7 +120,7 @@ func TestSandboxNativeMCPFilesRejectEscapedOrMalformedTargets(t *testing.T) {
 
 func TestSandboxNativeMCPMissingStateGrantRefusesCommand(t *testing.T) {
 	manager, execution, profile := newClaudePassthroughMCPTestManager(t)
-	attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "attempt", ChildHome: t.TempDir(), MCPURL: "http://127.0.0.1:45679/mcp"}}
+	attempt := &startSandboxFixture{launch: &contract.Launch{AttemptID: "attempt", ChildHome: t.TempDir(), MCPURL: "http://127.0.0.1:45679/" + strings.Repeat("a", 64) + "/mcp"}}
 	execution.SandboxSelection = &policy.SelectionContext{ExecutorID: "local"}
 	execution.sandboxAttempt = attempt
 	_, _, _, command, err := manager.passthroughAgentCommand(t.Context(), execution, profile)

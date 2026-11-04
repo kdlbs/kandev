@@ -88,7 +88,7 @@ func runSandboxRuntimeApproval(t *testing.T, providerUnavailable bool) {
 	manager := NewManager(policies, pluginService, t.TempDir())
 	t.Cleanup(func() { require.NoError(t, manager.Close()) })
 	forward, calls := runtimeMCPFixture(t)
-	prepared, err := manager.Prepare(ctx, PrepareRequest{MCPForward: forward, Selection: selection, SessionID: "approval-session", ExecutionID: "approval-execution", Generation: 1, WorkDir: work, Arguments: []string{child}})
+	prepared, err := manager.Prepare(ctx, PrepareRequest{MCPPaths: []string{"/mcp", "/mcp/packages/configuration"}, MCPForward: forward, Selection: selection, SessionID: "approval-session", ExecutionID: "approval-execution", Generation: 1, WorkDir: work, Arguments: []string{child}})
 	require.NoError(t, err)
 	require.Equal(t, prepared.agentState.Directories().Home, prepared.Launch().ChildHome)
 	args, env, err := contract.PrepareLaunch(prepared.Launch(), []string{child}, []string{"UNAPPROVED_SECRET=private-parent-value", "PATH=" + os.Getenv("PATH")})
@@ -176,6 +176,13 @@ func runSandboxRuntimeApproval(t *testing.T, providerUnavailable bool) {
 	send("mcp", prepared.Launch().MCPURL)
 	result(true)
 	require.EqualValues(t, 1, calls.Load())
+	send("mcp-init", prepared.Launch().MCPURL+"/packages/configuration")
+	result(true)
+	send("mcp-init", prepared.Launch().MCPURL+"/packages/diagnostics")
+	result(false)
+	send("mcp", prepared.Launch().MCPURL+"/packages/configuration")
+	result(false)
+	require.EqualValues(t, 1, calls.Load(), "package views must not expose a core tool")
 	send("mcp", "http://"+prepared.mcp.Address()+"/api/v1/settings")
 	result(false)
 	require.EqualValues(t, 1, calls.Load())
@@ -241,9 +248,10 @@ func buildApprovalChild(t *testing.T, ctx context.Context) string {
 	binary := filepath.Join(root, "child")
 	code := `package main
 import("bufio";"encoding/json";"encoding/base64";"fmt";"net";"net/http";"net/url";"os";"time";"strings";"io")
-func main(){fmt.Println("ready");scanner:=bufio.NewScanner(os.Stdin);for scanner.Scan(){if scanner.Text()=="exit"{return};var op map[string]string;if json.Unmarshal(scanner.Bytes(),&op)!=nil{os.Exit(2)};ok:=false;switch op["operation"]{case "read":_,err:=os.ReadFile(op["target"]);ok=err==nil;case "write":ok=os.WriteFile(op["target"],[]byte("ok"),0600)==nil;case "state":ok=state();case "env":ok=os.Getenv(op["target"])!="";case "proxy":ok=proxy(op["target"]);case "mcp":ok=mcp(op["target"]);case "connect":connection,err:=net.DialTimeout("tcp",op["target"],500*time.Millisecond);ok=err==nil;if connection!=nil{_=connection.Close()}};fmt.Println(ok)}}
+func main(){fmt.Println("ready");scanner:=bufio.NewScanner(os.Stdin);for scanner.Scan(){if scanner.Text()=="exit"{return};var op map[string]string;if json.Unmarshal(scanner.Bytes(),&op)!=nil{os.Exit(2)};ok:=false;switch op["operation"]{case "read":_,err:=os.ReadFile(op["target"]);ok=err==nil;case "write":ok=os.WriteFile(op["target"],[]byte("ok"),0600)==nil;case "state":ok=state();case "env":ok=os.Getenv(op["target"])!="";case "proxy":ok=proxy(op["target"]);case "mcp":ok=mcp(op["target"]);case "mcp-init":ok=mcpinit(op["target"]);case "connect":connection,err:=net.DialTimeout("tcp",op["target"],500*time.Millisecond);ok=err==nil;if connection!=nil{_=connection.Close()}};fmt.Println(ok)}}
 func state()bool{home:=os.Getenv("HOME");if home==""{return false};for _,key:=range []string{"XDG_CONFIG_HOME","XDG_STATE_HOME","TMPDIR"}{dir:=os.Getenv(key);if !strings.HasPrefix(dir,home+"/")||os.WriteFile(dir+"/owned",[]byte("session"),0600)!=nil{return false}};return os.WriteFile(home+"/conversation",[]byte("retained"),0600)==nil}
 func proxy(target string)bool{address,err:=url.Parse(os.Getenv("HTTP_PROXY"));if err!=nil{return false};connection,err:=net.DialTimeout("tcp",address.Host,time.Second);if err!=nil{return false};defer connection.Close();_=connection.SetDeadline(time.Now().Add(time.Second));auth:="";if address.User!=nil{password,_:=address.User.Password();auth="Proxy-Authorization: Basic "+base64.StdEncoding.EncodeToString([]byte(address.User.Username()+":"+password))+"\r\n"};_,err=fmt.Fprintf(connection,"CONNECT %s HTTP/1.1\r\nHost: %s\r\n%s\r\n",target,target,auth);if err!=nil{return false};response,err:=http.ReadResponse(bufio.NewReader(connection),&http.Request{Method:"CONNECT"});return err==nil && response.StatusCode==200}
+func mcpinit(target string)bool{proxyURL,err:=url.Parse(os.Getenv("HTTP_PROXY"));if err!=nil{return false};transport:=&http.Transport{Proxy:http.ProxyURL(proxyURL)};defer transport.CloseIdleConnections();client:=&http.Client{Transport:transport,Timeout:4*time.Second};body:=` + "`" + `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"sandbox-test","version":"1"}}}` + "`" + `;request,err:=http.NewRequest("POST",target,strings.NewReader(body));if err!=nil{return false};request.Header.Set("Content-Type","application/json");request.Header.Set("Accept","application/json, text/event-stream");response,err:=client.Do(request);if err!=nil{return false};defer response.Body.Close();content,err:=io.ReadAll(response.Body);return err==nil&&response.StatusCode==200&&strings.Contains(string(content),"kandev-configuration")}
 func mcp(target string)bool{proxyURL,err:=url.Parse(os.Getenv("HTTP_PROXY"));if err!=nil{return false};transport:=&http.Transport{Proxy:http.ProxyURL(proxyURL)};defer transport.CloseIdleConnections();client:=&http.Client{Transport:transport,Timeout:4*time.Second};session:="";bodies:=[]string{` + "`" + `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"sandbox-test","version":"1"}}}` + "`" + `,` + "`" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_task_plan_kandev","arguments":{}}}` + "`" + `};for index,body:=range bodies{request,err:=http.NewRequest("POST",target,strings.NewReader(body));if err!=nil{return false};request.Header.Set("Content-Type","application/json");request.Header.Set("Accept","application/json, text/event-stream");if session!=""{request.Header.Set("Mcp-Session-Id",session)};response,err:=client.Do(request);if err!=nil{fmt.Fprintln(os.Stderr,"MCP transport failed",index);return false};content,readErr:=io.ReadAll(response.Body);_=response.Body.Close();if readErr!=nil||response.StatusCode!=200{fmt.Fprintln(os.Stderr,"MCP response failed",index,response.StatusCode);return false};if index==0{session=response.Header.Get("Mcp-Session-Id")}else if !strings.Contains(string(content),"sandbox-mcp-permitted"){fmt.Fprintln(os.Stderr,"MCP content mismatch");return false}};return true}`
 	require.NoError(t, os.WriteFile(source, []byte(code), 0600))
 	build := exec.CommandContext(ctx, "go", "build", "-o", binary, source)

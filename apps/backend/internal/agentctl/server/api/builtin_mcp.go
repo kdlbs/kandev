@@ -24,7 +24,7 @@ func (s *Server) builtinSessionMCPServers(requested []types.McpServer) ([]types.
 			return nil, fmt.Errorf("reserved built-in MCP name %q must be renamed", server.Name)
 		}
 	}
-	injected, err := config.BuiltinMCPServers(manifest, s.cfg.MCPHost, s.cfg.Port)
+	injected, err := config.BuiltinMCPServersForLaunch(manifest, s.cfg.MCPHost, s.cfg.Port, s.cfg.Sandbox)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 )
 
 type PrepareRequest struct {
+	MCPPaths                        []string
 	RestartOf                       string
 	ProtectedPorts                  []uint16
 	Selection                       policy.SelectionContext
@@ -53,6 +54,7 @@ type Prepared struct {
 	channel         *policy.ApprovalChannel
 	egress          *sandboxproxy.Proxy
 	mcp             *sandboxmcp.Relay
+	mcpPaths        []string
 	runtimeNetwork  []contract.NetworkGrant
 	protectedPorts  []uint16
 	constraints     contract.OverrideConstraints

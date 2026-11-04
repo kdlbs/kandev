@@ -280,6 +280,7 @@ func (s *Server) setupRoutes() {
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.Any("/agent/sandbox/mcp", s.handleSandboxMCP)
+		api.Any("/agent/sandbox/mcp/packages/:package", s.handleSandboxMCP)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
 		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
 		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })

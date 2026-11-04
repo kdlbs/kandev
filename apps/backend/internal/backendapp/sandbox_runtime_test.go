@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	contract "github.com/kandev/kandev/internal/common/sandbox"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginruntime "github.com/kandev/kandev/internal/plugins/runtime"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -65,7 +66,7 @@ func TestSandboxBackendFactoryCapturesLocalExecutionAndRestart(t *testing.T) {
 	work := t.TempDir()
 	require.NoError(t, h.taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace", OrgID: "org"}))
 	require.NoError(t, h.taskRepo.CreateTask(ctx, &models.Task{ID: "task", Title: "Task", WorkspaceID: "workspace"}))
-	revision, err := policies.Publish(ctx, policy.Policy{ID: "work", Name: "Work", InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey, Grants: contract.Grants{Filesystem: []contract.FilesystemGrant{{Reference: contract.ReferenceWorkDir, Writable: true}}}}, 0)
+	revision, err := policies.Publish(ctx, policy.Policy{ID: "work", Name: "Work", InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey, Grants: contract.Grants{KandevMCP: true, Filesystem: []contract.FilesystemGrant{{Reference: contract.ReferenceWorkDir, Writable: true}}}}, 0)
 	require.NoError(t, err)
 	_, err = policies.PutBinding(ctx, policy.Binding{Scope: policy.ScopeExecutor, TargetID: "local", Executor: &policy.ExecutorPolicy{Mode: policy.ModeRequired, InstallationID: binding.InstallationID, ProviderKey: binding.ProviderKey, CeilingRevisionID: revision.ID, DefaultRevisionID: revision.ID, EligibleRevisionIDs: []string{revision.ID}}}, 0)
 	require.NoError(t, err)
@@ -117,9 +118,32 @@ func TestSandboxBackendFactoryCapturesLocalExecutionAndRestart(t *testing.T) {
 	})
 	transport := client.NewClient("127.0.0.1", 39993, log)
 	execution := &lifecycle.AgentExecution{ID: "execution", TaskID: "task", SessionID: "session", RuntimeName: executor.NameStandalone, ExecutorType: string(models.ExecutorTypeLocal), WorkspacePath: work, AgentArgs: []string{"/bin/agent"}, SandboxSelection: &policy.SelectionContext{OrgID: "org", WorkspaceID: "workspace", TaskID: "task", ExecutorID: "local"}}
+
+	profile := p.New(p.SurfaceKanbanTask, nil, nil)
+	profile.BuiltinPackages = &p.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "workspace", TaskID: "task", Surface: profile.Surface, Packages: []p.PackageID{p.PackageCore, p.PackageConfiguration}, Origins: map[p.PackageID]string{p.PackageCore: "required", p.PackageConfiguration: "task"}}
+	encoded, err := p.MarshalBuiltinBinding(profile)
+	require.NoError(t, err)
+	execution.WorkspaceID = "workspace"
+
+	for _, invalid := range []string{"malformed", "foreign"} {
+		bad := "{}"
+		if invalid == "foreign" {
+			foreign := profile
+			foreign.BuiltinPackages = profile.BuiltinPackages.Clone()
+			foreign.BuiltinPackages.WorkspaceID = "another-workspace"
+			bad, err = p.MarshalBuiltinBinding(foreign)
+			require.NoError(t, err)
+		}
+		execution.SetMetadataForTesting(map[string]any{p.BuiltinBindingMetadataKey: bad})
+		refused, refusal := factory.prepareExecution(ctx, execution, 1, "", nil, transport)
+		require.Error(t, refusal, invalid)
+		require.Nil(t, refused)
+	}
+	execution.SetMetadataForTesting(map[string]any{p.BuiltinBindingMetadataKey: encoded})
 	prepared, err := factory.prepareExecution(ctx, execution, 1, "", map[string]string{"HOME": "/host-home"}, transport)
 	require.NoError(t, err)
 	require.NotNil(t, prepared)
+	require.Equal(t, []string{"/mcp", "/mcp/packages/configuration"}, prepared.Launch().MCPPaths)
 	verifyPreparedExecutionSnapshot(t, h.taskRepo, policies, execution, prepared.Launch())
 	require.Equal(t, filepath.Join(cfg.ResolvedDataDir(), "sandbox-runtime"), filepath.Dir(prepared.Launch().Root))
 	_, err = factory.prepareExecution(ctx, execution, 2, "", nil, transport)

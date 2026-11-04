@@ -30,6 +30,7 @@ func (m *Manager) Prepare(ctx context.Context, req PrepareRequest) (prepared *Pr
 	if previous != nil && !sameCapturedProvider(previous.Snapshot.Provider, binding) {
 		return nil, policy.ErrIneligible
 	}
+	req.MCPPaths = capturedMCPPaths(req, previous)
 	p := &Prepared{manager: m, orgID: req.Selection.OrgID, binding: binding, protectedPorts: slices.Clone(req.ProtectedPorts)}
 	p.selectionDigest, err = selectionDigest(resolved, binding)
 	if err != nil {

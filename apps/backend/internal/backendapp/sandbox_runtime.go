@@ -76,7 +76,11 @@ func (f sandboxRuntimeFactory) prepareExecution(ctx context.Context, execution *
 	if err != nil {
 		return nil, err
 	}
-	return f.runtime.Prepare(ctx, sandboxruntime.PrepareRequest{RestartOf: restartOf, Selection: *execution.SandboxSelection, SessionID: execution.SessionID, ExecutionID: execution.ID, Generation: generation, WorkDir: execution.WorkspacePath, Arguments: execution.AgentArgs, ProtectedPorts: protected, MCPForward: transport.SandboxMCPForward})
+	paths, err := sandboxMCPPathsForExecution(execution)
+	if err != nil {
+		return nil, err
+	}
+	return f.runtime.Prepare(ctx, sandboxruntime.PrepareRequest{MCPPaths: paths, RestartOf: restartOf, Selection: *execution.SandboxSelection, SessionID: execution.SessionID, ExecutionID: execution.ID, Generation: generation, WorkDir: execution.WorkspacePath, Arguments: execution.AgentArgs, ProtectedPorts: protected, MCPForward: transport.SandboxMCPForward})
 }
 
 func (f sandboxRuntimeFactory) validateExecutor(ctx context.Context, id string) error {

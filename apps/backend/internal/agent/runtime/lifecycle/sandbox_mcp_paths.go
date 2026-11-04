@@ -48,3 +48,15 @@ func validateSandboxMCPArtifacts(execution *AgentExecution, serverCount int, art
 	}
 	return nil
 }
+
+func (execution *AgentExecution) sandboxLaunchForMCP() (*contract.Launch, error) {
+	execution.sandboxMu.Lock()
+	defer execution.sandboxMu.Unlock()
+	if execution.SandboxSelection == nil {
+		return nil, nil
+	}
+	if execution.sandboxAttempt == nil {
+		return nil, contract.ErrInvalidPolicy
+	}
+	return execution.sandboxAttempt.Launch().Clone(), nil
+}

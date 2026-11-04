@@ -93,15 +93,12 @@ func bindNativeSandbox(parent context.Context, executionID, processID string, ow
 	}
 }
 
-func (m *Manager) sandboxMCPRoute(ctx context.Context, execution *AgentExecution, automatic string) (string, error) {
+func (m *Manager) prepareSandboxMCP(ctx context.Context, execution *AgentExecution) error {
 	if execution.SandboxSelection == nil {
-		return automatic, nil
+		return nil
 	}
 	transport, release := execution.AcquireAgentCtlClient()
 	defer release()
-	attempt, err := m.prepareExecutionSandbox(ctx, execution, execution.RuntimeEnvironment(), transport)
-	if err != nil {
-		return "", err
-	}
-	return attempt.Launch().MCPURL, nil
+	_, err := m.prepareExecutionSandbox(ctx, execution, execution.RuntimeEnvironment(), transport)
+	return err
 }

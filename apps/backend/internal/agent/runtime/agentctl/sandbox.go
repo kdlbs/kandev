@@ -20,7 +20,13 @@ func (c *Client) requireSandbox(ctx context.Context, launch *sandbox.Launch) err
 	if err := launch.Validate(); err != nil {
 		return err
 	}
-	return c.checkLaunchCapability(ctx, sandbox.LaunchCapability, ErrSandboxLaunchUnsupported)
+	if err := c.checkLaunchCapability(ctx, sandbox.LaunchCapability, ErrSandboxLaunchUnsupported); err != nil {
+		return err
+	}
+	if len(launch.MCPPaths) > 0 {
+		return c.checkLaunchCapability(ctx, sandbox.MCPRoutesCapability, ErrSandboxLaunchUnsupported)
+	}
+	return nil
 }
 
 // ConfigureAgentWithSandbox sends a captured sandbox and complete environment atomically.

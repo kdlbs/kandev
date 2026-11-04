@@ -5,10 +5,18 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/sandbox"
+	"github.com/kandev/kandev/internal/common/sandboxmcp"
+	profile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func (s *Server) handleSandboxMCP(c *gin.Context) {
-	if !c.GetBool(authenticatedControlContextKey) || c.Request.URL.RawQuery != "" || !s.procMgr.AdmitSandboxMCP(c.GetHeader("X-Kandev-Sandbox-Attempt"), c.GetHeader("X-Kandev-Sandbox-Generation"), c.GetHeader("X-Kandev-Sandbox-Policy")) {
+	path, id := sandbox.MCPRootPath, profile.PackageCore
+	if name := c.Param("package"); name != "" {
+		path, id = sandbox.MCPPackagePathPrefix+name, profile.PackageID(name)
+	}
+	if !c.GetBool(authenticatedControlContextKey) || c.Request.URL.EscapedPath() != "/api/v1/agent/sandbox"+path || c.Request.URL.RawQuery != "" || c.Request.URL.ForceQuery ||
+		!s.procMgr.AdmitSandboxMCPPath(c.GetHeader("X-Kandev-Sandbox-Attempt"), c.GetHeader("X-Kandev-Sandbox-Generation"), c.GetHeader("X-Kandev-Sandbox-Policy"), path) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
@@ -30,8 +38,9 @@ func (s *Server) handleSandboxMCP(c *gin.Context) {
 		}()
 	}
 	request := c.Request.Clone(ctx)
-	request.URL.Path = "/mcp"
+	request.URL.Path = path
 	request.URL.RawPath = ""
 	request.Header.Del("Authorization")
-	s.mcpServer.ServeStreamableHTTP(c.Writer, request)
+	request.Header.Del(sandboxmcp.MCPPathHeader)
+	s.mcpServer.ServeBuiltinStreamableHTTP(id, c.Writer, request)
 }

@@ -2434,6 +2434,11 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
 
+	servers, injected, err := configuredSandboxMCP(m.cfg, sandboxLaunch)
+	if err != nil {
+		return err
+	}
+
 	m.cfg.AgentCommand = command
 	m.cfg.AgentCommandConfigured = true
 	m.cfg.AgentArgs = args
@@ -2441,7 +2446,8 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
 	m.cfg.Sandbox = sandboxLaunch.Clone()
 	m.cfg.SandboxRequired = sandboxLaunch != nil
-	m.configureSandboxMCP()
+	m.cfg.McpServers = servers
+	m.cfg.InjectedKandevMCP = injected
 
 	// Store continue command for one-shot adapters
 	if continueArgsPresent {

@@ -25,11 +25,18 @@ func (p *Prepared) prepareMCP(request PrepareRequest, grants contract.Grants) ([
 	if forward == nil {
 		return nil, policy.ErrIneligible
 	}
-	relay, err := sandboxmcp.Open(p.manager.ctx, p.guardMCP(forward))
+	paths, err := contract.CanonicalMCPPaths(request.MCPPaths)
+	if err != nil {
+		return nil, err
+	}
+	relay, err := sandboxmcp.OpenWithPaths(p.manager.ctx, p.guardMCP(forward), paths)
 	if err != nil {
 		return nil, err
 	}
 	p.mcp = relay
+	if len(paths) > 1 {
+		p.mcpPaths = paths
+	}
 	host, portText, err := net.SplitHostPort(relay.Address())
 	if err != nil {
 		return nil, err
@@ -39,7 +46,7 @@ func (p *Prepared) prepareMCP(request PrepareRequest, grants contract.Grants) ([
 		return nil, err
 	}
 	p.runtimeNetwork = append(p.runtimeNetwork, contract.NetworkGrant{Host: host, Port: uint16(port), Protocol: "tcp"})
-	return []*pluginsdk.SandboxEndpoint{{Key: "kandev.mcp", Host: host, Port: uint32(port), Scheme: "http", Path: "/mcp"}}, nil
+	return []*pluginsdk.SandboxEndpoint{{Key: "kandev.mcp", Host: host, Port: uint32(port), Scheme: "http", Path: contract.MCPRootPath}}, nil
 }
 
 func (p *Prepared) guardMCP(forward sandboxmcp.Forward) sandboxmcp.Forward {
@@ -53,4 +60,11 @@ func (p *Prepared) guardMCP(forward sandboxmcp.Forward) sandboxmcp.Forward {
 		}
 		return forward(ctx, method, headers, body)
 	}
+}
+
+func capturedMCPPaths(request PrepareRequest, previous *policy.Attempt) []string {
+	if previous != nil && request.Selection.RestartReview == nil {
+		return slices.Clone(previous.Snapshot.Launch.MCPPaths)
+	}
+	return slices.Clone(request.MCPPaths)
 }

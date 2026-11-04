@@ -85,6 +85,7 @@ func (p *Prepared) materialize(ctx context.Context, binary *plugins.SandboxRunti
 	}
 	if p.mcp != nil {
 		p.launch.MCPURL = p.mcp.URL()
+		p.launch.MCPPaths = slices.Clone(p.mcpPaths)
 	}
 	return p.launch.Validate()
 }

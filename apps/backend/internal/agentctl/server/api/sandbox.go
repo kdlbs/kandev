@@ -29,12 +29,12 @@ func (s *Server) admitExecutionConfiguration(c *gin.Context, req AgentConfigureR
 
 func (s *Server) handleSandboxOwner(c *gin.Context) {
 	if !c.GetBool(authenticatedControlContextKey) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "authenticated control is required"})
+		c.JSON(http.StatusForbidden, gin.H{errKey: "authenticated control is required"})
 		return
 	}
 	owner, err := s.procMgr.SandboxOwner()
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "sandbox owner is unavailable"})
+		c.JSON(http.StatusNotFound, gin.H{errKey: "sandbox owner is unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, owner)

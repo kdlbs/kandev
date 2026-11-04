@@ -24,7 +24,7 @@ var SurvivalCapabilities = executionCapabilities()
 func executionCapabilities() []string {
 	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, acpcompat.AntigravityPersonalAuthCapability, p.BuiltinPackagesCapability}
 	if runtime.GOOS == sandboxSupportedOS {
-		capabilities = append(capabilities, sandbox.LaunchCapability)
+		capabilities = append(capabilities, sandbox.LaunchCapability, sandbox.MCPRoutesCapability)
 	}
 	return capabilities
 }

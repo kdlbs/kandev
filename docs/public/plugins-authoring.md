@@ -4065,3 +4065,6 @@ Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md)
 Sandbox providers can declare bounded runtime records below the private state directory. Use identity records to associate a supervisor, child, and provider session. Keep identity separate from confinement evidence: a process registry without a policy digest must not certify active protection. Core verifies ownership and reads the declared files.
 
 A sandbox provider can require the optional `egress_proxy` host capability when its runtime cannot enforce exact TCP ports. Core supplies an attempt-owned CONNECT relay at the reserved `sandbox.egress.endpoint` artifact reference. Bind the reference to an existing empty JSON string in a private artifact. The relay accepts only the attempt's captured host/port pairs. Basic command wrappers do not require this capability.
+
+
+Logical Kandev MCP access uses a host-owned dynamic endpoint. Core captures selected package paths and preserves their separate registries behind that relay. Providers do not receive a backend control credential. Do not replace this endpoint with a fixed host path or broad loopback permission. Selected package routes require the execution helper capability `sandbox-mcp-routes.v1`; core checks compatibility before dispatch.
