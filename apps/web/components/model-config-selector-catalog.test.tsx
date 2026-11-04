@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -150,8 +150,9 @@ describe("ModelConfigSelector catalog navigation", () => {
     renderSelector({});
     openPicker();
     expect(screen.getByTestId(COMPOSITION_ROW)).toBeTruthy();
-    expect(screen.getByRole("group", { name: "Standard" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Solo" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Standard" })).toBeNull();
+    const solo = screen.getByRole("option", { name: "Solo" });
+    expect(within(solo).getByTestId("model-row-context").textContent).toBe("Standard");
   });
 
   it("opens a composition view with one row per catalog dimension", () => {
