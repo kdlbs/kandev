@@ -1067,6 +1067,8 @@ certification.
 
 Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
 
+The **Built-in** section manages Kandev's native tool packages separately from these definitions. See [Choose built-in MCP packages](builtin-mcp-packages.md) for task opt-in, workspace limits, defaults, and next-start timing.
+
 Choose **Add MCP server** for one of these setup modes:
 
 - **Remote endpoint** connects to an HTTP or SSE endpoint when an agent uses the definition.
@@ -1123,7 +1125,8 @@ After a definition is configured, select it where it should apply:
   additions under **Additional servers**. Inherited entries retain all contributing
   origins. Choose **Exclude for this session** to leave out one inherited server,
   or **Restore inheritance** to use its current inherited selections again.
-  Check **Connections** for evidence of delivery or loaded tools.
+  Exclusion help appears only when there are inherited servers or saved
+  exclusions. Check **Connections** for evidence of delivery or loaded tools.
 
 Selections combine every repository attached to the task, its profile, task,
 and session additions. An existing session can exclude a definition from this

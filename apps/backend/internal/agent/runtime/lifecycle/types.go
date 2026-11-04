@@ -32,6 +32,8 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
+	builtinMCPMu                 sync.Mutex
+	builtinDispatch              *builtinDispatchState
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
