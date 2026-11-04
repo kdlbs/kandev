@@ -793,6 +793,75 @@ func (x *SandboxServiceBindingV2) GetRouteId() string {
 	return ""
 }
 
+// A private callback declaration. Core creates its channel identity and secret.
+type SandboxApprovalServiceV2 struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ServiceKey        string                 `protobuf:"bytes,1,opt,name=service_key,json=serviceKey,proto3" json:"service_key,omitempty"`
+	RouteId           string                 `protobuf:"bytes,2,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
+	OperationKind     string                 `protobuf:"bytes,3,opt,name=operation_kind,json=operationKind,proto3" json:"operation_kind,omitempty"`
+	EndpointReference string                 `protobuf:"bytes,4,opt,name=endpoint_reference,json=endpointReference,proto3" json:"endpoint_reference,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *SandboxApprovalServiceV2) Reset() {
+	*x = SandboxApprovalServiceV2{}
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SandboxApprovalServiceV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SandboxApprovalServiceV2) ProtoMessage() {}
+
+func (x *SandboxApprovalServiceV2) ProtoReflect() protoreflect.Message {
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SandboxApprovalServiceV2.ProtoReflect.Descriptor instead.
+func (*SandboxApprovalServiceV2) Descriptor() ([]byte, []int) {
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SandboxApprovalServiceV2) GetServiceKey() string {
+	if x != nil {
+		return x.ServiceKey
+	}
+	return ""
+}
+
+func (x *SandboxApprovalServiceV2) GetRouteId() string {
+	if x != nil {
+		return x.RouteId
+	}
+	return ""
+}
+
+func (x *SandboxApprovalServiceV2) GetOperationKind() string {
+	if x != nil {
+		return x.OperationKind
+	}
+	return ""
+}
+
+func (x *SandboxApprovalServiceV2) GetEndpointReference() string {
+	if x != nil {
+		return x.EndpointReference
+	}
+	return ""
+}
+
 type SandboxApprovalActorV2 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Value:
@@ -806,7 +875,7 @@ type SandboxApprovalActorV2 struct {
 
 func (x *SandboxApprovalActorV2) Reset() {
 	*x = SandboxApprovalActorV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[11]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -818,7 +887,7 @@ func (x *SandboxApprovalActorV2) String() string {
 func (*SandboxApprovalActorV2) ProtoMessage() {}
 
 func (x *SandboxApprovalActorV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[11]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -831,7 +900,7 @@ func (x *SandboxApprovalActorV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxApprovalActorV2.ProtoReflect.Descriptor instead.
 func (*SandboxApprovalActorV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{11}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SandboxApprovalActorV2) GetValue() isSandboxApprovalActorV2_Value {
@@ -887,7 +956,7 @@ type SandboxApprovalV2 struct {
 
 func (x *SandboxApprovalV2) Reset() {
 	*x = SandboxApprovalV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[12]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +968,7 @@ func (x *SandboxApprovalV2) String() string {
 func (*SandboxApprovalV2) ProtoMessage() {}
 
 func (x *SandboxApprovalV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[12]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +981,7 @@ func (x *SandboxApprovalV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxApprovalV2.ProtoReflect.Descriptor instead.
 func (*SandboxApprovalV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{12}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SandboxApprovalV2) GetRequestId() string {
@@ -958,7 +1027,7 @@ type SandboxCapabilitiesV2 struct {
 
 func (x *SandboxCapabilitiesV2) Reset() {
 	*x = SandboxCapabilitiesV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[13]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1039,7 @@ func (x *SandboxCapabilitiesV2) String() string {
 func (*SandboxCapabilitiesV2) ProtoMessage() {}
 
 func (x *SandboxCapabilitiesV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[13]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1052,7 @@ func (x *SandboxCapabilitiesV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxCapabilitiesV2.ProtoReflect.Descriptor instead.
 func (*SandboxCapabilitiesV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{13}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SandboxCapabilitiesV2) GetPolicySchemas() []uint32 {
@@ -1051,7 +1120,7 @@ type SandboxRuntimeObservationV2 struct {
 
 func (x *SandboxRuntimeObservationV2) Reset() {
 	*x = SandboxRuntimeObservationV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[14]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1063,7 +1132,7 @@ func (x *SandboxRuntimeObservationV2) String() string {
 func (*SandboxRuntimeObservationV2) ProtoMessage() {}
 
 func (x *SandboxRuntimeObservationV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[14]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1076,7 +1145,7 @@ func (x *SandboxRuntimeObservationV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxRuntimeObservationV2.ProtoReflect.Descriptor instead.
 func (*SandboxRuntimeObservationV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{14}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SandboxRuntimeObservationV2) GetSourceId() string {
@@ -1151,7 +1220,7 @@ type SandboxAuditChunkV2 struct {
 
 func (x *SandboxAuditChunkV2) Reset() {
 	*x = SandboxAuditChunkV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[15]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1163,7 +1232,7 @@ func (x *SandboxAuditChunkV2) String() string {
 func (*SandboxAuditChunkV2) ProtoMessage() {}
 
 func (x *SandboxAuditChunkV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[15]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1176,7 +1245,7 @@ func (x *SandboxAuditChunkV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxAuditChunkV2.ProtoReflect.Descriptor instead.
 func (*SandboxAuditChunkV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{15}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SandboxAuditChunkV2) GetSourceSchema() string {
@@ -1281,7 +1350,7 @@ type SandboxAuditTrustV2 struct {
 
 func (x *SandboxAuditTrustV2) Reset() {
 	*x = SandboxAuditTrustV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[16]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1293,7 +1362,7 @@ func (x *SandboxAuditTrustV2) String() string {
 func (*SandboxAuditTrustV2) ProtoMessage() {}
 
 func (x *SandboxAuditTrustV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[16]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1306,7 +1375,7 @@ func (x *SandboxAuditTrustV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxAuditTrustV2.ProtoReflect.Descriptor instead.
 func (*SandboxAuditTrustV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{16}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SandboxAuditTrustV2) GetExpectedPublicKeyPem() []byte {
@@ -1349,7 +1418,7 @@ type SandboxAuditEventV2 struct {
 
 func (x *SandboxAuditEventV2) Reset() {
 	*x = SandboxAuditEventV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[17]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1361,7 +1430,7 @@ func (x *SandboxAuditEventV2) String() string {
 func (*SandboxAuditEventV2) ProtoMessage() {}
 
 func (x *SandboxAuditEventV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[17]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1374,7 +1443,7 @@ func (x *SandboxAuditEventV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxAuditEventV2.ProtoReflect.Descriptor instead.
 func (*SandboxAuditEventV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{17}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SandboxAuditEventV2) GetRecordId() string {
@@ -1464,7 +1533,7 @@ type SandboxReportCoverageV2 struct {
 
 func (x *SandboxReportCoverageV2) Reset() {
 	*x = SandboxReportCoverageV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[18]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1476,7 +1545,7 @@ func (x *SandboxReportCoverageV2) String() string {
 func (*SandboxReportCoverageV2) ProtoMessage() {}
 
 func (x *SandboxReportCoverageV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[18]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1489,7 +1558,7 @@ func (x *SandboxReportCoverageV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxReportCoverageV2.ProtoReflect.Descriptor instead.
 func (*SandboxReportCoverageV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{18}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SandboxReportCoverageV2) GetOperationKind() string {
@@ -1526,7 +1595,7 @@ type SandboxAuditVerificationV2 struct {
 
 func (x *SandboxAuditVerificationV2) Reset() {
 	*x = SandboxAuditVerificationV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[19]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1538,7 +1607,7 @@ func (x *SandboxAuditVerificationV2) String() string {
 func (*SandboxAuditVerificationV2) ProtoMessage() {}
 
 func (x *SandboxAuditVerificationV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[19]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1551,7 +1620,7 @@ func (x *SandboxAuditVerificationV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxAuditVerificationV2.ProtoReflect.Descriptor instead.
 func (*SandboxAuditVerificationV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{19}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SandboxAuditVerificationV2) GetArtifactSetDigest() string {
@@ -1654,7 +1723,7 @@ type SandboxReportV2 struct {
 
 func (x *SandboxReportV2) Reset() {
 	*x = SandboxReportV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[20]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1666,7 +1735,7 @@ func (x *SandboxReportV2) String() string {
 func (*SandboxReportV2) ProtoMessage() {}
 
 func (x *SandboxReportV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[20]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1679,7 +1748,7 @@ func (x *SandboxReportV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxReportV2.ProtoReflect.Descriptor instead.
 func (*SandboxReportV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{20}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SandboxReportV2) GetEvents() []*SandboxAuditEventV2 {
@@ -1748,7 +1817,7 @@ type SandboxRevisionAdditionsV2 struct {
 
 func (x *SandboxRevisionAdditionsV2) Reset() {
 	*x = SandboxRevisionAdditionsV2{}
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[21]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1760,7 +1829,7 @@ func (x *SandboxRevisionAdditionsV2) String() string {
 func (*SandboxRevisionAdditionsV2) ProtoMessage() {}
 
 func (x *SandboxRevisionAdditionsV2) ProtoReflect() protoreflect.Message {
-	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[21]
+	mi := &file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1773,7 +1842,7 @@ func (x *SandboxRevisionAdditionsV2) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SandboxRevisionAdditionsV2.ProtoReflect.Descriptor instead.
 func (*SandboxRevisionAdditionsV2) Descriptor() ([]byte, []int) {
-	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{21}
+	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SandboxRevisionAdditionsV2) GetStaticGrants() *SandboxPermissionsV2 {
@@ -1855,7 +1924,13 @@ const file_kandev_plugin_v1_sandbox_v2_proto_rawDesc = "" +
 	"channel_id\x18\x01 \x01(\tR\tchannelId\x12\x1f\n" +
 	"\vservice_key\x18\x02 \x01(\tR\n" +
 	"serviceKey\x12\x19\n" +
-	"\broute_id\x18\x03 \x01(\tR\arouteId\"\xc5\x01\n" +
+	"\broute_id\x18\x03 \x01(\tR\arouteId\"\xac\x01\n" +
+	"\x18SandboxApprovalServiceV2\x12\x1f\n" +
+	"\vservice_key\x18\x01 \x01(\tR\n" +
+	"serviceKey\x12\x19\n" +
+	"\broute_id\x18\x02 \x01(\tR\arouteId\x12%\n" +
+	"\x0eoperation_kind\x18\x03 \x01(\tR\roperationKind\x12-\n" +
+	"\x12endpoint_reference\x18\x04 \x01(\tR\x11endpointReference\"\xc5\x01\n" +
 	"\x16SandboxApprovalActorV2\x12L\n" +
 	"\rchild_process\x18\x01 \x01(\v2%.kandev.plugin.v1.SandboxChildActorV2H\x00R\fchildProcess\x12T\n" +
 	"\x0fruntime_service\x18\x02 \x01(\v2).kandev.plugin.v1.SandboxServiceBindingV2H\x00R\x0eruntimeServiceB\a\n" +
@@ -1969,7 +2044,7 @@ func file_kandev_plugin_v1_sandbox_v2_proto_rawDescGZIP() []byte {
 	return file_kandev_plugin_v1_sandbox_v2_proto_rawDescData
 }
 
-var file_kandev_plugin_v1_sandbox_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_kandev_plugin_v1_sandbox_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_kandev_plugin_v1_sandbox_v2_proto_goTypes = []any{
 	(*SandboxFilesystemPermissionV2)(nil), // 0: kandev.plugin.v1.SandboxFilesystemPermissionV2
 	(*SandboxTCPDestinationV2)(nil),       // 1: kandev.plugin.v1.SandboxTCPDestinationV2
@@ -1982,17 +2057,18 @@ var file_kandev_plugin_v1_sandbox_v2_proto_goTypes = []any{
 	(*SandboxOperationV2)(nil),            // 8: kandev.plugin.v1.SandboxOperationV2
 	(*SandboxChildActorV2)(nil),           // 9: kandev.plugin.v1.SandboxChildActorV2
 	(*SandboxServiceBindingV2)(nil),       // 10: kandev.plugin.v1.SandboxServiceBindingV2
-	(*SandboxApprovalActorV2)(nil),        // 11: kandev.plugin.v1.SandboxApprovalActorV2
-	(*SandboxApprovalV2)(nil),             // 12: kandev.plugin.v1.SandboxApprovalV2
-	(*SandboxCapabilitiesV2)(nil),         // 13: kandev.plugin.v1.SandboxCapabilitiesV2
-	(*SandboxRuntimeObservationV2)(nil),   // 14: kandev.plugin.v1.SandboxRuntimeObservationV2
-	(*SandboxAuditChunkV2)(nil),           // 15: kandev.plugin.v1.SandboxAuditChunkV2
-	(*SandboxAuditTrustV2)(nil),           // 16: kandev.plugin.v1.SandboxAuditTrustV2
-	(*SandboxAuditEventV2)(nil),           // 17: kandev.plugin.v1.SandboxAuditEventV2
-	(*SandboxReportCoverageV2)(nil),       // 18: kandev.plugin.v1.SandboxReportCoverageV2
-	(*SandboxAuditVerificationV2)(nil),    // 19: kandev.plugin.v1.SandboxAuditVerificationV2
-	(*SandboxReportV2)(nil),               // 20: kandev.plugin.v1.SandboxReportV2
-	(*SandboxRevisionAdditionsV2)(nil),    // 21: kandev.plugin.v1.SandboxRevisionAdditionsV2
+	(*SandboxApprovalServiceV2)(nil),      // 11: kandev.plugin.v1.SandboxApprovalServiceV2
+	(*SandboxApprovalActorV2)(nil),        // 12: kandev.plugin.v1.SandboxApprovalActorV2
+	(*SandboxApprovalV2)(nil),             // 13: kandev.plugin.v1.SandboxApprovalV2
+	(*SandboxCapabilitiesV2)(nil),         // 14: kandev.plugin.v1.SandboxCapabilitiesV2
+	(*SandboxRuntimeObservationV2)(nil),   // 15: kandev.plugin.v1.SandboxRuntimeObservationV2
+	(*SandboxAuditChunkV2)(nil),           // 16: kandev.plugin.v1.SandboxAuditChunkV2
+	(*SandboxAuditTrustV2)(nil),           // 17: kandev.plugin.v1.SandboxAuditTrustV2
+	(*SandboxAuditEventV2)(nil),           // 18: kandev.plugin.v1.SandboxAuditEventV2
+	(*SandboxReportCoverageV2)(nil),       // 19: kandev.plugin.v1.SandboxReportCoverageV2
+	(*SandboxAuditVerificationV2)(nil),    // 20: kandev.plugin.v1.SandboxAuditVerificationV2
+	(*SandboxReportV2)(nil),               // 21: kandev.plugin.v1.SandboxReportV2
+	(*SandboxRevisionAdditionsV2)(nil),    // 22: kandev.plugin.v1.SandboxRevisionAdditionsV2
 }
 var file_kandev_plugin_v1_sandbox_v2_proto_depIdxs = []int32{
 	0,  // 0: kandev.plugin.v1.SandboxPermissionsV2.filesystem:type_name -> kandev.plugin.v1.SandboxFilesystemPermissionV2
@@ -2010,11 +2086,11 @@ var file_kandev_plugin_v1_sandbox_v2_proto_depIdxs = []int32{
 	9,  // 12: kandev.plugin.v1.SandboxApprovalActorV2.child_process:type_name -> kandev.plugin.v1.SandboxChildActorV2
 	10, // 13: kandev.plugin.v1.SandboxApprovalActorV2.runtime_service:type_name -> kandev.plugin.v1.SandboxServiceBindingV2
 	8,  // 14: kandev.plugin.v1.SandboxApprovalV2.operation:type_name -> kandev.plugin.v1.SandboxOperationV2
-	11, // 15: kandev.plugin.v1.SandboxApprovalV2.actor:type_name -> kandev.plugin.v1.SandboxApprovalActorV2
+	12, // 15: kandev.plugin.v1.SandboxApprovalV2.actor:type_name -> kandev.plugin.v1.SandboxApprovalActorV2
 	8,  // 16: kandev.plugin.v1.SandboxAuditEventV2.operation:type_name -> kandev.plugin.v1.SandboxOperationV2
-	17, // 17: kandev.plugin.v1.SandboxReportV2.events:type_name -> kandev.plugin.v1.SandboxAuditEventV2
-	18, // 18: kandev.plugin.v1.SandboxReportV2.coverage:type_name -> kandev.plugin.v1.SandboxReportCoverageV2
-	19, // 19: kandev.plugin.v1.SandboxReportV2.verification:type_name -> kandev.plugin.v1.SandboxAuditVerificationV2
+	18, // 17: kandev.plugin.v1.SandboxReportV2.events:type_name -> kandev.plugin.v1.SandboxAuditEventV2
+	19, // 18: kandev.plugin.v1.SandboxReportV2.coverage:type_name -> kandev.plugin.v1.SandboxReportCoverageV2
+	20, // 19: kandev.plugin.v1.SandboxReportV2.verification:type_name -> kandev.plugin.v1.SandboxAuditVerificationV2
 	4,  // 20: kandev.plugin.v1.SandboxRevisionAdditionsV2.static_grants:type_name -> kandev.plugin.v1.SandboxPermissionsV2
 	4,  // 21: kandev.plugin.v1.SandboxRevisionAdditionsV2.approval_envelope:type_name -> kandev.plugin.v1.SandboxPermissionsV2
 	22, // [22:22] is the sub-list for method output_type
@@ -2035,18 +2111,18 @@ func file_kandev_plugin_v1_sandbox_v2_proto_init() {
 		(*SandboxOperationV2_Command)(nil),
 		(*SandboxOperationV2_HttpEndpoint)(nil),
 	}
-	file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[11].OneofWrappers = []any{
+	file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[12].OneofWrappers = []any{
 		(*SandboxApprovalActorV2_ChildProcess)(nil),
 		(*SandboxApprovalActorV2_RuntimeService)(nil),
 	}
-	file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[14].OneofWrappers = []any{}
+	file_kandev_plugin_v1_sandbox_v2_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kandev_plugin_v1_sandbox_v2_proto_rawDesc), len(file_kandev_plugin_v1_sandbox_v2_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -95,6 +95,9 @@ func (m *Manager) selectProvider(ctx context.Context, installationID, key string
 }
 
 func validateCompiledOverrides(req PrepareRequest, compiled *pluginsdk.SandboxCompiledPolicy) error {
+	if len(compiled.ApprovalServicesV2) != 0 {
+		return policy.ErrIneligible
+	}
 	for _, capability := range compiled.RequiredCapabilities {
 		if !slices.Contains([]string{"private_artifacts", "foreground_process", "approval_webhook", "isolated_environment", "egress_proxy"}, capability) {
 			return policy.ErrIneligible

@@ -82,6 +82,14 @@ message SandboxServiceBindingV2 {
   string route_id = 3;
 }
 
+// A private callback declaration. Core creates its channel identity and secret.
+message SandboxApprovalServiceV2 {
+  string service_key = 1;
+  string route_id = 2;
+  string operation_kind = 3;
+  string endpoint_reference = 4;
+}
+
 message SandboxApprovalActorV2 {
   oneof value {
     SandboxChildActorV2 child_process = 1;

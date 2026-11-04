@@ -11,7 +11,7 @@ func validSandboxV2Request(request proto.Message) bool {
 	case *pluginsdk.DescribeSandboxProviderRequest:
 		return true
 	case *pluginsdk.CompileSandboxPolicyRequest:
-		return validSandboxWirePolicyV2(value.Policy) && sandboxPublicReferencesV2(value.References)
+		return validSandboxWirePolicyV2(value.Policy) && validSandboxPublicRuntimeInputs(value.References, value.Endpoints)
 	case *pluginsdk.NormalizeSandboxApprovalRequest:
 		return len(value.VerifiedEvent) > 0 && len(value.VerifiedEvent) <= 64<<10 && (value.ServiceBindingV2 == nil || validSandboxServiceBindingV2(value.ServiceBindingV2))
 	case *pluginsdk.NormalizeSandboxStatusRequest:
@@ -19,10 +19,23 @@ func validSandboxV2Request(request proto.Message) bool {
 	case *pluginsdk.ReadSandboxReportRequest:
 		return validSandboxReportRequestV2(value)
 	case *pluginsdk.ProposeSandboxRevisionRequest:
-		return validSandboxWirePolicyV2(value.Policy) && validSandboxSelectionV2(value) && sandboxPublicReferencesV2(value.References)
+		return validSandboxWirePolicyV2(value.Policy) && validSandboxSelectionV2(value) && validSandboxPublicRuntimeInputs(value.References, value.Endpoints)
 	default:
 		return false
 	}
+}
+
+func validSandboxPublicRuntimeInputs(references []*pluginsdk.SandboxRuntimeReference, endpoints []*pluginsdk.SandboxEndpoint) bool {
+	return sandboxPublicReferencesV2(references) && sandboxPublicEndpoints(endpoints)
+}
+
+func sandboxPublicEndpoints(values []*pluginsdk.SandboxEndpoint) bool {
+	for _, value := range values {
+		if value == nil || privateSandboxReference(value.Key) {
+			return false
+		}
+	}
+	return true
 }
 
 func validSandboxReportRequestV2(value *pluginsdk.ReadSandboxReportRequest) bool {

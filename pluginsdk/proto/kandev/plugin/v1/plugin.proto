@@ -155,6 +155,7 @@ message SandboxOverrideConstraints {
 
 message SandboxCompiledPolicy {
   SandboxPolicyV2 effective_policy_v2 = 100;
+  repeated SandboxApprovalServiceV2 approval_services_v2 = 101;
   repeated SandboxArgument prefix = 1;
   repeated SandboxArtifact artifacts = 2;
   SandboxGrants effective_grants = 3;

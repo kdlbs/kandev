@@ -26,11 +26,15 @@ func validateSandboxCompilation(req *pluginsdk.CompileSandboxPolicyRequest, comp
 		!proto.Equal(req.Policy.Grants, compiled.EffectiveGrants) || proto.Size(compiled) > maxSandboxMessageBytes {
 		return errSandboxProviderReply
 	}
+	serviceReferences, err := validateSandboxServiceDeclarationsV2(req, compiled)
+	if err != nil {
+		return err
+	}
 	artifacts, err := validateSandboxArtifacts(compiled.Artifacts)
 	if err != nil {
 		return err
 	}
-	if err := validateSandboxArtifactBindings(req, compiled.Artifacts); err != nil {
+	if err := validateSandboxArtifactBindings(req, compiled.Artifacts, serviceReferences); err != nil {
 		return err
 	}
 	for _, name := range compiled.StatusArtifacts {
@@ -41,8 +45,11 @@ func validateSandboxCompilation(req *pluginsdk.CompileSandboxPolicyRequest, comp
 	return validateSandboxPrefix(req, compiled.Prefix, artifacts)
 }
 
-func validateSandboxArtifactBindings(req *pluginsdk.CompileSandboxPolicyRequest, artifacts []*pluginsdk.SandboxArtifact) error {
+func validateSandboxArtifactBindings(req *pluginsdk.CompileSandboxPolicyRequest, artifacts []*pluginsdk.SandboxArtifact, services map[string]bool) error {
 	values := map[string]string{sandboxApprovalEndpoint: "", sandboxApprovalToken: "", sandboxEgressEndpoint: ""}
+	for reference := range services {
+		values[reference] = ""
+	}
 	for _, reference := range req.References {
 		if reference != nil && !privateSandboxReference(reference.Key) {
 			values[reference.Key] = reference.Value
@@ -109,7 +116,7 @@ func validateSandboxPrefix(req *pluginsdk.CompileSandboxPolicyRequest, prefix []
 }
 
 func privateSandboxReference(key string) bool {
-	return key == sandboxApprovalEndpoint || key == sandboxApprovalToken || key == sandboxEgressEndpoint
+	return key == sandboxApprovalEndpoint || key == sandboxApprovalToken || key == sandboxEgressEndpoint || strings.HasPrefix(key, sandboxApprovalServicePrefix)
 }
 
 func validSandboxRequestPayload(request proto.Message) bool {
@@ -120,12 +127,7 @@ func validSandboxRequestPayload(request proto.Message) bool {
 	if !ok {
 		return true
 	}
-	for _, reference := range compile.References {
-		if reference == nil || privateSandboxReference(reference.Key) {
-			return false
-		}
-	}
-	return true
+	return validSandboxPublicRuntimeInputs(compile.References, compile.Endpoints)
 }
 
 func validSandboxArgument(arg *pluginsdk.SandboxArgument, references, artifacts map[string]bool) bool {

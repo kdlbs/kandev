@@ -6,6 +6,8 @@ const SandboxProtocolMajorV2 = 2
 
 const SandboxReportSchemaV2 = "kandev.sandbox.report.v2"
 
+const SandboxServiceApprovalCapabilityV2 = "service_approval_channels.v2"
+
 type SandboxFilesystemPermissionV2 = pluginv1.SandboxFilesystemPermissionV2
 type SandboxTCPDestinationV2 = pluginv1.SandboxTCPDestinationV2
 type SandboxCommandInvocationV2 = pluginv1.SandboxCommandInvocationV2
@@ -17,6 +19,7 @@ type SandboxFilesystemOperationV2 = pluginv1.SandboxFilesystemOperationV2
 type SandboxOperationV2 = pluginv1.SandboxOperationV2
 type SandboxChildActorV2 = pluginv1.SandboxChildActorV2
 type SandboxServiceBindingV2 = pluginv1.SandboxServiceBindingV2
+type SandboxApprovalServiceV2 = pluginv1.SandboxApprovalServiceV2
 type SandboxApprovalActorV2 = pluginv1.SandboxApprovalActorV2
 type SandboxApprovalV2 = pluginv1.SandboxApprovalV2
 type SandboxCapabilitiesV2 = pluginv1.SandboxCapabilitiesV2

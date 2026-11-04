@@ -1060,6 +1060,12 @@ Declare supported policy versions separately in `capabilities_v2.policy_schemas`
 
 Major 2 separates static grants from approval eligibility and distinguishes filesystem, TCP, command, and HTTP-endpoint operations. Child-process actors and attempt-owned runtime-service actors have different identity checks. The host authenticates runtime-service callbacks before normalization and compares the returned channel/route binding; a PID of zero is not a child identity. Neither actor type grants operator authority.
 
+The experimental compiled `approval_services_v2` field declares private runtime callbacks. Each declaration supplies a `service_key`, `route_id`, `operation_kind`, and `endpoint_reference`. Use lowercase letters, digits, and hyphens for each key (1-64 characters, starting with a letter).
+
+The reference must be `sandbox.approval.service.<service_key>.<route_id>.endpoint` and must bind an empty JSON string in a private artifact. Include `service_approval_channels.v2` in `required_capabilities`. Core creates channel IDs and callback secrets, which must not enter compile inputs or supervisor arguments.
+
+The current validator accepts only network declarations under policy schema 2 and rejects combination with `egress_proxy` or its private artifact binding. Runtime dispatch for these declarations is not enabled yet; declaring one refuses launch. This SDK shape does not establish native TCP approval support in the host or a provider.
+
 Runtime observations do not establish active confinement. Reports carry separate coverage, integrity, finalization, and signature-verification results. Chunk replies must retain the core-generated operation handle, artifact-set digest, and sequence. Trusted signature results require the expected public key, trust revision, and matching artifact identity. Private keys and callback secrets never enter these RPC payloads. See the maintained [major 2 fixture test](../../apps/backend/cmd/plugin-fixture/sandbox_provider_v2_test.go) for a complete-interface example.
 
 Negotiate typed reports separately with `capabilities_v2.report_schemas: ["kandev.sandbox.report.v2"]`. Each chunk binds its source schema, relative path, captured session, and position in the artifact set. A final marker ends that source. Preserve the operation's chunk sequence across source transitions. Empty existing sources remain distinct from missing files. The current host snapshot limit is 32 files and 32 MiB, with at most 256 KiB per chunk. Major 1 keeps its existing limits.
