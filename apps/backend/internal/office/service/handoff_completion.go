@@ -18,19 +18,30 @@ const handoffCompletionCommentSource = "handoff"
 // HandoffCompletionSource is the stored handoff relationship, not an actor
 // supplied by a state-change event or a new permission-bearing request.
 type HandoffCompletionSource struct {
-	DeliveryTaskID, DeliveryWorkspaceID                string
-	DeliveryState                                      string
-	SourceTaskID, SourceWorkspaceID, SourceSessionID   string
-	SourceAgentProfileID, SourceAssigneeAgentProfileID string
+	DeliveryTaskID, DeliveryWorkspaceID string
+	DeliveryTitle, DeliveryState        string
+	SourceTaskID, SourceWorkspaceID     string
+	SourceSessionID                     string
+	SourceAgentProfileID                string
+	SourceAssigneeAgentProfileID        string
+}
+
+// HandoffCompletionAuthorization keeps report and prompt rights independent.
+// A collaboration grant can authorize a stored report, a source-task wake, or
+// both; report permission alone never starts an agent run.
+type HandoffCompletionAuthorization struct {
+	Report bool
+	Prompt bool
 }
 
 // HandoffCompletionPolicy is wired once before subscriptions. Nil is the
-// default-off policy; composition checks current directional report grants.
-type HandoffCompletionPolicy func(context.Context, HandoffCompletionSource) (bool, error)
+// default-off policy; composition checks current directional collaboration
+// grants.
+type HandoffCompletionPolicy func(context.Context, HandoffCompletionSource) (HandoffCompletionAuthorization, error)
 
 // SetHandoffCompletionPolicy opts the service into reporting handed-off task
-// completions back to the originating office task. A nil policy leaves the
-// feature off: no comment, no wake, no side effect.
+// completions to the originating office task. A nil policy leaves the feature
+// off: no comment, wake, or side effect.
 func (s *Service) SetHandoffCompletionPolicy(policy HandoffCompletionPolicy) {
 	s.handoffCompletionPolicy = policy
 }
@@ -45,37 +56,68 @@ func (s *Service) handleHandoffTaskStateChanged(ctx context.Context, event *bus.
 	if s.handoffCompletionPolicy == nil {
 		return nil
 	}
-	data, err := decodeEventData[handoffTaskStateChangedData](event)
-	if err != nil || data.TaskID == "" || !taskmodels.IsTerminalTaskState(v1.TaskState(data.NewState)) {
-		return nil
-	}
-	// Report a completion, not a re-observation of an already-terminal task:
-	// a state-change event with no transition (or no previous state) did not
-	// reach the terminal state and must not produce a report or a wake.
-	if data.OldState == "" || data.OldState == data.NewState {
+	data, valid := handoffCompletionTransition(event)
+	if !valid {
 		return nil
 	}
 	source, err := s.handoffCompletionSource(ctx, data.TaskID, data.NewState)
 	if err != nil || source == nil {
 		return err
 	}
-	allowed, err := s.handoffCompletionPolicy(ctx, *source)
-	if err != nil || !allowed {
-		return err
+	return s.completeHandoffTaskStateChange(ctx, data, source)
+}
+
+func handoffCompletionTransition(event *bus.Event) (handoffTaskStateChangedData, bool) {
+	data, err := decodeEventData[handoffTaskStateChangedData](event)
+	if err != nil {
+		return handoffTaskStateChangedData{}, false
 	}
-	comment, created, err := s.handoffCompletionComment(ctx, *source, data.NewState)
+	// Report a completion, not a re-observation of an already-terminal task:
+	// a state-change event with no transition (or no previous state) did not
+	// reach the terminal state and must not produce a report or a wake.
+	valid := data.TaskID != "" && taskmodels.IsTerminalTaskState(v1.TaskState(data.NewState)) &&
+		data.OldState != "" && data.OldState != data.NewState
+	return *data, valid
+}
+
+func (s *Service) completeHandoffTaskStateChange(
+	ctx context.Context, data handoffTaskStateChangedData, source *HandoffCompletionSource,
+) error {
+	authorization, err := s.handoffCompletionPolicy(ctx, *source)
 	if err != nil {
 		return err
 	}
-	if created {
-		s.publishCommentCreated(ctx, comment)
+	if !authorization.Report && !authorization.Prompt {
+		return nil
 	}
-	return s.queueHandoffCompletedRun(ctx, *source, comment.ID, handoffCompletionKey(data.TaskID, data.NewState))
+	delivery, err := s.repo.GetTaskBasicInfo(ctx, source.DeliveryTaskID)
+	if err != nil {
+		return fmt.Errorf("read handoff completion task title: %w", err)
+	}
+	if delivery == nil {
+		return fmt.Errorf("handoff delivery task disappeared before completion handling")
+	}
+	source.DeliveryTitle = delivery.Title
+
+	key := handoffCompletionKey(data.TaskID, data.NewState)
+	var comment *models.TaskComment
+	if authorization.Report {
+		comment = handoffCompletionComment(*source, key)
+	}
+	wakePending := authorization.Prompt && source.SourceAssigneeAgentProfileID != ""
+	if comment == nil && !wakePending {
+		return nil
+	}
+	item := handoffCompletionOutbox(*source, key, comment, wakePending)
+	if err := s.repo.EnsureHandoffCompletionOutbox(ctx, item, comment); err != nil {
+		return err
+	}
+	return s.processHandoffCompletionOutbox(ctx, key)
 }
 
-// handoffCompletionSource resolves the stored provenance plus the current
-// delivery state and the originating task's current assignee. A stale
-// transition, a missing provenance, or a non-office origin produces nil.
+// handoffCompletionSource resolves write-once handoff provenance plus the
+// current delivery state and source-task assignee. A stale transition, a
+// missing provenance, or a non-office origin produces nil.
 func (s *Service) handoffCompletionSource(ctx context.Context, taskID, state string) (*HandoffCompletionSource, error) {
 	delivery, err := s.repo.GetTaskExecutionFields(ctx, taskID)
 	if err != nil {
@@ -104,7 +146,7 @@ func (s *Service) handoffCompletionSource(ctx context.Context, taskID, state str
 	if err != nil {
 		return nil, fmt.Errorf("read originating handoff task: %w", err)
 	}
-	if origin == nil || !origin.IsFromOffice || origin.WorkspaceID != source.SourceWorkspaceID || origin.AssigneeAgentProfileID == "" {
+	if origin == nil || !origin.IsFromOffice || origin.WorkspaceID != source.SourceWorkspaceID {
 		return nil, nil
 	}
 	source.SourceAssigneeAgentProfileID = origin.AssigneeAgentProfileID
@@ -131,48 +173,139 @@ func parseHandoffCompletionSource(metadata map[string]interface{}) *HandoffCompl
 }
 
 // handoffCompletionKey is stable across redeliveries of one delivery-task
-// transition, so the report comment and the wake run dedupe onto the same
-// identity instead of posting and waking twice. The key deliberately excludes
-// the current assignee: a redelivery after a reassignment must land on the
-// same run identity and dedupe rather than wake the new assignee again.
+// transition. The durable outbox receipt preserves that identity after run
+// history is pruned.
 func handoffCompletionKey(taskID, state string) string {
 	return RunReasonHandoffCompleted + ":" + taskID + ":" + state
 }
 
-// handoffCompletionComment stores the report once. The deterministic id is
-// the dedup identity: a redelivered event reuses the existing row, and no
-// second comment is posted.
-func (s *Service) handoffCompletionComment(
-	ctx context.Context, source HandoffCompletionSource, state string,
-) (*models.TaskComment, bool, error) {
-	delivery, err := s.repo.GetTaskBasicInfo(ctx, source.DeliveryTaskID)
-	if err != nil {
-		return nil, false, fmt.Errorf("read handoff completion title: %w", err)
-	}
-	if delivery == nil {
-		return nil, false, fmt.Errorf("handoff delivery task disappeared before completion report")
-	}
-	comment := &models.TaskComment{
-		ID:         handoffCompletionKey(source.DeliveryTaskID, state),
+func handoffCompletionComment(source HandoffCompletionSource, key string) *models.TaskComment {
+	return &models.TaskComment{
+		ID:         key,
 		TaskID:     source.SourceTaskID,
 		AuthorType: participantTypeAgent,
+		AuthorID:   source.SourceAgentProfileID,
 		Body: fmt.Sprintf("Handed-off task %q (%s) reached state %s.",
-			delivery.Title, source.DeliveryTaskID, state),
+			source.DeliveryTitle, source.DeliveryTaskID, source.DeliveryState),
 		Source: handoffCompletionCommentSource,
 	}
-	return s.repo.CreateHandoffCompletionComment(ctx, comment)
+}
+
+func handoffCompletionOutbox(
+	source HandoffCompletionSource, key string, comment *models.TaskComment, wakePending bool,
+) *sqlite.HandoffCompletionOutbox {
+	commentID := ""
+	commentEventPending := false
+	if comment != nil {
+		commentID = comment.ID
+		commentEventPending = true
+	}
+	return &sqlite.HandoffCompletionOutbox{
+		CompletionKey: key, CommentID: commentID,
+		SourceTaskID: source.SourceTaskID, SourceWorkspaceID: source.SourceWorkspaceID,
+		SourceSessionID: source.SourceSessionID, SourceAgentProfileID: source.SourceAgentProfileID,
+		SourceAssigneeAgentProfileID: source.SourceAssigneeAgentProfileID,
+		DeliveryTaskID:               source.DeliveryTaskID, DeliveryWorkspaceID: source.DeliveryWorkspaceID,
+		DeliveryTitle: source.DeliveryTitle, DeliveryState: source.DeliveryState,
+		CommentEventPending: commentEventPending, WakePending: wakePending,
+	}
+}
+
+func (s *Service) processHandoffCompletionOutbox(ctx context.Context, completionKey string) error {
+	item, err := s.repo.GetHandoffCompletionOutbox(ctx, completionKey)
+	if err != nil || item == nil {
+		return err
+	}
+	if err := s.repo.TouchHandoffCompletionOutboxAttempt(ctx, completionKey); err != nil {
+		return err
+	}
+	var deliveryErrors []error
+	if item.CommentEventPending {
+		comment, err := s.repo.GetTaskComment(ctx, item.CommentID)
+		if err != nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("read handoff completion report: %w", err))
+		} else if comment == nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("handoff completion outbox has no report comment %q", item.CommentID))
+		} else if err := s.publishCommentCreated(ctx, comment); err != nil {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("publish handoff completion report: %w", err))
+		} else if err := s.repo.MarkHandoffCompletionCommentEventPublished(ctx, completionKey); err != nil {
+			deliveryErrors = append(deliveryErrors, err)
+		}
+	}
+	if item.WakePending {
+		if err := s.replayHandoffCompletionWake(ctx, item); err != nil {
+			deliveryErrors = append(deliveryErrors, err)
+		}
+	}
+	return errors.Join(deliveryErrors...)
+}
+
+func (s *Service) replayHandoffCompletionWake(ctx context.Context, item *sqlite.HandoffCompletionOutbox) error {
+	if s.handoffCompletionPolicy == nil {
+		return s.repo.MarkHandoffCompletionWakeResolved(ctx, item.CompletionKey)
+	}
+	source, err := s.handoffCompletionSource(ctx, item.DeliveryTaskID, item.DeliveryState)
+	if err != nil {
+		return err
+	}
+	if source == nil || source.SourceTaskID != item.SourceTaskID ||
+		source.SourceWorkspaceID != item.SourceWorkspaceID || source.SourceSessionID != item.SourceSessionID ||
+		source.SourceAgentProfileID != item.SourceAgentProfileID ||
+		source.SourceAssigneeAgentProfileID != item.SourceAssigneeAgentProfileID {
+		return s.repo.MarkHandoffCompletionWakeResolved(ctx, item.CompletionKey)
+	}
+	authorization, err := s.handoffCompletionPolicy(ctx, *source)
+	if err != nil {
+		return err
+	}
+	if !authorization.Prompt {
+		return s.repo.MarkHandoffCompletionWakeResolved(ctx, item.CompletionKey)
+	}
+	// Preserve the title and report captured at completion even if the delivery
+	// task's editable title changes before a paused wake can be replayed.
+	source.DeliveryTitle = item.DeliveryTitle
+	commentID := item.CommentID
+	if err := s.queueHandoffCompletedRun(ctx, *source, commentID, item.CompletionKey); err != nil {
+		return err
+	}
+	return s.repo.MarkHandoffCompletionWakeResolved(ctx, item.CompletionKey)
+}
+
+// ReplayPendingHandoffCompletionOutbox retries reports and source-task wakes
+// after a transient failure or a process restart. Completed rows remain as
+// durable idempotency receipts after run retention.
+func (s *Service) ReplayPendingHandoffCompletionOutbox(ctx context.Context) error {
+	const batchSize = 5
+	items, err := s.repo.ListPendingHandoffCompletionOutbox(ctx, batchSize)
+	if err != nil {
+		return err
+	}
+	var replayErrors []error
+	for _, item := range items {
+		if err := s.processHandoffCompletionOutbox(ctx, item.CompletionKey); err != nil {
+			replayErrors = append(replayErrors, fmt.Errorf("replay handoff completion %s: %w", item.CompletionKey, err))
+		}
+	}
+	return errors.Join(replayErrors...)
 }
 
 func (s *Service) queueHandoffCompletedRun(
 	ctx context.Context, source HandoffCompletionSource, commentID, key string,
 ) error {
-	payload := mustJSON(map[string]string{"task_id": source.SourceTaskID, "comment_id": commentID})
-	if err := s.QueueRunFromTaskBoundary(ctx, source.SourceAssigneeAgentProfileID, RunReasonHandoffCompleted, payload, key, source.SourceTaskID); err != nil {
-		var paused *pausedQueueError
-		if errors.As(err, &paused) && paused.pause != nil {
-			s.RecordDeferredAssignment(ctx, source.SourceTaskID, paused.pause.ID)
-			return nil
-		}
+	if source.SourceAssigneeAgentProfileID == "" {
+		return nil
+	}
+	payload := map[string]string{
+		"task_id":          source.SourceTaskID,
+		"delivery_task_id": source.DeliveryTaskID,
+		"delivery_title":   source.DeliveryTitle,
+		"delivery_state":   source.DeliveryState,
+	}
+	if commentID != "" {
+		payload["comment_id"] = commentID
+	}
+	if err := s.QueueRunFromTaskBoundary(ctx, source.SourceAssigneeAgentProfileID,
+		RunReasonHandoffCompleted, mustJSON(payload), key, source.SourceTaskID); err != nil {
 		return fmt.Errorf("queue handoff completion wake: %w", err)
 	}
 	return nil

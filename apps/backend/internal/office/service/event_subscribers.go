@@ -1577,6 +1577,9 @@ func (s *Service) handleCommentCreated(ctx context.Context, event *bus.Event) er
 			zap.String("comment_id", data.CommentID), zap.Error(err))
 		return nil
 	}
+	if comment.Source == handoffCompletionCommentSource {
+		return nil
+	}
 	if err := s.relay.RelayComment(ctx, comment); err != nil {
 		s.logger.Error("relay comment failed",
 			zap.String("comment_id", data.CommentID), zap.Error(err))
