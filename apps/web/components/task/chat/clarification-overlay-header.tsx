@@ -15,6 +15,7 @@ import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip"
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import type { ReactNode } from "react";
 import { ClarificationStepper } from "./clarification-overlay-parts";
 
 function clarificationHeaderClassName(total: number): string {
@@ -37,6 +38,8 @@ type ClarificationOverlayTopBarProps = {
   allAnswered: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  attachmentActions?: ReactNode;
+  showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
@@ -61,6 +64,8 @@ export function ClarificationOverlayTopBar({
   allAnswered,
   onSubmit,
   onSkip,
+  attachmentActions,
+  showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
   onCollapse,
@@ -107,6 +112,8 @@ export function ClarificationOverlayTopBar({
         canExpandPanel={canExpandPanel}
         canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
+        attachmentActions={attachmentActions}
+        showSingleQuestionSubmit={showSingleQuestionSubmit}
       />
     </div>
   );
@@ -118,6 +125,8 @@ type ClarificationHeaderActionsProps = {
   isSubmitting: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  attachmentActions?: ReactNode;
+  showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
@@ -169,6 +178,8 @@ export function ClarificationHeaderActions({
   isSubmitting,
   onSubmit,
   onSkip,
+  attachmentActions,
+  showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
   onCollapse,
@@ -182,6 +193,7 @@ export function ClarificationHeaderActions({
   if (lateMode) {
     return (
       <div className="flex shrink-0 items-center justify-end gap-2">
+        {attachmentActions}
         <Button
           type="button"
           variant="ghost"
@@ -242,7 +254,8 @@ export function ClarificationHeaderActions({
           </Button>
         </>
       )}
-      {total > 1 && (
+      {attachmentActions}
+      {(total > 1 || showSingleQuestionSubmit) && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
           description={t("task:submitAnswers")}

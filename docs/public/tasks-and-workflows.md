@@ -710,9 +710,10 @@ output.
 ### Prevent auto-start on open
 
 Under **Settings → Preferences → Task Behavior**, the **Prevent auto-start on open**
-preference is off by default. When enabled, opening a task never launches or
-resumes its agent on its own; it shows the **Start agent** button instead. The
-preference applies in two situations:
+preference is off by default. When enabled in the web app, opening or refocusing
+a task never launches or resumes its agent on its own; it shows the **Start
+agent** button or the composer start hint instead. The preference applies in
+three situations:
 
 - **Opening a task in the final step of its workflow.** The task opens with a
   prepared session and the agent stays stopped until you select **Start agent**.
@@ -722,6 +723,12 @@ preference applies in two situations:
   preference is off, opening the task can resume its existing conversation.
   When it is on, the agent stays stopped until you select **Start agent** or
   send a message. The previous prompt is not replayed.
+- **Opening or refocusing a session paused by the workspace ACP idle policy.**
+  When this preference is on, the session stays suspended and the composer
+  shows the start hint. Sending a message resumes the same conversation once.
+  With the preference off, opening or refocusing the task resumes the session.
+  A completed session keeps its terminal recovery actions instead of the
+  composer hint.
 
 Separately, after a backend restart Kandev runs a bounded background pass over
 eligible interrupted sessions. It does not wait for you to open or focus each
@@ -737,9 +744,10 @@ owner keeps its existing control of the task. An earlier visit to the same step
 does not consume a newly accepted entry, and a prompt already accepted for the
 current entry is not replayed.
 
-The preference only gates opening a task. Choosing **Start agent** (or a
-workflow step transition) always starts the agent as usual, and a failed or
-interrupted session still shows its recovery actions.
+The preference only gates passive opening and focus recovery in the web app.
+Choosing **Start agent** (or a workflow step transition) always starts the
+agent as usual, and a failed or interrupted session still shows its recovery
+actions. Other clients and direct API calls do not enforce this web preference.
 
 An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the

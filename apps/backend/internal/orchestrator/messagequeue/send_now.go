@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/entityrefs"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/messageconstraints"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -136,6 +137,9 @@ func ValidateSendNowEntries(entries []QueuedMessage) error {
 	seenReferences := make(map[string]struct{})
 	referenceCount := 0
 	for _, entry := range entries {
+		if _, err := builtinintent.FromMetadata(entry.Metadata); err != nil {
+			return err
+		}
 		attachmentCount += len(entry.Attachments)
 		if attachmentCount > messageconstraints.MaxAttachmentCount {
 			return fmt.Errorf("%w: at most %d attachments are allowed", ErrSendNowAttachmentOverflow, messageconstraints.MaxAttachmentCount)
@@ -254,6 +258,15 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 
 	oldest := entries[0]
 	metadata := copyMessageMetadata(oldest.Metadata, 2)
+	for _, entry := range entries {
+		intent, err := builtinintent.FromMetadata(entry.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		if intent != "" {
+			metadata[builtinintent.MetadataKey] = string(intent)
+		}
+	}
 	// A source-level transcript receipt applies only to that source payload.
 	// The combined Send Now envelope gets its own deterministic receipt after
 	// every selected source has been claimed.

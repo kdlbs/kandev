@@ -168,6 +168,7 @@ test("keeps required answers reachable above a short mobile viewport", async ({
       79,
     );
     await answer.tap();
+    await question.getByTestId("clarification-custom-submit").tap();
     await expect(question).toHaveCount(0);
     await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
     await expect(testPage.getByTestId("session-chat")).toHaveCount(1);

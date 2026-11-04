@@ -420,6 +420,17 @@ func (m *Manager) Start(ctx context.Context) error {
 			// before any stream or prompt admission can observe this execution.
 			// A failed evidence read uses the same guarded stop path as every
 			// other unreconstructable recovery outcome.
+			if err := m.restoreBuiltinExecution(recoveryCtx, execution); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: built-in MCP binding could not be verified",
+					zap.String("instance_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
+				setCandidateOutcome(ri.SessionID, "builtin_mcp")
+				m.dispatchUnreconstructableStop(&stopWG, ri)
+				// Only the outer recovery error confirms a persisted refusal.
+				if _, blocked := err.(*BuiltinMCPRecoveryError); blocked {
+					progress.resolveAfterStop(ri.SessionID)
+				}
+				continue
+			}
 			if err := m.restoreRecoveredDelivery(recoveryCtx, execution, ri); err != nil {
 				m.logger.Error("refusing to re-track recovered execution: durable delivery identity could not be reconstructed",
 					zap.String("instance_id", execution.ID),

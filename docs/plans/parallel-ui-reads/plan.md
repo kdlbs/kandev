@@ -73,6 +73,10 @@ changed-file Go lint, and a fresh production-build replay of 45 desktop and
 phone E2E tests with one worker, two CPUs, and no retries. Task 02 records the
 resume repair. Hosted checks and review state are tracked on PR #5040.
 
+The merge with `a1013e89` passed 189 targeted Vitest tests across 17 files.
+Executor tests, settlement guards, typecheck, and scoped lint passed. A fresh
+production build passed all 45 E2E tests without retries.
+
 ## Risks
 
 Concurrency must not weaken stale-response guards or reorder saved tabs.

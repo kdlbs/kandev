@@ -1,3 +1,5 @@
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { test, expect } from "../../fixtures/test-base";
 import {
   activeTaskSessionId,
@@ -27,14 +29,22 @@ test.describe.serial("Cancel turn availability", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+    const releaseMarker = path.join(backend.tmpDir, `cancel-availability-${randomUUID()}`);
     const { session } = await seedRunningGeneratingSession(
       testPage,
       apiClient,
       seedData,
       "Direct input cancellation availability",
+      {
+        predecessorPrompt: `e2e:message("Steerable cancellation ready")\ne2e:await_file(${JSON.stringify(releaseMarker)})`,
+      },
     );
+    await expect(
+      session.activeChat().getByText("Steerable cancellation ready", { exact: true }),
+    ).toBeVisible();
 
     await waitForActiveSessionSupportsSteering(testPage);
     await expect(session.activeChat().getByTestId("cancel-agent-button")).toBeVisible();

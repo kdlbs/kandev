@@ -25,15 +25,16 @@ import (
 // This allows users of the adapter package to access these types without
 // importing the types package directly.
 type (
-	PermissionRequest  = types.PermissionRequest
-	PermissionResponse = types.PermissionResponse
-	PermissionOption   = streams.PermissionOption
-	PermissionHandler  = types.PermissionHandler
-	UserInputOption    = types.UserInputOption
-	UserInputQuestion  = types.UserInputQuestion
-	UserInputRequest   = types.UserInputRequest
-	UserInputAnswer    = types.UserInputAnswer
-	UserInputResponse  = types.UserInputResponse
+	PermissionRequest   = types.PermissionRequest
+	PermissionResponse  = types.PermissionResponse
+	PermissionOption    = streams.PermissionOption
+	PermissionHandler   = types.PermissionHandler
+	UserInputOption     = types.UserInputOption
+	UserInputQuestion   = types.UserInputQuestion
+	UserInputRequest    = types.UserInputRequest
+	UserInputAnswer     = types.UserInputAnswer
+	UserInputAttachment = types.UserInputAttachment
+	UserInputResponse   = types.UserInputResponse
 )
 
 // UserInputRequestHandler creates a clarification request and waits for its
