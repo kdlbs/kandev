@@ -36,6 +36,7 @@ func WithMCPExecutionContext(ctx context.Context, execution MCPExecutionContext)
 	if execution.CoordinatorToolPolicy != nil {
 		policy := *execution.CoordinatorToolPolicy
 		policy.ToolNames = append([]string(nil), execution.CoordinatorToolPolicy.ToolNames...)
+		policy.PluginTools = append([]mcpprofile.CoordinatorPluginTool(nil), execution.CoordinatorToolPolicy.PluginTools...)
 		execution.CoordinatorToolPolicy = &policy
 	}
 	execution.BuiltinAuthority = execution.BuiltinAuthority.Clone()
