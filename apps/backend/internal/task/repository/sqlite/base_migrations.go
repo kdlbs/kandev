@@ -749,8 +749,6 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
 			ON task_message_send_operations(created_at)`)
 
-	_ = r.migrate.Apply("task_message_send_operations.requested_question_id", `ALTER TABLE task_message_send_operations ADD COLUMN requested_question_id TEXT NOT NULL DEFAULT ''`)
-
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
