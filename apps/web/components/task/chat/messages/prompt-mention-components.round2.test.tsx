@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { PromptMentionChip, splitMarkdownPromptMentionSegments } from "./prompt-mention-components";
@@ -19,6 +19,7 @@ const EMPTY_PROMPT_STATE = {
 };
 const PROMPT_MENTION_TEST_ID = "custom-prompt-mention";
 const PROMPT_MENTION_LABEL_TEST_ID = "custom-prompt-mention-label";
+const EXPANDED_ATTRIBUTE = "aria-expanded";
 
 const touchState = vi.hoisted(() => ({ enabled: false }));
 
@@ -120,6 +121,62 @@ describe("splitMarkdownPromptMentionSegments round-two boundaries", () => {
     expect(splitMarkdownPromptMentionSegments(content, promptNames)).toEqual([
       { kind: "text", value: content },
     ]);
+  });
+});
+
+describe("PromptMentionChip dismissal", () => {
+  it.each(["click", "keyboard"])("keeps a quick %s toggle closed past the hover delay", (input) => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <StateProvider initialState={INITIAL_PROMPT_STATE}>
+          <PromptMentionChip name={PROMPT.name} value="@daily" />
+        </StateProvider>,
+      );
+      const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+      fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+      const toggle = () => {
+        if (input === "click") fireEvent.click(chip);
+        else fireEvent.keyDown(chip, { key: "Enter" });
+      };
+      toggle();
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+      toggle();
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      act(() => vi.advanceTimersByTime(500));
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      toggle();
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps Escape dismissal after a click ahead of the hover delay", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <StateProvider initialState={INITIAL_PROMPT_STATE}>
+          <PromptMentionChip name={PROMPT.name} value="@daily" />
+        </StateProvider>,
+      );
+      const chip = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+      fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+      fireEvent.click(chip);
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      act(() => vi.advanceTimersByTime(500));
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      fireEvent.pointerLeave(chip, { pointerType: "mouse" });
+      fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+      act(() => vi.advanceTimersByTime(500));
+      expect(chip.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 });
 

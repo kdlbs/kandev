@@ -227,7 +227,7 @@ function SplitNavigationRegion({
         if (
           !collapsed &&
           !expanded &&
-          clip.current &&
+          clip.current?.contains(event.target as Node) &&
           (event.target as HTMLElement).getBoundingClientRect().bottom >
             clip.current.getBoundingClientRect().bottom
         )

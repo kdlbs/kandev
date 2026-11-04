@@ -126,3 +126,22 @@ containing both fixture files before asserting row visibility with the default
 timeout. Typecheck, ESLint and both final browser scenarios passed again. Fresh
 desktop and phone captures were inspected after the production correction;
 the live PR screenshot section is refreshed during publication.
+
+
+## CI follow-up checkpoint
+
+PR #4534 validates a narrow input-cancellation ordering correction in the
+existing work order. The real pending anchor restoration must be cancelled
+before explicit manual input authorizes marking. Three controlled input
+regressions fail before implementation. Preserve the non-scroll interaction
+gates and require fresh focused and desktop/phone validation. The original CI
+first-scroll cause remains unproven; do not treat this correction as complete
+transport or browser-timing attribution.
+
+
+Follow-up validation: all 52 focused unit cases, full typecheck, changed-file
+lint, documentation validators, and three desktop plus three phone browser
+repetitions pass after rebuilding web assets. Independent read-only review
+confirms the real-hook regression and narrow ordering correction. The original
+CI trace does not expose saved restoration state, so its precise cause remains
+unconfirmed. Fresh exact-head CI is required after publication.

@@ -249,7 +249,21 @@ func newRemoteDockerRecoveryClient(
 	token string,
 ) *agentctl.Client {
 	return agentctl.NewClient(host, port, r.logger,
-		agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithExecutionID(remoteDockerAgentctlInstanceID(req)),
+		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+}
+
+// remoteDockerAgentctlInstanceID is the actual agentctl instance inside the
+// retained container. It is persisted separately from the backend execution
+// ID because live adoption can retain an older remote identity.
+func remoteDockerAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	if req == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyRemoteDockerAgentctlInstanceID)); id != "" {
+		return id
+	}
+	return req.InstanceID
 }
 
 func buildRemoteDockerRecoveredInstance(
@@ -264,10 +278,13 @@ func buildRemoteDockerRecoveredInstance(
 	if workspacePath == "" {
 		workspacePath = getMetadataString(req.Metadata, MetadataKeyOriginalWorkspacePath)
 	}
+	metadata := cloneKubernetesMetadata(req.Metadata)
+	metadata[MetadataKeyRemoteDockerAgentctlInstanceID] = info.ID
 	return &ExecutorInstance{
 		InstanceID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RuntimeName: r.Name(), Client: client, ContainerID: containerID, WorkspacePath: workspacePath,
-		Metadata: cloneKubernetesMetadata(req.Metadata), Env: cloneStringMap(info.Env),
+		ReusedWorkspace: true,
+		Metadata:        metadata, Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
 	}
@@ -313,12 +330,13 @@ func recoverRemoteDockerControlInstance(
 		}
 	}
 	control.SetAuthToken(token)
-	info, err := control.GetInstance(ctx, req.InstanceID)
+	agentctlID := remoteDockerAgentctlInstanceID(req)
+	info, err := control.GetInstance(ctx, agentctlID)
 	if err != nil && isAgentctlAuthError(err) && req.BootstrapNonce != "" && token == req.AuthToken {
 		token, err = control.Handshake(ctx, req.BootstrapNonce)
 		if err == nil {
 			control.SetAuthToken(token)
-			info, err = control.GetInstance(ctx, req.InstanceID)
+			info, err = control.GetInstance(ctx, agentctlID)
 		}
 	}
 	if errors.Is(err, agentctl.ErrInstanceNotFound) {
@@ -344,7 +362,7 @@ func refreshRemoteDockerRecoveryToken(
 		return "", nil, err
 	}
 	control.SetAuthToken(token)
-	info, err := control.GetInstance(ctx, req.InstanceID)
+	info, err := control.GetInstance(ctx, remoteDockerAgentctlInstanceID(req))
 	if err != nil {
 		return "", nil, err
 	}
@@ -359,7 +377,8 @@ func sameRemoteDockerInstance(
 	record *models.ExecutorRunning,
 	req *ExecutorCreateRequest,
 ) bool {
-	return info != nil && info.ID == req.InstanceID && info.SessionID == record.SessionID && info.TaskID == record.TaskID
+	return info != nil && info.ID == remoteDockerAgentctlInstanceID(req) &&
+		info.SessionID == record.SessionID && info.TaskID == record.TaskID
 }
 
 func (r *RemoteDockerExecutor) trackRecoveredRemoteDocker(

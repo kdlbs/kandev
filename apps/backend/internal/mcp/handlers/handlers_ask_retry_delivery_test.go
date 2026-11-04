@@ -32,6 +32,22 @@ func (b *retryClaimBarrier) CompleteActiveClarificationBundle(ctx context.Contex
 	return messages, claimed, err
 }
 
+func (b *retryClaimBarrier) CompleteActiveClarificationBundleWithAttachments(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	claims []models.ClarificationAttachmentClaim,
+) ([]*models.Message, bool, error) {
+	messages, claimed, err := b.svcMessageUpdater.CompleteActiveClarificationBundleWithAttachments(
+		ctx, pendingID, status, responses, claims,
+	)
+	if claimed && err == nil {
+		close(b.committed)
+		<-b.release
+	}
+	return messages, claimed, err
+}
+
 func (b *retryClaimBarrier) FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, status string, messages []*models.Message) ([]*models.Message, bool, error) {
 	if b.finalizeErr != nil {
 		return nil, false, b.finalizeErr

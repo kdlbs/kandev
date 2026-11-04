@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { closeQuickTerminalTab } from "./terminal-test-helpers";
 
 async function readQuickTerminalBuffer(page: Page): Promise<string> {
@@ -223,6 +224,7 @@ test.describe("mobile quick terminal tabs", () => {
       await menuButton.tap();
       await expect(terminalButton).toBeVisible();
       await expect(quickChatButton).toBeVisible();
+      await waitForFiniteAnimations(testPage.getByTestId("app-nav-sheet"));
       for (const button of [terminalButton, quickChatButton]) {
         const buttonBox = await button.boundingBox();
         expect(buttonBox).not.toBeNull();

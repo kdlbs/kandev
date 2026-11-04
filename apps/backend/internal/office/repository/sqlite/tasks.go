@@ -137,52 +137,6 @@ func (r *Repository) GetTaskProjectID(ctx context.Context, taskID string) (strin
 	return projectID, err
 }
 
-// UpdateTaskState updates the state column on a task (e.g. "IN_PROGRESS", "COMPLETED").
-func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`), state, taskID)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("task not found: %s", taskID)
-	}
-	return nil
-}
-
-// UpdateTaskStateIfWorkflowStep updates a task only when its workflow step
-// still matches the value read by the caller. This closes the validation-to-
-// write window for status gates that depend on the current workflow step.
-func (r *Repository) UpdateTaskStateIfWorkflowStep(
-	ctx context.Context, taskID, expectedStepID, state string,
-) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks
-		SET state = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
-	`), state, taskID, expectedStepID)
-	if err != nil {
-		return false, err
-	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		return true, nil
-	}
-
-	var exists int
-	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT 1 FROM tasks WHERE id = ?
-	`), taskID).Scan(&exists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("task not found: %s", taskID)
-		}
-		return false, err
-	}
-	return false, nil
-}
-
 // UpdateTaskAssignee writes (or clears) the per-task runner participant
 // row for a task. ADR 0005 Wave F replaced the legacy
 // tasks.assignee_agent_profile_id column with a 'runner' row in
@@ -1158,6 +1112,18 @@ func (r *Repository) ListUnstartedTasks(
 	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
+	driver := r.ro.DriverName()
+	// The lookback placeholder is cast to INTEGER so Postgres does not infer
+	// it as text from the || concatenation (pgx then refuses to encode the
+	// int argument), and the run payload lookup goes through the dialect
+	// helper because json_extract does not exist on Postgres (#4741).
+	// created_at is a naive TIMESTAMP holding UTC; on Postgres it is pinned to
+	// UTC before comparing with NOW() so a non-UTC session time zone does not
+	// shift the window. SQLite keeps its existing comparison.
+	createdAt := "t.created_at"
+	if dialect.IsPostgres(driver) {
+		createdAt = dialect.NaiveUTCTimestampOf(driver, createdAt)
+	}
 	query := `
 		SELECT t.id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
@@ -1167,10 +1133,10 @@ func (r *Repository) ListUnstartedTasks(
 		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
 		  AND ` + RunnerProjection("t") + ` != ''
 		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
-		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
+		  AND ` + createdAt + ` >= ` + dialect.NowMinusHours(driver, "CAST(? AS INTEGER)") + `
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = t.id
+		      WHERE ` + dialect.JSONExtract(driver, "w.payload", "task_id") + ` = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
 	`

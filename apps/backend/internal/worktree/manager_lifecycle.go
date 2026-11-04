@@ -141,6 +141,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		return wt, err
 	}
+	if wt, handled, err := m.tryReuseRetainedTaskCheckout(ctx, req); handled {
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+			if err == nil {
+				err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+			}
+		}
+		return wt, err
+	}
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
 		return nil, err
 	}
@@ -2411,6 +2420,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		m.mu.Lock()
 		m.worktrees[cacheKey(req.SessionID, req.RepositoryID, existing.BranchSlug)] = existing
 		m.mu.Unlock()
+	}
+
+	if req.OnWorktreeCreated != nil {
+		req.OnWorktreeCreated(existing)
 	}
 
 	m.logger.Info("recreated worktree",

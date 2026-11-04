@@ -64,6 +64,16 @@ var ErrRepoNotResolvable = errors.New("github: repository not resolvable")
 // callers translate this into a 400 rather than a generic 500.
 var ErrTaskPRNotLinked = errors.New("PR is not linked to this task")
 
+// ErrPRWatchNotFound reports that a watch lifetime is no longer available.
+var ErrPRWatchNotFound = errors.New("GitHub PR watch not found")
+
+// ErrPRWatchRetired prevents automatic watch admission from undoing an
+// explicit retirement.
+var ErrPRWatchRetired = errors.New("GitHub PR watch target is retired")
+
+// ErrPRWatchTargetIneligible reports a retired target that cannot be resumed.
+var ErrPRWatchTargetIneligible = errors.New("GitHub PR watch target is not eligible for resumption")
+
 // errStoreUnavailable is returned from service methods when no Store is
 // wired (Provide can return a Service with store == nil when the SQLite
 // repos aren't configured). Returning a typed error instead of nil-

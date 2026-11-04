@@ -285,7 +285,7 @@ func (s *Service) startSilentRestoreCandidate(
 		CandidateExecutionID: checkpoint.CandidateExecutionID,
 		OnExecutionAllocated: callback,
 	}
-	commitWhenReady := func(readyCtx context.Context, _ *resumeAttempt, execution *executor.TaskExecution) error {
+	commitWhenReady := func(readyCtx context.Context, startup *resumeAttempt, execution *executor.TaskExecution) error {
 		if execution == nil || execution.AgentExecutionID != checkpoint.CandidateExecutionID {
 			return errors.New("silent restart recovery resumed a different execution")
 		}
@@ -293,9 +293,15 @@ func (s *Service) startSilentRestoreCandidate(
 		if getErr != nil {
 			return getErr
 		}
-		return s.finishLaunchedSilentRestoreCandidateLocked(
+		if err := s.finishLaunchedSilentRestoreCandidateLocked(
 			readyCtx, store, attemptID, checkpoint, inputs, running,
-		)
+		); err != nil {
+			return err
+		}
+		if !s.resumeAttemptStore().markPromptReady(startup) {
+			return ErrResumeAttemptCancelled
+		}
+		return nil
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
 	ownedResumeCtx = context.WithValue(ownedResumeCtx, silentRestoreStartupContextKey{}, true)
@@ -454,7 +460,8 @@ func (s *Service) proveSilentRestoreSourceDead(
 		state = prober.RowLiveness(running)
 	}
 	dead, err := silentRestoreSourceIsProvenDead(
-		running, recovery, state, processidentity.OwnedSessionTerminated,
+		running, recovery, state,
+		processidentity.OriginalOwnerTerminated, processidentity.OwnedGroupTerminated,
 	)
 	if err != nil {
 		return err
@@ -469,7 +476,8 @@ func silentRestoreSourceIsProvenDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 	liveness models.ProcessLiveness,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if err := validateSilentRestoreSourceIdentity(running, recovery); err != nil {
 		return false, err
@@ -478,12 +486,38 @@ func silentRestoreSourceIsProvenDead(
 	case models.ProcessLivenessDead:
 		return true, nil
 	case models.ProcessLivenessAlive:
-		return false, errors.New("source execution is still alive")
+		return proveLiveStandaloneSilentRestoreSource(running, recovery, agentGroupTerminated)
 	case models.ProcessLivenessUnknown:
-		return proveUnknownStandaloneSilentRestoreSource(running, recovery, ownedSessionTerminated)
+		return proveUnknownStandaloneSilentRestoreSource(running, recovery, originalOwnerTerminated)
 	default:
 		return false, errors.New("source execution liveness is not proven")
 	}
+}
+
+func proveLiveStandaloneSilentRestoreSource(
+	running *models.ExecutorRunning,
+	recovery models.AgentDeliveryRecovery,
+	agentGroupTerminated func(processidentity.Identity) (bool, error),
+) (bool, error) {
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		return false, errors.New("live source execution cannot use local process-group proof")
+	}
+	identity := recovery.OriginalRuntime
+	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID ||
+		identity.AgentGroupID <= 1 || identity.AgentBirthToken == "" || agentGroupTerminated == nil {
+		return false, processidentity.ErrUnverifiableIdentity
+	}
+	group := processidentity.Identity{
+		PID: identity.AgentGroupID, GroupID: identity.AgentGroupID, BirthToken: identity.AgentBirthToken,
+	}
+	terminated, err := agentGroupTerminated(group)
+	if err != nil {
+		return false, err
+	}
+	if !terminated {
+		return false, errors.New("source agent process group is not terminated")
+	}
+	return true, nil
 }
 
 func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recovery models.AgentDeliveryRecovery) error {
@@ -497,7 +531,7 @@ func validateSilentRestoreSourceIdentity(running *models.ExecutorRunning, recove
 func proveUnknownStandaloneSilentRestoreSource(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
-	ownedSessionTerminated func(processidentity.Identity) (bool, error),
+	originalOwnerTerminated func(processidentity.Identity) (bool, error),
 ) (bool, error) {
 	if running.Runtime != runtimekind.RuntimeStandalone {
 		return false, errors.New("remote source execution cannot use local process proof")
@@ -506,10 +540,10 @@ func proveUnknownStandaloneSilentRestoreSource(
 	if identity.Validate() != nil || identity.GroupID != identity.PID || identity.SessionID != identity.PID {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	if ownedSessionTerminated == nil {
+	if originalOwnerTerminated == nil {
 		return false, processidentity.ErrUnverifiableIdentity
 	}
-	terminated, err := ownedSessionTerminated(identity)
+	terminated, err := originalOwnerTerminated(identity)
 	if err != nil {
 		return false, err
 	}

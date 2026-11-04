@@ -349,6 +349,8 @@ func respondRoutingValidation(c *gin.Context, err error) {
 // Clients can translate or handle these codes without matching backend text.
 func agentValidationErrorCode(err error) string {
 	switch {
+	case errors.Is(err, ErrAgentNameAlreadyExists):
+		return "agent_name_already_exists"
 	case errors.Is(err, ErrAgentCEOReportsTo):
 		return "agent_ceo_reports_to"
 	case errors.Is(err, ErrAgentReportsToInvalid):

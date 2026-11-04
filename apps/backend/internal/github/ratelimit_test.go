@@ -122,6 +122,23 @@ func TestParseRateHeaders_NoHeadersReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestParseRateHeaders_ResetWithoutRemainingDoesNotClaimObservedRemainder(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("X-RateLimit-Reset", "2000000000")
+	snap, ok := parseRateHeadersAt(resp, ResourceCore, time.Unix(1999999900, 0).UTC())
+	if !ok {
+		t.Fatal("expected reset-only snapshot")
+	}
+	if snap.RemainingObserved {
+		t.Fatal("reset-only response incorrectly marked remaining as observed")
+	}
+	tracker := NewRateTracker(nil, nil)
+	tracker.Record(snap)
+	if tracker.IsExhausted(ResourceCore) {
+		t.Fatal("reset-only response incorrectly marked bucket exhausted")
+	}
+}
+
 func TestRateTracker_RecordEmitsAndTracksExhaustion(t *testing.T) {
 	log := newTestTrackerLogger(t)
 	cb := newCaptureBus(t, events.GitHubRateLimitUpdated)

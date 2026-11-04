@@ -7,6 +7,7 @@ const TOTAL_BYTES = 8 * 1024 * 1024;
 const METADATA_BYTES = 64 * 1024;
 // Playwright retains both outputPath originals and attachment copies. Budget for both.
 const LOG_BYTES = Math.floor((TOTAL_BYTES - METADATA_BYTES) / 6);
+type LogSource = string | ((byteLimit: number) => string);
 
 type Capture = {
   name: string;
@@ -38,28 +39,40 @@ function redactLog(text: string): string {
     .join("\n");
 }
 
-async function attachLog(testInfo: TestInfo, source: string, capture: Capture): Promise<void> {
+function discardFirstLine(text: string): string {
+  const newline = text.indexOf("\n");
+  return newline === -1 ? "" : text.slice(newline + 1);
+}
+
+async function attachLog(testInfo: TestInfo, source: LogSource, capture: Capture): Promise<void> {
   let fd: number | undefined;
   try {
-    fd = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile()) throw new Error("not a regular log file");
-    const bytes = Math.min(stat.size, LOG_BYTES);
-    const offset = stat.size - bytes;
-    const buffer = Buffer.alloc(bytes);
-    const read = fs.readSync(fd, buffer, 0, bytes, offset);
-    let text = buffer.subarray(0, read).toString("utf8");
-    // A tail can split a credential from its marker. Discard the partial first line.
-    if (offset > 0) {
-      const newline = text.indexOf("\n");
-      text = newline === -1 ? "" : text.slice(newline + 1);
+    let text: string;
+    if (typeof source === "function") {
+      const buffer = Buffer.from(source(LOG_BYTES));
+      if (buffer.length > LOG_BYTES) throw new Error("remote log exceeds byte limit");
+      capture.readBytes = buffer.length;
+      // Remote tails have no trusted host stat. Discard a potentially partial credential line.
+      capture.truncated = buffer.length > 0;
+      text = discardFirstLine(buffer.toString("utf8"));
+    } else {
+      fd = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile()) throw new Error("not a regular log file");
+      const bytes = Math.min(stat.size, LOG_BYTES);
+      const offset = stat.size - bytes;
+      const buffer = Buffer.alloc(bytes);
+      const read = fs.readSync(fd, buffer, 0, bytes, offset);
+      text = buffer.subarray(0, read).toString("utf8");
+      if (offset > 0) text = discardFirstLine(text);
+      capture.originalBytes = stat.size;
+      capture.readBytes = read;
+      capture.truncated = offset > 0;
     }
     const body = Buffer.from(redactLog(text));
-    capture.originalBytes = stat.size;
-    capture.readBytes = read;
     const retained = body.subarray(Math.max(0, body.length - LOG_BYTES));
     capture.attachedBytes = retained.length;
-    capture.truncated = offset > 0 || body.length > LOG_BYTES;
+    capture.truncated ||= body.length > LOG_BYTES;
     const output = testInfo.outputPath(capture.name);
     fs.writeFileSync(output, retained);
     await testInfo.attach(capture.name, { path: output, contentType: "text/plain" });
@@ -80,7 +93,7 @@ async function attachLog(testInfo: TestInfo, source: string, capture: Capture): 
 export async function captureSSHInterruptionLogs(
   testInfo: TestInfo,
   backend: Pick<BackendContext, "logPath" | "tmpDir">,
-  remoteLog?: string,
+  remoteLog?: LogSource,
 ): Promise<void> {
   if (
     testInfo.status === testInfo.expectedStatus ||

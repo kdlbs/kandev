@@ -46,13 +46,22 @@ func (s *Service) createTransientRetryStatusMessageLocked(
 		return
 	}
 	policy := transientRetryPolicy{}
+	confirmed := false
+	var failureCode routingerr.Code
 	if value, ok := s.transientRetries.Load(data.SessionID); ok {
 		if entry, ok := value.(*transientRetryEntry); ok {
 			entry.mu.Lock()
 			policy = entry.policy
 			data.RecoveryAttemptsStarted = entry.started
+			confirmed = continuationActivityConfirmedLocked(entry)
+			failureCode = entry.failureCode
 			entry.mu.Unlock()
 		}
+	}
+	if confirmed {
+		content, meta := continuationActivityStatusMessage(data, failureCode, attempt, policy)
+		_ = s.writeTransientRetryStatusMessageLocked(ctx, data, content, meta)
+		return
 	}
 	content, meta := transientRetryStatusMessage(data, classified, attempt, delay, retryAt)
 	if !policy.windowEndsAt.IsZero() {
@@ -60,11 +69,19 @@ func (s *Service) createTransientRetryStatusMessageLocked(
 		meta["retry_window_ends_at"] = policy.windowEndsAt.UTC().Format(time.RFC3339Nano)
 		content = fmt.Sprintf("%s. Retrying in %ds (attempt %d/%d)", transientFailureLabel(classified), int(delay.Seconds()), attempt, policy.maxAttempts())
 	}
+	_ = s.writeTransientRetryStatusMessageLocked(ctx, data, content, meta)
+}
+
+func (s *Service) writeTransientRetryStatusMessageLocked(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	content string,
+	metadata map[string]interface{},
+) error {
 	if s.transientRetryMessages != nil {
-		s.updateTransientRetryStatusMessageLocked(ctx, data, content, meta)
-		return
+		return s.updateTransientRetryStatusMessageLocked(ctx, data, content, metadata)
 	}
-	s.createTransientRetryStatusMessageRecord(ctx, data, content, meta)
+	return s.createTransientRetryStatusMessageRecord(ctx, data, content, metadata)
 }
 
 func transientRetryStatusMessage(
@@ -120,7 +137,7 @@ func (s *Service) createTransientRetryStatusMessageRecord(
 	data watcher.AgentEventData,
 	content string,
 	meta map[string]interface{},
-) {
+) error {
 	turnID := ""
 	if data.RecoveryMode != recoveryModeContinue {
 		turnID = s.getActiveTurnID(data.SessionID)
@@ -138,7 +155,9 @@ func (s *Service) createTransientRetryStatusMessageRecord(
 		s.logger.Warn("failed to create transient retry status message",
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (s *Service) updateTransientRetryStatusMessageLocked(
@@ -146,7 +165,7 @@ func (s *Service) updateTransientRetryStatusMessageLocked(
 	data watcher.AgentEventData,
 	content string,
 	metadata map[string]interface{},
-) {
+) error {
 	// state.mu intentionally covers this DB I/O. Retirement and notice writes
 	// must serialize so cancellation cannot delete a row that this update then
 	// resurrects.
@@ -156,12 +175,11 @@ func (s *Service) updateTransientRetryStatusMessageLocked(
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	notices := transientRetryNotices(messages, data.TaskID, data.SessionID)
 	if len(notices) == 0 {
-		s.createTransientRetryStatusMessageRecord(ctx, data, content, metadata)
-		return
+		return s.createTransientRetryStatusMessageRecord(ctx, data, content, metadata)
 	}
 
 	current := notices[0]
@@ -175,7 +193,7 @@ func (s *Service) updateTransientRetryStatusMessageLocked(
 			zap.String("session_id", data.SessionID),
 			zap.String("message_id", current.ID),
 			zap.Error(err))
-		return
+		return err
 	}
 
 	for _, duplicate := range notices[1:] {
@@ -187,6 +205,7 @@ func (s *Service) updateTransientRetryStatusMessageLocked(
 				zap.Error(err))
 		}
 	}
+	return nil
 }
 
 func transientRetryNotices(messages []*models.Message, taskID, sessionID string) []*models.Message {

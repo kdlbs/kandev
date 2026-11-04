@@ -9,17 +9,18 @@ import (
 type ToolKind string
 
 const (
-	ToolKindReadFile     ToolKind = "read_file"
-	ToolKindModifyFile   ToolKind = "modify_file"
-	ToolKindShellExec    ToolKind = "shell_exec"
-	ToolKindCodeSearch   ToolKind = "code_search"
-	ToolKindHttpRequest  ToolKind = "http_request"
-	ToolKindGeneric      ToolKind = "generic"
-	ToolKindCreateTask   ToolKind = "create_task"
-	ToolKindSubagentTask ToolKind = "subagent_task"
-	ToolKindShowPlan     ToolKind = "show_plan"
-	ToolKindManageTodos  ToolKind = "manage_todos"
-	ToolKindMisc         ToolKind = "misc"
+	ToolKindReadFile          ToolKind = "read_file"
+	ToolKindModifyFile        ToolKind = "modify_file"
+	ToolKindShellExec         ToolKind = "shell_exec"
+	ToolKindCodeSearch        ToolKind = "code_search"
+	ToolKindHttpRequest       ToolKind = "http_request"
+	ToolKindGeneric           ToolKind = "generic"
+	ToolKindCreateTask        ToolKind = "create_task"
+	ToolKindSubagentTask      ToolKind = "subagent_task"
+	ToolKindShowPlan          ToolKind = "show_plan"
+	ToolKindManageTodos       ToolKind = "manage_todos"
+	ToolKindMisc              ToolKind = "misc"
+	ToolKindContextCompaction ToolKind = "context_compaction"
 )
 
 // ToMessageType maps the ToolKind to a frontend message type.
@@ -45,18 +46,19 @@ func (k ToolKind) ToMessageType() string {
 // Exactly one of the kind-specific fields will be set based on Kind.
 // Fields are unexported to enforce use of factory functions (NewReadFile, NewShellExec, etc.)
 type NormalizedPayload struct {
-	kind         ToolKind
-	readFile     *ReadFilePayload
-	modifyFile   *ModifyFilePayload
-	shellExec    *ShellExecPayload
-	codeSearch   *CodeSearchPayload
-	httpRequest  *HttpRequestPayload
-	generic      *GenericPayload
-	createTask   *CreateTaskPayload
-	subagentTask *SubagentTaskPayload
-	showPlan     *ShowPlanPayload
-	manageTodos  *ManageTodosPayload
-	misc         *MiscPayload
+	kind              ToolKind
+	readFile          *ReadFilePayload
+	modifyFile        *ModifyFilePayload
+	shellExec         *ShellExecPayload
+	codeSearch        *CodeSearchPayload
+	httpRequest       *HttpRequestPayload
+	generic           *GenericPayload
+	createTask        *CreateTaskPayload
+	subagentTask      *SubagentTaskPayload
+	showPlan          *ShowPlanPayload
+	manageTodos       *ManageTodosPayload
+	misc              *MiscPayload
+	contextCompaction *ContextCompactionPayload
 	// backgroundWork is adapter-issued provenance. Tool kind and payload shape
 	// are presentation contracts and cannot relax prompt admission by
 	// themselves.
@@ -89,7 +91,10 @@ func (p *NormalizedPayload) SubagentTask() *SubagentTaskPayload { return p.subag
 func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload         { return p.showPlan }
 func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload   { return p.manageTodos }
 func (p *NormalizedPayload) Misc() *MiscPayload                 { return p.misc }
-func (p *NormalizedPayload) IsMCPTool() bool                    { return p != nil && p.mcpTool }
+func (p *NormalizedPayload) ContextCompaction() *ContextCompactionPayload {
+	return p.contextCompaction
+}
+func (p *NormalizedPayload) IsMCPTool() bool { return p != nil && p.mcpTool }
 
 // Snapshot returns a detached copy of the normalized payload. A snapshot owns
 // every pointer, slice, and JSON-compatible value reachable from the payload so
@@ -99,21 +104,22 @@ func (p *NormalizedPayload) Snapshot() *NormalizedPayload {
 		return nil
 	}
 	return &NormalizedPayload{
-		kind:           p.kind,
-		readFile:       cloneReadFilePayload(p.readFile),
-		modifyFile:     cloneModifyFilePayload(p.modifyFile),
-		shellExec:      cloneShellExecPayload(p.shellExec),
-		codeSearch:     cloneCodeSearchPayload(p.codeSearch),
-		httpRequest:    cloneHttpRequestPayload(p.httpRequest),
-		generic:        cloneGenericPayload(p.generic),
-		createTask:     cloneCreateTaskPayload(p.createTask),
-		subagentTask:   cloneSubagentTaskPayload(p.subagentTask),
-		showPlan:       cloneShowPlanPayload(p.showPlan),
-		manageTodos:    cloneManageTodosPayload(p.manageTodos),
-		misc:           cloneMiscPayload(p.misc),
-		backgroundWork: cloneBackgroundWorkPayload(p.backgroundWork),
-		monitor:        cloneMonitorPayload(p.monitor),
-		mcpTool:        p.mcpTool,
+		kind:              p.kind,
+		readFile:          cloneReadFilePayload(p.readFile),
+		modifyFile:        cloneModifyFilePayload(p.modifyFile),
+		shellExec:         cloneShellExecPayload(p.shellExec),
+		codeSearch:        cloneCodeSearchPayload(p.codeSearch),
+		httpRequest:       cloneHttpRequestPayload(p.httpRequest),
+		generic:           cloneGenericPayload(p.generic),
+		createTask:        cloneCreateTaskPayload(p.createTask),
+		subagentTask:      cloneSubagentTaskPayload(p.subagentTask),
+		showPlan:          cloneShowPlanPayload(p.showPlan),
+		manageTodos:       cloneManageTodosPayload(p.manageTodos),
+		misc:              cloneMiscPayload(p.misc),
+		contextCompaction: cloneContextCompactionPayload(p.contextCompaction),
+		backgroundWork:    cloneBackgroundWorkPayload(p.backgroundWork),
+		monitor:           cloneMonitorPayload(p.monitor),
+		mcpTool:           p.mcpTool,
 	}
 }
 
@@ -228,6 +234,25 @@ func cloneMiscPayload(src *MiscPayload) *MiscPayload {
 	return &clone
 }
 
+func cloneContextCompactionPayload(src *ContextCompactionPayload) *ContextCompactionPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.PreTokens = cloneInt64(src.PreTokens)
+	clone.PostTokens = cloneInt64(src.PostTokens)
+	clone.DurationMs = cloneInt64(src.DurationMs)
+	return &clone
+}
+
+func cloneInt64(src *int64) *int64 {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
 func cloneBackgroundWorkPayload(src *BackgroundWorkPayload) *BackgroundWorkPayload {
 	if src == nil {
 		return nil
@@ -298,36 +323,38 @@ func cloneJSONReflectValue(value reflect.Value) reflect.Value {
 // MarshalJSON implements custom JSON marshaling for NormalizedPayload.
 func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 	type jsonPayload struct {
-		Kind         ToolKind               `json:"kind"`
-		ReadFile     *ReadFilePayload       `json:"read_file,omitempty"`
-		ModifyFile   *ModifyFilePayload     `json:"modify_file,omitempty"`
-		ShellExec    *ShellExecPayload      `json:"shell_exec,omitempty"`
-		CodeSearch   *CodeSearchPayload     `json:"code_search,omitempty"`
-		HttpRequest  *HttpRequestPayload    `json:"http_request,omitempty"`
-		Generic      *GenericPayload        `json:"generic,omitempty"`
-		CreateTask   *CreateTaskPayload     `json:"create_task,omitempty"`
-		SubagentTask *SubagentTaskPayload   `json:"subagent_task,omitempty"`
-		ShowPlan     *ShowPlanPayload       `json:"show_plan,omitempty"`
-		ManageTodos  *ManageTodosPayload    `json:"manage_todos,omitempty"`
-		Misc         *MiscPayload           `json:"misc,omitempty"`
-		Background   *BackgroundWorkPayload `json:"background_work,omitempty"`
-		Monitor      *MonitorPayload        `json:"monitor,omitempty"`
+		Kind              ToolKind                  `json:"kind"`
+		ReadFile          *ReadFilePayload          `json:"read_file,omitempty"`
+		ModifyFile        *ModifyFilePayload        `json:"modify_file,omitempty"`
+		ShellExec         *ShellExecPayload         `json:"shell_exec,omitempty"`
+		CodeSearch        *CodeSearchPayload        `json:"code_search,omitempty"`
+		HttpRequest       *HttpRequestPayload       `json:"http_request,omitempty"`
+		Generic           *GenericPayload           `json:"generic,omitempty"`
+		CreateTask        *CreateTaskPayload        `json:"create_task,omitempty"`
+		SubagentTask      *SubagentTaskPayload      `json:"subagent_task,omitempty"`
+		ShowPlan          *ShowPlanPayload          `json:"show_plan,omitempty"`
+		ManageTodos       *ManageTodosPayload       `json:"manage_todos,omitempty"`
+		Misc              *MiscPayload              `json:"misc,omitempty"`
+		ContextCompaction *ContextCompactionPayload `json:"context_compaction,omitempty"`
+		Background        *BackgroundWorkPayload    `json:"background_work,omitempty"`
+		Monitor           *MonitorPayload           `json:"monitor,omitempty"`
 	}
 	return json.Marshal(jsonPayload{
-		Kind:         p.kind,
-		ReadFile:     p.readFile,
-		ModifyFile:   p.modifyFile,
-		ShellExec:    p.shellExec,
-		CodeSearch:   p.codeSearch,
-		HttpRequest:  p.httpRequest,
-		Generic:      p.generic,
-		CreateTask:   p.createTask,
-		SubagentTask: p.subagentTask,
-		ShowPlan:     p.showPlan,
-		ManageTodos:  p.manageTodos,
-		Misc:         p.misc,
-		Background:   p.backgroundWork,
-		Monitor:      p.monitor,
+		Kind:              p.kind,
+		ReadFile:          p.readFile,
+		ModifyFile:        p.modifyFile,
+		ShellExec:         p.shellExec,
+		CodeSearch:        p.codeSearch,
+		HttpRequest:       p.httpRequest,
+		Generic:           p.generic,
+		CreateTask:        p.createTask,
+		SubagentTask:      p.subagentTask,
+		ShowPlan:          p.showPlan,
+		ManageTodos:       p.manageTodos,
+		Misc:              p.misc,
+		ContextCompaction: p.contextCompaction,
+		Background:        p.backgroundWork,
+		Monitor:           p.monitor,
 	})
 }
 
@@ -335,20 +362,21 @@ func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 // This is required because the struct has unexported fields.
 func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
 	type jsonPayload struct {
-		Kind         ToolKind               `json:"kind"`
-		ReadFile     *ReadFilePayload       `json:"read_file,omitempty"`
-		ModifyFile   *ModifyFilePayload     `json:"modify_file,omitempty"`
-		ShellExec    *ShellExecPayload      `json:"shell_exec,omitempty"`
-		CodeSearch   *CodeSearchPayload     `json:"code_search,omitempty"`
-		HttpRequest  *HttpRequestPayload    `json:"http_request,omitempty"`
-		Generic      *GenericPayload        `json:"generic,omitempty"`
-		CreateTask   *CreateTaskPayload     `json:"create_task,omitempty"`
-		SubagentTask *SubagentTaskPayload   `json:"subagent_task,omitempty"`
-		ShowPlan     *ShowPlanPayload       `json:"show_plan,omitempty"`
-		ManageTodos  *ManageTodosPayload    `json:"manage_todos,omitempty"`
-		Misc         *MiscPayload           `json:"misc,omitempty"`
-		Background   *BackgroundWorkPayload `json:"background_work,omitempty"`
-		Monitor      *MonitorPayload        `json:"monitor,omitempty"`
+		Kind              ToolKind                  `json:"kind"`
+		ReadFile          *ReadFilePayload          `json:"read_file,omitempty"`
+		ModifyFile        *ModifyFilePayload        `json:"modify_file,omitempty"`
+		ShellExec         *ShellExecPayload         `json:"shell_exec,omitempty"`
+		CodeSearch        *CodeSearchPayload        `json:"code_search,omitempty"`
+		HttpRequest       *HttpRequestPayload       `json:"http_request,omitempty"`
+		Generic           *GenericPayload           `json:"generic,omitempty"`
+		CreateTask        *CreateTaskPayload        `json:"create_task,omitempty"`
+		SubagentTask      *SubagentTaskPayload      `json:"subagent_task,omitempty"`
+		ShowPlan          *ShowPlanPayload          `json:"show_plan,omitempty"`
+		ManageTodos       *ManageTodosPayload       `json:"manage_todos,omitempty"`
+		Misc              *MiscPayload              `json:"misc,omitempty"`
+		ContextCompaction *ContextCompactionPayload `json:"context_compaction,omitempty"`
+		Background        *BackgroundWorkPayload    `json:"background_work,omitempty"`
+		Monitor           *MonitorPayload           `json:"monitor,omitempty"`
 	}
 	var jp jsonPayload
 	if err := json.Unmarshal(data, &jp); err != nil {
@@ -367,6 +395,7 @@ func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
 	p.showPlan = jp.ShowPlan
 	p.manageTodos = jp.ManageTodos
 	p.misc = jp.Misc
+	p.contextCompaction = jp.ContextCompaction
 	p.backgroundWork = jp.Background
 	return nil
 }
@@ -469,11 +498,24 @@ type HttpRequestPayload struct {
 	IsError  bool   `json:"is_error,omitempty"`
 }
 
+// SubagentControl identifies a provider operation that manages subagents.
+type SubagentControl string
+
+const (
+	SubagentControlWait    SubagentControl = "wait"
+	SubagentControlClose   SubagentControl = "close"
+	SubagentControlMessage SubagentControl = "message"
+	SubagentControlRead    SubagentControl = "read"
+	SubagentControlList    SubagentControl = "list"
+	SubagentControlResume  SubagentControl = "resume"
+)
+
 // GenericPayload is the fallback for unrecognized tools.
 type GenericPayload struct {
-	Name   string `json:"name"`
-	Input  any    `json:"input,omitempty"`
-	Output any    `json:"output,omitempty"`
+	Name            string          `json:"name"`
+	Input           any             `json:"input,omitempty"`
+	Output          any             `json:"output,omitempty"`
+	SubagentControl SubagentControl `json:"subagent_control,omitempty"`
 }
 
 // CreateTaskPayload contains normalized data for task creation operations.
@@ -484,12 +526,15 @@ type CreateTaskPayload struct {
 
 // SubagentTaskPayload contains normalized data for subagent task invocations.
 type SubagentTaskPayload struct {
+	Name         string `json:"name,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 	Description  string `json:"description"`
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type"`
 
 	// Result fields (populated from tool_use_result on completion)
 	Status         string `json:"status,omitempty"`
+	ResumeCount    int    `json:"resume_count,omitempty"`
 	AgentID        string `json:"agent_id,omitempty"`
 	Model          string `json:"model,omitempty"`
 	ChildSessionID string `json:"child_session_id,omitempty"`
@@ -559,6 +604,19 @@ type TodoItem struct {
 type MiscPayload struct {
 	Label   string `json:"label"`
 	Details any    `json:"details,omitempty"`
+}
+
+// ContextCompactionPayload contains the latest provider-reported state for one
+// ACP context compaction.
+type ContextCompactionPayload struct {
+	ID         string `json:"compaction_id"`
+	Status     string `json:"status"`
+	Summary    string `json:"summary,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Trigger    string `json:"trigger,omitempty"`
+	PreTokens  *int64 `json:"pre_tokens,omitempty"`
+	PostTokens *int64 `json:"post_tokens,omitempty"`
+	DurationMs *int64 `json:"duration_ms,omitempty"`
 }
 
 // --- Factory functions for NormalizedPayload ---
@@ -644,4 +702,10 @@ func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayloa
 			SubagentType: subagentType,
 		},
 	}
+}
+
+// NewContextCompaction creates a normalized payload for an ACP context
+// compaction update.
+func NewContextCompaction(payload ContextCompactionPayload) *NormalizedPayload {
+	return &NormalizedPayload{kind: ToolKindContextCompaction, contextCompaction: &payload}
 }

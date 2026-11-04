@@ -31,3 +31,80 @@ it("keeps the collapsed rail order unchanged", () => {
   fireEvent.keyDown(screen.getByRole("button", { name: "Home" }), { key: "ArrowUp", altKey: true });
   expect(mocks.mutate).not.toHaveBeenCalled();
 });
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.11
+it("moves a nested integration once without moving its parent", () => {
+  const children = [
+    { id: "plugin-a", content: <a href="/a">Plugin A</a> },
+    { id: "plugin-b", content: <a href="/b">Plugin B</a> },
+  ];
+  render(
+    <SidebarDraggableNavigation
+      catalog={[]}
+      rows={[
+        {
+          id: "integrations",
+          content: (
+            <>
+              <button>Integrations</button>
+              <SidebarDraggableNavigation catalog={[]} rows={children} />
+            </>
+          ),
+        },
+        { id: "home", content: <button>Home</button> },
+      ]}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("link", { name: "Plugin B" }), {
+    key: "ArrowUp",
+    altKey: true,
+  });
+  expect(mocks.mutate).toHaveBeenCalledOnce();
+  const layout = {
+    ...defaultSidebarLayout(),
+    nodes: [
+      {
+        id: "integrations",
+        kind: "builtin" as const,
+        visible: true,
+        destinationId: "integrations",
+      },
+      {
+        id: "plugin-a",
+        kind: "plugin" as const,
+        visible: true,
+        pluginSection: "integrations" as const,
+      },
+      {
+        id: "plugin-b",
+        kind: "plugin" as const,
+        visible: true,
+        pluginSection: "integrations" as const,
+      },
+      { id: "home", kind: "builtin" as const, visible: true, destinationId: "home" },
+    ],
+  };
+  const next = mocks.mutate.mock.calls[0][0](layout);
+  expect(next.nodes.map((node: { id: string }) => node.id)).toEqual([
+    "integrations",
+    "plugin-b",
+    "plugin-a",
+    "home",
+  ]);
+});
+
+// Touch and pen long-press events must reach the outer customization trigger.
+it.each(["touch", "pen"])("forwards %s pointer input through a draggable row", (pointerType) => {
+  const onPointerDown = vi.fn();
+  render(
+    <div onPointerDown={onPointerDown}>
+      <SidebarDraggableNavigation rows={rows} catalog={[]} />
+    </div>,
+  );
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Home" }), {
+    pointerType,
+    button: 0,
+    isPrimary: true,
+  });
+  expect(onPointerDown).toHaveBeenCalledOnce();
+});

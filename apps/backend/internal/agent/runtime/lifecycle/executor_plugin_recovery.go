@@ -13,7 +13,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 )
 
@@ -274,7 +274,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 	if state.inventory.InstancePort == 0 {
 		return nil, errors.New("plugin executor inventory has no agentctl instance port")
 	}
-	client, err := r.newRecoveredAgentctlClient(
+	client, err := r.newAgentctlClient(
 		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource, state.inventory.InstancePort), r.logger,
 		record.AgentExecutionID, record.TransientAuthToken,
 	)

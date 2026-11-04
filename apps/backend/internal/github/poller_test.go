@@ -64,6 +64,16 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	return poller, svc, mockClient, store
 }
 
+func TestPollerContextUsesNonBlockingBackgroundAdmission(t *testing.T) {
+	ctx := pollerContext(context.Background())
+	if githubWorkClass(ctx) != WorkClassBackground {
+		t.Fatalf("work class = %v, want background", githubWorkClass(ctx))
+	}
+	if !nonBlockingGitHubAdmission(ctx) {
+		t.Fatal("poller context must use non-blocking admission")
+	}
+}
+
 // seedTask inserts a minimal task row for JOIN-based queries. Pass archived=true
 // to seed an archived task (archived_at set to now).
 func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
@@ -768,6 +778,9 @@ func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ ma
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if strings.Contains(query, "query WorkflowSuites") || strings.Contains(query, "query WorkflowSuiteJobs") {
+		return json.Unmarshal([]byte(`{"data":{}}`), out)
+	}
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {
@@ -1626,6 +1639,9 @@ func TestPRWatchFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
 	client := &fallbackProbeClient{Client: NewMockClient()}
 	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
 	watches := seedSearchingFallbackWatches(t, store, 5)
+	if err := service.UpdatePRWatchBranchIfSearching(context.Background(), watches[1].ID, watches[0].Branch); err != nil {
+		t.Fatalf("share second watch target: %v", err)
+	}
 	watches[1].Branch = watches[0].Branch
 
 	poller.runPRWatchFallback(context.Background(), watches)
@@ -1771,14 +1787,24 @@ func TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls(t *testing.T) {
 }
 
 func TestSyncWatchesBatched_NumberedQueryError_ReturnsError(t *testing.T) {
-	_, svc, gh, _ := setupBatchedPollerTest(t)
+	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.prErr = errors.New("graphql 500")
 
-	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 1}}
+	seedTask(t, store, "task-numbered-error", false)
+	numberedWatch := withTestWorkspace(&PRWatch{
+		SessionID: "session-numbered-error", TaskID: "task-numbered-error", Owner: "o", Repo: "r", PRNumber: 1,
+	})
+	if err := store.CreatePRWatch(ctx, numberedWatch); err != nil {
+		t.Fatalf("create numbered watch: %v", err)
+	}
+	numbered := []*PRWatch{numberedWatch}
 	got, err := svc.SyncWatchesBatched(ctx, numbered)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on numbered query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on numbered query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed numbered phase results = %+v, want one unapplied entry", got)
 	}
 }
 
@@ -1787,14 +1813,24 @@ func TestSyncWatchesBatched_BranchQueryError_ReturnsError(t *testing.T) {
 	// the branch query fails (no numbered watches), an empty non-nil map
 	// silently absorbed the failure. The fix returns a non-nil error so the
 	// caller falls back per-watch.
-	_, svc, gh, _ := setupBatchedPollerTest(t)
+	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.branchErr = errors.New("graphql 500")
 
-	searching := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat"}}
+	seedTask(t, store, "task-branch-error", false)
+	searchingWatch := withTestWorkspace(&PRWatch{
+		SessionID: "session-branch-error", TaskID: "task-branch-error", Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat",
+	})
+	if err := store.CreatePRWatch(ctx, searchingWatch); err != nil {
+		t.Fatalf("create searching watch: %v", err)
+	}
+	searching := []*PRWatch{searchingWatch}
 	got, err := svc.SyncWatchesBatched(ctx, searching)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on branch query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on branch query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed branch phase results = %+v, want one unapplied entry", got)
 	}
 }
 
@@ -2004,48 +2040,6 @@ func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
 	})
 }
 
-func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
-	poller, _, _, _ := setupPollerTest(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if !poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected true when no exhaustion recorded")
-	}
-}
-
-func TestSearchBucketExhausted(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-
-	if poller.searchBucketExhausted("test") {
-		t.Errorf("expected false when no exhaustion recorded")
-	}
-
-	// Mark the search bucket exhausted with a future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceSearch,
-		Limit:     30,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-
-	if !poller.searchBucketExhausted("test") {
-		t.Errorf("expected true when search bucket exhausted")
-	}
-
-	// Other buckets exhausting must not trip the search guard.
-	poller2, svc2, _, _ := setupPollerTest(t)
-	svc2.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceCore,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-	if poller2.searchBucketExhausted("test") {
-		t.Errorf("expected false when only core (not search) is exhausted")
-	}
-}
-
 func TestDetectPRForWatch_FailsClosedWithoutWorkspace(t *testing.T) {
 	poller, _, mockClient, _ := setupPollerTest(t)
 
@@ -2113,21 +2107,4 @@ func TestCheckIssueWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
 	}
 
 	poller.checkIssueWatches(ctx)
-}
-
-func TestWaitForRateLimit_ReturnsFalseOnContextCancel(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-	// Force exhaustion with a far-future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceGraphQL,
-		Limit:     5000,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(time.Hour),
-		UpdatedAt: time.Now(),
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately so the timer select returns ctx.Done first
-	if poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected false when context cancelled during sleep")
-	}
 }

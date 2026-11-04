@@ -41,13 +41,30 @@ func (r *SSHExecutor) RecoverInstancesDetailed(
 	return instances, outcomes, nil
 }
 
-func (r *SSHExecutor) recoverSSHRecord(
+func (r *SSHExecutor) recoverSSHRecord(ctx context.Context, record *models.ExecutorRunning) (*ExecutorInstance, RecoveryCandidateOutcome) {
+	instance, state, outcome := r.prepareSSHRecovery(ctx, record)
+	if instance == nil {
+		return nil, outcome
+	}
+	r.mu.Lock()
+	if r.sessions[instance.InstanceID] != nil {
+		r.mu.Unlock()
+		r.discardRecoveredSSHState(instance.InstanceID, state)
+		return nil, RecoveryOutcomeUnknown
+	}
+	r.sessions[instance.InstanceID] = state
+	r.startWatchdogLocked(instance.InstanceID, state)
+	r.mu.Unlock()
+	return instance, ""
+}
+
+func (r *SSHExecutor) prepareSSHRecovery(
 	ctx context.Context,
 	record *models.ExecutorRunning,
-) (*ExecutorInstance, RecoveryCandidateOutcome) {
+) (*ExecutorInstance, *sshSessionState, RecoveryCandidateOutcome) {
 	identity, ok := sshRecoveryIdentity(record)
 	if !ok {
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
 	recoveryCtx, cancel := context.WithTimeout(ctx, sshAgentctlHealthTimeout)
@@ -55,12 +72,12 @@ func (r *SSHExecutor) recoverSSHRecord(
 	target, err := r.targetFromMetadata(record.Metadata)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot resolve saved target", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	client, err := dialSSH(recoveryCtx, target)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot connect to saved target", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
 	var forwarder *SSHPortForwarder
@@ -79,30 +96,27 @@ func (r *SSHExecutor) recoverSSHRecord(
 
 	instanceInfo, controlPort, outcome := r.inspectSSHRecoveryInstance(recoveryCtx, client, record, identity)
 	if outcome != "" {
-		return nil, outcome
+		return nil, nil, outcome
 	}
 
 	req := sshRecoveryRequest(record, identity)
 	runtimeTunnel, _, err = openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot attach saved runtime API tunnel", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	forwarder, err = StartPortForward(client, identity.port, r.logger)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot open local agentctl forward", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	if err := recoveryCtx.Err(); err != nil {
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
-	instance, registered := r.registerRecoveredSSHState(record, identity, target, client, forwarder, runtimeTunnel, req, instanceInfo, controlPort)
-	if instance == nil {
-		return nil, RecoveryOutcomeUnknown
-	}
-	transferred = registered
-	return instance, ""
+	instance, state := r.preparedSSHRecoveryState(record, identity, target, client, forwarder, runtimeTunnel, req, instanceInfo, controlPort)
+	transferred = true
+	return instance, state, ""
 }
 
 func (r *SSHExecutor) inspectSSHRecoveryInstance(
@@ -310,7 +324,7 @@ func sshRecoveryRequest(record *models.ExecutorRunning, identity sshRecoveryProc
 	}
 }
 
-func (r *SSHExecutor) registerRecoveredSSHState(
+func (r *SSHExecutor) preparedSSHRecoveryState(
 	record *models.ExecutorRunning,
 	identity sshRecoveryProcessIdentity,
 	target *SSHTarget,
@@ -320,7 +334,7 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 	req *ExecutorCreateRequest,
 	instanceInfo *agentctl.InstanceInfo,
 	controlPort int,
-) (*ExecutorInstance, bool) {
+) (*ExecutorInstance, *sshSessionState) {
 	metadata := cloneSSHMetadata(req.Metadata)
 	metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(forwarder.LocalPort())
 	metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
@@ -347,15 +361,6 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 		workdirRoot:      r.workdirRoot(metadata),
 	}
 
-	r.mu.Lock()
-	if r.sessions[identity.backendID] != nil {
-		r.mu.Unlock()
-		return nil, false
-	}
-	r.sessions[identity.backendID] = state
-	r.startWatchdogLocked(identity.backendID, state)
-	r.mu.Unlock()
-
 	instance := &ExecutorInstance{
 		InstanceID:           identity.backendID,
 		TaskID:               record.TaskID,
@@ -371,7 +376,7 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 	instance.DiscardRecovery = func() {
 		r.discardRecoveredSSHState(identity.backendID, state)
 	}
-	return instance, true
+	return instance, state
 }
 
 func (r *SSHExecutor) discardRecoveredSSHState(instanceID string, state *sshSessionState) {

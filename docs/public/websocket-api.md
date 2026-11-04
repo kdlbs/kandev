@@ -304,6 +304,10 @@ The action succeeds only when Kandev proves one unmatched canonical slot, one se
 
 The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
 
+After a completed positive repair, ordinary Resume and additional-session launch allow a later branch switch or rename when the recorded current branch matches the same registered Git worktree. Later commits and file edits remain intact, and the original repair receipt remains unchanged. Existing receipts support this check without a migration.
+
+Use ordinary Resume after a branch change. An explicit repair retry with the original key still requires the original request identity. Incomplete or failed repair evidence still blocks admission, and workspace recovery does not clear an independent `unknown_prompt_outcome` block or replay its prompt.
+
 Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
 
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
@@ -385,6 +389,16 @@ query validation.
   }
 }
 ```
+
+When **Limit automatic sessions** is enabled and the instance has no turn
+capacity, Kandev still accepts an ordinary message. It persists the visible
+message and a durable queue receipt in one transaction before responding, then
+dispatches one new turn after capacity is released. The success response keeps
+the existing message shape; clients observe the pending input through
+`message.queue.get` and `message.queue.status_changed`. Auto-run OFF leaves the
+entry pending. Explicit `message.queue.send_now` keeps its override. A failed
+queue or transcript write returns the existing error instead of a false
+success.
 
 `entity_references` is the structured companion to work-item Markdown links inserted by the `#` composer. Each version-1 entry carries `ref`, `provider`, `kind`, immutable `id`, optional display `key`, title snapshot, canonical `url`, and provider-connection `scope`. The backend derives the workspace from the persisted session, validates canonical identity and destination through the registered provider, deduplicates by `ref`, and rejects the request when a supplied reference is invalid or unauthorized. CLI-passthrough sessions do not accept structured references.
 

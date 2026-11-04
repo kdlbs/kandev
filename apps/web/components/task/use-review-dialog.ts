@@ -260,6 +260,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewTaskPR?.repo ?? null,
     reviewTaskPR?.pr_number ?? null,
     reviewTaskPR?.last_synced_at ?? null,
+    reviewTaskPR?.github_host,
   );
 
   useEffect(() => {

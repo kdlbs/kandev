@@ -195,6 +195,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		PullBeforeWorktree:     repo.PullBeforeWorktree,
 		TaskDirName:            env.TaskDirName,
 		WorkspaceRelativePath:  tr.WorkspaceRelativePath,
+		Position:               tr.Position,
 		RepoName:               repo.Name,
 		BranchSlug:             slug,
 	}

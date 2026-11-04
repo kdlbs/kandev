@@ -47,6 +47,17 @@ type workflowMoveAdmissionRepository interface {
 	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
+// workflowMoveAdmissionAppliedRepository is the automatic-transition variant
+// of workflowMoveAdmissionRepository. It is separate so test fakes that only
+// exercise the unconditional path do not need to grow a method they never
+// call. applied=false means the admission refused the write because a later
+// business state owns the row; the caller must not run destination effects.
+type workflowMoveAdmissionAppliedRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+		ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+	) (admitted, applied bool, err error)
+}
+
 // workflowMoveAdmissionCASRepository is the AC-46/48 compare-and-swap
 // variant of workflowMoveAdmissionRepository. It is a separate interface
 // (rather than a new method on workflowMoveAdmissionRepository) so fakes in
@@ -687,6 +698,12 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 			return applied, err
 		}
 	}
+	if appliedRepo, ok := s.repo.(workflowMoveAdmissionAppliedRepository); ok {
+		_, applied, err := appliedRepo.UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+			ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit,
+		)
+		return applied, err
+	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
@@ -853,6 +870,12 @@ func (s *workflowStore) pullOneFeederTask(
 		fromStepID := candidate.WorkflowStepID
 		candidate.WorkflowID = vacatedStep.WorkflowID
 		candidate.WorkflowStepID = vacatedStep.ID
+		// A pulled task leaves the queued band: an admitted task carrying a
+		// stale queue marker would hold a WIP slot while entry effects skip it.
+		// The promotion predicate still matches the stored marker.
+		candidate.WIPAdmitted = true
+		candidate.QueuedForStepID = ""
+		candidate.QueuedAt = nil
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}

@@ -175,8 +175,8 @@ func (f *casFakeRepo) UpsertUserSettingsPreservingTaskCreateLastUsed(
 }
 
 // UpdateTaskCreateLastUsed returns an unexpected-call error.
-func (f *casFakeRepo) UpdateTaskCreateLastUsed(context.Context, string, models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return nil, errors.New("unexpected UpdateTaskCreateLastUsed call")
+func (f *casFakeRepo) UpdateTaskCreateLastUsed(context.Context, string, models.TaskCreateLastUsed) (*models.UserSettings, bool, error) {
+	return nil, false, errors.New("unexpected UpdateTaskCreateLastUsed call")
 }
 
 // Close is a no-op.

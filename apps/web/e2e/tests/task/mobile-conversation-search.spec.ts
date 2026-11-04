@@ -23,6 +23,26 @@ test("searches conversations from a labelled phone action", async ({
     type: "message",
     content: "Discuss the mobilequartz budget here.",
   });
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workspaces/${seedData.workspaceId}/tasks/conversations?query=mobilequartz&limit=20`,
+        );
+        if (!response.ok) return false;
+        const result = (await response.json()) as {
+          state: string;
+          tasks: Array<{ id: string }>;
+        };
+        return (
+          result.state === "ready" && result.tasks.some((candidate) => candidate.id === task.id)
+        );
+      },
+      { timeout: 30_000, message: "Waiting for the seeded conversation to be indexed" },
+    )
+    .toBe(true);
+
   const mobile = new MobileKanbanPage(testPage);
   await testPage.goto("/");
   await mobile.mobileMenuButton.tap();

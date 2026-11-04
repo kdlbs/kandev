@@ -25,6 +25,11 @@ describe("session causal helpers", () => {
   });
 
   it("waits for the opening turn before accepting an idle Quick Chat baseline", async () => {
+    const startupTurn = {
+      id: "startup",
+      completed_at: "2026-10-15T00:00:00Z",
+      metadata: { lifecycle_only: true },
+    };
     const api = {
       listTaskSessions: vi.fn().mockResolvedValue({
         sessions: [{ id: "quick", state: "WAITING_FOR_INPUT" }],
@@ -32,11 +37,14 @@ describe("session causal helpers", () => {
       listSessionTurns: vi
         .fn()
         .mockResolvedValueOnce({ turns: [] })
-        .mockResolvedValueOnce({ turns: [{ id: "opening", completed_at: null }] })
-        .mockResolvedValue({ turns: [{ id: "opening", completed_at: "2026-10-15T00:00:00Z" }] }),
+        .mockResolvedValueOnce({ turns: [startupTurn] })
+        .mockResolvedValueOnce({ turns: [startupTurn, { id: "opening", completed_at: null }] })
+        .mockResolvedValue({
+          turns: [startupTurn, { id: "opening", completed_at: "2026-10-15T00:00:01Z" }],
+        }),
     };
     await waitForSessionSettledBaseline(api as unknown as ApiClient, "task", "quick");
-    expect(api.listSessionTurns).toHaveBeenCalledTimes(3);
+    expect(api.listSessionTurns).toHaveBeenCalledTimes(4);
     expect(api.listSessionTurns).toHaveBeenLastCalledWith("quick");
   });
 

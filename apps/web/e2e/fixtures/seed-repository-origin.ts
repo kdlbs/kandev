@@ -2,6 +2,18 @@ import { execFileSync } from "node:child_process";
 
 type SeedRepository = { repositoryPath: string; repositoryRemoteURL: string };
 
+/** Forget the old remote's default without deleting its cached target branch. */
+export function clearSeedRepositoryRemoteDefault(
+  seedData: Pick<SeedRepository, "repositoryPath">,
+  env: NodeJS.ProcessEnv,
+): void {
+  execFileSync(
+    "git",
+    ["-C", seedData.repositoryPath, "update-ref", "--no-deref", "-d", "refs/remotes/origin/HEAD"],
+    { env, stdio: "pipe" },
+  );
+}
+
 /**
  * Restore the offline origin. Integration cleanup defers tracking-ref refresh
  * until task reset; direct branch-recovery callers refresh by default.

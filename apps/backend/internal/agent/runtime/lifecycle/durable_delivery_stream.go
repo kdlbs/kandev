@@ -30,11 +30,17 @@ type AgentDeliveryRepository interface {
 // that owns task messages. It must persist the canonical message and advance
 // the inbox cursor in one transaction before returning.
 type canonicalAgentDeliveryProjector interface {
-	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type canonicalAgentDeliveryBatchProjector interface {
-	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]bool, error)
+	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]models.CanonicalAgentDeliveryProjectionResult, error)
+}
+
+// canonicalAgentDeliveryBatchReceiver is implemented by the repository that
+// can admit and project one compatible output batch in one writer transaction.
+type canonicalAgentDeliveryBatchReceiver interface {
+	ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect, remoteHighWater int64) ([]models.CanonicalAgentDeliveryProjectionResult, error)
 }
 
 type agentDeliveryAcknowledger interface {
@@ -138,6 +144,11 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 ) (uint64, error) {
 	remaining := target - after
 	limit := durableDeliveryReplayPageSize
+	if execution.DeliveryDescriptor != nil && execution.DeliveryDescriptor.ReplayBytes > 0 {
+		limit = durableDeliveryReplayPageSize
+	} else {
+		limit = client.DeliveryReplayPageLimit(durableDeliveryReplayPageSize)
+	}
 	if remaining < uint64(limit) {
 		limit = int(remaining)
 	}
@@ -511,19 +522,6 @@ func deliveryHarnessGeneration(
 	}
 }
 
-func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return nil
-	}
-	if acknowledger == nil {
-		return errors.New("agent delivery acknowledger is unavailable")
-	}
-	if err := acknowledger.AcknowledgeDelivery(ctx, event.DeliveryStreamID, event.DeliverySequence); err != nil {
-		return fmt.Errorf("acknowledge durable agent event: %w", err)
-	}
-	return nil
-}
-
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
 	sessionID := ""
 	if execution != nil {
@@ -550,7 +548,8 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	if payloadEvent.TurnID == "" && execution != nil {
 		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
-	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
+	payloadEvent.CanonicalMessageID = payloadEvent.CanonicalMessageBaseID
 	payloadEvent.CanonicalProjection = false
 	payloadEvent.CanonicalMessageAppend = false
 	payloadEvent.DeliveryStreamID = ""
@@ -616,6 +615,9 @@ func canonicalMessageType(event agentctl.AgentEvent) string {
 }
 
 func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEvent) string {
+	if event.CanonicalMessageBaseID != "" {
+		return event.CanonicalMessageBaseID
+	}
 	if event.CanonicalMessageID != "" {
 		return event.CanonicalMessageID
 	}

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,8 +69,11 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, "fixture-pull-requests", m.ReferenceSources[0].Source)
 	require.Equal(t, "fixture-source-control", m.ReferenceSources[0].Provider)
 	require.Equal(t, "pull_request", m.ReferenceSources[0].Kind)
-	require.Len(t, m.AgentTools, 1)
+	require.Len(t, m.AgentTools, 3)
 	require.Equal(t, "test_echo", m.AgentTools[0].Name)
+	require.Equal(t, []string{manifest.AgentToolSurfaceAutomation}, m.AgentTools[1].Surfaces)
+	require.Equal(t, "list_findings", m.AgentTools[1].Name)
+	require.Equal(t, "complete_report", m.AgentTools[2].Name)
 
 	require.Len(t, m.Webhooks, 2)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

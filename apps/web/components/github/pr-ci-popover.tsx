@@ -28,7 +28,6 @@ import {
   ChangeRequestPopoverFooter,
   ChangeRequestPopoverHeader,
   ChangeRequestReviewRow,
-  CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS,
   type ChangeRequestCheckRow,
 } from "@/components/integrations/change-request-ci-anatomy";
 
@@ -52,7 +51,8 @@ function normalizedReviewState(pr: TaskPR): "approved" | "changes_requested" | "
   return "pending";
 }
 
-export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS = CHANGE_REQUEST_CI_DESKTOP_SCROLL_CLASS;
+export const PR_CI_DESKTOP_POPOVER_CLASS =
+  "h-[min(28rem,calc(100dvh-2rem))] max-h-[var(--radix-popover-content-available-height)] max-w-[calc(100vw-1rem)] overflow-hidden motion-reduce:animate-none";
 
 export function deriveAggregateCounts(pr: TaskPR): CountsView {
   // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
@@ -105,7 +105,9 @@ function PRCIPopoverHeader({
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
       openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
-      externalLabel={t("github:viewPullRequestOnGithub")}
+      externalLabel={t("github:openPr")}
+      externalActionLabel={t("github:openPr")}
+      className="h-14 shrink-0 [@media(pointer:coarse)]:h-16 [@media(max-width:767px)]:h-16"
     />
   );
 }
@@ -178,6 +180,15 @@ function PRChecksSection({
         })),
       )
     : [];
+  if (isFetching && !feedback) {
+    return (
+      <div data-testid="pr-checks-loading" aria-hidden="true" className="space-y-3 p-1">
+        {["w-3/4", "w-full", "w-2/3"].map((width) => (
+          <div key={width} className={`h-4 rounded bg-muted motion-safe:animate-pulse ${width}`} />
+        ))}
+      </div>
+    );
+  }
   return (
     <ChangeRequestChecksSection
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
@@ -280,6 +291,7 @@ export function PRCIPopover({
   onOpenDetailPanel?: () => void;
   refreshTaskPR?: () => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const workspaceId = useTaskWorkspaceId(pr.task_id);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
@@ -292,29 +304,42 @@ export function PRCIPopover({
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
-    <ChangeRequestCIPopoverFrame>
+    <ChangeRequestCIPopoverFrame className="min-h-0 flex-1">
       <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
-      <PRWorkflowAttentionNotice pr={pr} attention={feedback?.workflow_attention} />
-      {authLost ? (
-        <ReconnectGitHubBlock />
-      ) : (
-        <>
-          <PRChecksSection
-            pr={pr}
-            feedback={feedback}
-            isFetching={isFetching}
-            onAddAsContext={onAddAsContext}
-          />
-          <div className="flex flex-col gap-0">
-            <PRReviewRow pr={pr} />
-            <PRCommentsRow pr={pr} />
-          </div>
-          <PRMergeabilityRow pr={pr} />
-          <PRCIAutomationControls pr={pr} />
-          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
-        </>
-      )}
-      <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
+      <div
+        key={pr.id}
+        data-testid="pr-popover-scroll-body"
+        role="region"
+        aria-label={t("github:pullRequestCiStatusReviewsAnd")}
+        tabIndex={0}
+        className="-mx-2 min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <div className="flex flex-col gap-2">
+          <PRWorkflowAttentionNotice pr={pr} attention={feedback?.workflow_attention} />
+          {authLost ? (
+            <ReconnectGitHubBlock />
+          ) : (
+            <>
+              <PRChecksSection
+                pr={pr}
+                feedback={feedback}
+                isFetching={isFetching}
+                onAddAsContext={onAddAsContext}
+              />
+              <div className="flex flex-col gap-0">
+                <PRReviewRow pr={pr} />
+                <PRCommentsRow pr={pr} />
+              </div>
+              <PRMergeabilityRow pr={pr} />
+              <PRCIAutomationControls pr={pr} />
+              <PRMergeButton taskPR={pr} onMerged={refetch} compact />
+            </>
+          )}
+        </div>
+      </div>
+      <div className="h-6 shrink-0 overflow-hidden">
+        <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} isRefreshing={isRefreshing} />
+      </div>
     </ChangeRequestCIPopoverFrame>
   );
 }

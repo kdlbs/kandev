@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "再試行を予定できませんでした",
   "retryAttempt": "試行 {{attempt}}",
   "retryDue": "予定 {{when}}",
-  "stopRetry": "再試行を停止"
+  "stopRetry": "再試行を停止",
+  "pluginToolsTitle": "プラグインツール（任意）",
+  "pluginToolsDescription": "この自動化で使用できるツールを選択します。",
+  "pluginToolsLoading": "プラグインツールを読み込み中...",
+  "pluginToolsLoadError": "プラグインツールを読み込めませんでした。保存済みの選択は変更されていません。",
+  "pluginToolsRetry": "再試行",
+  "pluginToolsEmpty": "プライベート自動化向けのツールを提供するインストール済みプラグインはありません。",
+  "pluginToolsReviewRequired": "確認が必要です: プラグイン設定が変更されました。",
+  "pluginToolsPreviouslySelected": "以前の選択: {{names}}",
+  "pluginToolsReselect": "ツールを再選択して保存するとアクセスが復元されます。",
+  "pluginToolsClear": "クリア",
+  "pluginToolsRead": "読み取り",
+  "pluginToolsWrite": "書き込み",
+  "pluginToolsClearedHint": "保存するとプラグインツールへのアクセスが削除されます。",
+  "pluginToolsUnavailable": "プラグインを利用できません"
 }

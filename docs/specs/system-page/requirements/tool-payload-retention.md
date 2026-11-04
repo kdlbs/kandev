@@ -7,13 +7,13 @@ owners:
   - kandev
 ---
 
-# Tool Payload Retention Requirements
+# History compaction requirements
 
 ## Overview
 
-Administrators can reduce database storage by removing old tool payloads while
-keeping conversation messages and their metadata. System-page owns this
-maintenance policy and its Data & Logs settings surface.
+Administrators can remove old tool payloads and historical diff content through one compaction policy.
+Conversation prose, metadata, and turn/file summaries remain available.
+System-page owns the shared maintenance policy and its Data & Logs settings surface.
 
 The policy uses task inactivity and defaults to three calendar months.
 Cleanup remains disabled until an administrator completes the preparation choice.
@@ -21,6 +21,8 @@ Cleanup remains disabled until an administrator completes the preparation choice
 ## Terminology
 
 - **Payload:** Tool input or result bodies covered by the supported removal rules.
+- **Historical content:** Retained turn checkpoints, derived rendering content, and legacy SQL diff payloads.
+- **History compaction:** One cleanup operation covering both eligible tool payloads and historical content.
 - **Retained metadata:** Message identity, order, title, tool identity, status,
   timestamps, relationships, and supported result summaries.
 - **Inactive task:** A task with no conversation activity within the selected
@@ -40,8 +42,8 @@ cleanup, so that I can compare storage savings with lost tool details.
 #### Acceptance criteria
 
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-001.1:** The Data & Logs page at
-  `/settings/system/data-storage` shall expose an independent tool-payload policy,
-  disabled by default, including on upgrades.
+  `/settings/system/data-storage` shall expose one history-compaction policy for old tool details and historical diff content.
+  Missing settings shall remain disabled. Existing age settings shall remain unchanged.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-001.2:** Administrators shall select
   whole weeks or calendar months. The initial value is three months.
   Valid values are 1–520 weeks or 1–120 months. Invalid input shall save nothing.
@@ -62,6 +64,9 @@ cleanup, so that I can compare storage savings with lost tool details.
   and use the route save/discard flow. Read-only users shall see status but cannot
   analyze, change the policy, or start cleanup. The policy covers the installation.
 
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-001.8:** One inactivity period, enable switch, analysis action, manual action, and automatic schedule shall cover both content categories.
+  Analysis shall include eligible history-only tasks and show a breakdown without separate cleanup controls.
+
 ### REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002: Backup and controlled cleanup
 
 **Intent:** Make payload removal deliberate and preserve usable conversations.
@@ -78,7 +83,7 @@ rules, so that I understand the first cleanup and its recovery limits.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.2:** If backup is selected, cleanup
   shall wait for a completed, verified backup. Failure, cancellation, or an
   interrupted preparation shall block cleanup and expose retry or cancel.
-- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.3:** Cleanup shall preserve message
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.3:** Cleanup shall preserve turn/file summaries and message
   rows, titles, ordering, timestamps, tool identity and status, relationships,
   and supported summaries. It shall preserve human and assistant prose,
   permissions, plans, todos, attachments, and task/session records.
@@ -94,7 +99,7 @@ rules, so that I understand the first cleanup and its recovery limits.
   cleanup now under the saved, enabled policy. Results shall report committed
   removals, skipped rows, remaining work, and failures.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.7:** Backup recovery shall use the
-  existing database restore process. The page shall explain that restore affects
+  existing restore process, including recorded checkpoint sources. The page shall explain that restore affects
   the whole database and can replace newer data. No per-message undo is promised.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.8:** Backup verification shall run
   its integrity check on the backup file at its native absolute path through a
@@ -111,6 +116,13 @@ rules, so that I understand the first cleanup and its recovery limits.
   shall still report only the failure code. A later successful preparation, a
   disable, a new pending preparation, or an interrupted preparation shall
   clear the stored message.
+
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.10:** For the same eligible task cohort, cleanup shall remove supported tool details and expire historical diff content.
+  Retained turn/file summaries shall explain expiry. User branches, unrelated refs, plans, and attachments shall remain intact.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.11:** Pending captures, preservation jobs, and historical-read or backup leases shall prevent conflicting content removal.
+  Interrupted cross-store cleanup shall resume without losing ownership or repeating committed removal counts.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.12:** A selected pre-compaction backup shall cover all historical content the operation can remove, including required Git objects.
+  Old tool-only approvals shall require the existing preparation choice for the expanded scope. No additional policy or enable switch shall appear.
 
 ### REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003: Background operation and access
 
@@ -148,16 +160,21 @@ rules, so that I understand the first cleanup and its recovery limits.
   operation. A persisted failed operation and a failed user action shall retain
   their distinct failure feedback.
 
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003.10:** The shared operation shall report tool removals, history expiry, pending reclamation, and failures together.
+  No independent fixed-age turn-history cleanup schedule shall compete with the selected compaction policy.
+
 ## Out of scope
 
 - Compression, cold storage, per-message restore, and removal from external
   provider histories or existing backups.
-- Automatic compaction, tool-message deletion, index removal, and attachment cleanup.
+- Automatic database-file compaction, tool-message deletion, index removal, and attachment cleanup.
 - Changes to the independent Office run-history or filesystem retention policies.
 
 ## Related documents
 
-- [System design](../system-design/tool-payload-retention.md)
+- [Tool-payload implementation design](../system-design/tool-payload-retention.md)
+- [Unified history compaction design](../system-design/history-compaction.md)
+- [Git history delivery package](../../../plans/turn-change-preservation-retry/plan.md)
 - [Implementation plan](../../../plans/tool-payload-retention/plan.md)
 - [Preparation failure diagnostics plan](../../../plans/database-hygiene/plan.md)
 - [Vacuum and status recovery fix](../../../plans/vacuum-compaction-status/plan.md)
