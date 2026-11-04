@@ -870,3 +870,49 @@ Use the clean launch environment and resource bounds recorded above. Logs:
 Public instructions retain the same entry path and package semantics, so no
 additional public copy or translation is needed. Normal hooks and exact-head
 CI/review/merge evidence remain separate delivery gates in the saved task plan.
+
+### Hosted CI sequencing repair (2026-11-04)
+
+At published head d19cbd2a6, E2E run 41845382225 attempt 1 finished with
+Shard 26/28 and its dependent aggregate failed. All other checks were green.
+The shard exposed two test sequencing errors outside the package editor. Both
+remain part of delivery verification; their location does not waive the gate.
+
+The mobile workflow test changed a session to mock-smart before waiting for its
+initial mock-slow runtime. The set-model handler persists the chosen model
+before acknowledging the request, so asserting the old model afterward races
+the accepted write and launch completion. The test now waits for the workflow
+move and initial idle runtime before changing the model. Its later assertions
+still require reuse of that exact session with mock-smart.
+
+The mobile navigation test polled the restored Git projection before waiting
+for its commits read. The test now arms the existing WebSocket response watcher
+before reload and awaits a correlated, ready commits response for the target
+session before checking the projection. A ready:false envelope with an empty
+array cannot satisfy that wait. The existing UI timeout and subsequent file
+visibility, retry, cache and navigation assertions stay unchanged. The same
+helper serves desktop, so both callers are verified. No production behavior,
+public copy, fixture credentials, retry count or UI timeout changes.
+
+The two exact failing titles passed an initial local reproduction; that did
+not invalidate their CI failures. After repair, each phone journey passed three
+repetitions with zero retries. After adding the explicit not-ready envelope
+guard, phone navigation passed three more repetitions and all five desktop
+navigation tests passed. Changed-file Oxlint, formatting and whitespace checks
+pass. No broader local suite or concurrent full E2E run was started. Fresh
+exact-head CI is still required after publication.
+
+```sh
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts e2e/tests/task/mobile-create-task-workflow-agent-overrides.spec.ts -- --retries=0 --repeat-each=3 -g 'phone Files remains usable|keeps touch controls usable'
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/task/task-navigation-responsiveness.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts -- --retries=0 --repeat-each=3
+pnpm --dir apps/web exec oxlint -c oxlint.config.mjs --deny-warnings e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/mobile-create-task-workflow-agent-overrides.spec.ts
+```
+
+Commands use the same clean launch environment and resource limits as above,
+with E2E_DEBUG=1 for diagnostic backend logs. Logs:
+`/tmp/kandev-5047-ci-sequencing-{phone,desktop-final,navigation-phone-final,lint-final,format-final}.log`.
+Exact failed-job raw/plain logs, error snapshots, workflow trace and the shard
+manifest are retained under `/tmp/kandev-5047-d19-*`. Existing final-head UI
+captures still represent the unchanged rendering; this repair changes tests
+and delivery records only.

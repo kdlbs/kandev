@@ -42,6 +42,17 @@ drawer, with one scroll body and its existing Close control. Package Back stays
 inside the same surface and does not submit. The existing form footer creates
 the task after the picker closes. Work order 03 names focused regressions.
 
+## Follow-up hosted CI repair (2026-11-04)
+
+The first follow-up fix head passed local checks and bot disposition, but hosted
+Shard 26 failed in mobile navigation hydration and workflow-model test
+sequencing. The scoped test-only repair waits for the actual restored commits
+response and finishes the initial workflow launch before changing its model.
+Both phone journeys pass repeated checks, and all five desktop navigation
+cases pass. The package implementation and UI remain unchanged. See
+[implementation results](implementation-results.md#hosted-ci-sequencing-repair-2026-11-04).
+Exact-head CI and the final merge gate remain pending publication of this repair.
+
 ## Historical pre-merge CI and main integration (2026-11-04)
 
 The user's current CI/conflict requests and later "continue" authorize repair,

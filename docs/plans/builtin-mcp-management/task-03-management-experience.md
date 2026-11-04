@@ -80,6 +80,11 @@ pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/
 Also run changed-file lint/format, web typecheck, and affected docs validators.
 Update the public package how-to's new-task entry instructions.
 
+Hosted follow-up CI also exposed sequencing defects in the existing navigation
+and workflow-model E2E cases. Delivery includes their test-only repair and
+focused phone/desktop checks recorded in the implementation results. This does
+not reopen product scope or change package policy, UI, or runtime behavior.
+
 ## Summary
 
 Expose built-in package policy and task choice through existing MCP management.
