@@ -115,9 +115,18 @@ Task 03. This is a hard gate for real Devin composition, not for ordinary flat c
 
 ## Results
 
-Gate unresolved. The qualification record is [fusion-qualification.md](fusion-qualification.md).
+Gate remains open. The qualification record is [fusion-qualification.md](fusion-qualification.md).
+The following results describe the original 2026-11-03 investigation.
 
 - Official Fusion documentation was fetched: it describes Lead, Effort, Sidekick, and Fast Mode but publishes no machine-readable pairing schema or exact model IDs.
 - ACP defines grouped choices only, and the repository has no other relationship source.
 - This environment has no `devin` binary and no Devin credential file, so no authenticated grouped probe could run.
 - No decoder, synthetic binding, or model-name parsing was added. Grouped selection works; verified Fusion composition and issue #5026's Fusion criterion remain incomplete.
+
+## Follow-up execution for issue #5053
+
+The issue now identifies native JSON model listing and reports an exact ID/label cross-check for the current ACP choices.
+Observed fixture capture and the production adapter remain pending.
+Execute the [binding work order](../model-catalog-selector-repair/task-02-fusion-bindings.md), then the [contextual acquisition work order](../model-catalog-selector-repair/task-03-contextual-acquisition.md).
+They refine this work order's remaining scope, commands, and negative cases.
+Keep this work order pending until both pass. Record real capture and integration results here without replacing the historical results.

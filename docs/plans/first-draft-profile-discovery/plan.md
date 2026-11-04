@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: in-progress
+status: in_progress
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -384,9 +384,21 @@ PR fixup remediation (2026-11-03):
 
 Known gaps:
 
-- Fusion composition (Task 04, part of Task 07) is not implemented because its verified binding source is missing. Issue #5026's Fusion acceptance is therefore not met.
+- Fusion composition (Task 04, part of Task 07) remains unimplemented. Issue #5053 now identifies native JSON source evidence, but sanitized observed fixtures and contextual acquisition are still pending. Issue #5026's Fusion acceptance remains unmet.
 - The Devin permission browser specs are added but their managed runs are recorded separately; the isolated capability scenarios (Smart present/absent, sandbox failure) still need a mock peer knob.
 - An isolated Devin settings mock descriptor is added (`KANDEV_E2E_MOCK_DEVIN`), but the Smart-present/Smart-absent/sandbox-failure scenarios still need a deterministic mock-peer knob.
+
+## Selector repair follow-up (2026-11-04)
+
+[Issue #5053](https://github.com/kdlbs/kandev/issues/5053) confirms duplicate singleton headings and identifies a native Fusion relationship source.
+The [selector repair package](../model-catalog-selector-repair/plan.md) refines the remaining delivery.
+Its [Task 01](../model-catalog-selector-repair/task-01-singleton-presentation.md) owns the rendered singleton correction beyond the original Task 05 coverage.
+Its [Task 02](../model-catalog-selector-repair/task-02-fusion-bindings.md) and [Task 03](../model-catalog-selector-repair/task-03-contextual-acquisition.md) complete the original Task 04's qualification and integration.
+Its [Task 04](../model-catalog-selector-repair/task-04-browser-acceptance.md) owns the remaining grouped/Fusion Task 07 browser matrix.
+All four were pending at the planning handoff; the [selector repair Task 01](../model-catalog-selector-repair/task-01-singleton-presentation.md) is now implemented and its component suite passes.
+Task 02's pure normalizer is implemented, but its captured-fixture gate remains open, so Tasks 03 and 04 are still blocked.
+Existing completed tasks and historical verification counts remain unchanged.
+Do not close the original Fusion gates from this planning update or synthetic-only evidence.
 
 ## Documentation impact
 
