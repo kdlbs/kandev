@@ -68,11 +68,11 @@ Applies to AC .1, .2, .4, .5.
 ## Verification
 
 ```bash
-(cd apps/backend && go test ./internal/task/repository/sqlite/ -run 'TestAgentProfileBlockers' -count=1)
-(cd apps/backend && go test ./internal/agent/settings/... -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite/ -run 'TestAgentProfileBlockers' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/settings/... -count=1)
 (cd apps/web && pnpm exec vitest run lib/settings/agent-profile-delete-conflict.test.ts components/settings/agent-profile-delete-dialog.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)
-(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/settings/agent-profile-delete.spec.ts)
+(cd apps/web && pnpm e2e:run --docker --shards 1 --project chromium tests/settings/agent-profile-delete.spec.ts)
 ```
 
 ## Files likely touched
@@ -111,14 +111,12 @@ None.
 
 ## Results
 
-- `go test ./internal/task/repository/sqlite/ -run 'TestAgentProfileBlockers' -count=1`: pass (new
-  `TestAgentProfileBlockersIncludeWorkspace` and `TestAgentProfileBlockersKeepTaskWithMissingWorkspace`
-  failed before the query change).
-- `go test ./internal/agent/settings/... -count=1`: delete-conflict tests pass; the only failures
-  (`TestOpenCodeInstallPreparesSelectedManagedRuntime`, `TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree`)
-  are local npm-cache/runtime environment failures and fail identically on the base commit.
+- `go test -tags fts5 ./internal/task/repository/sqlite/ -run 'TestAgentProfileBlockers' -count=1`: pass (new
+  `TestAgentProfileBlockersIncludeWorkspace`, `TestAgentProfileBlockersNameEachTasksWorkspace`, and
+  `TestAgentProfileBlockersKeepTaskWithMissingWorkspace` failed before the query change).
+- `go test -tags fts5 ./internal/agent/settings/... -count=1`: pass.
 - `vitest run lib/settings/agent-profile-delete-conflict.test.ts components/settings/agent-profile-delete-dialog.test.tsx`:
-  19 passed (new grouping tests failed before implementation).
+  22 passed (new grouping tests failed before implementation).
 - `pnpm run typecheck` (with `NODE_OPTIONS=--max-old-space-size=12288`) and `pnpm run i18n:check`: pass.
 - `pnpm e2e:run --docker --shards 1 --project chromium tests/settings/agent-profile-delete.spec.ts`:
   6 passed. Host mode was unavailable locally (no Playwright browser on NixOS).

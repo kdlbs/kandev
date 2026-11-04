@@ -295,20 +295,20 @@ function SessionConflictSection({
   return (
     <div className="space-y-1">
       <p className="font-medium text-sm">{title}</p>
-      {groupSessionsByWorkspace(sessions).map((group) => (
+      {groupSessionsByWorkspace(sessions, (id) => workspaceLabels.get(id)).map((group) => (
         <div
           key={group.workspaceId}
           className="space-y-0.5 pl-2"
           data-testid="profile-conflict-workspace-group"
         >
-          <p
+          <h3
             className="text-sm font-medium break-words"
             data-testid="profile-conflict-workspace-name"
           >
             {group.workspaceName ||
               workspaceLabels.get(group.workspaceId) ||
               t("agents:conflictUnknownWorkspace")}
-          </p>
+          </h3>
           <ul className="list-disc list-inside space-y-0.5 pl-2">
             {group.sessions.map((s) => (
               <li key={s.task_id} className="text-sm">

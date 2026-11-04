@@ -25,9 +25,14 @@ function compareSessions(a: ActiveSessionInfo, b: ActiveSessionInfo): number {
 /**
  * Groups delete-conflict sessions by workspace in a stable display order:
  * named workspaces by name then ID, unnamed workspaces last, and sessions by
- * title then task ID. Label resolution for unnamed groups is the caller's job.
+ * title then task ID. A group without a response name resolves it through
+ * `resolveName` before ordering, so the sort ranks the name the dialog shows;
+ * response names stay authoritative.
  */
-export function groupSessionsByWorkspace(sessions: ActiveSessionInfo[]): WorkspaceSessionGroup[] {
+export function groupSessionsByWorkspace(
+  sessions: ActiveSessionInfo[],
+  resolveName: (workspaceId: string) => string | undefined = () => undefined,
+): WorkspaceSessionGroup[] {
   const groups = new Map<string, WorkspaceSessionGroup>();
   for (const session of sessions) {
     const workspaceId = session.workspace_id ?? "";
@@ -38,6 +43,9 @@ export function groupSessionsByWorkspace(sessions: ActiveSessionInfo[]): Workspa
     }
     group.workspaceName ||= session.workspace_name ?? "";
     group.sessions.push(session);
+  }
+  for (const group of groups.values()) {
+    group.workspaceName ||= resolveName(group.workspaceId) ?? "";
   }
   const ordered = [...groups.values()].sort(compareGroups);
   for (const group of ordered) group.sessions.sort(compareSessions);

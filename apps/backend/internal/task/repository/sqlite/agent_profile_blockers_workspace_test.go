@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -39,6 +40,69 @@ func TestAgentProfileBlockersIncludeWorkspace(t *testing.T) {
 		if info.WorkspaceID != autoOriginWorkspaceID || info.WorkspaceName != "Automation origin" {
 			t.Fatalf("blocker %s: want workspace %q/%q, got %q/%q",
 				info.TaskID, autoOriginWorkspaceID, "Automation origin", info.WorkspaceID, info.WorkspaceName)
+		}
+	}
+}
+
+// Blockers in more than one workspace must each name their own workspace: a
+// query that copies one row's workspace onto every result would otherwise pass
+// the single-workspace test above.
+func TestAgentProfileBlockersNameEachTasksWorkspace(t *testing.T) {
+	f := seedAutomationOriginFixture(t)
+	ctx := context.Background()
+
+	const profileID = "agent-profile-two-ws"
+	const secondWorkspaceID = "ws-second-origin"
+	if err := f.repo.CreateWorkspace(ctx, &models.Workspace{ID: secondWorkspaceID, Name: "Second origin"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := f.repo.CreateTask(ctx, &models.Task{
+		ID:          "t-second",
+		WorkspaceID: secondWorkspaceID,
+		Title:       "second workspace work",
+		State:       "BACKLOG",
+		Priority:    "medium",
+		Origin:      models.TaskOriginManual,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	for _, spec := range []struct{ sessionID, taskID string }{
+		{"sess-first", f.boardTaskID},
+		{"sess-second", "t-second"},
+	} {
+		if err := f.repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:             spec.sessionID,
+			TaskID:         spec.taskID,
+			AgentProfileID: profileID,
+			State:          models.TaskSessionStateRunning,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", spec.sessionID, err)
+		}
+	}
+
+	blockers, err := f.repo.GetActiveTaskInfoByAgentProfile(ctx, profileID)
+	if err != nil {
+		t.Fatalf("GetActiveTaskInfoByAgentProfile: %v", err)
+	}
+	byTask := make(map[string]agentdto.ActiveTaskInfo, len(blockers))
+	for _, info := range blockers {
+		byTask[info.TaskID] = info
+	}
+	want := map[string]struct{ id, name string }{
+		f.boardTaskID: {autoOriginWorkspaceID, "Automation origin"},
+		"t-second":    {secondWorkspaceID, "Second origin"},
+	}
+	if len(blockers) != len(want) {
+		t.Fatalf("expected %d blockers, got %+v", len(want), blockers)
+	}
+	for taskID, expected := range want {
+		info, ok := byTask[taskID]
+		if !ok {
+			t.Fatalf("missing blocker for task %s: %+v", taskID, blockers)
+		}
+		if info.WorkspaceID != expected.id || info.WorkspaceName != expected.name {
+			t.Fatalf("blocker %s: want workspace %q/%q, got %q/%q",
+				taskID, expected.id, expected.name, info.WorkspaceID, info.WorkspaceName)
 		}
 	}
 }

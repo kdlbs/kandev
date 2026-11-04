@@ -40,16 +40,19 @@ semantics, and the other conflict sections are unchanged.
 - `ActiveSessionInfo` (`apps/web/lib/types/agent-profile-errors.ts`) gains
   optional `workspace_id` and `workspace_name`, optional so a response from an
   older backend still renders.
-- A pure helper `groupSessionsByWorkspace(sessions)` in
+- A pure helper `groupSessionsByWorkspace(sessions, resolveName)` in
   `apps/web/lib/settings/agent-profile-delete-conflict.ts` returns ordered
   groups `{ workspaceId, workspaceName, sessions }[]` per
   `AC-AGENTS-PROFILE-DELETE-WORKSPACES-001.3`. It keys groups by
-  `workspace_id` (empty string for a missing ID) and leaves label resolution to
-  the component.
+  `workspace_id` (empty string for a missing ID). A group whose rows carry no
+  `workspace_name` resolves it through the caller-supplied `resolveName`
+  lookup before ordering, so groups sort by the name the dialog shows;
+  response-provided names stay authoritative.
 - `SessionConflictSection` in
   `apps/web/components/settings/agent-profile-delete-dialog.tsx` renders the
   section title, then one workspace group per helper result: a heading and a
-  list of item titles. The heading label is `workspace_name`, else the name of
+  list of item titles. The heading is an `h3` so heading navigation reaches
+  each workspace group. The heading label is `workspace_name`, else the name of
   the matching entry in `useAppStore((s) => s.workspaces.items)`, else
   `t("agents:conflictUnknownWorkspace")`. Each group carries
   `data-testid="profile-conflict-workspace-group"`.

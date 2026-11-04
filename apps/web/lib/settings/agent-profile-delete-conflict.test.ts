@@ -58,4 +58,23 @@ describe("groupSessionsByWorkspace", () => {
       ["ws-gone", ""],
     ]);
   });
+
+  it("orders groups by the resolved store name when the response name is empty", () => {
+    const groups = groupSessionsByWorkspace(
+      [session("t1", "a", "ws-z", ""), session("t2", "a", "ws-a", "")],
+      (id) => (id === "ws-z" ? "Zeta" : "Alpha"),
+    );
+    expect(groups.map((g) => [g.workspaceId, g.workspaceName])).toEqual([
+      ["ws-a", "Alpha"],
+      ["ws-z", "Zeta"],
+    ]);
+  });
+
+  it("keeps the response name over a differing resolved name", () => {
+    const groups = groupSessionsByWorkspace(
+      [session("t1", "a", "ws-1", "Response name")],
+      () => "Store name",
+    );
+    expect(groups.map((g) => g.workspaceName)).toEqual(["Response name"]);
+  });
 });

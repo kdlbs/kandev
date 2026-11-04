@@ -97,7 +97,10 @@ describe("AgentProfileDeleteConfirmation", () => {
 
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
-function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
+function renderConflictDialog(
+  conflict: AgentProfileDeleteConflict | null,
+  extraWorkspaces: Array<{ id: string; name: string }> = [],
+) {
   return render(
     <StateProvider
       initialState={{
@@ -111,6 +114,13 @@ function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
               created_at: FIXTURE_TIMESTAMP,
               updated_at: FIXTURE_TIMESTAMP,
             },
+            ...extraWorkspaces.map((workspace) => ({
+              id: workspace.id,
+              name: workspace.name,
+              owner_id: "user-1",
+              created_at: FIXTURE_TIMESTAMP,
+              updated_at: FIXTURE_TIMESTAMP,
+            })),
           ],
         },
         settingsAgents: {
@@ -294,7 +304,7 @@ describe("AgentProfileDeleteConflictDialog workspace groups", () => {
     const groups = screen.getAllByTestId("profile-conflict-workspace-group");
     expect(
       groups.map((g) => [
-        within(g).getByTestId("profile-conflict-workspace-name").textContent,
+        within(g).getByRole("heading", { level: 3 }).textContent,
         within(g)
           .getAllByRole("listitem")
           .map((li) => li.textContent),
@@ -304,6 +314,34 @@ describe("AgentProfileDeleteConflictDialog workspace groups", () => {
       ["Frontend", ["Billing page"]],
       ["Backend", ["Quick question"]],
     ]);
+  });
+
+  it("sorts groups by the workspace name shown, not the raw response name", () => {
+    renderConflictDialog(
+      {
+        activeSessions: [
+          // ws-z has no response name, so its label resolves from the store
+          // ("Backend") before ordering; ws-f carries its own name.
+          { task_id: "t1", task_title: "Zeta task", is_ephemeral: false, workspace_id: "ws-z" },
+          {
+            task_id: "t2",
+            task_title: "Frontend task",
+            is_ephemeral: false,
+            workspace_id: "ws-f",
+            workspace_name: "Frontend",
+          },
+        ],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+      },
+      [{ id: "ws-z", name: "Backend" }],
+    );
+
+    const names = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((el) => el.textContent);
+    expect(names).toEqual(["Backend", "Frontend"]);
   });
 
   it("falls back to the store workspace name, then Unknown workspace", () => {
