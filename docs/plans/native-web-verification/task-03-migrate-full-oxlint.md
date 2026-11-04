@@ -114,7 +114,7 @@ Completed on November 3, 2026.
   categories and plugins are off, so no unrelated recommended preset runs.
 - `rule-ledger.json` records all 96 configured registrations with severity,
   options, scope, exclusions, inline-suppression policy, native target, and
-  fixture, plus the disabled rules and the compiler-covered `no-octal` gap.
+  fixture, plus the disabled rules and the native-parser `no-octal` coverage.
 - Resolved all 37 migration findings without a new exclusion: 23 JSX entities
   became the identical Unicode characters, 12 unsafe optional-chain expressions
   received explicit guards, and the two shadowed `createSentryInstance` and

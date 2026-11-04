@@ -456,7 +456,9 @@ def collect_type_inventory(
     return Inventory(files=files)
 
 
-def provision_reference_typescript(tmp_dir: Path, version: str) -> tuple[Path, Attempt]:
+def provision_reference_typescript(
+    tmp_dir: Path, version: str, attempts: list[Attempt] | None = None
+) -> tuple[Path, Attempt]:
     """Install the exact reference compiler outside workspace dependencies."""
     npm = _require_executable("npm", "npm")
     attempt = run_process(
@@ -473,9 +475,12 @@ def provision_reference_typescript(tmp_dir: Path, version: str) -> tuple[Path, A
         tmp_dir,
         timeout=600.0,
     )
+    if attempts is not None:
+        attempts.append(attempt)
     if attempt.exit_code != 0:
         raise EvidenceError(
-            f"reference TypeScript {version} installation failed: {attempt.stderr[:500]}"
+            f"reference TypeScript {version} installation failed: {attempt.stderr[:500]}",
+            attempt=attempt,
         )
     binary = tmp_dir / "node_modules" / ".bin" / "tsc"
     if not binary.exists():
@@ -541,6 +546,32 @@ def source_identity(root: Path, extensions: tuple[str, ...]) -> dict:
         "sha256": f"sha256:{digest.hexdigest()}",
         "git_revision": git_revision,
     }
+
+
+def config_identity(web_root: Path) -> dict:
+    """Bind a measurement to the configuration inputs it actually ran."""
+    digest = hashlib.sha256()
+    files: dict[str, str] = {}
+    candidates = [
+        web_root / "tsconfig.json",
+        web_root / "package.json",
+        web_root.parent / "tsconfig.json",
+        web_root.parent / "pnpm-lock.yaml",
+    ]
+    for path in candidates:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(web_root).as_posix()
+        data = path.read_bytes()
+        file_hash = hashlib.sha256(data).hexdigest()
+        files[relative] = file_hash
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(file_hash.encode())
+        digest.update(b"\0")
+    if not files:
+        raise EvidenceError("configuration identity is empty")
+    return {"files": files, "sha256": f"sha256:{digest.hexdigest()}"}
 
 
 def _cache_state(web_root: Path, project: str) -> dict:
@@ -823,10 +854,9 @@ def _run_compare_types(args: argparse.Namespace, report: dict) -> None:
         cache_root = Path(cache_tmp)
         reference_bin = args.reference_bin
         if reference_bin is None:
-            reference_bin_path, provisioning_attempt = provision_reference_typescript(
-                Path(reference_tmp), reference_version
+            reference_bin_path, _provisioning_attempt = provision_reference_typescript(
+                Path(reference_tmp), reference_version, attempts
             )
-            attempts.append(provisioning_attempt)
             reference_bin = str(reference_bin_path)
         reference_bin = _require_executable(reference_bin, "reference tsc")
         reference_version_output = tool_version(reference_bin, web_root, attempts, "version-reference")
@@ -1736,6 +1766,7 @@ def _run_benchmark(args: argparse.Namespace, report: dict) -> None:
     cleared_caches: list[str] = []
 
     source_before = source_identity(web_root, TYPE_EXTENSIONS + LINT_EXTENSIONS)
+    config_before = config_identity(web_root)
     samples: list[dict] = report["samples"]
     attempts: list[Attempt] = report["attempts"]
     failures: list[str] = report["failures"]
@@ -1780,7 +1811,9 @@ def _run_benchmark(args: argparse.Namespace, report: dict) -> None:
         samples.append(pair)
 
     source_after = source_identity(web_root, TYPE_EXTENSIONS + LINT_EXTENSIONS)
+    config_after = config_identity(web_root)
     source_stable = source_before["sha256"] == source_after["sha256"]
+    config_stable = config_before["sha256"] == config_after["sha256"]
 
     baseline_lint_values = [
         pair["samples"]["baseline"]["lint_seconds"]
@@ -1834,6 +1867,8 @@ def _run_benchmark(args: argparse.Namespace, report: dict) -> None:
     ]
     if not source_stable:
         failures.append("source changed during measurement")
+    if not config_stable:
+        failures.append("configuration changed during measurement")
     if len(complete_pairs) < args.pairs:
         failures.append("not every sample pair completed successfully")
     if lint_reduction is None or lint_reduction < args.min_lint_reduction:
@@ -1850,6 +1885,7 @@ def _run_benchmark(args: argparse.Namespace, report: dict) -> None:
     report.update({
         "web_root": str(web_root),
         "source": {"before": source_before, "after": source_after, "stable": source_stable},
+        "config": {"before": config_before, "after": config_after, "stable": config_stable},
         "pins": {
             "tsrs": tsrs_version,
             "typescript_workspace": tool_version(tsc, web_root),

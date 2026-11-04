@@ -121,6 +121,13 @@ describe("native rule execution", () => {
     expectFinding("scripts/unreachable.js", "eslint(no-unreachable)");
   });
 
+  it("rejects legacy octal literals through the native parser", () => {
+    write("scripts/legacy-octal.js", "var mode = 0755;\nexport { mode };\n");
+    const result = runOxlint(["scripts/legacy-octal.js"]);
+    expect(result.status).toBe(1);
+    expect(result.output).toMatch(/octal literals/i);
+  });
+
   it("reports a TypeScript parser error instead of silently skipping the file", () => {
     write(
       "components/duplicate-method.ts",

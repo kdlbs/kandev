@@ -170,7 +170,7 @@ Design validation passed on November 3, 2026:
 
 Implementation checks passed for Tasks 01-04 on November 3, 2026:
 
-- The evidence helper tests (39), routing contract (9), upgrade-regression
+- The evidence helper tests (40), routing contract (9), upgrade-regression
   contract (3), existing workflow contracts, `actionlint`, full web lint,
   full typecheck, i18n checks, the E2E wait ratchet, the complete frontend
   suite (3,261 files, 29,610 tests), the Vite build, and plugin SDK checks pass.

@@ -1238,14 +1238,14 @@
   ],
   "unmapped": [
     {
-      "from": "no-octal",
-      "disposition": "typescript-compiler",
-      "reason": "TypeScript rejects legacy octal literals with TS1121; the web tree has no JavaScript legacy octal literal. No silent rule replacement."
-    },
-    {
       "from": "no-dupe-args",
       "disposition": "not-implemented",
       "reason": "Oxlint has no native equivalent. The TypeScript parser rejects duplicate parameters in modules; no JavaScript source in the web tree uses the pattern."
+    },
+    {
+      "from": "no-octal",
+      "disposition": "native-parser",
+      "reason": "Oxlint rejects legacy octal literals as a syntax diagnostic for .js and .ts inputs; TypeScript additionally reports TS1121 in the configured project. No active rule is claimed."
     }
   ],
   "exemptions": {

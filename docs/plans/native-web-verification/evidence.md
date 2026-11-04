@@ -134,8 +134,8 @@ punctuation characters in Unicode form, 12 unsafe optional-chain expressions wer
 explicit callback or state guards, and the two shadowed `ApiClient.createSentryInstance` and
 `SessionPage.prStatusChip` declarations were removed while retaining the effective later
 implementations. `rule-ledger.json` records all 96 configured rule registrations, severities, options,
-scopes, exemptions, and native targets, plus the disabled rules and the compiler-covered `no-octal`
-gap.
+scopes, exemptions, and native targets, plus the disabled rules and the native-parser `no-octal`
+coverage.
 
 The native wiring suite executes the required CLI against the real configuration and asserts all
 four System owner paths, all four Query rules, i18n and task-link guards, E2E waits, exemptions,

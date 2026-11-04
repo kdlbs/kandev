@@ -350,6 +350,14 @@ class EvidenceHarnessTest(unittest.TestCase):
         with self.assertRaises(MODULE.EvidenceError):
             MODULE.parse_oxlint_json('{"diagnostics": [{"message": "x"}]}')
 
+    def test_config_identity_changes_with_configuration(self) -> None:
+        first = MODULE.config_identity(self.web_root)
+        (self.web_root / "tsconfig.json").write_text(
+            json.dumps({"compilerOptions": {"strict": False}}), encoding="utf-8"
+        )
+        second = MODULE.config_identity(self.web_root)
+        self.assertNotEqual(first["sha256"], second["sha256"])
+
     def test_source_identity_changes_with_source(self) -> None:
         first = MODULE.source_identity(self.web_root, (".ts",))
         (self.web_root / "index.ts").write_text("export const value = 2;\n", encoding="utf-8")
