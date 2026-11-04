@@ -133,6 +133,7 @@ export async function exerciseChoiceImageQuestion(
   await expect(missing).toContainText("Image file not found.");
   await expect(missing.getByTestId("clarification-option")).toBeEnabled();
   await session.clarificationOption("Compact layout").click();
+  await session.submitClarification();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   const { messages } = await api.listSessionMessages(task.session_id!);
   const question = messages.find((message) => message.type === "clarification_request")!;
@@ -158,6 +159,7 @@ export async function exerciseChoiceImageQuestion(
     mixed.session.clarificationOverlay().getByRole("img", { name: "Proposed layout", exact: true }),
   ).toHaveCount(2);
   await mixed.session.clarificationOption("Missing alternative").click();
+  await mixed.session.submitClarification();
   await expect(mixed.session.idleInput()).toBeVisible({ timeout: 30_000 });
   const mixedMessages = await api.listSessionMessages(mixed.task.session_id!);
   expect(

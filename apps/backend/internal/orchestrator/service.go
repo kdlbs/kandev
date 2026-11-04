@@ -126,6 +126,13 @@ type MessageCreator interface {
 	CreateAgentMessage(ctx context.Context, taskID, content, agentSessionID, turnID string) error
 	CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
 	CreateUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error
+	// SetUserMessageDeliveryStatus sets the delivery status on an exact
+	// session-owned user message. It reports whether the message exists.
+	SetUserMessageDeliveryStatus(ctx context.Context, messageID, agentSessionID, status string) (bool, error)
+	// CreateCompletedUserMessageIdempotent records a user message in an
+	// already-completed lifecycle-only turn. It never starts or adopts an
+	// active conversation turn.
+	CreateCompletedUserMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID string, metadata map[string]interface{}) error
 	// CreateToolCallMessage creates a message for a tool call.
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
@@ -2000,6 +2007,9 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnStaleExecutionCleanup(func(ctx context.Context, sessionID string) {
+		s.settleBackgroundWorkLocked(ctx, sessionID, "")
+	})
 	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
@@ -4437,6 +4447,9 @@ func (s *Service) QueueUserPrompt(
 	queueMetadata := make(map[string]interface{}, len(metadata)+1)
 	for key, value := range metadata {
 		queueMetadata[key] = value
+	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
 	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true

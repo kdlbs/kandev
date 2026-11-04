@@ -1568,6 +1568,31 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		s.startTurnForSession(ctx, queuedMsg.SessionID)
 		turnID = s.getActiveTurnID(queuedMsg.SessionID)
 	}
+	record, err := queuedUserMessageRecordFor(queuedMsg, attachments, preparedPromptContent, sourceIDs)
+	if err != nil {
+		return err
+	}
+	if err := s.messageCreator.CreateUserMessageIdempotent(
+		ctx, record.messageID, queuedMsg.TaskID, record.content, queuedMsg.SessionID, turnID, record.metadata,
+	); err != nil {
+		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
+		return err
+	}
+	if queuedMsg.Metadata == nil {
+		queuedMsg.Metadata = map[string]interface{}{}
+	}
+	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
+	return nil
+}
+
+// queuedUserMessageRecordFor composes the identity, content, and metadata a
+// queued prompt's user message must keep across replays.
+func queuedUserMessageRecordFor(
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	preparedPromptContent *string,
+	sourceIDs []string,
+) (queuedUserMessageRecord, error) {
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	if preparedPromptContent != nil {
@@ -1587,24 +1612,23 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		PlanMode: queuedMsg.PlanMode, Attachments: attachments,
 	})
 	if err != nil {
-		return err
+		return queuedUserMessageRecord{}, err
 	}
 	if metaMap == nil {
 		metaMap = make(map[string]interface{})
 	}
 	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
-	messageID := queuedTranscriptMessageID(queuedMsg, sourceIDs)
-	if err := s.messageCreator.CreateUserMessageIdempotent(
-		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
-	); err != nil {
-		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
-		return err
-	}
-	if queuedMsg.Metadata == nil {
-		queuedMsg.Metadata = map[string]interface{}{}
-	}
-	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
-	return nil
+	return queuedUserMessageRecord{
+		messageID: queuedTranscriptMessageID(queuedMsg, sourceIDs),
+		content:   promptContent,
+		metadata:  metaMap,
+	}, nil
+}
+
+type queuedUserMessageRecord struct {
+	messageID string
+	content   string
+	metadata  map[string]interface{}
 }
 
 func queuedTranscriptMessageID(queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) string {
@@ -1650,6 +1674,10 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 			turnReservation.release()
 			s.signalCeilingSweep()
 		}()
+	}
+	ctx, state.dispatchErr = s.prepareQueuedBuiltinIntent(ctx, queuedMsg)
+	if state.dispatchErr != nil {
+		return
 	}
 	s.deliverQueuedPassthroughPrompt(ctx, identity, queuedMsg, &state)
 }
@@ -1709,7 +1737,9 @@ func (s *Service) finishQueuedPassthroughExecution(
 		s.clearQueuedDispatchInFlightForCapacityRefusal(identity.SessionID, reservation)
 	} else {
 		s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-		s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+		if !isBuiltinIntentError(state.dispatchErr) {
+			s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+		}
 	}
 	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
 	if s.onQueuedMessageExecutionComplete != nil {
@@ -1825,6 +1855,7 @@ func (s *Service) markQueuedPassthroughDeliveryAttempt(
 	return nil
 }
 
+// executeQueuedMessageWithReservation dispatches one queue entry under its current session ownership.
 func (s *Service) executeQueuedMessageWithReservation(
 	callerSessionID string,
 	queuedMsg *messagequeue.QueuedMessage,
@@ -1923,6 +1954,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 
+	var intentErr error
+	promptCtx, intentErr = s.prepareQueuedBuiltinIntent(promptCtx, queuedMsg)
+	if intentErr != nil {
+		allowFollowupDrain = false
+		s.finishQueuedMessageExecution(promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation, lifecyclePrompt, false, false, intentErr)
+		return
+	}
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
 	if err := s.prepareQueuedCIAutoFixOutcomeProtocol(promptCtx, queuedMsg); err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
@@ -2028,7 +2066,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 		deliverySubmissionID: deliverySubmissionID,
 		deliveryPayloadHash:  deliveryPayloadHash,
 	}
-	if !lifecyclePrompt {
+	if !lifecyclePrompt && !queuedMsg.IsDurablePlanComment() {
 		options.deliveryClaimUpdater = func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
 			return s.messageQueue.SetPendingQueueDispatchDelivery(
 				updateCtx, queuedMsg, protocol, submissionID, payloadHash,
@@ -2081,6 +2119,9 @@ func (s *Service) executeQueuedMessageWithReservation(
 		// The receipt transition atomically removed this managed row from the
 		// shared FIFO. Ordinary acknowledgement could race a successor input.
 		return
+	}
+	if isBuiltinIntentError(err) {
+		allowFollowupDrain = false
 	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
@@ -2355,7 +2396,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Error(err))
 
-	manualRecovery := isManualRecoveryPromptError(err)
+	manualRecovery := isManualRecoveryPromptError(err) || isBuiltinIntentError(err)
 	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&

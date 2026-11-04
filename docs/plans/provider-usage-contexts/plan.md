@@ -150,4 +150,3 @@ not measurements from the user's providers.
 - External access reveals shared instance usage, not per-user usage.
 - Cached or partial data must not be interpreted as a guaranteed current quota.
 - The standalone SDK migration in host main is separate from this manifest change.
-

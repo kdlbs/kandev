@@ -244,6 +244,7 @@ export function pauseTurnFileContent(
   const db = new DatabaseSync(dbPath);
   try {
     db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("BEGIN IMMEDIATE");
     const file = readTurnFile(db, changeSetID, path);
     if (!file) throw new Error(`turn file not found: ${path}`);
     const repository = db
@@ -286,12 +287,13 @@ export function pauseTurnFileContent(
        SET content_source = '', source_git_dir = '', preservation_state = '',
            preservation_reason = '', preservation_receipt = '', content_complete = 0,
            export_state = 'queued', export_reason = '', export_claim_owner = '',
-           export_claim_token = 0, export_claim_expires_at = NULL, export_next_attempt_at = ?
+           export_claim_token = export_claim_token + 1, export_claim_expires_at = NULL, export_next_attempt_at = ?
        WHERE id = ?`,
     ).run(new Date(Date.now() + PAUSE_EXPORT_DEFERRAL_MS).toISOString(), file.repositoryChangeID);
     db.prepare(
       "UPDATE turn_change_sets SET content_complete = 0, complete = 0, revision = revision + 1 WHERE id = ?",
     ).run(changeSetID);
+    db.exec("COMMIT");
     return {
       fileID: file.id,
       repositoryChangeID: file.repositoryChangeID,
@@ -311,6 +313,7 @@ export function pauseTurnFileContent(
       },
     };
   } finally {
+    if (db.isTransaction) db.exec("ROLLBACK");
     db.close();
   }
 }

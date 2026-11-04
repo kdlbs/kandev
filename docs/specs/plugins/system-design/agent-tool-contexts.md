@@ -141,4 +141,3 @@ This extends the task-only boundary in
 while preserving [automation approval](../../../decisions/2026-11-02-automation-plugin-tool-selection.md).
 The explicit context declaration and separate coordinator binding preserve the
 rationale here; no additional ADR is needed for this bounded extension.
-

@@ -453,6 +453,10 @@ build-backend-quiet:
 build-e2e-delivery-fixture:
 	@$(MAKE) -C $(BACKEND_DIR) build-e2e-delivery-fixture
 
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(MAKE) -C $(BACKEND_DIR) build-e2e-send-now-fixture
+
 .PHONY: build-e2e-plugin-package
 build-e2e-plugin-package:
 	@printf "$(CYAN)Packaging e2e fixture plugin...$(RESET)\n"
@@ -596,7 +600,7 @@ test-scripts:
 	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
@@ -604,12 +608,12 @@ test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plug
 	done; exit $$status
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 

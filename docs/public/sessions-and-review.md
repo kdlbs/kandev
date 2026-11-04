@@ -33,9 +33,33 @@ blockquotes, or code panels. Tables are supported only in pending shared context
 File references remain labels rather than opening workspace files.
 
 Long context starts at its content height, up to an initial limit. Select
-**Expand to available space** or drag the panel's top edge to use more of the
-visible host. Select **Reset panel size** to return to content sizing. The
-panel keeps space for the chat input and, in Threads, a minimum transcript area.
+**Expand** to fill the available space. Select **Restore** to return to the
+previous height, including a height you set by dragging the panel's top edge.
+Drag the panel's top edge to resize it, or double-click the drag handle to
+return to content sizing. The panel keeps space for the chat input and, in
+Threads, a minimum transcript area.
+
+### Attach files to an answer
+
+Use the paperclip beside the custom answer, or in the question header when
+custom text is disabled, to add screenshots or other evidence. You can also
+paste an image directly into the custom answer. A bundle accepts up to 10 files
+and 100 MiB in total. Each file is limited to 100 MiB.
+
+Selecting an option records a draft. For one question, select **Send** to submit
+the answer. For several questions, select **Submit answers** after answering
+each question. An image-only paste keeps the selected option, typed text, and
+focus. Ordinary text paste behaves as before.
+
+The paperclip badge shows the file count, upload progress, or failure. Open the
+paperclip to view, retry, or remove files without losing the answer. A submission
+waits while a file is uploading or has failed. If delivery fails, Kandev keeps
+the answer and its files for a retry.
+
+Kandev delivers each file as a readable path in the agent's execution. It does
+not add a native image block to the tool result, so the agent inspects images
+with its file-reading tools. If an upload or the runtime cannot deliver a file,
+the answer fails visibly instead of reaching the agent with a missing file.
 
 ## Start a parallel session
 

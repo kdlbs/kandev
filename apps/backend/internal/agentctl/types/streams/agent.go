@@ -305,9 +305,10 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
-	// ToolStatusMissing retains ACP wire provenance for the local turn finalizer.
-	// It is not serialized because only the adapter consumes this evidence.
-	ToolStatusMissing bool `json:"-"`
+	// ToolStatusMissing retains ACP wire provenance. It crosses the agentctl
+	// stream so the backend lifecycle boundary can use the same evidence as the
+	// local turn finalizer when deciding whether an update starts a turn.
+	ToolStatusMissing bool `json:"tool_status_missing,omitempty"`
 
 	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
 	// New producers leave this read-compatibility field unset.

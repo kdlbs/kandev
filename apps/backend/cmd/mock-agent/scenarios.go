@@ -40,6 +40,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":             scenarioUntrackedFileSetup,
 	"untracked-file-modify":            scenarioUntrackedFileModify,
 	"clarification":                    scenarioClarification,
+	"clarification-files":              scenarioClarificationAttachments,
+	"clarification-files-choice":       scenarioClarificationAttachmentsChoiceOnly,
 	"clarification-no-other":           scenarioClarificationNoOther,
 	"clarification-markdown":           scenarioClarificationMarkdown,
 	"clarification-context-paragraphs": scenarioClarificationContextParagraphs,
@@ -695,7 +697,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 
 	e.text("First tour incoming.")
-	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+	if _, err := e.callMCPTool("kandev-walkthroughs", "show_walkthrough_kandev", wtArgs("First",
 		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
 		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
 	)); err != nil {
@@ -707,7 +709,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 
 // scenarioWalkthroughReemitSecond emits a new tour on a later user prompt.
 func scenarioWalkthroughReemitSecond(e *emitter) {
-	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+	if _, err := e.callMCPTool("kandev-walkthroughs", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
 		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
@@ -810,7 +812,7 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	toolName := "show_walkthrough_kandev"
 	args := walkthroughDemoArgs()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
-	result, err := e.callMCPTool("kandev", toolName, args)
+	result, err := e.callMCPTool("kandev-walkthroughs", toolName, args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))

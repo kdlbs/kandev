@@ -111,4 +111,3 @@ Implemented on 2026-11-03.
   packaged disposable-host evidence remain pending until the sibling SDK
   checkout includes host 0.99.0; the archive must not be produced against the
   older host.
-

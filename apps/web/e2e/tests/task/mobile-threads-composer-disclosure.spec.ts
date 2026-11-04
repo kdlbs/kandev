@@ -148,19 +148,12 @@ test("keeps required answers reachable above a short mobile viewport", async ({
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
     const question = tile.getByTestId("clarification-overlay-container");
     await expect(question).toBeVisible();
-    const expand = tile.getByTestId("clarification-panel-expand");
-    const reset = tile.getByTestId("clarification-panel-reset");
-    const [expandBox, resetBox] = await Promise.all([expand.boundingBox(), reset.boundingBox()]);
-    if (!expandBox || !resetBox) throw new Error("phone clarification sizing controls are missing");
-    expect(expandBox.height).toBeGreaterThanOrEqual(44);
-    expect(resetBox.height).toBeGreaterThanOrEqual(44);
-    if (await expand.isEnabled()) {
-      const hostMax = Number(await question.getAttribute("data-host-max-height"));
-      await expand.tap();
-      await expect(question).toHaveCSS("height", `${hostMax}px`);
-      await reset.tap();
-      await expect.poll(() => question.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
-    }
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toBeVisible();
+    const sizeBox = await sizeToggle.boundingBox();
+    if (!sizeBox) throw new Error("phone clarification sizing control is missing");
+    expect(sizeBox.height).toBeGreaterThanOrEqual(44);
+    expect(sizeBox.width).toBeGreaterThanOrEqual(44);
     const answer = question.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" });
     await expect(answer).toBeVisible();
     expect((await answer.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -168,6 +161,7 @@ test("keeps required answers reachable above a short mobile viewport", async ({
       79,
     );
     await answer.tap();
+    await question.getByTestId("clarification-custom-submit").tap();
     await expect(question).toHaveCount(0);
     await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
     await expect(testPage.getByTestId("session-chat")).toHaveCount(1);
@@ -197,12 +191,12 @@ test("keeps clarification sizing controls touch-sized on a coarse-pointer tablet
     await expect(tile.getByTestId("clarification-overlay-container")).toBeVisible();
     expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
 
-    for (const testId of ["clarification-panel-expand", "clarification-panel-reset"]) {
-      const control = tile.getByTestId(testId);
-      const box = await control.boundingBox();
-      if (!box) throw new Error(`${testId} is missing on the coarse-pointer tablet`);
-      expect(box.height).toBeGreaterThanOrEqual(44);
-    }
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    const box = await sizeToggle.boundingBox();
+    if (!box) throw new Error("the size toggle is missing on the coarse-pointer tablet");
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
   } finally {
     await apiClient.saveUserSettings(original);
   }
@@ -260,10 +254,20 @@ test("drops expanded height in the footer fallback and restores it with host spa
     const inner = tile.getByTestId("clarification-scroll-region");
     await expect(question).toBeVisible();
     await expect(question).toHaveAttribute("data-scroll-owner", "clarification-panel");
-    const expandedHeight = Number(await question.getAttribute("data-host-max-height"));
-    expect(expandedHeight).toBeGreaterThan(120);
-    await tile.getByTestId("clarification-panel-expand").tap();
-    await expect(question).toHaveCSS("height", `${expandedHeight}px`);
+    const hostBeforeExpand = Number(await question.getAttribute("data-host-max-height"));
+    expect(hostBeforeExpand).toBeGreaterThan(120);
+    const sizeToggle = tile.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toBeVisible();
+    await sizeToggle.tap();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+    await expect
+      .poll(() =>
+        question.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
 
     await testPage.setViewportSize({ width: 393, height: 320 });
     await expect(question).toHaveAttribute("data-scroll-owner", "thread-footer");
@@ -281,7 +285,14 @@ test("drops expanded height in the footer fallback and restores it with host spa
 
     await testPage.setViewportSize({ width: 393, height: 1100 });
     await expect(question).toHaveAttribute("data-scroll-owner", "clarification-panel");
-    await expect(question).toHaveCSS("height", `${expandedHeight}px`);
+    await expect
+      .poll(() =>
+        question.evaluate((element) => {
+          const host = Number((element as HTMLElement).dataset.hostMaxHeight);
+          return Math.abs(element.getBoundingClientRect().height - host) <= 1;
+        }),
+      )
+      .toBe(true);
 
     await testPage.setViewportSize({ width: 393, height: 320 });
     await expect(question).toHaveAttribute("data-scroll-owner", "thread-footer");
@@ -293,6 +304,7 @@ test("drops expanded height in the footer fallback and restores it with host spa
     await expect(question).toHaveCount(0);
     const composer = tile.getByTestId("chat-input-editor");
     await expect(composer).toBeVisible();
+    await composer.scrollIntoViewIfNeeded();
     const [composerBox, tileBox] = await Promise.all([composer.boundingBox(), tile.boundingBox()]);
     expect(composerBox).not.toBeNull();
     expect(tileBox).not.toBeNull();

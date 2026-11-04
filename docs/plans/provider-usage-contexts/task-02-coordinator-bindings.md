@@ -105,4 +105,3 @@ Implemented on 2026-11-03.
   `TestCoordinatorPluginToolLegacyBindingGrantsNothing`,
   `TestCoordinatorPluginActionPolicyGuard`,
   `TestInstancePluginToolRevokedAfterDiscovery`.
-

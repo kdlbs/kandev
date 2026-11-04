@@ -5,6 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { StorageMaintenanceSettings } from "../../../lib/types/system";
 import {
   mockProgressiveStorageOverview,
+  mockStorageMaintenanceRuns,
   mockTemporaryArtifactOverview,
   requestStorageMaintenanceSettings,
   restoreStorageMaintenanceSettings,
@@ -405,4 +406,80 @@ test.describe("Mobile storage maintenance", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
+
+  test("keeps maintenance history vertical with touch-sized details", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockStorageMaintenanceRuns(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    const partialRow = testPage.getByTestId("storage-run-history-partial");
+    await expect(partialRow.getByTestId("storage-run-status")).toHaveText("Partial");
+    await partialRow.locator("[data-slot='accordion-trigger']").tap();
+    const result = partialRow.getByTestId("storage-go-cache-result");
+    await expect(result).toContainText("Removed: 10.75 GB");
+    await expect(result).toContainText("Remaining: 53.69 GB");
+
+    const removedBox = await result.getByTestId("storage-go-cache-removed").boundingBox();
+    const remainingBox = await result.getByTestId("storage-go-cache-remaining").boundingBox();
+    expect(removedBox).not.toBeNull();
+    expect(remainingBox).not.toBeNull();
+    expect(remainingBox!.y).toBeGreaterThanOrEqual(removedBox!.y + removedBox!.height);
+
+    const technicalTrigger = partialRow.getByTestId("storage-run-technical-trigger");
+    const technicalBox = await technicalTrigger.boundingBox();
+    expect(technicalBox).not.toBeNull();
+    expect(technicalBox!.height).toBeGreaterThanOrEqual(44);
+
+    await technicalTrigger.tap();
+    const json = partialRow.getByTestId("storage-run-technical-json");
+    await expect(json).toBeVisible();
+    await expect(partialRow.getByTestId("storage-run-technical-message")).toContainText(
+      "go-cache parent changed after scan",
+    );
+    const technicalContent = partialRow.getByTestId("storage-run-technical-content");
+    const contentBox = await technicalContent.boundingBox();
+    expect(contentBox).not.toBeNull();
+    expect(contentBox!.height).toBeLessThanOrEqual(260);
+    expect(
+      await technicalContent.evaluate((element) => element.scrollHeight > element.clientHeight),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+
+    await prCapture.screenshot("mobile-storage-maintenance-history", {
+      caption:
+        "Phone maintenance history stacks facts, explains the result once, and contains diagnostics",
+      fullPage: true,
+    });
+
+    await technicalTrigger.tap();
+    await expect(partialRow.getByTestId("storage-run-technical-message")).toBeHidden();
+  });
+
+  for (const width of [767, 768]) {
+    test(`keeps maintenance history geometry at ${width}px`, async ({ testPage }) => {
+      await testPage.setViewportSize({ width, height: 900 });
+      await mockStorageMaintenanceRuns(testPage);
+      await testPage.goto("/settings/system/storage");
+
+      const partialRow = testPage.getByTestId("storage-run-history-partial");
+      await partialRow.locator("[data-slot='accordion-trigger']").click();
+      const technicalTrigger = partialRow.getByTestId("storage-run-technical-trigger");
+      const technicalBox = await technicalTrigger.boundingBox();
+      expect(technicalBox).not.toBeNull();
+      if (width < 768) {
+        expect(technicalBox!.height).toBeGreaterThanOrEqual(44);
+      } else {
+        expect(technicalBox!.height).toBeLessThanOrEqual(30);
+      }
+      await technicalTrigger.click();
+      await expect(partialRow.getByTestId("storage-run-technical-json")).toBeVisible();
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    });
+  }
 });

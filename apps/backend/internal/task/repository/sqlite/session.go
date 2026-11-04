@@ -482,6 +482,29 @@ func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID str
 	return turn, err
 }
 
+// CurrentClarificationTurnID returns the canonical current conversational turn
+// for a session using the same authority predicate and ordering as the
+// clarification claim and finalization transactions.
+func (r *Repository) CurrentClarificationTurnID(ctx context.Context, sessionID string) (string, error) {
+	predicate, orderBy := currentTurnAuthority(r.ro.DriverName(), "turn_row")
+	query := fmt.Sprintf(`
+		SELECT turn_row.id
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY %s
+		LIMIT 1
+	`, predicate, orderBy)
+	var turnID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(&turnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve current clarification turn: %w", err)
+	}
+	return turnID, nil
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
@@ -1103,15 +1126,12 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount, primaryCount int
+	var sessionCount int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
-		FROM task_sessions WHERE task_id = ?
-	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
+		SELECT COUNT(*) FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
-	// The task lock or SQLite writer serializes primary election with insertion.
-	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -1270,6 +1290,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		if err := r.prepareWorkflowInitialSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
+		if err := r.electInitialSessionPrimaryTx(ctx, tx, session); err != nil {
+			return err
+		}
 	}
 
 	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
@@ -1332,6 +1355,24 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		return err
 	}
 	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
+}
+
+// electInitialSessionPrimaryTx resolves an election-if-missing request under
+// the caller's task lock and records the committed ownership on session. The
+// insert therefore carries the final flag, and a caller never needs a second
+// transaction to promote the row.
+func (r *Repository) electInitialSessionPrimaryTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	if session == nil || !session.IsPrimary {
+		return nil
+	}
+	var primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM task_sessions WHERE task_id = ? AND is_primary = 1
+	`), session.TaskID).Scan(&primaryCount); err != nil {
+		return fmt.Errorf("check task primary session before insertion: %w", err)
+	}
+	session.IsPrimary = primaryCount == 0
+	return nil
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
@@ -5159,6 +5200,10 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	}
 	return result, rows.Err()
 }
+
+// ElectsPrimaryOnCreate reports that session insertion commits the initial
+// primary election under the owning task lock.
+func (r *Repository) ElectsPrimaryOnCreate() bool { return true }
 
 // SetSessionPrimary marks a session as primary and clears the primary flag
 // on every other session for the same task, atomically. Both writes go
