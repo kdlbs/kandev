@@ -1,6 +1,7 @@
 import {
   checkBuiltinCreation,
   checkBuiltinCreationBack,
+  checkBuiltinCreationLoading,
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -65,6 +66,10 @@ test("retains a denied draft and explains the failure", async ({ testPage, apiCl
 test("records explicit Configuration consent at task creation", async ({ testPage, apiClient }) => {
   test.setTimeout(120_000);
   await checkBuiltinCreation(testPage, apiClient, false);
+});
+
+test("keeps built-in choices available while additional servers load", async ({ testPage }) => {
+  await checkBuiltinCreationLoading(testPage, false);
 });
 
 test.afterEach(async ({ backend }, testInfo) => {

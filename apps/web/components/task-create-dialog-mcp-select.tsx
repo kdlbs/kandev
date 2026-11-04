@@ -32,6 +32,28 @@ type Props = {
   disabled?: boolean;
 };
 
+function TaskCreateAdditionalServers({
+  loading,
+  ...selection
+}: Omit<Props, "builtinPackages"> & {
+  query: string;
+  onQueryChange: (query: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (loading)
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          {t("settings:mcpAdditionalServers")}
+        </p>
+        <p role="status" className="text-xs text-muted-foreground">
+          {t("common:loading")}
+        </p>
+      </div>
+    );
+  return <MCPSelectionContent {...selection} sectionLabel={t("settings:mcpAdditionalServers")} />;
+}
+
 function TaskCreateMCPDrawer({
   open,
   onOpenChange,
@@ -98,14 +120,14 @@ export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection
       aria-haspopup="dialog"
       aria-expanded={open}
       data-testid="task-create-mcp-select"
-      disabled={loading || selection.disabled}
+      disabled={selection.disabled || (loading && !builtinPackages)}
       className={controlSizingClassName(
         "standard",
         "w-32 justify-between border-border/60 bg-muted/30 hover:bg-muted/60",
       )}
     >
       <span className="min-w-0 truncate tabular-nums">
-        {loading
+        {loading && !builtinPackages
           ? t("common:loading")
           : t("settings:mcpSelectedCount", { count: selection.selectedIds.length })}
       </span>
@@ -115,11 +137,11 @@ export function TaskCreateMCPSettingRow({ loading, builtinPackages, ...selection
   const body = (
     <div className="space-y-5">
       {builtinPackages}
-      <MCPSelectionContent
+      <TaskCreateAdditionalServers
         {...selection}
+        loading={loading}
         query={query}
         onQueryChange={setQuery}
-        sectionLabel={t("settings:mcpAdditionalServers")}
       />
     </div>
   );

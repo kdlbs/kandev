@@ -215,6 +215,50 @@ async function closeCreationMCP(page: Page, options: Locator, touch: boolean) {
   await expect(options).toBeHidden();
 }
 
+export async function checkBuiltinCreationLoading(page: Page, touch: boolean) {
+  if (touch) await page.setViewportSize({ width: 320, height: 852 });
+  await page.goto("/");
+  const catalog = "**/api/v1/workspaces/*/mcp-servers";
+  const release = Promise.withResolvers<void>();
+  const received = Promise.withResolvers<void>();
+  const completed = Promise.withResolvers<void>();
+  await page.route(catalog, async (route) => {
+    received.resolve();
+    await release.promise;
+    await route.continue();
+    completed.resolve();
+  });
+  try {
+    const create = touch
+      ? page.getByRole("button", { name: "Add task", exact: true })
+      : page.getByTestId("create-task-button").filter({ visible: true });
+    await activate(create, touch);
+    await received.promise;
+    const dialog = page.getByTestId("create-task-dialog");
+    await activate(dialog.getByTestId("task-create-advanced-settings-trigger"), touch);
+    const trigger = dialog.getByTestId("task-create-mcp-select");
+    await expect(trigger).toBeEnabled();
+    await activate(trigger, touch);
+    const options = page.getByTestId("task-create-mcp-options");
+    await expect(options.getByRole("status")).toContainText("Loading");
+    await activate(options.getByTestId("builtin-mcp-package-configuration"), touch);
+    await chooseBuiltin(page, "configuration", "On", touch);
+    await expect(options.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
+    const response = page.waitForResponse((entry) =>
+      /\/api\/v1\/workspaces\/[^/]+\/mcp-servers$/.test(new URL(entry.url()).pathname),
+    );
+    release.resolve();
+    expect((await response).ok()).toBe(true);
+    await expect(options.getByRole("status")).toBeHidden();
+    await expect(options.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
+    await closeCreationMCP(page, options, touch);
+  } finally {
+    release.resolve();
+    await completed.promise;
+    await page.unroute(catalog);
+  }
+}
+
 export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: boolean) {
   await page.goto("/");
   const create = touch

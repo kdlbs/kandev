@@ -825,3 +825,48 @@ Logs: `/tmp/kandev-creation-fix-{unit-receipt,typecheck-verified,complete-lint,d
 Failing evidence: `/tmp/kandev-4762-creation-{ui,reset}-red.log` and
 `/tmp/kandev-creation-fix-row-red.log`. Publication/hosted CI is a separate gate
 recorded in the saved task plan. No new tasks, sessions or workers were created.
+
+### Placement follow-up PR review repair (2026-11-04)
+
+Both review findings are valid. The older integration-base and feature-branch
+receipts are now labelled historical. The placement correction at the top of
+the plan remains the active branch/base record.
+
+The MCP trigger previously waited for additional-server catalog/selection reads,
+which made the independent built-in package editor unreachable during a slow
+request. Only additional-server content now waits for those reads. Explicit
+form disablement still applies to the whole trigger. The existing no-built-in
+loading behavior is unchanged. The search draft remains in the picker owner,
+so closing and reopening either native surface preserves the query.
+
+The new deferred-response regression fails before the fix because the MCP
+trigger is disabled. Desktop and a 320-pixel phone choose Configuration On
+while the real catalog response is held. Releasing and draining that response
+clears its loading status without discarding consent. The existing additional
+server regression also caught a query reset during the initial helper
+extraction; keeping query ownership in the original picker repairs it.
+
+Final source verification: 22 focused unit tests, web typecheck, changed-file
+Oxlint, formatting, and whitespace checks pass. Four desktop and four phone
+cases pass with one worker and zero retries. These include the new pending-read
+case, actual Configuration creation, Back without submission, and unchanged
+additional-server selection/search. The first phone invocation passed all three
+package cases but its additional-server fixture exited during backend restart,
+before assertions. The same complete four-case scope passed with backend
+diagnostics enabled; no production or test change was made for that startup
+failure. The original failure is retained, not counted as a passing run.
+
+```sh
+pnpm --dir apps/web exec vitest run components/task-create-dialog-reset-effects.test.ts components/task-create-dialog-form-reset.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web exec oxlint -c oxlint.config.mjs --deny-warnings components/task-create-dialog-mcp-select.tsx e2e/helpers/builtin-mcp-management.ts e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/settings/mobile-builtin-mcp-management.spec.ts
+pnpm --dir apps/web run build:e2e
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/task/task-mcp-selection.spec.ts -- --retries=0 -g 'keeps built-in choices available|at task creation|Back from package|matches neighboring Advanced'
+E2E_DEBUG=1 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-builtin-mcp-management.spec.ts e2e/tests/task/mobile-task-mcp-selection.spec.ts -- --retries=0 -g 'keeps built-in choices available|at task creation|Back from package|keeps task additions inside'
+```
+
+Use the clean launch environment and resource bounds recorded above. Logs:
+`/tmp/kandev-5047-loading-{red,desktop-final,phone-final,phone-diagnostic,unit,typecheck-final,lint-verified,format-check}.log`.
+Public instructions retain the same entry path and package semantics, so no
+additional public copy or translation is needed. Normal hooks and exact-head
+CI/review/merge evidence remain separate delivery gates in the saved task plan.

@@ -59,9 +59,15 @@ popover with the same list/detail. One heading identifies Built-in packages.
 Back returns focus to the package row. Preserve package choices across closure.
 
 Acceptance: no standalone package section; list reachable through MCP even
-without catalog servers; one title; explicit On survives picker and Advanced
+without catalog servers or while their request is pending; one title; explicit On survives picker and Advanced
 reopen and is saved by task creation; Back never submits; phone controls remain
 touch-sized and contained, including wrapped row labels; new task/workspace clears previous consent.
+
+PR review repair: only the additional-server content waits for catalog and
+selection data. Built-in packages retain their independent loading and editing
+path in the same picker. A deferred catalog response must not disable that
+entry. Desktop and minimum-width phone regressions choose Configuration On
+before releasing the real server response, then verify that consent survives.
 
 Focused commands (managed host environment/resource bounds from results):
 

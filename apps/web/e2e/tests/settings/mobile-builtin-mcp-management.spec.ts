@@ -1,6 +1,7 @@
 import {
   checkBuiltinCreation,
   checkBuiltinCreationBack,
+  checkBuiltinCreationLoading,
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -26,6 +27,12 @@ test("opts in and prunes packages in the phone explorer", async ({
 test("records explicit Configuration consent at task creation", async ({ testPage, apiClient }) => {
   test.setTimeout(120_000);
   await checkBuiltinCreation(testPage, apiClient, true);
+});
+
+test("keeps built-in choices available while additional servers load on a phone", async ({
+  testPage,
+}) => {
+  await checkBuiltinCreationLoading(testPage, true);
 });
 
 test("keeps translated detail usable across phone and touch widths", async ({
