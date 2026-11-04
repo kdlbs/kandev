@@ -168,7 +168,7 @@ Completed 2026-11-03.
 Verification:
 
 - The Task 02 focused Vitest set, including the retained clear-window suite and
-  the deferred first-read regression: 10 files, 143 tests passed.
+  the deferred first-read regression: 10 files, 144 tests passed.
 - `pnpm exec tsc --noEmit` (with an 8 GB Node heap): passed.
 - `pnpm run i18n:check`: passed; all seven catalogs complete.
 - Scoped ESLint over every changed TS/TSX path: 0 errors.

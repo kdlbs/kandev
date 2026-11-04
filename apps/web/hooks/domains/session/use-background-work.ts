@@ -167,6 +167,7 @@ export function useBackgroundWork(
   const { workloads, activeWorkId, isLoading } = useSessionBackgroundWorkState(sessionId, enabled);
 
   const lastFetchedSessionIdRef = useRef<string | null>(null);
+  const latestFetchIdRef = useRef(0);
   const { isInitialLoading, loadError, settle } = useInitialWorkloadReadiness(
     sessionId,
     enabled,
@@ -175,6 +176,7 @@ export function useBackgroundWork(
 
   const fetchWorkloads = useCallback(async () => {
     if (!detailActive || !sessionId || !enabled) return;
+    const requestId = (latestFetchIdRef.current += 1);
     let failed = false;
     try {
       store.getState().setBackgroundWorkLoading?.(sessionId, true);
@@ -184,7 +186,7 @@ export function useBackgroundWork(
       failed = true;
       store.getState().setBackgroundWorkLoading?.(sessionId, false);
     } finally {
-      settle(sessionId, failed);
+      if (requestId === latestFetchIdRef.current) settle(sessionId, failed);
     }
   }, [detailActive, sessionId, enabled, store, settle]);
 

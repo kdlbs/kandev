@@ -116,6 +116,54 @@ describe("useBackgroundWork fetching", () => {
     expect(result.current.loadError).toBe(true);
     expect(result.current.workloads).toEqual([]);
   });
+});
+
+describe("useBackgroundWork request generations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    storeState = {
+      features: {
+        agentBackgroundWork: true,
+      },
+      backgroundWork: {
+        workloadsBySessionId: {},
+        activeWorkIdBySessionId: {},
+        loadingBySessionId: {},
+      },
+    };
+  });
+
+  it("does not settle readiness from an older read across A-B-A session changes", async () => {
+    const pending: Array<(value: { workloads: WorkloadRunObservation[] }) => void> = [];
+    listBackgroundWorkloads.mockImplementation(
+      () =>
+        new Promise<{ workloads: WorkloadRunObservation[] }>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) => useBackgroundWork(sessionId),
+      { initialProps: { sessionId: "session-a" } },
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    rerender({ sessionId: "session-b" });
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    rerender({ sessionId: "session-a" });
+    await waitFor(() => expect(pending).toHaveLength(3));
+
+    await act(async () => {
+      pending[0]?.({ workloads: [] });
+    });
+    expect(result.current.isInitialLoading).toBe(true);
+
+    await act(async () => {
+      pending[2]?.({ workloads: [] });
+    });
+    await waitFor(() => expect(result.current.isInitialLoading).toBe(false));
+  });
 
   it("does not report initial loading without a fetched session", () => {
     const { result } = renderHook(() => useBackgroundWork(null));

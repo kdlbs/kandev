@@ -219,7 +219,7 @@ Implementation and product checks completed 2026-11-03.
 
 - Focused Vitest set (selector, hook, chip/panel, initial-read regression,
   clear-window, desktop menu, phone picker/bottom nav, panel actions): 10 files,
-  143 tests passed.
+  144 tests passed.
 - `pnpm exec tsc --noEmit` with an 8 GB Node heap passed; `pnpm run
   i18n:check` passed with all seven catalogs complete.
 - Scoped ESLint over every changed TS/TSX path reported 0 errors.

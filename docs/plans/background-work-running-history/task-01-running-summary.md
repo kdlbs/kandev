@@ -151,7 +151,7 @@ Completed 2026-11-03.
 
 Verification:
 
-- `pnpm exec vitest run` for the ten focused files: 10 files, 143 tests
+- `pnpm exec vitest run` for the ten focused files: 10 files, 144 tests
   passed (including a deferred first-read regression through the real hook and
   store).
 - `pnpm exec tsc --noEmit` (with an 8 GB Node heap): passed.

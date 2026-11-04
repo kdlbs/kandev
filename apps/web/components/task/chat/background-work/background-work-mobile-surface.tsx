@@ -24,7 +24,11 @@ type MobileMode = "summary" | "overview" | "detail";
 function focusWorkloadRow(workId: string | null) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      const selector = `[data-testid="background-work-open-button-${workId}"], [data-testid="open-workload-${workId}"]`;
+      const escapedId =
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(String(workId))
+          : String(workId).replace(/["\\]/g, "\\$&");
+      const selector = `[data-testid="background-work-open-button-${escapedId}"], [data-testid="open-workload-${escapedId}"]`;
       const target = document.querySelector<HTMLElement>(selector);
       const fallback = document.querySelector<HTMLElement>(
         '[data-testid^="open-workload-"], [data-testid^="background-work-open-button-"], [data-testid="background-work-chip"]',
