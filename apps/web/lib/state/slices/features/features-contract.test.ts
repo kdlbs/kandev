@@ -31,6 +31,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
+  it("omits the retired dynamic circuit backoff toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("dynamicCircuitBackoffEscalation");
+  });
+
   it("keeps canvases disabled by default", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });

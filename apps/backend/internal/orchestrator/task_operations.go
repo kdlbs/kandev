@@ -559,15 +559,24 @@ func withInitialPromptPreview(ctx context.Context, preview *models.InitialPrompt
 	return context.WithValue(ctx, initialPromptPreviewContextKey{}, preview)
 }
 
-func (s *Service) persistInitialPromptPreviewFromContext(ctx context.Context, taskID, sessionID string) error {
-	preview, ok := ctx.Value(initialPromptPreviewContextKey{}).(*models.InitialPromptPreview)
-	if !ok || preview == nil {
-		return nil
+// preparedSessionSeedFromContext snapshots the initial prompt state before
+// session persistence. Validation happens here so a malformed submission
+// cannot reach the session transaction.
+func preparedSessionSeedFromContext(ctx context.Context) (*models.PreparedSessionSeed, error) {
+	seed := &models.PreparedSessionSeed{}
+	if preview, ok := ctx.Value(initialPromptPreviewContextKey{}).(*models.InitialPromptPreview); ok {
+		seed.InitialPromptPreview = preview
 	}
-	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyInitialPromptPreview, preview); err != nil {
-		return s.handleSessionLaunchFailure(ctx, taskID, sessionID, fmt.Errorf("persist initial prompt preview: %w", err))
+	if submission, ok := ctx.Value(initialPromptSubmissionContextKey{}).(*models.InitialPromptSubmission); ok {
+		seed.InitialPromptSubmission = submission
 	}
-	return nil
+	if seed.Empty() {
+		return nil, nil
+	}
+	if err := seed.Validate(); err != nil {
+		return nil, err
+	}
+	return seed, nil
 }
 
 type initialPromptSubmissionContextKey struct{}
@@ -577,21 +586,6 @@ func withInitialPromptSubmission(ctx context.Context, submission *models.Initial
 		return ctx
 	}
 	return context.WithValue(ctx, initialPromptSubmissionContextKey{}, submission)
-}
-
-func (s *Service) persistInitialPromptSubmissionFromContext(ctx context.Context, taskID, sessionID string) error {
-	submission, ok := ctx.Value(initialPromptSubmissionContextKey{}).(*models.InitialPromptSubmission)
-	if !ok || submission == nil {
-		return nil
-	}
-	if err := submission.Validate(); err != nil {
-		return s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
-	}
-	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyInitialPromptSubmission, submission); err != nil {
-		return s.handleSessionLaunchFailure(ctx, taskID, sessionID,
-			fmt.Errorf("persist initial prompt submission: %w", err))
-	}
-	return nil
 }
 
 func isInheritParentWorkspace(task *v1.Task) bool {
@@ -1022,6 +1016,10 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
+	ctx, err = s.executor.PrepareMCPLaunch(ctx, taskID, session, true)
+	if err != nil {
+		return nil, fmt.Errorf("prepare built-in MCP launch: %w", err)
+	}
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
@@ -1234,15 +1232,17 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
-		return sysprompt.InjectOfficeContextWithOptions(
+		return sysprompt.InjectOfficeContextWithPackages(
 			taskID, sessionID, prompt,
 			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			preparedBuiltinPackages(ctx, taskID, sessionID),
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
 	case dbTask.Origin == models.TaskOriginCoordinator:
 		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			BuiltinPackages:                preparedBuiltinPackages(ctx, taskID, sessionID),
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
@@ -1264,6 +1264,9 @@ func (s *Service) handleSessionLaunchFailure(
 	preloadedSession ...*models.TaskSession,
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
+	if isFixedProfileSuspendedError(launchErr) {
+		return launchErr
+	}
 	if recordErr := s.recordSessionRecoveryBlock(failureCtx, sessionID, "interactive", launchErr); recordErr != nil {
 		s.logger.Warn("failed to persist session recovery block",
 			zap.String("task_id", taskID),
@@ -2059,6 +2062,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
+	ctx, err = s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
+	if err != nil {
+		return nil, failPreparedLaunch(fmt.Errorf("prepare built-in MCP launch: %w", err))
+	}
+
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists
 	// the wrapped form to task_session_messages; Message.ToAPI strips the
@@ -2248,13 +2256,15 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
-		return sysprompt.InjectOfficeContextWithOptions(
+		return sysprompt.InjectOfficeContextWithPackages(
 			p.taskID, p.sessionID, prompt,
 			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			preparedBuiltinPackages(ctx, p.taskID, p.sessionID),
 			p.referenceContext, spawnContext, pullRequestTargetContext,
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
+		BuiltinPackages:                preparedBuiltinPackages(ctx, p.taskID, p.sessionID),
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
@@ -2405,14 +2415,6 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 				zap.String("session_id", sessionID), zap.Error(deleteErr))
 		}
 		return "", false, err
-	}
-	if created {
-		if err := s.persistInitialPromptPreviewFromContext(ctx, task.ID, sessionID); err != nil {
-			return sessionID, created, err
-		}
-		if err := s.persistInitialPromptSubmissionFromContext(ctx, task.ID, sessionID); err != nil {
-			return sessionID, created, err
-		}
 	}
 	return sessionID, created, nil
 }
@@ -2702,14 +2704,18 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 			return "", false, err
 		}
 	}
+	seed, err := preparedSessionSeedFromContext(ctx)
+	if err != nil {
+		return "", false, err
+	}
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
 		var sessionID string
 		var prepareErr error
 		if workflowRoute != nil {
-			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRouteAndSeed(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute, seed)
 		} else {
-			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+			sessionID, prepareErr = s.executor.PrepareSessionWithSeed(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, seed)
 		}
 		return sessionID, prepareErr == nil, prepareErr
 	}
@@ -2719,9 +2725,9 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 		var sessionID string
 		var prepareErr error
 		if workflowRoute != nil {
-			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRoute(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
+			sessionID, prepareErr = s.executor.PrepareSessionWithWorkflowRouteAndSeed(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute, seed)
 		} else {
-			sessionID, prepareErr = s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+			sessionID, prepareErr = s.executor.PrepareSessionWithSeed(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, seed)
 		}
 		return sessionID, prepareErr == nil, prepareErr
 	}
@@ -2731,8 +2737,8 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 		// is not created through the generic PrepareSession transaction.
 		return "", false, fmt.Errorf("workflow session routes are not supported for new office sessions")
 	}
-	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
-		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID,
+	session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreationAndSeed(
+		ctx, task, sessionOwnerID, agentProfileID, executorID, executorProfileID, seed,
 	)
 	if ensureErr != nil {
 		return "", false, ensureErr
@@ -4753,6 +4759,11 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 			sessionID,
 		)
 	}
+	// Both production callers hold sessionID's lifecycle lock
+	// (ensureSessionRunningWithAttemptAndBinding and the resume pipeline). The
+	// stopped event the teardown publishes therefore cannot settle inside the
+	// handler; this owner settles in place before the caller relaunches.
+	s.settleBackgroundWorkLocked(ctx, sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	taskID := ""
 	if refreshed != nil {
@@ -6800,7 +6811,10 @@ type promptTaskOptions struct {
 	// liveExecutionFence disables lazy resume and binds dispatch to the current
 	// execution and native conversation. Capacity continuation uses it because
 	// completed effects cannot authorize a runtime restore.
-	liveExecutionFence        *promptTaskLiveExecutionFence
+	liveExecutionFence *promptTaskLiveExecutionFence
+	// capacityIntent selects bounded message-turn admission or an explicit
+	// execution override. The zero value is bounded for ordinary message turns.
+	capacityIntent            turnCapacityIntent
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
@@ -7031,6 +7045,38 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
 	if err != nil {
 		return nil, err
+	}
+
+	// A fixed profile whose resource circuit is open must not receive a new
+	// provider request, even into an execution that is still alive. Dynamic
+	// sessions are gated by their own selection.
+	if !s.isDynamicPromptSession(session) {
+		if err := s.admitFixedSessionPrompt(ctx, session); err != nil {
+			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+			return nil, err
+		}
+	}
+
+	// A new message turn needs capacity even when the runtime is already warm.
+	// This runs before sessionAlreadyPromptReady's early return and before cold
+	// resume, so both share one admission boundary.
+	turnReservation, err := s.admitPromptTaskMessageTurn(ctx, taskID, sessionID, session, options)
+	if err != nil {
+		if refusal, refused := messageTurnCapacityRefusalOf(err); refused {
+			if deferredErr := s.disposeMessageTurnCapacityRefusal(
+				ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, origin, options, refusal,
+			); deferredErr != nil {
+				err = deferredErr
+			}
+		}
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, err
+	}
+	if turnReservation != nil {
+		defer func() {
+			turnReservation.release()
+			s.signalCeilingSweep()
+		}()
 	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
@@ -10175,6 +10221,9 @@ func (s *Service) SetQueueAutoRun(ctx context.Context, sessionID string, enabled
 	if err := s.messageQueue.SetAutoRun(ctx, sessionID, enabled); err != nil {
 		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
 	}
+	if enabled {
+		s.signalCeilingSweep()
+	}
 	if !enabled || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return s.messageQueue.GetStatus(ctx, sessionID).AutoRun, false, nil
 	}
@@ -10216,6 +10265,9 @@ func (s *Service) SetQueueAutoRunForSession(ctx context.Context, identity messag
 
 	if err := s.messageQueue.SetAutoRunForSession(ctx, identity, enabled); err != nil {
 		return false, false, fmt.Errorf("set queue Auto-run: %w", err)
+	}
+	if enabled {
+		s.signalCeilingSweep()
 	}
 	if !enabled || s.queueAutoRunDrainBlocked(identity.SessionID) {
 		return enabled, false, nil
@@ -11316,6 +11368,15 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	}
 	defer guard.release()
 
+	// Cancellation can arrive just after the backend settled the turn, while
+	// the control is still visible. A fully idle target has nothing to
+	// interrupt, so succeed without creating a turn or a status message.
+	if s.explicitCancellationTargetIsIdle(ctx, sessionID) {
+		s.logger.Debug("ignoring explicit cancel for idle session",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+
 	// Invalidate startup before probing or cancelling the runtime. A resume
 	// continuation that is already waiting on ACP readiness will observe this
 	// identity fence and cannot publish a late token, failure, or prompt.
@@ -11355,6 +11416,63 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+// explicitCancellationTargetIsIdle reports whether a user cancel reached a
+// session that has no turn to interrupt. An internal continuation cancel is
+// never a no-op because it owns the resume attempt it is trying to stop.
+func (s *Service) explicitCancellationTargetIsIdle(ctx context.Context, sessionID string) bool {
+	if ctx.Value(continuationCancelContextKey{}) != nil || s.repo == nil {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	switch session.State {
+	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
+	default:
+		return false
+	}
+	// A held or waiting prompt admission is an in-flight dispatch, not a
+	// settled session: the cancel must reach it.
+	if s.messageQueue != nil && s.messageQueue.SessionAdmissionActive(sessionID) {
+		return false
+	}
+	return !s.sessionHasCancellableWork(ctx, sessionID)
+}
+
+// sessionHasCancellableWork reports any in-flight turn, dispatch, clarification,
+// or resume attempt that a cancellation must reach.
+func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID string) bool {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil || turnID != "" {
+		return true
+	}
+	if _, active := s.activeTurns.Load(sessionID); active || s.reservedPromptTurnID(sessionID) != "" {
+		return true
+	}
+	if _, ok := s.resumeAttemptStore().current(sessionID); ok {
+		return true
+	}
+	if s.sessionHasLiveClarification(ctx, sessionID) {
+		return true
+	}
+	if _, inFlight := s.steerInFlight.Load(sessionID); inFlight {
+		return true
+	}
+	if settler := s.backgroundWorkSettler(); settler != nil {
+		sessionIDs, err := settler.ListSessionIDsWithOpenBackgroundWork(ctx)
+		if err != nil {
+			return true
+		}
+		for _, candidate := range sessionIDs {
+			if candidate == sessionID {
+				return true
+			}
+		}
+	}
+	return s.pendingQueuedDispatch(sessionID) != nil || s.isQueuedDispatchAccepted(sessionID)
 }
 
 func (s *Service) acknowledgeRetainedPromptFailure(identity cancellationIdentity) {

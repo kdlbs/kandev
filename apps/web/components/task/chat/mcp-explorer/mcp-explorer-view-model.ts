@@ -98,7 +98,12 @@ export function mcpStatusPresentation(server: MCPAttachmentServer) {
 }
 
 export function isKandevMcpServer(server: MCPAttachmentServer): boolean {
-  return server.name === "kandev" && server.source !== "profile";
+  if (server.name === "kandev") return server.source !== "profile";
+  return (
+    server.source === "kandev" &&
+    server.builtin_package !== undefined &&
+    server.name === `kandev-${server.builtin_package}`
+  );
 }
 
 export function getMcpCatalogState(server: MCPAttachmentServer): MCPToolCatalogState {
@@ -118,7 +123,7 @@ export function getMcpToolCounts(server: MCPAttachmentServer) {
   const stored = server.tools?.length ?? 0;
   return {
     stored,
-    total: server.tool_count ?? stored,
+    total: server.tool_count ?? (server.tools !== undefined ? stored : undefined),
     truncated: server.tool_catalog_truncated === true,
   };
 }

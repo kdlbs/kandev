@@ -70,3 +70,32 @@ describe("session.mcp_status_updated handler", () => {
     expect(store.getState().setSessionMCPStatus).not.toHaveBeenCalled();
   });
 });
+
+describe("built-in attachment event ownership", () => {
+  it.each(["foreign-session", "foreign-task", "older"])("ignores %s reports", (kind) => {
+    const store = makeStore();
+    const newer = {
+      version: 1,
+      current: { attachment_attempt_id: "new", started_at: "2026-10-25T14:00:00Z" },
+    };
+    store.getState().sessionMcpStatus = { bySessionId: { "session-1": newer } };
+    const history = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "old",
+        started_at: "2026-10-25T13:00:00Z",
+        session_id: kind === "foreign-session" ? "other" : "session-1",
+        task_id: kind === "foreign-task" ? "other" : "task-1",
+      },
+    };
+    registerSessionMCPStatusHandlers(store)["session.mcp_status_updated"]!(
+      makeMessage({
+        task_id: "task-1",
+        session_id: "session-1",
+        history,
+        timestamp: "2026-10-25T15:00:00Z",
+      }),
+    );
+    expect(store.getState().setSessionMCPStatus).not.toHaveBeenCalled();
+  });
+});

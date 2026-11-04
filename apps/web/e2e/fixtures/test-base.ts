@@ -713,7 +713,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
+export async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
     ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");

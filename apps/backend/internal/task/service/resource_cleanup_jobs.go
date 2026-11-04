@@ -1573,7 +1573,7 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 	}
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
-	_, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
+	updated, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
 		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
@@ -1581,6 +1581,16 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
 			zap.Int("attempt", job.Attempts), zap.Error(err), zap.String("cleanup_error", cleanupErr.Error()))
 		return errors.Join(cleanupErr, err)
+	}
+	if !updated {
+		// A stale attempt did not commit this result, so it cannot publish
+		// attributed reconciliation diagnostics for a job another attempt owns.
+		s.logger.Warn("task resource cleanup retry transition was not claimed",
+			zap.String("job_id", job.ID),
+			zap.String("task_id", job.TaskID),
+			zap.Int("attempt", job.Attempts),
+			zap.String("state", string(state)))
+		return cleanupErr
 	}
 	fields := []zap.Field{
 		zap.String("job_id", job.ID),
@@ -1597,6 +1607,7 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 		)
 	}
 	s.logger.Warn("task resource cleanup job entered retry wait or failed", fields...)
+	s.logCleanupConflictDiagnostics(job, state, nextAttempt, cleanupErr)
 	return cleanupErr
 }
 

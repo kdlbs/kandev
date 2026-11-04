@@ -50,6 +50,17 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
       ],
     },
     {
+      path: path.join(
+        BACKEND_DIR,
+        "bin",
+        `e2e-send-now-fixture${process.platform === "win32" ? ".exe" : ""}`,
+      ),
+      rebuildTarget: "build-e2e-send-now-fixture",
+      sourceFiles: [
+        path.join(BACKEND_DIR, "internal/orchestrator/e2e_send_now_not_delivered_fixture_test.go"),
+      ],
+    },
+    {
       path: path.join(BACKEND_DIR, ".build", "kandev-plugin-e2e-1.0.0.tar.gz"),
       rebuildTarget: "e2e-plugin-package",
     },

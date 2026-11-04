@@ -144,3 +144,62 @@ describe("addSessionCommit — duplicate notifications", () => {
     expect(commits?.[1].pushed).toBe(true);
   });
 });
+
+describe("addSessionCommit repository scope", () => {
+  // @covers AC-TASKS-MULTI-BRANCH-001.2
+  it.each([
+    ["api", "web"],
+    ["api", "api-feature"],
+    [undefined, "web"],
+    ["", "web"],
+  ])("retains shared-parent commits in scopes %s and %s", (firstRepo, secondRepo) => {
+    const store = makeStore();
+    store.getState().registerSessionEnvironment(SESSION, "environment");
+    const first = commit({ commit_sha: "first", repository_name: firstRepo });
+    const second = commit({ commit_sha: "second", repository_name: secondRepo });
+
+    store.getState().addSessionCommit(SESSION, first);
+    store.getState().addSessionCommit(SESSION, second);
+
+    expect(store.getState().sessionCommits.byEnvironmentId.environment).toEqual([second, first]);
+  });
+
+  it("retains the same SHA in different repository scopes", () => {
+    const store = makeStore();
+    const first = commit({ repository_name: "api" });
+    const second = commit({ repository_name: "web" });
+
+    store.getState().addSessionCommit(SESSION, first);
+    store.getState().addSessionCommit(SESSION, second);
+
+    expect(store.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([second, first]);
+  });
+
+  it.each([
+    ["api", "api"],
+    [undefined, ""],
+    ["", undefined],
+  ])("replaces an amended leading commit in the same scope %s / %s", (oldRepo, newRepo) => {
+    const store = makeStore();
+    const original = commit({ commit_sha: "original", repository_name: oldRepo });
+    const sibling = commit({ commit_sha: "sibling", repository_name: "web" });
+    const amended = commit({ commit_sha: "amended", repository_name: newRepo });
+    store.getState().setSessionCommits(SESSION, [original, sibling]);
+
+    store.getState().addSessionCommit(SESSION, amended);
+
+    expect(store.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([amended, sibling]);
+  });
+
+  it("replaces an amended repository head after a sibling repository commits", () => {
+    const store = makeStore();
+    const original = commit({ commit_sha: "original", repository_name: "api" });
+    const sibling = commit({ commit_sha: "sibling", repository_name: "web" });
+    const amended = commit({ commit_sha: "amended", repository_name: "api" });
+    store.getState().setSessionCommits(SESSION, [sibling, original]);
+
+    store.getState().addSessionCommit(SESSION, amended);
+
+    expect(store.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([sibling, amended]);
+  });
+});

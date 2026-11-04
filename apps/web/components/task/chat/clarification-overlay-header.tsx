@@ -2,9 +2,9 @@
 
 import {
   IconArrowsMaximize,
+  IconArrowsMinimize,
   IconChevronDown,
   IconCheck,
-  IconRestore,
   IconX,
   IconMessageQuestion,
 } from "@tabler/icons-react";
@@ -15,6 +15,7 @@ import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip"
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import type { ReactNode } from "react";
 import { ClarificationStepper } from "./clarification-overlay-parts";
 
 function clarificationHeaderClassName(total: number): string {
@@ -37,13 +38,14 @@ type ClarificationOverlayTopBarProps = {
   allAnswered: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  attachmentActions?: ReactNode;
+  showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
-  onExpandPanel?: () => void;
-  onResetPanel?: () => void;
+  onToggleSize?: () => void;
+  sizeExpanded?: boolean;
   canExpandPanel?: boolean;
-  canResetPanel?: boolean;
   collapseContentId?: string;
 };
 
@@ -61,13 +63,14 @@ export function ClarificationOverlayTopBar({
   allAnswered,
   onSubmit,
   onSkip,
+  attachmentActions,
+  showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
   onCollapse,
-  onExpandPanel,
-  onResetPanel,
+  onToggleSize,
+  sizeExpanded,
   canExpandPanel,
-  canResetPanel,
   collapseContentId,
 }: ClarificationOverlayTopBarProps) {
   const { t } = useTranslation();
@@ -102,11 +105,12 @@ export function ClarificationOverlayTopBar({
         lateMode={lateMode}
         onLateClose={onLateClose}
         onCollapse={onCollapse}
-        onExpandPanel={onExpandPanel}
-        onResetPanel={onResetPanel}
+        onToggleSize={onToggleSize}
+        sizeExpanded={sizeExpanded}
         canExpandPanel={canExpandPanel}
-        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
+        attachmentActions={attachmentActions}
+        showSingleQuestionSubmit={showSingleQuestionSubmit}
       />
     </div>
   );
@@ -118,15 +122,60 @@ type ClarificationHeaderActionsProps = {
   isSubmitting: boolean;
   onSubmit: () => void;
   onSkip: () => void;
+  attachmentActions?: ReactNode;
+  showSingleQuestionSubmit?: boolean;
   lateMode?: boolean;
   onLateClose?: () => void;
   onCollapse?: () => void;
-  onExpandPanel?: () => void;
-  onResetPanel?: () => void;
+  onToggleSize?: () => void;
+  sizeExpanded?: boolean;
   canExpandPanel?: boolean;
-  canResetPanel?: boolean;
   collapseContentId?: string;
 };
+
+function ClarificationSizeToggle({
+  expanded,
+  canExpand,
+  onToggle,
+  ariaControls,
+}: {
+  expanded: boolean;
+  canExpand: boolean;
+  onToggle: () => void;
+  ariaControls?: string;
+}) {
+  const { t } = useTranslation();
+  const label = expanded ? t("chat:restoreClarificationPanel") : t("chat:expandClarificationPanel");
+  const disabled = !expanded && !canExpand;
+  const handleClick = () => {
+    if (disabled) return;
+    onToggle();
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 flex-shrink-0 cursor-pointer rounded transition-[color,background-color,transform] duration-150 active:scale-[0.96] aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 max-md:h-11 max-md:w-11"
+          aria-label={label}
+          aria-controls={ariaControls}
+          aria-disabled={disabled ? "true" : undefined}
+          data-testid="clarification-panel-size-toggle"
+          onClick={handleClick}
+        >
+          {expanded ? (
+            <IconArrowsMinimize className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <IconArrowsMaximize className="h-4 w-4" aria-hidden="true" />
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 function ClarificationSkipButton({
   isSubmitting,
@@ -169,19 +218,21 @@ export function ClarificationHeaderActions({
   isSubmitting,
   onSubmit,
   onSkip,
+  attachmentActions,
+  showSingleQuestionSubmit = false,
   lateMode = false,
   onLateClose,
   onCollapse,
-  onExpandPanel,
-  onResetPanel,
+  onToggleSize,
+  sizeExpanded = false,
   canExpandPanel = false,
-  canResetPanel = false,
   collapseContentId,
 }: ClarificationHeaderActionsProps) {
   const { t } = useTranslation();
   if (lateMode) {
     return (
       <div className="flex shrink-0 items-center justify-end gap-2">
+        {attachmentActions}
         <Button
           type="button"
           variant="ghost"
@@ -214,35 +265,16 @@ export function ClarificationHeaderActions({
         total > 1 && "w-full md:w-auto",
       )}
     >
-      {onExpandPanel && onResetPanel && (
-        <>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
-            onClick={onExpandPanel}
-            disabled={!canExpandPanel}
-            data-testid="clarification-panel-expand"
-          >
-            <IconArrowsMaximize className="size-3.5" aria-hidden="true" />
-            {t("chat:expandClarificationPanel")}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="min-h-11 cursor-pointer gap-1.5 px-2 text-xs md:min-h-0 [@media(pointer:coarse)]:min-h-11"
-            onClick={onResetPanel}
-            disabled={!canResetPanel}
-            data-testid="clarification-panel-reset"
-          >
-            <IconRestore className="size-3.5" aria-hidden="true" />
-            {t("chat:resetClarificationPanel")}
-          </Button>
-        </>
+      {onToggleSize && (
+        <ClarificationSizeToggle
+          expanded={sizeExpanded}
+          canExpand={canExpandPanel}
+          onToggle={onToggleSize}
+          ariaControls={collapseContentId}
+        />
       )}
-      {total > 1 && (
+      {attachmentActions}
+      {(total > 1 || showSingleQuestionSubmit) && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
           description={t("task:submitAnswers")}

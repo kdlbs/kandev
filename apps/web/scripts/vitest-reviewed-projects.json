@@ -393,7 +393,6 @@
     "lib/utils/hash.test.ts",
     "lib/utils/message-preview.test.ts",
     "lib/utils/needs-action.test.ts",
-    "lib/utils/pending-clarification-detached.test.ts",
     "lib/utils/pending-clarification-ordering.test.ts",
     "lib/utils/pending-clarification-scope.test.ts",
     "lib/utils/pending-clarification-turn-authority-fixture.test.ts",

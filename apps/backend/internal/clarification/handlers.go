@@ -63,6 +63,7 @@ var clarificationPreClaimTimeout = 5 * time.Second
 type handlerMessageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+	CurrentClarificationTurnID(ctx context.Context, sessionID string) (string, error)
 }
 
 // cancellationMessageStore is the task repository surface used by session cancellation.
@@ -113,6 +114,28 @@ type MessageCreator interface {
 	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message) error
 }
 
+// AttachmentAwareMessageCreator is the optional claim path used for every
+// production clarification response. It keeps the legacy file-free method
+// available for external clients and existing test doubles.
+type AttachmentAwareMessageCreator interface {
+	CompleteActiveClarificationBundleWithAttachments(
+		ctx context.Context,
+		pendingID, status string,
+		responses map[string]interface{},
+		claims []taskmodels.ClarificationAttachmentClaim,
+	) ([]*taskmodels.Message, bool, error)
+}
+
+// AnswerAttachmentMaterializer streams already-claimed answer files into one
+// live execution and returns the executor paths keyed by attachment ID.
+type AnswerAttachmentMaterializer interface {
+	MaterializeAnswerAttachments(
+		ctx context.Context,
+		sessionID string,
+		attachments []taskmodels.ClarificationAnswerAttachment,
+	) (map[string]string, error)
+}
+
 // EventBus interface for publishing events.
 type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
@@ -129,6 +152,7 @@ type PrimaryAnswered struct {
 	ClarificationTurnID string
 	Question            string
 	AnswerText          string
+	Attachments         []taskmodels.ClarificationAnswerAttachment
 	Rejected            bool
 	RejectReason        string
 }
@@ -149,6 +173,7 @@ type DetachedClarificationResume struct {
 	ClaimedMessageIDs   []string
 	Question            string
 	AnswerText          string
+	Attachments         []taskmodels.ClarificationAnswerAttachment
 	Rejected            bool
 	RejectReason        string
 }
@@ -463,7 +488,14 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	serialized, err := SerializeResponse(resp)
+	if err != nil {
+		h.logger.Error("failed to serialize clarification wait response",
+			zap.String("pending_id", pendingID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errClarificationInternal})
+		return
+	}
+	c.JSON(http.StatusOK, json.RawMessage(serialized))
 }
 
 // RespondBody is the request body for responding to a clarification request.
@@ -619,6 +651,14 @@ func clarificationPersistenceContext(ctx context.Context) (context.Context, cont
 	// failed detached response can sequence claim, resume, and restore phases,
 	// so its worst-case response latency may span three of these windows.
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
+}
+
+// clarificationPostClaimDeliveryContext bounds the direct post-claim materialization
+// and live-waiter release. Nested finalize, restore, and publish phases detach
+// with their own persistence windows. It starts after the claim and survives
+// caller cancellation.
+func clarificationPostClaimDeliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout+5*time.Second)
 }
 
 type clarificationPreClaimContextKey struct{}

@@ -17,6 +17,7 @@ import (
 // descriptor. The name is relative to the session attachment directory.
 type MaterializedAttachment struct {
 	Name      string `json:"name"`
+	Path      string `json:"path"`
 	SizeBytes int64  `json:"size_bytes"`
 }
 

@@ -277,6 +277,10 @@
   "notificationClarificationTitle": "Agent needs your answer",
   "notificationInboxItemBody": "A new item needs your attention.",
   "notificationInboxItemTitle": "New inbox item",
+  "notificationPermissionBody": "The agent is waiting for your approval.",
+  "notificationPermissionTitle": "Agent needs permission",
+  "notificationSessionFailedBody": "The agent session ended with an error.",
+  "notificationSessionFailedTitle": "Agent session failed",
   "notificationTurnFinishedBody": "The agent finished a turn.",
   "notificationTurnFinishedTitle": "Agent turn finished",
   "notInstalled": "Not installed",
@@ -563,5 +567,8 @@
   "conversationSearch_query_too_short": "Use at least 3 characters to search conversations.",
   "conversationSearch_query_too_long": "Use at most 200 characters to search conversations.",
   "conversationSearch_query_too_broad": "Use at least 3 consecutive letters or digits.",
-  "conversationSearch_title": "Command Palette"
+  "conversationSearch_title": "Command Palette",
+  "offlineTitle": "You are offline",
+  "offlineDescription": "Kandev needs a connection to your server. Check your network, then try again.",
+  "offlineRetry": "Try again"
 }
