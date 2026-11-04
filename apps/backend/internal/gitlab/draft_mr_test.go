@@ -415,6 +415,9 @@ func TestMockClientMarkMRReady(t *testing.T) {
 	if _, err := mock.MarkMRReady(t.Context(), "g/p", 99); err == nil {
 		t.Fatal("unknown MR must fail")
 	}
+	if _, err := mock.MergeMR(t.Context(), "g/p", 7, false, ""); err != nil {
+		t.Fatalf("merge after Mark as ready = %v", err)
+	}
 }
 
 func TestMockClientMarkMRReadyAcceptsOpenedState(t *testing.T) {

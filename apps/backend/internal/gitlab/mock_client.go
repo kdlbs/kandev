@@ -261,6 +261,9 @@ func (c *MockClient) MarkMRReady(ctx context.Context, projectPath string, iid in
 			mr := c.mrs[key]
 			mr.Title = title
 			mr.Draft = false
+			if mr.DetailedMergeStatus == detailedMergeStatusDraft {
+				mr.DetailedMergeStatus = "mergeable"
+			}
 			c.readyFeedbackReads[key] = 0
 			return nil
 		},
