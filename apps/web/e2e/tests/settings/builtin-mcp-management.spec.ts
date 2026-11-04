@@ -75,8 +75,8 @@ test.afterEach(async ({ backend }, testInfo) => {
     });
 });
 
-test("Back from package detail does not submit a new task", async ({ testPage }) => {
-  await checkBuiltinCreationBack(testPage, false);
+test("Back from package detail does not submit a new task", async ({ testPage, prCapture }) => {
+  await checkBuiltinCreationBack(testPage, false, prCapture);
 });
 
 test("shows a saved package addition separately from current connections", async ({

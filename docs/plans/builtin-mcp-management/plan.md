@@ -13,6 +13,28 @@ legacy_specs: []
 
 # Implementation plan: Selectable built-in MCP packages
 
+## New-task MCP placement correction (2026-11-04)
+
+PR #4762 merged at `a1013e89fc460b39b17003e5022d756bf480e3d2` before this
+request. This correction uses `fix/task-create-mcp-package-placement-6d1b` from
+verified current main `5d6adcbca18231a5aa3726ca9ee642bfa255cd4a`, which contains
+that merge. The merged delivery branch is unchanged. The initial work is backed
+up as a patch and retained stash before applying it to this new branch.
+
+The user reported a separate package disclosure above Advanced settings and a
+repeated package title. Work order 03 was reopened for this existing UI-02 management
+scope. The correction is complete and locally verified. Put task-creation packages inside Advanced settings > MCP servers, using
+the shipped desktop popover and phone drawer. Render one package-list heading.
+Keep the task draft in the form owner so closing either disclosure does not
+discard consent. Reset it on a new task or workspace change. No package default,
+permission, persisted format, process-start timing, or existing-task flow changes.
+
+Desktop: New Task > Advanced settings > MCP servers > package list/detail and
+additional servers in one popover. Phone: the same entry opens the shipped MCP
+drawer, with one scroll body and its existing Close control. Package Back stays
+inside the same surface and does not submit. The existing form footer creates
+the task after the picker closes. Work order 03 names focused regressions.
+
 ## Current CI and main integration (2026-11-04)
 
 The user's current CI/conflict requests and later "continue" authorize repair,

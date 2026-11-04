@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client";
+import type { PrAssetCapture } from "./pr-asset-capture";
+import { waitForFiniteAnimations } from "./animations";
 import type { SeedData } from "../fixtures/test-base";
 import type { BuiltinMCPManagementView } from "@/lib/types/builtin-mcp";
 import { SessionPage } from "../pages/session-page";
@@ -168,6 +170,51 @@ async function checkBuiltinTaskReopen(page: Page, api: ApiClient, taskId: string
   await expect(page.getByTestId("builtin-mcp-choice-configuration")).toContainText("On");
 }
 
+async function openCreationMCP(page: Page, dialog: Locator, touch: boolean) {
+  await expect(dialog.getByTestId("task-create-builtin-packages")).toBeHidden();
+  await activate(dialog.getByTestId("task-create-advanced-settings-trigger"), touch);
+  await expect(dialog.getByTestId("task-create-builtin-packages")).toBeHidden();
+  const trigger = dialog.getByTestId("task-create-mcp-select");
+  await activate(trigger, touch);
+  const options = page.getByTestId("task-create-mcp-options");
+  const packages = options.getByTestId("task-create-builtin-packages");
+  await expect(packages.getByTestId("builtin-mcp-package-core")).toBeVisible();
+  await expect(options.getByText("Built-in packages", { exact: true })).toHaveCount(1);
+  await expect(
+    options.getByRole("heading", { name: "Built-in packages", exact: true }),
+  ).toHaveCount(1);
+  await assertNoDocumentHorizontalOverflow(page, "new-task MCP packages");
+  await waitForFiniteAnimations(options);
+  for (const row of await packages.locator('[data-testid^="builtin-mcp-package-"]').all()) {
+    const box = await row.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const label = element.firstElementChild!.getBoundingClientRect();
+      return {
+        top: bounds.top,
+        bottom: bounds.bottom,
+        labelTop: label.top,
+        labelBottom: label.bottom,
+      };
+    });
+    expect(box.labelTop).toBeGreaterThanOrEqual(box.top + 8);
+    expect(box.labelBottom).toBeLessThanOrEqual(box.bottom - 8);
+  }
+  if (touch) {
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const box = (await options.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+  }
+  return { packages, options };
+}
+
+async function closeCreationMCP(page: Page, options: Locator, touch: boolean) {
+  if (touch) await options.getByRole("button", { name: "Close", exact: true }).tap();
+  else await page.keyboard.press("Escape");
+  await expect(options).toBeHidden();
+}
+
 export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: boolean) {
   await page.goto("/");
   const create = touch
@@ -178,11 +225,18 @@ export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: bo
   const dialog = page.getByTestId("create-task-dialog");
   await dialog.getByTestId("task-title-input").fill("Creation package consent");
   await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
-  const packages = dialog.getByTestId("task-create-builtin-packages");
-  await activate(packages.locator(":scope > summary"), touch);
+  const { packages, options } = await openCreationMCP(page, dialog, touch);
   await activate(packages.getByTestId("builtin-mcp-package-configuration"), touch);
   await expect(packages.getByTestId("builtin-mcp-effective")).toContainText("Off");
   await chooseBuiltin(page, "configuration", "On", touch);
+  await closeCreationMCP(page, options, touch);
+  await activate(dialog.getByTestId("task-create-advanced-settings-trigger"), touch);
+  const reopened = await openCreationMCP(page, dialog, touch);
+  await activate(reopened.packages.getByTestId("builtin-mcp-package-configuration"), touch);
+  await expect(reopened.packages.getByTestId("builtin-mcp-choice-configuration")).toContainText(
+    "On",
+  );
+  await closeCreationMCP(page, reopened.options, touch);
   const created = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -219,7 +273,11 @@ export async function checkBuiltinCreation(page: Page, api: ApiClient, touch: bo
   await expect(explorer.getByTestId("mcp-tool-row-list_shared_prompts_kandev")).toBeVisible();
 }
 
-export async function checkBuiltinCreationBack(page: Page, touch: boolean) {
+export async function checkBuiltinCreationBack(
+  page: Page,
+  touch: boolean,
+  capture: PrAssetCapture,
+) {
   await page.goto("/");
   const create = touch
     ? page.getByRole("button", { name: "Add task", exact: true })
@@ -228,8 +286,16 @@ export async function checkBuiltinCreationBack(page: Page, touch: boolean) {
   const dialog = page.getByTestId("create-task-dialog");
   await dialog.getByTestId("task-title-input").fill("Unfinished package selection");
   await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
-  const packages = dialog.getByTestId("task-create-builtin-packages");
-  await activate(packages.locator(":scope > summary"), touch);
+  const { packages } = await openCreationMCP(page, dialog, touch);
+  if (capture.capturing) {
+    await capture.screenshot(
+      touch ? "phone-new-task-mcp-packages" : "desktop-new-task-mcp-packages",
+      {
+        caption:
+          "New Task groups built-in packages inside Advanced settings and MCP servers, with one package heading.",
+      },
+    );
+  }
   await activate(packages.getByTestId("builtin-mcp-package-configuration"), touch);
   const form = dialog.locator("form");
   await form.evaluate((node) => {

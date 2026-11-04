@@ -231,13 +231,6 @@ function DialogFormBody(props: DialogFormBodyProps) {
         launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
-      {isCreateMode && props.workspaceId && props.fs.setBuiltinMCPPreferences && (
-        <TaskCreateBuiltinPackages
-          workspaceId={props.workspaceId}
-          draft={props.fs.builtinMCPPreferences}
-          onChange={props.fs.setBuiltinMCPPreferences}
-        />
-      )}
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
         isEditMode={props.isEditMode}
@@ -258,6 +251,16 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onWorkflowAgentOverrideChange={props.onWorkflowAgentOverrideChange}
         onResetWorkflowAgentOverrides={props.onResetWorkflowAgentOverrides}
         onRetryWorkflowAgentOverrides={props.onRetryWorkflowAgentOverrides}
+        builtinPackages={
+          isCreateMode && props.workspaceId && props.fs.setBuiltinMCPPreferences ? (
+            <TaskCreateBuiltinPackages
+              key={props.workspaceId}
+              workspaceId={props.workspaceId}
+              draft={props.fs.builtinMCPPreferences}
+              onChange={props.fs.setBuiltinMCPPreferences}
+            />
+          ) : null
+        }
         mcpDefinitions={props.mcpDefinitions}
         mcpDefinitionsLoading={props.mcpDefinitionsLoading}
         mcpSelectionIds={props.fs.mcpServerIds}

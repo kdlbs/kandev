@@ -67,8 +67,8 @@ test("keeps translated detail usable across phone and touch widths", async ({
   }
 });
 
-test("Back from package detail does not submit a new task", async ({ testPage }) => {
-  await checkBuiltinCreationBack(testPage, true);
+test("Back from package detail does not submit a new task", async ({ testPage, prCapture }) => {
+  await checkBuiltinCreationBack(testPage, true, prCapture);
 });
 
 test("shows a saved package addition separately from current connections on a phone", async ({
