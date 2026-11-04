@@ -27,6 +27,16 @@ modules, tests, baselines, shrink-only checks, and entry points unchanged.
 
 The accepted guard design defines the exact source boundary and supported forms.
 
+**Host update (2026-11-03):** normal web lint now runs the same rule through the
+[Oxlint configuration](../../apps/web/oxlint.config.mjs) as a first-party JS
+plugin. ESLint remains installed for RuleTester and the focused adapter suites,
+including the real-config wiring assertions in
+`apps/web/scripts/lib/migrated-system-query-owner-wiring.test.ts`. The native
+host asserts the same four owner paths through the required CLI in
+`apps/web/scripts/lib/native-lint-wiring.test.ts`. The bounded guard contract,
+four owner paths, and independent Python architecture engine are unchanged;
+[ADR-2026-11-03](2026-11-03-native-web-verification.md) records the host choice.
+
 ## Consequences
 
 The guard uses an installed TypeScript-aware parser, adds no dependency or

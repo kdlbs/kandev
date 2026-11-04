@@ -155,9 +155,6 @@ export class SessionPage {
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");
   }
-  prStatusChip() {
-    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
-  }
   todoIndicator() {
     return this.activeChat().getByTestId("todo-indicator");
   }
