@@ -1496,7 +1496,12 @@ type startTaskOptions struct {
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
+	// Explicit MCP spawns also set this flag to bypass workflow session-target
+	// routing while retaining normal defaults for an empty profile.
 	ProfileExplicit bool
+	// PreserveWorkflowBinding leaves the source conversation owned by the
+	// workflow when this launch only adds an independent session.
+	PreserveWorkflowBinding bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
@@ -1881,7 +1886,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	var explicitProfileID string
 	// opts.ProfileExplicit means the caller's agent_profile_id must be used
 	// exactly as supplied, with no inheritance or defaulting from the
-	// destination workflow step (AC-PROFILES-001.4/D14a). SessionTarget
+	// destination workflow step. SessionTarget
 	// routing is itself a form of that defaulting — it can resolve to a
 	// different profile (and reuse a different session) than the one the
 	// caller asked for — so it must not even be consulted here, not merely
@@ -2005,7 +2010,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, failPreparedLaunch(fmt.Errorf("failed to reload launch session: %w", err))
 	}
-	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
+	if !opts.PreserveWorkflowBinding && explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
 		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
 			return nil, failPreparedLaunch(fmt.Errorf("load workflow source step for session binding: %w", stepErr))
 		} else if sourceStep != nil {
