@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BuiltinPackageDetail,
@@ -26,10 +26,6 @@ export function TaskCreateBuiltinPackages({
   const [selected, select] = useState<BuiltinMCPPackage | null>(null);
   const returnFocus = useRef<BuiltinMCPPackage | null>(null);
   if (selected) returnFocus.current = selected;
-  useEffect(() => {
-    onChange(undefined);
-    select(null);
-  }, [workspaceId, onChange]);
   const choices = draft?.workspaceId === workspaceId ? draft.preferences.packages : {};
   const view = remote.view
     ? {
@@ -62,23 +58,18 @@ export function TaskCreateBuiltinPackages({
   };
   const item = view?.catalog.find((entry) => entry.id === selected);
   return (
-    <details className="rounded-md border p-3" data-testid="task-create-builtin-packages">
-      <summary className="min-h-7 cursor-pointer text-sm font-medium max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
-        {t("settings:builtinMcp.title")}
-      </summary>
-      <div className="space-y-3 pt-3">
-        {item ? (
-          <BuiltinPackageDetail
-            editor={editor}
-            item={item}
-            scope="tasks"
-            onBack={() => select(null)}
-          />
-        ) : (
-          <BuiltinPackageList returnFocus={returnFocus.current} editor={editor} onSelect={select} />
-        )}
-        <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.creationConsent")}</p>
-      </div>
-    </details>
+    <div className="min-w-0 space-y-3" data-testid="task-create-builtin-packages">
+      {item ? (
+        <BuiltinPackageDetail
+          editor={editor}
+          item={item}
+          scope="tasks"
+          onBack={() => select(null)}
+        />
+      ) : (
+        <BuiltinPackageList returnFocus={returnFocus.current} editor={editor} onSelect={select} />
+      )}
+      <p className="text-xs text-muted-foreground">{t("settings:builtinMcp.creationConsent")}</p>
+    </div>
   );
 }

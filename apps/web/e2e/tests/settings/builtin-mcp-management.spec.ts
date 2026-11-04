@@ -1,6 +1,7 @@
 import {
   checkBuiltinCreation,
   checkBuiltinCreationBack,
+  checkBuiltinCreationLoading,
 } from "../../helpers/builtin-mcp-management";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -67,6 +68,10 @@ test("records explicit Configuration consent at task creation", async ({ testPag
   await checkBuiltinCreation(testPage, apiClient, false);
 });
 
+test("keeps built-in choices available while additional servers load", async ({ testPage }) => {
+  await checkBuiltinCreationLoading(testPage, false);
+});
+
 test.afterEach(async ({ backend }, testInfo) => {
   if (testInfo.status !== testInfo.expectedStatus)
     await testInfo.attach("builtin-backend.log", {
@@ -75,8 +80,8 @@ test.afterEach(async ({ backend }, testInfo) => {
     });
 });
 
-test("Back from package detail does not submit a new task", async ({ testPage }) => {
-  await checkBuiltinCreationBack(testPage, false);
+test("Back from package detail does not submit a new task", async ({ testPage, prCapture }) => {
+  await checkBuiltinCreationBack(testPage, false, prCapture);
 });
 
 test("shows a saved package addition separately from current connections", async ({
