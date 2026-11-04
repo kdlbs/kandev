@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isMergeStatusTransient } from "@/lib/gitlab-merge-state";
 import type { ReloadResult } from "./use-mr-feedback";
 
@@ -19,13 +19,12 @@ export function usePostReadyWait(scope: Scope, reload: () => Promise<ReloadResul
   const token = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadRef = useRef(reload);
-  const scopeRef = useRef(scope);
+  const scopeGeneration = useRef(0);
   const mounted = useRef(true);
   const readySeq = useRef(0);
 
   useEffect(() => {
     reloadRef.current = reload;
-    scopeRef.current = scope;
   });
 
   const cancel = useCallback(() => {
@@ -42,7 +41,13 @@ export function usePostReadyWait(scope: Scope, reload: () => Promise<ReloadResul
     };
   }, []);
 
-  useEffect(() => cancel, [scope.identityKey, scope.revision, cancel]);
+  useLayoutEffect(
+    () => () => {
+      scopeGeneration.current += 1;
+      cancel();
+    },
+    [scope.identityKey, scope.revision, cancel],
+  );
 
   const step = useCallback((own: number, reloads: number) => {
     void reloadRef.current().then((result) => {
@@ -69,15 +74,13 @@ export function usePostReadyWait(scope: Scope, reload: () => Promise<ReloadResul
    */
   const trackReady = useCallback(
     async (request: () => Promise<unknown>) => {
-      const issuedScope = scopeRef.current;
+      const issuedGeneration = scopeGeneration.current;
       const seq = ++readySeq.current;
       await request();
-      const now = scopeRef.current;
       if (
         mounted.current &&
         seq === readySeq.current &&
-        now.identityKey === issuedScope.identityKey &&
-        now.revision === issuedScope.revision
+        scopeGeneration.current === issuedGeneration
       ) {
         start();
       }

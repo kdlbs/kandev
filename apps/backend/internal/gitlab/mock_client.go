@@ -56,6 +56,11 @@ type MockClient struct {
 	nextMRIID          int
 }
 
+const (
+	mockMRStatusChecking  = "checking"
+	mockMRStatusMergeable = "mergeable"
+)
+
 type mockMRKey struct {
 	Project string
 	IID     int
@@ -243,9 +248,9 @@ func (c *MockClient) GetMR(_ context.Context, projectPath string, iid int) (*MR,
 // "checking" until two feedback reads have been answered, "mergeable" after.
 func mockReadyMergeStatus(feedbackReads int) string {
 	if feedbackReads < 2 {
-		return "checking"
+		return mockMRStatusChecking
 	}
-	return "mergeable"
+	return mockMRStatusMergeable
 }
 
 // MarkMRReady strips the draft marker from the seeded MR's title. Afterwards
@@ -262,7 +267,7 @@ func (c *MockClient) MarkMRReady(ctx context.Context, projectPath string, iid in
 			mr.Title = title
 			mr.Draft = false
 			if mr.DetailedMergeStatus == detailedMergeStatusDraft {
-				mr.DetailedMergeStatus = "mergeable"
+				mr.DetailedMergeStatus = mockMRStatusMergeable
 			}
 			c.readyFeedbackReads[key] = 0
 			return nil

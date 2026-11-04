@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"go.uber.org/zap"
 )
@@ -70,7 +71,7 @@ func stripDraftMarkers(title string) (stripped string, found bool) {
 		matched := false
 		for _, marker := range draftMarkers {
 			if len(rest) >= len(marker) && strings.EqualFold(rest[:len(marker)], marker) {
-				rest = strings.TrimLeft(rest[len(marker):], " \t\r\n")
+				rest = strings.TrimLeftFunc(rest[len(marker):], unicode.IsSpace)
 				matched, found = true, true
 				break
 			}
@@ -152,20 +153,52 @@ func (s *Service) refreshCachedTaskMRs(ctx context.Context, client Client, works
 		s.logger.Warn("list cached GitLab task MRs after mark ready", zap.Error(err))
 		return
 	}
+	matches := matchingCachedTaskMRs(byTask, client.Host(), projectPath, iid)
+	if len(matches) == 0 {
+		return
+	}
+
+	status, err := client.GetMRStatus(ctx, projectPath, iid)
+	if err != nil {
+		s.logger.Warn("fetch GitLab MR status after mark ready", zap.Error(err))
+		return
+	}
+	if status == nil || status.MR == nil {
+		s.logger.Warn("GitLab returned no MR status after mark ready", zap.Int("iid", iid))
+		return
+	}
+	s.refreshTaskMRsWithStatus(ctx, client, workspaceID, status, matches)
+}
+
+func matchingCachedTaskMRs(byTask map[string][]*TaskMR, host, projectPath string, iid int) []*TaskMR {
+	var matches []*TaskMR
 	for _, rows := range byTask {
 		for _, row := range rows {
-			if row.Host == "" || row.ProjectPath != projectPath || row.MRIID != iid ||
-				!sameConfiguredOrigin(row.Host, client.Host()) {
-				continue
+			if row.Host != "" && row.ProjectPath == projectPath && row.MRIID == iid &&
+				sameConfiguredOrigin(row.Host, host) {
+				matches = append(matches, row)
 			}
-			result, err := s.syncTaskMRWithClient(ctx, client, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID)
-			if err != nil {
-				s.logger.Warn("refresh cached GitLab task MR after mark ready",
-					zap.String("task_id", row.TaskID), zap.Error(err))
-				continue
-			}
-			s.publishTaskMRUpdated(ctx, workspaceID, result.taskMR)
 		}
+	}
+	return matches
+}
+
+func (s *Service) refreshTaskMRsWithStatus(
+	ctx context.Context, client Client, workspaceID string, status *MRStatus, matches []*TaskMR,
+) {
+	for _, existing := range matches {
+		result, err := s.syncTaskMRWithStatus(
+			ctx, client, existing.TaskID, existing.RepositoryID, existing.ProjectPath, existing.MRIID, status, existing,
+		)
+		if err != nil {
+			s.logger.Warn("refresh cached GitLab task MR after mark ready",
+				zap.String("task_id", existing.TaskID), zap.Error(err))
+			continue
+		}
+		if result == nil || result.taskMR == nil {
+			continue
+		}
+		s.publishTaskMRUpdated(ctx, workspaceID, result.taskMR)
 	}
 }
 

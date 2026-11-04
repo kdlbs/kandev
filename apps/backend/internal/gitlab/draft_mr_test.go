@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.34
@@ -28,6 +31,7 @@ func TestStripDraftMarkers(t *testing.T) {
 		{name: "parens", title: "(Draft) add thing", want: "add thing", wantFound: true},
 		{name: "uppercase", title: "DRAFT: add thing", want: "add thing", wantFound: true},
 		{name: "repeated mixed", title: "Draft: [Draft]  (draft) add thing", want: "add thing", wantFound: true},
+		{name: "unicode whitespace between markers", title: "Draft:\u00a0[Draft]\u2003(draft)\u00a0fix", want: "fix", wantFound: true},
 		{name: "leading whitespace", title: "  \tDraft:   add thing", want: "add thing", wantFound: true},
 		{name: "marker only", title: "Draft:", want: "", wantFound: true},
 		{name: "no prefix", title: "add thing", want: "add thing"},
@@ -73,6 +77,10 @@ func (s *readyServer) handler(t *testing.T) http.Handler {
 			}
 			w.WriteHeader(code)
 			_, _ = w.Write([]byte(`{}`))
+		case "GET /api/v4/projects/g%2Fp/merge_requests/7/approvals":
+			_, _ = w.Write([]byte(`{"approved_by":[],"approvals_required":0}`))
+		case "GET /api/v4/projects/g%2Fp/pipelines":
+			_, _ = w.Write([]byte(`[]`))
 		case "PUT /api/v4/projects/g%2Fp/merge_requests/7/merge":
 			s.mergePut++
 			_, _ = w.Write([]byte(`{"iid":7,"state":"merged"}`))
@@ -100,27 +108,28 @@ const (
 // @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.34
 func TestPATMarkMRReady(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		get      func(n int) (int, string)
-		putCode  int
-		wantErr  error
-		wantPuts int
-		wantDraf bool
-		wantNil  bool
+		name      string
+		get       func(n int) (int, string)
+		putCode   int
+		wantErr   error
+		wantPuts  int
+		wantTitle string
+		wantDraf  bool
+		wantNil   bool
 	}{
 		{name: "success", get: func(n int) (int, string) {
 			if n == 1 {
 				return 200, draftBody
 			}
 			return 200, readyBody
-		}, wantPuts: 1},
+		}, wantPuts: 1, wantTitle: "add thing"},
 		{name: "not draft is a no-op", get: func(int) (int, string) { return 200, readyBody }},
 		{name: "draft status without flag", get: func(n int) (int, string) {
 			if n == 1 {
 				return 200, `{"iid":7,"title":"Draft: x","state":"opened","detailed_merge_status":"draft_status"}`
 			}
 			return 200, readyBody
-		}, wantPuts: 1},
+		}, wantPuts: 1, wantTitle: "x"},
 		{name: "not open", get: func(int) (int, string) { return 200, closedBody }, wantErr: ErrMRNotOpen},
 		{name: "marker not at start", get: func(int) (int, string) {
 			return 200, `{"iid":7,"title":"add Draft: x","state":"opened","draft":true}`
@@ -133,14 +142,14 @@ func TestPATMarkMRReady(t *testing.T) {
 				return 200, draftBody
 			}
 			return 503, `{}`
-		}, wantErr: ErrMRReadAfterReady, wantPuts: 1},
-		{name: "reread still draft", get: func(int) (int, string) { return 200, draftBody }, wantErr: ErrMRStillDraft, wantPuts: 1},
+		}, wantErr: ErrMRReadAfterReady, wantPuts: 1, wantTitle: "add thing"},
+		{name: "reread still draft", get: func(int) (int, string) { return 200, draftBody }, wantErr: ErrMRStillDraft, wantPuts: 1, wantTitle: "add thing"},
 		{name: "reread closed wins over draft flag", get: func(n int) (int, string) {
 			if n == 1 {
 				return 200, draftBody
 			}
 			return 200, closedBody
-		}, wantPuts: 1},
+		}, wantPuts: 1, wantTitle: "add thing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rs, client := newReadyServer(t, tc.get)
@@ -158,8 +167,10 @@ func TestPATMarkMRReady(t *testing.T) {
 			}
 			if tc.wantPuts == 1 {
 				var body map[string]string
-				if err := json.Unmarshal([]byte(rs.puts[0]), &body); err != nil || body["title"] == "" || strings.Contains(strings.ToLower(body["title"]), "draft") {
-					t.Errorf("title write body = %s, want stripped title", rs.puts[0])
+				if err := json.Unmarshal([]byte(rs.puts[0]), &body); err != nil {
+					t.Errorf("decode title write body %s: %v", rs.puts[0], err)
+				} else if body["title"] != tc.wantTitle {
+					t.Errorf("title write body = %s, want title %q", rs.puts[0], tc.wantTitle)
 				}
 			}
 		})
@@ -239,7 +250,7 @@ func TestPATMergeMRWrapsRefusalStatusesOnWriteOnly(t *testing.T) {
 	}
 }
 
-func newMergeRouter(t *testing.T, serverURL string) *gin.Engine {
+func newMergeRouter(t *testing.T, serverURL string) (*gin.Engine, *Store, *bus.MemoryEventBus) {
 	t.Helper()
 	store := newTestStore(t)
 	seedWorkspace(t, store, "workspace-test")
@@ -249,10 +260,12 @@ func newMergeRouter(t *testing.T, serverURL string) *gin.Engine {
 	svc := NewService(DefaultHost, NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t))
 	svc.SetStore(store)
 	svc.SetWorkspaceSecretStore(&configTestSecrets{values: map[string]string{SecretKeyForWorkspace("workspace-test"): "workspace-token"}})
+	eventBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(eventBus)
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	NewController(svc, newTestLogger(t)).RegisterHTTPRoutes(router)
-	return router
+	return router, store, eventBus
 }
 
 func doRoute(router *gin.Engine, path, body string) *httptest.ResponseRecorder {
@@ -297,7 +310,8 @@ func TestMergeRouteMapsDraftAndRefusals(t *testing.T) {
 				}
 			}))
 			t.Cleanup(server.Close)
-			rec := doRoute(newMergeRouter(t, server.URL), "/api/v1/gitlab/mrs/merge?workspace_id=workspace-test", `{"project":"g/p","iid":7,"method":"merge"}`)
+			router, _, _ := newMergeRouter(t, server.URL)
+			rec := doRoute(router, "/api/v1/gitlab/mrs/merge?workspace_id=workspace-test", `{"project":"g/p","iid":7,"method":"merge"}`)
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d (%s)", rec.Code, tc.wantStatus, rec.Body.String())
 			}
@@ -355,11 +369,11 @@ func TestMarkReadyRoute(t *testing.T) {
 			if get == nil {
 				get = func(int) (int, string) { return 200, draftBody }
 			}
-			rs, _ := newReadyServer(t, get)
-			_ = rs
+			rs := &readyServer{getBody: get}
 			server := httptest.NewServer(rs.handler(t))
 			t.Cleanup(server.Close)
-			rec := doRoute(newMergeRouter(t, server.URL), "/api/v1/gitlab/mrs/ready?workspace_id=workspace-test", tc.body)
+			router, _, _ := newMergeRouter(t, server.URL)
+			rec := doRoute(router, "/api/v1/gitlab/mrs/ready?workspace_id=workspace-test", tc.body)
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d (%s)", rec.Code, tc.wantStatus, rec.Body.String())
 			}
@@ -380,6 +394,51 @@ func TestMarkReadyRoute(t *testing.T) {
 				t.Errorf("GitLab was called %d times before validation", rs.gets)
 			}
 		})
+	}
+}
+
+func TestMarkReadyRoutePublishesPersistedDiscussionCount(t *testing.T) {
+	rs := &readyServer{getBody: func(n int) (int, string) {
+		if n == 1 {
+			return http.StatusOK, draftBody
+		}
+		return http.StatusOK, readyBody
+	}}
+	server := httptest.NewServer(rs.handler(t))
+	t.Cleanup(server.Close)
+	router, store, eventBus := newMergeRouter(t, server.URL)
+	seedTask(t, store, "task-ready", "workspace-test")
+	if err := store.UpsertTaskMR(t.Context(), &TaskMR{
+		TaskID: "task-ready", Host: server.URL, ProjectPath: "g/p", MRIID: 7,
+		MRTitle: "Draft: add thing", State: mrStateOpen, Draft: true,
+		UnresolvedDiscussions: 3,
+	}); err != nil {
+		t.Fatalf("seed task MR: %v", err)
+	}
+
+	var received []*TaskMRUpdatedEvent
+	if _, err := eventBus.Subscribe(events.GitLabTaskMRUpdated, func(_ context.Context, event *bus.Event) error {
+		if payload, ok := event.Data.(*TaskMRUpdatedEvent); ok {
+			received = append(received, payload)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe to task MR updates: %v", err)
+	}
+
+	rec := doRoute(router, "/api/v1/gitlab/mrs/ready?workspace_id=workspace-test", `{"project":"g/p","iid":7}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	stored, err := store.GetTaskMR(t.Context(), "task-ready", "", "g/p", 7)
+	if err != nil || stored == nil || stored.UnresolvedDiscussions != 3 || stored.Draft || stored.MRTitle != "add thing" {
+		t.Fatalf("stored MR = %+v, %v; want ready title with 3 unresolved discussions", stored, err)
+	}
+	if len(received) != 1 {
+		t.Fatalf("task MR update events = %d, want 1", len(received))
+	}
+	if received[0].WorkspaceID != "workspace-test" || received[0].UnresolvedDiscussions != 3 {
+		t.Fatalf("published MR = %+v, want workspace and 3 unresolved discussions", received[0])
 	}
 }
 
@@ -442,6 +501,16 @@ func seedRefreshRow(t *testing.T, svc *Service, store *Store, mock *MockClient, 
 	}
 }
 
+type countingMRStatusClient struct {
+	Client
+	statusReads int
+}
+
+func (c *countingMRStatusClient) GetMRStatus(ctx context.Context, projectPath string, iid int) (*MRStatus, error) {
+	c.statusReads++
+	return c.Client.GetMRStatus(ctx, projectPath, iid)
+}
+
 // @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.35
 func TestRefreshCachedTaskMRsAfterReady(t *testing.T) {
 	svc, _, _ := newServiceFixture(t, userHandler(func(string) bool { return true }))
@@ -452,6 +521,7 @@ func TestRefreshCachedTaskMRsAfterReady(t *testing.T) {
 	mock.SeedMR("g/p", &MR{IID: 7, Title: "Draft: add thing", HeadBranch: "x", BaseBranch: "main", State: mrStateOpen, Draft: true, CreatedAt: now})
 	mock.SeedMR("g/p", &MR{IID: 8, Title: "other", HeadBranch: "y", BaseBranch: "main", State: mrStateOpen, CreatedAt: now})
 	seedRefreshRow(t, svc, store, mock, "task-match")
+	seedRefreshRow(t, svc, store, mock, "task-match-two")
 	seedRefreshRow(t, svc, store, mock, "task-legacy")
 	seedTask(t, store, "task-other", "ws-1")
 	if _, err := svc.SyncTaskMR(t.Context(), "task-other", "", "g/p", 8); err != nil {
@@ -464,11 +534,18 @@ func TestRefreshCachedTaskMRsAfterReady(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc.refreshCachedTaskMRs(t.Context(), mock, "ws-1", "g/p", 7)
+	counted := &countingMRStatusClient{Client: mock}
+	svc.refreshCachedTaskMRs(t.Context(), counted, "ws-1", "g/p", 7)
+	if counted.statusReads != 1 {
+		t.Errorf("MR status reads = %d, want one read for the linked rows", counted.statusReads)
+	}
 
 	rows, _ := svc.ListTaskMRsByWorkspace(t.Context(), "ws-1")
 	if got := rows["task-match"][0]; got.MRTitle != "add thing" || got.Draft {
 		t.Errorf("matching row = title %q draft %v, want refreshed", got.MRTitle, got.Draft)
+	}
+	if got := rows["task-match-two"][0]; got.MRTitle != "add thing" || got.Draft {
+		t.Errorf("second matching row = title %q draft %v, want refreshed", got.MRTitle, got.Draft)
 	}
 	if got := rows["task-legacy"][0]; got.Host != "" || got.MRTitle != "Draft: add thing" {
 		t.Errorf("legacy empty-host row = host %q title %q, want untouched", got.Host, got.MRTitle)

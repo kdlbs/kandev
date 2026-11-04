@@ -196,3 +196,28 @@ describe("usePostReadyWait requests in flight", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("usePostReadyWait scope ownership", () => {
+  it("does not start when the identity changes away and back during the request", async () => {
+    const reload = vi.fn<() => Promise<ReloadResult>>().mockResolvedValue(ok("checking"));
+    const { result, rerender } = renderHook(({ scope }) => usePostReadyWait(scope, reload), {
+      initialProps: { scope: SCOPE },
+    });
+    let finish!: () => void;
+    const request = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let tracked!: Promise<void>;
+    act(() => {
+      tracked = result.current.trackReady(() => request);
+    });
+    rerender({ scope: { identityKey: "b", revision: 0 } });
+    rerender({ scope: SCOPE });
+    await act(async () => {
+      finish();
+      await tracked;
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(result.current.holding).toBe(false);
+  });
+});
