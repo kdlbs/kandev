@@ -76,10 +76,10 @@ The regression was added first and the first command recorded the red result.
 After the caller correction, the complete block recorded the green result and focused compatibility checks.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v)
-(cd apps/backend && go test -trimpath -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1)
-(cd apps/backend && go test -trimpath ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1)
-(cd apps/backend && go test -trimpath ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_command_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -178,15 +178,15 @@ Exit status was zero and the command ended with `PASS`.
 Recorded verification on November 4, from the repository root:
 
 ```text
-(cd apps/backend && go test -trimpath ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v)
   PASS
-(cd apps/backend && go test -trimpath -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1)
-  ok github.com/kandev/kandev/internal/agent/hostutility 1.090s
-(cd apps/backend && go test -trimpath ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1)
-  ok github.com/kandev/kandev/internal/agent/runtime/agentctl 0.014s
-  ok github.com/kandev/kandev/internal/agentctl/server/api 0.027s
-(cd apps/backend && go test -trimpath ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1)
-  ok github.com/kandev/kandev/internal/agent/antigravityruntime 0.040s
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1)
+  ok github.com/kandev/kandev/internal/agent/hostutility 1.093s
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1)
+  ok github.com/kandev/kandev/internal/agent/runtime/agentctl 0.066s
+  ok github.com/kandev/kandev/internal/agentctl/server/api 0.029s
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1)
+  ok github.com/kandev/kandev/internal/agent/antigravityruntime 0.043s
 bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_command_test.go
   0 issues.
 python3 scripts/list-docs.py validate

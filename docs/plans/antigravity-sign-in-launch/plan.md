@@ -198,11 +198,11 @@ Regression evidence:
 
 Implementation checks passed on November 4:
 
-- `go test -trimpath ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v`: red before, green after.
-- `go test -trimpath -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1`: passed.
-- `go test -trimpath ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1`: passed.
-- `go test -trimpath ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1`: passed.
-- `bash scripts/lint-go-changed` on the changed Go files: 0 issues.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/hostutility -run '^TestAntigravityLoginConfigurePreservesCommand$' -count=1 -v)`: red before, green after.
+- `(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/hostutility -run '^TestAntigravity' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/runtime/agentctl ./internal/agentctl/server/api -run '^Test(ConfigureAgent_|HandleAgentConfigure_)' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/antigravityruntime -run '^Test(InstallAntigravityBundle|ResolveAntigravityBundle)$' -count=1)`: passed.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/hostutility/antigravity_login.go apps/backend/internal/agent/hostutility/antigravity_login_command_test.go`: 0 issues.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, the coverage preflight, and `git diff --check`: passed.
 
 Prior diagnosis reproduced the reported error in an isolated temporary Go test.
