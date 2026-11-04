@@ -258,6 +258,7 @@ type ModelConfigSelectorTriggerProps = Pick<
 > & {
   label: string;
   details?: TriggerDetail[];
+  expanded?: boolean;
   onOpen?: () => void;
   triggerRef?: Ref<HTMLButtonElement>;
 };
@@ -272,6 +273,7 @@ function ModelConfigSelectorTrigger({
   triggerTitle,
   providerIcon,
   variant,
+  expanded,
   onOpen,
   triggerRef,
 }: ModelConfigSelectorTriggerProps) {
@@ -287,6 +289,8 @@ function ModelConfigSelectorTrigger({
       size={compact ? "sm" : "default"}
       className={cn(baseClassName, triggerClassName)}
       aria-label={ariaLabel}
+      data-testid="model-config-trigger"
+      aria-expanded={expanded}
       aria-haspopup={onOpen ? "dialog" : undefined}
       disabled={disabled}
       title={triggerTitle}
@@ -534,6 +538,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector(
       variant={variant}
       providerIcon={providerIcon}
       triggerRef={triggerRef}
+      expanded={open}
       onOpen={isMobile ? () => setOpen(true) : undefined}
     />
   );
