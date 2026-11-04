@@ -1854,6 +1854,13 @@ func activateOfficeServices(
 	// block startup and cannot affect its result.
 	startup.AfterReady(ctx, func() { go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC()) })
 
+	// Handoff completion reports are opt-in behind the same cross-workspace
+	// collaboration flag their report grant belongs to. Wire the policy before
+	// the subscribers so a disabled flag stays the default-off state.
+	services.Office.SetHandoffCompletionPolicy(
+		newOfficeHandoffCompletionPolicy(cfg.Features.WorkspaceCollaboration, repos.Task, repos.Office),
+	)
+
 	// Register Office-only event subscribers. Global scheduling starts after
 	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
