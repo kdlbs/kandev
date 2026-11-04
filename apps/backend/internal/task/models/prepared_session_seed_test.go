@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,13 @@ func TestPreparedSessionSeedAppliesAndValidates(t *testing.T) {
 	require.Equal(t, submission, metadata[SessionMetaKeyInitialPromptSubmission])
 
 	submission.State = "not-a-state"
+	require.ErrorIs(t, seed.Validate(), ErrInvalidInitialPromptSubmission)
+}
+
+func TestPreparedSessionSeedRejectsOversizedPreview(t *testing.T) {
+	seed := &PreparedSessionSeed{InitialPromptPreview: NewInitialPromptPreview(
+		strings.Repeat("x", MaxInitialPromptSubmissionBytes+1), nil,
+	)}
 	require.ErrorIs(t, seed.Validate(), ErrInvalidInitialPromptSubmission)
 }
 

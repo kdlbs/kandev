@@ -8,9 +8,17 @@ type PreparedSessionSeed struct {
 	InitialPromptSubmission *InitialPromptSubmission
 }
 
-// Validate rejects a malformed submission before any session row is written.
+// Validate rejects malformed preview or submission state before any session
+// row is written.
 func (seed *PreparedSessionSeed) Validate() error {
-	if seed == nil || seed.InitialPromptSubmission == nil {
+	if seed == nil {
+		return nil
+	}
+	if preview := seed.InitialPromptPreview; preview != nil &&
+		(len(preview.Content) > MaxInitialPromptSubmissionBytes || len(preview.Attachments) > MaxMessageAttachmentCount) {
+		return ErrInvalidInitialPromptSubmission
+	}
+	if seed.InitialPromptSubmission == nil {
 		return nil
 	}
 	return seed.InitialPromptSubmission.Validate()

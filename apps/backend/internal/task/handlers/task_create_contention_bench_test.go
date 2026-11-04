@@ -373,6 +373,10 @@ func validateContentionMeasurement(
 		if measurement.offered == 0 {
 			b.Fatal("durable streams offered no events")
 		}
+		expectedOffers := float64(streamCount) * measurement.window.Seconds() / contentionEventInterval.Seconds()
+		if float64(measurement.offered) < expectedOffers*0.9 {
+			b.Fatalf("offered events = %d, want at least 90%% of %.0f", measurement.offered, expectedOffers)
+		}
 		if measurement.projected*100 < measurement.offered*90 {
 			b.Fatalf("timely durable delivery = %d/%d, want >=90%%", measurement.projected, measurement.offered)
 		}

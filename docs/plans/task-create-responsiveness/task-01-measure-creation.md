@@ -102,10 +102,10 @@ Baseline source: revision `a0f2e665701` in temporary worktree
 `/tmp/opencode/kandev-baseline-fixup`. The same corrected fixture and benchmark
 are present there. Retained binaries:
 
-- Baseline: `/tmp/opencode/task-create-baseline-fixup.test`, SHA-256
-  `af00327b0651104b311f0a18e7ea03397158cd8f1a4550d11721581903e0feb2`.
-- Candidate: `/tmp/opencode/task-create-candidate-fixup.test`, SHA-256
-  `c4ead47683f37ca3fddc5941f4df43a0025906c2b16c844df3521d29bf8cad69`.
+- Baseline: `/tmp/opencode/task-create-baseline-final.test`, SHA-256
+  `4fc967b0487c63878536044f79d80ba1e8389ca3ed9ef29569f253c6dbef90b0`.
+- Candidate: `/tmp/opencode/task-create-candidate-final.test`, SHA-256
+  `671390a6614d1edcfecdc30829c6d1299936ad75279c77e52454dfff62b3b014`.
 
 Verification:
 
@@ -122,9 +122,8 @@ projected after the timed interval are cleanup only and do not count as timely
 delivery. A failed color, too few color samples, or less than 90% timely
 delivery fails the benchmark.
 
-Five eight-stream runs per binary on the same host produced unstable p95
-values under unrelated host load; the median improvement was only about 1.3%,
-well below the target. The complete comparison and the unproven AC .1/AC .2
+Five eight-stream runs per binary on the same host produced a median
+improvement of only about 5.8%, well below the target. The complete comparison and the unproven AC .1/AC .2
 results are recorded in `plan.md`. The requested writer-acquisition, commit, and individual-statement
 counters, plus settings-CAS failure counts, are not collected. They remain
 deferred instrumentation work; pool wait counters and the user-service error
