@@ -62,10 +62,9 @@ type ClarificationInputOverlayProps = {
   onDismiss: () => void;
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
-  onExpandPanel?: () => void;
-  onResetPanel?: () => void;
+  onToggleSize?: () => void;
+  sizeExpanded?: boolean;
   canExpandPanel?: boolean;
-  canResetPanel?: boolean;
   collapseContentId?: string;
   // Additive: reports every settled submission outcome, distinct from
   // onResolved's narrower "this caller's own answer landed" signal. The
@@ -695,10 +694,9 @@ export function ClarificationInputOverlay({
   agentDisconnected = false,
   onDismiss,
   onCollapse,
-  onExpandPanel,
-  onResetPanel,
+  onToggleSize,
+  sizeExpanded,
   canExpandPanel,
-  canResetPanel,
   collapseContentId,
   lateAnswerState,
 }: ClarificationInputOverlayProps) {
@@ -963,10 +961,9 @@ export function ClarificationInputOverlay({
         lateMode={lateInteraction}
         onLateClose={onDismiss}
         onCollapse={onCollapse}
-        onExpandPanel={onExpandPanel}
-        onResetPanel={onResetPanel}
+        onToggleSize={onToggleSize}
+        sizeExpanded={sizeExpanded}
         canExpandPanel={canExpandPanel}
-        canResetPanel={canResetPanel}
         collapseContentId={collapseContentId}
       />
       {group.submitState === "error" && (

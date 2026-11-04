@@ -33,9 +33,11 @@ blockquotes, or code panels. Tables are supported only in pending shared context
 File references remain labels rather than opening workspace files.
 
 Long context starts at its content height, up to an initial limit. Select
-**Expand to available space** or drag the panel's top edge to use more of the
-visible host. Select **Reset panel size** to return to content sizing. The
-panel keeps space for the chat input and, in Threads, a minimum transcript area.
+**Expand** to fill the available space. Select **Restore** to return to the
+previous height, including a height you set by dragging the panel's top edge.
+Drag the panel's top edge to resize it, or double-click the drag handle to
+return to content sizing. The panel keeps space for the chat input and, in
+Threads, a minimum transcript area.
 
 ### Attach files to an answer
 
