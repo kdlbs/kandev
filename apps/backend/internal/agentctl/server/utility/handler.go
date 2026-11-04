@@ -2,6 +2,7 @@ package utility
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,11 @@ import (
 )
 
 const inferenceErrorKey = "error"
+
+const (
+	probeDiagnosticOperation = "agent_probe"
+	probeDiagnosticUnknown   = "unknown"
+)
 
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
@@ -52,7 +58,8 @@ func (h *Handler) handleProbe(c *gin.Context) {
 
 	resp, err := h.probeExecutor(req).Probe(c.Request.Context(), &req)
 	if err != nil {
-		h.logger.Error("inference probe failed", zap.Error(err))
+		h.logger.Error("inference probe failed",
+			append(probeExecutionFailureFields(err), zap.Error(err))...)
 		c.JSON(http.StatusInternalServerError, ProbeResponse{
 			Success: false,
 			Error:   "probe execution failed",
@@ -61,7 +68,8 @@ func (h *Handler) handleProbe(c *gin.Context) {
 	}
 
 	if !resp.Success {
-		h.logger.Warn("ACP probe unsuccessful", zap.String(inferenceErrorKey, resp.Error))
+		h.logger.Warn("ACP probe unsuccessful",
+			append(probeFailureSummaryFields(resp), zap.String(inferenceErrorKey, resp.Error))...)
 	} else {
 		h.logger.Info("ACP probe completed",
 			zap.Int("duration_ms", resp.DurationMs),
@@ -109,6 +117,44 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// probeFailureSummaryFields returns bounded context for a failed probe
+// response. Only the four declared probe failure codes keep their own class;
+// every other cause stays an explicit unknown.
+func probeFailureSummaryFields(resp *ProbeResponse) []zap.Field {
+	return []zap.Field{
+		zap.String("operation", probeDiagnosticOperation),
+		zap.String("error_class", probeFailureCodeClass(resp.FailureCode)),
+	}
+}
+
+func probeFailureCodeClass(code ProbeFailureCode) string {
+	switch code {
+	case ProbeFailureManagedRuntimeNPMResolution,
+		ProbeFailureManagedRuntimeNPMPolicy,
+		ProbeFailureUnsupportedContext,
+		ProbeFailureAuthenticationRequired:
+		return string(code)
+	default:
+		return probeDiagnosticUnknown
+	}
+}
+
+// probeExecutionFailureFields returns bounded context for a probe that failed
+// before it produced a response.
+func probeExecutionFailureFields(err error) []zap.Field {
+	class := probeDiagnosticUnknown
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		class = "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		class = "context_canceled"
+	}
+	return []zap.Field{
+		zap.String("operation", probeDiagnosticOperation),
+		zap.String("error_class", class),
+	}
 }
 
 func (h *Handler) probeExecutor(req ProbeRequest) inferenceExecutor {

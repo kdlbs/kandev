@@ -212,7 +212,7 @@ func TestHealthSQLiteCatalogFactoryPoolContention(t *testing.T) {
 			defer cancel()
 			diagnostic, err := health.check(ctx)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
-			require.Equal(t, role+"_ping", diagnostic.stage)
+			require.Equal(t, role+"_acquire", diagnostic.stage)
 			require.Equal(t, []string{"a", "b", "c"}, health.UnhealthyStoreIDs())
 			for _, conn := range held {
 				require.NoError(t, conn.Close())

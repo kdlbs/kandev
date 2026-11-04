@@ -1733,7 +1733,8 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		if process.IsGitStatusEvidenceChanged(err) {
 			s.logGitStatusCaptureFailure(err)
 		} else {
-			s.logger.Error("git status failed", zap.Error(err))
+			s.logger.Error("git status failed",
+				append(s.gitInspectionFailureFields(err), zap.Error(err))...)
 		}
 		result := unavailableGitStatusResult(err)
 		if status.StatusState == gitStatusReadyState && status.FilesComplete {
