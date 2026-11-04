@@ -27,7 +27,16 @@ const (
 
 func newDiagnosticTestServer(t *testing.T, cfg *config.InstanceConfig) (*Server, *observer.ObservedLogs) {
 	t.Helper()
-	core, observed := observer.New(zapcore.ErrorLevel)
+	return newDiagnosticTestServerAt(t, cfg, zapcore.ErrorLevel)
+}
+
+func newDiagnosticTestServerAt(
+	t *testing.T,
+	cfg *config.InstanceConfig,
+	level zapcore.Level,
+) (*Server, *observer.ObservedLogs) {
+	t.Helper()
+	core, observed := observer.New(level)
 	log, err := logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
 	manager := process.NewManager(cfg, log)
@@ -134,6 +143,41 @@ func TestGitStatusFailureDiagnostic(t *testing.T) {
 	fields := entries[0].ContextMap()
 	require.Equal(t, "git_inspection", fields["operation"])
 	require.Equal(t, "repository_context_unavailable", fields["error_class"])
+	require.Equal(t, diagnosticTestTaskID, fields["task_id"])
+	require.Equal(t, diagnosticTestSessionID, fields["session_id"])
+
+	// The multi-repository fan-out shares the same bounded failure record.
+	multiRec := httptest.NewRecorder()
+	server.Router().ServeHTTP(multiRec,
+		httptest.NewRequest(http.MethodGet, "/api/v1/git/status/multi?fresh=true", nil))
+	require.Equal(t, http.StatusOK, multiRec.Code)
+	var multiResult MultiRepoGitStatusResult
+	require.NoError(t, json.Unmarshal(multiRec.Body.Bytes(), &multiResult))
+	require.Len(t, multiResult.Repos, 1)
+	require.False(t, multiResult.Repos[0].Status.Success)
+
+	multiEntries := observed.FilterMessage("git status failed").All()
+	require.Len(t, multiEntries, 2, "the multi-repository path keeps the same failure attribution")
+	require.Equal(t, "git_inspection", multiEntries[1].ContextMap()["operation"])
+	require.Equal(t, "repository_context_unavailable", multiEntries[1].ContextMap()["error_class"])
+}
+
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9
+func TestGitStatusEvidenceChangeDiagnostic(t *testing.T) {
+	cfg := &config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		TaskID:    diagnosticTestTaskID,
+		SessionID: diagnosticTestSessionID,
+	}
+	server, observed := newDiagnosticTestServerAt(t, cfg, zapcore.WarnLevel)
+
+	server.logGitStatusFailure(process.GitStatusEvidenceChangedErrorForTest())
+
+	entries := observed.FilterMessage("git status capture failed due to changing repository evidence").All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	require.Equal(t, "git_inspection", fields["operation"])
+	require.Equal(t, "evidence_changed", fields["error_class"])
 	require.Equal(t, diagnosticTestTaskID, fields["task_id"])
 	require.Equal(t, diagnosticTestSessionID, fields["session_id"])
 }

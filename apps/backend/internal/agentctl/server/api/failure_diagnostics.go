@@ -19,6 +19,7 @@ const (
 	diagnosticClassAgentRunning     = "agent_running"
 	diagnosticClassContextCanceled  = "context_canceled"
 	diagnosticClassDeadlineExceeded = "deadline_exceeded"
+	diagnosticClassEvidenceChanged  = "evidence_changed"
 	diagnosticClassUnknown          = "unknown"
 )
 

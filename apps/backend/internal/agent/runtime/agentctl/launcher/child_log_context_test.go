@@ -297,6 +297,7 @@ func TestPipeOutputForwardsAgentFailureContext(t *testing.T) {
 		{operation: "agent_probe", class: "managed_runtime_npm_policy"},
 		{operation: "agent_probe", class: "unsupported_profile_context"},
 		{operation: "agent_probe", class: "authentication_required"},
+		{operation: "git_inspection", class: "evidence_changed"},
 	} {
 		t.Run(tt.operation+"-"+tt.class, func(t *testing.T) {
 			line := encodeChildLogLine(t, zapcore.WarnLevel, "agent operation failed",

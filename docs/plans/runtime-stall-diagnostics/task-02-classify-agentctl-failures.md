@@ -129,3 +129,7 @@ Completed on 4 November 2026.
   declared classes. Unsupported values are still dropped.
 - `go test -race` passed for the API, process, utility, and launcher packages.
   `bash scripts/lint-go-changed` reported 0 issues.
+- Review remediation also attaches the trusted instance identity to probe
+  failure records, keeps the changing-evidence Git status class, and logs the
+  multi-repository failure record. Handler-level execution-error coverage and a
+  reader-ping case preserve those branches.

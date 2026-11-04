@@ -90,7 +90,8 @@ The record contains these fixed fields:
 | `hold_ms` | Successful acquisition through connection release, including discard when required |
 | `begin_ms`, `write_ms`, `commit_ms` | Time in the corresponding transaction operation |
 
-Reached stages record their elapsed duration even on error.
+The timed phases record their elapsed duration even on error.
+Stages without a timing field, such as `set_full` and `restore_normal`, are identified by `stage` only.
 Unreached stages omit their timing fields.
 An unacquired connection therefore has no `hold_ms` field.
 Commit duration can include synchronization and checkpoint work.
@@ -127,9 +128,12 @@ The handler classifies that sentinel as `agent_running`.
 Cancellation and deadline use their existing typed identities.
 Other configuration errors use `unknown` without matching arbitrary error text.
 Git status reuses `fsdiagnostics.ErrorClass` and `operation=git_inspection`.
-The changing-evidence warning branch retains its existing behavior.
+A changing-evidence failure keeps its existing warning and adds the same operation, `evidence_changed` class, and trusted identity.
+Every other status failure uses the generic error record.
+Both the single-repository and multi-repository status paths share that record.
 
 The utility handler adds `operation=agent_probe` to its failure summaries.
+When the API server supplies the instance's trusted identity, the summary also carries `instance_id`.
 It recognizes only the four existing `ProbeFailureCode` constants.
 An empty or unsupported code uses `unknown`.
 Direct execution errors use typed cancellation or deadline evidence before `unknown`.

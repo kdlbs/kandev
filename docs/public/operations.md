@@ -166,7 +166,7 @@ correlation evidence and do not identify the transaction that holds the writer.
 
 On SQLite, journal release also logs one warning when a shared durability run
 fails or takes at least one second. The warning reports the operation, the
-outcome, the failed stage, and numeric timings for connection acquisition,
+outcome, the current stage, and numeric timings for connection acquisition,
 connection ownership, transaction entry, generation write, and commit. A stage
 the run never reached has no timing field.
 

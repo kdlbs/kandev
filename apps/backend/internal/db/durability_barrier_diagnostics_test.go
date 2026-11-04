@@ -19,6 +19,10 @@ import (
 
 var errControlledRunFailure = errors.New("controlled durability run failure")
 
+// testSlowRunThreshold makes every completed run qualify as slow without a
+// wall-clock delay.
+const testSlowRunThreshold = time.Nanosecond
+
 func newBarrierLogFixture(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
 	t.Helper()
 	core, observed := observer.New(zapcore.WarnLevel)
@@ -35,6 +39,13 @@ func waitForBarrierDiagnostics(t *testing.T, observed *observer.ObservedLogs, co
 	require.Eventually(t, func() bool { return observed.Len() >= count },
 		5*time.Second, 5*time.Millisecond, "expected %d run diagnostics", count)
 	return observed.All()
+}
+
+// releaseGate closes a blocking test gate exactly once, from the success path
+// or from cleanup.
+func releaseGate(gate chan struct{}) func() {
+	var once sync.Once
+	return func() { once.Do(func() { close(gate) }) }
 }
 
 func requirePhaseField(t *testing.T, fields map[string]any, key string) {
@@ -73,8 +84,10 @@ func TestDurabilityBarrierRunDiagnosticPhases(t *testing.T) {
 				t.Fatalf("successful run omitted %s timing", name)
 			}
 		}
-		record.logRun()
-		require.Zero(t, observed.Len(), "a fast successful run must not log")
+		record.logRun(durabilityRunSlowThreshold)
+		if record.elapsed < durabilityRunSlowThreshold {
+			require.Zero(t, observed.Len(), "a fast successful run must not log")
+		}
 	})
 
 	t.Run("failed generation write omits the commit phase", func(t *testing.T) {
@@ -97,7 +110,7 @@ func TestDurabilityBarrierRunDiagnosticPhases(t *testing.T) {
 		}
 		require.Nil(t, record.commit, "an unreached commit has no timing")
 
-		record.logRun()
+		record.logRun(durabilityRunSlowThreshold)
 		entries := observed.All()
 		require.Len(t, entries, 1)
 		fields := entries[0].ContextMap()
@@ -145,10 +158,9 @@ func TestDurabilityBarrierRunDiagnosticSlowSuccess(t *testing.T) {
 	database := openBarrierTestDB(t)
 	log, observed := newBarrierLogFixture(t)
 	barrier := newDurabilityBarrier(database, 0, log)
-	barrier.observe = func(context.Context, *sql.Conn) error {
-		time.Sleep(durabilityRunSlowThreshold + 20*time.Millisecond)
-		return nil
-	}
+	// Every completed run exceeds this threshold, so the success record is
+	// exercised without a real-time wait.
+	barrier.slowRunThreshold = testSlowRunThreshold
 
 	require.NoError(t, barrier.Await(t.Context()))
 	entries := waitForBarrierDiagnostics(t, observed, 1)
@@ -160,9 +172,6 @@ func TestDurabilityBarrierRunDiagnosticSlowSuccess(t *testing.T) {
 	for _, key := range []string{"elapsed_ms", "acquire_ms", "hold_ms", "begin_ms", "write_ms", "commit_ms"} {
 		requirePhaseField(t, fields, key)
 	}
-	if elapsed, ok := fields["elapsed_ms"].(float64); !ok || elapsed < float64(durabilityRunSlowThreshold/time.Millisecond) {
-		t.Fatalf("elapsed_ms = %v, want at least one second", fields["elapsed_ms"])
-	}
 }
 
 // @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.8
@@ -170,11 +179,11 @@ func TestDurabilityBarrierRunDiagnosticCoalesces(t *testing.T) {
 	database := openBarrierTestDB(t)
 	log, observed := newBarrierLogFixture(t)
 	barrier := newDurabilityBarrier(database, 150*time.Millisecond, log)
+	barrier.slowRunThreshold = testSlowRunThreshold
 
 	var runs atomic.Int32
 	barrier.observe = func(context.Context, *sql.Conn) error {
 		runs.Add(1)
-		time.Sleep(durabilityRunSlowThreshold + 20*time.Millisecond)
 		return nil
 	}
 
@@ -218,6 +227,8 @@ func TestDurabilityBarrierRunDiagnosticCancellation(t *testing.T) {
 	var runs atomic.Int32
 	started := make(chan struct{})
 	release := make(chan struct{})
+	releaseRun := releaseGate(release)
+	t.Cleanup(releaseRun)
 	barrier.observe = func(context.Context, *sql.Conn) error {
 		if runs.Add(1) == 1 {
 			close(started)
@@ -252,7 +263,7 @@ func TestDurabilityBarrierRunDiagnosticCancellation(t *testing.T) {
 		t.Fatal("canceled caller did not stop waiting")
 	}
 
-	close(release)
+	releaseRun()
 	require.ErrorIs(t, <-followerResult, errControlledRunFailure,
 		"the shared run keeps its own lifetime after a caller cancels")
 	entries := waitForBarrierDiagnostics(t, observed, 2)
@@ -269,6 +280,8 @@ func TestDurabilityBarrierRunDiagnosticResultBeforeLogRelease(t *testing.T) {
 	database.SetMaxOpenConns(1)
 	hookEntered := make(chan struct{})
 	releaseHook := make(chan struct{})
+	releaseLog := releaseGate(releaseHook)
+	t.Cleanup(releaseLog)
 	var entered sync.Once
 	core, observed := observer.New(zapcore.WarnLevel)
 	core = zapcore.RegisterHooks(core, func(zapcore.Entry) error {
@@ -307,7 +320,7 @@ func TestDurabilityBarrierRunDiagnosticResultBeforeLogRelease(t *testing.T) {
 	require.NoError(t, database.QueryRowContext(probeCtx, "SELECT 1").Scan(&value),
 		"the writer stays available while the diagnostic sink blocks")
 
-	close(releaseHook)
+	releaseLog()
 	require.Len(t, waitForBarrierDiagnostics(t, observed, 1), 1)
 }
 

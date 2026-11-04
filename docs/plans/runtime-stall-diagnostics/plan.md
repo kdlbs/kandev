@@ -17,7 +17,7 @@ legacy_specs: []
 Identify database phases and preserve safe failure causes with two small changes.
 Task 01 adds probe and durability-run diagnostics.
 Task 02 adds classified agentctl context through the existing forwarding path.
-Both work orders are pending. This package does not claim to fix the database stall.
+Both work orders are complete. This package does not claim to fix the database stall.
 
 Platform owns shared persistence and runtime diagnostic contracts.
 Existing delivery, provider, and repository owners keep their authority.
@@ -77,14 +77,14 @@ continues to own sanitized stderr and existing probe codes.
 
 `Health.pingObserved` acquires and releases each existing connection explicitly.
 It keeps the shared context and records the stage that actually fails.
-No successful probe adds a new log entry.
+No successful probe adds a new failure-stage warning.
 
 `DurabilityBarrier.run` owns a local diagnostic record for the shared operation.
 Its existing transaction helper records begin, write, and commit durations.
 `NewDurabilityBarrier` receives the repository logger through one added constructor argument.
 The signature update affects the constructor, its repository caller, and its direct SQLite test.
 The record emits after release and outside the barrier mutex.
-The one-second slow threshold is fixed and needs no setting.
+The one-second slow threshold is fixed for production and exposed only as a package-private test seam.
 Existing per-caller metrics, cancellation ownership, and connection-discard behavior remain unchanged.
 
 Agentctl handlers add fields at their current failure sites.
@@ -161,6 +161,30 @@ Review remediation on 4 November 2026:
   tests passed. The new result-before-log regression fails against the previous
   ordering.
 
+Review remediation for PR #5054 on 4 November 2026:
+
+- The SQL guard exemption moved from `commit` to `commitAcquired` after the
+  barrier phase split, so `go run ./cmd/sqlguard ./internal` passes again.
+- Both Git status paths now share one failure record. A changing-evidence
+  failure keeps its warning and adds `operation=git_inspection`,
+  `error_class=evidence_changed`, and trusted identity; the multi-repository
+  fan-out logs the generic record it previously omitted.
+- Probe failure records include the instance's trusted identity when the API
+  server supplies it, and the handler executor fields are injectable so the
+  execution-error branch has handler-level coverage.
+- The barrier exposes its slow-run threshold as a package-private test seam, so
+  the slow-success and coalescing tests no longer sleep. Test gates release
+  through `sync.Once` cleanup.
+- Plan and operations wording now distinguishes the current stage from a failed
+  stage and the failure-stage warning from the existing state-transition log.
+- Verification passed: backend build; race tests for `internal/db`,
+  `internal/persistence/requiredstores`, `internal/agentctl/server/{api,process,utility}`,
+  `internal/agent/runtime/agentctl/launcher`, and the sqlite durability scope;
+  `go run ./cmd/sqlguard ./internal`; `bash scripts/lint-go-changed`;
+  `node --test scripts/validate-public-docs.test.mjs`; `node scripts/validate-public-docs.mjs`;
+  `python3 scripts/lint-spec-files.py --all`; `python3 scripts/list-docs.py validate`;
+  and `git diff --check`.
+
 ## Verification results
 
 Design validation passed on 4 November 2026:
@@ -181,7 +205,7 @@ Implementation checks passed in the results above.
 - A canceled caller must not finish or cancel a shared durability run.
 - Logging under a writer lease or barrier mutex can prolong the failure.
 - Missing identity and unsupported errors must remain explicit unknown evidence.
-- The multi-repository Git status path reports per-repository unavailability without a generic failure record. This increment keeps that existing behavior and adds fields only at the existing single-repository failure record.
+- A changing-evidence Git status failure keeps its own warning class and does not become a generic status failure.
 
 ## Public documentation
 

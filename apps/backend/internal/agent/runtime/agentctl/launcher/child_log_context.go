@@ -138,6 +138,7 @@ var childLogErrorClasses = stringSet(
 	"git_start_failed", "git_command_failed", "repository_context_unavailable",
 	"io_error", "unknown", "agent_running", "managed_runtime_npm_resolution",
 	"managed_runtime_npm_policy", "unsupported_profile_context", "authentication_required",
+	"evidence_changed",
 )
 
 var childLogOperations = stringSet(

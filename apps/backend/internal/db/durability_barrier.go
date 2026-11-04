@@ -48,6 +48,10 @@ type DurabilityBarrier struct {
 	window time.Duration
 	log    *logger.Logger
 
+	// slowRunThreshold is the fixed production threshold. Tests may lower it to
+	// exercise the slow-run record without waiting on wall-clock time.
+	slowRunThreshold time.Duration
+
 	// observe is a test seam that runs after the FULL pragma is applied and
 	// before the barrier commit. It never runs in production.
 	observe func(context.Context, *sql.Conn) error
@@ -74,10 +78,11 @@ func newDurabilityBarrier(database *sql.DB, window time.Duration, log *logger.Lo
 		window = 0
 	}
 	return &DurabilityBarrier{
-		db:      database,
-		window:  window,
-		log:     log,
-		changed: make(chan struct{}),
+		db:               database,
+		window:           window,
+		log:              log,
+		slowRunThreshold: durabilityRunSlowThreshold,
+		changed:          make(chan struct{}),
 	}
 }
 
@@ -131,7 +136,7 @@ func (b *DurabilityBarrier) lead(ctx context.Context) error {
 	go func() {
 		record, err := b.run()
 		done <- err
-		record.logRun()
+		record.logRun(b.slowRunThreshold)
 	}()
 	select {
 	case err := <-done:

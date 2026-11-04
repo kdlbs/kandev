@@ -75,13 +75,14 @@ func (d *durabilityRunDiagnostic) finish(err error) {
 	d.elapsed = time.Since(d.started)
 }
 
-// logRun emits one bounded warning for a failed or slow run. A successful fast
-// run stays quiet. A nil logger or a nil record keeps the barrier silent.
-func (d *durabilityRunDiagnostic) logRun() {
+// logRun emits one bounded warning for a failed or slow run. A successful run
+// below the threshold stays quiet. A nil logger or a nil record keeps the
+// barrier silent.
+func (d *durabilityRunDiagnostic) logRun(slowThreshold time.Duration) {
 	if d == nil || d.log == nil {
 		return
 	}
-	if d.outcome == durabilityRunOutcomeSuccess && d.elapsed < durabilityRunSlowThreshold {
+	if d.outcome == durabilityRunOutcomeSuccess && d.elapsed < slowThreshold {
 		return
 	}
 	fields := []zap.Field{

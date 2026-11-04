@@ -130,7 +130,9 @@ Completed on 4 November 2026.
   cancellation of the initiating caller, coalescing, quiet fast success,
   release before log emission, and run-result delivery before a blocked log
   sink. Callers block in the registration hook until every coalesced caller
-  has registered, and tests wait explicitly for the asynchronous run record.
+  has registered, tests wait explicitly for the asynchronous run record, the
+  slow-run threshold is a package-private test seam instead of a sleep, and
+  blocking gates release through `sync.Once` cleanup.
 - `docs/public/operations.md` describes the stage split, phase timings, and the
   remaining limits of writer attribution.
 - `go test -race ./internal/db ./internal/persistence/requiredstores` passed.
