@@ -430,17 +430,14 @@ func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.Tas
 	if taskCreateLastUsedPatchEmpty(patch) {
 		return nil
 	}
-	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	settings, changed, err := s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 	if err != nil {
 		return err
 	}
-	s.publishUserSettingsEvent(ctx, settings)
+	if changed {
+		s.publishUserSettingsEvent(ctx, settings)
+	}
 	return nil
-}
-
-// updateTaskCreateLastUsed delegates the patch to the repository.
-func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
-	return s.repo.UpdateTaskCreateLastUsed(ctx, s.settingsUserID(ctx), patch)
 }
 
 // taskCreateLastUsedPatchEmpty reports whether every field of the patch is

@@ -129,9 +129,29 @@ func normalizeClarificationAnswer(
 		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response selected an unoffered option for Codex question %q", answer.QuestionID)
 	}
 	return adapter.UserInputAnswer{
-		OptionIDs:  append([]string(nil), answer.SelectedOptions...),
-		CustomText: answer.CustomText,
+		OptionIDs:   append([]string(nil), answer.SelectedOptions...),
+		CustomText:  answer.CustomText,
+		Attachments: codexUserInputAttachments(answer.Attachments),
 	}, nil
+}
+
+func codexUserInputAttachments(attachments []clarificationprotocol.AnswerAttachment) []adapter.UserInputAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]adapter.UserInputAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, adapter.UserInputAttachment{
+			AttachmentID: attachment.AttachmentID,
+			Type:         attachment.Type,
+			Name:         attachment.Name,
+			MimeType:     attachment.MimeType,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+			Path:         attachment.Path,
+		})
+	}
+	return out
 }
 
 func userInputOfferedOption(question adapter.UserInputQuestion, selectedID string) bool {

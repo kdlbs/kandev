@@ -556,6 +556,35 @@ export class SessionPage {
   clarificationCustomSubmit(): Locator {
     return this.page.getByTestId("clarification-custom-submit");
   }
+  /** Paperclip trigger for question-answer files (header or custom row). */
+  clarificationAttachmentTrigger(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-trigger");
+  }
+
+  /** Hidden file input used by the paperclip. */
+  clarificationAttachmentInput(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-input");
+  }
+
+  /** Paperclip count/progress/failure badge. */
+  clarificationAttachmentBadge(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-attachment-badge");
+  }
+
+  /** On-demand answer-file manager surface. */
+  clarificationAttachmentManager(): Locator {
+    return this.page.getByTestId("clarification-attachment-manager");
+  }
+
+  /** Submits the active single-question or multi-question answer explicitly. */
+  async submitClarification(): Promise<void> {
+    const headerSubmit = this.clarificationSubmit();
+    if ((await headerSubmit.count()) > 0) {
+      await headerSubmit.click();
+      return;
+    }
+    await this.clarificationCustomSubmit().click();
+  }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {

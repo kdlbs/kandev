@@ -312,6 +312,7 @@ type AgentProfileVerifier interface {
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	automationCreator      AutomationCreator
+	automationPluginTools  AutomationPluginTools
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService

@@ -21,15 +21,18 @@ import (
 const maxAgentToolResultBytes = 1 << 20
 
 const agentToolOutcomeError = "error"
+const agentToolOutcomeSuccess = "success"
+const agentToolOutcomeToolError = "tool_error"
 
 type AgentToolInvocationContext struct {
-	InvocationID      string
-	TaskID            string
-	SessionID         string
-	WorkspaceID       string
-	Surface           string
-	ExecutionID       string
-	ManagedToolPolicy *mcpprofile.ManagedToolPolicy
+	InvocationID                string
+	TaskID                      string
+	SessionID                   string
+	WorkspaceID                 string
+	Surface                     string
+	ExecutionID                 string
+	ManagedToolPolicy           *mcpprofile.ManagedToolPolicy
+	AutomationToolAuthorization *plugintools.AutomationAuthorization
 }
 
 // AgentToolCatalog returns the current tool snapshot of active plugins whose
@@ -209,16 +212,19 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	if invocation.ManagedToolPolicy != nil || invocation.Surface == manifest.AgentToolSurfaceManaged {
 		return s.invokeManagedAgentTool(ctx, pluginID, localName, arguments, invocation)
 	}
+	if invocation.AutomationToolAuthorization != nil || invocation.Surface == manifest.AgentToolSurfaceAutomation {
+		return s.invokeAutomationAgentTool(ctx, pluginID, localName, arguments, invocation)
+	}
 	started := time.Now()
 	defer func() {
 		if s.log == nil {
 			return
 		}
-		outcome := "success"
+		outcome := agentToolOutcomeSuccess
 		if err != nil {
 			outcome = agentToolOutcomeError
 		} else if result != nil && result.IsError {
-			outcome = "tool_error"
+			outcome = agentToolOutcomeToolError
 		}
 		s.log.Info("plugin agent tool invocation",
 			zap.String("invocation_id", invocation.InvocationID),
@@ -231,6 +237,26 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	}()
 
 	// Keep record lookup and the RPC in one dispatch lease across lifecycle changes.
+	return s.invokeDeclaredAgentTool(ctx, pluginID, localName, arguments, invocation, invocation.Surface, func(record *store.Record) error {
+		if record.Status != StatusActive {
+			return fmt.Errorf("plugins: plugin %q is not active", pluginID)
+		}
+		return nil
+	})
+}
+
+// invokeDeclaredAgentTool owns the shared dispatch lease and bounded call for
+// the ordinary and automation surfaces. The caller supplies the surface-
+// specific record checks; argument validation, remote dispatch, and result
+// validation stay in one place.
+func (s *Service) invokeDeclaredAgentTool(
+	ctx context.Context,
+	pluginID, localName string,
+	arguments map[string]any,
+	invocation AgentToolInvocationContext,
+	surface string,
+	validateRecord func(*store.Record) error,
+) (*pluginsdk.AgentToolResult, error) {
 	dispatchLock := s.dispatchLocks.lockFor(pluginID)
 	dispatchLock.RLock()
 	defer dispatchLock.RUnlock()
@@ -239,10 +265,10 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	if err != nil {
 		return nil, err
 	}
-	if record.Status != StatusActive {
-		return nil, fmt.Errorf("plugins: plugin %q is not active", pluginID)
+	if err := validateRecord(record); err != nil {
+		return nil, err
 	}
-	declaration, err := findAgentTool(record.AgentTools, localName, invocation.Surface)
+	declaration, err := findAgentTool(record.AgentTools, localName, surface)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +280,7 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	if !ok {
 		return nil, fmt.Errorf("plugins: plugin %q is not running", pluginID)
 	}
-	result, err = invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
+	result, err := invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
 	if err != nil {
 		return nil, err
 	}
@@ -292,11 +318,11 @@ func (s *Service) invokeManagedAgentToolWithRemote(
 		if s.log == nil {
 			return
 		}
-		outcome := "success"
+		outcome := agentToolOutcomeSuccess
 		if err != nil {
 			outcome = agentToolOutcomeError
 		} else if result != nil && result.IsError {
-			outcome = "tool_error"
+			outcome = agentToolOutcomeToolError
 		}
 		s.log.Info("managed plugin agent tool invocation",
 			zap.String("audit_id", CanonicalApprovalDigest(pluginID, invocation.InvocationID, invocation.TaskID, invocation.SessionID, localName)),
@@ -415,6 +441,10 @@ func invokeRemoteAgentTool(ctx context.Context, remote interface {
 		toolContext.ApprovalRevision = policy.ApprovalRevision
 		toolContext.ManifestDigest = policy.ManifestDigest
 		toolContext.AgentToolNames = append([]string(nil), policy.AgentToolNames...)
+	}
+	if authorization := invocation.AutomationToolAuthorization; authorization != nil {
+		toolContext.InstallationID = authorization.InstallationID
+		toolContext.AgentToolNames = append([]string(nil), authorization.ToolNames...)
 	}
 	return remote.InvokeAgentTool(callCtx, &pluginsdk.AgentToolRequest{
 		InvocationID: invocation.InvocationID,

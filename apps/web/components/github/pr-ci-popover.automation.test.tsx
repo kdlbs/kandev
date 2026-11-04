@@ -384,7 +384,7 @@ describe("PRCIPopover linked PR status", () => {
     expect(screen.queryByText("CI status")).toBeNull();
     expect(screen.queryByText("Open PR details")).toBeNull();
     expect(screen.queryByLabelText("View all checks on GitHub")).toBeNull();
-    expect(screen.getByLabelText("View pull request on GitHub")).not.toBeNull();
+    expect(screen.getByLabelText("Open PR")).not.toBeNull();
   });
 
   it("opens the in-app detail panel from the selected multi-PR title", () => {
@@ -489,7 +489,7 @@ describe("MultiPRCIPopover unlink", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: REMOVE_FIRST_PR_LABEL })).toBeNull(),
     );
-    expect(screen.getByRole("tab", { name: "r #2" })).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "r #2" }).textContent).toBe("r #2");
     expect(onCollapseFocus).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
   });
 

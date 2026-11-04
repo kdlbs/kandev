@@ -652,18 +652,31 @@ foreground-generating Claude turns retain the coarse queueing behavior.
 
 ### Inspect background work
 
-When an agent reports a background shell command, subagent, or monitor, Kandev
-adds a content-width chip directly above the message box. The chip counts the
-jobs that are running, waiting, or of unknown activity. Select it to open a
-summary. Selecting a job opens its own tab in the central area on desktop, or a
-full-height detail view on a phone. **View all** opens the Background Work
+When an agent reports a background shell command, subagent, or monitor that is
+still running, Kandev adds a content-width chip directly above the message box.
+The chip counts only running jobs. Select it to open a running-only summary.
+Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all work** opens the Background Work
 overview. Closing a tab or view does not stop the job.
+
+The overview has two tabs. **Active** lists running and waiting jobs. **History**
+lists completed, failed, interrupted, ended, and unknown jobs. Each tab shows its
+count before you search, and search filters the selected tab. Long commands
+truncate in the list, while the detail view shows the complete command and wraps
+it inside the available width.
+
+Background Work stays reachable without the chip. On desktop, open it from the
+**+** panel menu. On a phone in a managed session, open it from **Panels**;
+passthrough terminal sessions do not expose it. A job with unknown activity
+appears in History with its actual **Unknown** status and never implies
+completion. Unknown work can return to Active when new evidence arrives.
 
 Background inspection is standard behavior in the shipped profiles. Operators
 can disable it with the `features.agentBackgroundWork` runtime toggle
-(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
-job controls are unavailable, and existing chat behavior is unchanged. The
-toggle is separate from the Claude background prompt handoff experiment.
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, entries,
+reads, and job controls are unavailable, and existing chat behavior is
+unchanged. The toggle is separate from the Claude background prompt handoff
+experiment.
 
 The chip never changes how a prompt is admitted. A foreground that is still
 generating keeps its normal **Queue** behavior. An idle foreground accepts an
@@ -688,6 +701,10 @@ What a job row can show depends on the agent runtime:
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
 
+When Kandev verifies that the owning agent process has ended, its jobs stop
+contributing to the active count. Their history stays reachable when you
+restart the session.
+
 For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
 detached shell job from the native exit event. A job can therefore move from
 unknown to completed, failed, or interrupted after the foreground prompt ends.
@@ -706,9 +723,10 @@ output.
 ### Prevent auto-start on open
 
 Under **Settings → Preferences → Task Behavior**, the **Prevent auto-start on open**
-preference is off by default. When enabled, opening a task never launches or
-resumes its agent on its own; it shows the **Start agent** button instead. The
-preference applies in two situations:
+preference is off by default. When enabled in the web app, opening or refocusing
+a task never launches or resumes its agent on its own; it shows the **Start
+agent** button or the composer start hint instead. The preference applies in
+three situations:
 
 - **Opening a task in the final step of its workflow.** The task opens with a
   prepared session and the agent stays stopped until you select **Start agent**.
@@ -718,6 +736,12 @@ preference applies in two situations:
   preference is off, opening the task can resume its existing conversation.
   When it is on, the agent stays stopped until you select **Start agent** or
   send a message. The previous prompt is not replayed.
+- **Opening or refocusing a session paused by the workspace ACP idle policy.**
+  When this preference is on, the session stays suspended and the composer
+  shows the start hint. Sending a message resumes the same conversation once.
+  With the preference off, opening or refocusing the task resumes the session.
+  A completed session keeps its terminal recovery actions instead of the
+  composer hint.
 
 Separately, after a backend restart Kandev runs a bounded background pass over
 eligible interrupted sessions. It does not wait for you to open or focus each
@@ -733,9 +757,10 @@ owner keeps its existing control of the task. An earlier visit to the same step
 does not consume a newly accepted entry, and a prompt already accepted for the
 current entry is not replayed.
 
-The preference only gates opening a task. Choosing **Start agent** (or a
-workflow step transition) always starts the agent as usual, and a failed or
-interrupted session still shows its recovery actions.
+The preference only gates passive opening and focus recovery in the web app.
+Choosing **Start agent** (or a workflow step transition) always starts the
+agent as usual, and a failed or interrupted session still shows its recovery
+actions. Other clients and direct API calls do not enforce this web preference.
 
 An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
@@ -832,6 +857,13 @@ session sends or queues it according to its current input mode. If delivery
 fails, the form keeps your answer so you can retry. **Close question** removes
 the answer surface without sending anything, while the question stays in the
 conversation history.
+
+Unfinished answers stay with their question when you switch tasks or sessions
+and come back. This includes text you have typed but not sent, selected options,
+and your position in a multi-question bundle. Drafts last for the current
+browser page: a reload, logout, or different signed-in user clears them. Kandev
+keeps up to eight unfinished question bundles at a time and discards the least
+recently used one after that.
 
 ## Task dependencies
 
@@ -1347,7 +1379,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 - **Completion signal appears ignored:** it is asynchronous; also check whether a user message canceled it or whether the task already left the step.
 - **Remote source cannot clone or fetch:** verify provider credentials and access to every repository and base branch.
 - **Attachment is rejected below the picker limit:** encoded size is subject to the backend's stricter 10 MB item/batch checks.
-- **Resources remain after archive or delete:** physical cleanup is asynchronous and retryable. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually. Restarting Kandev lets queued cleanup work resume; do not manually remove a shared environment while another active task uses it.
+- **Resources remain after archive or delete:** physical cleanup is asynchronous and retryable. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually. A cleanup identity conflict reports `cleanup_condition=reconciliation_required`; inspect it first using [Inspect cleanup identity conflicts](git-operations.md#inspect-cleanup-identity-conflicts). Restarting Kandev lets queued cleanup work resume; do not manually remove a shared environment while another active task uses it.
 - **An unarchived worktree starts fresh:** an external action or an older Kandev version removed the branch, and no matching branch exists on `origin`.
 - **A synchronized workflow is read-only:** edit the workflow file in its GitHub source and let sync apply the change.
 

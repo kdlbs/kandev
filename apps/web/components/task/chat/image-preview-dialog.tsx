@@ -12,6 +12,8 @@ type ImagePreviewDialogProps = {
   alt: string;
   thumbnailClassName?: string;
   interactive?: boolean;
+  /** Keeps question-panel keyboard shortcuts from acting behind the viewer. */
+  stopShortcutPropagation?: boolean;
 };
 
 export const IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME =
@@ -111,6 +113,7 @@ export function ImagePreviewDialog({
   alt,
   thumbnailClassName,
   interactive = true,
+  stopShortcutPropagation = false,
 }: ImagePreviewDialogProps) {
   const { t } = useTranslation();
   if (!interactive) {
@@ -136,6 +139,8 @@ export function ImagePreviewDialog({
       <DialogContent
         aria-describedby={undefined}
         showCloseButton={false}
+        onEscapeKeyDown={stopShortcutPropagation ? (event) => event.stopPropagation() : undefined}
+        onKeyDown={stopShortcutPropagation ? (event) => event.stopPropagation() : undefined}
         className={cn(
           IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
           "motion-reduce:data-open:zoom-in-100 motion-reduce:data-closed:zoom-out-100",

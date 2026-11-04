@@ -1,4 +1,7 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import {
   activeSessionId,
   expectCleanSupersededProjection,
@@ -8,6 +11,8 @@ import {
   type SupersededClarificationStatus,
 } from "../../helpers/clarification";
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { waitForSessionState } from "../../helpers/session";
+import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 import { expectClarificationReferencePopup } from "../../helpers/clarification-markdown";
@@ -59,6 +64,7 @@ test.describe("Mobile clarification multiline answer", () => {
       caption: "Mobile clarification offers only the choices allowed by Codex",
     });
     await session.clarificationOption("Fast").tap();
+    await session.submitClarification();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("You answered");
@@ -223,6 +229,7 @@ test.describe("Mobile clarification multiline answer", () => {
 
     try {
       await session.clarificationOption("PostgreSQL").tap();
+      await session.submitClarification();
       await expect(status).toBeVisible();
       await expect(status).toHaveAttribute("aria-label", "Submitting…");
       await expect(session.clarificationSkip()).toBeDisabled();
@@ -300,6 +307,7 @@ test.describe("Mobile clarification multiline answer", () => {
     });
 
     await session.clarificationOption("PostgreSQL").tap();
+    await session.submitClarification();
     const retry = testPage.getByTestId("clarification-retry");
     await expect(retry).toBeVisible();
     await expect(session.clarificationSkip()).toBeEnabled();
@@ -572,6 +580,7 @@ test.describe("Mobile clarification multiline answer", () => {
     ).resolves.toBe(true);
 
     await option.locator("code").tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(
       session
@@ -626,6 +635,7 @@ test.describe("Mobile clarification multiline answer", () => {
     const option = session.clarificationOption("PostgreSQL");
     await option.scrollIntoViewIfNeeded();
     await option.tap();
+    await session.submitClarification();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
@@ -751,26 +761,28 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(container).toBeVisible({ timeout: 30_000 });
     await input.fill("Phone draft remains here.");
     const phoneHost = Number(await container.getAttribute("data-host-max-height"));
-    const [expand, reset] = [
-      container.getByTestId("clarification-panel-expand"),
-      container.getByTestId("clarification-panel-reset"),
-    ];
-    const [expandBox, resetBox] = await Promise.all([expand.boundingBox(), reset.boundingBox()]);
-    if (!expandBox || !resetBox) throw new Error("mobile resize controls are not measurable");
-    expect(expandBox.height).toBeGreaterThanOrEqual(44);
-    expect(resetBox.height).toBeGreaterThanOrEqual(44);
-    await expect(expand).toBeEnabled();
-    await expand.tap();
+    const sizeToggle = container.getByTestId("clarification-panel-size-toggle");
+    await expect(sizeToggle).toHaveCount(1);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    const phoneBox = await sizeToggle.boundingBox();
+    if (!phoneBox) throw new Error("mobile size control is not measurable");
+    expect(phoneBox.height).toBeGreaterThanOrEqual(44);
+    expect(phoneBox.width).toBeGreaterThanOrEqual(44);
+    await expect(sizeToggle).toBeEnabled();
+    await sizeToggle.tap();
     await expect(container).toHaveCSS("height", `${phoneHost}px`);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
     await expect(input).toHaveValue("Phone draft remains here.");
     await input.fill("Desktop draft remains here.");
     const desktopHost = Number(await container.getAttribute("data-host-max-height"));
-    await expect(container.getByTestId("clarification-panel-expand")).toBeEnabled();
-    await container.getByTestId("clarification-panel-expand").click();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toBeEnabled();
+    await sizeToggle.click();
     await expect(container).toHaveCSS("height", `${desktopHost}px`);
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
 
     await testPage.setViewportSize({ width: 393, height: 852 });
     await expect
@@ -783,14 +795,23 @@ test.describe("Mobile clarification multiline answer", () => {
       )
       .toBe(true);
     await expect(input).toHaveValue("Desktop draft remains here.");
-    await reset.tap();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Restore");
+    await sizeToggle.tap();
     await expect.poll(() => container.evaluate((el) => (el as HTMLElement).style.height)).toBe("");
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
 
     await testPage.setViewportSize({ width: 900, height: 900 });
     await expect(container).toHaveCSS("height", `${desktopHost}px`);
     await expect(input).toHaveValue("Desktop draft remains here.");
     await testPage.setViewportSize({ width: 393, height: 500 });
-    await expect(container.getByTestId("clarification-panel-reset")).toBeDisabled();
+    await expect(sizeToggle).toBeVisible();
+    await expect(sizeToggle).toHaveAttribute("aria-label", "Expand");
+    await expect(sizeToggle).toHaveAttribute("aria-disabled", "true");
+    const constrainedBox = await sizeToggle.boundingBox();
+    expect(constrainedBox).not.toBeNull();
+    expect(constrainedBox!.height).toBeGreaterThanOrEqual(44);
+    expect(constrainedBox!.width).toBeGreaterThanOrEqual(44);
+    await expect(sizeToggle).toHaveCount(1);
     await expect(
       testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -852,4 +873,128 @@ test.describe("Mobile superseded detached clarification stays history", () => {
       await expectCleanSupersededProjection(apiClient, fixture.sessionId);
     });
   }
+});
+
+test.describe("question draft navigation", () => {
+  test.describe.configure({ retries: 1, timeout: 180_000 });
+
+  async function createPendingClarificationTask(
+    apiClient: ApiClient,
+    seedData: SeedData,
+    title: string,
+  ) {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-multi",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("clarification task has no session");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "clarification task should block on its questions",
+      timeout: 60_000,
+    });
+    return { ...task, sessionId: task.session_id };
+  }
+
+  async function openTaskFromPicker(testPage: Page, taskId: string) {
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+    await expect(sheet).toBeVisible();
+    await sheet.locator(`[data-task-row-id="${taskId}"]`).tap();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}(?:\\?|$)`));
+  }
+
+  test("retains and submits phone answers across task-picker navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const first = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Mobile Draft Navigation First",
+    );
+    const second = await createPendingClarificationTask(
+      apiClient,
+      seedData,
+      "Mobile Draft Navigation Second",
+    );
+
+    await testPage.goto(`/t/${first.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const overlay = session.clarificationOverlay();
+    await expect(overlay).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").tap();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await session.clarificationInput().fill("Use Go and TypeScript");
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+
+    let respondRequests = 0;
+    testPage.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      if (/^\/api\/v1\/clarification\/[^/]+\/respond$/.test(new URL(request.url()).pathname)) {
+        respondRequests += 1;
+      }
+    });
+
+    await openTaskFromPicker(testPage, second.id);
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await openTaskFromPicker(testPage, first.id);
+
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(session.clarificationInput()).toHaveValue("Use Go and TypeScript");
+    expect(respondRequests).toBe(0);
+    await session.clarificationStep(0).tap();
+    await expect(session.clarificationOption("PostgreSQL")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    await session.clarificationStep(1).tap();
+    await session.clarificationStep(2).tap();
+    await session.clarificationOption("Docker").tap();
+    await expect(session.clarificationSubmit()).toBeEnabled();
+    await expect(
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).resolves.toBe(true);
+
+    const responded = waitForHttp(testPage, "POST", /^\/api\/v1\/clarification\/[^/]+\/respond$/);
+    await session.clarificationSubmit().tap();
+    await responded;
+    await expect(session.idleInput()).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(first.sessionId);
+        return messages
+          .filter((message) => message.type === "clarification_request")
+          .map((message) => message.metadata?.status);
+      })
+      .toEqual(["answered", "answered", "answered"]);
+    const { messages } = await apiClient.listSessionMessages(first.sessionId);
+    expect(
+      messages.find(
+        (message) =>
+          message.type === "clarification_request" && message.metadata?.question_id === "language",
+      )?.metadata?.response,
+    ).toMatchObject({ custom_text: "Use Go and TypeScript" });
+
+    await openTaskFromPicker(testPage, second.id);
+    await openTaskFromPicker(testPage, first.id);
+    await expect(session.idleInput()).toBeVisible();
+    await expect(session.clarificationOverlay()).toHaveCount(0);
+  });
 });
