@@ -10,6 +10,7 @@ import {
   IconLayoutGrid,
   IconListCheck,
   IconNetwork,
+  IconTerminal2,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -303,6 +304,33 @@ function missingBuiltInReviews(
   };
 }
 
+/** Feature-gated entry to the shared background work overview. Runs even when
+ * the session has no records so history and empty states stay reachable without
+ * a composer chip. */
+function BackgroundWorkMenuItems({
+  groupId,
+  state,
+}: {
+  groupId: string;
+  state: AddPanelMenuState;
+}) {
+  const { t } = useTranslation();
+  const enabled = useFeature("agentBackgroundWork");
+  const sessionId = useAppStore((store) => store.tasks.activeSessionId);
+  const addBackgroundWorkPanel = useDockviewStore((s) => s.addBackgroundWorkPanel);
+  if (!enabled || state.isPassthrough || !sessionId) return null;
+  return (
+    <DropdownMenuItem
+      onClick={() => addBackgroundWorkPanel({ sessionId, groupId, inCenter: true })}
+      className={MENU_ITEM_CLASS}
+      data-testid="add-panel-background-work"
+    >
+      <IconTerminal2 className={MENU_ICON_CLASS} />
+      {t("task:panelBackgroundWork")}
+    </DropdownMenuItem>
+  );
+}
+
 /** Renders the dockview "+" menu: session/terminal reopen entries, browser,
  * VS Code, plan, port-forwarding toggle, plugin task panels, task canvases,
  * todos, changes/files, review panels, and repository scripts. */
@@ -365,6 +393,7 @@ export function AddPanelMenuItems({
       )}
       <PluginTaskPanelMenuItems groupId={groupId} state={state} />
       <TaskCanvasMenuItems groupId={groupId} taskId={state.taskId} />
+      <BackgroundWorkMenuItems groupId={groupId} state={state} />
       {!state.isPassthrough && (
         <DropdownMenuItem onClick={() => addTodosPanel({ groupId })} className={MENU_ITEM_CLASS}>
           <IconListCheck className={MENU_ICON_CLASS} />

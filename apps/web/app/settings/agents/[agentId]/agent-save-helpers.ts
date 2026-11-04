@@ -20,6 +20,7 @@ import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
 import { toAgentProfilePayload } from "@/lib/api/domains/agent-profile-normalize";
+import { areStringSetsEqual } from "@/lib/string-set-equality";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 import type { AgentCreationPublication } from "@/hooks/domains/settings/use-agent-creation-store-sync";
 
@@ -42,6 +43,7 @@ const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> =
   ["cursor_plugins_mcp_enabled", "cursorPluginsMcpEnabled"],
   ["mcp_selection_mode", "mcpSelectionMode"],
   ["mcp_selected_servers", "mcpSelectedServers"],
+  ["copilot_selected_plugins", "copilotSelectedPlugins"],
   ["cli_flags", "cliFlags"],
   ["command_prefix", "commandPrefix"],
   ["provider_kind", "providerKind"],
@@ -260,6 +262,7 @@ function buildCreateProfilePayload(profile: DraftProfile) {
     cursor_plugins_mcp_enabled: profile.cursorPluginsMcpEnabled ?? true,
     mcp_selection_mode: profile.mcpSelectionMode ?? "inherit",
     mcp_selected_servers: profile.mcpSelectedServers ?? [],
+    copilot_selected_plugins: [...(profile.copilotSelectedPlugins ?? [])].sort(),
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     ...providerPayloadFields(profile),
@@ -281,7 +284,7 @@ function changedCursorPreferences(profile: DraftProfile, savedProfile: AgentProf
     (profile.mcpSelectionMode ?? "inherit") === (savedProfile.mcpSelectionMode ?? "inherit")
       ? undefined
       : (profile.mcpSelectionMode ?? "inherit");
-  const selectedServers = areSelectedServerIdsEqual(
+  const selectedServers = areStringSetsEqual(
     profile.mcpSelectedServers,
     savedProfile.mcpSelectedServers,
   )
@@ -293,13 +296,6 @@ function changedCursorPreferences(profile: DraftProfile, savedProfile: AgentProf
     mcp_selection_mode: selectionMode,
     mcp_selected_servers: selectedServers,
   };
-}
-
-function areSelectedServerIdsEqual(left: string[] = [], right: string[] = []): boolean {
-  if (left.length !== right.length) return false;
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
-  return sortedLeft.every((serverId, index) => serverId === sortedRight[index]);
 }
 
 function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentProfile) {
@@ -314,6 +310,12 @@ function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentPro
     ...permissionsToProfilePatch(profile),
     cli_passthrough: profile.cliPassthrough ?? false,
     ...changedCursorPreferences(profile, savedProfile),
+    copilot_selected_plugins: areStringSetsEqual(
+      profile.copilotSelectedPlugins,
+      savedProfile.copilotSelectedPlugins,
+    )
+      ? undefined
+      : [...(profile.copilotSelectedPlugins ?? [])].sort(),
     cli_flags: profile.cliFlags ?? [],
     command_prefix: profile.commandPrefix ?? "",
     ...providerPayloadFields(profile),
@@ -638,7 +640,8 @@ function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boole
     (draft.cursorMcpAuthEnabled ?? true) !== (saved.cursorMcpAuthEnabled ?? true) ||
     (draft.cursorPluginsMcpEnabled ?? true) !== (saved.cursorPluginsMcpEnabled ?? true) ||
     (draft.mcpSelectionMode ?? "inherit") !== (saved.mcpSelectionMode ?? "inherit") ||
-    !areSelectedServerIdsEqual(draft.mcpSelectedServers, saved.mcpSelectedServers) ||
+    !areStringSetsEqual(draft.mcpSelectedServers, saved.mcpSelectedServers) ||
+    !areStringSetsEqual(draft.copilotSelectedPlugins, saved.copilotSelectedPlugins) ||
     arePermissionsDirty(draft, saved)
   );
 }

@@ -142,6 +142,18 @@ type HarnessSessionGeneration struct {
 	CommittedAt           time.Time `json:"committed_at"`
 }
 
+// HarnessNativeRebind moves the current generation and its resume token from
+// one native conversation to the next after an in-place context reset.
+type HarnessNativeRebind struct {
+	SessionID               string
+	IncarnationID           string
+	Generation              int64
+	TaskID                  string
+	ExecutionID             string
+	PreviousNativeSessionID string
+	NativeSessionID         string
+}
+
 // RestoreAttempt records the decision and result of one native restore or
 // explicitly authorized continuation action.
 type RestoreAttempt struct {

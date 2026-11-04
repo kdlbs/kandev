@@ -205,7 +205,7 @@ func convertStageType(stage string) (models.StageType, error) {
 		return models.StageTypeCustom, nil
 	}
 	switch models.StageType(stage) {
-	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom:
+	case models.StageTypeWork, models.StageTypeReview, models.StageTypeApproval, models.StageTypeCustom, models.StageTypeHold:
 		return models.StageType(stage), nil
 	}
 	return "", fmt.Errorf("invalid stage_type %q", stage)

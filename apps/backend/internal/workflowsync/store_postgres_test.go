@@ -25,6 +25,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	pollEnabled := true
 	request := &SetConfigRequest{
 		Provider:        ProviderGitHub,
+		GitHubHost:      "git.example.com",
 		RepoOwner:       "acme",
 		RepoName:        "workflows",
 		Branch:          "main",
@@ -43,7 +44,7 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 		t.Fatalf("record workflow sync status: %v", err)
 	}
 	config, err := replayed.GetConfigForWorkspace(ctx, "ws-1")
-	if err != nil || config == nil || !config.LastOk || !config.PollEnabled || config.LastHash != "hash-1" {
+	if err != nil || config == nil || !config.LastOk || !config.PollEnabled || config.LastHash != "hash-1" || config.GitHubHost != "git.example.com" {
 		t.Fatalf("workflow sync config = %+v, err=%v", config, err)
 	}
 	configs, err := replayed.ListConfigs(ctx)

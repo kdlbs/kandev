@@ -82,8 +82,8 @@ exit code. A patch contains independent per-field operations:
 
 Encode inserted/checkpoint text bytes as base64, then validate decoded UTF-8.
 Two saturated fields require about 683 KiB of base64 rather than up to 3 MiB of
-JSON-escaped text, keeping normal checkpoints inside the existing 1 MiB event
-limit. Count encoded bytes in all budgets. Oversized unrelated metadata retains
+JSON-escaped text. Normal checkpoints remain below 1 MiB within the
+[shared event budget](bounded-tool-delivery.md#capacity-contract). Count encoded bytes in all budgets. Oversized unrelated metadata retains
 the existing typed size failure; it is not truncated to make a checkpoint fit.
 
 Compute each field's SHA-256 directly over its UTF-8 bytes, then SHA-256 the JSON

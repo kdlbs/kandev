@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-10-02
-updated: 2026-10-02
+updated: 2026-11-03
 owners:
   - cfl
 ---
@@ -47,6 +47,7 @@ No cache generations or consumer tracking are required.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.10:** Busy cleanup shall neither terminate tasks nor promise transparent retries. Builds can fail; subsequent build attempts shall reuse the same cache path.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.11:** Threshold discovery and deletion shall make bounded progress across repeated calls. A partial prefix shall not authorize deletion unless accumulated measurements establish that the configured threshold is exceeded. A process restart or root/settings identity change may discard in-memory progress and start a new scan.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.12:** Cleanup shall identify nested mount boundaries independently of device identity on supported platforms. If mount identity cannot be established, cleanup shall fail closed and preserve the affected data.
+- **AC-SYSTEM-PAGE-GO-CACHE-004.13:** When a cache directory changes between cleanup passes, cleanup shall discard stale scan evidence before deleting through the replacement. A fresh attempt shall establish ownership, containment, mount safety, and threshold eligibility again. Unchanged directories shall retain bounded progress across calls.
 
 ### REQ-SYSTEM-PAGE-GO-CACHE-005: Policy and result feedback
 
@@ -58,6 +59,9 @@ No cache generations or consumer tracking are required.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.4:** The interface shall report physical cache usage, including the fuzz corpus, separately from cleanup-eligible bytes used by threshold eligibility.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.5:** Cleanup results shall distinguish removed bytes, remaining or unknown bytes, partial failure, and skipped resources. Busy cleanup shall never claim an empty cache or exact disk recovery without evidence.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.6:** New copy shall use the selected language. Phone users shall access the same controls and results without horizontal page scrolling.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.7:** Maintenance history shall distinguish bounded cleanup progress, partial cleanup, and failure. A genuine error from any provider shall prevent a progress-only outcome. Historical runs shall remain readable.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.8:** Expanded Go cleanup results shall show removed bytes, remaining or unknown bytes, and one explanation per distinct issue. Result text and error explanations shall use one body text size and compact spacing. Technical diagnostics shall remain available behind a separate disclosure, closed initially.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.9:** Desktop and phone users shall open and close technical details with a keyboard or visible touch control. Long diagnostics shall remain contained. Run status and trigger labels shall use the selected language.
 
 ## Retired draft identities
 
@@ -75,3 +79,4 @@ are outside scope. The existing shared cache remains opt-in.
 
 - [System design](../system-design/go-cache-reclamation.md)
 - [Implementation package](../../../plans/go-cache-reclamation/plan.md)
+- [Scan recovery and history repair](../../../plans/storage-cleanup-recovery/plan.md)

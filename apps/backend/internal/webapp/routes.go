@@ -142,7 +142,9 @@ func isStaticPath(requestPath string) bool {
 		"/favicon.ico",
 		"/icon.svg",
 		"/manifest.webmanifest",
+		"/offline.html",
 		"/robots.txt",
+		"/sw.js",
 		"/vite.svg":
 		return true
 	default:

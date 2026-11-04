@@ -105,6 +105,15 @@ function capabilityResponse(
   };
 }
 
+function policyBlockedCapabilityResponse(contextRevision: string): DynamicModelsResponse {
+  return {
+    ...capabilityResponse([], contextRevision),
+    status: "unsupported",
+    reason_code: "policy_unverified",
+    error: "profile launch settings are unsupported by this agent",
+  };
+}
+
 function optionResponse(model: string, contextRevision: string): AgentModelConfigResponse {
   return {
     agent_name: MOCK_AGENT_NAME,
@@ -222,6 +231,138 @@ describe("useProfileModelCapabilities", () => {
     expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2);
     expect(result.current.configStatus).toBe("ok");
     expect(result.current.configIsLoading).toBe(false);
+  });
+});
+
+describe("useProfileModelCapabilities policy feedback", () => {
+  it("keeps policy-blocked capability metadata without changing the saved model or options", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const profile = {
+      ...initialProfile,
+      config_options: { effort: "high", reasoning: "balanced" },
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const launchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const onChange = vi.fn();
+    probeAgentProfileMock.mockResolvedValueOnce(policyBlockedCapabilityResponse(REVISION_A));
+
+    const { result } = renderHook(() =>
+      useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+        profileId: PROFILE_ID_A,
+        savedLaunchSettings: launchSettings,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.discoveryState).toBe("failed"));
+    expect(result.current.capabilities.status).toBe("unsupported");
+    expect(result.current.capabilities.reasonCode).toBe("policy_unverified");
+    expect(result.current.capabilities.models).toEqual([]);
+    expect(profile.model).toBe(SAVED_MODEL_ID);
+    expect(profile.config_options).toEqual({ effort: "high", reasoning: "balanced" });
+    expect(resolveAgentModelConfigMock).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("retains a model-option policy reason without reconciling saved values", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const profile = {
+      ...initialProfile,
+      config_options: { effort: "high", reasoning: "balanced" },
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const launchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    const onChange = vi.fn();
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: SAVED_MODEL_ID, name: SAVED_MODEL_NAME }], REVISION_A),
+    );
+    resolveAgentModelConfigMock.mockResolvedValueOnce({
+      ...optionResponse(SAVED_MODEL_ID, REVISION_A),
+      status: "unsupported",
+      reason_code: "policy_unverified",
+      error: "model option resolution failed",
+    });
+
+    const { result } = renderHook(() =>
+      useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+        profileId: PROFILE_ID_A,
+        savedLaunchSettings: launchSettings,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.configStatus).toBe("unsupported"));
+    expect(result.current.configReasonCode).toBe("policy_unverified");
+    expect(result.current.configError).toBe("model option resolution failed");
+    expect(profile.model).toBe(SAVED_MODEL_ID);
+    expect(profile.config_options).toEqual({ effort: "high", reasoning: "balanced" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("useProfileModelCapabilities response ordering", () => {
+  it("rejects a delayed blocked-profile failure after an empty-selection recovery succeeds", async () => {
+    const selectedPluginIds = ["installed:m/spark"];
+    const selectedProfile = { ...initialProfile, copilot_selected_plugins: selectedPluginIds };
+    const selectedLaunchSettings = {
+      ...savedLaunchSettings,
+      copilot_selected_plugins: selectedPluginIds,
+    };
+    probeAgentProfileMock.mockResolvedValueOnce(policyBlockedCapabilityResponse(REVISION_A));
+    const onChange = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ profile }) =>
+        useProfileModelCapabilities(MOCK_AGENT_NAME, profile, modelConfig, onChange, {
+          profileId: PROFILE_ID_A,
+          savedLaunchSettings: selectedLaunchSettings,
+        }),
+      { initialProps: { profile: selectedProfile } },
+    );
+
+    await waitFor(() => expect(result.current.capabilities.reasonCode).toBe("policy_unverified"));
+    let rejectOldProbe: ((error: Error) => void) | undefined;
+    probeAgentProfileMock.mockImplementationOnce(
+      () =>
+        new Promise<DynamicModelsResponse>((_resolve, reject) => {
+          rejectOldProbe = reject;
+        }),
+    );
+    let oldRefresh: Promise<void> | undefined;
+    act(() => {
+      oldRefresh = result.current.refresh();
+    });
+    await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(2));
+
+    const recoveredProfile = { ...selectedProfile, copilot_selected_plugins: [] };
+    rerender({ profile: recoveredProfile });
+    probeAgentProfileMock.mockResolvedValueOnce(
+      capabilityResponse([{ id: "recovered-model", name: "Recovered model" }], REVISION_B),
+    );
+    resolveAgentModelConfigMock.mockResolvedValueOnce(
+      optionResponse("recovered-model", REVISION_B),
+    );
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+    await waitFor(() => expect(result.current.configStatus).toBe("ok"));
+
+    await act(async () => {
+      rejectOldProbe?.(new Error("late old profile failure"));
+      await oldRefresh;
+    });
+
+    expect(result.current.discoveryState).toBe("ready");
+    expect(result.current.capabilities.models).toEqual([
+      { id: "recovered-model", name: "Recovered model" },
+    ]);
+    expect(result.current.capabilities.reasonCode).toBeUndefined();
+    expect(result.current.capabilities.error).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

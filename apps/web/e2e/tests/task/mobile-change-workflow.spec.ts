@@ -13,6 +13,8 @@ import {
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-TASKS-CHANGE-WORKFLOW-001.9
 test("shows step colors when selecting a destination on phone", async ({
   testPage,

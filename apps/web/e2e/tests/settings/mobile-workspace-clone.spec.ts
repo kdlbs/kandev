@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { seedCloneSource, proveClone } from "../../helpers/workspace-clone";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
+test.use({ trace: "retain-on-failure" });
+
 test("phone clone uses an inset sheet and persists the complete setup", async ({
   testPage,
   apiClient,

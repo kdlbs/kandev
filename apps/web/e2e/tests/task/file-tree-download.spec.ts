@@ -35,7 +35,6 @@ async function setupTask({
     repository_ids: [seedData.repositoryId],
   });
 
-  let workspacePath = "";
   await expect
     .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
       timeout: 30_000,
@@ -46,8 +45,21 @@ async function setupTask({
     .poll(
       async () => {
         const environment = await apiClient.getTaskEnvironment(task.id);
-        workspacePath = environment?.repos?.[0]?.worktree_path || environment?.workspace_path || "";
-        return Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath)));
+        const repositoryWorktree = environment?.repos?.find(
+          (repository) => repository.repository_id === seedData.repositoryId,
+        )?.worktree_path;
+        const candidatePaths = [
+          repositoryWorktree,
+          ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
+          environment?.workspace_path,
+          environment?.worktree_path,
+        ].filter(
+          (candidate, index, paths): candidate is string =>
+            Boolean(candidate) && paths.indexOf(candidate) === index,
+        );
+        return candidatePaths.some((candidate) =>
+          fs.existsSync(path.join(candidate, requiredPath)),
+        );
       },
       { timeout: 60_000, message: `Waiting for ${taskTitle} worktree materialization` },
     )

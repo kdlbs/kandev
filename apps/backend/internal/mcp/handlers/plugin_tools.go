@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -20,6 +21,21 @@ import (
 
 type pluginToolsListRequest struct {
 	Surface string `json:"surface"`
+}
+
+// AutomationPluginTools is the Office-owned authority the plugin bridge uses
+// for filtered discovery and per-call approval checks. MCP payload fields are
+// never used to construct these identities.
+type AutomationPluginTools interface {
+	PluginToolOptions(ctx context.Context, workspaceID string) ([]plugintools.OptionGroup, error)
+	ApprovedPluginTools(ctx context.Context, automationID, workspaceID string) ([]plugintools.Definition, error)
+	AutomationToolAuthorization(ctx context.Context, automationID, workspaceID, pluginID string) (*plugintools.AutomationAuthorization, error)
+}
+
+// SetAutomationPluginTools wires the automation selection authority used by
+// the only plugin surface that supports saved approvals.
+func (h *Handlers) SetAutomationPluginTools(provider AutomationPluginTools) {
+	h.automationPluginTools = provider
 }
 
 type pluginToolInvocationRequest struct {
@@ -38,6 +54,14 @@ func (h *Handlers) handleListPluginTools(ctx context.Context, msg *ws.Message) (
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid request: "+err.Error(), nil)
 	}
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		return h.handleListAutomationPluginTools(ctx, msg, req, principal)
+	}
+	if req.Surface == string(mcpprofile.SurfaceAutomation) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "automation plugin tools require an automation execution", nil)
+	}
+	// Ordinary pulled catalogs must stay compatible with older retained
+	// agentctl validators that do not know the automation surface.
 	policy, managed, response, err := h.managedToolPolicyForRequest(ctx, msg, req.Surface)
 	if err != nil || response != nil {
 		return response, err
@@ -46,6 +70,7 @@ func (h *Handlers) handleListPluginTools(ctx context.Context, msg *ws.Message) (
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
+	snapshot = plugintools.ProjectNonAutomation(snapshot)
 	if managed {
 		filtered := snapshot
 		filtered.Tools = make([]plugintools.Definition, 0, len(snapshot.Tools))
@@ -68,6 +93,24 @@ func (h *Handlers) handleListPluginTools(ctx context.Context, msg *ws.Message) (
 	return ws.NewResponse(msg.ID, msg.Action, snapshot)
 }
 
+func (h *Handlers) handleListAutomationPluginTools(ctx context.Context, msg *ws.Message, req pluginToolsListRequest, principal mcpscope.Principal) (*ws.Message, error) {
+	if req.Surface != string(mcpprofile.SurfaceAutomation) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "automation execution may only request the automation surface", nil)
+	}
+	if h.automationPluginTools == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "automation plugin tools are unavailable", nil)
+	}
+	definitions, err := h.automationPluginTools.ApprovedPluginTools(ctx, principal.AutomationID, principal.WorkspaceID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load approved plugin tools", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, plugintools.Snapshot{
+		Generation: "automation-" + principal.AutomationID,
+		Revision:   1,
+		Tools:      definitions,
+	})
+}
+
 func (h *Handlers) handleInvokePluginTool(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req pluginToolInvocationRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -75,6 +118,12 @@ func (h *Handlers) handleInvokePluginTool(ctx context.Context, msg *ws.Message) 
 	}
 	if req.PluginID == "" || req.LocalName == "" || req.Surface == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_id, local_name, and surface are required", nil)
+	}
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+		return h.handleInvokeAutomationPluginTool(ctx, msg, req, principal)
+	}
+	if req.Surface == string(mcpprofile.SurfaceAutomation) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "automation plugin tools require an automation execution", nil)
 	}
 	policy, managed, policyErrorResponse, policyErr := h.managedToolPolicyForRequest(ctx, msg, req.Surface)
 	if policyErr != nil || policyErrorResponse != nil {
@@ -104,6 +153,60 @@ func (h *Handlers) handleInvokePluginTool(ctx context.Context, msg *ws.Message) 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 		"text": result.Text, "structured_content": result.StructuredContent, "is_error": result.IsError,
 	})
+}
+
+func (h *Handlers) handleInvokeAutomationPluginTool(ctx context.Context, msg *ws.Message, req pluginToolInvocationRequest, principal mcpscope.Principal) (*ws.Message, error) {
+	if req.Surface != string(mcpprofile.SurfaceAutomation) {
+		h.logAutomationPluginToolDenial(ctx, msg.Action, "surface_forged", principal)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "automation execution may only invoke the automation surface", nil)
+	}
+	if h.automationPluginTools == nil || h.pluginSvc == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "automation plugin tools are unavailable", nil)
+	}
+	invocation, contextErrorResponse, err := h.resolvePluginToolInvocationContext(ctx, msg, req)
+	if err != nil || contextErrorResponse != nil {
+		h.logAutomationPluginToolDenial(ctx, msg.Action, "request_context_mismatch", principal)
+		return contextErrorResponse, err
+	}
+	authorization, err := h.automationPluginTools.AutomationToolAuthorization(ctx, principal.AutomationID, principal.WorkspaceID, req.PluginID)
+	if err != nil {
+		h.logAutomationPluginToolDenial(ctx, msg.Action, "approval_read_failed", principal)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load automation tool approval", nil)
+	}
+	if authorization == nil || !authorization.Allows(req.PluginID, req.LocalName) {
+		h.logAutomationPluginToolDenial(ctx, msg.Action, "tool_not_approved", principal)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "tool is not approved for this automation", nil)
+	}
+	invocation.Surface = string(mcpprofile.SurfaceAutomation)
+	invocation.AutomationToolAuthorization = authorization
+	result, err := h.pluginSvc.InvokeAgentTool(ctx, req.PluginID, req.LocalName, req.Arguments, invocation)
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn("automation plugin tool invocation failed",
+				zap.String("plugin_id", req.PluginID),
+				zap.String("local_name", req.LocalName),
+				zap.String("automation_id", principal.AutomationID),
+				zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "plugin tool invocation failed", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"text": result.Text, "structured_content": result.StructuredContent, "is_error": result.IsError,
+	})
+}
+
+func (h *Handlers) logAutomationPluginToolDenial(ctx context.Context, action, reason string, principal mcpscope.Principal) {
+	if h == nil || h.logger == nil {
+		return
+	}
+	execution, _ := streams.MCPExecutionContextFromContext(ctx)
+	h.logger.Warn("automation plugin tool request denied",
+		zap.String("action", action),
+		zap.String("reason", reason),
+		zap.String("automation_id", principal.AutomationID),
+		zap.String("workspace_id", principal.WorkspaceID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID))
 }
 
 func (h *Handlers) managedToolPolicyForRequest(ctx context.Context, msg *ws.Message, requestedSurface string) (*mcpprofile.ManagedToolPolicy, bool, *ws.Message, error) {

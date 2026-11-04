@@ -4,6 +4,7 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlProviderCircuits } from "./control-provider-circuits";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -18,6 +19,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
+      {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
           <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />

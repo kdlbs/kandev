@@ -208,7 +208,7 @@ func (c *Cloner) managedAttachmentDestination(repo *models.Repository) (string, 
 }
 
 func attachmentGitPath(ctx context.Context, path, option string) (string, error) {
-	cmd := subproc.NewGitCommand(ctx, "-C", path, "rev-parse", "--path-format=absolute", option)
+	cmd := subproc.NewGitCommand(ctx, "-C", path, "rev-parse", option)
 	cleanup, err := configureGitCommand(cmd, nil)
 	if err != nil {
 		return "", err
@@ -219,5 +219,13 @@ func attachmentGitPath(ctx context.Context, path, option string) (string, error)
 		return "", formatGitOriginError(path, output, err)
 	}
 	// Each query emits one path followed by Git's record newline.
-	return strings.TrimSuffix(string(output), "\n"), nil
+	gitPath := strings.TrimSuffix(string(output), "\n")
+	if option == "--git-common-dir" {
+		// Relative common directories are rooted at the inspected checkout.
+		if !filepath.IsAbs(gitPath) {
+			gitPath = filepath.Join(path, gitPath)
+		}
+		return filepath.EvalSymlinks(gitPath)
+	}
+	return gitPath, nil
 }

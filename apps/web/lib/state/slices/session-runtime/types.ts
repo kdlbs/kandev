@@ -1,3 +1,8 @@
+import type {
+  BuiltinMCPPackage,
+  BuiltinMCPManifest,
+  BuiltinMCPAcceptedBinding,
+} from "@/lib/types/builtin-mcp";
 import type { WorkloadRunObservation, WorkloadOutputChunk } from "@/lib/types/background-work";
 import type {
   WorkspaceRestorationAttempt,
@@ -389,6 +394,8 @@ export type MCPToolSummary = {
 };
 
 export type MCPAttachmentServer = {
+  builtin_package?: BuiltinMCPPackage;
+  accepted_at?: string;
   name: string;
   source?: "kandev" | "profile";
   transport?: string;
@@ -404,20 +411,21 @@ export type MCPAttachmentServer = {
   tool_token_estimator?: string;
 };
 
+export type MCPAttachmentAttempt = {
+  attachment_attempt_id: string;
+  task_id?: string;
+  session_id?: string;
+  execution_id?: string;
+  builtin_packages?: BuiltinMCPManifest;
+  started_at: string;
+  updated_at?: string;
+  servers?: MCPAttachmentServer[];
+};
 export type MCPAttachmentHistory = {
   version: number;
-  current: {
-    attachment_attempt_id: string;
-    started_at: string;
-    updated_at?: string;
-    servers?: MCPAttachmentServer[];
-  };
-  previous?: Array<{
-    attachment_attempt_id: string;
-    started_at: string;
-    updated_at?: string;
-    servers?: MCPAttachmentServer[];
-  }>;
+  builtin_binding?: BuiltinMCPAcceptedBinding;
+  current: MCPAttachmentAttempt;
+  previous?: MCPAttachmentAttempt[];
 };
 
 export type SessionMCPStatusState = { bySessionId: Record<string, MCPAttachmentHistory> };
@@ -548,8 +556,16 @@ export type LaunchWarningState = {
 
 export type BackgroundWorkState = {
   workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
+  outputWindowsBySessionId: Record<string, Record<string, BackgroundOutputWindow>>;
+  nextOutputWindowGeneration: number;
   activeWorkIdBySessionId: Record<string, string>;
   loadingBySessionId: Record<string, boolean>;
+};
+
+export type BackgroundOutputWindow = {
+  runId: string | undefined;
+  generation: number;
+  evicted: number;
 };
 
 export type SessionRuntimeSliceState = {

@@ -34,9 +34,9 @@ func (m *Manager) contributionPreflightTimeout() time.Duration {
 // contract.
 func (m *Manager) startPassthroughExecution(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
 	if execution.isResumedSession {
-		// Resume reuses the launched session id; ResumePassthroughSession does
-		// its own profile lookup for command building.
-		return m.ResumePassthroughSession(ctx, execution.SessionID)
+		// Startup retains its observed execution; terminal reconnects separately
+		// resolve whichever execution currently owns the session.
+		return m.resumePassthroughExecution(ctx, execution, "")
 	}
 	if profileInfo == nil {
 		// Snapshot-driven routing leaves profileInfo nil so we resolve fresh
@@ -94,6 +94,9 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return err
+	}
 	if m.executorAdmission != nil {
 		var err error
 		ctx, err = m.executorAdmission(ctx, execution.SessionID, getMetadataString(execution.MetadataSnapshot(), "executor_id"), getMetadataString(execution.MetadataSnapshot(), MetadataKeyExecutorProfileID))
@@ -137,6 +140,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		}
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
+	if err := m.verifyBuiltinExecution(ctx, execution); err != nil {
+		return err
+	}
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}
@@ -186,10 +192,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if err := context.Cause(operationCtx); err != nil {
 		return err
 	}
+	if err := m.bindPassthroughStartupOrBegin(operationCtx, execution, isPassthrough); err != nil {
+		return err
+	}
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -239,6 +247,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return err
 	}
 	var bootCommand string
+	var mcpOperation *preparedMCPOperation
 	if reuseExisting {
 		m.logger.Info("reattaching to existing agent session without ACP initialization",
 			zap.String("execution_id", executionID),
@@ -253,8 +262,17 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
 
-		var err error
-		bootCommand, err = m.configureAndStartAgent(operationCtx, execution)
+		agentConfig, resolveErr := m.getAgentConfigForExecution(execution)
+		if resolveErr != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
+			return resolveErr
+		}
+		mcpOperation, err = m.prepareExecutionMCP(operationCtx, execution, agentConfig)
+		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
+			return err
+		}
+		bootCommand, err = m.configureAndStartAgentWithMCP(operationCtx, execution, agentConfig, mcpOperation)
 		if err != nil {
 			execution.remoteInstanceLifecycleMu.Unlock()
 			return routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, execution.AgentID, err)
@@ -267,7 +285,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.remoteInstanceLifecycleMu.Unlock()
 
-	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription); err != nil {
+	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, mcpOperation); err != nil {
 		return routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, execution.AgentID, err)
 	}
 	return nil

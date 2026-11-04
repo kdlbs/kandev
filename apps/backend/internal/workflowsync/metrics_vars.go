@@ -14,10 +14,22 @@ import (
 // identifiers, branches, or error text. Mirrors the label idiom in
 // internal/github/metrics_vars.go.
 var (
-	syncFailuresTotal = expvar.NewMap("workflowsync_failures_total")
-	circuitSkipsTotal = expvar.NewMap("workflowsync_circuit_skips_total")
-	circuitResetTotal = expvar.NewMap("workflowsync_circuit_resets_total")
+	syncFailuresTotal            = expvar.NewMap("workflowsync_failures_total")
+	circuitSkipsTotal            = expvar.NewMap("workflowsync_circuit_skips_total")
+	circuitResetTotal            = expvar.NewMap("workflowsync_circuit_resets_total")
+	workflowSyncTransitionsTotal = expvar.NewMap("workflow_sync_recovery_transitions_total")
 )
+
+func workflowSyncMetricLabel(pairs ...string) string { return metricLabel(pairs...) }
+
+func incWorkflowSyncTransition(transition, provider, failureClass, retrySource string) {
+	workflowSyncTransitionsTotal.Add(metricLabel(
+		"transition", transition,
+		"provider", provider,
+		"failure_class", failureClass,
+		"retry_source", retrySource,
+	), 1)
+}
 
 // metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map
 // key, matching the idiom in internal/github/metrics_vars.go.

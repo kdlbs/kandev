@@ -62,7 +62,7 @@
     "@floating-ui/dom": "^1.7.4",
     "@json-render/core": "0.21.0",
     "@json-render/react": "0.21.0",
-    "@kandev/plugin-sdk": "workspace:*",
+    "@kdlbs/plugin-sdk": "workspace:*",
     "@kandev/theme": "workspace:*",
     "@kandev/types": "workspace:*",
     "@kandev/ui": "workspace:*",

@@ -131,6 +131,11 @@ agent_tools:
       destructive_hint: false
       idempotent_hint: true
 
+Automation tools use the same declaration with `surfaces: [automation]`. They
+do not require `managed_agent_tools`; the workspace owner approves exact tools
+per private automation, and the approval expires when the plugin installation or
+configuration changes.
+
 ui: # optional native frontend plugin
   bundle: "/ui/bundle.js" # root-relative
   styles: ["/ui/plugin.css"] # optional, root-relative
@@ -237,7 +242,7 @@ for a complete authoring path.
 | `config_schema`                    | no                                   | object                                | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `agent_tools`                      | no                                   | object[]                              | Task-aware MCP tools implemented by the managed plugin's optional `AgentToolPlugin` SDK interface. Each declaration has a local `name`, `description`, `surfaces`, required `input_schema`, optional `output_schema`, and optional MCP annotation hints. At most 16 tools are allowed.                                                                                                                                                                                                                                                                                                                                                                                           |
 | `agent_tools[].name`               | yes\*                                | string                                | Plugin-local name matching `^[a-z0-9][a-z0-9_]{0,31}$`. Kandev derives the global MCP name; authors cannot choose it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `agent_tools[].surfaces`           | yes\*                                | string[]                              | Any of `kanban-task`, `office-task`, and `managed-conversation`. Managed-conversation declarations also require `capabilities.api_write: [managed_agent_tools]`; the host exposes only per-instance selections and does not expose plugin tools to `configuration` or `external` MCP surfaces. No agent provider currently passes the managed restriction gate, so managed turns fail before launch until provider evidence is added.                                                                                                                                                                    |
+| `agent_tools[].surfaces`           | yes\*                                | string[]                              | Any of `kanban-task`, `office-task`, `managed-conversation`, and `automation`. Managed-conversation declarations also require `capabilities.api_write: [managed_agent_tools]`; the host exposes only per-instance selections. Automation declarations are opt-in: a workspace owner must select exact tools in a private automation editor and save, and plugin/config changes require reselection. Plugin tools are not exposed to `configuration` or `external` MCP surfaces. No agent provider currently passes the managed restriction gate, so managed turns fail before launch until provider evidence is added. |
 | `agent_tools[].input_schema`       | yes\*                                | object                                | Compiled object-root JSON Schema, at most 64 KiB serialized. Kandev rejects unknown top-level arguments before invoking the plugin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `agent_tools[].output_schema`      | no                                   | object                                | Optional compiled object-root JSON Schema applied to structured plugin results.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `agent_tools[].annotations`        | no                                   | object                                | MCP hints: `read_only_hint`, `destructive_hint`, `idempotent_hint`, and `open_world_hint`. Omitted values use conservative host defaults.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -431,7 +436,11 @@ the matching `Host` accessor, the optional
 `pluginsdk.ExecutorProfiles(host)` extension, or the exact managed conversation
 reader. Exact workspace observations use `pluginsdk.HostExactQueries(host)` and
 also require a matching workspace grant such as `host.v2.read:tasks` or
-`host.v2.read:usage`. The Host advertises per-method support and authorization;
+`host.v2.read:usage`. Automation history reads use
+`pluginsdk.HostAutomationHistory(host)` and require the
+`host.v2.read:automations` grant; the `automations` resource covers definitions
+and retained run observations, not only managed-conversation schedules. The
+Host advertises per-method support and authorization;
 an RPC present in the protocol does not mean that every host has its data source.
 See [Authoring a plugin](plugins-authoring.md). Calling an accessor or exact
 manager without its resource declared returns gRPC `PermissionDenied`.
@@ -467,7 +476,10 @@ interaction response methods return `PermissionDenied` because they cannot
 carry that receipt or an observed revision. `managed_agent_conversations`
 enables exact lifecycle, enqueue, cancellation, and immediate-dispatch writes,
 subject to its workspace grant. `automations` enables exact managed-conversation
-schedule reads and mutations, subject to its separate workspace grant.
+schedule reads and mutations, and automation history reads, subject to their
+separate workspace grants. History reads require `api_read: automations` plus
+`host.v2.read:automations`; they expose safe definitions and retained run
+observations with bounded snapshots and exact run refresh.
 `managed_agent_tools` declares tools for the restricted managed-conversation
 surface, subject to its separate workspace grant and
 provider support gate. The host applies the same first-party task service and

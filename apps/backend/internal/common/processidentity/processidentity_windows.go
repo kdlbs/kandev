@@ -80,3 +80,6 @@ func parseWindowsBirthToken(token string) (uint64, error) {
 
 // OwnedSessionTerminated fails closed when descendant ownership cannot be inspected.
 func OwnedSessionTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
+// OwnedGroupTerminated is unverifiable on Windows, which has no POSIX process groups.
+func OwnedGroupTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

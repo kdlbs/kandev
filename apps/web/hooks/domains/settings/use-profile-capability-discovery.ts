@@ -27,6 +27,7 @@ export type ProfileModelSelection = {
   env_vars?: ProfileLaunchSettingsRequest["env_vars"];
   cli_flags?: CLIFlag[];
   command_prefix?: string;
+  copilot_selected_plugins?: string[];
   provider_kind?: string;
 };
 
@@ -49,7 +50,10 @@ export type ProfileCapabilityState = {
 };
 
 export function canonicalLaunchSettings(
-  profile: Pick<ProfileModelSelection, "env_vars" | "cli_flags" | "command_prefix">,
+  profile: Pick<
+    ProfileModelSelection,
+    "env_vars" | "cli_flags" | "command_prefix" | "copilot_selected_plugins"
+  >,
 ): ProfileLaunchSettingsRequest {
   return {
     env_vars: [...(profile.env_vars ?? [])]
@@ -57,6 +61,9 @@ export function canonicalLaunchSettings(
       .sort((left, right) => left.key.localeCompare(right.key)),
     cli_flags: (profile.cli_flags ?? []).map((item) => ({ ...item })),
     command_prefix: profile.command_prefix ?? "",
+    ...(profile.copilot_selected_plugins !== undefined
+      ? { copilot_selected_plugins: [...profile.copilot_selected_plugins].sort() }
+      : {}),
   };
 }
 
@@ -286,13 +293,16 @@ function useProfileCapabilityRefresh({
 
 export function useProfileCapabilityDiscovery(
   agentName: string,
-  profile: Pick<ProfileModelSelection, "env_vars" | "cli_flags" | "command_prefix">,
+  profile: Pick<
+    ProfileModelSelection,
+    "env_vars" | "cli_flags" | "command_prefix" | "copilot_selected_plugins"
+  >,
   options: ProfileCapabilityDiscoveryOptions = {},
 ) {
   const isStaticContext = options.skipCapabilityProbe || !options.supportsDynamicModels;
   const launchSettings = useMemo(
     () => canonicalLaunchSettings(profile),
-    [profile.env_vars, profile.cli_flags, profile.command_prefix],
+    [profile.env_vars, profile.cli_flags, profile.command_prefix, profile.copilot_selected_plugins],
   );
   const launchKey = profileContextKey(agentName, options.profileId, launchSettings);
   const profileIdentity = `${agentName}:${options.profileId ?? "draft"}`;

@@ -3,6 +3,77 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow import/export", () => {
+  test("imports a version 3 profile using its options", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    const seed = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const model = `portable-import-${Date.now()}`;
+    const low = await apiClient.createAgentProfile(
+      seed.agentId,
+      `Portable import low ${Date.now()}`,
+      {
+        model,
+        mode: seed.mode,
+        config_options: { reasoning_effort: "low" },
+      },
+    );
+    let highId: string | undefined;
+    try {
+      const high = await apiClient.createAgentProfile(
+        seed.agentId,
+        `Portable import high ${Date.now()}`,
+        {
+          model,
+          mode: seed.mode,
+          config_options: { reasoning_effort: "high" },
+        },
+      );
+      highId = high.id;
+      const name = `Option import ${Date.now()}`;
+      const yaml = `version: 3
+type: kandev_workflow
+workflows:
+  - name: ${name}
+    steps:
+      - name: Work
+        position: 0
+        color: bg-blue-500
+        complete_task_on_enter: false
+        agent_profile:
+          agent_name: ${JSON.stringify(seed.agentDisplayName)}
+          model: ${JSON.stringify(model)}
+          mode: ${JSON.stringify(seed.mode ?? "")}
+          config_options: { reasoning_effort: low }`;
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+      await testPage.getByRole("button", { name: "Import", exact: true }).click();
+      const dialog = testPage.getByRole("dialog");
+      await dialog.locator("textarea").fill(yaml);
+      const imported = waitForHttp(
+        testPage,
+        "POST",
+        new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
+      );
+      await dialog.getByRole("button", { name: "Import", exact: true }).click();
+      expect((await imported).ok()).toBe(true);
+      await expect(dialog).not.toBeVisible();
+      await expect(await page.findWorkflowCard(name, { waitForName: true })).toBeVisible();
+      const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+      const workflow = workflows.find((item) => item.name === name);
+      expect(workflow).toBeDefined();
+      expect((await apiClient.listWorkflowSteps(workflow!.id)).steps[0].agent_profile_id).toBe(
+        low.id,
+      );
+      await testPage.reload();
+      await expect(await page.findWorkflowCard(name, { waitForName: true })).toBeVisible();
+    } finally {
+      if (highId) await apiClient.deleteAgentProfile(highId, true);
+      await apiClient.deleteAgentProfile(low.id, true);
+    }
+  });
+
   test("export all button opens dialog with valid YAML", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);

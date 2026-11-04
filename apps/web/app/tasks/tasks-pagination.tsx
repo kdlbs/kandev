@@ -55,15 +55,15 @@ export function TasksPagination({
   return (
     <div
       data-testid="tasks-pagination"
-      className="flex flex-col gap-3 px-1 pb-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col gap-3 px-1 pb-2 text-sm max-md:pb-[calc(6rem+env(safe-area-inset-bottom,0px))] lg:flex-row lg:flex-wrap lg:items-center lg:justify-between"
     >
       <div className="flex-1 text-muted-foreground">
         {t("tasks:showingRange", { start, end, count: total })}
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6 lg:gap-8">
+      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center lg:gap-8">
         <RowsPerPageSelect pagination={pagination} onPaginationChange={onPaginationChange} />
-        <Pagination className="mx-0 w-auto justify-start sm:justify-end">
-          <PaginationContent>
+        <Pagination className="mx-0 min-w-0 w-full justify-start lg:w-auto lg:justify-end">
+          <PaginationContent className="flex-wrap">
             <PageNavigationButton
               label={t("tasks:goToFirstPage")}
               disabled={!canPrevious}

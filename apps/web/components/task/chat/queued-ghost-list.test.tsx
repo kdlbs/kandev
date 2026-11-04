@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- queue panel behavior tests share one fixture matrix. */
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -9,6 +9,10 @@ import { entityReferenceMarkdown } from "@/lib/entity-references/message-referen
 import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { toast } from "sonner";
 import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
+
+function render(ui: ReactNode) {
+  return renderBase(ui, { wrapper: StateProvider });
+}
 
 const useQueueMock = vi.fn();
 const useQueueEditProtectionMock = vi.fn();

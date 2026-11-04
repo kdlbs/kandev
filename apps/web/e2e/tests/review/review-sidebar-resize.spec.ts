@@ -118,7 +118,7 @@ test.describe("Review dialog sidebar resize", () => {
     const sidebar = dialog.getByTestId("review-dialog-sidebar");
     const handle = dialog.getByTestId("review-dialog-sidebar-resize");
 
-    await dragHandle(testPage, handle, 2000); // way past max=600
+    await dragHandle(testPage, handle, 400); // past max=600 while staying inside the dialog
 
     // At default Playwright viewport (~1280px) the dialog is ~1024px, so the
     // (containerWidth - minDiffPaneWidth) clamp (~704) is wider than the

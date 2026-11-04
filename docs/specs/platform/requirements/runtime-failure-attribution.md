@@ -51,9 +51,17 @@ an identity rejection, and expected non-recovery without exposing request data.
   from a verified absent reference. Ownership and changed-commit refusals shall
   remain distinguishable. Diagnostics shall preserve cleanup evidence and
   existing retry and deletion-safety policy.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.7:** Recovery progress shall count each conclusively resolved inventory candidate exactly once, including verified absence and definitive reconstruction refusal.
+  Retracked count shall remain separate from completed work.
+  Unresolved cancellation, deadline, enumeration failure, and unknown outcomes shall remain incomplete.
+  Unknown inventory shall not become a measured empty inventory.
 
 ## Out of scope
 
 - Changing probe timeouts or readiness policy before the database stall is attributed.
 - Changing plugin-provided webhook responses or external plugin manifests.
 - Relaxing the pull-request identity guard or suppressing the startup progress warning.
+
+## Implementation plans
+
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)
