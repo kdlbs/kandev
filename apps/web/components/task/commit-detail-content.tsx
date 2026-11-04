@@ -83,13 +83,13 @@ function CommitHeaderMeta({
     <p className="mt-1 text-xs text-muted-foreground">
       {values.map((value, index) => (
         <span key={`${value}-${index}`}>
-          {index > 0 && <span className="mx-1.5">&middot;</span>}
+          {index > 0 && <span className="mx-1.5">·</span>}
           {value}
         </span>
       ))}
       {commitSha && (
         <>
-          {values.length > 0 && <span className="mx-1.5">&middot;</span>}
+          {values.length > 0 && <span className="mx-1.5">·</span>}
           <CommitCopyIdentifier key={commitSha} sha={commitSha} />
         </>
       )}
