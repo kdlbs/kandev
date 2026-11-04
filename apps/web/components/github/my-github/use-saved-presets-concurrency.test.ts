@@ -100,6 +100,7 @@ function expectLastPersisted(mode: PersistenceMode, presets: SavedPreset[]) {
   if (mode === WORKSPACE_MODE) {
     expect(updateGitHubWorkspaceSettings).toHaveBeenLastCalledWith({
       workspace_id: WORKSPACE_ID,
+      expected_host: "github.com",
       saved_presets: presets,
     });
   } else {

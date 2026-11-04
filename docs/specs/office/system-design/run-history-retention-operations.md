@@ -12,7 +12,7 @@ requirements:
 
 The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
 allocates the shipped page composition. Office retention lives at Storage > Office retention.
-Message compaction remains in Data & Logs > Database.
+History compaction remains in Data & Logs > Database.
 Policy, API, and persistence contracts remain unchanged.
 
 ## Purpose and boundaries

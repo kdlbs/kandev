@@ -6,6 +6,8 @@ import {
   verifySelectedFilters,
 } from "./sidebar-filter-selected-first-helpers";
 
+test.use({ trace: "retain-on-failure" });
+
 // @covers AC-UI-FILTER-SELECTED-FIRST-001.5
 test("phone view filters surface selected options first through touch controls", async ({
   testPage,

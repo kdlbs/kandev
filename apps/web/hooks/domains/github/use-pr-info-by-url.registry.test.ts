@@ -232,3 +232,8 @@ it("keeps structured inspection isolated between hook instances and workspaces",
   expect(first.result.current.inspection?.(ALPHA)).toBeUndefined();
   expect(second.result.current.inspection?.(ALPHA)?.repositoryName).toBe("alpha");
 });
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ githubStatus: { byWorkspaceId: {} } }),
+}));

@@ -80,6 +80,11 @@ retain it through repeated focus restoration, then discard it on pointer input,
 text input, keydown, or unmount. Do not focus the input
 from a window-focus or visibility listener.
 
+If keydown or text insertion arrives before the deferred restoration runs,
+restore the retained range before the browser applies that input. Cancel the
+deferred callback so it cannot overwrite the caret after the user's action.
+Pointer selection still replaces the retained range without restoration.
+
 Keep `useTaskTitleSelectionRestore` and its code-point clamp behavior intact.
 That hook repairs selection after value clamping, not edit entry or browser
 activation. Verify both paths together at the title length limit.

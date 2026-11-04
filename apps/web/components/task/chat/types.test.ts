@@ -52,6 +52,15 @@ describe("kandevToolStemOf", () => {
     expect(kandevToolStemOf(toolCall("kandev: show_rich_output_kandev"))).toBe("show_rich_output");
   });
 
+  it("recognizes the Copilot title and content", () => {
+    const copilotTitle = "kandev-show_rich_output_kandev";
+    const message = toolCall(copilotTitle);
+    message.content = copilotTitle;
+
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+    expect(isRichOutputMessage(message)).toBe(true);
+  });
+
   it("rejects a Kandev title for a foreign persisted provider", () => {
     const message = toolCall("kandev: show_rich_output_kandev");
     const metadata = message.metadata as ToolCallMetadata;
@@ -64,6 +73,27 @@ describe("kandevToolStemOf", () => {
     };
 
     expect(kandevToolStemOf(message)).toBeNull();
+  });
+
+  it("rejects a Copilot title when normalized identity is foreign", () => {
+    const message = toolCall("kandev-show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "github/show_rich_output_kandev";
+
+    expect(kandevToolStemOf(message)).toBeNull();
+    expect(isRichOutputMessage(message)).toBe(false);
+  });
+
+  it("rejects a Copilot title when raw_input names a foreign provider", () => {
+    const message = toolCall("kandev-show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.input = {
+      kind: "other",
+      raw_input: { providerIdentifier: "github" },
+    };
+
+    expect(kandevToolStemOf(message)).toBeNull();
+    expect(isRichOutputMessage(message)).toBe(false);
   });
 });
 

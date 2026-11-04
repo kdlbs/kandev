@@ -17,7 +17,7 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   // Worker-scoped: create office API client pointing at the worker's backend.
   officeApi: [
     async ({ backend }, use) => {
-      const client = new OfficeApiClient(backend.baseUrl);
+      const client = new OfficeApiClient(backend.baseUrl, backend.ensureReady);
       await use(client);
     },
     { scope: "worker" },

@@ -26,6 +26,7 @@ export type ProfileDiscoveryRequest = {
 
 export type ProfileProbeEvidence = {
   wrapper: boolean;
+  launcher_pid?: number;
   command?: string;
   env_catalog?: string;
   cli_catalog?: string;
@@ -331,18 +332,37 @@ export async function mockProfileProbeRequiresAuth(
   return () => matched;
 }
 
+export function createGenericWrapper(backend: BackendContext): string {
+  const wrapper = path.join(
+    fs.mkdtempSync(path.join(backend.tmpDir, "generic wrapper ")),
+    "launcher",
+  );
+  fs.writeFileSync(
+    wrapper,
+    `#!/bin/sh
+[ "$1" = "$PWD" ] || exit 2
+shift
+printf '{"wrapper":true,"command":"%s","launcher_pid":%s}\\n' "\${1##*/}" "$$" >> "$MOCK_AGENT_PROFILE_EVIDENCE_FILE"
+exec "$@"
+`,
+    { mode: 0o700 },
+  );
+  return `${JSON.stringify(wrapper)} "{{kandev.work_dir}}"`;
+}
+
 export async function createProfileWithCatalog(
   apiClient: ApiClient,
   backend: BackendContext,
   agentId: string,
   name: string,
   catalog: string,
-): Promise<{ profile: AgentProfile; evidencePath: string }> {
+): Promise<{ profile: AgentProfile; evidencePath: string; commandPrefix: string }> {
   const evidencePath = path.join(
     backend.tmpDir,
     `profile-discovery-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.jsonl`,
   );
   fs.rmSync(evidencePath, { force: true });
+  const commandPrefix = createGenericWrapper(backend);
   const profile = await apiClient.createAgentProfile(agentId, name, {
     model: "mock-fast",
     env_vars: [
@@ -356,9 +376,34 @@ export async function createProfileWithCatalog(
         enabled: true,
       },
     ],
-    command_prefix: "mock-agent --profile-probe-wrapper",
+    command_prefix: commandPrefix,
   });
-  return { profile, evidencePath };
+  return { profile, evidencePath, commandPrefix };
+}
+
+export async function expectWrapperRetry(
+  page: Page,
+  prefix: string,
+  selectedModel: { id: string; label: string },
+  evidencePath: string,
+) {
+  const input = page.getByTestId("command-prefix-input");
+  const refresh = page.getByTestId("profile-refresh-capabilities");
+  const status = page.getByTestId("profile-capability-status");
+  const selector = page.getByRole("button", { name: "Profile start model settings" });
+  const clickRefresh = () =>
+    (page.viewportSize()?.width ?? 768) < 768 ? refresh.tap() : refresh.click();
+  const receipts = readProfileProbeEvidence(evidencePath).length;
+  await input.fill(JSON.stringify(path.join(path.dirname(evidencePath), "missing wrapper")));
+  await clickRefresh();
+  await expect(status).toHaveAttribute("data-status", "failed", { timeout: 20_000 });
+  await expect(selector).toContainText(selectedModel.id);
+  expect(readProfileProbeEvidence(evidencePath)).toHaveLength(receipts);
+  await input.fill(prefix);
+  await clickRefresh();
+  await expect(status).toHaveAttribute("data-status", "ready", { timeout: 20_000 });
+  await expect(selector).toContainText(selectedModel.label);
+  expect(readProfileProbeEvidence(evidencePath).length).toBeGreaterThan(receipts);
 }
 
 export function readProfileProbeEvidence(pathname: string): ProfileProbeEvidence[] {

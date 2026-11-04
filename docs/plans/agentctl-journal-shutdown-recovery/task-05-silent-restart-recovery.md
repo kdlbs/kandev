@@ -145,3 +145,25 @@ The implementation and local behavior checks are complete. Task 06 owns remainin
 Post-rebase browser remediation passed focused boot-status suppression and request-propagation tests, plus the real sanitized-error persistence and atomic-restore path. The structured-identity matrix passed with race on SQLite and PostgreSQL (2.568 seconds), including mismatched, empty, malformed, and legacy-fallback cases. Frontend identity tests passed 33 cases; the combined legacy restored/dismissed recovery suite passed 25 cases. Scoped frontend lint, formatting, and typecheck passed. The frozen-source backend race union passed lifecycle (165.577 seconds), orchestrator (265.166 seconds), executor (15.529 seconds), watcher (1.077 seconds), backendapp (128.627 seconds), and task models (1.476 seconds). Six desktop cases passed with retries disabled. Three of four phone cases passed; the remaining initial Mock launch failure did not reproduce in an isolated rerun. Complete phone and SSH selections remain pending after current-base reconciliation. Later constant and helper-file extraction is behavior-preserving and receives focused checks.
 
 After the second rebase onto main `43f55a6`, all four phone cases and three focused desktop runtime-replacement/reattachment cases passed with retries disabled on fresh managed builds. The coordinator reviewed the new desktop and phone captures: normal chat and composer are present, the restart-resume form is absent, and interrupted history remains visible. The earlier initial Mock launch failure did not reproduce in the isolated rerun or final four-case selection; its cause remains unclassified. The merged native Resume/read-only recovery contracts passed 358 focused frontend tests across 34 files and type checking. The explicit native Resume startup-failure regression was RED when the startup error was swallowed, then passed with race alongside successful Resume and context-continuation controls (4.000 seconds). No interrupted instruction or queued work is dispatched by silent restoration.
+
+## Mobile in-flight restart fixture (2026-10-27)
+
+Failed CI result 1fa47ce8463516c8b5d4c0973e435827 owns its retained trace.
+The same execution remains running at 13:55:42.356, completes its 12-second
+turn at 42.610, settles at 42.691, and moves the task to Review at 42.764.
+The test asserts In progress at 45.269. This is normal completion before
+the assertion, not false shutdown settlement or failed survivor adoption.
+
+The phone test now uses the existing mockTurnGate to keep the real turn
+in flight through post-restart running-state, identity, no-resend, single
+boot, and recovery-control assertions. It then releases completion and
+retains idle, single-response, follow-up acceptance, and overflow checks.
+Assistant-body matching excludes the scripted user prompt and allows
+streamed chunks to combine. Cleanup releases the gate and restores the
+feature even when an assertion fails. No production or timeout changes.
+Focused repeated phone validation, typecheck and lint verify the correction;
+current-head CI remains the delivery gate.
+
+Focused post-correction validation passed three repetitions with retries
+disabled, plus full web typecheck, zero-warning scoped lint, catalog validation
+and specification lint. Normal hooks and fresh integrated CI remain required.

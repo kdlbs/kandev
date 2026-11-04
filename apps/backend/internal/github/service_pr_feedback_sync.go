@@ -36,7 +36,7 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 		return
 	}
 	pr := feedback.PR
-	rows, err := s.store.ListTaskPRsByPRNumber(ctx, workspaceID, pr.RepoOwner, pr.RepoName, pr.Number)
+	rows, err := s.store.ListTaskPRsByPRNumberForHost(ctx, workspaceID, historicalGitHubURLHost(pr.HTMLURL), pr.RepoOwner, pr.RepoName, pr.Number)
 	if err != nil {
 		s.logger.Debug("list task PRs for feedback persist failed",
 			zap.String("workspace_id", workspaceID), zap.String("owner", pr.RepoOwner),

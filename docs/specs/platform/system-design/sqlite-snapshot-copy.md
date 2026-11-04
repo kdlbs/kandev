@@ -40,6 +40,15 @@ existing pool while application mutation is gated. The native backup API owns WA
 consistency and writer coordination. Never copy the live main/WAL files directly.
 Keep existing shared maintenance admission for backup versus retention.
 
+For an autocommit WAL source connection, establish a deferred read transaction
+and read the schema before starting the copy. This pins one committed snapshot
+while independent WAL writers continue to commit. Without the read transaction,
+each independent commit can restart the incremental copy, leaving the same page
+counts until the existing stall bound expires. Release only the transaction opened
+by the copy, using a cleanup context independent of cancellation, before returning
+the connection to its pool. Preserve already-open caller transactions, non-WAL
+journal modes, the bounded step size and the existing contention timeout.
+
 ## Consumer migration and compaction
 
 Switch backup-only calls in persistence/provider.go, persistence/sqlite_selection.go,

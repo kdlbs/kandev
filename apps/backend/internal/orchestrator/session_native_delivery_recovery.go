@@ -86,6 +86,10 @@ type nativeResumeEvidenceBlockResolver interface {
 	ResolveSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence, time.Time) (bool, error)
 }
 
+type nativeResumeEvidenceBlockVerifier interface {
+	VerifyResolvedSessionRecoveryBlockWithNativeEvidence(context.Context, string, *models.NativeResumeDeliveryEvidence) (bool, error)
+}
+
 func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.SessionRecoveryBlock, completedAt time.Time) (bool, bool, error) {
 	reader, canRead := s.agentManager.(nativeResumeDeliveryEvidenceReader)
 	resolver, canResolve := s.repo.(nativeResumeEvidenceBlockResolver)
@@ -100,6 +104,11 @@ func (s *Service) resolveNativeDeliveryBlock(ctx context.Context, block *models.
 		return false, false, nil
 	}
 	changed, err := resolver.ResolveSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof, completedAt)
+	if err == nil && !changed {
+		if verifier, canVerify := s.repo.(nativeResumeEvidenceBlockVerifier); canVerify {
+			changed, err = verifier.VerifyResolvedSessionRecoveryBlockWithNativeEvidence(ctx, block.ID, proof)
+		}
+	}
 	return changed, true, err
 }
 
