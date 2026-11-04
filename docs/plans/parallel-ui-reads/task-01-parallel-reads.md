@@ -143,5 +143,5 @@ The mobile turn-error action test measured its menu item during the opening
 zoom animation. CI and the local production build both reported 43.07 px for
 the 44 px item. The test now waits for the menu's finite animations before
 checking its height. The size assertion is unchanged. Both tests in the mobile
-spec passed without retries. The background-process test also passed in
-isolation without retries; its CI group replay remains in progress.
+spec passed without retries. The background-process test passed in isolation,
+but its CI group exposed a resume race. Task 02 records that repair.

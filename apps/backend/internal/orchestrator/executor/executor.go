@@ -1202,6 +1202,7 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	onStaleExecutionCleanup func(context.Context, string)
 	// Callback for cancelled resume startup cleanup, which must share the
 	// orchestrator's retryable exact-execution teardown claim.
 	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc

@@ -1305,7 +1305,7 @@ func (e *Executor) resumeSession(
 	// A terminal session may retain an unconfirmed runtime. Stop it before
 	// selected-environment admission can claim the environment.
 	if wasTerminalResume {
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(ctx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to force-cleanup stale execution before terminal-state resume",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
@@ -1459,7 +1459,7 @@ func (e *Executor) resumeSession(
 		e.logger.Info("cleaning up stale execution and retrying launch",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID))
-		if cleanupErr := e.agentManager.CleanupStaleExecutionBySessionID(launchCtx, session.ID); cleanupErr != nil {
+		if cleanupErr := e.cleanupStaleExecutionBeforeResume(launchCtx, session.ID); cleanupErr != nil {
 			e.logger.Warn("failed to clean up stale execution",
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))

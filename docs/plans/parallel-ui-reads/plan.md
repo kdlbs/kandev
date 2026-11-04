@@ -4,9 +4,11 @@ status: done
 requirements:
   - REQ-UI-TASK-NAVIGATION-RESPONSIVENESS-001
   - REQ-UI-COMPOSER-FILE-SEARCH-OWNERSHIP-001
+  - REQ-AGENTS-BACKGROUND-WORK-010
 system_design:
   - ../../specs/ui/system-design/task-navigation-responsiveness.md
   - ../../specs/ui/system-design/composer-file-search-ownership.md
+  - ../../specs/agents/system-design/background-work.md
 legacy_specs: []
 ---
 
@@ -38,6 +40,10 @@ public APIs, and rendered composition are outside this refactor. Desktop and
 phone use the existing shared loading paths. No public documentation or new
 browser scenario is needed for this request-scheduling change.
 
+CI remediation also corrects a mobile test that measured an opening menu and
+the existing process-end settlement path during resume. Task 02 records the
+backend scope and its unchanged background-work requirements.
+
 ## Tests
 
 The [work order](task-01-parallel-reads.md) names exact regression commands.
@@ -49,6 +55,7 @@ These preserve `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` and
 ## Work orders
 
 - [x] [Task 01: Parallelize independent UI reads](task-01-parallel-reads.md)
+- [x] [Task 02: Settle background work before resume](task-02-resume-settlement.md)
 
 ## Verification results
 
@@ -57,6 +64,11 @@ Changed-file ESLint, the i18n ratchet, and typecheck passed. Typecheck required
 an 8 GB Node heap. The affected 19-test message suite passed again after the
 commit hook reformatted its fixture. Hosted CI and review completion remain
 external delivery gates. No measured latency improvement is claimed.
+
+CI remediation passed the executor package and background-settlement tests,
+changed-file Go lint, and a fresh production-build replay of 45 desktop and
+phone E2E tests with one worker, two CPUs, and no retries. Task 02 records the
+resume repair. Hosted checks and review state are tracked on PR #5040.
 
 ## Risks
 
