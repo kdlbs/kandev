@@ -70,6 +70,7 @@ function run(fail = false): string {
     stdio: "pipe",
     env: {
       ...process.env,
+      E2E_DEBUG: "",
       PATH: `${path.join(root, "tools")}${path.delimiter}${process.env.PATH}`,
       IMAGE_COMMAND_LOG: commandLog,
       FAIL_IMAGE_TRANSFER: fail ? "1" : "0",

@@ -9,6 +9,7 @@ import { prepareCompactRuntimeFixture } from "./compact-runtime";
 import { runFixtureCommand } from "./fixture-command";
 import {
   assertRuntimeImageTagAvailable,
+  cleanupFailedKubernetesSetup,
   FixtureResourceOwnership,
   redactKubernetesDiagnosticText,
   renderWorkloadRBACRules,
@@ -814,12 +815,7 @@ export async function provisionKubernetesCluster(
       restrictedKubeconfig,
     );
   } catch (error) {
-    try {
-      deleteCluster();
-    } finally {
-      removeRuntimeImage();
-    }
-    throw error;
+    cleanupFailedKubernetesSetup(error, [deleteCluster, removeRuntimeImage]);
   }
 
   const cleanupWorkloads = async () => {

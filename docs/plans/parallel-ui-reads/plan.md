@@ -77,6 +77,10 @@ The merge with `a1013e89` passed 189 targeted Vitest tests across 17 files.
 Executor tests, settlement guards, typecheck, and scoped lint passed. A fresh
 production build passed all 45 E2E tests without retries.
 
+The later CodeRabbit full review identified two Kind diagnostic edge cases.
+Task 03 records their corrections and 17 passing fixture tests, including four
+cleanup-failure cases. Final hosted checks remain a PR delivery gate.
+
 ## Risks
 
 Concurrency must not weaken stale-response guards or reorder saved tabs.
