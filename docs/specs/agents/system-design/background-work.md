@@ -190,10 +190,11 @@ process termination. Browser
 disconnection alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
 
-Every path that ends the owning agent process attempts this settlement. That
-includes an owned teardown that replaces an execution, which passes the stopped
-execution ID before the successor launches, and `reclaimIdleSession`, which
-settles after its cleanup succeeds.
+Every process-ending path attempts settlement before a successor launches.
+Owned teardown passes the stopped execution ID. After successful stale-runtime
+cleanup, resume calls the orchestrator while holding the lifecycle fence.
+Idle reclaim settles after cleanup. All paths retain the liveness and
+retained-owner guards above.
 
 Startup settlement follows lifecycle recovery and session reconciliation.
 Reconciliation may clear a recovered row's PID, making `RowProcessLiveness`

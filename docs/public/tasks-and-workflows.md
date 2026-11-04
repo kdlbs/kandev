@@ -701,6 +701,10 @@ What a job row can show depends on the agent runtime:
   zero. A failed row keeps its exit status and retained output when the runtime
   reports them.
 
+When Kandev verifies that the owning agent process has ended, its jobs stop
+contributing to the active count. Their history stays reachable when you
+restart the session.
+
 For OpenCode v2 2.2.0, the optional **OpenCode integration plugin** can settle a
 detached shell job from the native exit event. A job can therefore move from
 unknown to completed, failed, or interrupted after the foreground prompt ends.
