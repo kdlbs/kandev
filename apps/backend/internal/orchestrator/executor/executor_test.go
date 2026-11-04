@@ -176,9 +176,9 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
-	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+	// Primary election commits with the session insert; no second promotion.
+	if len(repo.setSessionPrimaryCalls) != 0 {
+		t.Errorf("Expected no SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 

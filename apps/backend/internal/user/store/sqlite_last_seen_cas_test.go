@@ -326,13 +326,16 @@ func TestPostgresRepositoryTaskCreateLastUsedRoundTrip(t *testing.T) {
 	}
 	upsertUserSettingsForTest(t, repo, ctx, staleSettings)
 
-	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	got, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		RepositoryID:   "repo-after",
 		Branch:         "feature",
 		AgentProfileID: "agent-after",
 	})
 	if err != nil {
 		t.Fatalf("update postgres task-create last-used: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed update")
 	}
 	if got.SidebarActiveViewID != "view-before" {
 		t.Fatalf("unrelated postgres setting should be preserved, got %q", got.SidebarActiveViewID)
@@ -404,7 +407,7 @@ func TestSQLiteRepositoryUpsertSettingsPreservesCurrentTaskCreateLastUsed(t *tes
 
 	// Simulate a task-create write that lands after another settings caller
 	// read the old blob but before that caller writes its unrelated change.
-	if _, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	if _, _, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		RepositoryID: "repo-after",
 		Branch:       "feature",
 	}); err != nil {
@@ -460,7 +463,7 @@ func TestSQLiteRepositoryUpsertSettingsPreservingTaskCreateLastUsedAppliesPatch(
 		ExecutorProfileID: "exec-before",
 	}
 	upsertUserSettingsForTest(t, repo, ctx, staleSettings)
-	if _, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	if _, _, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		RepositoryID:      "repo-current",
 		Branch:            "current",
 		ExecutorProfileID: "exec-current",
