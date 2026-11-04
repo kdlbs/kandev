@@ -71,8 +71,8 @@ The permanent regression must fail on the recipient assertion, not a missing fie
 Run each command from the repository root. These commands are the implementation gates.
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/mcp/handlers -run '^TestHandleSpawnSession' -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run '^(TestLaunchSpawn.*WorkflowSourceBinding|TestSpawnThenEnterSourceTargetUsesBoundSession|TestManualInitialStartRecordsWorkflowSourceBinding|TestSeam1StartPayloadPreservesWorkflowBindingPolicy|TestCeilingReplayPreservesWorkflowSourceBinding|TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch|TestRecordWorkflowSourceBinding.*|TestRevisitedSourceBindingBarrierPreservesLaterTargetSelection|TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/mcp/handlers -run '^TestHandleSpawnSession' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator -run '^(TestLaunchSpawn.*WorkflowSourceBinding|TestSpawnThenEnterSourceTargetUsesBoundSession|TestManualInitialStartRecordsWorkflowSourceBinding|TestSeam1StartPayloadPreservesWorkflowBindingPolicy|TestCeilingReplayPreservesWorkflowSourceBinding|TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch|TestRecordWorkflowSourceBinding.*|TestRevisitedSourceBindingBarrierPreservesLaterTargetSelection|TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile)$' -count=1)
 bash scripts/lint-go-changed \
   apps/backend/internal/mcp/handlers/spawn_session.go \
   apps/backend/internal/mcp/handlers/spawn_session_workflow_binding_test.go \
@@ -186,9 +186,9 @@ Implemented on 2026-11-04.
   No regression relies on a wall-clock sleep.
 - Updated the spawn routing explanation in `docs/public/coordination.md`.
 
-Verification passed: the work-order Go test commands with `-race`,
-`bash scripts/lint-go-changed` (`0 issues`), `go build -trimpath ./...`, full
-`internal/orchestrator` and `internal/mcp/handlers` package tests, the four
-documentation validators, the local PR-documentation coverage preflight
-(`covered`), and `git diff --check`. Exact evidence is in the
+Verification passed: the work-order Go test commands with `-tags fts5 -race`,
+`bash scripts/lint-go-changed` (`0 issues`), `go build -trimpath -tags fts5 ./...`,
+full `internal/orchestrator` and `internal/mcp/handlers` package tests with
+`-tags fts5`, the four documentation validators, the local PR-documentation
+coverage preflight (`covered`), and `git diff --check`. Exact evidence is in the
 [plan verification results](plan.md#verification-results).

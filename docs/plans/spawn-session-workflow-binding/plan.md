@@ -211,11 +211,11 @@ No regression uses a wall-clock sleep to establish the timestamp condition.
 
 Command results:
 
-- `go test -trimpath -race ./internal/mcp/handlers -run '^TestHandleSpawnSession' -count=1`: passed.
-- Targeted orchestrator regressions (work order command): passed with `-race`.
+- `go test -trimpath -tags fts5 -race ./internal/mcp/handlers -run '^TestHandleSpawnSession' -count=1`: passed.
+- Targeted orchestrator regressions (work order command, `-tags fts5 -race`): passed.
 - `bash scripts/lint-go-changed <changed files>`: `0 issues`.
-- `go build -trimpath ./...`: passed.
-- `go test -trimpath ./internal/orchestrator ./internal/mcp/handlers -count=1`: both packages passed.
+- `go build -trimpath -tags fts5 ./...`: passed.
+- `go test -trimpath -tags fts5 ./internal/orchestrator ./internal/mcp/handlers -count=1`: both packages passed.
 - `python3 scripts/list-docs.py validate`: passed (431 decisions and 1,912 specifications).
 - `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - `python3 scripts/lint-spec-files.py --all`: passed.
@@ -224,7 +224,9 @@ Command results:
 - Local PR-documentation coverage preflight: `covered`, no errors.
 - `git diff --check` and plan whitespace checks: passed.
 
-The earlier 2026-11-04 diagnostic command remains historical evidence:
+The earlier 2026-11-04 diagnostic command remains historical evidence. It ran
+without build tags and is not part of the verification gate; every permanent
+backend test and build command in this package uses `-tags fts5`.
 
 ```bash
 (cd apps/backend && go test -trimpath -overlay /tmp/kandev-5045-repro-m6b_910_/overlay.json ./internal/orchestrator -run '^TestIssue5045SpawnBindingReproduction$' -count=1 -v)
