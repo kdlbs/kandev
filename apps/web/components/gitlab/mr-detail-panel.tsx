@@ -195,7 +195,6 @@ function PanelHeader({
 
 type MergeGate = { draft: boolean; holding: boolean; blocked: boolean };
 
-/** The conditions that disable Merge and its confirmation, in one place. */
 /** Runs Mark as ready and the bounded wait that follows it. */
 function useMarkReady(
   identity: GitLabMRIdentity & { host: string },
@@ -210,6 +209,7 @@ function useMarkReady(
   return { holding, markReady };
 }
 
+/** The conditions that disable Merge and its confirmation, in one place. */
 export function mergeGate(
   mr: { state: string; has_conflicts: boolean; draft: boolean; detailed_merge_status?: string },
   busy: boolean,
