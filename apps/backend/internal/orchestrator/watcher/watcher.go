@@ -46,6 +46,7 @@ type AgentEventData struct {
 	AgentID                   string                                `json:"agent_id,omitempty"`
 	AgentProfileID            string                                `json:"agent_profile_id"`
 	ExecutionProfileID        string                                `json:"execution_profile_id,omitempty"`
+	ResourceCircuitKey        string                                `json:"resource_circuit_key,omitempty"`
 	TurnID                    string                                `json:"turn_id,omitempty"`
 	DeliveryStreamID          string                                `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string                                `json:"delivery_incarnation_id,omitempty"`
@@ -115,14 +116,17 @@ type PermissionRequestData struct {
 	AgentID       string `json:"agent_id"`
 	// OwnerKind is "run" for a run-owned Office execution, which Office
 	// answers; the task permission path ignores it.
-	OwnerKind     string                   `json:"owner_kind,omitempty"`
-	RequestID     string                   `json:"request_id"`
-	PendingID     string                   `json:"pending_id"`
-	ToolCallID    string                   `json:"tool_call_id"`
-	Title         string                   `json:"title"`
-	Options       []map[string]interface{} `json:"options"`
-	ActionType    string                   `json:"action_type"`
-	ActionDetails map[string]interface{}   `json:"action_details"`
+	OwnerKind  string                   `json:"owner_kind,omitempty"`
+	RequestID  string                   `json:"request_id"`
+	PendingID  string                   `json:"pending_id"`
+	ToolCallID string                   `json:"tool_call_id"`
+	Title      string                   `json:"title"`
+	Options    []map[string]interface{} `json:"options"`
+	// HumanInput marks a provider-native question only a person can answer.
+	// Automatic consumers must leave it pending.
+	HumanInput    bool                   `json:"human_input,omitempty"`
+	ActionType    string                 `json:"action_type"`
+	ActionDetails map[string]interface{} `json:"action_details"`
 	// AutoApprovedOptionID names the option agentctl already selected on the
 	// user's behalf. Nonempty means the request is recorded, not pending.
 	AutoApprovedOptionID   string `json:"auto_approved_option_id,omitempty"`

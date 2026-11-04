@@ -5,8 +5,10 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 // convertAuthMethods converts ACP auth methods to stream types,
@@ -130,6 +132,7 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 			Name:         s.Name,
 			Description:  derefStr(s.Description),
 			CurrentValue: string(s.CurrentValue),
+			Catalog:      acpcompat.CatalogFromSelectOptions(s.Options),
 		}
 		if s.Category != nil {
 			co.Category = string(*s.Category)
@@ -189,13 +192,18 @@ func extractConfigOptions(meta any) []streams.ConfigOption {
 			Category:     getString(opt, "category"),
 		}
 		if options, ok := opt["options"].([]any); ok {
-			for _, o := range options {
-				if om, ok := o.(map[string]any); ok {
-					co.Options = append(co.Options, streams.ConfigOptionValue{
-						Value:       getString(om, "value"),
-						Name:        getString(om, "name"),
-						Description: getString(om, "description"),
-					})
+			co.Catalog = acpcompat.CatalogFromRawOptions(options)
+			if co.Catalog != nil {
+				co.Options = flatConfigOptionValues(co.Catalog)
+			} else {
+				for _, o := range options {
+					if om, ok := o.(map[string]any); ok {
+						co.Options = append(co.Options, streams.ConfigOptionValue{
+							Value:       getString(om, "value"),
+							Name:        getString(om, "name"),
+							Description: getString(om, "description"),
+						})
+					}
 				}
 			}
 		}
@@ -401,4 +409,19 @@ func getInt64WithPresence(m map[string]any, key string) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// flatConfigOptionValues derives the compatibility choice list from a
+// validated catalog so every consumer keeps the existing flat lookup.
+func flatConfigOptionValues(catalog *modelcatalog.Catalog) []streams.ConfigOptionValue {
+	choices := modelcatalog.LeafChoices(catalog.Nodes)
+	out := make([]streams.ConfigOptionValue, 0, len(choices))
+	for _, choice := range choices {
+		out = append(out, streams.ConfigOptionValue{
+			Value:       choice.Value,
+			Name:        choice.Label,
+			Description: choice.Description,
+		})
+	}
+	return out
 }

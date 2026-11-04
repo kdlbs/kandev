@@ -192,6 +192,7 @@ export async function assertProgressiveNavigation(
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
   await page.reload();
+  if (!mobile) await session.waitForDockviewReady();
   await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);

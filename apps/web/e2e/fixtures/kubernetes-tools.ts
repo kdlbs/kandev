@@ -9,6 +9,7 @@ import { prepareCompactRuntimeFixture } from "./compact-runtime";
 import { runFixtureCommand } from "./fixture-command";
 import {
   assertRuntimeImageTagAvailable,
+  cleanupFailedKubernetesSetup,
   FixtureResourceOwnership,
   redactKubernetesDiagnosticText,
   renderWorkloadRBACRules,
@@ -801,9 +802,8 @@ export async function provisionKubernetesCluster(
         { timeout: 300_000 },
       ),
     );
-    execFileSync(tools.kind, ["load", "docker-image", image, "--name", name], {
+    runFixtureCommand(tools.kind, ["load", "docker-image", image, "--name", name], {
       timeout: KIND_IMAGE_LOAD_TIMEOUT_MS,
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
     });
     kubectl(["apply", "-f", "-"], { input: workloadRBAC() });
     serviceAccountKubeconfig(tools.kubectl, adminKubeconfig, HOST_SERVICE_ACCOUNT, hostKubeconfig);
@@ -815,12 +815,7 @@ export async function provisionKubernetesCluster(
       restrictedKubeconfig,
     );
   } catch (error) {
-    try {
-      deleteCluster();
-    } finally {
-      removeRuntimeImage();
-    }
-    throw error;
+    cleanupFailedKubernetesSetup(error, [deleteCluster, removeRuntimeImage]);
   }
 
   const cleanupWorkloads = async () => {

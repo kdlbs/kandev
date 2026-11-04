@@ -63,6 +63,42 @@ export type AutomationRepository = {
   base_branch: string;
 };
 
+/**
+ * Exact plugin tool approval saved for one private automation. The policy
+ * version binds it to the installed plugin configuration displayed at save
+ * time; a plugin update or configuration change requires review.
+ */
+export type AutomationPluginToolSelection = {
+  plugin_id: string;
+  installation_id: string;
+  policy_version: string;
+  tool_names: string[];
+};
+
+export type AutomationPluginToolOption = {
+  local_name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
+  read_only_hint: boolean;
+  destructive_hint: boolean;
+  idempotent_hint: boolean;
+  open_world_hint: boolean;
+};
+
+export type AutomationPluginToolGroup = {
+  plugin_id: string;
+  display_name: string;
+  version: string;
+  installation_id: string;
+  policy_version: string;
+  tools: AutomationPluginToolOption[];
+};
+
+export type AutomationPluginToolOptionsResponse = {
+  groups: AutomationPluginToolGroup[];
+};
+
 export type Automation = {
   id: string;
   workspace_id: string;
@@ -84,6 +120,8 @@ export type Automation = {
   continuation_policy?: ContinuationPolicy;
   managed_destination?: ManagedConversationDestination;
   retry_policy?: RetryPolicy;
+  /** Exact plugin tools approved by the last native editor save. */
+  plugin_tools?: AutomationPluginToolSelection[];
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -313,6 +351,7 @@ export type CreateAutomationRequest = {
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
   retry_policy?: RetryPolicy;
+  plugin_tools?: AutomationPluginToolSelection[];
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -338,6 +377,7 @@ export type UpdateAutomationRequest = {
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
   retry_policy?: RetryPolicy;
+  plugin_tools?: AutomationPluginToolSelection[];
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

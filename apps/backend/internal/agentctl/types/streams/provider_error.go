@@ -84,6 +84,12 @@ const (
 	// ProviderErrorSourceACPPrompt marks a safe diagnostic projected from a
 	// terminal ACP session/prompt JSON-RPC error.
 	ProviderErrorSourceACPPrompt = "acp_prompt"
+	// ProviderErrorSourceAntigravityACP marks a structured Antigravity prompt
+	// error normalized by the provider's own classifier.
+	ProviderErrorSourceAntigravityACP = "antigravity_acp"
+	// ProviderErrorSourceAntigravityNative marks a failure established by a
+	// new native Antigravity error record for the current turn.
+	ProviderErrorSourceAntigravityNative = "antigravity_native"
 )
 
 // ProviderError is the bounded, sanitized provider diagnostic that may cross

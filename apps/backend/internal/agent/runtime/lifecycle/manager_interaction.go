@@ -2011,6 +2011,66 @@ func (m *Manager) GetExecutionBySessionID(sessionID string) (*AgentExecution, bo
 	return m.executionStore.GetBySessionID(sessionID)
 }
 
+// ErrNoActiveAnswerExecution means no live execution currently owns the
+// answering session. Callers treat it as a retryable materialization failure;
+// detached answers materialize through their resume prompt instead.
+var ErrNoActiveAnswerExecution = errors.New("no active execution for answer attachments")
+
+// MaterializeAnswerAttachments streams already-claimed answer files into the
+// session's current execution without starting or steering a prompt. It is
+// only valid for a live waiter whose execution still owns the session.
+func (m *Manager) MaterializeAnswerAttachments(
+	ctx context.Context,
+	sessionID string,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
+	if len(attachments) == 0 {
+		return attachments, nil
+	}
+	execution, err := m.activeAnswerAttachmentExecution(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if m.sessionManager == nil {
+		return nil, errors.New("answer attachment runtime is unavailable")
+	}
+	executionID := execution.ID
+	taskID := execution.TaskID
+	materialized, err := m.sessionManager.materializeAttachments(ctx, execution, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.verifyAnswerAttachmentExecutionCurrent(executionID, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	for _, attachment := range materialized {
+		if attachment.AttachmentID != "" && strings.TrimSpace(attachment.Path) == "" {
+			return nil, fmt.Errorf("attachment %q has no readable executor path", attachment.AttachmentID)
+		}
+	}
+	return materialized, nil
+}
+
+func (m *Manager) activeAnswerAttachmentExecution(sessionID string) (*AgentExecution, error) {
+	execution, ok := m.GetExecutionBySessionID(sessionID)
+	if !ok || execution == nil || execution.ID == "" ||
+		execution.SessionID != sessionID || execution.ACPSessionID == "" {
+		return nil, ErrNoActiveAnswerExecution
+	}
+	return execution, nil
+}
+
+func (m *Manager) verifyAnswerAttachmentExecutionCurrent(
+	executionID, taskID, sessionID string,
+) error {
+	current, stillCurrent := m.executionStore.GetBySessionID(sessionID)
+	if !stillCurrent || current == nil || current.ID != executionID ||
+		current.TaskID != taskID || current.SessionID != sessionID {
+		return fmt.Errorf("answer attachment execution changed during transfer")
+	}
+	return nil
+}
+
 // ResolveTaskEnvironmentID returns the task environment ID for a session.
 // User shell resources must be environment-scoped; missing mappings are
 // lifecycle errors and must not be converted into session-scoped shell state.

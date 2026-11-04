@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -19,6 +20,7 @@ import (
 // mockSyncOps implements SyncWorkflowOps on top of a mockWorkflowProvider.
 type mockSyncOps struct {
 	provider         *mockWorkflowProvider
+	db               *sqlx.DB
 	tasksPerWorkflow map[string]int
 	tasksPerStep     map[string]int
 	deleted          []string
@@ -27,16 +29,22 @@ type mockSyncOps struct {
 func newMockSyncOps(provider *mockWorkflowProvider) *mockSyncOps {
 	return &mockSyncOps{
 		provider:         provider,
+		db:               provider.db,
 		tasksPerWorkflow: map[string]int{},
 		tasksPerStep:     map[string]int{},
 	}
 }
 
-func (m *mockSyncOps) DeleteWorkflow(_ context.Context, id string) error {
+func (m *mockSyncOps) DeleteWorkflow(ctx context.Context, id string) error {
 	for i, wf := range m.provider.workflows {
 		if wf.ID == id {
 			m.provider.workflows = append(m.provider.workflows[:i], m.provider.workflows[i+1:]...)
 			m.deleted = append(m.deleted, id)
+			if m.db != nil {
+				if _, err := m.db.ExecContext(ctx, `DELETE FROM workflows WHERE id = ?`, id); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
@@ -62,8 +70,8 @@ func (m *mockSyncOps) SetWorkflowSource(ctx context.Context, id, source, sourceP
 }
 
 func setupSyncService(t *testing.T) (*Service, *mockWorkflowProvider, *mockSyncOps) {
-	svc, _ := setupTestService(t)
-	provider := &mockWorkflowProvider{}
+	svc, db := setupTestService(t)
+	provider := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -73,8 +81,8 @@ func setupSyncService(t *testing.T) (*Service, *mockWorkflowProvider, *mockSyncO
 // setupSyncServiceWithLogger is a variant of setupSyncService for tests that
 // need to observe log output (e.g. via a zaptest observer core).
 func setupSyncServiceWithLogger(t *testing.T, log *logger.Logger) (*Service, *mockWorkflowProvider, *mockSyncOps) {
-	svc, _ := setupTestService(t, log)
-	provider := &mockWorkflowProvider{}
+	svc, db := setupTestService(t, log)
+	provider := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -606,7 +614,7 @@ func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.
 	require.NoError(t, err)
 
 	svc, db := setupTestService(t, log)
-	provider := &mockWorkflowProvider{}
+	provider := &mockWorkflowProvider{db: db}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
 	svc.SetSyncWorkflowOps(ops)
@@ -620,6 +628,7 @@ func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.
 
 	pw := portableWorkflow("Dev Flow", "Todo")
 	pw.Steps[0].AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
+	wf.Description = pw.Description
 	files := []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(pw)}}
 	svc.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return "profile-new" })
 

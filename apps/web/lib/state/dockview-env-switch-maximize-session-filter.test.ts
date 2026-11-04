@@ -331,9 +331,8 @@ function persistAuthoritativeSessionCleanup(): void {
 
   const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
   expect(savedState).toBeDefined();
-  const savedPanelIds = (
-    (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-  ).map((panel) => panel.id);
+  const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+  const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map((panel) => panel.id);
   expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
   expect(savedPanelIds).not.toContain(stalePanelId);
 }
@@ -383,9 +382,10 @@ function persistSessionReconciliationBeforeMaximizeSave(): void {
 
     const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
     expect(savedState).toBeDefined();
-    const savedPanelIds = (
-      (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-    ).map((panel) => panel.id);
+    const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+    const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map(
+      (panel) => panel.id,
+    );
     expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
     expect(savedPanelIds).not.toContain(stalePanelId);
   } finally {
@@ -434,9 +434,8 @@ function persistFilteredRestoreSnapshot(): void {
 
   const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
   expect(savedState).toBeDefined();
-  const savedPanelIds = (
-    (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-  ).map((panel) => panel.id);
+  const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+  const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map((panel) => panel.id);
   expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
   expect(savedPanelIds).not.toContain(stalePanelId);
 }

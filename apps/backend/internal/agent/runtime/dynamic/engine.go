@@ -91,6 +91,15 @@ func NewEngine(options ...EngineOption) *Engine {
 
 func (e *Engine) Circuits() *CircuitRegistry { return e.circuits }
 
+// CircuitSnapshots exposes the live circuits for read-only surfaces. It never
+// routes, writes, or releases anything.
+func (e *Engine) CircuitSnapshots() []CircuitSnapshot {
+	if e == nil || e.circuits == nil {
+		return []CircuitSnapshot{}
+	}
+	return e.circuits.Snapshots()
+}
+
 // ContinuationPersistence exposes the durable handoff seam without exposing
 // the engine's other persistence responsibilities to the conductor.
 func (e *Engine) ContinuationPersistence() ContinuationPersistence {
@@ -1377,7 +1386,14 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 			continue
 		}
 		failure = keywordFailureForCandidate(candidate, failure)
-		if failure.Keyword != nil && failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
+		if failure.Keyword == nil {
+			e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
+				Code: failure.Code, Now: e.now(),
+				ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
+			})
+			return
+		}
+		if failure.Keyword.Action == "retry_same" && candidate.Policies.Version == 0 && len(candidate.Rules) == 0 {
 			return
 		}
 		until := keywordCircuitUntil(candidate, failure, e.now())
@@ -1385,8 +1401,6 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		return
 	}
 }
-
-const circuitBackoff = time.Minute
 
 func qualifiesForCircuit(code routingerr.Code) bool {
 	switch code {

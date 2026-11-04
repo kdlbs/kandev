@@ -5,7 +5,11 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { statusSummaryRowErrorPreview, statusSummaryTurnError } from "@/lib/task-status-summary";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
@@ -94,6 +98,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
       ctx.dismissedAgentErrors,
     ),
     turnError: sheetTurnError(summary),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
 }
 

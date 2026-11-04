@@ -1,0 +1,682 @@
+{
+  "schema_version": 1,
+  "source_revision": "8cd31a0896abc50e6d9683369cee92252c5d2e44",
+  "date": "2026-11-03",
+  "scope": "Local investigation, not accepted migration or hosted adoption",
+  "environment": {
+    "node": "24.16.0",
+    "available_cpus": 11,
+    "cpu_affinity": [
+      0,
+      1,
+      3,
+      4
+    ],
+    "node_heap_mib": 8192,
+    "shared_host": true,
+    "sequential": true,
+    "filesystem_cache": "not flushed",
+    "platform": "Linux x64"
+  },
+  "versions": {
+    "typescript_baseline": "5.9.3",
+    "typescript_native_stable": "7.0.2",
+    "typescript_reference": "7.1.0-beta",
+    "tsrs": "0.20.1-ts7.1.0-beta",
+    "tsrs_upstream_commit": "3e9236361fa9",
+    "oxlint": "1.91.0",
+    "oxlint_migrate": "1.90.0",
+    "vite": "8.0.16",
+    "rolldown": "1.0.3"
+  },
+  "compiler_medians": {
+    "tsc5": {
+      "samples": 3,
+      "median_seconds": 90.47,
+      "median_peak_rss_mib": 4927.27,
+      "range_seconds": [
+        79.351,
+        100.643
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    "tsc7": {
+      "samples": 3,
+      "median_seconds": 16.645,
+      "median_peak_rss_mib": 5204.672,
+      "range_seconds": [
+        13.737,
+        17.728
+      ],
+      "exit_codes": [
+        1,
+        1,
+        1
+      ]
+    },
+    "tsc71": {
+      "samples": 3,
+      "median_seconds": 10.955,
+      "median_peak_rss_mib": 3936.75,
+      "range_seconds": [
+        9.321,
+        18.142
+      ],
+      "exit_codes": [
+        2,
+        2,
+        2
+      ]
+    },
+    "tsrs": {
+      "samples": 3,
+      "median_seconds": 4.37,
+      "median_peak_rss_mib": 1542.266,
+      "range_seconds": [
+        3.875,
+        4.66
+      ],
+      "exit_codes": [
+        2,
+        2,
+        2
+      ]
+    },
+    "tsrs-fast": {
+      "samples": 3,
+      "median_seconds": 3.609,
+      "median_peak_rss_mib": 1123.832,
+      "range_seconds": [
+        3.318,
+        3.854
+      ],
+      "exit_codes": [
+        2,
+        2,
+        2
+      ]
+    }
+  },
+  "compiler_samples": {
+    "tsc5": [
+      {
+        "round": 1,
+        "elapsed_s": 100.643,
+        "cpu_s": 116.869,
+        "peak_rss_mib": 5145.066,
+        "exit_code": 0
+      },
+      {
+        "round": 2,
+        "elapsed_s": 79.351,
+        "cpu_s": 103.083,
+        "peak_rss_mib": 4927.27,
+        "exit_code": 0
+      },
+      {
+        "round": 3,
+        "elapsed_s": 90.47,
+        "cpu_s": 120.285,
+        "peak_rss_mib": 4881.734,
+        "exit_code": 0
+      }
+    ],
+    "tsc7": [
+      {
+        "round": 1,
+        "elapsed_s": 17.728,
+        "cpu_s": 64.776,
+        "peak_rss_mib": 5185.355,
+        "exit_code": 1
+      },
+      {
+        "round": 2,
+        "elapsed_s": 13.737,
+        "cpu_s": 51.374,
+        "peak_rss_mib": 5204.672,
+        "exit_code": 1
+      },
+      {
+        "round": 3,
+        "elapsed_s": 16.645,
+        "cpu_s": 60.209,
+        "peak_rss_mib": 5225.914,
+        "exit_code": 1
+      }
+    ],
+    "tsc71": [
+      {
+        "round": 1,
+        "elapsed_s": 10.955,
+        "cpu_s": 39.863,
+        "peak_rss_mib": 3936.75,
+        "exit_code": 2
+      },
+      {
+        "round": 2,
+        "elapsed_s": 9.321,
+        "cpu_s": 34.61,
+        "peak_rss_mib": 3975.34,
+        "exit_code": 2
+      },
+      {
+        "round": 3,
+        "elapsed_s": 18.142,
+        "cpu_s": 54.459,
+        "peak_rss_mib": 3894.32,
+        "exit_code": 2
+      }
+    ],
+    "tsrs": [
+      {
+        "round": 1,
+        "elapsed_s": 4.66,
+        "cpu_s": 16.866,
+        "peak_rss_mib": 1542.25,
+        "exit_code": 2
+      },
+      {
+        "round": 2,
+        "elapsed_s": 3.875,
+        "cpu_s": 13.493,
+        "peak_rss_mib": 1547.82,
+        "exit_code": 2
+      },
+      {
+        "round": 3,
+        "elapsed_s": 4.37,
+        "cpu_s": 15.791,
+        "peak_rss_mib": 1542.266,
+        "exit_code": 2
+      }
+    ],
+    "tsrs-fast": [
+      {
+        "round": 1,
+        "elapsed_s": 3.609,
+        "cpu_s": 13.478,
+        "peak_rss_mib": 1125.516,
+        "exit_code": 2
+      },
+      {
+        "round": 2,
+        "elapsed_s": 3.318,
+        "cpu_s": 12.218,
+        "peak_rss_mib": 1123.262,
+        "exit_code": 2
+      },
+      {
+        "round": 3,
+        "elapsed_s": 3.854,
+        "cpu_s": 14.161,
+        "peak_rss_mib": 1123.832,
+        "exit_code": 2
+      }
+    ]
+  },
+  "cold_incremental_controls": {
+    "tsc5-ci-cold": {
+      "round": 0,
+      "elapsed_s": 74.284,
+      "cpu_s": 97.369,
+      "peak_rss_mib": 5036.496,
+      "exit_code": 0
+    },
+    "tsc7-ci-cold": {
+      "round": 0,
+      "elapsed_s": 18.591,
+      "cpu_s": 63.541,
+      "peak_rss_mib": 5475.711,
+      "exit_code": 1
+    },
+    "tsc71-ci-cold": {
+      "round": 0,
+      "elapsed_s": 12.004,
+      "cpu_s": 42.439,
+      "peak_rss_mib": 3845.703,
+      "exit_code": 2
+    },
+    "tsrs-ci-cold": {
+      "round": 0,
+      "elapsed_s": 3.668,
+      "cpu_s": 12.645,
+      "peak_rss_mib": 1572.27,
+      "exit_code": 2
+    },
+    "tsrs-fast-ci-cold": {
+      "round": 0,
+      "elapsed_s": 4.053,
+      "cpu_s": 13.369,
+      "peak_rss_mib": 1280.727,
+      "exit_code": 2
+    }
+  },
+  "lint_medians": {
+    "eslint": {
+      "samples": 3,
+      "median_seconds": 82.487,
+      "median_peak_rss_mib": 1161.23,
+      "range_seconds": [
+        72.156,
+        85.439
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ]
+    },
+    "oxlint-corrected": {
+      "samples": 3,
+      "median_seconds": 19.803,
+      "median_peak_rss_mib": 895.066,
+      "range_seconds": [
+        17.112,
+        29.764
+      ],
+      "exit_codes": [
+        1,
+        1,
+        1
+      ]
+    }
+  },
+  "lint_samples": {
+    "eslint": [
+      {
+        "round": 0,
+        "elapsed_s": 82.487,
+        "cpu_s": 120.167,
+        "peak_rss_mib": 1144.055,
+        "exit_code": 0
+      },
+      {
+        "round": 1,
+        "elapsed_s": 85.439,
+        "cpu_s": 121.201,
+        "peak_rss_mib": 1161.23,
+        "exit_code": 0
+      },
+      {
+        "round": 2,
+        "elapsed_s": 72.156,
+        "cpu_s": 107.959,
+        "peak_rss_mib": 1168.152,
+        "exit_code": 0
+      }
+    ],
+    "oxlint-corrected": [
+      {
+        "round": 1,
+        "elapsed_s": 29.764,
+        "cpu_s": 38.517,
+        "peak_rss_mib": 895.066,
+        "exit_code": 1
+      },
+      {
+        "round": 2,
+        "elapsed_s": 19.803,
+        "cpu_s": 32.321,
+        "peak_rss_mib": 2544.629,
+        "exit_code": 1
+      },
+      {
+        "round": 3,
+        "elapsed_s": 17.112,
+        "cpu_s": 28.164,
+        "peak_rss_mib": 799.637,
+        "exit_code": 1
+      }
+    ]
+  },
+  "hybrid": {
+    "samples": 1,
+    "seconds": 63.242,
+    "passed": true
+  },
+  "type_inventory": {
+    "non_dependency_files": 7635,
+    "all_modes_equal": true
+  },
+  "lint_inventory": {
+    "source_files": 9806,
+    "equal": true,
+    "missing": [],
+    "extra": []
+  },
+  "compiler_diagnostics": [
+    {
+      "file": "components/review/review-diff-list-auto-mark.test.tsx",
+      "line": 74,
+      "column": 9,
+      "code": "2420",
+      "message": "Class 'MockIntersectionObserver' incorrectly implements interface 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "components/review/review-diff-list-auto-mark.test.tsx",
+      "line": 81,
+      "column": 33,
+      "code": "2322",
+      "message": "Type 'this' is not assignable to type 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "components/task/chat/messages/kandev/rich-output/chart-block.test.tsx",
+      "line": 78,
+      "column": 9,
+      "code": "2420",
+      "message": "Class 'MockIntersectionObserver' incorrectly implements interface 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "components/task/chat/messages/kandev/rich-output/chart-block.test.tsx",
+      "line": 85,
+      "column": 33,
+      "code": "2322",
+      "message": "Type 'this' is not assignable to type 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "components/task/use-passthrough-terminal.ts",
+      "line": 607,
+      "column": 15,
+      "code": "2769",
+      "message": "No overload matches this call.\n\n  The last overload gave the following error.\n    Argument of type 'Uint8Array<ArrayBufferLike>' is not assignable to parameter of type 'string | Blob | BufferSource'.\n      Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'ArrayBufferView<ArrayBuffer>'.\n        Types of property 'buffer' are incompatible.\n          Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'.\n            Type 'SharedArrayBuffer' is missing the following properties from type 'ArrayBuffer': resizable, resize, detached, transfer, transferToFixedLength"
+    },
+    {
+      "file": "components/threads/thread-column-activation.test.tsx",
+      "line": 28,
+      "column": 7,
+      "code": "2420",
+      "message": "Class 'MockIntersectionObserver' incorrectly implements interface 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "hooks/use-lazy-load-sentinel.test.ts",
+      "line": 20,
+      "column": 7,
+      "code": "2420",
+      "message": "Class 'MockIntersectionObserver' incorrectly implements interface 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "hooks/use-lazy-load-sentinel.test.ts",
+      "line": 30,
+      "column": 7,
+      "code": "2322",
+      "message": "Type 'this' is not assignable to type 'IntersectionObserver'.\n\n  Property 'scrollMargin' is missing in type 'MockIntersectionObserver' but required in type 'IntersectionObserver'."
+    },
+    {
+      "file": "lib/terminal/send-pty-input.test.ts",
+      "line": 15,
+      "column": 18,
+      "code": "2345",
+      "message": "Argument of type '{ readyState: number; send: Mock<Procedure>; }' is not assignable to parameter of type 'Pick<WebSocket, \"readyState\" | \"send\">'.\n\n  Types of property 'readyState' are incompatible.\n    Type 'number' is not assignable to type '0 | 1 | 2 | 3'."
+    },
+    {
+      "file": "lib/terminal/send-pty-input.test.ts",
+      "line": 23,
+      "column": 18,
+      "code": "2345",
+      "message": "Argument of type '{ readyState: number; send: Mock<Procedure>; }' is not assignable to parameter of type 'Pick<WebSocket, \"readyState\" | \"send\">'.\n\n  Types of property 'readyState' are incompatible.\n    Type 'number' is not assignable to type '0 | 1 | 2 | 3'."
+    },
+    {
+      "file": "lib/terminal/send-pty-input.test.ts",
+      "line": 33,
+      "column": 18,
+      "code": "2345",
+      "message": "Argument of type '{ readyState: number; send: Mock<Procedure>; }' is not assignable to parameter of type 'Pick<WebSocket, \"readyState\" | \"send\">'.\n\n  Types of property 'readyState' are incompatible.\n    Type 'number' is not assignable to type '0 | 1 | 2 | 3'."
+    },
+    {
+      "file": "lib/terminal/send-pty-input.test.ts",
+      "line": 41,
+      "column": 18,
+      "code": "2345",
+      "message": "Argument of type '{ readyState: number; send: Mock<Procedure>; }' is not assignable to parameter of type 'Pick<WebSocket, \"readyState\" | \"send\">'.\n\n  Types of property 'readyState' are incompatible.\n    Type 'number' is not assignable to type '0 | 1 | 2 | 3'."
+    }
+  ],
+  "lint_findings": [
+    {
+      "file": "app/settings/workspace/workspace-workflows-dialogs.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 162,
+      "message": "disallow literal string: <span className=\"text-muted-foreground/40 text-xs\">&rarr;</span>"
+    },
+    {
+      "file": "components/gitlab/my-gitlab/quick-task-launcher.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 129,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/gitlab/my-gitlab/quick-task-launcher.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 203,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/gitlab/my-gitlab/quick-task-launcher.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 243,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "lib/state/dockview-env-switch-maximize-session-filter.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 335,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "lib/state/dockview-env-switch-maximize-session-filter.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 387,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "lib/state/dockview-env-switch-maximize-session-filter.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 438,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "e2e/helpers/api-client.ts",
+      "rule": "parser",
+      "line": 3566,
+      "message": "Identifier `createSentryInstance` has already been declared"
+    },
+    {
+      "file": "components/diff/diff-viewer-comment-edit.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 226,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/diff/diff-viewer-comment-edit.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 227,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/task/commit-detail-content.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 86,
+      "message": "disallow literal string: <span className=\"mx-1.5\">&middot;</span>"
+    },
+    {
+      "file": "components/task/commit-detail-content.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 92,
+      "message": "disallow literal string: <span className=\"mx-1.5\">&middot;</span>"
+    },
+    {
+      "file": "components/task/chat/context-items/selection-comment-item.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 30,
+      "message": "disallow literal string: <div className=\"line-clamp-2 text-muted-foreground italic\">\n              &ldquo;{comment.selectedText}&rdquo;\n            </div>"
+    },
+    {
+      "file": "components/task/chat/context-items/selection-comment-item.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 31,
+      "message": "disallow literal string: <div className=\"line-clamp-2 text-muted-foreground italic\">\n              &ldquo;{comment.selectedText}&rdquo;\n            </div>"
+    },
+    {
+      "file": "app/settings/workspace/workflow-duplication.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 201,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/task-renderers.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 87,
+      "message": "disallow literal string: <span className=\"truncate max-w-[40ch]\">&ldquo;{title}&rdquo;</span>"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/task-renderers.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 87,
+      "message": "disallow literal string: <span className=\"truncate max-w-[40ch]\">&ldquo;{title}&rdquo;</span>"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/task-renderers.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 230,
+      "message": "disallow literal string: <span className=\"truncate max-w-[40ch]\">&ldquo;{promptShort}&rdquo;</span>"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/task-renderers.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 230,
+      "message": "disallow literal string: <span className=\"truncate max-w-[40ch]\">&ldquo;{promptShort}&rdquo;</span>"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/ask-user-question-renderer.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 123,
+      "message": "disallow literal string: <span className=\"truncate max-w-[50ch]\">\n                  &ldquo;\n                  <ClarificationMarkdown variant=\"inline\" linkBehavior=\"passive\" className=\"inline\">\n                    {promptShort}\n                  </ClarificationMarkdown>\n                  &rdquo;\n                </span>"
+    },
+    {
+      "file": "components/task/chat/messages/kandev/ask-user-question-renderer.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 127,
+      "message": "disallow literal string: <span className=\"truncate max-w-[50ch]\">\n                  &ldquo;\n                  <ClarificationMarkdown variant=\"inline\" linkBehavior=\"passive\" className=\"inline\">\n                    {promptShort}\n                  </ClarificationMarkdown>\n                  &rdquo;\n                </span>"
+    },
+    {
+      "file": "components/task/chat/messages/message-comment-surface.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 273,
+      "message": "disallow literal string: <DrawerDescription className=\"line-clamp-2 text-pretty italic\">\n            &ldquo;{target.selection.selectedText}&rdquo;\n          </DrawerDescription>"
+    },
+    {
+      "file": "components/task/chat/messages/message-comment-surface.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 274,
+      "message": "disallow literal string: <DrawerDescription className=\"line-clamp-2 text-pretty italic\">\n            &ldquo;{target.selection.selectedText}&rdquo;\n          </DrawerDescription>"
+    },
+    {
+      "file": "lib/api/domains/canvas-distribution-api.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 64,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/task/plan-selection-popover.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 215,
+      "message": "disallow literal string: <DrawerDescription className=\"line-clamp-2 text-pretty italic\">\n        &ldquo;{selectedText}&rdquo;\n      </DrawerDescription>"
+    },
+    {
+      "file": "components/task/plan-selection-popover.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 216,
+      "message": "disallow literal string: <DrawerDescription className=\"line-clamp-2 text-pretty italic\">\n        &ldquo;{selectedText}&rdquo;\n      </DrawerDescription>"
+    },
+    {
+      "file": "components/task/plan-selection-popover.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 418,
+      "message": "disallow literal string: <p className=\"mb-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic\">\n          &ldquo;{previewText}&rdquo;\n        </p>"
+    },
+    {
+      "file": "components/task/plan-selection-popover.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 419,
+      "message": "disallow literal string: <p className=\"mb-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed italic\">\n          &ldquo;{previewText}&rdquo;\n        </p>"
+    },
+    {
+      "file": "e2e/pages/session-page.ts",
+      "rule": "parser",
+      "line": 158,
+      "message": "Identifier `prStatusChip` has already been declared"
+    },
+    {
+      "file": "hooks/domains/kanban/use-sidebar-task-page.recovery.test.tsx",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 190,
+      "message": "Unsafe usage of optional chaining"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 91,
+      "message": "disallow literal string: <span>&middot;</span>"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 99,
+      "message": "disallow literal string: <span>&middot;</span>"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 108,
+      "message": "disallow literal string: <span>&middot;</span>"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 131,
+      "message": "disallow literal string: <span>&middot;</span>"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 140,
+      "message": "disallow literal string: <span>&middot;</span>"
+    },
+    {
+      "file": "components/integrations/change-request-detail-header.tsx",
+      "rule": "i18next(no-literal-string)",
+      "line": 216,
+      "message": "disallow literal string: <span className=\"mx-0.5 text-muted-foreground\">&rarr;</span>"
+    },
+    {
+      "file": "components/github/my-github/use-saved-presets-concurrency.test.ts",
+      "rule": "eslint(no-unsafe-optional-chaining)",
+      "line": 257,
+      "message": "Unsafe usage of optional chaining"
+    }
+  ],
+  "negative_type_cases": 8,
+  "all_type_negative_cases_detected": true,
+  "full_oxlint_guard_cases": 9,
+  "hybrid_guard_cases": 11,
+  "vite_build": {
+    "round": 0,
+    "elapsed_s": 13.378,
+    "cpu_s": 38.531,
+    "peak_rss_mib": 3898.809,
+    "exit_code": 0
+  },
+  "notes": [
+    "Initial smoke checks used an incomplete temporary snapshot. Their failed results are excluded from accepted comparison samples.",
+    "Native compilers reported 12 shared compatibility errors while the current compiler passed. Those are failed migration candidates.",
+    "Full Oxlint reported 37 additional findings. Its execution time is not evidence of a passing replacement.",
+    "The hybrid candidate passed but is not the selected delivery target.",
+    "Compiler modes used identical non-dependency files. Bundled standard-library versions differ explicitly.",
+    "A single fresh-cache incremental control kept incremental:true. Other primary compiler samples disabled incremental caching.",
+    "Peak RSS is a process measurement and does not claim aggregate job memory.",
+    "Raw logs and scratch harness remain outside version control. Future acceptance requires reproducible passing comparisons."
+  ]
+}
