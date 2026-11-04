@@ -200,6 +200,9 @@ it("reuses free restoration slots while preserving order and skipping failures",
   const started = mockRequestFileContent.mock.calls.length;
   await act(async () => {
     pending[3].resolve({ content: "fourth", is_binary: false });
+  });
+  expect(mockRequestFileContent.mock.calls.length - 1).toBe(4);
+  await act(async () => {
     pending[2].resolve({ content: "third", is_binary: false });
     pending[1].reject(new Error("missing"));
   });

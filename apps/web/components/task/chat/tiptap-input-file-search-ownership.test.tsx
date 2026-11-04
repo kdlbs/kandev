@@ -499,6 +499,7 @@ it("starts file search while task mentions are pending", async () => {
   await flush();
   await reply(0, [CURRENT_FILE]);
   expect(started).toBe(1);
+  expect(DeferredSocket.current.searches()).toHaveLength(started);
   menuHas(CURRENT_FILE);
 });
 

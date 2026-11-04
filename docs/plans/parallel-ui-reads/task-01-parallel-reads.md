@@ -125,3 +125,14 @@ Final verification passed: 175 tests across 14 files, changed-file ESLint,
 typecheck with an 8 GB Node heap, the i18n ratchet, catalog validation,
 specification lint, and documentation coverage preflight. Hosted checks and
 review resolution remain external delivery gates.
+
+
+### CodeRabbit summary follow-up
+
+The review body included five test suggestions without inline threads. The
+existing regressions now check successful current-session restoration, preview
+publication before comment completion, both diff reads settling before failure,
+worker capacity after an early settlement, and no duplicate file read after
+mention-task completion. The five affected suites passed 65 tests. Together
+with the unchanged validated suites, final local coverage is 176 tests across
+14 files. No production behavior changed in this follow-up.

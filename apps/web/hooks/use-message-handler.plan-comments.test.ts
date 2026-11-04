@@ -554,8 +554,15 @@ describe("accepted message refresh concurrency", () => {
       };
       const snapshot = { task_id: TASK_ID, plan_id: "plan-1", revision: 9, comments: [] };
       await act(async () => {
-        resolveComments(snapshot);
         resolvePreview({ task_id: TASK_ID, revision: 4, items: [] });
+      });
+      expect(setTaskPreviewFeedbackMock).toHaveBeenCalledWith(
+        TASK_ID,
+        expect.objectContaining({ revision: 4 }),
+      );
+      expect(setTaskPlanCommentsMock).not.toHaveBeenCalled();
+      await act(async () => {
+        resolveComments(snapshot);
         await send;
       });
       expect(started).toEqual({ comments: 1, preview: 1 });

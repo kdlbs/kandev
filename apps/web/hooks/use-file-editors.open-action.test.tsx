@@ -229,30 +229,45 @@ describe("useFileEditors open actions", () => {
   });
 });
 
-it("restores four editor files concurrently and rejects writes after a session switch", async () => {
-  mocks.requestFileContent.mockReset();
-  mocks.resetDockState();
-  mocks.sessionId = "restore-concurrency";
-  mocks.savedTabs = Array.from({ length: 6 }, (_, index) => ({
-    path: `restored-${index}.ts`,
-    name: `restored-${index}.ts`,
-  }));
-  const pending = mocks.savedTabs.map(() => defer<FileContentResponse>());
-  mocks.requestFileContent.mockImplementation(
-    (_client, _session, path) => pending[Number(path.match(/\d+/)[0])].promise,
-  );
-  const view = renderHook(() => useFileEditors());
-  const started = mocks.requestFileContent.mock.calls.length;
-  const saved = [...mocks.savedTabs];
-  mocks.savedTabs = [];
-  mocks.sessionId = "replacement-session";
-  view.rerender();
-  await act(async () => {
-    pending.forEach((read, index) => read.resolve(fileResponse(saved[index].path, "old session")));
-  });
-  expect(started).toBe(4);
-  expect(mocks.requestFileContent).toHaveBeenCalledTimes(4);
-  expect(mocks.getDockState().openFiles.size).toBe(0);
-  view.unmount();
-  mocks.sessionId = "sess-1";
-});
+it.each(["current", "replaced"])(
+  "restores four files concurrently with %s session ownership",
+  async (ownership) => {
+    mocks.requestFileContent.mockReset();
+    mocks.resetDockState();
+    mocks.sessionId = `restore-concurrency-${ownership}`;
+    mocks.savedTabs = Array.from({ length: 6 }, (_, index) => ({
+      path: `restored-${index}.ts`,
+      name: `restored-${index}.ts`,
+    }));
+    const pending = mocks.savedTabs.map(() => defer<FileContentResponse>());
+    mocks.requestFileContent.mockImplementation(
+      (_client, _session, path) => pending[Number(path.match(/\d+/)[0])].promise,
+    );
+    const view = renderHook(() => useFileEditors());
+    const started = mocks.requestFileContent.mock.calls.length;
+    const saved = [...mocks.savedTabs];
+    if (ownership === "replaced") {
+      mocks.savedTabs = [];
+      mocks.sessionId = "replacement-session";
+      view.rerender();
+    }
+    await act(async () => {
+      pending.forEach((read, index) =>
+        read.resolve(fileResponse(saved[index].path, "old session")),
+      );
+    });
+    expect(started).toBe(4);
+    if (ownership === "replaced") {
+      expect(mocks.requestFileContent).toHaveBeenCalledTimes(4);
+      expect(mocks.getDockState().openFiles.size).toBe(0);
+    } else {
+      expect(mocks.requestFileContent).toHaveBeenCalledTimes(6);
+      expect([...mocks.getDockState().openFiles.values()].map((file) => file.content)).toEqual(
+        Array(6).fill("old session"),
+      );
+    }
+    view.unmount();
+    mocks.savedTabs = [];
+    mocks.sessionId = "sess-1";
+  },
+);
