@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   createPromptErrorFixture,
   expectPromptErrorRow,
@@ -100,6 +101,7 @@ test("phone: visible per-row task actions expose Dismiss turn error", async ({
     await trigger.tap();
     const dismiss = testPage.getByTestId("task-context-dismiss-turn-error");
     await expect(dismiss).toBeVisible();
+    await waitForFiniteAnimations(testPage.getByRole("menu").filter({ has: dismiss }));
     const box = await dismiss.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
     await dismiss.tap();

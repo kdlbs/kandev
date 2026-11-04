@@ -136,3 +136,12 @@ worker capacity after an early settlement, and no duplicate file read after
 mention-task completion. The five affected suites passed 65 tests. Together
 with the unchanged validated suites, final local coverage is 176 tests across
 14 files. No production behavior changed in this follow-up.
+
+### CI E2E remediation
+
+The mobile turn-error action test measured its menu item during the opening
+zoom animation. CI and the local production build both reported 43.07 px for
+the 44 px item. The test now waits for the menu's finite animations before
+checking its height. The size assertion is unchanged. Both tests in the mobile
+spec passed without retries. The background-process test also passed in
+isolation without retries; its CI group replay remains in progress.
