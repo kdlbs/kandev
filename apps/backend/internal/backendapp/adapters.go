@@ -1603,6 +1603,20 @@ func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID
 	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
 }
 
+// ReserveMessageTurn reserves a bounded message-turn slot before a direct
+// request is acknowledged.
+func (w *orchestratorWrapper) ReserveMessageTurn(
+	ctx context.Context, taskID, sessionID, incarnationID string,
+) (*orchestrator.MessageTurnReservation, bool) {
+	return w.svc.ReserveMessageTurn(ctx, taskID, sessionID, incarnationID)
+}
+
+// RegisterMessageCapacityWait records a queue head blocked by the session
+// ceiling for the shared capacity sweep.
+func (w *orchestratorWrapper) RegisterMessageCapacityWait(ctx context.Context, taskID, sessionID, entryID string) {
+	w.svc.RegisterMessageCapacityWait(ctx, taskID, sessionID, entryID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
@@ -1728,6 +1742,32 @@ func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
+// SetUserMessageDeliveryStatus marks an exact session-owned user message with
+// the supplied delivery status and reports whether that message exists.
+func (a *messageCreatorAdapter) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, agentSessionID, status string,
+) (bool, error) {
+	return a.svc.SetUserMessageDeliveryStatus(ctx, messageID, agentSessionID, status)
+}
+
+// CreateCompletedUserMessageIdempotent records a user message in an
+// already-completed lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateCompletedUserMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
 		Content:       content,
 		AuthorType:    "user",
 		Metadata:      metadata,

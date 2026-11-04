@@ -159,7 +159,7 @@ function TemplateRadioItem({
           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
             {template.default_steps.map((step, i) => (
               <div key={i} className="flex items-center gap-1">
-                {i > 0 && <span className="text-muted-foreground/40 text-xs">&rarr;</span>}
+                {i > 0 && <span className="text-muted-foreground/40 text-xs">→</span>}
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <div className={cn("w-2 h-2 rounded-full", step.color ?? "bg-slate-500")} />
                   {step.name}

@@ -17,6 +17,10 @@ legacy_specs: []
 
 # Fix plan: Turn change history integrity
 
+The completed [unavailable-card visibility package](../hide-unavailable-turn-changes/plan.md)
+replaces this package's unavailable-card expectations and UI-03 preview.
+It retains historical diagnostics and usable partial cards. The results below describe the original delivery.
+
 Follow-up: [generated-branch continuity](../turn-change-title-branch-continuity/plan.md)
 adds title-rename interaction coverage for issue #4961. This completed package's
 work-order statuses and recorded verification results remain its original delivery evidence.

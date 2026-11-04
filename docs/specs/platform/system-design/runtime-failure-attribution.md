@@ -34,11 +34,11 @@ task repository identity checks.
 | `internal/orchestrator/executor` PR-base resolution | task-repository ID, PR number, mismatch reason enum | Have the comparison return a reason while retaining the current boolean decision. Test bound and unbound fork identities and every failure branch. |
 | `internal/agent/runtime/lifecycle` recovery | candidate count, retracked count, not-retracked count, classified known reasons, unknown count | Summarize only outcomes the recovery code can prove. A missing backend return is `not_retracked_unknown` unless a specific reason is available; it is not evidence that the process is dead. |
 
-The recovery summary is separate from the counted startup progress step. The
-step continues to advance only at its current reconstruction points and can
-end below total with the existing warning. The summary is a single event for
-one recovery pass, including zero-candidate passes; it does not log one row per
-old inventory record.
+The recovery summary remains separate from counted startup progress.
+The [startup progress design](startup-progress-visibility.md#measuring-each-step)
+counts conclusively resolved candidates under AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.7.
+Retracking success does not determine completed work.
+The summary remains one event per pass, including zero-candidate passes.
 
 ## Safety
 
@@ -66,8 +66,10 @@ The summary adds fixed numeric fields for these outcomes, retains existing
 fields, and resets its state on every pass. Internal record keys are not logged.
 Candidate count equals retracked plus classified not-retracked plus unknown
 for known inventory, including mixed-runtime and partially recovered sets.
-No new outcome increments startup progress or changes recovery guards, stops,
-deadlines, persistence, or readiness. The existing below-total warning remains.
+The candidate completion ledger consumes only conclusive outcomes.
+It advances each input candidate at most once and leaves unresolved work incomplete.
+Recovery guards, stops, deadlines, persistence, and readiness retain their existing policy.
+The existing warning remains for a genuinely incomplete pass.
 
 ### Cleanup inspection attribution
 
@@ -146,3 +148,4 @@ readiness state, retry, stop decision, or persisted record.
 - [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)
 - [Startup log corrections](../../../plans/startup-log-corrections/plan.md)
 - [Cleanup preparation failure attribution](../../../plans/cleanup-preparation-attribution/plan.md)
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)

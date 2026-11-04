@@ -709,6 +709,7 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 		receipt.merge(branchReceipt)
+		err = AnnotateCleanupInspectionWorktreeID(err, wt.ID)
 		if err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
