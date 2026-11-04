@@ -1,4 +1,5 @@
 import type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+import type { TaskListFacetOption } from "@/lib/tasks/tasks-list-options";
 
 export type FilterDimension =
   | "archived"
@@ -60,13 +61,15 @@ export type SortSpec = {
 
 export type { SidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 
-export type GroupKey =
+export type BuiltinGroupKey =
   | "none"
   | "repository"
   | "workflow"
   | "workflowStep"
   | "executorType"
   | "state";
+
+export type GroupKey = BuiltinGroupKey | TaskListFacetOption;
 
 export type SidebarView = {
   id: string;

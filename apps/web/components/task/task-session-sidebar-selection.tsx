@@ -5,7 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useSidebarMultiSelect } from "@/hooks/use-sidebar-multi-select";
 import {
   computeMixedWorkflowSelection,
-  flattenVisibleTaskIds,
+  flattenVisibleTaskOccurrences,
   sortIdsByVisibleOrder,
   type GroupedSidebarList,
 } from "@/lib/sidebar/apply-view";
@@ -76,6 +76,7 @@ export function useSelectionHandlers(args: {
   unpinTasks: (ids: string[]) => void;
   pinnedTaskIds: string[];
   visibleTaskIds: string[];
+  visibleOccurrenceKeys: string[];
   movableSelectedIds: Set<string>;
   workflowIdByTaskId?: ReadonlyMap<string, string>;
   selectionScopeKey?: string;
@@ -86,6 +87,7 @@ export function useSelectionHandlers(args: {
     unpinTasks,
     pinnedTaskIds,
     visibleTaskIds,
+    visibleOccurrenceKeys,
     movableSelectedIds,
     workflowIdByTaskId,
     selectionScopeKey,
@@ -111,8 +113,13 @@ export function useSelectionHandlers(args: {
 
   // Stable ref so TaskSwitcher's React.memo isn't defeated by a fresh closure.
   const onSelectTaskRange = useCallback(
-    (taskId: string) => selectRange(taskId, visibleTaskIds),
-    [selectRange, visibleTaskIds],
+    (taskId: string, occurrenceId?: string) =>
+      selectRange(
+        taskId,
+        visibleTaskIds,
+        occurrenceId ? { key: occurrenceId, orderedKeys: visibleOccurrenceKeys } : undefined,
+      ),
+    [selectRange, visibleTaskIds, visibleOccurrenceKeys],
   );
 
   // Bulk move in rendered order so a backward range selection isn't scrambled at
@@ -204,9 +211,17 @@ export function useSidebarSelection({
   const archiveDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkArchive);
   const deleteDialog = useBulkConfirmDialog(selectedTaskDetails, multiSelect.bulkDelete);
 
-  const visibleTaskIds = useMemo(
-    () => flattenVisibleTaskIds(grouped, collapsedGroups, collapsedSubtaskParents),
+  const visibleOccurrences = useMemo(
+    () => flattenVisibleTaskOccurrences(grouped, collapsedGroups, collapsedSubtaskParents),
     [grouped, collapsedGroups, collapsedSubtaskParents],
+  );
+  const visibleTaskIds = useMemo(
+    () => visibleOccurrences.map((row) => row.taskId),
+    [visibleOccurrences],
+  );
+  const visibleOccurrenceKeys = useMemo(
+    () => visibleOccurrences.map((row) => row.key),
+    [visibleOccurrences],
   );
 
   // A workflow-less selected row (e.g. the archived placeholder) can't be moved,
@@ -223,6 +238,7 @@ export function useSidebarSelection({
     unpinTasks,
     pinnedTaskIds,
     visibleTaskIds,
+    visibleOccurrenceKeys,
     movableSelectedIds,
     workflowIdByTaskId: selectedWorkflowByTaskId,
     selectionScopeKey,

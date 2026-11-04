@@ -2,6 +2,12 @@
 
 All notable changes to Kandev.
 
+## Unreleased
+
+### Features
+
+- Group workspace sidebar saved views by plugin task-list facets, including live multi-tag membership, section-local subtasks and collapse, and an Unassigned fallback without changing existing sorting or pagination.
+
 ## 0.98.0 - 2026-10-23
 
 ### Features

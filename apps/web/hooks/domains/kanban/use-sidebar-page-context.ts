@@ -10,6 +10,7 @@ import {
 import { normalizeLocale } from "@/lib/i18n";
 import type { SidebarTaskQuery } from "@/lib/types/http";
 import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
+import { isTaskListFacetOption } from "@/lib/tasks/tasks-list-options";
 
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
@@ -21,9 +22,10 @@ function buildSidebarQuery(
   return {
     filters: view.filters.map(({ dimension, op, value }) => ({ dimension, op, value })),
     sort: sidebarSortToWire(view.sort),
-    group: view.group,
-    collapsed_group_keys: view.collapsedGroups,
-    collapsed_task_ids: collapsedTaskIDs,
+    // Facets are resolved over the bounded workspace page, never in SQL.
+    group: isTaskListFacetOption(view.group) ? "none" : view.group,
+    collapsed_group_keys: isTaskListFacetOption(view.group) ? [] : view.collapsedGroups,
+    collapsed_task_ids: isTaskListFacetOption(view.group) ? [] : collapsedTaskIDs,
     page,
     page_size: PAGE_SIZE,
     locale,

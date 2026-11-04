@@ -65,6 +65,9 @@ function previousTasksById(grouped: GroupedSidebarList): Map<string, TaskSwitche
   const result = new Map<string, TaskSwitcherItem>();
   for (const group of grouped.groups) {
     for (const task of group.tasks) result.set(task.id, task);
+    for (const children of group.subTasksByParentId?.values() ?? []) {
+      for (const task of children) result.set(task.id, task);
+    }
   }
   for (const tasks of grouped.subTasksByParentId.values()) {
     for (const task of tasks) result.set(task.id, task);
@@ -97,12 +100,18 @@ function shareGroup(
   if (
     !previous ||
     previous.label !== next.label ||
+    previous.color !== next.color ||
     previous.isContinuation !== next.isContinuation ||
     previous.matchingCount !== next.matchingCount
   )
     return next;
   const tasks = shareTaskArray(previous.tasks, next.tasks, priorById);
-  return tasks === previous.tasks ? previous : { ...next, tasks };
+  const children = next.subTasksByParentId
+    ? shareSubtaskMap(previous.subTasksByParentId ?? new Map(), next.subTasksByParentId, priorById)
+    : undefined;
+  return tasks === previous.tasks && children === previous.subTasksByParentId
+    ? previous
+    : { ...next, tasks, ...(children ? { subTasksByParentId: children } : {}) };
 }
 
 function pageGroupLabel(group: GroupedSidebarList["groupKey"], key: string, label: string): string {

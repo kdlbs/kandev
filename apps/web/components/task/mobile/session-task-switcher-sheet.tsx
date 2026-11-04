@@ -316,6 +316,7 @@ function TaskSwitcherSurfaceContent({
             beforePluginRun={presentation === "drawer" ? () => onOpenChange(false) : undefined}
           >
             <MobileTaskList
+              workspaceId={workspaceId}
               tasks={data.tasksWithRepositories}
               workflows={data.workflows}
               stepsByWorkflowId={data.stepsByWorkflowId}
