@@ -55,6 +55,19 @@ func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(
 	assert.Equal(t, string(foreign.Payload), string(missing.Payload))
 }
 
+func TestGetTaskVisibilityMalformedPayloadUsesStableError(t *testing.T) {
+	handlers := NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testLogger(t))
+	handlers.SetHandoffService(service.NewHandoffService(nil, nil, nil, nil, nil, testLogger(t)))
+	response, err := handlers.handleGetTaskVisibility(context.Background(), &ws.Message{
+		ID: "bad-visibility", Action: ws.ActionMCPGetTaskVisibility, Payload: json.RawMessage(`{"private":"value"`),
+	})
+	require.NoError(t, err)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.Equal(t, ws.ErrorCodeBadRequest, payload.Code)
+	require.Equal(t, "Invalid payload", payload.Message)
+}
+
 func seedRelatedReadTasks(t *testing.T, repo relatedReadSeedRepo) {
 	t.Helper()
 	ctx := context.Background()
@@ -253,5 +266,6 @@ func snapshotVisibilityNativeTables(t *testing.T, repo relatedReadSnapshotRepo) 
 		"sessions":  snapshotSQLRows(t, db, "SELECT * FROM task_sessions ORDER BY id"),
 		"documents": snapshotSQLRows(t, db, "SELECT * FROM task_documents ORDER BY task_id, key"),
 		"revisions": snapshotSQLRows(t, db, "SELECT * FROM task_document_revisions ORDER BY task_id, document_key, revision_number"),
+		"receipts":  snapshotSQLRows(t, db, "SELECT * FROM task_lifecycle_receipts ORDER BY task_id"),
 	}
 }

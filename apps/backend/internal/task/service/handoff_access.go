@@ -24,14 +24,13 @@ const (
 	RelatedReadScopeTaskVisibility RelatedReadScope = "task-visibility"
 )
 
-// RelatedReadRequest separates compact task-tree inspection from the document
-// access rules. The MCP server supplies Scope after resolving its profile.
+// RelatedReadRequest binds a compact task visibility read to the caller and
+// resolved MCP scope.
 type RelatedReadRequest struct {
 	CallerTaskID      string
 	CallerWorkspaceID string
 	TargetTaskID      string
 	Scope             RelatedReadScope
-	Verbose           bool
 }
 
 // RelatedReadDenialReason is safe to return to a caller. In particular,
@@ -39,9 +38,8 @@ type RelatedReadRequest struct {
 type RelatedReadDenialReason string
 
 const (
-	RelatedReadDenialTargetUnavailable          RelatedReadDenialReason = "target_unavailable"
-	RelatedReadDenialScopeRequired              RelatedReadDenialReason = "related_task_scope_required"
-	RelatedReadDenialVerboseDocumentScopeNeeded RelatedReadDenialReason = "verbose_document_scope_required"
+	RelatedReadDenialTargetUnavailable RelatedReadDenialReason = "target_unavailable"
+	RelatedReadDenialScopeRequired     RelatedReadDenialReason = "related_task_scope_required"
 )
 
 // RelatedReadAccessError preserves the existing ErrAccessDenied category for

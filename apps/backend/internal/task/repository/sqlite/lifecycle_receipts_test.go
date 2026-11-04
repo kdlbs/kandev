@@ -67,10 +67,21 @@ func TestTaskVisibilitySnapshotKeepsTaskAndReceiptCoherentAcrossDelete(t *testin
 		task, receipt, err := repo.GetTaskVisibilitySnapshot(ctx, "visibility-snapshot-workspace", "visibility-snapshot-task")
 		resultCh <- result{task: task, receipt: receipt, err: err}
 	}()
-	<-readTask
+	select {
+	case <-readTask:
+	case early := <-resultCh:
+		t.Fatalf("snapshot returned before the task-read barrier: %+v", early)
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot did not reach the task-read barrier")
+	}
 	require.NoError(t, repo.DeleteTask(ctx, task.ID))
 	releaseRead()
-	first := <-resultCh
+	var first result
+	select {
+	case first = <-resultCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot did not complete after the task-read barrier was released")
+	}
 	require.NoError(t, first.err)
 	require.NotNil(t, first.task)
 	require.NotNil(t, first.receipt)
@@ -105,16 +116,14 @@ func newVisibilitySnapshotRepo(t *testing.T) (*Repository, *sqlx.DB) {
 	path := filepath.Join(t.TempDir(), "visibility-snapshot.db")
 	writerConn, err := db.OpenSQLite(path)
 	require.NoError(t, err)
+	writer := sqlx.NewDb(writerConn, "sqlite3")
+	t.Cleanup(func() { _ = writer.Close() })
 	readerConn, err := db.OpenSQLiteReader(path)
 	require.NoError(t, err)
-	writer := sqlx.NewDb(writerConn, "sqlite3")
 	reader := sqlx.NewDb(readerConn, "sqlite3")
+	t.Cleanup(func() { _ = reader.Close() })
 	repo, err := NewWithDB(writer, reader, nil)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = reader.Close()
-		_ = writer.Close()
-	})
 	return repo, writer
 }
 

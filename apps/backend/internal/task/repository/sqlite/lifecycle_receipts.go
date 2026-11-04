@@ -21,7 +21,7 @@ func (r *Repository) taskLifecycleSnapshotInTx(ctx context.Context, tx lifecycle
 	var task models.Task
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, workspace_id, COALESCE(workflow_id, ''), COALESCE(workflow_step_id, ''),
-			COALESCE(title, ''), state, COALESCE(identifier, ''), updated_at
+			COALESCE(title, ''), COALESCE(state, ''), COALESCE(identifier, ''), updated_at
 		FROM tasks WHERE id = ?
 	`), taskID).Scan(&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.State, &task.Identifier, &task.UpdatedAt)

@@ -128,6 +128,30 @@ type failingVisibilitySnapshotRepo struct {
 	err error
 }
 
+type failingCallerVisibilityRepo struct {
+	*visibilityReceiptRepo
+	err error
+}
+
+func (r *failingCallerVisibilityRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return nil, r.err
+}
+
+func TestGetTaskVisibilityPropagatesCallerLookupFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("caller", "", "workspace-a")
+	lookupErr := errors.New("caller database unavailable")
+	repo := &failingCallerVisibilityRepo{
+		visibilityReceiptRepo: &visibilityReceiptRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+		err:                   lookupErr,
+	}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	_, err := svc.GetTaskVisibilityForRequest(context.Background(), RelatedReadRequest{
+		CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeTaskVisibility,
+	})
+	require.ErrorIs(t, err, lookupErr)
+}
+
 func (r *failingVisibilitySnapshotRepo) GetTaskVisibilitySnapshot(context.Context, string, string) (*models.Task, *models.TaskLifecycleReceipt, error) {
 	return nil, nil, r.err
 }
@@ -172,7 +196,7 @@ func (r *deleteAfterVisibilitySnapshotRepo) GetTaskVisibilitySnapshot(ctx contex
 	return task, receipt, nil
 }
 
-func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateAndSurvivesConcurrentDelete(t *testing.T) {
+func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateWhenDeleteFollowsRead(t *testing.T) {
 	ctx := context.Background()
 	repo, writer := newVisibilitySQLiteRepo(t)
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "visibility-snapshot-workspace", Name: "Visibility snapshot"}))

@@ -4876,7 +4876,6 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models
 
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
-	now := time.Now().UTC()
 	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
@@ -4888,6 +4887,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
 	if err != nil {
 		return err
@@ -5110,6 +5110,10 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
 		return false, err
 	}
+	visibilityTask, err := r.taskLifecycleSnapshotInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
 	query := fmt.Sprintf(`
 		UPDATE tasks AS t
@@ -5133,6 +5137,12 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 			return false, err
 		}
 		return false, nil
+	}
+	if visibilityTask != nil {
+		visibilityTask.UpdatedAt = now
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, visibilityTask, "archived", "archive", now); err != nil {
+			return false, err
+		}
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {

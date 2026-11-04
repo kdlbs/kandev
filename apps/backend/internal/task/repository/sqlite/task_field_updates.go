@@ -25,6 +25,7 @@ func (r *Repository) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id
 	if err != nil {
 		return nil, err
 	}
+	previousWorkflowID, previousStepID := task.WorkflowID, task.WorkflowStepID
 	if update.ParentID != nil {
 		if err := validate(ctx, taskHierarchyReader{r, tx}, task, *update.ParentID); err != nil {
 			return nil, err
@@ -49,6 +50,11 @@ func (r *Repository) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id
 	entry, marker, err := r.updateTaskTx(updateCtx, tx, task, "", preservePosition, preservePosition, nil)
 	if err != nil {
 		return nil, err
+	}
+	if previousWorkflowID != task.WorkflowID || previousStepID != task.WorkflowStepID {
+		if err := r.recordTaskLifecycleReceipt(ctx, tx, task, "active", "move", task.UpdatedAt); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

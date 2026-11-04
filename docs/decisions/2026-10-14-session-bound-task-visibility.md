@@ -1,6 +1,6 @@
 # ADR-2026-10-14-session-bound-task-visibility: Bind compact lifecycle reads to a task session
 
-**Status:** accepted
+**Status:** proposed
 **Date:** 2026-10-14
 **Area:** backend
 
@@ -10,7 +10,7 @@ A manual Coordinator conversation needs the lifecycle disposition of tasks that 
 
 ## Decision
 
-A trusted backend may record a versioned compact-visibility grant in one persisted manual task session. The grant names that task, session, and workspace exactly. Profile discovery reads the persisted session; each in-session MCP dispatch resolves the task and session again and binds the hidden request envelope to that principal. The new capability exposes only `get_task_visibility` and its existing compact, workspace-bound lifecycle projection. It does not confer Office relation, document, global, foreign-workspace, or write access. Missing, revoked, malformed, or mismatched grants fail closed. The specific grant is activated separately from shipping this capability.
+A trusted backend may record a versioned compact-visibility grant in one persisted manual task session. The grant names that task, session, and workspace exactly. Profile discovery reads the persisted session; each in-session MCP dispatch resolves the task and session again and binds the hidden request envelope to that principal. The new capability exposes only `get_task_visibility_kandev` and its existing compact, workspace-bound lifecycle projection. It does not confer Office relation, document, global, foreign-workspace, or write access. Missing, revoked, malformed, or mismatched grants fail closed. The specific grant is activated separately from shipping this capability.
 
 ## Consequences
 

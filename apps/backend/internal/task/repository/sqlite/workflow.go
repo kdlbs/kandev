@@ -53,8 +53,10 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	if rows == 0 {
 		return tx.Commit()
 	}
-	if err := r.recordTaskLifecycleReceiptForCurrentTask(ctx, tx, taskID, "active", "move", updatedAt); err != nil {
-		return err
+	if fromWorkflowID != workflowID || fromStepID != workflowStepID {
+		if err := r.recordTaskLifecycleReceiptForCurrentTask(ctx, tx, taskID, "active", "move", updatedAt); err != nil {
+			return err
+		}
 	}
 
 	transitionID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{

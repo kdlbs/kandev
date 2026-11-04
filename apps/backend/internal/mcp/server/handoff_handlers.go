@@ -143,7 +143,7 @@ func (s *Server) getTaskVisibilityHandler() server.ToolHandlerFunc {
 		}
 		if s.taskID == "" || s.sessionID == "" {
 			return backendErrorToolResult(&BackendError{
-				Code: ws.ErrorCodeForbidden, Message: "task visibility access denied",
+				Code: ws.ErrorCodeNotFound, Message: "target unavailable",
 				Details: map[string]interface{}{"reason": "target_unavailable"},
 			}), nil
 		}

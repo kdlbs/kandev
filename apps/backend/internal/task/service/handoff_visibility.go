@@ -48,11 +48,14 @@ func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req Re
 		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "task visibility requires a manual session grant")
 	}
 	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
-	if err != nil || caller == nil {
-		if errors.Is(err, repository.ErrTaskNotFound) || caller == nil {
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
 			return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller task missing")
 		}
 		return nil, err
+	}
+	if caller == nil {
+		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller task missing")
 	}
 	if req.CallerWorkspaceID != "" && caller.WorkspaceID != req.CallerWorkspaceID {
 		return nil, relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller workspace changed")

@@ -14,8 +14,13 @@ func TestTaskVisibilityGrantBindsExactManualSessionAndWorkspace(t *testing.T) {
 		t.Fatal("exact manual task/session/workspace grant was denied")
 	}
 	for name, change := range map[string]func(*Task, *TaskSession){
-		"other session":   func(_ *Task, s *TaskSession) { s.ID = "session-b" },
-		"other task":      func(_ *Task, s *TaskSession) { s.TaskID = "other-task" },
+		"other session": func(_ *Task, s *TaskSession) { s.ID = "session-b" },
+		"other task":    func(_ *Task, s *TaskSession) { s.TaskID = "other-task" },
+		"other grant task": func(_ *Task, s *TaskSession) {
+			s.Metadata[SessionMetaKeyTaskVisibilityGrant] = map[string]interface{}{
+				"version": float64(1), "task_id": "other-task", "session_id": s.ID, "workspace_id": "workspace-a",
+			}
+		},
 		"other workspace": func(task *Task, _ *TaskSession) { task.WorkspaceID = "workspace-b" },
 		"office origin":   func(task *Task, _ *TaskSession) { task.Origin = TaskOriginAgentCreated },
 		"missing grant":   func(_ *Task, s *TaskSession) { delete(s.Metadata, SessionMetaKeyTaskVisibilityGrant) },

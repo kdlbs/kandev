@@ -52,7 +52,7 @@ func (h *Handlers) handleGetTaskVisibility(ctx context.Context, msg *ws.Message)
 	}
 	var req taskVisibilityPayload
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)

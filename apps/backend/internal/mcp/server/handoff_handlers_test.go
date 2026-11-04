@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	ws "github.com/kandev/kandev/pkg/websocket"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -127,7 +128,21 @@ func TestGetTaskVisibilityToolRequiresExplicitCapabilityAndTakesOnlyTaskID(t *te
 	require.False(t, result.IsError)
 	payload, ok := backend.lastPayload.(map[string]string)
 	require.True(t, ok)
+	assert.Equal(t, "target", payload["task_id"])
 	assert.Equal(t, "task-visibility", payload["related_read_scope"])
 	assert.Equal(t, "caller-A", payload["caller_task_id"])
 	assert.Equal(t, "session-A", payload["caller_session_id"])
+}
+
+func TestGetTaskVisibilityMissingLocalContextUsesTargetUnavailableDenial(t *testing.T) {
+	profile := mcpprofile.New(mcpprofile.SurfaceKanbanTask, []mcpprofile.Capability{
+		mcpprofile.CapabilityTaskVisibilityRead,
+	}, nil)
+	s := NewWithProfile(&testBackend{}, "", "", 10005, newTestLogger(t), "", false, profile)
+	result := callTool(t, s, "get_task_visibility_kandev", map[string]interface{}{"task_id": "target"})
+	require.True(t, result.IsError)
+	structured, ok := result.StructuredContent.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, ws.ErrorCodeNotFound, structured["code"])
+	assert.Equal(t, "target unavailable", structured["message"])
 }
