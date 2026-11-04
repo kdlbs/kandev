@@ -211,8 +211,8 @@ func (h *Handlers) replayRecordedSendOperation(msg *ws.Message, req sendOperatio
 		h.logger.Warn("rejected send-operation replay whose request differs from the claim",
 			zap.String("operation_id", req.OperationID),
 			zap.String("claimed_state", existing.State))
-		return wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, sendOperationErrorConflict+
-			": this operation_id was already used for a different send; nothing was delivered. Use a fresh operation_id.")
+		return wsError(msg.ID, msg.Action, sendOperationErrorConflict,
+			"this operation_id was already used for a different send; nothing was delivered. Use a fresh operation_id.")
 	}
 
 	recordSendOperationMetric(sendOperationOutcomeReplayed, existing.DeliveryStatus)
