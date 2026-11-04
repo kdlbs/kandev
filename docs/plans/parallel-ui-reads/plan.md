@@ -5,10 +5,12 @@ requirements:
   - REQ-UI-TASK-NAVIGATION-RESPONSIVENESS-001
   - REQ-UI-COMPOSER-FILE-SEARCH-OWNERSHIP-001
   - REQ-AGENTS-BACKGROUND-WORK-010
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
 system_design:
   - ../../specs/ui/system-design/task-navigation-responsiveness.md
   - ../../specs/ui/system-design/composer-file-search-ownership.md
   - ../../specs/agents/system-design/background-work.md
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
 legacy_specs: []
 ---
 
@@ -56,6 +58,7 @@ These preserve `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` and
 
 - [x] [Task 01: Parallelize independent UI reads](task-01-parallel-reads.md)
 - [x] [Task 02: Settle background work before resume](task-02-resume-settlement.md)
+- [x] [Task 03: Retain Kind image-load diagnostics](task-03-kind-load-diagnostics.md)
 
 ## Verification results
 

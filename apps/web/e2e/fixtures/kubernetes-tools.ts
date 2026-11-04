@@ -801,9 +801,8 @@ export async function provisionKubernetesCluster(
         { timeout: 300_000 },
       ),
     );
-    execFileSync(tools.kind, ["load", "docker-image", image, "--name", name], {
+    runFixtureCommand(tools.kind, ["load", "docker-image", image, "--name", name], {
       timeout: KIND_IMAGE_LOAD_TIMEOUT_MS,
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
     });
     kubectl(["apply", "-f", "-"], { input: workloadRBAC() });
     serviceAccountKubeconfig(tools.kubectl, adminKubeconfig, HOST_SERVICE_ACCOUNT, hostKubeconfig);
