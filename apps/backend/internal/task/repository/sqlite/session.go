@@ -5178,6 +5178,10 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	return result, rows.Err()
 }
 
+// ElectsPrimaryOnCreate reports that session insertion commits the initial
+// primary election under the owning task lock.
+func (r *Repository) ElectsPrimaryOnCreate() bool { return true }
+
 // SetSessionPrimary marks a session as primary and clears the primary flag
 // on every other session for the same task, atomically. Both writes go
 // through a single transaction so a concurrent caller can't observe (or

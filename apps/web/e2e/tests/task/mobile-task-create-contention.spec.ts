@@ -1,8 +1,13 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
+import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { fillRecoveryDraft, openMobileCreateDialog } from "./task-create-recovery-helpers";
+import {
+  expectStandardCreateReady,
+  fillRecoveryDraft,
+  openMobileCreateDialog,
+} from "./task-create-recovery-helpers";
 
 useRegularMode();
 
@@ -35,7 +40,7 @@ test("phone creates while another task streams and keeps the other task's saved 
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === "/api/v1/tasks",
   );
-  await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
+  await expectStandardCreateReady(dialog);
   await dialog.getByTestId("submit-start-agent").click();
   const response = await createResponse;
   expect(response.ok()).toBeTruthy();
@@ -43,7 +48,11 @@ test("phone creates while another task streams and keeps the other task's saved 
   expect(created.id).toBeTruthy();
 
   await expect(dialog).toBeHidden();
-  await testPage.goto(`/t/${created.id}`);
+  const kanban = new MobileKanbanPage(testPage);
+  const createdCard = kanban.taskCard(created.id);
+  await expect(createdCard).toBeVisible();
+  await createdCard.click();
+  await expect(testPage).toHaveURL(new RegExp(`/t/${created.id}$`));
 
   const openDrawer = async () => {
     const session = new SessionPage(testPage);

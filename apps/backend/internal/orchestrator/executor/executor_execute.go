@@ -1762,10 +1762,20 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	// Session creation elected primary under the owning task lock and
-	// recorded the committed ownership on session. Publish that result once;
-	// an existing primary is never demoted by ordinary preparation.
-	if session.IsPrimary && e.onPrimarySessionSet != nil {
-		e.onPrimarySessionSet(ctx, task.ID, sessionID)
+	// recorded the committed ownership on session. Legacy stores without that
+	// atomic contract retain the explicit promotion fallback.
+	if session.IsPrimary {
+		if !repositoryElectsPrimaryOnCreate(e.repo) {
+			if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+				e.logger.Warn("failed to update primary session flag",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
+		}
+		if e.onPrimarySessionSet != nil {
+			e.onPrimarySessionSet(ctx, task.ID, sessionID)
+		}
 	}
 
 	e.logger.Info("session entry created",
@@ -2373,6 +2383,15 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 // before a binding retry. The election winner may have created the task's first
 // session while this start waited, so the retry must neither claim the
 // first-session origin nor take the primary flag from the winner.
+
+// repositoryElectsPrimaryOnCreate reports whether the store commits initial
+// primary selection with the session insert. Stores that predate that contract
+// keep the executor's explicit promotion fallback.
+func repositoryElectsPrimaryOnCreate(repo executorStore) bool {
+	elector, ok := repo.(interface{ ElectsPrimaryOnCreate() bool })
+	return ok && elector.ElectsPrimaryOnCreate()
+}
+
 func (e *Executor) refreshRetriedSessionOrder(
 	ctx context.Context,
 	session *models.TaskSession,

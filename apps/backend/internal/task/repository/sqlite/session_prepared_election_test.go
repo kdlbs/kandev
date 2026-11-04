@@ -2,66 +2,147 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
-func TestPreparedSessionPrimaryElection(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepoForSessionTests(t)
-	const taskID = "task-prepared-election"
-	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Prepared election"}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
+func newPreparedSessionRepo(t *testing.T, postgres bool) *Repository {
+	t.Helper()
+	if !postgres {
+		return newRepoForSessionTests(t)
 	}
+	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// The concurrency case needs independent connections so the task-lock
+	// election can race instead of serializing on a single-connection pool.
+	conn.SetMaxOpenConns(4)
+	conn.SetMaxIdleConns(4)
+	repo, err := NewWithDB(conn, conn, nil)
+	require.NoError(t, err)
+	return repo
+}
+
+func TestPreparedSessionPrimaryElection(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "SQLite"
+		if postgres {
+			name = "Postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			runPreparedSessionPrimaryElection(t, newPreparedSessionRepo(t, postgres))
+		})
+	}
+}
+
+func runPreparedSessionPrimaryElection(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	const taskID = "task-prepared-election"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Prepared election"}))
 
 	first := &models.TaskSession{ID: "prepared-first", TaskID: taskID, IsPrimary: true}
-	if err := repo.CreateTaskSession(ctx, first); err != nil {
-		t.Fatalf("create first session: %v", err)
-	}
-	if !first.IsPrimary {
-		t.Fatal("first prepared session must commit as primary")
-	}
+	require.NoError(t, repo.CreateTaskSession(ctx, first))
+	require.True(t, first.IsPrimary, "first prepared session must commit as primary")
 
 	second := &models.TaskSession{ID: "prepared-second", TaskID: taskID, IsPrimary: true}
-	if err := repo.CreateTaskSession(ctx, second); err != nil {
-		t.Fatalf("create second session: %v", err)
-	}
-	if second.IsPrimary {
-		t.Fatal("a second prepared session must not demote the committed primary")
-	}
+	require.NoError(t, repo.CreateTaskSession(ctx, second))
+	require.False(t, second.IsPrimary, "a second prepared session must not demote the primary")
 
 	stored, err := repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		t.Fatalf("ListTaskSessions: %v", err)
-	}
+	require.NoError(t, err)
 	primary := 0
 	for _, session := range stored {
 		if session.IsPrimary {
 			primary++
-			if session.ID != first.ID {
-				t.Fatalf("unexpected primary session %q", session.ID)
-			}
+			require.Equal(t, first.ID, session.ID)
 		}
 	}
-	if primary != 1 {
-		t.Fatalf("primary sessions = %d, want 1", primary)
+	require.Equal(t, 1, primary)
+}
+
+func TestPreparedSessionConcurrentPrimaryElection(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "SQLite"
+		if postgres {
+			name = "Postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := newPreparedSessionRepo(t, postgres)
+			ctx := context.Background()
+			const taskID = "task-prepared-concurrent"
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Concurrent election"}))
+
+			const creators = 4
+			start := make(chan struct{})
+			errs := make([]error, creators)
+			sessions := make([]*models.TaskSession, creators)
+			var wg sync.WaitGroup
+			for i := 0; i < creators; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					session := &models.TaskSession{
+						ID: fmt.Sprintf("prepared-concurrent-%d", i), TaskID: taskID, IsPrimary: true,
+					}
+					sessions[i] = session
+					<-start
+					errs[i] = repo.CreateTaskSession(ctx, session)
+				}(i)
+			}
+			close(start)
+			wg.Wait()
+			for i, err := range errs {
+				require.NoErrorf(t, err, "creator %d", i)
+			}
+			stored, err := repo.ListTaskSessions(ctx, taskID)
+			require.NoError(t, err)
+			primary := 0
+			for _, session := range stored {
+				if session.IsPrimary {
+					primary++
+				}
+			}
+			require.Equal(t, 1, primary)
+			committed := 0
+			for _, session := range sessions {
+				storedSession, err := repo.GetTaskSession(ctx, session.ID)
+				require.NoError(t, err)
+				if storedSession.IsPrimary {
+					committed++
+				}
+			}
+			require.Equal(t, 1, committed)
+		})
 	}
 }
 
 func TestPreparedSessionSeedAtomicity(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "SQLite"
+		if postgres {
+			name = "Postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			runPreparedSessionSeedAtomicity(t, newPreparedSessionRepo(t, postgres))
+		})
+	}
+}
+
+func runPreparedSessionSeedAtomicity(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := context.Background()
-	repo := newRepoForSessionTests(t)
 	const taskID = "task-prepared-seed"
-	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Prepared seed"}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	preview := models.NewInitialPromptPreview("submitted text", nil)
-	submission, err := models.NewInitialPromptSubmission("submitted text", false, nil)
-	if err != nil {
-		t.Fatalf("NewInitialPromptSubmission: %v", err)
-	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Prepared seed"}))
+	preview := models.NewInitialPromptPreview("original text", nil)
+	submission, err := models.NewInitialPromptSubmission("original text", false, nil)
+	require.NoError(t, err)
 	seed := &models.PreparedSessionSeed{
 		InitialPromptPreview:    preview,
 		InitialPromptSubmission: submission,
@@ -70,35 +151,37 @@ func TestPreparedSessionSeedAtomicity(t *testing.T) {
 		ID: "prepared-seed-session", TaskID: taskID,
 		Metadata: seed.ApplyToMetadata(nil),
 	}
-	if err := repo.CreateTaskSession(ctx, session); err != nil {
-		t.Fatalf("create seeded session: %v", err)
-	}
-	stored, err := repo.GetTaskSession(ctx, session.ID)
-	if err != nil {
-		t.Fatalf("GetTaskSession: %v", err)
-	}
-	if _, ok := stored.Metadata[models.SessionMetaKeyInitialPromptPreview]; !ok {
-		t.Fatal("initial prompt preview was not committed with the session")
-	}
-	loaded, found, err := models.LoadInitialPromptSubmission(stored.Metadata)
-	if err != nil || !found || loaded.Content != "submitted text" {
-		t.Fatalf("initial prompt submission = %+v found=%v err=%v", loaded, found, err)
-	}
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
 
+	replacementPreview := models.NewInitialPromptPreview("replacement text", nil)
+	replacementSubmission, err := models.NewInitialPromptSubmission("replacement text", false, nil)
+	require.NoError(t, err)
 	duplicate := &models.TaskSession{
 		ID: session.ID, TaskID: taskID,
-		Metadata: seed.ApplyToMetadata(nil),
+		Metadata: (&models.PreparedSessionSeed{
+			InitialPromptPreview: replacementPreview, InitialPromptSubmission: replacementSubmission,
+		}).ApplyToMetadata(nil),
 	}
-	if err := repo.CreateTaskSession(ctx, duplicate); err == nil {
-		t.Fatal("duplicate session insert must fail")
-	}
+	require.Error(t, repo.CreateTaskSession(ctx, duplicate), "duplicate session insert must fail")
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	loadedPreview, ok := stored.Metadata[models.SessionMetaKeyInitialPromptPreview]
+	require.True(t, ok)
+	encodedPreview, err := json.Marshal(loadedPreview)
+	require.NoError(t, err)
+	var decodedPreview models.InitialPromptPreview
+	require.NoError(t, json.Unmarshal(encodedPreview, &decodedPreview))
+	require.Equal(t, "original text", decodedPreview.Content)
+	loaded, found, err := models.LoadInitialPromptSubmission(stored.Metadata)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "original text", loaded.Content)
+
 	sessions, err := repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		t.Fatalf("ListTaskSessions: %v", err)
-	}
-	if len(sessions) != 1 || sessions[0].ID != session.ID {
-		t.Fatalf("failed insert changed stored sessions: %+v", sessions)
-	}
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, session.ID, sessions[0].ID)
 }
 
 func TestPreparedSessionCancellationWritesNothing(t *testing.T) {

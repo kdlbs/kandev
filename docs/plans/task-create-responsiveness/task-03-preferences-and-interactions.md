@@ -128,6 +128,6 @@ It measures real orchestration, a real local repository, and production durable
 delivery, and it correctly rejects backlog, failed colors, and inadequate
 samples. On this shared host its eight-stream p95 comparison showed only a
 10.7% completed-run median improvement, below the required 25%, and one run per
-binary failed the 90% delivery bound. AC .1 remains unproven. This work order
-therefore stays in progress until the same corrected workload on a stable host
-satisfies every latency and delivery bound.
+binary failed the 90% delivery bound. AC .1 and AC .2 remain unproven. This
+work order therefore stays in progress until the same corrected workload on a
+stable host satisfies every latency and delivery bound.

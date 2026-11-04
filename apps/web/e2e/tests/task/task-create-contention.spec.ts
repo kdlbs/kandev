@@ -3,7 +3,11 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarTasksPage } from "../../pages/sidebar-tasks-page";
-import { fillRecoveryDraft, openDesktopCreateDialog } from "./task-create-recovery-helpers";
+import {
+  expectStandardCreateReady,
+  fillRecoveryDraft,
+  openDesktopCreateDialog,
+} from "./task-create-recovery-helpers";
 
 useRegularMode();
 
@@ -37,7 +41,7 @@ test.describe("Task creation under concurrent activity", () => {
         response.request().method() === "POST" &&
         new URL(response.url()).pathname === "/api/v1/tasks",
     );
-    await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
+    await expectStandardCreateReady(dialog);
     await dialog.getByTestId("submit-start-agent").click();
     const response = await createResponse;
     expect(response.ok()).toBeTruthy();

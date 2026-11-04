@@ -50,7 +50,8 @@ provider launch, and shared SQL writer policy.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'TestPreparedSession(SeedAtomicity|PrimaryElection)|TestSetSessionPrimary|TestCreateTaskSession' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'TestPreparedSession(SeedAtomicity|PrimaryElection|ConcurrentPrimaryElection)' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository -run 'TestSetSessionPrimary_DemotesOthersAndPromotesExactlyOne' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator/executor -run 'TestPreparedSession|TestPrepareSession' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator -run 'TestPreparedSession|TestFreshStartSubmission|TestPrepareTaskSession' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/task/handlers -run 'TestHTTPCreateTask' -count=1)

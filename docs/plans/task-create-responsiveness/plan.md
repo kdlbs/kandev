@@ -138,7 +138,7 @@ The browser tests cover AC-TASKS-CREATE-RESPONSIVENESS-001.2, .3, and .6.
 
 ## Work orders
 
-- [x] [01: Measure full creation under load](task-01-measure-creation.md)
+- [ ] [01: Measure full creation under load](task-01-measure-creation.md)
 - [x] [02: Persist prepared sessions once](task-02-prepare-session-once.md)
 - [ ] [03: Avoid unchanged preferences and verify interactions](task-03-preferences-and-interactions.md)
 
@@ -172,10 +172,13 @@ All commands passed. The PostgreSQL-gated variants were not executed because
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-task-create-contention.spec.ts tests/task/mobile-sidebar-task-color-sync.spec.ts tests/task/mobile-task-create-recovery.spec.ts)
 ```
 
-Both commands passed. The contention tests start a real mock-agent session that
-keeps generating, create the new task, then change the *other* generating
-task's color through the desktop menu or phone drawer context menu. They verify
-the generating session remains RUNNING and the unrelated color survives reload.
+Both commands passed in emulated Chromium projects. No physical-device
+validation was available, so physical keyboard/touch behavior remains an
+unverified hardware gate rather than a passed check. The contention tests start
+a real mock-agent session that keeps generating, create the new task, then
+change the *other* generating task's color through the desktop menu or phone
+drawer context menu. They verify the generating session remains RUNNING and the
+unrelated color survives reload.
 
 ### Corrected full-path benchmark
 
@@ -187,19 +190,18 @@ the asynchronous provider/process launch is substituted.
 
 Retained binaries:
 
-- Baseline: `/tmp/opencode/task-create-baseline-fixed.test`,
-  SHA-256 `abb83fd3451bd96b8db93e0b9bd74b01a9484c940f8d12d5d4ac709c76f19f92`.
-- Candidate: `/tmp/opencode/task-create-candidate-fixed.test`,
-  SHA-256 `1ff15ed60fbb1637c61379bbb0df416d4db81144df1b0f3ce64d36a9552e3a6c`.
+- Baseline: `/tmp/opencode/task-create-baseline-fixup.test`,
+  SHA-256 `af00327b0651104b311f0a18e7ea03397158cd8f1a4550d11721581903e0feb2`.
+- Candidate: `/tmp/opencode/task-create-candidate-fixup.test`,
+  SHA-256 `c4ead47683f37ca3fddc5941f4df43a0025906c2b16c844df3521d29bf8cad69`.
 
 Five consecutive eight-stream runs per binary were compared on the same host.
-Latency p95 values varied widely as unrelated host work changed. Four baseline
-runs completed with p95 values from 100.8 ms to 260.7 ms (median 118.1 ms); one
-baseline run failed the 90% timely delivery bound. Four candidate runs
-completed with p95 values from 38.7 ms to 185.2 ms (median 105.5 ms); one
-candidate run also failed the delivery bound. The completed-run median
-improvement is about 10.7%, below the required 25%, and the failed runs make
-the comparison unstable. AC .1 remains unproven.
+Latency p95 values still varied with unrelated host work. Baseline p95 values
+ranged from 37.1 ms to 215.6 ms (median 37.5 ms); candidate p95 values ranged
+from 36.4 ms to 39.6 ms (median 37.0 ms). The median improvement is about 1.3%,
+far below the required 25%. All ten latest runs delivered at least 98.9% of
+offered events, but an earlier candidate run under load missed the 90% bound.
+AC .1 is unproven, and AC .2 does not yet have stable run-to-run evidence.
 
 The corrected delivery checks are stricter than the earlier benchmark. In a
 complete run, offered, projected, dropped, stream-error, ACK-error, and writer
@@ -216,10 +218,10 @@ pool wait counters.
 ### Commands
 
 ```bash
-(cd /tmp/opencode/kandev-baseline-fixed/apps/backend && go test -c -trimpath -tags fts5 -o /tmp/opencode/task-create-baseline-fixed.test ./internal/task/handlers)
-(cd apps/backend && go test -c -trimpath -tags fts5 -o /tmp/opencode/task-create-candidate-fixed.test ./internal/task/handlers)
-nice -n -20 /tmp/opencode/task-create-baseline-fixed.test -test.run '^$' -test.bench '^BenchmarkTaskCreateContention/final/start_agent=(true|false)/sessions_8$' -test.benchtime=100x -test.count=5
-nice -n -20 /tmp/opencode/task-create-candidate-fixed.test -test.run '^$' -test.bench '^BenchmarkTaskCreateContention/final/start_agent=(true|false)/sessions_8$' -test.benchtime=100x -test.count=5
+(cd /tmp/opencode/kandev-baseline-fixup/apps/backend && go test -c -trimpath -tags fts5 -o /tmp/opencode/task-create-baseline-fixup.test ./internal/task/handlers)
+(cd apps/backend && go test -c -trimpath -tags fts5 -o /tmp/opencode/task-create-candidate-fixup.test ./internal/task/handlers)
+nice -n -20 /tmp/opencode/task-create-baseline-fixup.test -test.run '^$' -test.bench '^BenchmarkTaskCreateContention/final/start_agent=(true|false)/sessions_8$' -test.benchtime=100x -test.count=5
+nice -n -20 /tmp/opencode/task-create-candidate-fixup.test -test.run '^$' -test.bench '^BenchmarkTaskCreateContention/final/start_agent=(true|false)/sessions_8$' -test.benchtime=100x -test.count=5
 ```
 
 Completed diagnostic command:

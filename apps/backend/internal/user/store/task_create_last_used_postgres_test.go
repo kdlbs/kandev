@@ -14,6 +14,10 @@ import (
 func newTaskCreateLastUsedPostgresRepo(t *testing.T) *sqliteRepository {
 	t.Helper()
 	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// OpenIsolatedPostgres caps the pool at one connection. The concurrent
+	// test needs independent connections so the two writers can overlap.
+	conn.SetMaxOpenConns(4)
+	conn.SetMaxIdleConns(4)
 	repo, err := newSQLiteRepositoryWithDB(conn, conn)
 	if err != nil {
 		t.Fatalf("new postgres repo: %v", err)

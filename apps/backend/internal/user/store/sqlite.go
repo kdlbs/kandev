@@ -664,7 +664,7 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 	sort.Strings(workflowIDs)
 	for _, workspaceID := range workflowIDs {
 		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
-		if workspaceID == "" || workflowID == "" {
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
 			continue
 		}
 		expr = fmt.Sprintf(

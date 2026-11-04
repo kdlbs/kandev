@@ -1,7 +1,7 @@
 ---
 id: "01-measure-creation"
 title: "Measure full creation under load"
-status: completed
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -29,7 +29,9 @@ and unrelated color writes. Retain the original benchmark binary before changes.
 - Offer zero, four, and eight independent streams at 100 text events/s each.
 - Measure immediate-start and no-agent requests separately.
 - Report at least 100 requests per point, latency percentiles, errors, writer
-  acquisitions/commits, offered events, projected events, and settings CAS failures.
+  wait counters, offered events, and projected events. Writer acquisitions,
+  commits, individual statements, and settings-CAS failures are deferred
+  instrumentation for this in-progress work order.
 - Add focused phase instrumentation only if it identifies an unresolved delay.
   Keep prompts and SQL parameter values out of output.
 
@@ -85,7 +87,10 @@ delivery contention benchmark.
 
 ## Results
 
-Completed. `TestTaskCreateContentionFixture` and
+Benchmark and fixture delivered; acquisition/commit and settings-CAS metrics
+remain deferred, so this work order stays in progress.
+
+`TestTaskCreateContentionFixture` and
 `BenchmarkTaskCreateContention` live beside the real task HTTP handlers. The
 fixture uses file-backed SQLite through `OpenSQLite` and `OpenSQLiteReader`,
 the production task/user repositories and services, the real orchestrator
@@ -94,13 +99,13 @@ production durable-delivery receive/projection, cursor, and durability-barrier
 paths. Only the asynchronous provider/process launch is substituted.
 
 Baseline source: revision `a0f2e665701` in temporary worktree
-`/tmp/opencode/kandev-baseline-fixed`. The same corrected fixture and benchmark
+`/tmp/opencode/kandev-baseline-fixup`. The same corrected fixture and benchmark
 are present there. Retained binaries:
 
-- Baseline: `/tmp/opencode/task-create-baseline-fixed.test`, SHA-256
-  `abb83fd3451bd96b8db93e0b9bd74b01a9484c940f8d12d5d4ac709c76f19f92`.
-- Candidate: `/tmp/opencode/task-create-candidate-fixed.test`, SHA-256
-  `1ff15ed60fbb1637c61379bbb0df416d4db81144df1b0f3ce64d36a9552e3a6c`.
+- Baseline: `/tmp/opencode/task-create-baseline-fixup.test`, SHA-256
+  `af00327b0651104b311f0a18e7ea03397158cd8f1a4550d11721581903e0feb2`.
+- Candidate: `/tmp/opencode/task-create-candidate-fixup.test`, SHA-256
+  `c4ead47683f37ca3fddc5941f4df43a0025906c2b16c844df3521d29bf8cad69`.
 
 Verification:
 
@@ -118,7 +123,9 @@ delivery. A failed color, too few color samples, or less than 90% timely
 delivery fails the benchmark.
 
 Five eight-stream runs per binary on the same host produced unstable p95
-values under unrelated host load; the candidate does not consistently beat the
-baseline. The complete comparison and the unproven AC .1 result are recorded in
-`plan.md`. Writer acquisitions, commits, and individual SQL statements are not
-counted separately; pool wait counters are the contention evidence.
+values under unrelated host load; the median improvement was only about 1.3%,
+well below the target. The complete comparison and the unproven AC .1/AC .2
+results are recorded in `plan.md`. The requested writer-acquisition, commit, and individual-statement
+counters, plus settings-CAS failure counts, are not collected. They remain
+deferred instrumentation work; pool wait counters and the user-service error
+path are the current evidence, and this work order is not marked complete.

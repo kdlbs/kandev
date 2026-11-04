@@ -89,8 +89,16 @@ func runTaskCreateContention(b *testing.B, startAgent bool, streamCount int) {
 			runDurableAckWorker(streamCtx, fixture.repo, target)
 		}(target)
 	}
+	var stopStreamsOnce sync.Once
+	stopStreams := func() {
+		stopStreamsOnce.Do(func() {
+			cancelStreams()
+			streamWG.Wait()
+		})
+	}
+	b.Cleanup(stopStreams)
 	if streamCount > 0 {
-		time.Sleep(time.Second)
+		waitForDurableStreams(b, targets)
 	}
 	fixture.measurementEnd.Store(0)
 
@@ -123,6 +131,16 @@ func runTaskCreateContention(b *testing.B, startAgent bool, streamCount int) {
 			colorMu.Unlock()
 		}
 	}()
+
+	var stopColorOnce sync.Once
+	stopColor := func() {
+		stopColorOnce.Do(func() {
+			close(colorTriggers)
+			colorWG.Wait()
+			cancelColors()
+		})
+	}
+	b.Cleanup(stopColor)
 
 	writerStatsBefore := fixture.writer.Stats()
 	measurement := contentionMeasurement{latencies: make([]time.Duration, 0, b.N)}
@@ -158,8 +176,7 @@ func runTaskCreateContention(b *testing.B, startAgent bool, streamCount int) {
 	writerStatsAfter := fixture.writer.Stats()
 	measurement.window = measureEnd.Sub(measureStart)
 
-	cancelStreams()
-	streamWG.Wait()
+	stopStreams()
 	for _, target := range targets {
 		measurement.offered += target.offered.Load() - target.startSequence.Load()
 		measurement.projected += target.projected.Load()
@@ -167,9 +184,7 @@ func runTaskCreateContention(b *testing.B, startAgent bool, streamCount int) {
 		measurement.streamFailures += target.streamFailures.Load()
 		measurement.ackFailures += target.ackFailures.Load()
 	}
-	close(colorTriggers)
-	colorWG.Wait()
-	cancelColors()
+	stopColor()
 
 	colorMu.Lock()
 	for _, result := range colorResults {
@@ -227,7 +242,7 @@ func runTaskCreateContention(b *testing.B, startAgent bool, streamCount int) {
 	if colorErrors > 0 {
 		b.Fatalf("color errors inside measurement: %d", colorErrors)
 	}
-	if b.N >= 20 {
+	if b.N >= contentionColorEveryCreates*contentionColorMinSamples {
 		validateContentionMeasurement(b, fixture, measurement, streamCount)
 	}
 }
@@ -320,6 +335,27 @@ func runDurableAckWorker(ctx context.Context, repo interface {
 				return
 			}
 		}
+	}
+}
+
+func waitForDurableStreams(tb testing.TB, targets []*contentionDurableTarget) {
+	tb.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		ready := true
+		for _, target := range targets {
+			if target.projected.Load() < contentionBatchSize || target.offered.Load() < contentionBatchSize {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			return
+		}
+		if time.Now().After(deadline) {
+			tb.Fatalf("durable streams did not project an initial batch within 10s")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -51,8 +51,8 @@ submission recovery, and unrelated edits.
   side-effect-free result. Workspace launch shall retain its asynchronous start.
 - **AC-TASKS-CREATE-RESPONSIVENESS-001.4:** When preparation creates a session,
   initial primary selection shall preserve an existing primary. Concurrent
-  preparations shall establish at most one primary. Explicit later promotion
-  shall retain its existing behavior.
+  preparations shall establish exactly one primary for a task with prepared
+  sessions. Explicit later promotion shall retain its existing behavior.
 - **AC-TASKS-CREATE-RESPONSIVENESS-001.5:** When successful creation repeats
   identical last-used choices, it shall preserve the current settings revision.
   Changed choices shall remain durable and portable. Concurrent color changes

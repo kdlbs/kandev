@@ -1407,6 +1407,19 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	}
 }
 
+// TestBuildPostgresTaskCreateLastUsedUpdateSkipsUnsafeWorkspaceKeys verifies
+// unsafe-only workflow maps do not produce an empty conditional update.
+func TestBuildPostgresTaskCreateLastUsedUpdateSkipsUnsafeWorkspaceKeys(t *testing.T) {
+	query, setArgs, diffArgs, hasPatch := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace.with.dot": "workflow-dot",
+		},
+	})
+	if hasPatch {
+		t.Fatalf("unsafe-only patch must be a no-op: query=%s set=%#v diff=%#v", query, setArgs, diffArgs)
+	}
+}
+
 // TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries verifies the generated Postgres update patches workflow history entries.
 func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *testing.T) {
 	query, setArgs, diffArgs, _ := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
