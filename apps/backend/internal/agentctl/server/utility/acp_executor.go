@@ -1146,6 +1146,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
+			Catalog:      option.Catalog,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, streams.ConfigOptionValue{
@@ -1166,6 +1167,7 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
+			Catalog:      option.Catalog,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, ProbeConfigOptionChoice{
@@ -1210,6 +1212,7 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 			Name:         sel.Name,
 			Description:  derefString(sel.Description),
 			CurrentValue: string(sel.CurrentValue),
+			Catalog:      acpcompat.CatalogFromSelectOptions(sel.Options),
 		}
 		if sel.Category != nil {
 			config.Category = string(*sel.Category)

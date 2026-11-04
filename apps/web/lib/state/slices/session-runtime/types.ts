@@ -9,6 +9,7 @@ import type {
   WorkspaceRestorationState,
 } from "./workspace-restoration";
 import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -331,6 +332,8 @@ export type ConfigOptionEntry = {
   currentValue: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 export type AgentCapabilitiesEntry = {

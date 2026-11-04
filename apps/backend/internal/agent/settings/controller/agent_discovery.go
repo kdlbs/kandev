@@ -391,6 +391,7 @@ func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO 
 			CurrentValue: opt.CurrentValue,
 			Category:     opt.Category,
 			Options:      choices,
+			Catalog:      opt.Catalog,
 		})
 	}
 	return out
@@ -510,7 +511,7 @@ func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discover
 	if hadProfiles {
 		return nil
 	}
-	return c.createDefaultProfile(ctx, agent.ID, p)
+	return c.createDefaultProfile(ctx, agent.ID, agentConfig, p)
 }
 
 // resolveDisplayName returns the display name for an agent config, falling back to its
@@ -547,15 +548,23 @@ func (c *Controller) buildProfileSyncParams(
 // createDefaultProfile creates the initial agent profile when none exist for an agent.
 // The model may be empty — the profile reconciler fills it from the host
 // utility capability cache on boot.
-func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p profileSyncParams) error {
+func (c *Controller) createDefaultProfile(
+	ctx context.Context,
+	agentID string,
+	agentConfig agents.Agent,
+	p profileSyncParams,
+) error {
 	profileName := p.displayName
 	if !p.isPassthrough && p.defaultModel != "" {
 		profileName = p.defaultModel
 	}
+	mode, envVars := devinProfilePermissionDefaults(agentConfig.ID(), "", nil, true)
 	defaultProfile := &models.AgentProfile{
 		AgentID:                    agentID,
 		Name:                       profileName,
 		Model:                      p.defaultModel,
+		Mode:                       mode,
+		EnvVars:                    envVarsFromDTO(envVars),
 		AgentDisplayName:           p.displayName,
 		AutoApprove:                p.autoApprove,
 		AllowIndexing:              p.allowIndexing,
