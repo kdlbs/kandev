@@ -1,7 +1,7 @@
 ---
 id: "01-fence-destination-allocation"
 title: "Fence profile destination allocation by entry"
-status: completed
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -51,3 +51,27 @@ checks passed on `5b4416a3e6fcb561bd66c5fff5704fa3db99155e`. The focused
 PostgreSQL 16.15 concurrency test passed three unskipped race-enabled runs in a
 disposable task-owned private-socket fixture. External agent attachment remained
 mocked; this work order does not claim provider or deployment acceptance.
+
+Run backend checks from `apps/backend`:
+
+```sh
+go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^TestWorkflowAllocation' -count=1
+go test -trimpath -tags fts5 ./internal/orchestrator -run '^(TestWorkflowAllocation|TestProcessOnEnterImplicitProfileSwitch)' -count=1
+go test -race -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^TestWorkflowAllocation' -count=1
+go test -race -trimpath -tags fts5 ./internal/orchestrator -run '^(TestWorkflowAllocation|TestProcessOnEnterImplicitProfileSwitch)' -count=1
+go test -trimpath -tags fts5 ./internal/task/repository/sqlite -count=1
+go test -trimpath -tags fts5 ./internal/orchestrator -count=1
+```
+
+For PostgreSQL parity, set `KANDEV_TEST_POSTGRES_DSN` to a disposable task-owned
+PostgreSQL 16+ private-socket database, then run from `apps/backend`:
+
+```sh
+go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^TestPostgresWorkflowAllocationConcurrentTransactions$' -count=3 -v
+```
+
+Run changed-file lint from the repository root:
+
+```sh
+bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/workflow_allocation.go apps/backend/internal/task/repository/sqlite/workflow_allocation_test.go
+```

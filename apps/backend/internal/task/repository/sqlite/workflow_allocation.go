@@ -60,7 +60,7 @@ func (r *Repository) workflowAllocationOwnerTx(ctx context.Context, tx *sqlx.Tx,
 		return nil, fmt.Errorf("read workflow allocation entry: %w", err)
 	}
 	if strings.HasPrefix(route.EntryIdentity, "entry:") {
-		if route.EntryIdentity != fmt.Sprintf("entry:%020d", entryID) {
+		if entryID == 0 || route.EntryIdentity != fmt.Sprintf("entry:%020d", entryID) {
 			return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 		}
 	} else if entryID > 0 {

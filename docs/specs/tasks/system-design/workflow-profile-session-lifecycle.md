@@ -356,19 +356,21 @@ Use conditional task-repository operations within the existing transition and
 lifecycle serialization. Fresh session insertion and prepared destination
 recording commit together; promotion and committed phase advance together.
 Preflight external credentials before that transaction; do not hold a database
-transaction while stopping or launching a runtime. The allocation path refuses
+transaction while stopping or launching a runtime. The profile allocation path refuses
 a second destination for a recorded entry. Runtime continuation and source
 cleanup require separate ownership checks.
 
-Reject an obsolete entry against the current transition/entry identity before
-replacing this record. A newer accepted entry may replace an unfinished or
-committed route; this allocation gate does not reconcile the prior runtime.
-Task deletion removes the route and duplication strips it. A deleted or terminal
-recorded destination cannot satisfy reuse. The same accepted entry must not
-allocate another destination when its recorded allocation is missing, failed,
-terminal, or has uncertain ownership; re-admission is refused. Only a distinct accepted
-entry may allocate a fresh destination under its start setting. This allocation
-fence does not restart a runtime or replay a prompt.
+Profile destinations reject obsolete entries before replacing the route. A newer
+accepted profile entry may replace an unfinished or committed route; this gate
+does not reconcile the prior runtime. Task deletion removes the route and
+duplication strips it. A deleted or terminal profile destination cannot be
+reused. The same accepted profile entry cannot allocate again when its recorded
+destination is missing, failed, terminal, or has uncertain ownership;
+re-admission is refused. Only a distinct accepted profile entry may allocate a
+fresh destination under its start setting. The fence does not restart a runtime
+or replay a prompt. Explicit initial/step targets keep their separate
+replacement rules.
+
 Test prepared/committed restart and rollback on both
 databases. Extend existing task metadata transaction helpers; do not assume
 unconditional `SetTaskMetadataKey` provides compare-and-set or write-once safety.

@@ -117,6 +117,20 @@ func TestWorkflowAllocationAllowsNonEntryIdentityWithoutTransition(t *testing.T)
 	require.Len(t, rows, 1)
 }
 
+func TestWorkflowAllocationRejectsZeroEntryIdentityWithoutTransition(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	route := allocationRouteFixture(t, repo)
+	route.EntryIdentity = "entry:00000000000000000000"
+	_, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(`DELETE FROM task_step_transitions WHERE task_id = ?`), "allocation-task")
+	require.NoError(t, err)
+
+	err = repo.CreateTaskSessionWithWorkflowSessionRoute(t.Context(), &models.TaskSession{ID: "zero-entry", TaskID: "allocation-task"}, &route)
+	require.ErrorIs(t, err, repoerrors.ErrWorkflowAllocationStaleEntry)
+	rows, err := repo.ListTaskSessions(t.Context(), "allocation-task")
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}
+
 func TestWorkflowAllocationConcurrentTransactions(t *testing.T) {
 	verifyWorkflowAllocationConcurrentTransactions(t, newRepoForSessionTests(t))
 }
