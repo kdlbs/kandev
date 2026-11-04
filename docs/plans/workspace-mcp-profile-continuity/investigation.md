@@ -161,7 +161,7 @@ All assertions preserved the native conversation.
 The six existing component checks also passed in backendapp, executor, and lifecycle:
 
 ```bash
-(cd apps/backend && go test -trimpath -p 1 ./internal/backendapp ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run '^(TestBuiltinMCPManagementRoutesAreWired|TestBuiltinFreshResumeAndModelSwitchResolveCurrentPolicy|TestExistingWorkspacePreparesBuiltinPackagesBeforeStart|TestBuiltinPromotionBindsWorkspaceBeforeCommand|TestBuiltinPromotionVerifiesRetainedBindingWithoutReplacingIt|TestStartupMCPReadyBeforeRecoveryAndLaunch)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -p 1 ./internal/backendapp ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run '^(TestBuiltinMCPManagementRoutesAreWired|TestBuiltinFreshResumeAndModelSwitchResolveCurrentPolicy|TestExistingWorkspacePreparesBuiltinPackagesBeforeStart|TestBuiltinPromotionBindsWorkspaceBeforeCommand|TestBuiltinPromotionVerifiesRetainedBindingWithoutReplacingIt|TestStartupMCPReadyBeforeRecoveryAndLaunch)$' -count=1)
 ```
 
 ### Teardown

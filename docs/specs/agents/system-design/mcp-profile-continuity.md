@@ -99,7 +99,7 @@ It does not inject the expected profile directly into that helper's MCP server.
 It initializes a real local MCP transport and compares canonical `tools/list` membership with a fresh start.
 
 The inventory test covers a pending title's owner, a non-owner session, a settled title, and canvas enabled/disabled contexts.
-`TestResumeWorkspaceHelperMCPGuidance` renders the capability-aware Kandev startup context for the same four contexts.
+`TestResumeWorkspaceHelperMCPGuidance` captures the prompt assembled by the production message-add path for the same four contexts.
 It asserts canvas and title sections follow the effective profile, and every canvas or title tool name those sections advertise exists in the promoted helper's real `tools/list`.
 It does not require every available tool to be advertised.
 The same test retains package-selection agreement against the delivered built-in catalog.

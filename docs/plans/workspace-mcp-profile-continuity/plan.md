@@ -105,7 +105,7 @@ No production changes are planned unless the new regression reveals a current de
 | --- | --- |
 | 001.1, 001.2, 001.6 | Task 00 native-process comparison: historical failure, current pass, unchanged conversation, retained-process control |
 | 001.1, 001.2 | Task 02 `TestResumeWorkspaceHelperMCPToolInventory`: production resolution, workspace-first promotion, real `tools/list`, negative mutation control |
-| 001.3, 001.4 | Task 02 guidance test renders the same four eligibility contexts, checks canvas/title sections and advertised tool names, and checks package guidance; existing resolver tests cover question policy |
+| 001.3, 001.4 | Task 02 guidance test captures the production message-add prompt for the same four eligibility contexts, checks canvas/title sections and advertised tool names, and checks package guidance; existing resolver tests cover question policy |
 | 001.5 | Existing binding acknowledgement/failure tests; extend only where composition coverage finds a gap |
 | 001.6 | Existing retained-binding tests plus Task 00 same-process evidence |
 
@@ -128,8 +128,9 @@ Task 02 asserts the generated startup context for the covered eligibility contex
 - Native current-main retained-process case: same execution, native process, conversation, and canvas tools preserved.
 - The six named wiring/resume/promotion/startup checks in Task 00 passed in all three Go packages.
 - `TestResumeWorkspaceHelperMCPToolInventory`: four cases passed, including real initialized `tools/list`, direct-start parity, identity, and persisted binding.
-- `TestResumeWorkspaceHelperMCPGuidance`: the same four eligibility contexts plus a configuration-package case; canvas/title sections and advertised tool names matched the promoted inventory and profile.
-- Guidance mutation control: forcing canvas/title guidance on failed the non-owner, settled-title, and canvas-disabled cases; the source was restored.- Mutation control: omitting the promotion binding call failed the direct-start inventory comparison; the source was restored.
+- `TestResumeWorkspaceHelperMCPGuidance`: the same four eligibility contexts plus a configuration-package case; the production message-add prompt's canvas/title sections and advertised tool names matched the promoted inventory and profile.
+- Guidance mutation control: forcing canvas/title guidance on failed the non-owner, settled-title, and canvas-disabled cases; the source was restored.
+- Promotion binding mutation control: omitting the binding call failed the direct-start inventory comparison; the source was restored.
 - Both disposable instances stopped. Their port ranges have no listeners and no process retains either disposable home.
 - `python3 scripts/list-docs.py validate`: passed, 431 decisions and 1914 specifications.
 - `python3 scripts/lint-spec-files.py --all`: passed.

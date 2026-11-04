@@ -68,9 +68,9 @@ No new profile endpoint or production behavior is planned.
 Record the mutation failure, restore the source, and run from the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/backendapp -run '^TestResumeWorkspaceHelperMCP(ToolInventory|Guidance)$' -count=1 -v)
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator/executor ./internal/orchestrator ./internal/sysprompt -run 'MCPProfile|MCPMode|Canvas|TaskTitle|Builtin' -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/mcp/server -run 'Builtin|BindInitialProfile' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp -run '^TestResumeWorkspaceHelperMCP(ToolInventory|Guidance)$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator/executor ./internal/orchestrator ./internal/sysprompt -run 'MCPProfile|MCPMode|Canvas|TaskTitle|Builtin' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/mcp/server -run 'Builtin|BindInitialProfile' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -135,13 +135,15 @@ composition tests; no production source changed.
 - After promotion, the test re-resolves the profile and confirms title and
   canvas eligibility. It parses the persisted binding and confirms the execution,
   session, and saved native conversation identities are unchanged.
-- `TestResumeWorkspaceHelperMCPGuidance` renders the capability-aware Kandev
-  startup context through `sysprompt.InjectKandevContextWithOptions` for the same
-  four eligibility contexts. It asserts the canvas and title sections appear only
-  when eligible, and that every canvas or title tool name advertised by those
-  sections exists in the promoted helper's real `tools/list`. It does not require
-  every available tool to be advertised. Package-selection checks remain for the
-  default and task-enabled configuration package sets.
+- `TestResumeWorkspaceHelperMCPGuidance` captures the prompt assembled by the
+  production message-add path (`RegisterMessageRoutes` to `wsAddMessage`) for the
+  same four eligibility contexts. The message handler derives title and canvas
+  decisions from task state and the production-resolved profile, and injects the
+  prepared package manifest. The test asserts the canvas and title sections
+  appear only when eligible, and that every canvas or title tool name advertised
+  by those sections exists in the promoted helper's real `tools/list`. It does
+  not require every available tool to be advertised. Package-selection checks
+  remain for the default and task-enabled configuration package sets.
 - AC 001.5 remains covered by the existing lifecycle promotion test: an
   unsupported helper returns an error before any agent command exists. The
   composition test exercises the matching exact acknowledgement on success.
@@ -166,10 +168,10 @@ Both production changes were restored before the final checks.
 ### Verification
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/backendapp -run '^TestResumeWorkspaceHelperMCP(ToolInventory|Guidance)$' -count=1 -v)
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator/executor ./internal/orchestrator ./internal/sysprompt -run 'MCPProfile|MCPMode|Canvas|TaskTitle|Builtin' -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/mcp/server -run 'Builtin|BindInitialProfile' -count=1)
-(cd apps/backend && go build -trimpath ./...)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp -run '^TestResumeWorkspaceHelperMCP(ToolInventory|Guidance)$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/orchestrator/executor ./internal/orchestrator ./internal/sysprompt -run 'MCPProfile|MCPMode|Canvas|TaskTitle|Builtin' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl ./internal/agentctl/server/api ./internal/agentctl/server/process ./internal/mcp/server -run 'Builtin|BindInitialProfile' -count=1)
+(cd apps/backend && go build -trimpath -tags fts5 ./...)
 bash scripts/lint-go-changed apps/backend/internal/backendapp/restart_mcp_catalog_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all

@@ -28,10 +28,13 @@ import (
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
+	"github.com/kandev/kandev/internal/orchestrator"
 	executorpkg "github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/sysprompt"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 const resumeCatalogExecutionID = "resume-catalog-helper"
@@ -41,11 +44,12 @@ const resumeCatalogExecutionID = "resume-catalog-helper"
 // workspace access uses, so optional tools can only arrive through the
 // production binding operation.
 type resumeCatalogHelper struct {
+	harness   bootStateTestHarness
 	server    *httptest.Server
 	mcp       *mcpserver.Server
 	execution *lifecycle.AgentExecution
 	executor  *executorpkg.Executor
-	taskID    string
+	task      *models.Task
 	session   *models.TaskSession
 	adapter   *lifecycleAdapter
 	profile   p.Context
@@ -80,7 +84,7 @@ func TestResumeWorkspaceHelperMCPToolInventory(t *testing.T) {
 			promoteResumeCatalogHelper(t, helper)
 
 			names := listMCPToolNames(t, helper.server.URL+"/mcp")
-			resolved, err := helper.executor.PrepareTaskSessionMCPProfile(context.Background(), helper.taskID, helper.session, true)
+			resolved, err := helper.executor.PrepareTaskSessionMCPProfile(context.Background(), helper.task.ID, helper.session, true)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantTitle, resolved.HasCapability(p.CapabilityTaskTitle),
 				"promotion must preserve the owned title capability")
@@ -107,7 +111,7 @@ func TestResumeWorkspaceHelperMCPGuidance(t *testing.T) {
 			helper := newResumeCatalogHelper(t, tc)
 			promoteResumeCatalogHelper(t, helper)
 			names := listMCPToolNames(t, helper.server.URL+"/mcp")
-			startupContext := resumeCatalogStartupContext(helper.profile, helper.taskID, helper.session.ID)
+			startupContext := captureResumeCatalogStartupContext(t, helper)
 			assertResumeCapabilityGuidance(t, startupContext, names, tc)
 			assertResumeGuidanceMatchesProfile(t, startupContext, helper.profile.BuiltinPackages, helper.mcp.BuiltinCatalog())
 			require.Contains(t, startupContext, "MCP DISCOVERY:")
@@ -128,15 +132,98 @@ func resumeCatalogToolCases() []resumeCatalogCase {
 	}
 }
 
-func resumeCatalogStartupContext(profile p.Context, taskID, sessionID string) string {
-	return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, "resume this work", sysprompt.KandevContextOptions{
-		BuiltinPackages:                profile.BuiltinPackages,
-		IncludeCoordinatorTaskControls: true,
-		IncludeTaskTitleTool:           profile.HasCapability(p.CapabilityTaskTitle),
-		IncludeCanvasGuidance:          profile.HasCapability(p.CapabilityCanvas),
-		IncludeUserQuestionTool:        profile.HasCapability(p.CapabilityUserQuestion),
-		IncludeParentQuestionTool:      profile.HasCapability(p.CapabilityParentQuestion),
+func captureResumeCatalogStartupContext(t *testing.T, helper *resumeCatalogHelper) string {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, helper.harness.taskRepo.UpdateTaskSessionState(ctx, helper.session.ID, models.TaskSessionStateCreated, ""))
+	helper.session.State = models.TaskSessionStateCreated
+	router := gin.New()
+	dispatcher := ws.NewDispatcher()
+	taskhandlers.RegisterMessageRoutes(router, dispatcher, helper.harness.taskSvc, &resumeCatalogMessageOrchestrator{
+		executor: helper.executor, task: helper.task, session: helper.session,
+	}, logger.Default())
+	request, err := ws.NewRequest("resume-catalog-guidance", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id": helper.task.ID, "session_id": helper.session.ID, "content": "resume this work",
 	})
+	require.NoError(t, err)
+	response, err := dispatcher.Dispatch(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type, string(response.Payload))
+	messages, err := helper.harness.taskRepo.ListMessages(ctx, helper.session.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	return messages[0].Content
+}
+
+// resumeCatalogMessageOrchestrator drives the production message handler. It
+// resolves title and canvas guidance through the same task state and executor
+// profile the production orchestrator uses.
+type resumeCatalogMessageOrchestrator struct {
+	executor *executorpkg.Executor
+	task     *models.Task
+	session  *models.TaskSession
+	started  []string
+}
+
+func (o *resumeCatalogMessageOrchestrator) PromptTask(_ context.Context, _, _, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
+	o.started = append(o.started, prompt)
+	return &orchestrator.PromptResult{}, nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) ResumeTaskSession(context.Context, string, string) error {
+	return nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) StartCreatedSession(_ context.Context, _, _, _, prompt string, _, _, _ bool, _ []v1.MessageAttachment, _ []v1.EntityReference) error {
+	o.started = append(o.started, prompt)
+	return nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) StartCreatedSessionWithDeliverySubmission(_ context.Context, _, _, _, prompt string, _ orchestrator.DirectPromptStartOptions) (*executorpkg.TaskExecution, error) {
+	o.started = append(o.started, prompt)
+	return &executorpkg.TaskExecution{}, nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) QueueUserPrompt(_ context.Context, _, _, prompt, _ string, _ bool, _ []v1.MessageAttachment, _ map[string]interface{}, _ bool) error {
+	o.started = append(o.started, prompt)
+	return nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
+	return false
+}
+
+func (o *resumeCatalogMessageOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
+	return v1.ForegroundActivityGenerating
+}
+
+func (o *resumeCatalogMessageOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (o *resumeCatalogMessageOrchestrator) SteerTask(_ context.Context, _, _, prompt, _ string, _ bool, _ []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	o.started = append(o.started, prompt)
+	return &orchestrator.PromptResult{}, nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) ClaimTaskTitleSession(_ context.Context, _, sessionID string) (bool, error) {
+	return models.IsAgentTitleOwner(o.task.Metadata, sessionID), nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, _ string) (bool, error) {
+	profile, err := o.executor.ResolveTaskSessionMCPProfile(ctx, taskID, o.session, true)
+	if err != nil {
+		return false, err
+	}
+	return profile.HasCapability(p.CapabilityCanvas), nil
+}
+
+func (o *resumeCatalogMessageOrchestrator) PrepareTaskSessionMCPPrompt(ctx context.Context, taskID, _ string) (context.Context, error) {
+	return o.executor.PrepareMCPLaunch(ctx, taskID, o.session, true)
 }
 
 func assertResumeCapabilityGuidance(t *testing.T, startupContext string, names []string, tc resumeCatalogCase) {
@@ -259,31 +346,32 @@ func canvasToolNames() []string {
 func newResumeCatalogHelper(t *testing.T, tc resumeCatalogCase) *resumeCatalogHelper {
 	t.Helper()
 	harness := newBootStateTestHarness(t)
-	workspaceID, taskID, session := createResumeCatalogTask(t, harness, tc)
+	workspaceID, task, session := createResumeCatalogTask(t, harness, tc)
 	log := logger.Default()
 	settings, cleanup, err := agentsettingsstore.Provide(harness.db, harness.db, log)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cleanup()) })
 	if tc.configurationPackage {
-		enableResumeCatalogConfiguration(t, settings, workspaceID, taskID)
+		enableResumeCatalogConfiguration(t, settings, workspaceID, task.ID)
 	}
 	executor := executorpkg.NewExecutor(nil, harness.taskRepo, log, executorpkg.ExecutorConfig{})
 	executor.SetBuiltinPolicyReader(settings)
 	executor.SetCanvasesEnabled(tc.canvases)
-	profile, err := executor.PrepareTaskSessionMCPProfile(context.Background(), taskID, session, true)
+	profile, err := executor.PrepareTaskSessionMCPProfile(context.Background(), task.ID, session, true)
 	require.NoError(t, err)
 	require.NotNil(t, profile.BuiltinPackages)
 
-	server, mcp := newResumeCatalogAgentctl(t, taskID, session.ID)
+	server, mcp := newResumeCatalogAgentctl(t, task.ID, session.ID)
 	mgr := newResumeCatalogLifecycle(t, workspaceID, log)
-	execution := registerResumeCatalogExecution(t, mgr, server, taskID, session.ID, workspaceID)
+	execution := registerResumeCatalogExecution(t, mgr, server, task.ID, session.ID, workspaceID)
 	return &resumeCatalogHelper{
-		server: server, mcp: mcp, execution: execution, executor: executor, taskID: taskID, session: session,
+		harness: harness, server: server, mcp: mcp, execution: execution, executor: executor,
+		task: task, session: session,
 		adapter: newLifecycleAdapter(mgr, nil, log), profile: profile,
 	}
 }
 
-func createResumeCatalogTask(t *testing.T, harness bootStateTestHarness, tc resumeCatalogCase) (string, string, *models.TaskSession) {
+func createResumeCatalogTask(t *testing.T, harness bootStateTestHarness, tc resumeCatalogCase) (string, *models.Task, *models.TaskSession) {
 	t.Helper()
 	ctx := context.Background()
 	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
@@ -314,7 +402,7 @@ func createResumeCatalogTask(t *testing.T, harness bootStateTestHarness, tc resu
 		State: models.TaskSessionStateRunning, IsPrimary: true,
 	}
 	require.NoError(t, harness.taskRepo.CreateTaskSession(ctx, session))
-	return workspaces[0].ID, result.Task.ID, session
+	return workspaces[0].ID, result.Task, session
 }
 
 func enableResumeCatalogConfiguration(t *testing.T, writer resumeCatalogPreferenceWriter, workspaceID, taskID string) {

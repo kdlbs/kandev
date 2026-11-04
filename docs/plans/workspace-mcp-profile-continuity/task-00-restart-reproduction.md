@@ -58,7 +58,7 @@ Real Claude discovery remains an explicit limit; Task 02 covers generated-guidan
 The following component command passed in all three packages:
 
 ```bash
-(cd apps/backend && go test -trimpath -p 1 ./internal/backendapp ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run '^(TestBuiltinMCPManagementRoutesAreWired|TestBuiltinFreshResumeAndModelSwitchResolveCurrentPolicy|TestExistingWorkspacePreparesBuiltinPackagesBeforeStart|TestBuiltinPromotionBindsWorkspaceBeforeCommand|TestBuiltinPromotionVerifiesRetainedBindingWithoutReplacingIt|TestStartupMCPReadyBeforeRecoveryAndLaunch)$' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -p 1 ./internal/backendapp ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run '^(TestBuiltinMCPManagementRoutesAreWired|TestBuiltinFreshResumeAndModelSwitchResolveCurrentPolicy|TestExistingWorkspacePreparesBuiltinPackagesBeforeStart|TestBuiltinPromotionBindsWorkspaceBeforeCommand|TestBuiltinPromotionVerifiesRetainedBindingWithoutReplacingIt|TestStartupMCPReadyBeforeRecoveryAndLaunch)$' -count=1)
 ```
 
 Actual process commands, matrix results, version pins, identities, artifacts, and teardown are recorded in [the investigation](investigation.md).
