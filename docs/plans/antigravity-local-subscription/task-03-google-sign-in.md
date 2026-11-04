@@ -147,4 +147,13 @@ Verification: backend targeted tests, `go test -race` for host utility/auth stat
 
 Review remediation: login attempts now fence terminal state until native cleanup completes, expire without retaining URLs, and reject a successor while cleanup is unfinished. Sign-in polling survives transient status failures, clears missing attempts after restart, fences stale responses, and closes only after confirmed cancellation. The phone sheet renders one action region.
 
-Browser setup E2E specs remain open; deterministic backend and component coverage is complete.
+Browser setup E2E specs remain open; earlier deterministic backend and component checks passed.
+Those checks did not exercise the configure boundary described below.
+
+### Sign-in launch regression, November 4
+
+The Settings sign-in action sends `args[1:]` to a configure API that expects full argv.
+Linux therefore sends only `--uid=` and fails before native startup.
+The [focused repair package](../antigravity-sign-in-launch/plan.md) owns the correction and real HTTP-boundary regression.
+That repair is implemented: the sign-in caller passes the complete argv and `TestAntigravityLoginConfigurePreservesCommand` reaches the controlled start marker through the real configure handler.
+Keep this work order `in_progress`; the browser setup specs and full native qualification remain open.
