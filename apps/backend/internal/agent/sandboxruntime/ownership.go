@@ -125,7 +125,7 @@ func (m *Manager) normalizeApproval(ctx context.Context, attempt *policy.Attempt
 		return policy.ApprovalOperation{}, err
 	}
 	operation := response.Operation
-	if operation.Kind != pluginsdk.SandboxOperationFilesystem {
+	if operation == nil || operation.Kind != pluginsdk.SandboxOperationFilesystem {
 		return policy.ApprovalOperation{}, policy.ErrIneligible
 	}
 	return policy.ApprovalOperation{RequestID: operation.RequestId, ProviderSessionID: operation.ProviderSessionId, ChildPID: int(operation.ChildPid), Access: operation.Access, Target: operation.Target}, nil

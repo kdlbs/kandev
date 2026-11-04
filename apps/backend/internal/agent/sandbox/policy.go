@@ -25,27 +25,29 @@ type Source struct {
 }
 
 type Policy struct {
-	ID             string          `json:"id"`
-	WorkspaceID    string          `json:"workspace_id"`
-	Name           string          `json:"name"`
-	InstallationID string          `json:"installation_id"`
-	ProviderKey    string          `json:"provider_key"`
-	Grants         contract.Grants `json:"grants"`
-	Sources        []Source        `json:"sources"`
+	ID             string             `json:"id"`
+	WorkspaceID    string             `json:"workspace_id"`
+	Name           string             `json:"name"`
+	InstallationID string             `json:"installation_id"`
+	ProviderKey    string             `json:"provider_key"`
+	Grants         contract.Grants    `json:"grants"`
+	Sources        []Source           `json:"sources"`
+	PolicyV2       *contract.PolicyV2 `json:"policy_v2,omitempty"`
 }
 
 type Revision struct {
-	ID                 string              `json:"id"`
-	Number             int64               `json:"number"`
-	SchemaVersion      int                 `json:"schema_version"`
-	Digest             string              `json:"digest"`
-	Policy             Policy              `json:"policy"`
-	OperatorID         string              `json:"operator_id"`
-	OrgID              string              `json:"org_id"`
-	CreatedAt          time.Time           `json:"created_at"`
-	Revoked            bool                `json:"revoked"`
-	LearningProposalID string              `json:"learning_proposal_id,omitempty"`
-	Learning           *LearningProvenance `json:"learning,omitempty"`
+	Migration          *PolicyMigrationProvenance `json:"migration,omitempty"`
+	ID                 string                     `json:"id"`
+	Number             int64                      `json:"number"`
+	SchemaVersion      int                        `json:"schema_version"`
+	Digest             string                     `json:"digest"`
+	Policy             Policy                     `json:"policy"`
+	OperatorID         string                     `json:"operator_id"`
+	OrgID              string                     `json:"org_id"`
+	CreatedAt          time.Time                  `json:"created_at"`
+	Revoked            bool                       `json:"revoked"`
+	LearningProposalID string                     `json:"learning_proposal_id,omitempty"`
+	Learning           *LearningProvenance        `json:"learning,omitempty"`
 }
 
 type Service struct {

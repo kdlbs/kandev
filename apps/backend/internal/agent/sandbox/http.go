@@ -21,6 +21,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine) {
 	s.registerAuditRoutes(group)
 	group.GET("/sessions/:id/attempts/:attempt/report", s.readReportHTTP)
 	s.registerCatalogRoutes(group)
+	s.registerMigrationRoutes(group)
 	group.POST("/policies", s.publishHTTP)
 	group.GET("/revisions/:id", func(c *gin.Context) {
 		revision, err := s.GetRevision(c.Request.Context(), c.Param("id"))

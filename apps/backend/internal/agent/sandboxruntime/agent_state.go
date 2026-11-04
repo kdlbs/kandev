@@ -9,7 +9,11 @@ import (
 )
 
 func (p *Prepared) prepareAgentState(req PrepareRequest, resolved *policy.Resolved) error {
-	if !slices.ContainsFunc(resolved.Revision.Policy.Grants.Filesystem, func(grant contract.FilesystemGrant) bool { return grant.Reference == contract.ReferenceAgentState }) {
+	filesystem := resolved.Revision.Policy.Grants.Filesystem
+	if typed := resolved.Revision.Policy.PolicyV2; typed != nil {
+		filesystem = append(slices.Clone(typed.StaticGrants.Filesystem), typed.ApprovalEnvelope.Filesystem...)
+	}
+	if !slices.ContainsFunc(filesystem, func(grant contract.FilesystemGrant) bool { return grant.Reference == contract.ReferenceAgentState }) {
 		return nil
 	}
 	scope := contract.AgentStateScope{OrgID: req.Selection.OrgID, WorkspaceID: req.Selection.WorkspaceID, SessionID: req.SessionID, AgentProfileID: req.Selection.AgentProfileID, InstallationID: p.binding.InstallationID, ProviderKey: p.binding.ProviderKey}

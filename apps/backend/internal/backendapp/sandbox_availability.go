@@ -27,7 +27,7 @@ func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, r
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(described.Description.SupportedTransports, "local") {
+	if !slices.Contains(described.Description.SupportedTransports, sandboxLocalTransport) || !resolved.Revision.SupportedBy(binding.ProtocolVersion(), described.Description.GetCapabilitiesV2().GetPolicySchemas()) {
 		return sandbox.ErrIneligible
 	}
 	if _, err = providers.ReadSandboxRuntime(ctx, binding, described.Description.RuntimeArtifact); err != nil {
@@ -44,7 +44,7 @@ func checkSandboxInstallation(ctx context.Context, providers *plugins.Service, r
 }
 
 func sandboxInstallation(ctx context.Context, providers *plugins.Service, resolved *sandbox.Resolved) (plugins.SandboxProviderBinding, error) {
-	if resolved == nil || resolved.Revision == nil {
+	if resolved == nil || !resolved.Revision.ValidSchema() {
 		return plugins.SandboxProviderBinding{}, sandbox.ErrIneligible
 	}
 	items, err := providers.ListSandboxProviders(ctx)

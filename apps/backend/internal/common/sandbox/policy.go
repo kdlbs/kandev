@@ -12,7 +12,10 @@ import (
 	"unicode"
 )
 
-const ProtocolHTTPS = "https"
+const (
+	ProtocolHTTPS = "https"
+	ProtocolTCP   = "tcp"
+)
 
 var (
 	ErrInvalidPolicy  = errors.New("sandbox policy is invalid")
@@ -148,7 +151,7 @@ func canonicalPath(path string) (string, error) {
 }
 
 func validRoute(grant NetworkGrant) bool {
-	if grant.Port == 0 || (grant.Protocol != ProtocolHTTPS && grant.Protocol != ProtocolHTTP && grant.Protocol != "tcp") {
+	if grant.Port == 0 || (grant.Protocol != ProtocolHTTPS && grant.Protocol != ProtocolHTTP && grant.Protocol != ProtocolTCP) {
 		return false
 	}
 	if addr, err := netip.ParseAddr(grant.Host); err == nil {

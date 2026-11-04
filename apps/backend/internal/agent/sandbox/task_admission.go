@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-
-	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
 
 type taskGuard struct {
@@ -76,8 +74,11 @@ func (s *Service) readTaskGuard(ctx context.Context, orgID, taskID, workspaceID 
 	if err = json.Unmarshal([]byte(raw), &guard); err != nil {
 		return nil, 0, err
 	}
-	if guard.WorkspaceID != workspaceID || guard.Resolved == nil || guard.Resolved.Revision == nil || guard.Resolved.Revision.OrgID != orgID {
+	if guard.WorkspaceID != workspaceID || guard.Resolved == nil || !guard.Resolved.Revision.ValidSchema() || guard.Resolved.Revision.OrgID != orgID {
 		return nil, 0, ErrIneligible
+	}
+	if err = s.validateResolvedGrants(guard.Resolved.Revision, guard.Resolved.Ceiling); err != nil {
+		return nil, 0, err
 	}
 	return guard.Resolved, version, nil
 }
@@ -141,6 +142,9 @@ func (s *Service) InheritTaskGuard(ctx context.Context, selection SelectionConte
 }
 
 func noBroader(candidate, limit *Resolved) bool {
+	if candidate == nil || limit == nil || !candidate.Revision.ValidSchema() || !limit.Revision.ValidSchema() {
+		return false
+	}
 	a, b := candidate.Revision.Policy, limit.Revision.Policy
-	return a.InstallationID == b.InstallationID && a.ProviderKey == b.ProviderKey && contract.WithinCeiling(a.Grants, b.Grants) == nil
+	return a.InstallationID == b.InstallationID && a.ProviderKey == b.ProviderKey && withinPriorPolicy(a, b) == nil
 }

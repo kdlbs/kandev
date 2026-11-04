@@ -73,6 +73,9 @@ func TestSandboxBackendFactoryCapturesLocalExecutionAndRestart(t *testing.T) {
 	availability, err := policies.CheckAvailability(ctx, policy.PreviewContext{ExecutorID: "local"})
 	require.NoError(t, err)
 	require.True(t, availability.Available, "installed provider runtime must pass the explicit read-only check")
+	t.Run("policy schema availability", func(t *testing.T) {
+		testSandboxAvailabilityPolicySchema(t, ctx, policies)
+	})
 	runtime, err := newSandboxRuntime(cfg, policies, providers)
 	require.NoError(t, err)
 	require.NotNil(t, runtime)

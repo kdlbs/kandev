@@ -104,13 +104,16 @@ func validateCompiledOverrides(req PrepareRequest, compiled *pluginsdk.SandboxCo
 }
 
 func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *policy.Resolved) (*pluginsdk.CompileSandboxPolicyResponse, *plugins.SandboxRuntimeBinary, contract.Grants, error) {
+	if !resolved.Revision.ValidSchema() || p.binding.ProtocolVersion() == 1 && resolved.Revision.SchemaVersion != 1 {
+		return nil, nil, contract.Grants{}, policy.ErrIneligible
+	}
 	facts := &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport}
 	description, err := p.manager.providers.DescribeSandboxProvider(ctx, p.binding, &pluginsdk.DescribeSandboxProviderRequest{Context: p.request, Runtime: facts})
 	if err != nil {
 		return nil, nil, contract.Grants{}, err
 	}
 	p.description = description.Description
-	if !slices.Contains(p.description.SupportedTransports, sandboxLocalTransport) || p.binding.ProtocolVersion() == 2 && !slices.Contains(p.description.GetCapabilitiesV2().GetPolicySchemas(), uint32(1)) {
+	if !slices.Contains(p.description.SupportedTransports, sandboxLocalTransport) || !resolved.Revision.SupportedBy(p.binding.ProtocolVersion(), p.description.GetCapabilitiesV2().GetPolicySchemas()) {
 		return nil, nil, contract.Grants{}, policy.ErrIneligible
 	}
 	binary, err := p.manager.providers.ReadSandboxRuntime(ctx, p.binding, p.description.RuntimeArtifact)
@@ -121,11 +124,11 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 	if err = p.prepareAgentState(req, resolved); err != nil {
 		return nil, nil, contract.Grants{}, err
 	}
-	grants, err := contract.ResolveAttemptGrants(resolved.Revision.Policy.Grants, req.WorkDir, p.agentState, []string{p.manager.base}, req.SessionID)
+	grants, typed, err := p.resolveRuntimePolicy(req, resolved)
 	if err != nil {
 		return nil, nil, contract.Grants{}, err
 	}
-	p.policy = wirePolicy(resolved, grants)
+	p.policy = wirePolicy(resolved, grants, typed)
 	endpoints, err := p.prepareMCP(req, grants)
 	if err != nil {
 		return nil, nil, contract.Grants{}, err

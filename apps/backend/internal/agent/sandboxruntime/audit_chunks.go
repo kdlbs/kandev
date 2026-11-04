@@ -14,7 +14,7 @@ func (m *Manager) verifyAuditChunks(ctx context.Context, binding plugins.Sandbox
 	handle := uuid.NewString()
 	var sequence uint64
 	var verified *pluginsdk.SandboxAuditVerificationV2
-	wire := wirePolicy(attempt.Snapshot.Resolved, attempt.Snapshot.Grants)
+	wire := wirePolicy(attempt.Snapshot.Resolved, attempt.Snapshot.Grants, attempt.Snapshot.PolicyV2)
 	for index, source := range archive.Sources {
 		var offset int64
 		for {

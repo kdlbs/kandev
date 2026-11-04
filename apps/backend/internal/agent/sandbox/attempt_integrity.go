@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 
 func validStoredAttempt(attempt *Attempt, orgID, executionID string, generation uint64) bool {
 	snapshot := attempt.Snapshot
-	if snapshot.SchemaVersion != 1 || snapshot.OrgID != orgID || snapshot.ExecutionID != executionID || attempt.Version < 1 || attempt.UpdatedAt.IsZero() {
+	if !validAttemptPermissions(snapshot) || snapshot.OrgID != orgID || snapshot.ExecutionID != executionID || attempt.Version < 1 || attempt.UpdatedAt.IsZero() {
 		return false
 	}
 	if !slices.Contains([]string{AttemptPrepared, AttemptStarting, AttemptRunning, AttemptStopped, AttemptFailed, AttemptRecoveryRequired}, attempt.State) {
@@ -38,8 +39,26 @@ func validStoredLaunch(launch *contract.Launch, attemptID string, generation uin
 }
 
 func validStoredResolution(resolved *Resolved, orgID, digest string) bool {
-	return resolved != nil && resolved.Revision != nil && resolved.Ceiling != nil &&
+	return resolved != nil && resolved.Revision.ValidSchema() && resolved.Ceiling.ValidSchema() &&
 		resolved.Revision.OrgID == orgID && resolved.Ceiling.OrgID == orgID && resolved.Revision.Digest == digest
+}
+
+func validAttemptPermissions(snapshot AttemptSnapshot) bool {
+	if snapshot.Resolved == nil || !snapshot.Resolved.Revision.ValidSchema() || snapshot.SchemaVersion != snapshot.Resolved.Revision.SchemaVersion {
+		return false
+	}
+	if snapshot.SchemaVersion == 1 {
+		return snapshot.PolicyV2 == nil
+	}
+	if snapshot.PolicyV2 == nil || snapshot.Provider.ProtocolVersion() != 2 {
+		return false
+	}
+	canonical, err := contract.CanonicalizePolicyV2(*snapshot.PolicyV2, nil)
+	if err != nil {
+		return false
+	}
+	static, err := canonical.StaticAccess()
+	return err == nil && reflect.DeepEqual(static, snapshot.Grants) && contract.WithinLegacyCeilingV2(canonical, snapshot.Ceiling) == nil
 }
 
 // ValidateAttemptAuthority rechecks revocation without replacing captured policy.
@@ -58,7 +77,7 @@ func (s *Service) ValidateAttemptAuthority(ctx context.Context, attempt *Attempt
 		if err != nil {
 			return err
 		}
-		if current.Revoked || current.Digest != captured.Digest {
+		if current.Revoked || !current.ValidSchema() || current.SchemaVersion != captured.SchemaVersion || current.Digest != captured.Digest {
 			return ErrIneligible
 		}
 	}

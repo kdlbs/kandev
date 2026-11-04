@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-
-	contract "github.com/kandev/kandev/internal/common/sandbox"
 )
 
 func (s *Service) PutBinding(ctx context.Context, binding Binding, expected int64) (*Binding, error) {
@@ -101,7 +99,7 @@ func (s *Service) validateExecutorRevisions(ctx context.Context, binding Binding
 		if !matchesExecutor(revision, executor, workspaceID) {
 			return ErrIneligible
 		}
-		if err = contract.WithinCeiling(revision.Policy.Grants, ceiling.Policy.Grants); err != nil {
+		if err = s.validateResolvedGrants(revision, ceiling); err != nil {
 			return err
 		}
 	}

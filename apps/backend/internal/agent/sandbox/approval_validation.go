@@ -36,7 +36,14 @@ func validApprovalDigest(value string) bool {
 
 func (s *Service) validateApprovalTarget(attempt *Attempt, operation ApprovalOperation) error {
 	roots := append(slices.Clone(s.protectedRoots), attempt.Snapshot.Launch.Root)
-	return contract.ValidateFilesystemOperation(operation.Target, operation.Access == filesystemWrite, attempt.Snapshot.Ceiling, roots)
+	if err := contract.ValidateFilesystemOperation(operation.Target, operation.Access == filesystemWrite, attempt.Snapshot.Ceiling, roots); err != nil {
+		return err
+	}
+	if typed := attempt.Snapshot.PolicyV2; typed != nil {
+		envelope := contract.Grants{Filesystem: typed.ApprovalEnvelope.Filesystem}
+		return contract.ValidateFilesystemOperation(operation.Target, operation.Access == filesystemWrite, envelope, roots)
+	}
+	return nil
 }
 
 func (s *Service) admitApprovalGrant(ctx context.Context, approval *Approval) error {

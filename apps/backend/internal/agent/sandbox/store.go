@@ -71,6 +71,10 @@ func (s *Service) initSchema() error {
 }
 
 func (s *Service) Publish(ctx context.Context, policy Policy, expected int64) (*Revision, error) {
+	return s.publishPolicy(ctx, policy, expected, nil)
+}
+
+func (s *Service) publishPolicy(ctx context.Context, policy Policy, expected int64, migration *PolicyMigrationProvenance) (*Revision, error) {
 	id, err := s.operator(ctx)
 	if err != nil {
 		return nil, err
@@ -81,8 +85,11 @@ func (s *Service) Publish(ctx context.Context, policy Policy, expected int64) (*
 	if expected < 0 || !validPolicyIdentity(policy) {
 		return nil, contract.ErrInvalidPolicy
 	}
-	policy.Grants, err = contract.Canonicalize(policy.Grants, s.protectedRoots)
+	policy, schemaVersion, err := canonicalPolicy(policy, s.protectedRoots)
 	if err != nil {
+		return nil, err
+	}
+	if err = s.validatePublishedSchema(ctx, policy, schemaVersion, expected, migration); err != nil {
 		return nil, err
 	}
 	if err = s.validateSources(ctx, policy); err != nil {
@@ -96,7 +103,7 @@ func (s *Service) Publish(ctx context.Context, policy Policy, expected int64) (*
 		return nil, contract.ErrInvalidPolicy
 	}
 	digest := sha256.Sum256(content)
-	revision := &Revision{ID: uuid.NewString(), Number: expected + 1, SchemaVersion: 1, Digest: hex.EncodeToString(digest[:]), Policy: policy, OperatorID: id.UserID, OrgID: id.OrgID, CreatedAt: time.Now().UTC()}
+	revision := &Revision{Migration: migration, ID: uuid.NewString(), Number: expected + 1, SchemaVersion: schemaVersion, Digest: hex.EncodeToString(digest[:]), Policy: policy, OperatorID: id.UserID, OrgID: id.OrgID, CreatedAt: time.Now().UTC()}
 	raw, err := json.Marshal(revision)
 	if err != nil {
 		return nil, err
@@ -134,11 +141,7 @@ func insertRevisionTx(ctx context.Context, tx *sqlx.Tx, revision *Revision, raw 
 	if n != 1 {
 		return ErrConflict
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO sandbox_policy_revisions (id,org_id,policy_id,revision,content_json) VALUES (?,?,?,?,?)`), revision.ID, revision.OrgID, revision.Policy.ID, revision.Number, string(raw))
-	if err != nil {
-		return err
-	}
-	return nil
+	return insertRevisionContent(ctx, tx, revision, raw, expected)
 }
 
 func (s *Service) GetRevision(ctx context.Context, id string) (*Revision, error) {
@@ -228,10 +231,10 @@ func (s *Service) validateSources(ctx context.Context, policy Policy) error {
 			return contract.ErrInvalidPolicy
 		}
 		revision, err := s.GetRevision(ctx, source.ID)
-		if err != nil || revision.Revoked || revision.Digest != source.Digest || revision.Policy.InstallationID != policy.InstallationID || revision.Policy.ProviderKey != policy.ProviderKey {
+		if err != nil || !revision.ValidSchema() || revision.Revoked || revision.Digest != source.Digest || revision.Policy.InstallationID != policy.InstallationID || revision.Policy.ProviderKey != policy.ProviderKey {
 			return contract.ErrInvalidPolicy
 		}
-		if err = contract.WithinCeiling(revision.Policy.Grants, policy.Grants); err != nil {
+		if err = withinPriorPolicy(revision.Policy, policy); err != nil {
 			return contract.ErrInvalidPolicy
 		}
 	}

@@ -72,11 +72,11 @@ func (s *Service) checkPrior(ctx context.Context, selection SelectionContext, re
 		return nil
 	}
 	prior := selection.Prior.Revision
-	if prior == nil {
+	if !prior.ValidSchema() || !revision.ValidSchema() {
 		return ErrIneligible
 	}
 	sameProvider := prior.Policy.InstallationID == revision.Policy.InstallationID && prior.Policy.ProviderKey == revision.Policy.ProviderKey
-	if sameProvider && contract.WithinCeiling(revision.Policy.Grants, prior.Policy.Grants) == nil {
+	if sameProvider && withinPriorPolicy(revision.Policy, prior.Policy) == nil {
 		return nil
 	}
 	if _, err := s.operator(ctx); err == nil {
@@ -86,18 +86,30 @@ func (s *Service) checkPrior(ctx context.Context, selection SelectionContext, re
 }
 
 func (s *Service) validateResolvedGrants(revision, ceiling *Revision) error {
-	canonical, err := contract.Canonicalize(revision.Policy.Grants, s.protectedRoots)
+	if !revision.ValidSchema() || !ceiling.ValidSchema() {
+		return ErrIneligible
+	}
+	canonical, _, err := canonicalPolicy(revision.Policy, s.protectedRoots)
 	if err != nil {
 		return err
 	}
-	ceilingGrants, err := contract.Canonicalize(ceiling.Policy.Grants, s.protectedRoots)
+	limit, _, err := canonicalPolicy(ceiling.Policy, s.protectedRoots)
 	if err != nil {
 		return err
 	}
-	if err = contract.WithinCeiling(canonical, ceilingGrants); err != nil {
-		return err
+	if limit.PolicyV2 != nil {
+		if hasApprovalPermissions(limit.PolicyV2.ApprovalEnvelope) {
+			return ErrIneligible
+		}
+		if canonical.PolicyV2 != nil {
+			return contract.WithinCeilingV2(*canonical.PolicyV2, limit.PolicyV2.StaticGrants)
+		}
+		return contract.LegacyWithinCeilingV2(canonical.Grants, limit.PolicyV2.StaticGrants)
 	}
-	return nil
+	if canonical.PolicyV2 != nil {
+		return contract.WithinLegacyCeilingV2(*canonical.PolicyV2, limit.Grants)
+	}
+	return contract.WithinCeiling(canonical.Grants, limit.Grants)
 }
 
 func (s *Service) resolveRevisions(ctx context.Context, selection SelectionContext, executor *ExecutorPolicy, ref string) (*Revision, *Revision, error) {

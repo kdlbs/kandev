@@ -17,6 +17,14 @@ Agents owns permission meaning, operator authority, and attempt lifecycle. REQ-A
 
 Introduce explicit schema version 2 in the common sandbox policy model. Separate `static_grants`, `approval_envelope`, and executor `ceiling`. The task guard constrains both static access and possible approved expansion. A selected policy's static grants and envelope must each be subsets of the ceiling and captured task limit. Inherited hard denials are never removed.
 
+The host policy payload retains legacy `grants` for schema 1 and adds an optional `policy_v2` object for schema 2. A schema 2 payload requires empty legacy grants. The immutable revision schema must match its payload. Unknown or inconsistent versions refuse admission. The nil schema 2 field is omitted from legacy JSON so existing content hashes stay unchanged.
+
+Schema 2 JSON decoding rejects unknown permission fields, including when reading stored revisions or attempts. A host that cannot represent a restriction must not erase it during decoding. Provider protocol major and supported policy schemas are independent checks at availability and launch admission.
+
+A schema 2 revision used as an executor ceiling must have an empty approval envelope. Its static permission collection supplies the ceiling's maximum access. Compare the selected revision's static grants and envelope independently with this limit. Legacy ceiling comparisons preserve their original route protocols and never create approval eligibility.
+
+Logical MCP and top-level environment keys remain static capabilities. Reject them in the top-level approval envelope because neither is an approval operation. Command resource policies retain their separately declared environment permissions.
+
 Operations are a tagged union, never an overloaded target string:
 
 | Kind | Canonical identity and initial supported matching |
@@ -39,6 +47,12 @@ Extend `internal/common/sandbox` canonicalization, subset comparison, resolved g
 Retain schema 1 decoding and its original hashes. A schema 1 filesystem approval uses its existing captured ceiling semantics. Never silently convert that ceiling into a schema 2 expansion envelope. New schema 2 policies default to no expansion.
 
 An operator can explicitly migrate a revision. Review the full static-grant and approval-envelope diff, then publish an immutable schema 2 revision and explicitly select it. Existing attempts keep protocol, package, runtime, and policy identities. Unknown versions refuse new launch; they do not erase fields or retry through v1.
+
+The operator API uses `POST /api/v1/sandbox/revisions/:id/migration/preview` and `POST /api/v1/sandbox/revisions/:id/migration/publish`. Both require `source_digest`, `expected_revision`, and the complete target `policy`. Publication also requires `expected_review_digest`. Preview returns the canonical `before` and `after` policies plus a digest over those contents, the source revision identity, and its expected head. Preview writes no revision and grants no access.
+
+Publication rechecks that digest and the current, unrevoked schema 1 head. The same policy, workspace, installation, and provider identities must remain. Ordinary policy publication cannot change schema versions, and schema 2 cannot downgrade to schema 1. The committed revision records source and review digests in migration provenance; its ordinary operator and timestamp fields identify the publication. Compare-and-swap protects the head, and the transaction holds the source row against revocation until commit or rollback. A failed commit preserves the old head. Publication does not change selections or current attempts.
+
+An attempt snapshot uses the selected policy schema. Schema 2 stores both resolved permission groups in `policy_v2`; its `grants` field is a derived projection of static access, and `ceiling` retains the resolved maximum. Resolve references in both groups against the same owned work and agent-state directories. Approval checks require the frozen envelope as well as the ceiling. Legacy snapshots retain their original representation and approval rules.
 
 Add schema-tagged operation and caller binding to approval/report persistence using the existing SQLite/PostgreSQL stores and migrations. Legacy rows remain readable as filesystem operations. Do not rewrite finalized decisions or historical receipts. Core captures a digest of the complete normalized request for replay protection.
 

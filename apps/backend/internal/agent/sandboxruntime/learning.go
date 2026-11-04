@@ -56,7 +56,7 @@ func learningRequest(attempt *policy.Attempt, records []policy.DenialRecord) (*p
 	request := &pluginsdk.ProposeSandboxRevisionRequest{
 		Context: &pluginsdk.SandboxRequestContext{ProtocolMajor: provider.ProtocolVersion(), InstallationId: provider.InstallationID, ProviderKey: provider.Key,
 			OperationId: uuid.NewString(), AttemptId: attempt.ID, ExecutionId: snapshot.ExecutionID, Generation: snapshot.Launch.Generation},
-		Policy:     wirePolicy(snapshot.Resolved, snapshot.Grants),
+		Policy:     wirePolicy(snapshot.Resolved, snapshot.Grants, snapshot.PolicyV2),
 		Runtime:    &pluginsdk.SandboxRuntimeFacts{Os: runtime.GOOS, Architecture: runtime.GOARCH, Transport: sandboxLocalTransport, RuntimeVersion: provider.RuntimeVersion, RuntimeDigest: provider.RuntimeDigest},
 		References: childDirectoryReferences(snapshot.AgentState.Directories()),
 	}

@@ -932,6 +932,8 @@ Deleting a sandboxed session removes its private agent state after owned process
 
 Providers can require additional host isolation. The pinned Nono provider requires Linux user and network namespaces for new launches with network or Kandev MCP access. If the runtime reports that namespace isolation is unavailable, the launch fails before starting the agent. Use a compatible execution host. A filesystem-only policy with blocked network access does not require the proxy namespace.
 
+Policy schema 2 separates access granted at launch from access eligible for a later approval. An empty approval envelope permits no expansion. Changing an existing policy to schema 2 requires an administrator's explicit migration review and publication. Migration preserves the original revision and leaves current selections and running attempts unchanged. The current Nono provider advertises schema 1; native network approvals remain unavailable until its schema 2 implementation passes its acceptance checks.
+
 An unavailable provider or incompatible stored policy remains selected until an operator repairs it. Kandev does not silently remove the policy to start an unconfined agent. The same configuration actions are available on phones.
 
 Open **Execution details** from the session tab or its action menu. On a phone, use the labelled **Execution** control. The view separates the captured launch from current defaults for the next launch. Command previews omit private arguments and environment values. An active shield requires fresh evidence for that exact attempt. A wrapper name, installed provider, or old observation cannot establish active protection.

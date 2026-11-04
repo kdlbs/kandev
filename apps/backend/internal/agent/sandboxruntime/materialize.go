@@ -14,7 +14,7 @@ import (
 	"github.com/kdlbs/kandev/pluginsdk"
 )
 
-func wirePolicy(resolved *policy.Resolved, grants contract.Grants) *pluginsdk.SandboxPolicySnapshot {
+func wirePolicy(resolved *policy.Resolved, grants contract.Grants, typed *contract.PolicyV2) *pluginsdk.SandboxPolicySnapshot {
 	result := &pluginsdk.SandboxPolicySnapshot{PolicyId: resolved.Revision.Policy.ID, Revision: uint64(resolved.Revision.Number), Digest: resolved.Revision.Digest, CeilingDigest: resolved.Ceiling.Digest, Grants: &pluginsdk.SandboxGrants{KandevMcp: grants.KandevMCP, EnvironmentKeys: grants.EnvironmentKeys}}
 	for _, fs := range grants.Filesystem {
 		result.Grants.Filesystem = append(result.Grants.Filesystem, &pluginsdk.SandboxFilesystemGrant{Path: fs.Path, Writable: fs.Writable})
@@ -24,6 +24,14 @@ func wirePolicy(resolved *policy.Resolved, grants contract.Grants) *pluginsdk.Sa
 	}
 	for _, source := range resolved.Revision.Policy.Sources {
 		result.Sources = append(result.Sources, &pluginsdk.SandboxPolicySource{Scope: source.Kind, SourceId: source.ID, Digest: source.Digest})
+	}
+	if resolved.Revision.SchemaVersion == contract.PolicySchemaV2 {
+		if typed == nil || typed.SchemaVersion != contract.PolicySchemaV2 {
+			return nil
+		}
+		result.Grants = nil
+		result.PolicyV2 = &pluginsdk.SandboxPolicyV2{SchemaVersion: contract.PolicySchemaV2,
+			StaticGrants: wirePermissionsV2(typed.StaticGrants), ApprovalEnvelope: wirePermissionsV2(typed.ApprovalEnvelope)}
 	}
 	return result
 }

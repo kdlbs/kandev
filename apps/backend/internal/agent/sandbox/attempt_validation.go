@@ -26,15 +26,8 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 		return AttemptSnapshot{}, contract.ErrInvalidPolicy
 	}
 	roots := append(slices.Clone(s.protectedRoots), request.Launch.Root)
-	grants, err := contract.ResolveAttemptGrants(resolved.Revision.Policy.Grants, request.WorkDir, request.AgentState, roots, request.SessionID)
+	permissions, err := s.resolveCapturedPermissions(resolved, request, roots)
 	if err != nil {
-		return AttemptSnapshot{}, err
-	}
-	ceiling, err := resolveAttemptCeiling(resolved.Ceiling.Policy.Grants, request, s.protectedRoots)
-	if err != nil {
-		return AttemptSnapshot{}, err
-	}
-	if err = contract.WithinCeiling(grants, ceiling); err != nil {
 		return AttemptSnapshot{}, err
 	}
 	if !validCapturedAgentState(request) {
@@ -48,8 +41,8 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 	if err != nil {
 		return AttemptSnapshot{}, err
 	}
-	return AttemptSnapshot{AuditSources: slices.Clone(request.AuditSources), LaunchChecks: request.LaunchChecks, RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: 1, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
-		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: grants, Ceiling: ceiling,
+	return AttemptSnapshot{PolicyV2: permissions.policyV2, AuditSources: slices.Clone(request.AuditSources), LaunchChecks: request.LaunchChecks, RestartReview: review, RestartOf: request.RestartOf, RestartVersion: restartVersion, AgentProfileID: request.Selection.AgentProfileID, AgentState: request.AgentState.Snapshot(), SchemaVersion: resolved.Revision.SchemaVersion, OrgID: request.Selection.OrgID, WorkspaceID: request.Selection.WorkspaceID, TaskID: request.Selection.TaskID,
+		SessionID: request.SessionID, ExecutionID: request.ExecutionID, WorkDir: request.WorkDir, Resolved: resolved, Grants: permissions.static, Ceiling: permissions.ceiling,
 		Launch: request.Launch.Clone(), Provider: request.Provider, CreatedAt: time.Now().UTC()}, nil
 }
 
