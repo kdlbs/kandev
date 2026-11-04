@@ -1,2 +1,2 @@
 glpat-ambient-ci-not-a-real-token
-postgres://user:password@host/db
+postgres://user:password@host
