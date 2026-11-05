@@ -342,6 +342,7 @@
   "portableConfigBundleGeneric": "Configuração do agente ({{id}})",
   "portableConfigBundleMockSettings": "Copiar definições do agente simulado",
   "portableConfigBundleOpenCodeConfig": "Copiar configuração do OpenCode",
+  "portableConfigBundlePiConfig": "Copiar definições e modelos do Pi",
   "portableConfigFileMapping": "{{source}} para {{target}}",
   "portableConfigInfoCopyTiming": "O Kandev copia os ficheiros selecionados sem alterações apenas durante o aprovisionamento de raiz ou a reinicialização do ambiente. Uma cópia nova pode substituir um ficheiro de destino existente. As retomas a quente mantêm o ambiente existente.",
   "portableConfigInfoErrors": "Ficheiros opcionais em falta ou ilegíveis são ignorados com um aviso e não impedem o arranque. Os ficheiros podem conter segredos ou valores de ambiente.",

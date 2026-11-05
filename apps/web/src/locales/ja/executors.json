@@ -200,6 +200,7 @@
   "portableConfigBundleGeneric": "エージェント設定 ({{id}})",
   "portableConfigBundleMockSettings": "mock-agent 設定をコピー",
   "portableConfigBundleOpenCodeConfig": "OpenCode 設定をコピー",
+  "portableConfigBundlePiConfig": "Pi の設定とモデルをコピー",
   "portableConfigFileMapping": "{{source}} から {{target}} へ",
   "portableConfigInfoCopyTiming": "Kandev は、選択したファイルを変更せずにコピーするのは、新規プロビジョニング時か環境リセット時だけ。新しいコピーで既存の対象ファイルを置き換えることあり。ウォーム再開では既存環境をそのまま使う。",
   "portableConfigInfoErrors": "不足または読めない任意ファイルは警告付きでスキップ、起動は止めない。ファイルにはシークレットや環境値を含められる。",

@@ -27,6 +27,7 @@ var (
 	_ PassthroughAgent       = (*PiACP)(nil)
 	_ InferenceAgent         = (*PiACP)(nil)
 	_ ManagedNPMRuntimeAgent = (*PiACP)(nil)
+	_ PortableConfigAgent    = (*PiACP)(nil)
 )
 
 // PiACP implements Agent for the Pi Coding Agent via the pi-acp adapter.
@@ -115,7 +116,50 @@ func (a *PiACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *PiACP) RemoteAuth() *RemoteAuth { return nil }
+// piAgentDir is Pi's agent directory relative to the home directory. Pi lets
+// PI_CODING_AGENT_DIR move it; the remote side uses the default.
+const piAgentDir = ".pi/agent"
+
+// piRemoteAuthEnvVars are the API-key variables of Pi's most used built-in
+// providers. Pi reads a stored auth.json credential before the environment.
+var piRemoteAuthEnvVars = []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"}
+
+func (a *PiACP) RemoteAuth() *RemoteAuth {
+	methods := []RemoteAuthMethod{{
+		// No Label: the card shows its own translated "Copy auth files".
+		Type: remoteAuthMethodTypeFiles,
+		// `/login` stores subscription and API-key credentials per provider as
+		// top-level entries of auth.json, so a copy merges into the remote file.
+		FileConflictPolicy: RemoteAuthFileConflictPolicyMergeJSONObject,
+		SourceFiles: map[string][]string{
+			"darwin":  {piAgentDir + "/auth.json"},
+			"linux":   {piAgentDir + "/auth.json"},
+			"windows": {piAgentDir + "/auth.json"},
+		},
+		TargetRelDir: piAgentDir,
+	}}
+	for _, envVar := range piRemoteAuthEnvVars {
+		methods = append(methods, RemoteAuthMethod{Type: "env", EnvVar: envVar})
+	}
+	return &RemoteAuth{Methods: methods}
+}
+
+// PortableConfig copies Pi's global settings and custom model definitions.
+// models.json can hold inline API keys; the bundle copies it as it is.
+func (a *PiACP) PortableConfig() *PortableConfig {
+	file := func(name string) PortableConfigFile {
+		path := piAgentDir + "/" + name
+		return PortableConfigFile{
+			SourcePaths: map[string]string{"darwin": path, "linux": path, "windows": path},
+			TargetPath:  path,
+		}
+	}
+	return &PortableConfig{Bundles: []PortableConfigBundle{{
+		ID:    "pi.config",
+		Label: "Copy Pi settings and models",
+		Files: []PortableConfigFile{file("settings.json"), file("models.json")},
+	}}}
+}
 
 func (a *PiACP) InstallScript() string {
 	return "npm install -g --ignore-scripts " + piCLIPkg

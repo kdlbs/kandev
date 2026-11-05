@@ -992,6 +992,7 @@ const (
 	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
 	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyOpenRouterAPIKey     = "OPENROUTER_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
 	envKeyGitLabToken          = "GITLAB_TOKEN"
@@ -1019,6 +1020,7 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyOpenAIAPIKey,
 	envKeyGeminiAPIKey,
 	envKeyGoogleAPIKey,
+	envKeyOpenRouterAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
 	envKeyGitLabToken,
