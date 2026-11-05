@@ -54,6 +54,11 @@ export async function verifyLocalMarkdownLinks(page: Page, api: ApiClient, seed:
     await imageButton.click();
     const imageDialog = page.getByRole("dialog").last();
     await expect(imageDialog).toBeVisible();
+    const fullImage = imageDialog.getByRole("img");
+    await expect(fullImage).toBeVisible();
+    await expect
+      .poll(() => fullImage.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0);
     expect(new URL(page.url()).pathname).toBe(`/t/${task.id}`);
     await expect(page.getByTestId("markdown-preview-toggle")).toHaveCount(0);
     await page.evaluate(async () => {
