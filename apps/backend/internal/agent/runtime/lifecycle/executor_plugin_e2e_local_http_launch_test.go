@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-// Each e2e-local locator form the rig creates tasks with (file and loopback
+// Each e2e-local locator form an e2e run creates tasks with (file and loopback
 // http) reaches the provider's provision request unchanged, and the e2e
 // profile selector is forwarded so the provider's agentctl accepts it.
 func TestE2ELocalLocatorsReachTheProvisionRequestWithProfile(t *testing.T) {
 	for name, locator := range map[string]string{
-		"file":          "file:///tmp/local-rig/local-rig-file-main.git",
-		"http loopback": "http://127.0.0.1:41234/local-rig-http-main.git",
+		"file":          "file:///tmp/e2e-local/e2e-local-file-main.git",
+		"http loopback": "http://127.0.0.1:41234/e2e-local-http-main.git",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(pluginAgentEnvE2EProfile, boolStringTrue)
-			harness := preparedHarness(t, preparedResource(repositoryState("repo-1", testInventoryRoot+"/rig", "main")))
+			harness := preparedHarness(t, preparedResource(repositoryState("repo-1", testInventoryRoot+"/e2e", "main")))
 			launch := &LaunchRequest{Repositories: []RepoLaunchSpec{{
 				RepositoryID: "repo-1", RepositoryURL: locator, CheckoutBranch: "main", BaseBranch: "main",
 			}}}

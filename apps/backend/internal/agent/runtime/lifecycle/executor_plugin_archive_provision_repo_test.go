@@ -69,8 +69,8 @@ func launchRunning(request *ExecutorCreateRequest, metadata map[string]interface
 	}
 }
 
-// The rig's archive-during-provision failure, against the real repository: the
-// archive removes the inventory row (the rig found none) and holds the environment while the
+// The e2e archive-during-provision failure, against the real repository: the
+// archive removes the inventory row (the e2e run found none) and holds the environment while the
 // provider returns, so the launch can neither claim nor record the resource.
 // The resource must survive in durable storage, and a cleanup run by a new
 // process (a restart) must destroy it under its own persisted claim and only

@@ -699,7 +699,7 @@ func materializeRepositoryWithQualifiedPRBase(
 }
 
 func TestValidateRepositoryLocator_E2ELocalFileRemote(t *testing.T) {
-	const fileLocator = "file:///tmp/local-rig/file-main.git"
+	const fileLocator = "file:///tmp/e2e-local/file-main.git"
 
 	t.Setenv("KANDEV_E2E_MOCK", "")
 	if err := validateRepositoryLocator(fileLocator); err == nil {
@@ -710,10 +710,10 @@ func TestValidateRepositoryLocator_E2ELocalFileRemote(t *testing.T) {
 	if err := validateRepositoryLocator(fileLocator); err != nil {
 		t.Fatalf("e2e profile must accept a file:// locator: %v", err)
 	}
-	if err := validateRepositoryLocator("http://127.0.0.1:41234/local-rig-http-main.git"); err != nil {
+	if err := validateRepositoryLocator("http://127.0.0.1:41234/e2e-local-http-main.git"); err != nil {
 		t.Fatalf("e2e profile must accept a loopback http locator: %v", err)
 	}
-	for _, locator := range []string{"/srv/repos/private.git", "file://remotehost/srv/x.git", "file://user@/x.git", "local-rig-file-main"} {
+	for _, locator := range []string{"/srv/repos/private.git", "file://remotehost/srv/x.git", "file://user@/x.git", "e2e-local-file-main"} {
 		if err := validateRepositoryLocator(locator); err == nil {
 			t.Fatalf("%q must stay refused under the e2e profile", locator)
 		}

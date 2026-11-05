@@ -224,7 +224,7 @@ func validateRepositoryLocator(locator string) error {
 }
 
 // isE2ELocalFileLocator admits a host-less file:// locator, which is how the
-// e2e-local rig repositories are cloned, under the e2e mock profile only.
+// e2e-local repositories are cloned, under the e2e mock profile only.
 const (
 	fileLocatorScheme = "file"
 	e2eMockEnv        = "KANDEV_E2E_MOCK"

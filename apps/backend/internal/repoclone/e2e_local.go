@@ -10,7 +10,7 @@ import (
 
 const (
 	e2eMockEnv = "KANDEV_E2E_MOCK"
-	// ProviderE2ELocal names the synthetic provider of local rig repositories.
+	// ProviderE2ELocal names the synthetic provider of local e2e repositories.
 	ProviderE2ELocal = "e2e-local"
 )
 

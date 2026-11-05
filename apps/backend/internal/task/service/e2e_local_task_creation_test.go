@@ -7,14 +7,14 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// A task created from an e2e-local file:// or loopback http remote (the rig's
+// A task created from an e2e-local file:// or loopback http remote (an e2e run's
 // API path) persists an e2e-local repository that keeps its locator, passes the
 // plugin executor cloneability gate, and is cloneable as a workspace source.
 func TestCreateTaskWithE2ELocalRemotes(t *testing.T) {
 	t.Setenv(e2eMockEnv, "true")
 	for name, remote := range map[string]string{
-		"file":          "file:///tmp/local-rig/local-rig-file-main.git",
-		"http loopback": "http://127.0.0.1:41234/local-rig-http-main.git",
+		"file":          "file:///tmp/e2e-local/e2e-local-file-main.git",
+		"http loopback": "http://127.0.0.1:41234/e2e-local-http-main.git",
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, _, repo := createTestService(t)
@@ -28,7 +28,7 @@ func TestCreateTaskWithE2ELocalRemotes(t *testing.T) {
 			}
 			result, err := svc.CreateTask(ctx, &CreateTaskRequest{
 				WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123",
-				Title: "rig", Repositories: []TaskRepositoryInput{input},
+				Title: "e2e", Repositories: []TaskRepositoryInput{input},
 			})
 			if err != nil {
 				t.Fatalf("CreateTask: %v", err)

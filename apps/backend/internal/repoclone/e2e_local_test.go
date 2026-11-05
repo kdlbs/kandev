@@ -12,7 +12,7 @@ import (
 
 func localGitRemote(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "rig.git")
+	dir := filepath.Join(t.TempDir(), "e2e.git")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func localGitRemote(t *testing.T) string {
 }
 
 func e2eLocalRequest(remote string) GitCredentialRequest {
-	return GitCredentialRequest{WorkspaceID: "workspace", Provider: ProviderE2ELocal, ProviderHost: "http://localhost", CloneURL: remote, Owner: "local", Name: "rig"}
+	return GitCredentialRequest{WorkspaceID: "workspace", Provider: ProviderE2ELocal, ProviderHost: "http://localhost", CloneURL: remote, Owner: "local", Name: "e2e"}
 }
 
 func TestE2ELocalRemoteIsClonedWithoutCredentialsUnderTheE2EProfile(t *testing.T) {
@@ -52,10 +52,10 @@ func TestE2ELocalRemoteIsRefusedOutsideTheE2EProfile(t *testing.T) {
 
 func TestE2ELocalRemoteRejectsOtherProvidersAndHosts(t *testing.T) {
 	t.Setenv(e2eMockEnv, "true")
-	if _, ok := E2ELocalRemote("github", "file:///tmp/rig.git"); ok {
+	if _, ok := E2ELocalRemote("github", "file:///tmp/e2e.git"); ok {
 		t.Fatal("a real provider matched")
 	}
-	for _, raw := range []string{"http://intranet.example/rig.git", "file://host/tmp/rig.git", "ssh://localhost/rig.git"} {
+	for _, raw := range []string{"http://intranet.example/e2e.git", "file://host/tmp/e2e.git", "ssh://localhost/e2e.git"} {
 		if _, ok := E2ELocalRemote(ProviderE2ELocal, raw); ok {
 			t.Fatalf("E2ELocalRemote(%q) matched", raw)
 		}
