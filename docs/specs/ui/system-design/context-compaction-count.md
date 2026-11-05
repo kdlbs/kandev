@@ -111,7 +111,7 @@ It does not need to expose or interpret the exclusion marker.
 The existing count row and accessible info control retain their composition.
 
 Update `common:contextCompactionCountHelp` to explain excluded streams and approximate counts.
-Suggested English: "Kandev infers this count from context usage drops. Streams that mix parent and subagent usage are excluded. Missing samples or provider resets can affect accuracy."
+Suggested English: "Kandev infers this count from context usage drops. Copilot ACP usage is excluded because it can mix parent and subagent contexts. Missing samples or provider resets can affect accuracy."
 
 Update all seven supported languages, generate Traditional Chinese catalogs, and regenerate pseudo.
 The component continues to call `t()` at render time.

@@ -80,7 +80,7 @@ test("context source help stays open when hovered", async ({
   const compactionHelp = testPage.locator(`[id="${compactionHelpId}"]`);
   await expect(compactionHelp).toHaveCSS("opacity", "1");
   await expect(compactionHelp).toContainText(
-    "Streams that mix parent and subagent usage are excluded",
+    "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
   );
   await prCapture.screenshot("context-source-help", {
     caption: "Context source and inferred compaction count shown with their help visible",

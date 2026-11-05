@@ -265,7 +265,9 @@ describe("TokenUsageDisplay compaction count", () => {
     expect(getByText("2", { selector: "span" })).toBeDefined();
     expect(getByLabelText("About inferred compaction count")).toBeDefined();
     expect(container.textContent).toContain("Kandev infers this count from context usage drops");
-    expect(container.textContent).toContain("mix parent and subagent usage are excluded");
+    expect(container.textContent).toContain(
+      "Copilot ACP usage is excluded because it can mix parent and subagent contexts",
+    );
     expect(container.textContent).toContain(
       "Missing samples or provider resets can affect accuracy",
     );
@@ -307,6 +309,6 @@ describe("TokenUsageDisplay compaction count", () => {
     if (!helpId) throw new Error("Expected compaction help to be described");
     const help = document.getElementById(helpId);
     if (!help) throw new Error("Expected compaction help element");
-    expect(help.textContent).toContain("Streams that mix parent and subagent usage are excluded");
+    expect(help.textContent).toContain("Copilot ACP usage is excluded because it can mix");
   });
 });

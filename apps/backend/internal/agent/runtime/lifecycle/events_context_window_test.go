@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -40,7 +39,9 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 		want        bool
 	}{
 		{name: "copilot acp", agentID: agents.CopilotACPAgentID, executionID: "exec-copilot", want: true},
-		{name: "copilot after restore", agentID: agents.CopilotACPAgentID, executionID: "exec-restored", want: true},
+		// Restoration retains the provider type on AgentExecution even when a
+		// replacement execution identifier is allocated.
+		{name: "copilot with replacement execution id", agentID: agents.CopilotACPAgentID, executionID: "exec-restored", want: true},
 		{name: "other provider", agentID: "claude-acp", executionID: "exec-claude", want: false},
 		{name: "legacy execution without provider", agentID: "", executionID: "exec-legacy", want: false},
 	}
@@ -76,9 +77,22 @@ func TestPublishContextWindowCompactionPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal payload: %v", err)
 			}
-			hasMarker := strings.Contains(string(encoded), `"compaction_inference_disabled"`)
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(encoded, &fields); err != nil {
+				t.Fatalf("unmarshal payload fields: %v", err)
+			}
+			rawMarker, hasMarker := fields["compaction_inference_disabled"]
 			if hasMarker != tc.want {
 				t.Fatalf("serialized marker presence = %v, want %v: %s", hasMarker, tc.want, encoded)
+			}
+			if tc.want {
+				var marker bool
+				if err := json.Unmarshal(rawMarker, &marker); err != nil {
+					t.Fatalf("decode marker: %v", err)
+				}
+				if !marker {
+					t.Fatalf("serialized marker = false, want true")
+				}
 			}
 		})
 	}

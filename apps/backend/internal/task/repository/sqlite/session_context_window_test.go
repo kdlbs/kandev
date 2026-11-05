@@ -103,6 +103,7 @@ func TestUpdateSessionContextWindowCompactionEligibilitySurvivesReopen(t *testin
 		t.Helper()
 		dbConn, err := db.OpenSQLite(dbPath)
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = dbConn.Close() })
 		sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
 		require.NoError(t, err)

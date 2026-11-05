@@ -123,7 +123,7 @@ Source evidence shows the stored value reaches the count row. The corrected fres
 | --- | --- |
 | Header and usage | Existing title, progress, and token/source reading |
 | Count row | Compactions: 0, followed by the existing info control |
-| Expanded info | Inferred usage drops, excluded mixed-context streams, and approximate accuracy |
+| Expanded info | Inferred usage drops, the Copilot ACP exclusion, and approximate accuracy |
 | Desktop access | Hover the ring, then hover or focus info |
 | Phone access | Tap the ring, then tap info inside the pinned surface |
 | Dismissal | Existing toggle, outside interaction, and keyboard behavior |
@@ -185,14 +185,15 @@ No delegation is authorized by this package.
 - Repository eligibility matrix and reopen baseline passed in `./internal/task/repository/sqlite`; the existing strict-drop regression also passed.
 - Broader packages passed: `./internal/agent/runtime/lifecycle`, `./internal/orchestrator`, `./internal/orchestrator/watcher`, and `./internal/task/repository/sqlite` (full package runs).
 - Go lint: `bash scripts/lint-go-changed` reported 0 issues for all changed backend files.
-- PostgreSQL: `TestPostgresUpdateSessionContextWindowCompactionEligibility` is present but skipped because `KANDEV_TEST_POSTGRES_DSN` was unavailable. This remains incomplete parity evidence, not a pass.
+- PostgreSQL: `TestPostgresUpdateSessionContextWindowCompactionEligibility` passed against a disposable PostgreSQL 16 container, together with the existing `TestPostgresUpdateSessionContextWindowCountsStrictUsageDrops`. The targeted repository command passed all 8 tests.
 - Task 02: `pnpm exec vitest run components/task/chat/token-usage-display.test.tsx` passed 16 tests, including zero-count and revised-help assertions.
 - Task 02: `pnpm run i18n:check` passed (all seven locales complete, pseudo in sync), `pnpm run i18n:ratchet` passed, focused Oxlint passed, and `pnpm run typecheck` passed.
 - E2E: managed Chromium desktop `context-window-source.spec.ts` passed 3 tests; mobile-chrome `mobile-context-window-source.spec.ts` passed 3 tests.
 - Public documentation: `node --test scripts/validate-public-docs.test.mjs` passed 63 tests and `node scripts/validate-public-docs.mjs` validated 55 pages.
 - Specification lifecycle: `python3 scripts/list-docs.py validate` passed (432 decisions / 1,922 specifications) and `python3 scripts/lint-spec-files.py --all` passed after promotion.
 - `git diff --check` passed.
-- Limit: no live Copilot call or PostgreSQL execution was available; that limitation is unchanged from planning. Generated Traditional Chinese catalogs produced unrelated `automations.json` drift, which was reverted to keep this change scoped.
+- Limit: no live Copilot call was available. Generated Traditional Chinese catalogs produced
+  unrelated `automations.json` drift, which was reverted to keep this change scoped.
 
 Package validation commands, from the repository root:
 
@@ -230,4 +231,4 @@ Keep original package results intact. New results are recorded here and in the r
 - Thresholds and open-card gating remain ambiguous with concurrent or delayed samples, so this package rejects those heuristics.
 - Explicit-event counting needs provider support and replay/dedup semantics beyond this repair.
 - High-water usage or discarded child-like samples distort current usage and can affect accounting.
-- No fresh live-provider run or PostgreSQL execution occurred here; the runtime propagation is covered by the real publisher-to-storage regression instead.
+- No fresh live-provider run occurred here; the runtime propagation is covered by the real publisher-to-storage regression instead. PostgreSQL parity was verified against a disposable PostgreSQL 16 container.

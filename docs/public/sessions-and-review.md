@@ -601,11 +601,12 @@ upgrade and recovery limits.
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
 tokens; it focuses on the active session's context window. The hover also shows
-a session compaction count inferred from drops in used tokens. Streams that mix
-parent and subagent usage, such as Copilot ACP sessions, are excluded from that
-inference, so genuine compactions in those streams can be missed. Missing samples
-or provider resets can make eligible counts approximate. Existing sessions keep
-their previously inferred totals because Kandev cannot attribute old increments.
+a session compaction count inferred from drops in used tokens. Copilot ACP
+sessions, which can mix parent and subagent usage, are excluded from that
+inference, so genuine compactions in those sessions can be missed. Missing
+samples or provider resets can make eligible counts approximate. Existing
+sessions keep their previously inferred totals because Kandev cannot attribute
+old increments.
 For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a

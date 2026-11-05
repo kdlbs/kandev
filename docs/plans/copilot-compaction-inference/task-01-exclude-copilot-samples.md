@@ -125,12 +125,13 @@ statement.
 - GREEN: `go test -trimpath -tags fts5 ./internal/orchestrator/watcher -run '^TestContextWindow' -count=1`
   passed (marker round trip and legacy unmarked event).
 - GREEN: `go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^Test(UpdateSessionContextWindow|PostgresUpdateSessionContextWindow)' -count=1`
-  passed the mixed eligible/excluded matrix, duplicates, reset, missing marker, reopen baseline, and
-  the existing strict-drop regression. The PostgreSQL test was skipped because
-  `KANDEV_TEST_POSTGRES_DSN` was unavailable.
+  passed the mixed eligible/excluded matrix, duplicates, reset, missing marker, reopen baseline,
+  the existing strict-drop regression, and the PostgreSQL eligibility plan. PostgreSQL ran against
+  a disposable `postgres:16-alpine` container through `KANDEV_TEST_POSTGRES_DSN`; all 8 targeted
+  tests passed.
 - Full package runs passed: `./internal/agent/runtime/lifecycle`, `./internal/orchestrator`,
   `./internal/orchestrator/watcher`, and `./internal/task/repository/sqlite`.
 - `bash scripts/lint-go-changed ...` reported 0 issues.
 - Files changed: the payload type, publisher, watcher data, handler, SQLite/PostgreSQL SQL, and five
-  new test files. No schema, raw agentctl, frontend, or accounting change. PostgreSQL parity remains
-  incomplete without a test database.
+  new test files. No schema, raw agentctl, frontend, or accounting change. PostgreSQL parity passed
+  against a disposable PostgreSQL 16 container.

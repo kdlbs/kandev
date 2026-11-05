@@ -58,7 +58,7 @@ See the [complete package preview](plan.md#ui-preview).
 | --- | --- |
 | Current usage | Latest observed tokens and source |
 | Following row | Compactions: 0, then the existing info control |
-| Expanded explanation | Inferred usage drops, excluded mixed-context streams, and approximate accuracy |
+| Expanded explanation | Inferred usage drops, the Copilot ACP exclusion, and approximate accuracy |
 | Phone interaction | Tap ring, tap info, tap again to close help; the pinned surface remains usable |
 
 The hierarchy and interaction are structural requirements. Copy and spacing are illustrative.
@@ -135,8 +135,8 @@ Task 01: backend exclusion and regression coverage.
 
 ## Results
 
-Implemented. English, `pt-pt`, `zh-cn`, `ja`, and `ko` explain that mixed parent/subagent streams
-are excluded and eligible counts remain approximate. Traditional Chinese and pseudo catalogs were
+Implemented. English, `pt-pt`, `zh-cn`, `ja`, and `ko` explain that Copilot ACP usage is
+excluded and eligible counts remain approximate. Traditional Chinese and pseudo catalogs were
 regenerated. The unrelated `automations.json` drift produced by the Traditional Chinese generator
 was reverted so this change only carries the compaction help.
 
@@ -151,7 +151,7 @@ was reverted so this change only carries the compaction help.
 - E2E: `pnpm e2e:run --host --shards 1 --project mobile-chrome tests/chat/mobile-context-window-source.spec.ts`
   passed 3 tests with tap toggling, containment, a zero-count help fixture, and the revised
   explanation. Non-zero history remains covered by the default fixture in the sibling scenarios.
-- Public documentation: the context-window paragraph now explains excluded mixed-context streams,
+- Public documentation: the context-window paragraph now explains the Copilot ACP exclusion,
   missed genuine Copilot compactions, approximate eligible counts, and preserved historical totals.
   `node --test scripts/validate-public-docs.test.mjs` passed 63 tests and
   `node scripts/validate-public-docs.mjs` validated 55 pages.
