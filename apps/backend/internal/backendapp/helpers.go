@@ -238,6 +238,13 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 		}
 		appendGitStatusRefreshSnapshots(&attempt, sources, sessionID, multi)
 		if attempt.Success {
+			// A sibling execution can retain the pre-attachment tracker graph.
+			// Its aggregate then describes only that checkout, not the whole
+			// environment. Only a source covering every registered repository
+			// may define the complete inventory.
+			if len(multi.Repos) < sources.repositoryCount {
+				continue
+			}
 			return attempt
 		}
 		if failedSource == nil {

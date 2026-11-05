@@ -146,6 +146,32 @@ func TestManager_LiveRepositoryAttachmentRefreshScopes(t *testing.T) {
 		collector.stopAndCheckNoEmptyName(t)
 	})
 
+	t.Run("repo-less root adopts suppression on rescan", func(t *testing.T) {
+		taskRoot := t.TempDir()
+		mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+		t.Cleanup(mgr.stopWorkspaceTrackers)
+		placeSiblingRepos(t, taskRoot, "master", "secondary")
+
+		if err := mgr.RescanRepositories(context.Background(), ""); err != nil {
+			t.Fatalf("rescan repositories: %v", err)
+		}
+		if !mgr.workspaceTracker.suppressGitPublication {
+			t.Fatal("rescanned bare root did not adopt Git publication suppression")
+		}
+
+		sub := mgr.SubscribeWorkspaceStream()
+		defer mgr.UnsubscribeWorkspaceStream(sub)
+		collector := collectPublishedGitStatuses(sub)
+
+		writeRepositoryFile(t, filepath.Join(taskRoot, "master"), "rescan.txt")
+		writeRepositoryFile(t, filepath.Join(taskRoot, "secondary"), "rescan.txt")
+		mgr.SetWorkspacePollMode(context.Background(), PollModeFast)
+		assertTrackerHasFile(t, mgr.findRepositoryTracker("master"), "rescan.txt", "rescanned master refresh")
+		assertTrackerHasFile(t, mgr.findRepositoryTracker("secondary"), "rescan.txt", "rescanned secondary refresh")
+
+		collector.stopAndCheckNoEmptyName(t)
+	})
+
 	t.Run("real root repository still publishes beside named children", func(t *testing.T) {
 		root, cleanup := setupTestRepo(t)
 		t.Cleanup(cleanup)

@@ -142,16 +142,13 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 
 	root := desiredRoot
 	rootReused := false
-	if oldRoot != nil && repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
-		repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) {
+	if oldRoot != nil &&
+		repositoryTrackerIdentity(oldRoot.RepositoryName(), oldRoot.workDir) ==
+			repositoryTrackerIdentity(desiredRoot.RepositoryName(), desiredRoot.workDir) &&
+		oldRoot.suppressGitPublication == desiredRoot.suppressGitPublication {
 		root = oldRoot
 		rootReused = true
 		syncTrackerConfiguration(root, desiredRoot, roots)
-		// The desired graph decides whether this root is a bare multi-repo
-		// parent. A reused root must adopt that eligibility; otherwise a
-		// repo-less root created at launch would keep publishing the unnamed
-		// unavailable status after a rescan adds repositories.
-		root.suppressGitPublication = desiredRoot.suppressGitPublication
 		m.prepareTrackerComparisonTarget(root, false)
 		desiredRoot.Stop()
 	}

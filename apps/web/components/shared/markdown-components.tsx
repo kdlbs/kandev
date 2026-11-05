@@ -162,18 +162,31 @@ function MarkdownFallbackLink(
   // a new snapshot on every read and re-render without end.
   const activeWorkspace = useAppStore(
     useShallow((state) => {
-      const sessionId = state.tasks.activeSessionId;
-      if (!sessionId) return null;
-      const session = state.taskSessions.items[sessionId];
+      const activeSession = state.tasks.activeSessionId
+        ? state.taskSessions.items[state.tasks.activeSessionId]
+        : undefined;
+      // A surface that supplies its own worktree (for example a run
+      // transcript) must use that session's native base, not another
+      // globally active session's checkout.
+      const renderingSession = props.worktreePath
+        ? Object.values(state.taskSessions.items).find(
+            (session) =>
+              session.worktree_path === props.worktreePath ||
+              getSessionWorkspacePath(session) === props.worktreePath,
+          )
+        : undefined;
+      const session = renderingSession ?? activeSession;
+      const sessionId = session?.id ?? state.tasks.activeSessionId;
+      if (!session || !sessionId) return null;
       const liveWorktreeIds =
         state.sessionWorktreesBySessionId?.itemsBySessionId?.[sessionId] ?? [];
       const worktreePaths = [
-        ...(session?.worktrees ?? []).map((worktree) => worktree.worktree_path),
+        ...(session.worktrees ?? []).map((worktree) => worktree.worktree_path),
         ...liveWorktreeIds.map((id) => state.worktrees?.items?.[id]?.path),
       ].filter((path): path is string => Boolean(path));
       return {
-        workspacePath: getSessionWorkspacePath(session) ?? null,
-        agentWorkspacePath: session?.agent_workspace_path ?? null,
+        workspacePath: props.worktreePath ?? getSessionWorkspacePath(session) ?? null,
+        agentWorkspacePath: session.agent_workspace_path ?? null,
         // Primitive key keeps the shallow snapshot stable; the prefix list is
         // derived outside the selector.
         worktreePaths: [...new Set(worktreePaths)].sort().join("\u0000"),

@@ -23,6 +23,18 @@ func TestAgentctlReadyPublishesNativeWorkspaceBeneathPromotedRoot(t *testing.T) 
 	require.Equal(t, "/work/task-1/master", payload.WorktreePath)
 }
 
+func TestAgentctlStartingDoesNotPublishUnconfirmedNativeWorkspace(t *testing.T) {
+	h := newWorkspaceEventsHarness(t)
+	h.exec.WorkspacePath = "/work/task-1/master"
+
+	h.mgr.eventPublisher.PublishAgentctlEvent(context.Background(), events.AgentctlStarting, h.exec, "")
+
+	payload, ok := h.only(t).Event.Data.(AgentctlEventPayload)
+	require.True(t, ok, "payload type = %T", h.only(t).Event.Data)
+	require.Empty(t, payload.AgentWorkspacePath,
+		"starting events carry a prepared path, not a confirmed native workspace")
+}
+
 func TestNotifyWorktreeMaterializedKeepsLaunchedExecutionWorkspace(t *testing.T) {
 	h := newWorkspaceEventsHarness(t)
 	h.exec.WorkspacePath = "/work/task-1/master"

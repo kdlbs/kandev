@@ -329,6 +329,18 @@ describe("resolveMarkdownFileTarget native workspace boundaries", () => {
     ).toEqual({ kind: "file", path: GUIDE_PATH });
   });
 
+  it("matches a case-variant Windows source prefix", () => {
+    const windowsWorkspaceRoot = String.raw`C:\Users\Me\worktree`;
+    const windowsBase = String.raw`C:\Users\Me\worktree\master`;
+    expect(
+      resolveMarkdownFileTarget("MASTER/README.md", {
+        workspaceRoot: windowsWorkspaceRoot,
+        relativeBasePath: windowsBase,
+        sourcePrefixes: ["master"],
+      }),
+    ).toEqual({ kind: "file", path: "MASTER/README.md" });
+  });
+
   it("maps a Windows native workspace case-insensitively", () => {
     const windowsWorkspaceRoot = String.raw`C:\Users\Me\worktree`;
     expect(

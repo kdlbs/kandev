@@ -102,10 +102,11 @@ function pruneObsoleteEnvironmentFailure(
   state: SessionRuntimeSliceState,
   environmentId: string,
 ): void {
-  // A validated aggregate supersedes a legacy environment-level failure. An
-  // in-flight attempt keeps its request bookkeeping until it settles.
+  // A validated aggregate supersedes a settled environment-level failure.
+  // `pending` is the only in-flight state; `unavailable` keeps a request_id
+  // from the attempt that produced it and still must not outlive the inventory.
   const environmentRefresh = state.gitStatus.refreshByEnvironmentId?.[environmentId];
-  if (environmentRefresh?.state === "unavailable" && !environmentRefresh.request_id) {
+  if (environmentRefresh?.state === "unavailable") {
     delete state.gitStatus.refreshByEnvironmentId?.[environmentId];
   }
 }

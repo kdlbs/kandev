@@ -51,6 +51,7 @@ function seedMultiRepositoryState(store: ReturnType<typeof makeStore>) {
   store.getState().setGitStatusRefresh(ENVIRONMENT, undefined, {
     state: "unavailable",
     error_code: "status_unavailable",
+    request_id: "git-refresh-settled",
   });
 }
 

@@ -270,18 +270,21 @@ export function buildMarkdownWorkspaceSourcePrefixes({
  * exact session worktree placement, so nested and remote layouts stay valid
  * without probing a repository for a matching filename.
  */
-function matchesSourcePrefix(path: string, prefix: string): boolean {
-  return path === prefix || path.startsWith(`${prefix}/`);
+function matchesSourcePrefix(path: string, prefix: string, caseInsensitive: boolean): boolean {
+  const comparablePath = caseInsensitive ? path.toLowerCase() : path;
+  const comparablePrefix = caseInsensitive ? prefix.toLowerCase() : prefix;
+  return comparablePath === comparablePrefix || comparablePath.startsWith(`${comparablePrefix}/`);
 }
 
 function resolveExplicitSourcePrefixTarget(
   path: string,
   aliases: readonly MarkdownFileRootAlias[],
   sourcePrefixes: readonly string[],
+  caseInsensitive: boolean,
 ): MarkdownFileTarget | null {
   const matches = aliases.flatMap((alias) => {
     const relativeRoot = normalizeOptionalPath(alias.workspaceRelativeRoot);
-    if (!relativeRoot || !matchesSourcePrefix(path, relativeRoot)) return [];
+    if (!relativeRoot || !matchesSourcePrefix(path, relativeRoot, caseInsensitive)) return [];
     return [{ alias, relativeRoot }];
   });
   if (matches.length > 0) {
@@ -295,7 +298,9 @@ function resolveExplicitSourcePrefixTarget(
     );
     if (targetIdentities.size !== 1) return { kind: "blocked" };
   } else {
-    const matchesPrefix = sourcePrefixes.some((prefix) => matchesSourcePrefix(path, prefix));
+    const matchesPrefix = sourcePrefixes.some((prefix) =>
+      matchesSourcePrefix(path, prefix, caseInsensitive),
+    );
     if (!matchesPrefix) return null;
   }
   return createFileTarget(path) ?? { kind: "blocked" };
@@ -326,7 +331,12 @@ function resolveRelativeTarget(
   aliases: readonly MarkdownFileRootAlias[],
   sourcePrefixes: readonly string[],
 ): MarkdownFileTarget | null {
-  const explicitPrefix = resolveExplicitSourcePrefixTarget(path, aliases, sourcePrefixes);
+  const explicitPrefix = resolveExplicitSourcePrefixTarget(
+    path,
+    aliases,
+    sourcePrefixes,
+    isWindowsDriveAbsolutePath(workspaceRoot ?? ""),
+  );
   if (explicitPrefix) return explicitPrefix;
 
   if (!relativeBasePath) {

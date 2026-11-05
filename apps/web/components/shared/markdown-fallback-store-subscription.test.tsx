@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-duplicate-string -- Workspace fixtures repeat across session-base cases. */
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import ReactMarkdown from "react-markdown";
@@ -6,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import { markdownComponents, remarkPlugins } from "./markdown-components";
+import { MemoizedMarkdown } from "./memoized-markdown";
 
 const openFile = vi.hoisted(() => vi.fn());
 
@@ -26,6 +28,7 @@ vi.mock("@/components/task/chat/messages/inline-code", () => ({
 }));
 
 const SESSION_ID = toSessionId("session-1");
+const OTHER_SESSION_ID = toSessionId("session-other");
 const TASK_ID = toTaskId("task-1");
 const session: TaskSession = {
   id: SESSION_ID,
@@ -56,18 +59,37 @@ const session: TaskSession = {
   ],
 };
 
-/** Seeds a live session through the real store, as hydration would. */
-function SeedActiveSession() {
+const otherSession: TaskSession = {
+  id: OTHER_SESSION_ID,
+  task_id: TASK_ID,
+  state: "RUNNING",
+  started_at: "2026-11-05T00:00:00Z",
+  updated_at: "2026-11-05T00:00:00Z",
+  workspace_path: "/task-root-other",
+  worktree_path: "/task-root-other/other",
+  agent_workspace_path: "/task-root-other/other",
+};
+
+/** Seeds two live sessions through the real store, as hydration would. */
+function SeedActiveSession({
+  activeSessionId = SESSION_ID,
+}: {
+  activeSessionId?: typeof SESSION_ID;
+}) {
   const store = useAppStoreApi();
   useEffect(() => {
     store.setState((state) => ({
-      tasks: { ...state.tasks, activeSessionId: SESSION_ID },
+      tasks: { ...state.tasks, activeSessionId },
       taskSessions: {
         ...state.taskSessions,
-        items: { ...state.taskSessions.items, [SESSION_ID]: session },
+        items: {
+          ...state.taskSessions.items,
+          [SESSION_ID]: session,
+          [OTHER_SESSION_ID]: otherSession,
+        },
       },
     }));
-  }, [store]);
+  }, [activeSessionId, store]);
   return null;
 }
 
@@ -84,10 +106,16 @@ function UnrelatedStoreUpdate() {
   );
 }
 
-function Providers({ children }: { children: ReactNode }) {
+function Providers({
+  children,
+  activeSessionId,
+}: {
+  children: ReactNode;
+  activeSessionId?: typeof SESSION_ID;
+}) {
   return (
     <StateProvider>
-      <SeedActiveSession />
+      <SeedActiveSession activeSessionId={activeSessionId} />
       <UnrelatedStoreUpdate />
       {children}
     </StateProvider>
@@ -126,5 +154,18 @@ describe("Markdown fallback file-link snapshot", () => {
     fireEvent.click(screen.getByRole("link", { name: "work order" }));
     expect(openFile).toHaveBeenCalledTimes(4);
     expect(openFile).toHaveBeenLastCalledWith("master/implementation_plans/task.md");
+  });
+
+  it("uses the rendering session's base when it differs from the active session", async () => {
+    render(
+      <Providers activeSessionId={OTHER_SESSION_ID}>
+        <MemoizedMarkdown content="[run guide](docs/guide.md)" worktreePath="/task-root" />
+      </Providers>,
+    );
+
+    const link = await screen.findByRole("link", { name: "run guide" });
+    fireEvent.click(link);
+
+    expect(openFile).toHaveBeenLastCalledWith("master/docs/guide.md");
   });
 });
