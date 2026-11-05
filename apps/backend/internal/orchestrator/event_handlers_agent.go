@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -4473,8 +4474,9 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	taskID, sessionID, agentExecutionID string,
 	dispatch *func(context.Context),
 ) bool {
+	classified := unavailableDynamicStartupModel(err, *failureData)
 	var startupFailure *routingerr.AgentStartupFailure
-	if !errors.As(err, &startupFailure) || startupFailure == nil {
+	if classified == nil && (!errors.As(err, &startupFailure) || startupFailure == nil) {
 		return false
 	}
 	attempt, ok := dynamicStartupAttemptFromContext(ctx)
@@ -4484,7 +4486,9 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	failureData.OwnerKind = queueStatusScopeTask
 	failureData.DynamicRouteAttempt = true
 	failureData.EvidenceKnown = true
-	classified := classifyTrustedAgentStartupFailure(startupFailure)
+	if classified == nil {
+		classified = classifyTrustedAgentStartupFailure(startupFailure)
+	}
 	var session *models.TaskSession
 	var sessionErr error
 	if s.repo == nil {
@@ -4493,10 +4497,17 @@ func (s *Service) handleDynamicAgentStartupFailure(
 		session, sessionErr = s.repo.GetTaskSession(ctx, sessionID)
 	}
 	if sessionErr != nil || !startupAttemptOwnsSession(session, agentExecutionID, attempt) ||
-		classified.Code != routingerr.CodeAgentRuntime {
+		(classified.Code != routingerr.CodeAgentRuntime && classified.Code != routingerr.CodeModelUnavailable) {
 		return false
 	}
 	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
+	if classified.Code == routingerr.CodeModelUnavailable {
+		evidence = s.unclassifiedFailureEvidence(
+			ctx, *failureData, session, attempt.SessionID == sessionID,
+			dynamicruntime.UnclassifiedOriginAgentStartup, routingerr.PhaseSessionInit,
+			attempt.ID, "", "", false, true, false, false,
+		)
+	}
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return false
 	}

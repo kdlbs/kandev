@@ -986,6 +986,9 @@ func (s *Service) prepareDynamicFailureEvidence(
 	if unclassified {
 		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
 	}
+	if classifiedStartupModelFailureSafe(classified, startupEvidence) {
+		return *startupEvidence, true
+	}
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
