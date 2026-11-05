@@ -25,6 +25,7 @@ test.describe("Mobile live repository attachment", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const repository = createLiveAttachmentRepository(backend.tmpDir);
     const task = await apiClient.createTaskWithAgent(
@@ -94,6 +95,10 @@ test.describe("Mobile live repository attachment", () => {
     ).toBeVisible();
     await expect(testPage.getByText("primary-change.txt", { exact: true })).toBeVisible();
     await expect(testPage.getByTestId("changes-refresh-status")).toHaveCount(0);
+    await prCapture.screenshot("mobile-changes-reconciled-repositories", {
+      caption:
+        "Phone Changes with both current repositories after live attachment and no refresh warning",
+    });
 
     await openMobilePanel(testPage, /Chat$/);
     const chat = session.activeChat();
@@ -101,6 +106,9 @@ test.describe("Mobile live repository attachment", () => {
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
     await expect(viewer.locator(".cm-content")).toContainText(LIVE_ATTACHMENT_WORK_ORDER.trim());
+    await prCapture.screenshot("mobile-chat-link-primary-checkout", {
+      caption: "Phone file viewer opening the work order from the agent's original checkout",
+    });
     await viewer.getByRole("button", { name: /Close/i }).tap();
     await openMobilePanel(testPage, /Chat$/);
 

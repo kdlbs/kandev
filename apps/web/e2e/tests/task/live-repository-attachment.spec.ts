@@ -25,6 +25,7 @@ test.describe("Live repository attachment", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const repository = createLiveAttachmentRepository(backend.tmpDir);
     const task = await apiClient.createTaskWithAgent(
@@ -105,6 +106,10 @@ test.describe("Live repository attachment", () => {
     ).toBeVisible();
     await expect(changes.getByText("primary-change.txt", { exact: true })).toBeVisible();
     await expect(changes.getByTestId("changes-refresh-status")).toHaveCount(0);
+    await prCapture.screenshot("changes-reconciled-repositories", {
+      caption:
+        "Desktop Changes with both current repositories after live attachment and no refresh warning",
+    });
 
     await session.showSessionContext();
     const chat = session.activeChat();
@@ -112,6 +117,9 @@ test.describe("Live repository attachment", () => {
     const editor = activeFileEditor(testPage);
     await expect(editor).toBeVisible({ timeout: 15_000 });
     await expect(editor.locator(".view-lines")).toContainText(LIVE_ATTACHMENT_WORK_ORDER.trim());
+    await prCapture.screenshot("chat-link-primary-checkout", {
+      caption: "Desktop file panel opening the work order from the agent's original checkout",
+    });
 
     await session.showSessionContext();
     await chat.getByRole("link", { name: "primary qualified" }).click();
