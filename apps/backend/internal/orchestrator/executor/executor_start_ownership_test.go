@@ -71,6 +71,69 @@ func TestExistingWorkspaceStart_ActiveAgent(t *testing.T) {
 	require.ErrorIs(t, err, ErrExecutionAlreadyRunning)
 }
 
+// Regression: a launch (refuseIfAgentRunning=false) onto a WAITING_FOR_INPUT
+// session whose agent process is still alive used to reach StartAgentProcess,
+// which agentctl rejects ("cannot configure while agent is running"), failing
+// the session and force-stopping the live agent.
+func TestExistingWorkspaceStart_LiveAgentWithoutRefuseFlag(t *testing.T) {
+	cases := []struct {
+		name         string
+		isOffice     bool
+		wantErr      error
+		wantStopCall int32
+	}{
+		// A non-Office session may be about to receive a user prompt: never stop it.
+		{name: "non-office is refused untouched", isOffice: false, wantErr: ErrExecutionAlreadyRunning},
+		// An Office wake for a parked agent releases it and cold-resumes.
+		{name: "office parked agent is released for cold resume", isOffice: true, wantErr: ErrStaleExecution, wantStopCall: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			var processStarts, stopCalls atomic.Int32
+			agentManager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+					return "execution-parked", nil
+				},
+				isAgentRunningForSessionFunc: func(context.Context, string) bool { return true },
+				startAgentProcessFunc: func(context.Context, string) error {
+					processStarts.Add(1)
+					return nil
+				},
+				stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+					require.Equal(t, "execution-parked", executionID)
+					require.False(t, force, "release must be graceful")
+					stopCalls.Add(1)
+					return nil
+				},
+			}
+			repo := newMockRepository()
+			exec := newTestExecutor(t, agentManager, repo)
+			task := &v1.Task{ID: "task-parked", WorkspaceID: "workspace-parked"}
+			repo.tasks[task.ID] = &models.Task{ID: task.ID, IsFromOffice: tc.isOffice}
+			session := &models.TaskSession{
+				ID: "session-parked", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+				AgentProfileID: "profile-parked",
+			}
+			repo.sessions[session.ID] = cloneMockTaskSession(session)
+			request := &LaunchAgentRequest{
+				TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+				ExecutorType: "local_pc",
+			}
+
+			_, err := exec.startAgentOnExistingWorkspaceWithRequest(
+				ctx, task, session, "assigned", true, "", request, nil, nil, nil, nil, false,
+			)
+
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Zero(t, processStarts.Load(), "a second agent process must not start")
+			require.Equal(t, tc.wantStopCall, stopCalls.Load())
+			require.Equal(t, models.TaskSessionStateWaitingForInput, repo.sessions[session.ID].State,
+				"the session must not be moved to STARTING")
+		})
+	}
+}
+
 func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	ctx := context.Background()
 	started := make(chan struct{}, 1)
