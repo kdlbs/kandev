@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -73,6 +74,10 @@ type MarkdownCodeProps = {
 
 export type MarkdownFileLinkContextValue = {
   worktreePath?: string | null;
+  /** Confirmed native workspace used as the base for relative links. */
+  relativeBasePath?: string | null;
+  /** Files-root-relative checkout directories that preserve explicit prefixes. */
+  sourcePrefixes?: readonly string[];
   onOpenFile?: (path: string) => void;
   fileRootAliases?: readonly MarkdownFileRootAlias[];
 };
@@ -93,15 +98,21 @@ function MarkdownFileAnchor({
   href,
   children,
   worktreePath,
+  relativeBasePath,
+  sourcePrefixes,
   openFile,
   fileRootAliases,
 }: MarkdownLinkProps & {
   worktreePath: string | null | undefined;
+  relativeBasePath?: string | null;
+  sourcePrefixes?: readonly string[];
   openFile: (path: string) => void;
   fileRootAliases?: readonly MarkdownFileRootAlias[];
 }) {
   const target = resolveMarkdownFileTarget(href, {
     workspaceRoot: worktreePath,
+    relativeBasePath,
+    sourcePrefixes,
     fileRootAliases,
   });
   const filePath = target?.kind === "file" ? target.path : null;
@@ -132,20 +143,33 @@ function MarkdownFileAnchor({
 function MarkdownFallbackLink(
   props: MarkdownLinkProps & {
     worktreePath?: string | null;
+    relativeBasePath?: string | null;
+    sourcePrefixes?: readonly string[];
     fileRootAliases?: readonly MarkdownFileRootAlias[];
   },
 ) {
   const { openFile } = usePanelActions();
-  const activeWorktreePath = useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return getSessionWorkspacePath(state.taskSessions.items[sessionId]);
-  });
+  // Choose primitives into one shallow-compared snapshot. Returning a fresh
+  // object from a bare Zustand selector makes React's external-store check see
+  // a new snapshot on every read and re-render without end.
+  const activeWorkspace = useAppStore(
+    useShallow((state) => {
+      const sessionId = state.tasks.activeSessionId;
+      if (!sessionId) return null;
+      const session = state.taskSessions.items[sessionId];
+      return {
+        workspacePath: getSessionWorkspacePath(session) ?? null,
+        agentWorkspacePath: session?.agent_workspace_path ?? null,
+      };
+    }),
+  );
 
   return (
     <MarkdownFileAnchor
       {...props}
-      worktreePath={props.worktreePath ?? activeWorktreePath}
+      worktreePath={props.worktreePath ?? activeWorkspace?.workspacePath}
+      relativeBasePath={props.relativeBasePath ?? activeWorkspace?.agentWorkspacePath}
+      sourcePrefixes={props.sourcePrefixes}
       fileRootAliases={props.fileRootAliases}
       openFile={openFile}
     />
@@ -159,6 +183,8 @@ function MarkdownLink(props: MarkdownLinkProps) {
       <MarkdownFileAnchor
         {...props}
         worktreePath={linkContext.worktreePath}
+        relativeBasePath={linkContext.relativeBasePath}
+        sourcePrefixes={linkContext.sourcePrefixes}
         fileRootAliases={linkContext.fileRootAliases}
         openFile={linkContext.onOpenFile}
       />
@@ -168,6 +194,8 @@ function MarkdownLink(props: MarkdownLinkProps) {
     <MarkdownFallbackLink
       {...props}
       worktreePath={linkContext.worktreePath}
+      relativeBasePath={linkContext.relativeBasePath}
+      sourcePrefixes={linkContext.sourcePrefixes}
       fileRootAliases={linkContext.fileRootAliases}
     />
   );

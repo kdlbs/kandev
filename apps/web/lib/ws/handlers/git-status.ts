@@ -12,6 +12,7 @@ import type {
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { acceptsGitStatusOrdering } from "@/lib/state/slices/session-runtime/git-status-state";
+import { isCurrentGitStatusScope } from "@/lib/state/slices/session-runtime/git-status-inventory";
 
 const debug = createDebugLogger("git-status:ws");
 
@@ -100,6 +101,15 @@ export function applyGitStatusUpdate(
   store: StoreApi<AppState>,
   event: GitStatusUpdateEvent,
 ): boolean {
+  const state = store.getState();
+  const environmentId = event.task_environment_id;
+  if (!environmentId) return false;
+  // Once an authoritative aggregate read has established the current Git
+  // scopes, late streaming frames from a retired tracker cannot recreate the
+  // empty-name failure or another stale repository.
+  if (!isCurrentGitStatusScope(state, environmentId, event.status.repository_name)) {
+    return false;
+  }
   return applyGitStatusUpdateWithOutcome(store, event).changed;
 }
 

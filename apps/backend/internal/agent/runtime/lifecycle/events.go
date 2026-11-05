@@ -329,6 +329,7 @@ func (p *EventPublisher) agentctlEventPayload(
 		WorktreeID:             worktreeID,
 		WorktreePath:           execution.WorkspacePath,
 		WorktreeBranch:         worktreeBranch,
+		AgentWorkspacePath:     execution.WorkspacePath,
 	}
 	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
 		payload.AttemptID = attemptID

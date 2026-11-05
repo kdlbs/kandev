@@ -4,6 +4,10 @@ import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } f
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
 import {
+  invalidateGitStatusInventory as invalidateInventoryState,
+  reconcileGitStatusInventory as reconcileInventoryState,
+} from "./git-status-inventory";
+import {
   beginWorkspaceRestoration,
   clearWorkspaceRestoration,
   completeWorkspaceRestoration,
@@ -120,6 +124,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     byEnvironmentRepo: {},
     refreshByEnvironmentId: {},
     refreshByEnvironmentRepo: {},
+    inventoryByEnvironment: {},
   },
   gitStatusDisplay: { byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
@@ -377,6 +382,9 @@ export function migrateEnvKeyedData(
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.gitStatusDisplay.byEnvironmentRepo);
+  if (draft.gitStatus.refreshByEnvironmentId) migrate(draft.gitStatus.refreshByEnvironmentId);
+  if (draft.gitStatus.refreshByEnvironmentRepo) migrate(draft.gitStatus.refreshByEnvironmentRepo);
+  if (draft.gitStatus.inventoryByEnvironment) migrate(draft.gitStatus.inventoryByEnvironment);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitCheckoutGeneration.byEnvironmentId);
@@ -459,6 +467,27 @@ function buildWorkspaceRestorationActions(set: ImmerSet) {
   };
 }
 
+function buildGitInventoryActions(set: ImmerSet) {
+  return {
+    invalidateGitStatusInventory: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        invalidateInventoryState(draft, envKey);
+      }),
+    reconcileGitStatusInventory: (
+      environmentId: string,
+      generation: number,
+      scopes: readonly string[],
+    ) => {
+      let applied = false;
+      set((draft) => {
+        applied = reconcileInventoryState(draft, environmentId, generation, scopes);
+      });
+      return applied;
+    },
+  };
+}
+
 export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
@@ -516,14 +545,25 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
       // backend and will never emit another update under the empty key. The
       // per-repo entries (real repo names) are intentionally left in place;
       // they continue to receive fresh status updates from the new trackers.
+      // Refresh failures belong to the same retired scope and must go too, or
+      // a blank repository name keeps the warning visible after every named
+      // repository has recovered.
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
       if (repoMap && "" in repoMap) {
         delete repoMap[""];
       }
+      const refreshRepoMap = draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+      if (refreshRepoMap && "" in refreshRepoMap) {
+        delete refreshRepoMap[""];
+        if (Object.keys(refreshRepoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+        }
+      }
       delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
     }),
+  ...buildGitInventoryActions(set),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;

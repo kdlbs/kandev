@@ -68,6 +68,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 
 	if !rootIsGit && (len(directRepos) >= 2 || forceBareRoot) {
 		root := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
+		root.suppressGitPublication = true
 		m.configureTracker(root, "", roots)
 
 		trackers := make([]*WorkspaceTracker, 0, len(directRepos))

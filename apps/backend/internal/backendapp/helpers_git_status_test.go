@@ -843,13 +843,15 @@ func TestSessionGitRefreshContinuesToHealthySiblingSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh provider: %v", err)
 	}
-	if !result.Success || len(result.Snapshots) != 2 {
-		t.Fatalf("refresh result = %+v; want failed and healthy source snapshots", result)
+	// A successful sibling source is authoritative for the complete scope
+	// set. The earlier failed source's snapshots must not be concatenated
+	// with it, or the UI would reconcile against a mixed inventory.
+	if !result.Success || len(result.Snapshots) != 1 {
+		t.Fatalf("refresh result = %+v; want only the healthy source's complete set", result)
 	}
-	first := decodePayload(t, result.Snapshots[0].Payload)["status"].(map[string]interface{})
-	last := decodePayload(t, result.Snapshots[1].Payload)["status"].(map[string]interface{})
-	if first["status_state"] != "unavailable" || last["files_complete"] != true {
-		t.Fatalf("source snapshots = %#v / %#v; want unavailable then complete", first, last)
+	only := decodePayload(t, result.Snapshots[0].Payload)["status"].(map[string]interface{})
+	if only["status_state"] != "ready" || only["files_complete"] != true {
+		t.Fatalf("source snapshot = %#v; want the healthy complete status", only)
 	}
 }
 
