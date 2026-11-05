@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- comprehensive session-state handler tests */
+/* eslint-disable max-lines, sonarjs/no-duplicate-string -- comprehensive session-state handler tests */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
@@ -43,6 +43,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     queue: { bySessionId: {}, metaBySessionId: {} },
     setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
+    invalidateGitStatusInventory: vi.fn(),
     bumpSessionGitCheckoutGeneration: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -1676,6 +1677,132 @@ describe("session.state_changed → agentctl ready fallback", () => {
       }),
     );
     expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
+  });
+
+  it("keeps the launched workspace as the relative-link base after sibling materialization", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const setTaskSession = vi.fn();
+    const setWorktree = vi.fn();
+    const clearLegacyGitStatusEntry = vi.fn();
+    const invalidateGitStatusInventory = vi.fn();
+    const existing = {
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      repository_id: "primary-repo",
+      worktree_id: "primary-worktree",
+      worktree_path: "/task-root/master",
+      worktree_branch: "main",
+      workspace_path: "/task-root/master",
+      agent_workspace_path: "/task-root/master",
+    };
+    const store = makeStore({
+      taskSessions: { items: { "s-1": existing } },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      clearLegacyGitStatusEntry,
+      invalidateGitStatusInventory,
+      bumpSessionGitCheckoutGeneration: vi.fn(),
+      upsertTaskSessionFromEvent,
+      setWorktree,
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_repository_id: "secondary-repo",
+        worktree_path: "/task-root/secondary",
+        worktree_branch: "main",
+        task_workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+      },
+    });
+
+    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({
+        workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+      }),
+    );
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+        worktree_path: "/task-root/master",
+      }),
+    );
+    expect(setWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sibling-worktree", repositoryId: "secondary-repo" }),
+    );
+    expect(clearLegacyGitStatusEntry).toHaveBeenCalledWith("s-1");
+    expect(invalidateGitStatusInventory).toHaveBeenCalledWith("s-1");
+  });
+
+  it("keeps a valid unnamed root snapshot when attachment does not promote the root", () => {
+    const clearLegacyGitStatusEntry = vi.fn();
+    const invalidateGitStatusInventory = vi.fn();
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            repository_id: "root-repo",
+            worktree_id: "root-worktree",
+            worktree_path: TASK_ROOT,
+            worktree_branch: "main",
+            workspace_path: TASK_ROOT,
+          },
+        },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["root-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      clearLegacyGitStatusEntry,
+      invalidateGitStatusInventory,
+      bumpSessionGitCheckoutGeneration: vi.fn(),
+      upsertTaskSessionFromEvent: vi.fn(),
+      setWorktree: vi.fn(),
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_path: "/task-root/secondary",
+        worktree_branch: "main",
+        task_workspace_path: TASK_ROOT,
+        agent_workspace_path: TASK_ROOT,
+      },
+    });
+
+    expect(clearLegacyGitStatusEntry).not.toHaveBeenCalled();
+    expect(invalidateGitStatusInventory).toHaveBeenCalledWith("s-1");
   });
 
   it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {

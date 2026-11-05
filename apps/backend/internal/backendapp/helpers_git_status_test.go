@@ -843,13 +843,58 @@ func TestSessionGitRefreshContinuesToHealthySiblingSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh provider: %v", err)
 	}
-	if !result.Success || len(result.Snapshots) != 2 {
-		t.Fatalf("refresh result = %+v; want failed and healthy source snapshots", result)
+	// A successful sibling source is authoritative for the complete scope
+	// set. The earlier failed source's snapshots must not be concatenated
+	// with it, or the UI would reconcile against a mixed inventory.
+	if !result.Success || len(result.Snapshots) != 1 {
+		t.Fatalf("refresh result = %+v; want only the healthy source's complete set", result)
 	}
-	first := decodePayload(t, result.Snapshots[0].Payload)["status"].(map[string]interface{})
-	last := decodePayload(t, result.Snapshots[1].Payload)["status"].(map[string]interface{})
-	if first["status_state"] != "unavailable" || last["files_complete"] != true {
-		t.Fatalf("source snapshots = %#v / %#v; want unavailable then complete", first, last)
+	only := decodePayload(t, result.Snapshots[0].Payload)["status"].(map[string]interface{})
+	if only["status_state"] != "ready" || only["files_complete"] != true {
+		t.Fatalf("source snapshot = %#v; want the healthy complete status", only)
+	}
+}
+
+func TestSessionGitRefreshRejectsIncompleteSiblingInventory(t *testing.T) {
+	fixture := newGitStatusEnvironmentFixture(t)
+	ctx := context.Background()
+	for index, repositoryID := range []string{"git-status-repo-a", "git-status-repo-b"} {
+		if err := fixture.repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+			ID:                "git-status-env-repo-" + repositoryID,
+			TaskEnvironmentID: fixture.env.ID,
+			RepositoryID:      repositoryID,
+			WorktreePath:      filepath.Join(fixture.env.WorkspacePath, repositoryID),
+			Position:          index,
+		}); err != nil {
+			t.Fatalf("create environment repository %s: %v", repositoryID, err)
+		}
+	}
+	log := newTestLogger()
+	agentClient, closeServer := newGitStatusClient(t, log, client.GitStatusResult{
+		Success: true, StatusState: "ready", FilesComplete: true, DetailState: "ready",
+		Modified: []string{"main.go"}, Files: map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+	})
+	defer closeServer()
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), log)
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: "git-status-incomplete-source", TaskID: fixture.requested.TaskID,
+		SessionID: "git-status-canonical", TaskEnvironmentID: fixture.env.ID,
+		WorkspacePath: fixture.env.WorkspacePath,
+	}); err != nil {
+		t.Fatalf("add source execution: %v", err)
+	}
+	execution, ok := mgr.GetExecutionBySessionID("git-status-canonical")
+	if !ok {
+		t.Fatal("source execution was not registered")
+	}
+	execution.SetAgentCtlClientForTesting(agentClient)
+
+	result, err := buildSessionGitRefreshProvider(fixture.repo, mgr, log)(ctx, fixture.requested.ID, "fresh")
+	if err != nil {
+		t.Fatalf("refresh provider: %v", err)
+	}
+	if result.Success || len(result.Snapshots) != 0 {
+		t.Fatalf("refresh result = %+v; want no inventory from a source missing a repository", result)
 	}
 }
 
