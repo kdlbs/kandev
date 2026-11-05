@@ -2200,7 +2200,8 @@ func registerSecondaryRoutes(
 			p.authSvc,
 			p.log,
 		)
-		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log,
+			buildOfficeCrossWorkspaceGateway(p))
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }

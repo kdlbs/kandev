@@ -549,9 +549,10 @@ func mountOfficeRoutes(
 	handoffSvc *taskservice.HandoffService,
 	handoffDeps officeruntime.HandoffDependencies,
 	log *logger.Logger,
+	crossWorkspace ...officeruntime.CrossWorkspaceGateway,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
-	office.RegisterAllRoutes(api, svcs, handoffSvc, handoffDeps, log)
+	office.RegisterAllRoutes(api, svcs, handoffSvc, handoffDeps, log, crossWorkspace...)
 }

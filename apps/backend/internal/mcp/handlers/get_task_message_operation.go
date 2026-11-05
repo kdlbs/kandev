@@ -83,11 +83,11 @@ func (h *Handlers) handleGetTaskMessageOperation(ctx context.Context, msg *ws.Me
 }
 
 // A caller cannot widen the server-injected sender pair through a raw action.
-// Readback uses the existing kanban task principal; payload sender fields never
-// establish authority.
+// Office's signed runtime gateway may supply the same exact sender authority;
+// ordinary Office MCP discovery and raw actions remain unchanged.
 func (h *Handlers) validateSendOperationSender(ctx context.Context, msg *ws.Message, taskID, sessionID string) *ws.Message {
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || principal.Surface != mcpprofile.SurfaceKanbanTask ||
+	if !ok || (principal.Surface != mcpprofile.SurfaceKanbanTask && !officeRuntimeMessageAuthorized(ctx, principal)) ||
 		principal.CallerTaskID != taskID || principal.CallerSessionID != sessionID {
 		return wsError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			"send-operation records belong to the authorized calling task session")
