@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/taskdependencies"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
@@ -60,10 +61,13 @@ type workspaceEnvironmentOwnershipTransfer struct {
 	resultingGeneration int64
 }
 
-func (s *HandoffService) lockArchiveCascade(rootID string) func() {
-	lock := s.archiveCascadeLock.lockFor(rootID)
-	lock.Lock()
-	return lock.Unlock
+func (s *HandoffService) lockArchiveCascade(ctx context.Context, rootID string) (func(), error) {
+	stored, _ := s.archiveCascadeLock.LoadOrStore(rootID, &ctxmutex.Mutex{})
+	lock := stored.(*ctxmutex.Mutex)
+	if err := lock.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	return lock.Unlock, nil
 }
 
 // publishUpdatedTask re-reads the task row and forwards it to the event
@@ -291,9 +295,11 @@ func (s *HandoffService) archiveTaskTree(
 	if err := s.validateArchiveRoot(archiveCtx, rootID); err != nil {
 		return nil, err
 	}
-	cascadeLock := s.archiveCascadeLock.lockFor(rootID)
-	cascadeLock.Lock()
-	defer cascadeLock.Unlock()
+	unlockCascade, err := s.lockArchiveCascade(archiveCtx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCascade()
 	cascadeID, all, err := s.resolveArchiveCascade(archiveCtx, rootID, cascade)
 	if err != nil {
 		return nil, err
@@ -571,7 +577,11 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	if s.tasks == nil {
 		return nil, errors.New("task repo not configured")
 	}
-	defer s.lockArchiveCascade(rootID)()
+	unlockCascade, err := s.lockArchiveCascade(deleteCtx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCascade()
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 	all, err := s.resolveDeleteSet(deleteCtx, rootID, cascade)
@@ -606,7 +616,12 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 		}
 	}
 
-	s.cancelActiveRuns(postDeleteCtx, all, "task tree deleted")
+	if err := s.cancelDeleteRuns(postDeleteCtx, all, options); err != nil {
+		cancelErr := s.cancelDeletePreparedCleanups(deleteCompensationCtx, all, cleanupOps)
+		rollbackErr := s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(deleteCompensationCtx, ownershipTransfers, nil)
+		childRestoreErr := s.restoreNoCascadeChildren(deleteCompensationCtx, noCascadeSnapshots)
+		return out, errors.Join(err, cancelErr, rollbackErr, childRestoreErr)
+	}
 	// Release memberships BEFORE deleting the task rows so the
 	// membership cleanup evaluation sees the group's full audit
 	// history. Once tasks(id) cascade-deletes member rows we can no
@@ -1249,6 +1264,26 @@ func (s *HandoffService) cancelCascadeResourceCleanupRange(
 	return errors.Join(errs...)
 }
 
+type taskResourceCleanupDeadlineCanceller interface {
+	CancelPreparedTaskResourceCleanupWithinDeadline(context.Context, string) error
+}
+
+func (s *HandoffService) cancelDeletePreparedCleanups(ctx context.Context, taskIDs []string, operations map[string]string) error {
+	coordinator, ok := s.resourceCleaner.(taskResourceCleanupDeadlineCanceller)
+	if !ok {
+		return s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
+	}
+	var errs []error
+	for _, taskID := range taskIDs {
+		if operationID := operations[taskID]; operationID != "" {
+			if err := coordinator.CancelPreparedTaskResourceCleanupWithinDeadline(ctx, operationID); err != nil {
+				errs = append(errs, fmt.Errorf("cancel delete cleanup %s: %w", operationID, err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (s *HandoffService) startCascadeResourceCleanup(ctx context.Context, operationID string) error {
 	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
 	if !ok || operationID == "" {
@@ -1278,21 +1313,35 @@ func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, opera
 // mutation commits, because finalizing them here could leave a task active in
 // the database when the caller's lifecycle mutation is cancelled.
 func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string, reason string) {
-	synchronous, hasSynchronousStop := s.runCanceller.(SynchronousRunCanceller)
 	for _, id := range taskIDs {
-		if s.runCanceller != nil {
-			var err error
-			if hasSynchronousStop {
-				err = synchronous.CancelTaskExecutionSynchronously(ctx, id, reason, false)
-			} else {
-				err = s.runCanceller.CancelTaskExecution(ctx, id, reason, false)
-			}
-			if err != nil {
-				s.logf().Warn("cascade: cancel task execution failed",
-					zap.String("task_id", id), zap.Error(err))
-			}
+		if err := s.cancelTaskRun(ctx, id, reason); err != nil {
+			s.logf().Warn("cascade: cancel task execution failed",
+				zap.String("task_id", id), zap.Error(err))
 		}
 	}
+}
+
+func (s *HandoffService) cancelTaskRun(ctx context.Context, taskID, reason string) error {
+	if s.runCanceller == nil {
+		return nil
+	}
+	if synchronous, ok := s.runCanceller.(SynchronousRunCanceller); ok {
+		return synchronous.CancelTaskExecutionSynchronously(ctx, taskID, reason, false)
+	}
+	return s.runCanceller.CancelTaskExecution(ctx, taskID, reason, false)
+}
+
+func (s *HandoffService) cancelDeleteRuns(ctx context.Context, taskIDs []string, options DeleteTaskOptions) error {
+	if options.retainsWorkspace() || options.AllowUnverifiedWorkspaceChanges {
+		s.cancelActiveRuns(ctx, taskIDs, "task tree deleted")
+		return nil
+	}
+	for _, taskID := range taskIDs {
+		if err := s.cancelTaskRun(ctx, taskID, "task tree deleted"); err != nil {
+			return fmt.Errorf("stop task %s before deletion: %w", taskID, err)
+		}
+	}
+	return nil
 }
 
 func (s *HandoffService) cancelArchiveRunsForCandidate(
@@ -1358,9 +1407,11 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
-	unlockArchiveCascade := s.archiveCascadeLock.lockFor(rootID)
-	unlockArchiveCascade.Lock()
-	defer unlockArchiveCascade.Unlock()
+	unlockCascade, err := s.lockArchiveCascade(unarchiveCtx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCascade()
 	root, err := s.tasks.GetTask(unarchiveCtx, rootID)
 	if err != nil {
 		return nil, err

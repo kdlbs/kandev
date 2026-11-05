@@ -11416,8 +11416,10 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	if err := s.finishCancelledAgentTurnWithFreshContext(ctx, sessionID, prepared); err != nil {
 		return err
 	}
-	s.acknowledgeRetainedPromptFailure(prepared.identity)
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	// Settlement can wait for ordered stream consumers that need this guard.
+	guard.unlock()
+	s.acknowledgeRetainedPromptFailure(prepared.identity)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
