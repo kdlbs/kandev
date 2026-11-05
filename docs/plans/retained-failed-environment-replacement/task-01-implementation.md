@@ -39,6 +39,15 @@ The source files are the existing PR #4713 diff. This work order adds its delive
 
 ## Verification and results
 
+The retained-history follow-up rejects a retired environment at the shared
+inventory admission boundary before its early returns. This prevents resume or
+inventory recovery from accepting an inactive historical environment while
+leaving active-environment handling unchanged. It changes
+`apps/backend/internal/orchestrator/executor/executor_environment_reuse.go`.
+The existing admission path was exercised through a temporary overlay: the
+retired case failed before the guard and passed afterward, alongside the
+existing inventory controls. No permanent test was added.
+
 Validation:
 - Existing focused store/executor tests and temporary real-SQLite/ResumeSession checks passed, including binding-before-launch, same-reservation retry, retained inventory, ownership/consumer refusals, and preflight/launch failure release.
 - SQL guard, documentation checks and all normal commit hooks passed.
