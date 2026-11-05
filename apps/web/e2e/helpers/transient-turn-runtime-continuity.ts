@@ -122,6 +122,28 @@ export function assertRetainedACPTrace(tracePath: string, expectedPrompts: numbe
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(expectedPrompts);
 }
 
+export function assertKnownFailedCommandCapacityACPTrace(tracePath: string) {
+  const records = readMockACPTrace(tracePath);
+  const prompts = records.filter((record) => record.event === "prompt");
+  assertRetainedACPTrace(tracePath, 2);
+  expect(
+    prompts.filter((record) => record.prompt?.includes("/capacity-known-failed-command")),
+  ).toHaveLength(1);
+  expect(records.filter((record) => record.event === "known_command_failure")).toHaveLength(1);
+}
+
+export async function expectKnownFailedCommandVisible(session: SessionPage) {
+  // The failed command and the successful read are grouped into one collapsed
+  // tool-call summary. The command's exit evidence is asserted through the
+  // trace; this checks the real result rows survived in the transcript.
+  await expect(
+    session
+      .activeChat()
+      .getByRole("button", { name: /2 tool calls/ })
+      .first(),
+  ).toBeVisible({ timeout: 30_000 });
+}
+
 export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {
   const records = readMockACPTrace(tracePath);
   const prompts = records.filter((record) => record.event === "prompt");

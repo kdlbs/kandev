@@ -6,7 +6,9 @@ import {
   expectPromptErrorRow,
   GENERIC_PROMPT_ERROR,
   promptEventCount,
+  waitForAgentResponseAfter,
   waitForPromptError,
+  waitForUserContinueMessages,
 } from "../../helpers/acp-prompt-error-continuity";
 import { SessionPage } from "../../pages/session-page";
 
@@ -73,6 +75,46 @@ test("phone: generic prompt error shows one inline error with a usable composer"
     await expect(dismiss).toHaveCount(0);
     await expect(row).toContainText(GENERIC_PROMPT_ERROR);
     await expectMobileBadge(testPage, fixture.taskTitle, false);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("phone: Dismiss and continue stacks above dismissal with a reachable target", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await createPromptErrorFixture(backend, apiClient, seedData);
+  try {
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    await waitForPromptError(apiClient, fixture.sessionId);
+
+    const row = await expectPromptErrorRow(session, { continue: true });
+    const continueButton = row.getByTestId("turn-error-continue-button");
+    const dismissButton = row.getByTestId("turn-error-dismiss-button");
+    const group = row.getByTestId("turn-error-actions");
+    await expect(group).toBeVisible();
+
+    const continueBox = await continueButton.boundingBox();
+    const dismissBox = await dismissButton.boundingBox();
+    expect(continueBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(dismissBox?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(continueBox?.y ?? 0).toBeLessThan(dismissBox?.y ?? 0);
+    await assertNoDocumentHorizontalOverflow(testPage);
+
+    await continueButton.tap();
+    const continued = await waitForUserContinueMessages(apiClient, fixture.sessionId);
+    expect(continued).toHaveLength(1);
+    await expect.poll(() => promptEventCount(fixture.tracePath), { timeout: 60_000 }).toBe(2);
+    await waitForAgentResponseAfter(apiClient, fixture.sessionId, continued[0].created_at);
+    await expect(continueButton).toHaveCount(0);
+    await expect(dismissButton).toHaveCount(0);
+    await expectMobileBadge(testPage, fixture.taskTitle, false);
+    await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();
   }

@@ -64,7 +64,7 @@ export function assertPromptErrorACPTrace(tracePath: string, expectedPrompts: nu
 
 export async function expectPromptErrorRow(
   session: SessionPage,
-  options: { dismiss?: boolean } = {},
+  options: { dismiss?: boolean; continue?: boolean } = {},
 ) {
   const row = session.activeChat().getByTestId("session-recovery-action-message");
   await expect(row).toHaveCount(1);
@@ -74,7 +74,53 @@ export async function expectPromptErrorRow(
   } else {
     await expect(row.getByTestId("turn-error-dismiss-button")).toBeVisible({ timeout: 30_000 });
   }
+  if (options.continue === false) {
+    await expect(row.getByTestId("turn-error-continue-button")).toHaveCount(0);
+  } else if (options.continue === true) {
+    await expect(row.getByTestId("turn-error-continue-button")).toBeVisible({ timeout: 30_000 });
+  }
   return row;
+}
+
+export async function waitForUserContinueMessages(apiClient: ApiClient, sessionId: string) {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.filter(
+        (message) => message.author_type === "user" && message.content === "continue",
+      );
+    },
+    (messages) => messages.length > 0,
+    60_000,
+    "waiting for the manual continue message",
+  );
+}
+
+export async function waitForAgentResponseAfter(
+  apiClient: ApiClient,
+  sessionId: string,
+  after: string,
+) {
+  return pollUntil(
+    async () => {
+      const { messages } = await apiClient.listSessionMessages(sessionId);
+      return messages.find(
+        (message) =>
+          message.author_type === "agent" &&
+          Date.parse(message.created_at) > Date.parse(after) &&
+          (message.content ?? "").trim().length > 0,
+      );
+    },
+    (message): message is NonNullable<typeof message> => message !== undefined,
+    60_000,
+    "waiting for the agent response after the manual continuation",
+  );
+}
+
+export function originalPromptOccurrences(tracePath: string, command: string): number {
+  return readMockACPTrace(tracePath).filter(
+    (record) => record.event === "prompt" && record.prompt?.includes(command),
+  ).length;
 }
 
 export async function expectTurnErrorBadge(session: SessionPage, taskTitle: string) {
