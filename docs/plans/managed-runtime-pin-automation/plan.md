@@ -32,7 +32,7 @@ one grouped review change and does not activate a runtime.
 ## Validation
 
 - `node --test scripts/update-agent-runtime-pins.test.mjs` passed.
-- `go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers` passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers)` passed.
 
 ## Work orders
 

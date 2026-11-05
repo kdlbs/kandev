@@ -61,7 +61,7 @@ Before the repair, this run must reproduce the fixed-default failures.
 ```bash
 set -euo pipefail
 node --test scripts/update-agent-runtime-pins.test.mjs
-(cd apps/backend && go test -trimpath ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers)
 node --input-type=module <<'NODE'
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -80,7 +80,7 @@ try {
   await fs.writeFile(candidate, formatCatalogue(next));
   await fs.writeFile(overlay, JSON.stringify({ Replace: { [DEFAULT_CATALOGUE_PATH]: candidate } }));
   const packages = ['agents', 'managedruntime', 'runtime/lifecycle', 'hostutility', 'settings/controller', 'settings/handlers'];
-  const result = spawnSync('go', ['test', '-trimpath', '-count=1', `-overlay=${overlay}`, ...packages.map(name => `./internal/agent/${name}`)], {
+  const result = spawnSync('go', ['test', '-trimpath', '-count=1', '-tags', 'fts5', `-overlay=${overlay}`, ...packages.map(name => `./internal/agent/${name}`)], {
     cwd: path.resolve('apps/backend'), stdio: 'inherit', timeout: 600000,
   });
   if (result.error) throw result.error;
@@ -139,12 +139,13 @@ Completed on 2026-11-05.
   success fixtures select `1.0.104` through the existing selection seam.
   Unknown selected versions remain a typed `runtime_unsupported` rejection.
 - The six-package suite passed with the tracked catalogue and with the temporary
-  overlay that changed every pin. The pre-repair overlay reproduced the reported
-  fixed-default and unsupported-plugin failures.
+  overlay that changed every pin, both with the `fts5` build tag. The pre-repair
+  overlay reproduced the reported fixed-default and unsupported-plugin failures.
 - The derived target helpers validate through the shared managed-runtime SemVer
   parser, accept build metadata with and without dot components, and keep
   generated targets strictly newer in the same major. A focused table test
   covers plain and metadata-bearing versions.
 - `node --test scripts/update-agent-runtime-pins.test.mjs` passed 9/9.
-- `bash scripts/lint-go-changed` passed for the changed Go paths.
+- `bash scripts/lint-go-changed $(git diff --name-only a8b8ac18e0f08cafc48f303eafc88ffd546f31f4...HEAD -- '*.go')`
+  passed for every changed Go path.
 - `git diff --check` passed.

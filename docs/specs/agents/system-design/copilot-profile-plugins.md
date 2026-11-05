@@ -63,7 +63,7 @@ ACP startup with disposable fixtures, without authentication.
 Confirmed in this checkout:
 
 - `CopilotACP.ID()` is `copilot-acp`. `BuildCommand` uses the selected managed npm package.
-- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.88`.
+- `managed_npm_runtime_versions.json` pins `@github/copilot` to `1.0.105`.
 - `ManagedNPMRuntimeSpec.InteractiveCommand(version)` provides the same package without `--acp`.
 - `resolveProfileProbeContext` resolves authorized profile settings and secrets.
 - `requireProfileDiscoveryScope` requires `org.config.manage`.
@@ -80,8 +80,10 @@ Supplied observations: Copilot `1.0.103/1.0.104` loaded `harness` through an exp
 Its read-only Atlassian call succeeded with existing native authentication.
 Both ordinary CLI and ACP logs fetched managed policy. The automatic activation
 difference remains unexplained. WO-00 reproduced inventory and ACP startup for
-`1.0.88` and `1.0.104`; authenticated calls and managed-veto observation remain
-unverified.
+the historical `1.0.88` and `1.0.104` fixtures; authenticated calls and
+managed-veto observation remain unverified. The current inventory adapter also
+supports `1.0.105` with inventory, installation-metadata, manifest, and
+repeated-mount evidence only.
 
 Official references, checked 2026-10-27:
 
@@ -93,7 +95,7 @@ Official references, checked 2026-10-27:
 - The [ACP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/acp-server) describes `--acp`, stdio, and process-owned session options.
   ACP remains a changing upstream interface.
 
-These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's `1.0.88` pin.
+These references do not establish the private installation schema or explicit-mount policy enforcement for Kandev's current `1.0.105` pin.
 
 ## Design choices and alternatives
 

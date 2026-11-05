@@ -157,16 +157,14 @@ func TestCopilotPluginNativeInventoryCompatibility(t *testing.T) {
 }
 
 func nativeInventoryEnvironment(home, configDir, npmCache, npmUserConfig, npmGlobalConfig string) []string {
-	env := make([]string, 0, len(os.Environ())+10)
+	env := make([]string, 0, 16)
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
 		lowerKey := strings.ToLower(key)
-		if strings.HasPrefix(lowerKey, "npm_config_") {
+		if lowerKey == "home" || lowerKey == "copilot_home" {
 			continue
 		}
-		switch lowerKey {
-		case "gh_token", "github_token", "npm_token", "node_auth_token", "copilot_github_token",
-			"home", "copilot_home", "copilot_auto_update", "no_color":
+		if !nativeInventoryEnvironmentKeyAllowed(lowerKey) {
 			continue
 		}
 		env = append(env, item)
@@ -180,6 +178,18 @@ func nativeInventoryEnvironment(home, configDir, npmCache, npmUserConfig, npmGlo
 		"NPM_CONFIG_USERCONFIG="+npmUserConfig,
 		"NPM_CONFIG_GLOBALCONFIG="+npmGlobalConfig,
 	)
+}
+
+func nativeInventoryEnvironmentKeyAllowed(key string) bool {
+	switch key {
+	case "path", "user", "logname", "shell", "lang", "term",
+		"term_program", "colorterm", "gh_host", "copilot_gh_host",
+		"http_proxy", "https_proxy", "all_proxy", "no_proxy",
+		"ssl_cert_file", "ssl_cert_dir", "node_extra_ca_certs":
+		return true
+	default:
+		return strings.HasPrefix(key, "lc_")
+	}
 }
 
 func installNativeCopilotPackage(t *testing.T, npmPath, runtimeRoot, workDir, version string, env []string) {

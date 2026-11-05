@@ -298,7 +298,7 @@ A bounded inventory test established adapter-format compatibility before the
 version entered `inventoryQualifiedVersions`:
 
 ```bash
-(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags copilot_native -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags 'copilot_native fts5' -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
 ```
 
 Observed on Linux x64 with disposable `HOME`, `COPILOT_HOME`, npm prefix, npm

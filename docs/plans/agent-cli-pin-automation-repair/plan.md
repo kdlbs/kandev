@@ -156,20 +156,25 @@ authorized.
 
 Implemented and verified on 2026-11-05:
 
-- The updater tests pass 9/9. The workflow contract tests pass 11/11, the PR
+- The updater tests pass 9/9. The workflow contract tests pass 13/13, including
+  executable stubbed-`gh` create, refresh, and dispatch paths. The PR
   documentation workflow contract passes 7/7, and action-pinning tests pass 9/9.
 - The generator tests pass as part of an 18/18 combined updater and record run.
   Generated records pass the actual documentation coverage validator.
 - The six-package suite passed with the tracked catalogue and with a temporary
-  overlay that changed every pin. The pre-repair overlay reproduced the reported
-  failures.
-- The six-package suite plus `copilotplugins` passed with the refreshed
-  catalogue.
+  overlay that changed every pin, both with the `fts5` build tag. The pre-repair
+  overlay reproduced the reported failures.
+- The six-package suite plus `copilotplugins`, `internal/agentctl/server/utility`,
+  and `internal/agentctl/server/adapter/transport/acp` passed with the refreshed
+  catalogue and the `fts5` build tag.
 - The isolated `copilot_native` inventory test passed for `1.0.105`, including
   exact package/binary identity, repeated mounts with a spaced path, local
   marketplace installation metadata, manifests, and adapter root resolution.
   Its command paths use the production process-tree and pipe-drain ownership
   helper, with a focused cancellation regression.
+- The Claude ACP prompt-suggestion fallback now includes the inspected `0.100.0`
+  package contract alongside `0.81.2`, with exact-version tests and no range
+  expansion.
 - `python3 scripts/list-docs.py validate` validated 431 decisions and 1920
   specifications. `python3 scripts/lint-spec-files.py --all` passed.
 - `node --test scripts/validate-public-docs.test.mjs` passed 63/63 and

@@ -584,6 +584,7 @@ test-scripts:
 	@python3 .github/scripts/announce-discord-release_test.py
 	@python3 .github/scripts/announce-discord-release-workflow-contract_test.py
 	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
+	@node --test scripts/update-agent-runtime-pins.test.mjs .github/scripts/record-agent-runtime-pin-refresh.test.mjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh

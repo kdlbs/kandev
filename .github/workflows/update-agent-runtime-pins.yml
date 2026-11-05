@@ -65,7 +65,7 @@ jobs:
 
       - name: Test managed runtime catalogue and commands
         working-directory: apps/backend
-        run: go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
+        run: go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers
 
       - name: Generate delivery record
         if: steps.update.outputs.changed == 'true'
@@ -114,7 +114,7 @@ jobs:
           ## Validation
 
           - `node --test scripts/update-agent-runtime-pins.test.mjs`
-          - `go test ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers`
+          - `go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers`
 
           ## Checklist
 

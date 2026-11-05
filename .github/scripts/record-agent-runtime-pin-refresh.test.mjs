@@ -244,6 +244,17 @@ test("renders deterministic records for a supplied date", () => {
   assert.equal(renderPlan(changes, "2026-11-05"), renderPlan(changes, "2026-11-05"));
   assert.match(renderPlan(changes, "2026-11-05"), /created: 2026-11-05/);
   assert.match(renderWorkOrder(changes, "2026-11-05"), /created: 2026-11-05/);
+  for (const target of [
+    renderPlan(changes, "2026-11-05"),
+    renderWorkOrder(changes, "2026-11-05"),
+  ]) {
+    for (const { packageName, previous, proposed } of changes) {
+      assert.ok(target.includes(`\`${packageName}\``), `${packageName} missing from rendered record`);
+      assert.ok(target.includes(`\`${previous}\``), `${previous} missing from rendered record`);
+      assert.ok(target.includes(`\`${proposed}\``), `${proposed} missing from rendered record`);
+    }
+  }
+  assert.match(renderPlan(changes, "2026-11-05"), /-tags fts5/);
 });
 
 test("parses required paths and the validation gate", () => {

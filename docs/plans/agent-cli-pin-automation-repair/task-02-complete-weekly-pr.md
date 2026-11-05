@@ -122,15 +122,19 @@ Completed on 2026-11-05.
   records pass the actual `validateCoverage` function, while catalogue-only and
   broken-reference fixtures fail with the intended statuses.
 - The workflow saves the trusted baseline catalogue before updating, generates
-  records only after the six-package Go validation, stages only the catalogue
-  and two record files, and exports the PR number from both create and refresh
-  paths.
+  records only after the six-package Go validation with the `fts5` build tag,
+  stages only the catalogue and two record files, and exports the PR number from
+  both create and refresh paths.
 - The six required validation dispatches remain. A separate `pr-docs.yml`
   dispatch uses `main` and the exported PR number. The PR body follows the
   repository template and links the generated work order.
+- The workflow contract test now executes both PR paths and the dispatch step
+  with a stubbed `gh`, proving the create, refresh, six validation dispatches,
+  and trusted-main documentation dispatch arguments. The generator tests are
+  registered in `Makefile`'s `test-scripts` target as well as the lint workflow.
 - `node --test scripts/update-agent-runtime-pins.test.mjs .github/scripts/record-agent-runtime-pin-refresh.test.mjs`
   passed 18/18.
-- The pin workflow contract passed 11/11, the PR documentation workflow contract
+- The pin workflow contract passed 13/13, the PR documentation workflow contract
   passed 7/7, and action-pinning tests passed 9/9.
 - `zizmor` reported no findings for the changed pin workflow. The repository-wide
   workflow directory retains its pre-existing 238 findings, unchanged from the

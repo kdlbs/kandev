@@ -46,7 +46,7 @@ Kandev offers **Codex app server** as a separate native Codex profile. It uses t
 
 Enable **Codex app server** in **Settings > System > Feature Toggles**, then restart Kandev. The toggle is off by default and requires a restart. The native profile is hidden from new-session selectors while the toggle is off. Keep it enabled while native sessions need to resume.
 
-Kandev currently uses `@openai/codex` version `0.154.0` as its managed default. Sign in to Codex as the operating-system user that runs Kandev, or provide `OPENAI_API_KEY` to the executor. The profile uses the same workspace and MCP configuration as other structured sessions.
+Kandev currently uses `@openai/codex` version `0.166.0` as its managed default. Sign in to Codex as the operating-system user that runs Kandev, or provide `OPENAI_API_KEY` to the executor. The profile uses the same workspace and MCP configuration as other structured sessions.
 
 Native sessions show response and turn token usage in the chat footer. A provider thread usage estimate may appear when Codex reports one. It is an estimate, not a promise of the billed charge. Kandev keeps provider estimates separate from calculated cost.
 

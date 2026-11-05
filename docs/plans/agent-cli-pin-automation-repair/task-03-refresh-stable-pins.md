@@ -72,10 +72,10 @@ and does not require authenticated model calls or an enterprise-policy fixture.
 
 ```bash
 set -euo pipefail
-(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags copilot_native -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
+(cd apps/backend && KANDEV_COPILOT_NATIVE_VERSION=1.0.105 go test -trimpath -tags 'copilot_native fts5' -count=1 -timeout 5m ./internal/agent/copilotplugins -run '^TestCopilotPluginNativeInventoryCompatibility$' -v)
 node scripts/update-agent-runtime-pins.mjs
 node --test scripts/update-agent-runtime-pins.test.mjs .github/scripts/record-agent-runtime-pin-refresh.test.mjs
-(cd apps/backend && go test -trimpath ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/agent/copilotplugins)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agent/agents ./internal/agent/managedruntime ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/agent/copilotplugins ./internal/agentctl/server/utility ./internal/agentctl/server/adapter/transport/acp)
 python3 .github/scripts/update-agent-runtime-pins-workflow-contract_test.py
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -139,20 +139,27 @@ Completed on 2026-11-05.
   manifest-backed plugin from a local marketplace, verifies the native
   installation metadata, and resolves the plugin through the adapter's parser
   and root validation.
-- Both native command paths use the production owned-process `runCommand`
-  helper, including process-tree cleanup and `WaitDelay` pipe draining. A
-  focused helper-process regression proves cancellation returns promptly and
-  reaps a descendant that retains an output descriptor.
+- The inventory compatibility helper `runNativeInventoryCommand` uses the
+  production owned-process `runCommand` helper, including process-tree cleanup
+  and `WaitDelay` pipe draining. The acceptance harness `runNativeCommand` keeps
+  its own `Start`/`Wait` flow with context-based process cancellation and does
+  not use `runCommand`. A focused helper-process regression proves cancellation
+  returns promptly and reaps a descendant that retains an output descriptor.
 - The isolated native test passed for `1.0.105` on Linux x64 in 6.1 seconds.
   It did not authenticate or exercise managed policy.
 - Added `1.0.105` to the inventory-qualified adapter set only after that run.
   Unknown-version rejection and the existing native-authority admission tests
   remain. The compatibility ledger and public adapter reference describe the
   observed scope without claiming authenticated or enterprise certification.
+- Inspected the `@agentclientprotocol/claude-agent-acp@0.100.0` package contract
+  and added it to the exact verified prompt-suggestion fallback versions without
+  broadening the range.
 - The generated delivery record lists the actual eight changed packages and the
   validation that preceded it.
-- The six-package suite plus `copilotplugins` passed with the refreshed
-  catalogue. `node --test scripts/update-agent-runtime-pins.test.mjs
+- The six-package suite plus `copilotplugins`, `internal/agentctl/server/utility`,
+  and `internal/agentctl/server/adapter/transport/acp` passed with the refreshed
+  catalogue and the `fts5` build tag. `node --test
+  scripts/update-agent-runtime-pins.test.mjs
   .github/scripts/record-agent-runtime-pin-refresh.test.mjs` passed 18/18.
 - `node --test scripts/validate-public-docs.test.mjs` passed 63/63 and
   `node scripts/validate-public-docs.mjs` validated 55 pages.

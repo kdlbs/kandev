@@ -2,8 +2,12 @@
 """Contract tests for the managed runtime pin update workflow."""
 
 from pathlib import Path
+import os
 import re
+import subprocess
+import tempfile
 import unittest
+import textwrap
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +22,31 @@ REQUIRED_CHECK_WORKFLOWS = (
     "lint-action-pinning.yml",
     "lint-harness-files.yml",
 )
+
+
+def workflow_step_run_block(workflow: str, step_name: str) -> str:
+    """Return the dedented shell run block for one named workflow step."""
+    lines = workflow.splitlines()
+    start = next(
+        index
+        for index, line in enumerate(lines)
+        if line.strip() == f"- name: {step_name}"
+    )
+    run_index = next(
+        index
+        for index in range(start + 1, len(lines))
+        if lines[index].strip() == "run: |"
+    )
+    block = []
+    for line in lines[run_index + 1 :]:
+        if not line.strip():
+            block.append("")
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent < 10:
+            break
+        block.append(line[10:])
+    return "\n".join(block).rstrip() + "\n"
 
 
 class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
@@ -97,15 +126,19 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn('=~ ^[0-9]+$', pr_step)
         self.assertIn("gh workflow run pr-docs.yml", dispatch_step)
-        self.assertIn("--ref main", dispatch_step)
+        docs_start = dispatch_step.index("gh workflow run pr-docs.yml")
+        docs_command = dispatch_step[docs_start:]
+        self.assertNotIn("--ref main", dispatch_step[:docs_start])
+        self.assertIn("--ref main", docs_command)
         self.assertIn('PR_NUMBER: ${{ steps.pr.outputs.pr_number }}', dispatch_step)
-        self.assertIn('-f pr_number="$PR_NUMBER"', dispatch_step)
-        self.assertIn("pr-docs.yml", dispatch_step)
+        self.assertIn('-f pr_number="$PR_NUMBER"', docs_command)
 
     def test_workflow_validates_before_any_commit_or_push(self) -> None:
         baseline_pos = self.workflow.index('cp "$CATALOGUE"')
         update_pos = self.workflow.index("node scripts/update-agent-runtime-pins.mjs")
-        validation_pos = self.workflow.index("go test ./internal/agent/agents")
+        validation_pos = self.workflow.index(
+            "go test -trimpath -tags fts5 ./internal/agent/agents"
+        )
         record_pos = self.workflow.index(
             "node .github/scripts/record-agent-runtime-pin-refresh.mjs"
         )
@@ -122,7 +155,8 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         self.assertIn('--before "$RUNNER_TEMP/managed-runtime-pins.before.json"', self.workflow)
         self.assertIn("working-directory: apps/backend", self.workflow)
         self.assertIn(
-            "go test ./internal/agent/agents ./internal/agent/managedruntime "
+            "go test -trimpath -tags fts5 ./internal/agent/agents "
+            "./internal/agent/managedruntime "
             "./internal/agent/runtime/lifecycle ./internal/agent/hostutility "
             "./internal/agent/settings/controller ./internal/agent/settings/handlers",
             self.workflow,
@@ -166,6 +200,105 @@ class ManagedRuntimePinWorkflowContractTest(unittest.TestCase):
         self.assertIn(
             "node --test .github/scripts/record-agent-runtime-pin-refresh.test.mjs",
             lint_workflow,
+        )
+
+    def _run_workflow_step(
+        self,
+        step_name: str,
+        *,
+        state: str | None = None,
+        pr_number: str = "123",
+    ) -> tuple[str, list[str], list[str]]:
+        block = workflow_step_run_block(self.workflow, step_name)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            gh = directory / "gh"
+            gh.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    printf '%s\\n' "$*" >> "$GH_LOG"
+                    case "$1 $2" in
+                      "pr list")
+                        if [[ -f "$GH_STATE" ]]; then cat "$GH_STATE"; fi
+                        ;;
+                      "pr create")
+                        echo 123 > "$GH_STATE"
+                        echo "https://github.com/$GITHUB_REPOSITORY/pull/123"
+                        ;;
+                      "pr edit")
+                        ;;
+                      "workflow run")
+                        printf '%s\\n' "$*" >> "$GH_DISPATCH_LOG"
+                        ;;
+                    esac
+                    """
+                ),
+                encoding="utf-8",
+            )
+            gh.chmod(0o755)
+            if state is not None:
+                (directory / "state").write_text(state, encoding="utf-8")
+            github_output = directory / "github-output"
+            github_output.write_text("", encoding="utf-8")
+            env = os.environ.copy()
+            env.update(
+                PATH=f"{directory}{os.pathsep}{env.get('PATH', '')}",
+                GITHUB_REPOSITORY="owner/repo",
+                BOT_BRANCH="automation/test-branch",
+                GITHUB_OUTPUT=str(github_output),
+                GH_LOG=str(directory / "gh.log"),
+                GH_STATE=str(directory / "state"),
+                GH_DISPATCH_LOG=str(directory / "dispatch.log"),
+                PR_NUMBER=pr_number,
+            )
+            result = subprocess.run(
+                ["bash", "-c", block],
+                cwd=REPO_ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            gh_log = (directory / "gh.log").read_text(encoding="utf-8").splitlines()
+            dispatch_log = (
+                (directory / "dispatch.log").read_text(encoding="utf-8").splitlines()
+                if (directory / "dispatch.log").exists()
+                else []
+            )
+            return github_output.read_text(encoding="utf-8"), gh_log, dispatch_log
+
+    def test_stubbed_gh_creates_and_refreshes_the_grouped_pr(self) -> None:
+        create_output, create_log, _ = self._run_workflow_step(
+            "Create or refresh the single grouped PR"
+        )
+        self.assertIn("pr_number=123", create_output.splitlines())
+        self.assertTrue(any(line.startswith("pr create ") for line in create_log))
+        self.assertFalse(any(line.startswith("pr edit ") for line in create_log))
+
+        refresh_output, refresh_log, _ = self._run_workflow_step(
+            "Create or refresh the single grouped PR",
+            state="77\n",
+        )
+        self.assertIn("pr_number=77", refresh_output.splitlines())
+        self.assertTrue(any(line.startswith("pr edit 77 ") for line in refresh_log))
+        self.assertFalse(any(line.startswith("pr create ") for line in refresh_log))
+
+    def test_stubbed_gh_dispatches_validation_and_trusted_docs(self) -> None:
+        _, _, dispatch_log = self._run_workflow_step(
+            "Dispatch required checks for generated PR",
+            pr_number="456",
+        )
+        expected_validation = [
+            f"workflow run {name} --repo owner/repo --ref automation/test-branch"
+            for name in REQUIRED_CHECK_WORKFLOWS
+        ]
+        self.assertEqual(dispatch_log[: len(expected_validation)], expected_validation)
+        self.assertEqual(
+            dispatch_log[-1],
+            "workflow run pr-docs.yml --repo owner/repo --ref main -f pr_number=456",
         )
 
     def test_updater_script_exists_and_has_no_network_in_fixture_tests(self) -> None:

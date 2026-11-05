@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-RUNTIME-UPDATES-001
@@ -550,15 +550,21 @@ succeeds. An unchanged catalogue produces no record change.
 The workflow commits the catalogue and those two record files together. This
 satisfies the existing
 [PR documentation coverage contract](../../ci/system-design/pull-request-documentation-coverage.md)
-without a new exemption or an automatic exception label. The stable record
-paths change with each proposed version set, so each PR contains a changed work
-order. The six validation dispatches remain. A separate `pr-docs.yml` dispatch
-uses `--ref main` and the generated PR number, because that evaluator runs only
-from the trusted default branch.
+without a new exemption or an automatic exception label. The records at those
+stable paths change with each proposed version set, so each PR contains a
+changed work order. The six validation dispatches remain. A separate
+`pr-docs.yml` dispatch uses `--ref main` and the generated PR number, because
+that evaluator runs only from the trusted default branch.
 
 The [repair package](../../../plans/agent-cli-pin-automation-repair/plan.md)
 records implementation and verification. It does not change runtime activation
 or authorize a native compatibility claim before evidence exists.
+
+Closure gate: Copilot `1.0.105` admission is limited to inventory and
+installation-metadata compatibility. Authenticated ACP behavior, physical-device
+coverage, and enterprise-policy enforcement remain unavailable and untested;
+they are not reported as passed and do not block this inventory-only admission
+under the native-authority boundary.
 
 ## Out of scope
 

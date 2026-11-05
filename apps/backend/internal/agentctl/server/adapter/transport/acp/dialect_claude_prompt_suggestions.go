@@ -18,13 +18,19 @@ const claudePromptSuggestionType = "prompt_suggestion"
 // release advertises it; it is a Kandev opt-in contract, not standard ACP.
 const claudePromptSuggestionFeatureKey = "promptSuggestions"
 
-// Verified compatibility evidence for the exact official bridge Kandev pins.
-// The pair identifies the implementation whose options/raw-notification contract
-// was inspected; it is a compatibility assertion, not attestation.
+// Verified compatibility evidence for the exact official bridges Kandev
+// supports. Each pair identifies an implementation whose options and
+// raw-notification contract was inspected; it is a compatibility assertion,
+// not attestation.
 const (
 	verifiedClaudeSuggestionBridgeName    = "@agentclientprotocol/claude-agent-acp"
 	verifiedClaudeSuggestionBridgeVersion = "0.81.2"
 )
+
+var verifiedClaudeSuggestionBridgeVersions = map[string]struct{}{
+	"0.81.2":  {},
+	"0.100.0": {},
+}
 
 // claudePromptSuggestionEvidence is the bounded debug reason for the support
 // decision. It is never sent to consumers.
@@ -70,7 +76,10 @@ func claudePromptSuggestionSupport(
 // an independent contract, so its advertisement supplies no suggestion
 // authority outside this tuple.
 func verifiedClaudeSuggestionBridge(agentName, agentVersion string, claudeCode map[string]any) bool {
-	if agentName != verifiedClaudeSuggestionBridgeName || agentVersion != verifiedClaudeSuggestionBridgeVersion {
+	if agentName != verifiedClaudeSuggestionBridgeName {
+		return false
+	}
+	if _, ok := verifiedClaudeSuggestionBridgeVersions[agentVersion]; !ok {
 		return false
 	}
 	if claudeCode == nil {
