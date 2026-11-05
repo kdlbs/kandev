@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-status: completed
+status: in_progress
 requirements:
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
@@ -65,7 +65,7 @@ Use [REQ-PLATFORM-WORKSPACE-GIT-STATUS-001](../../specs/platform/requirements/wo
 Criteria `.26` and `.41` clarify current scope membership without creating a separate repair requirement.
 The [scope lifecycle design](../../specs/platform/system-design/git-repository-scope-lifecycle.md) defines retirement and recovery.
 
-The [proposed ADR](../../decisions/2026-11-05-chat-file-link-workspace-context.md) records chat-base authority.
+The [accepted ADR](../../decisions/2026-11-05-chat-file-link-workspace-context.md) records chat-base authority.
 Existing accepted decisions retain live add-branch continuity and environment-owned Git state.
 
 ## Scope
@@ -176,8 +176,8 @@ These previews map to Tasks `.7/.8` and Platform `.25/.26/.41`.
 | Platform `.27/.40` | Refresh coordinator and hook tests reject old-generation responses, share sibling work, and refresh after attachment |
 | Platform `.39/.41` | Coordinator and Changes tests stop recovery only after all current failures clear |
 
-Each work order starts with its behavioral regression under `/tdd`.
-The exact test names above are implementation targets. They do not exist yet.
+Each work order started with its behavioral regression under `/tdd`.
+The regression files and test names above are the implemented targets.
 
 ## E2E tests
 
@@ -197,7 +197,7 @@ Use causal HTTP/WS waits. Managed runs build fresh binaries and Vite assets.
 
 - [x] [Task 01: Preserve relative chat file context](task-01-preserve-chat-file-context.md)
 - [x] [Task 02: Reconcile Git repository refresh scopes](task-02-reconcile-git-refresh-scopes.md)
-- [x] [Task 03: Prove live attachment on desktop and phone](task-03-prove-live-attachment.md)
+- [ ] [Task 03: Prove live attachment on desktop and phone](task-03-prove-live-attachment.md)
 
 ## Companion packages
 
@@ -212,6 +212,9 @@ Any implementation change to their owned behavior must rerun the affected focuse
 Implementation and browser proof are complete on 2026-11-05.
 Both work orders passed their focused regressions; the Chromium and
 `mobile-chrome` specs passed against fresh managed builds.
+The phone proof uses Playwright `mobile-chrome` emulation; a physical-device
+smoke check of the mobile Chat and Changes flows was not available in this
+environment and remains a release gate before closing the issues.
 
 Evidence:
 

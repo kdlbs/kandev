@@ -36,6 +36,24 @@ const session: TaskSession = {
   workspace_path: "/task-root",
   worktree_path: "/task-root/master",
   agent_workspace_path: "/task-root/master",
+  worktrees: [
+    {
+      id: "session-worktree-1",
+      session_id: SESSION_ID,
+      worktree_id: "worktree-master",
+      repository_id: "repo-master" as never,
+      position: 0,
+      worktree_path: "/task-root/master",
+    },
+    {
+      id: "session-worktree-2",
+      session_id: SESSION_ID,
+      worktree_id: "worktree-secondary",
+      repository_id: "repo-secondary" as never,
+      position: 1,
+      worktree_path: "/task-root/secondary",
+    },
+  ],
 };
 
 /** Seeds a live session through the real store, as hydration would. */
@@ -88,7 +106,7 @@ describe("Markdown fallback file-link snapshot", () => {
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
           components={markdownComponents}
-        >{`[work order](implementation_plans/task.md) [external](https://example.com/docs)`}</ReactMarkdown>
+        >{`[work order](implementation_plans/task.md) [qualified](master/README.md) [secondary](secondary/README.md) [external](https://example.com/docs)`}</ReactMarkdown>
       </Providers>,
     );
 
@@ -97,12 +115,16 @@ describe("Markdown fallback file-link snapshot", () => {
 
     fireEvent.click(link);
     expect(openFile).toHaveBeenCalledWith("master/implementation_plans/task.md");
+    fireEvent.click(screen.getByRole("link", { name: "qualified" }));
+    expect(openFile).toHaveBeenLastCalledWith("master/README.md");
+    fireEvent.click(screen.getByRole("link", { name: "secondary" }));
+    expect(openFile).toHaveBeenLastCalledWith("secondary/README.md");
 
     fireEvent.click(screen.getByRole("button", { name: "unrelated-update" }));
     await waitFor(() => expect(screen.getByRole("link", { name: "external" })).toBeTruthy());
 
     fireEvent.click(screen.getByRole("link", { name: "work order" }));
-    expect(openFile).toHaveBeenCalledTimes(2);
+    expect(openFile).toHaveBeenCalledTimes(4);
     expect(openFile).toHaveBeenLastCalledWith("master/implementation_plans/task.md");
   });
 });

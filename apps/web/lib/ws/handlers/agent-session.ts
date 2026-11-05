@@ -555,9 +555,8 @@ function handleAgentctlReady(
   const isSibling = isSiblingWorktree(existingSession, payload);
   const previousWorkspacePath = getSessionWorkspacePath(sessionBeforeSync);
   const rootPromoted = !!(
-    previousWorkspacePath &&
     payload.task_workspace_path &&
-    previousWorkspacePath !== payload.task_workspace_path
+    (!previousWorkspacePath || previousWorkspacePath !== payload.task_workspace_path)
   );
 
   const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
@@ -708,9 +707,8 @@ function handleWorkspaceSourcesUpdated(
   const existing = store.getState().taskSessions.items[sessionId];
   const previousWorkspacePath = getSessionWorkspacePath(existing);
   const rootPromoted = !!(
-    previousWorkspacePath &&
     workspacePath &&
-    previousWorkspacePath !== workspacePath
+    (!previousWorkspacePath || previousWorkspacePath !== workspacePath)
   );
   if (existing && workspacePath) {
     store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });

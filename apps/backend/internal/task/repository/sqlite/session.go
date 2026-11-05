@@ -535,19 +535,6 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	return result, nil
 }
 
-// taskSessionSelectCols is the column list used by every SELECT that scans
-// into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
-// so columns can be added in one place. Order MUST match the scan helpers.
-//
-// agent_execution_id and container_id come from executors_running (the single
-// source of truth for active execution state) via LEFT JOIN. The effective
-// workspace_path comes from the linked task environment when available so a
-// promoted multi-repo task is correct after a session refresh; all other
-// columns come from task_sessions (aliased ts).
-//
-// ADR 0005: agent_profile_id is the single column for both kanban (FK to a
-// shallow profile) and office (FK to a per-workspace rich profile) sessions —
-// the two column names that used to live here have collapsed into one.
 // taskSessionAgentWorkspaceSelect projects the confirmed native workspace from
 // the current incarnation's latest committed harness generation. The raw
 // task_sessions.workspace_path column is mutable and can be overwritten with
@@ -564,6 +551,19 @@ const taskSessionAgentWorkspaceSelect = `COALESCE((
 		LIMIT 1
 	), '')`
 
+// taskSessionSelectCols is the column list used by every SELECT that scans
+// into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
+// so columns can be added in one place. Order MUST match the scan helpers.
+//
+// agent_execution_id and container_id come from executors_running (the single
+// source of truth for active execution state) via LEFT JOIN. The effective
+// workspace_path comes from the linked task environment when available so a
+// promoted multi-repo task is correct after a session refresh; all other
+// columns come from task_sessions (aliased ts).
+//
+// ADR 0005: agent_profile_id is the single column for both kanban (FK to a
+// shallow profile) and office (FK to a per-workspace rich profile) sessions —
+// the two column names that used to live here have collapsed into one.
 const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
 	ts.agent_profile_id, ts.execution_profile_id, ts.route_generation, ts.route_state, ts.route_reason, ts.downstream_acp_session_id,

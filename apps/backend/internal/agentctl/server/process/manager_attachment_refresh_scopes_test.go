@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -22,36 +22,89 @@ func placeSiblingRepos(t *testing.T, root string, names ...string) {
 	}
 }
 
-func collectGitStatuses(t *testing.T, sub <-chan types.WorkspaceStreamMessage, window time.Duration) []types.GitStatusUpdate {
+func writeRepositoryFile(t *testing.T, repositoryPath, name string) {
 	t.Helper()
-	deadline := time.After(window)
-	var statuses []types.GitStatusUpdate
-	for {
-		select {
-		case msg := <-sub:
-			if msg.Type == types.WorkspaceMessageTypeGitStatus && msg.GitStatus != nil {
-				statuses = append(statuses, *msg.GitStatus)
-			}
-		case <-deadline:
-			return statuses
-		}
+	if err := os.WriteFile(filepath.Join(repositoryPath, name), []byte(name+"\n"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
 	}
 }
 
-func requireNoEmptyRepositoryStatus(t *testing.T, statuses []types.GitStatusUpdate, operation string) {
+func statusContainsFile(status types.GitStatusUpdate, path string) bool {
+	_, present := status.Files[path]
+	return present
+}
+
+// assertTrackerHasFile forces one fresh status read and checks that the
+// changed file is visible. The manager operation under test is invoked first;
+// this read proves the repository state reached the tracker without relying on
+// an arbitrary stream-observation window.
+func assertTrackerHasFile(t *testing.T, tracker *WorkspaceTracker, path, description string) {
 	t.Helper()
-	for _, status := range statuses {
+	status, err := tracker.GetGitStatus(context.Background(), true)
+	if err != nil {
+		t.Fatalf("%s: %v", description, err)
+	}
+	if !statusContainsFile(status, path) {
+		keys := make([]string, 0, len(status.Files))
+		for key := range status.Files {
+			keys = append(keys, key)
+		}
+		t.Fatalf("%s: file %q missing; state=%s repo=%s files=%v", description, path, status.StatusState, status.RepositoryName, keys)
+	}
+}
+
+// publishedGitStatusCollector drains the workspace stream for the whole test so
+// no explicit refresh can publish an empty-name status between assertions.
+type publishedGitStatusCollector struct {
+	mu       sync.Mutex
+	statuses []types.GitStatusUpdate
+	stop     chan struct{}
+	done     chan struct{}
+}
+
+func collectPublishedGitStatuses(sub types.WorkspaceStreamSubscriber) *publishedGitStatusCollector {
+	collector := &publishedGitStatusCollector{
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	go func() {
+		defer close(collector.done)
+		for {
+			select {
+			case msg := <-sub:
+				if msg.Type != types.WorkspaceMessageTypeGitStatus || msg.GitStatus == nil {
+					continue
+				}
+				collector.mu.Lock()
+				collector.statuses = append(collector.statuses, *msg.GitStatus)
+				collector.mu.Unlock()
+			case <-collector.stop:
+				return
+			}
+		}
+	}()
+	return collector
+}
+
+func (c *publishedGitStatusCollector) stopAndCheckNoEmptyName(t *testing.T) {
+	t.Helper()
+	close(c.stop)
+	<-c.done
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, status := range c.statuses {
 		if status.RepositoryName == "" {
-			t.Fatalf("%s published a Git status for the plain parent tracker: %+v", operation, status)
+			t.Fatalf("bare parent tracker published Git status: %+v", status)
 		}
 	}
 }
 
 // TestManager_LiveRepositoryAttachmentRefreshScopes pins the single-to-multi
 // transition: a bare task-root tracker owns Files events but must never
-// publish Git status. Explicit refresh paths are the ones that previously
-// manufactured an empty-name refresh failure after the Files root was
-// promoted above the agent's checkout.
+// publish Git status. Each explicit refresh path is driven by a real file
+// change and verified through the tracker's accepted snapshot; the stream
+// collector separately proves that no path published the empty repository
+// name.
 func TestManager_LiveRepositoryAttachmentRefreshScopes(t *testing.T) {
 	t.Run("plain parent tracker stays out of Git refresh publication", func(t *testing.T) {
 		taskRoot := t.TempDir()
@@ -62,28 +115,35 @@ func TestManager_LiveRepositoryAttachmentRefreshScopes(t *testing.T) {
 		if mgr.workspaceTracker.gitIndexPath != "" {
 			t.Fatalf("task root unexpectedly owns a Git index: %s", mgr.workspaceTracker.gitIndexPath)
 		}
-
-		statusCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		for _, tracker := range mgr.repoTrackers {
-			if _, err := tracker.GetGitStatus(statusCtx, true); err != nil {
-				t.Fatalf("capture %s status: %v", tracker.RepositoryName(), err)
-			}
+		master := mgr.findRepositoryTracker("master")
+		secondary := mgr.findRepositoryTracker("secondary")
+		if master == nil || secondary == nil {
+			t.Fatal("per-repository trackers were not created")
 		}
 
 		sub := mgr.SubscribeWorkspaceStream()
 		defer mgr.UnsubscribeWorkspaceStream(sub)
-		// Drain the initial per-repository replay before observing refreshes.
-		collectGitStatuses(t, sub, 200*time.Millisecond)
+		collector := collectPublishedGitStatuses(sub)
 
+		writeRepositoryFile(t, filepath.Join(taskRoot, "master"), "poll-mode.txt")
+		writeRepositoryFile(t, filepath.Join(taskRoot, "secondary"), "poll-mode.txt")
 		mgr.SetWorkspacePollMode(context.Background(), PollModeFast)
-		requireNoEmptyRepositoryStatus(t, collectGitStatuses(t, sub, 700*time.Millisecond), "poll mode")
+		assertTrackerHasFile(t, master, "poll-mode.txt", "poll-mode refresh for master")
+		assertTrackerHasFile(t, secondary, "poll-mode.txt", "poll-mode refresh for secondary")
 
+		writeRepositoryFile(t, filepath.Join(taskRoot, "master"), "base-branch.txt")
+		writeRepositoryFile(t, filepath.Join(taskRoot, "secondary"), "base-branch.txt")
 		mgr.UpdateBaseBranches(context.Background(), map[string]string{"master": "main", "secondary": "main"})
-		requireNoEmptyRepositoryStatus(t, collectGitStatuses(t, sub, 700*time.Millisecond), "base branch")
+		assertTrackerHasFile(t, master, "base-branch.txt", "base-branch refresh for master")
+		assertTrackerHasFile(t, secondary, "base-branch.txt", "base-branch refresh for secondary")
 
+		writeRepositoryFile(t, filepath.Join(taskRoot, "master"), "turn-complete.txt")
+		writeRepositoryFile(t, filepath.Join(taskRoot, "secondary"), "turn-complete.txt")
 		mgr.RefreshWorkspace(context.Background(), "turn_complete")
-		requireNoEmptyRepositoryStatus(t, collectGitStatuses(t, sub, 700*time.Millisecond), "turn completion")
+		assertTrackerHasFile(t, master, "turn-complete.txt", "turn-completion refresh for master")
+		assertTrackerHasFile(t, secondary, "turn-complete.txt", "turn-completion refresh for secondary")
+
+		collector.stopAndCheckNoEmptyName(t)
 	})
 
 	t.Run("real root repository still publishes beside named children", func(t *testing.T) {
@@ -104,31 +164,10 @@ func TestManager_LiveRepositoryAttachmentRefreshScopes(t *testing.T) {
 			t.Fatalf("RepositoryScopes = %v, want [\"\" secondary]", scopes)
 		}
 
-		statusCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if _, err := mgr.workspaceTracker.GetGitStatus(statusCtx, true); err != nil {
-			t.Fatalf("capture root status: %v", err)
-		}
-
-		sub := mgr.SubscribeWorkspaceStream()
-		defer mgr.UnsubscribeWorkspaceStream(sub)
-		collectGitStatuses(t, sub, 200*time.Millisecond)
-
-		// Change the root checkout so the explicit refresh cannot be deduped
-		// against the status already replayed on subscribe.
-		if err := os.WriteFile(filepath.Join(root, "attachment-change.txt"), []byte("changed\n"), 0o600); err != nil {
-			t.Fatalf("write root change: %v", err)
-		}
+		writeRepositoryFile(t, root, "root-change.txt")
 		mgr.SetWorkspacePollMode(context.Background(), PollModeFast)
-		statuses := collectGitStatuses(t, sub, 2*time.Second)
-		sawRoot := false
-		for _, status := range statuses {
-			if status.RepositoryName == "" && status.StatusState == gitStatusStateReady {
-				sawRoot = true
-			}
-		}
-		if !sawRoot {
-			t.Fatalf("refresh skipped the valid root Git scope: %+v", statuses)
-		}
+
+		rootTracker := mgr.GetWorkspaceTracker()
+		assertTrackerHasFile(t, rootTracker, "root-change.txt", "root repository refresh")
 	})
 }

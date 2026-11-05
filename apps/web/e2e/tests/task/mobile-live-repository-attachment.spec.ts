@@ -88,12 +88,24 @@ test.describe("Mobile live repository attachment", () => {
       .find((worktree) => worktree !== primaryPath);
     if (!secondaryPath) throw new Error("attached worktree path was not returned");
     fs.writeFileSync(path.join(secondaryPath, "secondary-change.txt"), "secondary change\n");
+    const postSecondaryRefresh = watcher.waitForResponse("session.git.refresh", {
+      timeout: 30_000,
+      requestWhere: (payload) => payload.session_id === task.session_id,
+      where: (payload) => {
+        const snapshots = (payload as { snapshots?: unknown[] }).snapshots;
+        return Array.isArray(snapshots) && snapshots.length >= 2;
+      },
+    });
+    await openMobilePanel(testPage, /Files$/);
+    await openMobilePanel(testPage, /Changes$/);
+    await postSecondaryRefresh;
 
     await expect(testPage.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(
       testPage.getByTestId("changes-repo-header").filter({ hasText: "secondary-repository" }),
     ).toBeVisible();
     await expect(testPage.getByText("primary-change.txt", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("secondary-change.txt", { exact: true })).toBeVisible();
     await expect(testPage.getByTestId("changes-refresh-status")).toHaveCount(0);
     await prCapture.screenshot("mobile-changes-reconciled-repositories", {
       caption:
@@ -118,6 +130,14 @@ test.describe("Mobile live repository attachment", () => {
     await viewer.getByRole("button", { name: /Close/i }).tap();
     await openMobilePanel(testPage, /Chat$/);
 
+    const postReloadRefresh = watcher.waitForResponse("session.git.refresh", {
+      timeout: 90_000,
+      requestWhere: (payload) => payload.session_id === task.session_id,
+      where: (payload) => {
+        const snapshots = (payload as { snapshots?: unknown[] }).snapshots;
+        return Array.isArray(snapshots) && snapshots.length >= 2;
+      },
+    });
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 60_000 });
@@ -131,5 +151,7 @@ test.describe("Mobile live repository attachment", () => {
     await expect(testPage.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(testPage.getByTestId("changes-refresh-status")).toHaveCount(0);
     await expect(testPage.getByText("primary-change.txt", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("secondary-change.txt", { exact: true })).toBeVisible();
+    await postReloadRefresh;
   });
 });

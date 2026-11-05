@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
+import {
+  createContext,
+  isValidElement,
+  useContext,
+  useMemo,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,6 +25,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { remarkMathCompat } from "@/lib/markdown/remark-math-compat";
 import {
+  buildMarkdownWorkspaceSourcePrefixes,
   resolveMarkdownFileTarget,
   type MarkdownFileRootAlias,
 } from "@/lib/markdown/file-link-target";
@@ -157,11 +165,30 @@ function MarkdownFallbackLink(
       const sessionId = state.tasks.activeSessionId;
       if (!sessionId) return null;
       const session = state.taskSessions.items[sessionId];
+      const liveWorktreeIds =
+        state.sessionWorktreesBySessionId?.itemsBySessionId?.[sessionId] ?? [];
+      const worktreePaths = [
+        ...(session?.worktrees ?? []).map((worktree) => worktree.worktree_path),
+        ...liveWorktreeIds.map((id) => state.worktrees?.items?.[id]?.path),
+      ].filter((path): path is string => Boolean(path));
       return {
         workspacePath: getSessionWorkspacePath(session) ?? null,
         agentWorkspacePath: session?.agent_workspace_path ?? null,
+        // Primitive key keeps the shallow snapshot stable; the prefix list is
+        // derived outside the selector.
+        worktreePaths: [...new Set(worktreePaths)].sort().join("\u0000"),
       };
     }),
+  );
+  const fallbackSourcePrefixes = useMemo(
+    () =>
+      buildMarkdownWorkspaceSourcePrefixes({
+        workspaceRoot: activeWorkspace?.workspacePath,
+        sessionWorktrees: activeWorkspace?.worktreePaths
+          ? activeWorkspace.worktreePaths.split("\u0000").map((path) => ({ path }))
+          : [],
+      }),
+    [activeWorkspace?.workspacePath, activeWorkspace?.worktreePaths],
   );
 
   return (
@@ -169,7 +196,7 @@ function MarkdownFallbackLink(
       {...props}
       worktreePath={props.worktreePath ?? activeWorkspace?.workspacePath}
       relativeBasePath={props.relativeBasePath ?? activeWorkspace?.agentWorkspacePath}
-      sourcePrefixes={props.sourcePrefixes}
+      sourcePrefixes={props.sourcePrefixes ?? fallbackSourcePrefixes}
       fileRootAliases={props.fileRootAliases}
       openFile={openFile}
     />

@@ -64,12 +64,16 @@ Run from the repository root. If workspace dependencies are absent, first run `(
 (cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite -run 'TestTaskSession(WorkspacePath|AgentWorkspace)')
 (cd apps/backend && go test -tags fts5 ./internal/task/dto -run 'Test.*(TaskSession|AgentWorkspace)')
 (cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(NotifyWorktreeMaterialized|AgentWorkspace|.*AgentctlReady)')
-(cd apps/web && pnpm exec vitest run lib/markdown/file-link-target.test.ts components/shared/task-markdown-file-link-provider.test.tsx components/shared/markdown-components.test.tsx components/shared/memoized-markdown.test.tsx lib/state/slices/session/session-slice.upsert.test.ts lib/ws/handlers/agent-session.test.ts)
+(cd apps/web && pnpm exec vitest run lib/markdown/file-link-target.test.ts components/shared/task-markdown-file-link-provider.test.tsx components/shared/markdown-components.test.tsx components/shared/memoized-markdown.test.tsx components/shared/markdown-fallback-store-subscription.test.tsx lib/state/slices/session/session-slice.upsert.test.ts lib/ws/handlers/agent-session.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm exec oxlint -c oxlint.config.mjs --deny-warnings lib/types/http.ts lib/state/slices/session/session-merge.ts lib/ws/handlers/agent-session.ts lib/markdown/file-link-target.ts components/shared/task-markdown-file-link-provider.tsx components/shared/markdown-components.tsx components/shared/memoized-markdown.tsx)
 (
-  mapfile -t attachment_go_files < <(git ls-files --modified --others --exclude-standard -- 'apps/backend/**/*.go')
+  mapfile -t attachment_go_files < <(
+    git diff --name-only --diff-filter=ACMR origin/main...HEAD -- 'apps/backend/**/*.go'
+    git ls-files --modified --others --exclude-standard -- 'apps/backend/**/*.go'
+  )
+  mapfile -t attachment_go_files < <(printf '%s\n' "${attachment_go_files[@]}" | sort -u)
   if ((${#attachment_go_files[@]})); then bash scripts/lint-go-changed "${attachment_go_files[@]}"; fi
 )
 node --test scripts/validate-public-docs.test.mjs

@@ -99,12 +99,24 @@ test.describe("Live repository attachment", () => {
       .find((worktree) => worktree !== primaryPath);
     if (!secondaryPath) throw new Error("attached worktree path was not returned");
     fs.writeFileSync(path.join(secondaryPath, "secondary-change.txt"), "secondary change\n");
+    const postSecondaryRefresh = watcher.waitForResponse("session.git.refresh", {
+      timeout: 30_000,
+      requestWhere: (payload) => payload.session_id === task.session_id,
+      where: (payload) => {
+        const snapshots = (payload as { snapshots?: unknown[] }).snapshots;
+        return Array.isArray(snapshots) && snapshots.length >= 2;
+      },
+    });
+    await session.clickTab("Files");
+    await session.clickTab("Changes");
+    await postSecondaryRefresh;
 
     await expect(changes.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(
       changes.getByTestId("changes-repo-header").filter({ hasText: "secondary-repository" }),
     ).toBeVisible();
     await expect(changes.getByText("primary-change.txt", { exact: true })).toBeVisible();
+    await expect(changes.getByText("secondary-change.txt", { exact: true })).toBeVisible();
     await expect(changes.getByTestId("changes-refresh-status")).toHaveCount(0);
     await prCapture.screenshot("changes-reconciled-repositories", {
       caption:

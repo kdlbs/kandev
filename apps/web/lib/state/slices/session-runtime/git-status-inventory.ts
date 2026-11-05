@@ -9,18 +9,43 @@ export function gitStatusInventoryGeneration(
 }
 
 /**
+ * Reports whether a streaming status belongs to a scope that a validated
+ * inventory retired. With unknown inventory (null scopes) nothing is retired,
+ * so an attachment can establish a new current root again.
+ */
+export function isRetiredGitStatusScope(
+  state: Pick<SessionRuntimeSliceState, "gitStatus">,
+  environmentId: string,
+  repositoryName: string | undefined,
+): boolean {
+  const inventory = state.gitStatus.inventoryByEnvironment?.[environmentId];
+  if (!inventory?.scopes) return false;
+  return (inventory.retiredScopes ?? []).includes(repositoryName ?? "");
+}
+
+/**
  * Reports whether a streaming status belongs to the validated current scope
  * set. Unknown inventory accepts everything so pre-existing behavior and
- * initial hydration are unchanged.
+ * initial hydration are unchanged; retired scopes are rejected.
  */
 export function isCurrentGitStatusScope(
   state: Pick<SessionRuntimeSliceState, "gitStatus">,
   environmentId: string,
   repositoryName: string | undefined,
 ): boolean {
-  const scopes = state.gitStatus.inventoryByEnvironment?.[environmentId]?.scopes;
-  if (!scopes) return true;
-  return scopes.includes(repositoryName ?? "");
+  return !isRetiredGitStatusScope(state, environmentId, repositoryName);
+}
+
+/** True when inventory is known but this repository is neither current nor retired. */
+export function isUnknownGitStatusScope(
+  state: Pick<SessionRuntimeSliceState, "gitStatus">,
+  environmentId: string,
+  repositoryName: string | undefined,
+): boolean {
+  const inventory = state.gitStatus.inventoryByEnvironment?.[environmentId];
+  if (!inventory?.scopes) return false;
+  const scope = repositoryName ?? "";
+  return !inventory.scopes.includes(scope) && !(inventory.retiredScopes ?? []).includes(scope);
 }
 
 /** Advances the generation once and marks the scope set unknown. */
@@ -34,6 +59,7 @@ export function invalidateGitStatusInventory(
   byEnvironment[environmentId] = {
     generation: (current?.generation ?? 0) + 1,
     scopes: null,
+    retiredScopes: current?.retiredScopes,
   };
 }
 
@@ -123,7 +149,17 @@ export function reconcileGitStatusInventory(
   const byEnvironment = (state.gitStatus.inventoryByEnvironment ??= {});
   if ((byEnvironment[environmentId]?.generation ?? 0) !== generation) return false;
   const normalized = [...new Set(scopes)].sort((a, b) => a.localeCompare(b));
-  byEnvironment[environmentId] = { generation, scopes: normalized };
+  const previous = byEnvironment[environmentId];
+  const retired = new Set(previous?.retiredScopes ?? []);
+  for (const scope of previous?.scopes ?? []) {
+    if (!normalized.includes(scope)) retired.add(scope);
+  }
+  for (const scope of normalized) retired.delete(scope);
+  byEnvironment[environmentId] = {
+    generation,
+    scopes: normalized,
+    retiredScopes: [...retired].sort((a, b) => a.localeCompare(b)),
+  };
   pruneEnvironmentScopes(state, environmentId, new Set(normalized));
   return true;
 }

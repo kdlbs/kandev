@@ -1,7 +1,7 @@
 ---
 id: "03-prove-live-attachment"
 title: "Prove live attachment on desktop and phone"
-status: done
+status: in_progress
 wave: 3
 depends_on:
   - "01-preserve-chat-file-context"
@@ -161,11 +161,16 @@ Recorded evidence:
 - `(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-live-repository-attachment.spec.ts)`:
   1 passed (10.1 s).
 - Both flows preserved the initial checkout for relative links, opened exact
-  primary and sibling contents, retained both Changes groups, and showed no
-  obsolete refresh warning after attachment and reload.
-- Parent-root semantics and duplicate filenames are covered in resolver and
-  provider regressions; the managed browser flow uses the primary checkout's
-  relative link and the sibling's explicit source prefix.
+  primary and sibling contents, asserted the secondary repository's changed
+  file, retained both Changes groups, and showed no obsolete refresh warning
+  after attachment and reload.
+- Duplicate filenames and explicit source prefixes are browser-covered in both
+  viewports. Parent-root relative semantics remain covered by resolver,
+  provider, and fallback-store regressions; no parent-root browser session is
+  claimed.
+- The phone proof uses `mobile-chrome` emulation. A physical-device smoke check
+  of the mobile Chat and Changes flows was unavailable here and remains a
+  release gate before closing the issues.
 
 The plan and both paired designs are promoted to their final status. The ADR
 is accepted.

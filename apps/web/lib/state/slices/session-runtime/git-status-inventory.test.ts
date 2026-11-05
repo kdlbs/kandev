@@ -3,7 +3,11 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import type { GitStatusEntry, SessionRuntimeSlice } from "./types";
-import { gitStatusInventoryGeneration, isCurrentGitStatusScope } from "./git-status-inventory";
+import {
+  gitStatusInventoryGeneration,
+  isCurrentGitStatusScope,
+  isUnknownGitStatusScope,
+} from "./git-status-inventory";
 
 const ENVIRONMENT = "env-attachment";
 const MASTER = "master";
@@ -76,15 +80,22 @@ describe("git status inventory reconciliation", () => {
     store.getState().invalidateGitStatusInventory(ENVIRONMENT);
     const generation = gitStatusInventoryGeneration(store.getState(), ENVIRONMENT);
 
+    // Establish the unnamed root first so the next aggregate can retire it.
+    expect(
+      store
+        .getState()
+        .reconcileGitStatusInventory(ENVIRONMENT, generation, ["", MASTER, SECONDARY]),
+    ).toBe(true);
     const applied = store
       .getState()
       .reconcileGitStatusInventory(ENVIRONMENT, generation, [SECONDARY, MASTER]);
 
     expect(applied).toBe(true);
     const state = store.getState();
-    expect(state.gitStatus.inventoryByEnvironment?.[ENVIRONMENT]).toEqual({
+    expect(state.gitStatus.inventoryByEnvironment?.[ENVIRONMENT]).toMatchObject({
       generation,
       scopes: [MASTER, SECONDARY],
+      retiredScopes: [""],
     });
     expect(Object.keys(state.gitStatus.byEnvironmentRepo[ENVIRONMENT]).sort()).toEqual([
       MASTER,
@@ -112,6 +123,7 @@ describe("git status inventory reconciliation", () => {
     const state = store.getState();
     expect(state.gitStatus.byEnvironmentRepo[ENVIRONMENT]?.[""]).toBeDefined();
     expect(state.gitStatus.byEnvironmentId[ENVIRONMENT]?.repository_name).toBe(SECONDARY);
+    expect(state.gitStatus.inventoryByEnvironment?.[ENVIRONMENT]?.retiredScopes).toEqual([]);
     expect(gitStatusInventoryGeneration(state, ENVIRONMENT)).toBe(0);
   });
 
@@ -130,13 +142,15 @@ describe("git status inventory reconciliation", () => {
     ]);
   });
 
-  it("rejects late streaming frames for a retired scope once inventory is known", () => {
+  it("rejects a retired scope while accepting a newly discovered one", () => {
     const store = makeStore();
+    store.getState().reconcileGitStatusInventory(ENVIRONMENT, 0, ["", MASTER, SECONDARY]);
     store.getState().reconcileGitStatusInventory(ENVIRONMENT, 0, [MASTER, SECONDARY]);
 
     expect(isCurrentGitStatusScope(store.getState(), ENVIRONMENT, "")).toBe(false);
     expect(isCurrentGitStatusScope(store.getState(), ENVIRONMENT, MASTER)).toBe(true);
-    expect(isCurrentGitStatusScope(store.getState(), ENVIRONMENT, "retired")).toBe(false);
+    expect(isCurrentGitStatusScope(store.getState(), ENVIRONMENT, "submodule/new")).toBe(true);
+    expect(isUnknownGitStatusScope(store.getState(), ENVIRONMENT, "submodule/new")).toBe(true);
   });
 });
 
@@ -152,6 +166,7 @@ describe("legacy git status retirement", () => {
     expect(state.gitStatus.byEnvironmentRepo[ENVIRONMENT]?.[""]).toBeUndefined();
     expect(state.gitStatus.refreshByEnvironmentRepo?.[ENVIRONMENT]?.[""]).toBeUndefined();
     expect(state.gitStatus.refreshByEnvironmentRepo?.[ENVIRONMENT]?.[SECONDARY]).toBeDefined();
+    expect(state.gitStatus.refreshByEnvironmentId?.[ENVIRONMENT]).toBeUndefined();
     expect(state.gitStatus.byEnvironmentRepo[ENVIRONMENT]?.[MASTER]).toBeDefined();
   });
 });

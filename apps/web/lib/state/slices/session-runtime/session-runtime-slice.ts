@@ -88,6 +88,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.gitStatusDisplay.byEnvironmentRepo[envKey];
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
+  delete state.gitStatus.inventoryByEnvironment?.[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -562,6 +563,8 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
       }
       delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
+      // The environment-level failure belonged to the retired unnamed root.
+      delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
     }),
   ...buildGitInventoryActions(set),
   registerSessionEnvironment: (sessionId, environmentId) =>

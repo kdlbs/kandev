@@ -170,6 +170,7 @@ function seedSessionCommits(store: StoreApi<AppState>) {
 describe("git-status WS handler — inventory scope guard", () => {
   it("rejects a late unnamed failure after a validated named inventory", () => {
     const store = freshStore();
+    expect(store.getState().reconcileGitStatusInventory(SESSION, 0, ["", "master"])).toBe(true);
     expect(store.getState().reconcileGitStatusInventory(SESSION, 0, ["master"])).toBe(true);
     const handler = gitStatusHandler(store);
 
@@ -188,6 +189,22 @@ describe("git-status WS handler — inventory scope guard", () => {
     handler(gitEvent(unavailableRepoEvent(STATUS_TIME_2, "master")));
 
     expect(store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.master).toMatchObject({
+      state: "unavailable",
+    });
+  });
+
+  it("accepts and inventories a newly discovered submodule scope", () => {
+    const store = freshStore();
+    store.getState().reconcileGitStatusInventory(SESSION, 0, ["master"]);
+    const handler = gitStatusHandler(store);
+
+    handler(gitEvent(unavailableRepoEvent(STATUS_TIME_2, "submodule/new")));
+
+    const inventory = store.getState().gitStatus.inventoryByEnvironment?.[SESSION];
+    expect(inventory?.scopes).toBeNull();
+    expect(
+      store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.["submodule/new"],
+    ).toMatchObject({
       state: "unavailable",
     });
   });

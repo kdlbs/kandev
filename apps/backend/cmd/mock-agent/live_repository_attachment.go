@@ -42,7 +42,6 @@ func scenarioLiveRepositoryAttachment(e *emitter) {
 		return
 	}
 	primaryDir := filepath.Base(cwd)
-	attachmentDir := args.attachmentDirName()
 
 	e.text(fmt.Sprintf(
 		"Before attachment, this work order lives in the agent checkout. [primary before](implementation_plans/task-00.md)\n\n`agent cwd: %s`",
@@ -73,7 +72,11 @@ func scenarioLiveRepositoryAttachment(e *emitter) {
 	}
 	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 
-	secondaryPrefix := attachmentWorkspacePrefix(result, attachmentDir)
+	secondaryPrefix, ok := attachmentWorkspacePrefix(result)
+	if !ok {
+		e.text("Attachment succeeded but the tool response omitted the materialized worktree identity; refusing to guess a source prefix.")
+		return
+	}
 	e.text(fmt.Sprintf(
 		"Attachment succeeded without restarting the agent. The same work order is still available from its original checkout. [primary after](implementation_plans/task-00.md)\n\n"+
 			"An explicit source prefix keeps the primary checkout. [primary qualified](%s/README.md)\n\n"+
@@ -86,25 +89,26 @@ func scenarioLiveRepositoryAttachment(e *emitter) {
 // attachmentWorkspacePrefix derives the Files-root-relative directory of the
 // materialized sibling from the real tool response. The tool result is the
 // authority: worktree directory names include the branch slug and must not be
-// guessed from the repository source name.
-func attachmentWorkspacePrefix(result, fallback string) string {
+// guessed from the repository source name. A response without both paths is a
+// hard failure so the browser scenario cannot pass with a fabricated link.
+func attachmentWorkspacePrefix(result string) (string, bool) {
 	var response struct {
 		TaskWorkspacePath string `json:"task_workspace_path"`
 		WorktreePath      string `json:"worktree_path"`
 	}
 	if err := json.Unmarshal([]byte(result), &response); err != nil {
-		return fallback
+		return "", false
 	}
 	workspace := filepath.Clean(response.TaskWorkspacePath)
 	worktree := filepath.Clean(response.WorktreePath)
 	if workspace == "." || worktree == "." || workspace == "" || worktree == "" {
-		return fallback
+		return "", false
 	}
 	relative, err := filepath.Rel(workspace, worktree)
 	if err != nil || relative == "." || strings.HasPrefix(relative, "..") {
-		return fallback
+		return "", false
 	}
-	return filepath.ToSlash(relative)
+	return filepath.ToSlash(relative), true
 }
 
 func parseLiveRepositoryAttachmentArgs(raw string) (liveRepositoryAttachmentArgs, error) {
@@ -126,13 +130,4 @@ func parseLiveRepositoryAttachmentArgs(raw string) (liveRepositoryAttachmentArgs
 		args.BaseBranch = "main"
 	}
 	return args, nil
-}
-
-func (a liveRepositoryAttachmentArgs) attachmentDirName() string {
-	if a.LocalPath != "" {
-		if name := filepath.Base(filepath.Clean(a.LocalPath)); name != "" && name != "." && name != "/" {
-			return name
-		}
-	}
-	return "secondary"
 }

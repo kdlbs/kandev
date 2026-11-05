@@ -139,13 +139,15 @@ export type GitStatusEntry = {
 
 /**
  * Runtime-only repository inventory for one environment. `scopes` is null
- * until an authoritative aggregate read validates the current Git scopes;
- * `generation` advances once per attachment so late responses and streaming
- * events from the previous inventory can be rejected.
+ * until an authoritative aggregate read validates the current Git scopes.
+ * `generation` advances on every invalidation and fences refresh responses;
+ * streaming events are filtered by `scopes` and `retiredScopes`.
  */
 export type GitStatusInventoryState = {
   generation: number;
   scopes: string[] | null;
+  /** Scopes removed by a validated inventory; late frames from them are rejected. */
+  retiredScopes?: string[];
 };
 
 export type GitStatusState = {

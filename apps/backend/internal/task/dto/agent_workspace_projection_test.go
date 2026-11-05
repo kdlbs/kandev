@@ -51,11 +51,13 @@ func TestTaskSessionAgentWorkspaceProjection(t *testing.T) {
 	if got := FromTaskSessionSummary(unknown).AgentWorkspacePath; got != nil {
 		t.Fatalf("summary AgentWorkspacePath = %v, want nil", got)
 	}
-	if got := marshalSessionDTO(t, FromTaskSession(unknown))["agent_workspace_path"]; got != nil {
-		t.Fatalf("full JSON agent_workspace_path = %v, want explicit null", got)
+	fullUnknownJSON := marshalSessionDTO(t, FromTaskSession(unknown))
+	if got, exists := fullUnknownJSON["agent_workspace_path"]; !exists || got != nil {
+		t.Fatalf("full JSON agent_workspace_path = %v (exists=%v), want explicit null", got, exists)
 	}
-	if got := marshalSessionDTO(t, FromTaskSessionSummary(unknown))["agent_workspace_path"]; got != nil {
-		t.Fatalf("summary JSON agent_workspace_path = %v, want explicit null", got)
+	summaryUnknownJSON := marshalSessionDTO(t, FromTaskSessionSummary(unknown))
+	if got, exists := summaryUnknownJSON["agent_workspace_path"]; !exists || got != nil {
+		t.Fatalf("summary JSON agent_workspace_path = %v (exists=%v), want explicit null", got, exists)
 	}
 }
 

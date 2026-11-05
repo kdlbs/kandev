@@ -56,34 +56,18 @@ func TestLiveRepositoryAttachment(t *testing.T) {
 
 func TestLiveRepositoryAttachmentWorkspacePrefixUsesToolResponse(t *testing.T) {
 	result := `{"task_workspace_path":"/tasks/demo","worktree_path":"/tasks/demo/secondary-repository-main"}`
-	if got := attachmentWorkspacePrefix(result, "fallback"); got != "secondary-repository-main" {
-		t.Fatalf("attachmentWorkspacePrefix() = %q, want tool response prefix", got)
+	if got, ok := attachmentWorkspacePrefix(result); !ok || got != "secondary-repository-main" {
+		t.Fatalf("attachmentWorkspacePrefix() = %q, %v; want tool response prefix", got, ok)
 	}
-	if got := attachmentWorkspacePrefix("{", "fallback"); got != "fallback" {
-		t.Fatalf("attachmentWorkspacePrefix() = %q, want fallback for malformed response", got)
+	if _, ok := attachmentWorkspacePrefix("{"); ok {
+		t.Fatal("attachmentWorkspacePrefix accepted malformed response")
 	}
-	if got := attachmentWorkspacePrefix(
+	if _, ok := attachmentWorkspacePrefix(
 		`{"task_workspace_path":"/tasks/demo","worktree_path":"/elsewhere/repo"}`,
-		"fallback",
-	); got != "fallback" {
-		t.Fatalf("attachmentWorkspacePrefix() = %q, want fallback outside the workspace", got)
+	); ok {
+		t.Fatal("attachmentWorkspacePrefix accepted a worktree outside the workspace")
 	}
-}
-
-func TestLiveRepositoryAttachmentDerivesWorkspaceDirectoryName(t *testing.T) {
-	tests := []struct {
-		name string
-		args liveRepositoryAttachmentArgs
-		want string
-	}{
-		{name: "local path", args: liveRepositoryAttachmentArgs{LocalPath: "/workspace/secondary/"}, want: "secondary"},
-		{name: "repository id", args: liveRepositoryAttachmentArgs{RepositoryID: "repo-2"}, want: "secondary"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := test.args.attachmentDirName(); got != test.want {
-				t.Fatalf("attachmentDirName() = %q, want %q", got, test.want)
-			}
-		})
+	if _, ok := attachmentWorkspacePrefix(`{"task_workspace_path":"/tasks/demo"}`); ok {
+		t.Fatal("attachmentWorkspacePrefix accepted a response without worktree_path")
 	}
 }
