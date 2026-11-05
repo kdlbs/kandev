@@ -28,6 +28,24 @@ publication. No model, operating database, profile policy or shared cap is chang
 Overall/grade reservation and utility/review call-site integration remain
 original subsequent work. This task alone does not enforce shared capacity.
 
+## Follow-up: exact awaited stop
+
+The optional `await_terminal` session stop requires a pinned execution ID and
+`force=false`. It reports request acceptance, runtime stop return, current
+manager teardown and recorded child settlement separately. A changed execution
+or unavailable observation must not certify another target. An unknown census,
+unmatched retained child or absent capacity binding remains unresolved; the
+result does not attest earlier owners or remote provider cancellation.
+
+This follow-up covers `agent/runtime/agentctl/inference_stop*.go`,
+`agent/runtime/inference_context.go`, `agentctl/server/api/control_server.go`,
+`agentctl/server/{instance,process}/inference_snapshot.go`,
+`agentctl/server/utility/stop_receipts.go`, `backendapp/inference_stop.go`,
+`orchestrator/awaited_session_stop.go`,
+`orchestrator/executor/{executor_interaction,prepare_awaited_stop}.go` and
+`orchestrator/handlers/handlers.go`. It builds on shared admission and does not
+change its policy or model ordering.
+
 ## Implemented owner boundary
 
 The per-instance handler joins actual ACP/Codex Start, dispatch and common
