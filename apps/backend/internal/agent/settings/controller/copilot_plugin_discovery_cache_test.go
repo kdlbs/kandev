@@ -111,6 +111,17 @@ func TestCopilotPluginDiscoveryOldCompletionBeforeNewerPublicationIsRejected(t *
 	}
 }
 
+func TestCopilotPluginResponseCloneCopiesPlugins(t *testing.T) {
+	original := &dto.CopilotPluginDiscoveryResponse{
+		Plugins: []dto.CopilotPluginDiscoveryPlugin{{ID: "installed:m/p"}},
+	}
+	clone := cloneCopilotPluginResponse(original)
+	clone.Plugins[0].ID = "installed:m/other"
+	if original.Plugins[0].ID != "installed:m/p" {
+		t.Fatalf("clone mutated plugins: %v", original.Plugins)
+	}
+}
+
 func requireCall(t *testing.T, calls <-chan int, want int) {
 	t.Helper()
 	select {

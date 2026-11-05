@@ -62,6 +62,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.backgroundWork.outputWindowsBySessionId[sessionId];
   delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
   delete state.backgroundWork.loadingBySessionId[sessionId];
+  delete state.backgroundWork.readGenerationBySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -154,6 +155,8 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     nextOutputWindowGeneration: 1,
     activeWorkIdBySessionId: {},
     loadingBySessionId: {},
+    readGenerationBySessionId: {},
+    nextReadGeneration: 1,
   },
 };
 
