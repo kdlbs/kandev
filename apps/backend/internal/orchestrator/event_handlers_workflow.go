@@ -8519,6 +8519,13 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// The source transition is committed, but destination state and
 		// on_enter behavior wait for the queue promotion event.
 		if sessionLifecycle {
+			s.logger.Info("workflow on_enter deferred until destination step admits the task",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("from_step_id", result.FromStepID),
+				zap.String("to_step_id", result.ToStepID),
+				zap.Int("wip_limit", targetStep.WIPLimit),
+				zap.String("reason", "wip_limit_reached"))
 			if mode == transitionLifecycleOnTurnStart {
 				if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
 					s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
