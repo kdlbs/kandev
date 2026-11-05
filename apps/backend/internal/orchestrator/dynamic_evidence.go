@@ -21,8 +21,10 @@ import (
 // separately.
 type promptAttemptEvidence struct {
 	mu sync.Mutex
-	// retirementGeneration is captured under the session lifecycle lock and
-	// does not change during this attempt.
+	// retirementState and retirementGeneration identify the notice lifecycle
+	// observed when this attempt began. Reclaimed entries can be replaced by a
+	// state with the same generation, so the counter alone is not unique.
+	retirementState      *transientRetryNoticeState
 	retirementGeneration uint64
 	executionID          string
 	promptGeneration     uint64
@@ -95,6 +97,7 @@ func (s *Service) beginPromptAttempt(
 		promptGeneration:     promptGeneration,
 		evidenceKnown:        true,
 		dynamic:              dynamic,
+		retirementState:      state,
 		retirementGeneration: state.retirementGeneration,
 	}
 	s.dynamicAttemptEvidence.Store(sessionID, evidence)
@@ -229,7 +232,7 @@ func (s *Service) bindPromptAttemptIfCurrent(sessionID, executionID string, prom
 	// A fence already present when this attempt began belongs to its predecessor;
 	// a newer retirement must not be cleared by this admission callback.
 	if expected != nil && state.retired.Load() &&
-		state.retirementGeneration != expected.retirementGeneration {
+		(state != expected.retirementState || state.retirementGeneration != expected.retirementGeneration) {
 		return
 	}
 	evidence.mu.Lock()
