@@ -59,7 +59,7 @@ func (r *pluginToolCatalogRefresher) run() {
 		case <-r.requests:
 			snapshot, err := r.source.AgentToolCatalog()
 			if err == nil && r.lifecycle != nil {
-				err = r.lifecycle.SetPluginToolsForAllExecutions(r.ctx, plugintools.ProjectNonAutomation(snapshot))
+				err = r.lifecycle.SetPluginToolsForAllExecutions(r.ctx, snapshot)
 			}
 			if err != nil && r.logger != nil {
 				r.logger.Warn("live plugin tool catalog refresh failed", zap.Error(err))

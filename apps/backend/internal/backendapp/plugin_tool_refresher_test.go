@@ -21,7 +21,7 @@ func (f pluginToolLifecycleFake) SetPluginToolsForAllExecutions(_ context.Contex
 	return nil
 }
 
-func TestPluginToolCatalogRefresherProjectsAutomationSurface(t *testing.T) {
+func TestPluginToolCatalogRefresherForwardsFullCatalog(t *testing.T) {
 	want := plugintools.Snapshot{
 		Generation: "g", Revision: 4,
 		Tools: []plugintools.Definition{
@@ -35,16 +35,52 @@ func TestPluginToolCatalogRefresherProjectsAutomationSurface(t *testing.T) {
 	refresher.NotifyAgentToolCatalogChanged()
 	select {
 	case got := <-lifecycle.calls:
-		if len(got.Tools) != 1 {
-			t.Fatalf("pushed tools = %#v", got.Tools)
+		if len(got.Tools) != len(want.Tools) {
+			t.Fatalf("pushed tools = %#v, want the full catalog for per-execution projection", got.Tools)
 		}
 		if got.Generation != want.Generation || got.Revision != want.Revision {
-			t.Fatalf("projection changed catalog identity: %#v", got)
-		}
-		if surfaces := got.Tools[0].Surfaces; len(surfaces) != 1 || surfaces[0] != plugintools.SurfaceKanban {
-			t.Fatalf("pushed surfaces = %#v", surfaces)
+			t.Fatalf("catalog identity changed: %#v", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("catalog notification was not pushed")
+	}
+}
+
+type pluginToolSubscriberFake struct {
+	refreshes int
+}
+
+func (f *pluginToolSubscriberFake) RefreshPluginTools(context.Context) error {
+	f.refreshes++
+	return nil
+}
+
+func TestPluginToolCatalogFanoutRefreshesSubscribersWithExecutions(t *testing.T) {
+	lifecycle := pluginToolLifecycleFake{calls: make(chan plugintools.Snapshot, 1)}
+	fanout := newPluginToolCatalogFanout(lifecycle, nil)
+	subscriber := &pluginToolSubscriberFake{}
+	unsubscribe := fanout.Subscribe(subscriber)
+
+	snapshot := plugintools.Snapshot{Generation: "g", Revision: 7}
+	if err := fanout.SetPluginToolsForAllExecutions(context.Background(), snapshot); err != nil {
+		t.Fatalf("fanout: %v", err)
+	}
+	if got := <-lifecycle.calls; got.Revision != snapshot.Revision {
+		t.Fatalf("execution revision = %d, want %d", got.Revision, snapshot.Revision)
+	}
+	if subscriber.refreshes != 1 {
+		t.Fatalf("subscriber refreshes = %d, want 1", subscriber.refreshes)
+	}
+
+	unsubscribe()
+	unsubscribe()
+	if err := fanout.SetPluginToolsForAllExecutions(context.Background(), snapshot); err != nil {
+		t.Fatalf("fanout after unsubscribe: %v", err)
+	}
+	if got := <-lifecycle.calls; got.Revision != snapshot.Revision {
+		t.Fatalf("execution revision after unsubscribe = %d, want %d", got.Revision, snapshot.Revision)
+	}
+	if subscriber.refreshes != 1 {
+		t.Fatalf("unsubscribed server refreshed %d times", subscriber.refreshes)
 	}
 }

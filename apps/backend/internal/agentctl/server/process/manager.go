@@ -382,6 +382,11 @@ type Manager struct {
 // ErrManagerStopping indicates that process admission is closed for teardown.
 var ErrManagerStopping = errors.New("process manager is stopping")
 
+// ErrConfigureWhileRunning reports a configuration attempt that arrived while
+// the agent process was already starting or running. Callers classify this
+// sentinel instead of matching error text.
+var ErrConfigureWhileRunning = errors.New("cannot configure while agent is running")
+
 func (m *Manager) admitStart() (func(), error) {
 	m.admissionMu.Lock()
 	if m.stopping {
@@ -2392,7 +2397,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	defer m.startMu.Unlock()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("cannot configure while agent is running")
+		return ErrConfigureWhileRunning
 	}
 
 	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)

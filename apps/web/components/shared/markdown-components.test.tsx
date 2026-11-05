@@ -319,32 +319,32 @@ describe("markdownComponents", () => {
     expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
   });
 
-  it("does not open host-absolute file links outside the worktree", () => {
+  it("opens read-only host-absolute file links outside the worktree", () => {
     render(<Markdown>{"[secret](/root/other-project/secret.md)"}</Markdown>);
 
     fireEvent.click(screen.getByRole("link", { name: "secret" }));
 
-    expect(openFile).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledWith("/root/other-project/secret.md");
   });
 
-  it("does not treat sibling workspace paths as repo-root file links", () => {
+  it("preserves sibling workspace absolute paths", () => {
     appState.value.taskSessions.items["session-1"].worktree_path = "/workspace/current-project";
 
     render(<Markdown>{"[schema](/workspace/sibling-project/schema.prisma)"}</Markdown>);
 
     fireEvent.click(screen.getByRole("link", { name: "schema" }));
 
-    expect(openFile).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledWith("/workspace/sibling-project/schema.prisma");
   });
 
-  it("does not open Windows drive-letter absolute file links", () => {
+  it("opens Windows drive-letter absolute file links", () => {
     render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
 
     const link = screen.getByRole("link", { name: "hosts" });
     fireEvent.click(link);
 
-    expect(openFile).not.toHaveBeenCalled();
-    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(openFile).toHaveBeenCalledWith("C:/Windows/System32/drivers/etc/hosts");
+    expect(link.getAttribute("aria-disabled")).toBeNull();
   });
 
   it("does not treat bare domains as relative file links", () => {
@@ -356,6 +356,23 @@ describe("markdownComponents", () => {
 
     expect(openFile).not.toHaveBeenCalled();
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("shared Markdown image rendering", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("keeps browser-rendered relative and same-origin images without a session", () => {
+    render(
+      <Markdown>{"![Relative](images/chart.svg) ![Same origin](/assets/chart.svg)"}</Markdown>,
+    );
+
+    expect(screen.getByRole("img", { name: "Relative" }).getAttribute("src")).toBe(
+      "images/chart.svg",
+    );
+    expect(screen.getByRole("img", { name: "Same origin" }).getAttribute("src")).toBe(
+      "/assets/chart.svg",
+    );
   });
 });
 
@@ -386,13 +403,13 @@ describe("markdownComponents registered source links", () => {
     expect(openFile).toHaveBeenCalledWith("kandev/ui/bundle.js");
   });
 
-  it("keeps an unmatched host path inert", () => {
+  it("opens an unmatched absolute host path through the existing file action", () => {
     render(<Markdown>{"[secret](/home/other-project/secret.md)"}</Markdown>);
 
     const link = screen.getByRole("link", { name: "secret" });
     expect(fireEvent.click(link)).toBe(false);
-    expect(openFile).not.toHaveBeenCalled();
-    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(openFile).toHaveBeenCalledWith("/home/other-project/secret.md");
+    expect(link.getAttribute("aria-disabled")).toBeNull();
   });
 });
 

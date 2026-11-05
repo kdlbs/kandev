@@ -463,7 +463,10 @@ misleading disabled toggle. Package defaults use explicit labelled choices.
 UI-02 task: MCP plug > Customize > Built-in packages. Each optional row shows
 Inherit/On/Off, effective value, and workspace limit. Core shows Required.
 Configuration starts Inherit (Off); details explain authority before save.
-Existing authorized task creation can save these choices before the first start.
+New Task saves choices before first start through Advanced settings > MCP servers.
+Desktop popover and phone drawer use one scroller and package heading with
+additional servers. Form-owned choices survive picker/Advanced closure and reset
+on a new task/workspace.
 Session Connections lists actual package entries; selecting one shows desired,
 bound, and observed state with an authorized Manage action.
 
@@ -486,20 +489,19 @@ and refresh next-start feedback, while failed saves retain the draft. In an
 explorer the save surface belongs to that panel, outside its content scroller,
 and never portals into an unrelated configuration-chat save host.
 
-Phone uses one full-height detail in the existing settings shell or explorer
-drawer, with list > package detail > tool detail in the same surface. Back returns
-one level and Close returns focus to the invoker. Fixed navigation/save controls
+Phone uses the existing full-height settings shell or explorer drawer for
+list > package detail > tool detail. Back returns one level. Close restores
+invoker focus. Fixed navigation/save controls
 surround one `min-h-0` scrolling body with safe-area clearance; no nested drawer.
 Use the shipped touch-tablet drawer. Maintain one domain controller and draft
 across responsive branches and viewport changes.
 
-Use `controlSizingClassName`: at least 44px phone/coarse targets, nominal 48px
-header close, 28px ordinary desktop controls. Keep reasons/errors visible without
-hover. Conflict preserves the draft and offers explicit reload; denial remains
-unsaved. Shared stale-page handling stays in the existing API client. All copy
-uses seven locales and generated Traditional Chinese. Reuse neutral surfaces,
-Tabler icons, headings, spacing, and focus rings. Toggles need no new animation;
-any press feedback follows better-ui 0.96/150ms and reduced-motion preferences.
+Use `controlSizingClassName`: 44px minimum phone/coarse targets, nominal 48px
+header Close, 28px desktop controls. Reasons/errors never depend on hover.
+Conflict keeps drafts and offers reload; denied saves stay unsaved. Reuse API
+stale-page handling, seven locales, generated Traditional Chinese, neutral
+surfaces, Tabler icons, headings, spacing, and focus rings. No new toggle motion.
+Press feedback uses better-ui 0.96/150ms with reduced-motion support.
 
 ## Observability and validation
 

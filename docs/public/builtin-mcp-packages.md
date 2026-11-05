@@ -21,7 +21,8 @@ workspace policy. Changed choices use the settings change highlight. The compact
 save bar appears while edits are unsaved; its **Reset** restores saved choices.
 **Reset all packages to defaults** stages a separate change that still needs Save.
 
-In **New Task**, expand **Built-in packages** to choose packages before the first start.
+In **New Task**, expand **Advanced settings**, then open **MCP servers**.
+Select a package under **Built-in packages** to choose its tools before the first start.
 Those choices are saved as part of task creation. A rejected choice prevents that
 creation from starting an agent.
 

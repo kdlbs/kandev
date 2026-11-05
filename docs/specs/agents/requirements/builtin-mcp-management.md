@@ -45,6 +45,8 @@ not previously approved behavior. Implementation needs a later explicit request.
   containing Core, Configuration, Rich output, Walkthroughs, and Diagnostics,
   including when the workspace has no user-defined server definitions. Each
   detail shall explain purpose, tool membership, ownership, and eligible contexts.
+  In New Task, package selection shall be inside Advanced settings > MCP servers,
+  with one package-list title rather than a separate top-level disclosure.
 - **AC-AGENTS-BUILTIN-MCP-001.2:** Each selected package shall be a distinct
   host-injected MCP server. Core shall retain `kandev`. Package identities shall
   be reserved. Packages shall not become ordinary workspace catalog records or
