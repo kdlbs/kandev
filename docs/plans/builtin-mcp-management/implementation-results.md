@@ -760,3 +760,159 @@ The user's preview and main runtime remain untouched. Kubernetes has no local
 Docker host; its successful prior same-source retry is recorded above. Fresh
 published-head CI, review-thread state, and mergeability remain delivery gates
 tracked in the saved task plan, rather than claims made by this local receipt.
+
+
+### New-task MCP placement correction (2026-11-04)
+
+The user reported that package choices appeared above Advanced settings and the
+package title appeared twice. The form rendered its own package disclosure,
+while the shared package list rendered the same heading inside it. The new
+regression fails before the correction because that top-level section is visible.
+
+PR #4762 had already merged as `a1013e89fc460b39b17003e5022d756bf480e3d2`.
+The correction starts from verified main `5d6adcbca18231a5aa3726ca9ee642bfa255cd4a`
+on `fix/task-create-mcp-package-placement-6d1b`. The original merged branch stays
+unchanged. The initial task-owned changes are preserved in a backup patch and
+stash before transfer to this branch. All affected creation sources match the
+merged checkpoint before this repair.
+
+Packages now appear inside Advanced settings > MCP servers, beside existing
+server choices in the desktop popover and phone drawer. The extra disclosure is
+removed; the shared list owns one heading. Package consent remains in the form
+across picker and Advanced close/reopen. Clearing consent moves from the picker
+mount effect to the existing new-task/workspace reset boundary. Two hook tests
+fail before that reset repair, including provisional locked-workflow hydration.
+Back remains a non-submit action and returns focus to the package row.
+
+Phone visual verification also exposed fixed-height responsive button classes
+on package rows with wrapped descriptions. A rendered containment regression
+fails before correction: the label's top inset is below the required eight
+pixels. Package rows now override the phone/coarse fixed height with automatic
+height, preserving their existing minimum size and padding. The test checks
+label bounds inside every row. It waits for the existing finite drawer animation
+before measuring; an earlier measurement during entrance was test setup timing,
+not evidence of a settled viewport failure. No arbitrary delay or timeout change.
+
+After the final production edit, all 22 focused component tests pass, full web
+typecheck passes through the current native compiler, changed-file Oxlint has
+zero warnings, and formatting passes. Three desktop and three phone cases pass
+with one worker and zero retries. These verify consent persistence and actual
+creation, non-submit Back, one title, row/viewport containment, and unchanged
+additional-server selection through the existing picker. Native/backend fixtures
+were rebuilt from the current base, then the web build was refreshed after each
+UI edit. No main runtime or user preview was accessed.
+
+```sh
+pnpm --dir apps/web exec vitest run components/task-create-dialog-reset-effects.test.ts components/task-create-dialog-form-reset.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web exec oxlint -c oxlint.config.mjs --deny-warnings components/mcp/builtin-package-list.tsx components/task-create-dialog.tsx components/task-create-dialog-advanced-settings.tsx components/task-create-dialog-mcp-select.tsx components/task-create-builtin-packages.tsx components/task-create-dialog-form-reset.ts components/task-create-dialog-reset-effects.ts components/task-create-dialog-state.ts components/task-create-dialog-form-reset.test.ts components/task-create-dialog-reset-effects.test.ts e2e/helpers/builtin-mcp-management.ts e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/settings/mobile-builtin-mcp-management.spec.ts
+pnpm --dir apps/web run build:e2e
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/task/task-mcp-selection.spec.ts -- --retries=0 -g 'at task creation|Back from package|matches neighboring Advanced'
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-builtin-mcp-management.spec.ts e2e/tests/task/mobile-task-mcp-selection.spec.ts -- --retries=0 -g 'at task creation|Back from package|keeps task additions inside'
+```
+
+Browser commands use the clean launch environment and resource bounds from the
+previous receipts, with `CAPTURE_PR_ASSETS=1` for screenshot output. The final
+fresh desktop/phone captures are visually inspected and compressed. The capture
+manifest selects exactly those two assets. Public how-to instructions now give
+the Advanced settings > MCP servers path. The owning requirement/design and
+work order record this placement and draft ownership; no package default,
+permission, payload or runtime apply-point change. All existing translated
+labels are reused. Public-doc validator and its tests, catalog validation,
+specification lint, and diff whitespace checks pass.
+
+Logs: `/tmp/kandev-creation-fix-{unit-receipt,typecheck-verified,complete-lint,desktop-verified,phone-verified}.log`.
+Failing evidence: `/tmp/kandev-4762-creation-{ui,reset}-red.log` and
+`/tmp/kandev-creation-fix-row-red.log`. Publication/hosted CI is a separate gate
+recorded in the saved task plan. No new tasks, sessions or workers were created.
+
+### Placement follow-up PR review repair (2026-11-04)
+
+Both review findings are valid. The older integration-base and feature-branch
+receipts are now labelled historical. The placement correction at the top of
+the plan remains the active branch/base record.
+
+The MCP trigger previously waited for additional-server catalog/selection reads,
+which made the independent built-in package editor unreachable during a slow
+request. Only additional-server content now waits for those reads. Explicit
+form disablement still applies to the whole trigger. The existing no-built-in
+loading behavior is unchanged. The search draft remains in the picker owner,
+so closing and reopening either native surface preserves the query.
+
+The new deferred-response regression fails before the fix because the MCP
+trigger is disabled. Desktop and a 320-pixel phone choose Configuration On
+while the real catalog response is held. Releasing and draining that response
+clears its loading status without discarding consent. The existing additional
+server regression also caught a query reset during the initial helper
+extraction; keeping query ownership in the original picker repairs it.
+
+Final source verification: 22 focused unit tests, web typecheck, changed-file
+Oxlint, formatting, and whitespace checks pass. Four desktop and four phone
+cases pass with one worker and zero retries. These include the new pending-read
+case, actual Configuration creation, Back without submission, and unchanged
+additional-server selection/search. The first phone invocation passed all three
+package cases but its additional-server fixture exited during backend restart,
+before assertions. The same complete four-case scope passed with backend
+diagnostics enabled; no production or test change was made for that startup
+failure. The original failure is retained, not counted as a passing run.
+
+```sh
+pnpm --dir apps/web exec vitest run components/task-create-dialog-reset-effects.test.ts components/task-create-dialog-form-reset.test.ts components/task-create-dialog-advanced-settings.test.tsx components/task-create-dialog-composition.test.tsx
+pnpm --dir apps/web run typecheck
+pnpm --dir apps/web exec oxlint -c oxlint.config.mjs --deny-warnings components/task-create-dialog-mcp-select.tsx e2e/helpers/builtin-mcp-management.ts e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/settings/mobile-builtin-mcp-management.spec.ts
+pnpm --dir apps/web run build:e2e
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/settings/builtin-mcp-management.spec.ts e2e/tests/task/task-mcp-selection.spec.ts -- --retries=0 -g 'keeps built-in choices available|at task creation|Back from package|matches neighboring Advanced'
+E2E_DEBUG=1 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-builtin-mcp-management.spec.ts e2e/tests/task/mobile-task-mcp-selection.spec.ts -- --retries=0 -g 'keeps built-in choices available|at task creation|Back from package|keeps task additions inside'
+```
+
+Use the clean launch environment and resource bounds recorded above. Logs:
+`/tmp/kandev-5047-loading-{red,desktop-final,phone-final,phone-diagnostic,unit,typecheck-final,lint-verified,format-check}.log`.
+Public instructions retain the same entry path and package semantics, so no
+additional public copy or translation is needed. Normal hooks and exact-head
+CI/review/merge evidence remain separate delivery gates in the saved task plan.
+
+### Hosted CI sequencing repair (2026-11-04)
+
+At published head d19cbd2a6, E2E run 41845382225 attempt 1 finished with
+Shard 26/28 and its dependent aggregate failed. All other checks were green.
+The shard exposed two test sequencing errors outside the package editor. Both
+remain part of delivery verification; their location does not waive the gate.
+
+The mobile workflow test changed a session to mock-smart before waiting for its
+initial mock-slow runtime. The set-model handler persists the chosen model
+before acknowledging the request, so asserting the old model afterward races
+the accepted write and launch completion. The test now waits for the workflow
+move and initial idle runtime before changing the model. Its later assertions
+still require reuse of that exact session with mock-smart.
+
+The mobile navigation test polled the restored Git projection before waiting
+for its commits read. The test now arms the existing WebSocket response watcher
+before reload and awaits a correlated, ready commits response for the target
+session before checking the projection. A ready:false envelope with an empty
+array cannot satisfy that wait. The existing UI timeout and subsequent file
+visibility, retry, cache and navigation assertions stay unchanged. The same
+helper serves desktop, so both callers are verified. No production behavior,
+public copy, fixture credentials, retry count or UI timeout changes.
+
+The two exact failing titles passed an initial local reproduction; that did
+not invalidate their CI failures. After repair, each phone journey passed three
+repetitions with zero retries. After adding the explicit not-ready envelope
+guard, phone navigation passed three more repetitions and all five desktop
+navigation tests passed. Changed-file Oxlint, formatting and whitespace checks
+pass. No broader local suite or concurrent full E2E run was started. Fresh
+exact-head CI is still required after publication.
+
+```sh
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts e2e/tests/task/mobile-create-task-workflow-agent-overrides.spec.ts -- --retries=0 --repeat-each=3 -g 'phone Files remains usable|keeps touch controls usable'
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/task/task-navigation-responsiveness.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-task-navigation-responsiveness.spec.ts -- --retries=0 --repeat-each=3
+pnpm --dir apps/web exec oxlint -c oxlint.config.mjs --deny-warnings e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/mobile-create-task-workflow-agent-overrides.spec.ts
+```
+
+Commands use the same clean launch environment and resource limits as above,
+with E2E_DEBUG=1 for diagnostic backend logs. Logs:
+`/tmp/kandev-5047-ci-sequencing-{phone,desktop-final,navigation-phone-final,lint-final,format-final}.log`.
+Exact failed-job raw/plain logs, error snapshots, workflow trace and the shard
+manifest are retained under `/tmp/kandev-5047-d19-*`. Existing final-head UI
+captures still represent the unchanged rendering; this repair changes tests
+and delivery records only.
