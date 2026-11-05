@@ -119,7 +119,8 @@ new classification through their existing policies, without a new retry policy.
 When `Classify` selects the existing OpenCode period usage-limit rule, a
 relative duration on its sole matching line can supply a missing reset time.
 The diagnostic observation time must be known; the duration is added to it.
-An explicit structured or dated reset keeps precedence. Unrelated lines,
+The resulting hint is marked inferred under the existing circuit contract. An
+explicit structured or dated reset keeps precedence. Unrelated lines,
 multiple matching period lines, incomplete or unsupported units, and overflow
 leave the hint unknown without changing the error classification. The result
 does not change candidate order or authorize prompt replay.
