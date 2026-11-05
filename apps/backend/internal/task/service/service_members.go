@@ -157,7 +157,7 @@ func (s *Service) requireMemberManage(ctx context.Context, workspaceID string) (
 	if err != nil {
 		return nil, err
 	}
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return workspace, nil
 	}
 	decision := s.workspaceDecision(ctx, workspace)
@@ -166,6 +166,9 @@ func (s *Service) requireMemberManage(ctx context.Context, workspaceID string) (
 	}
 	if !decision.Has(authz.ScopeMemberManage) {
 		return nil, ErrForbidden
+	}
+	if err := s.authorizeWorkspaceCollaboration(ctx, workspaceID, models.CollaborationControl); err != nil {
+		return nil, err
 	}
 	return workspace, nil
 }

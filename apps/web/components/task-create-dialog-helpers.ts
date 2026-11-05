@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { useRouter } from "@/lib/routing/client-router";
 import type {
   Task,
@@ -226,6 +228,7 @@ export type BuildCreatePayloadArgs = {
   workflowAgentOverrides?: Record<string, string>;
   /** Task-scoped MCP additions. */
   mcpServerIds?: string[];
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   initialWorkspaceLayout?: InitialWorkspaceLayout;
 };
 
@@ -286,6 +289,9 @@ function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCr
 }
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
+  if (args.builtinMCPPreferences && args.builtinMCPPreferences.workspaceId !== args.workspaceId) {
+    throw new Error(t("settings:builtinMcp.scopeChanged"));
+  }
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
@@ -302,6 +308,9 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
     mcp_server_ids: nonEmptyArray(args.mcpServerIds),
+    ...(args.builtinMCPPreferences
+      ? { builtin_mcp_preferences: args.builtinMCPPreferences.preferences }
+      : {}),
   };
 }
 
@@ -404,10 +413,10 @@ export function validateCreateInputs(inputs: {
 export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
   const seen = new Map<string, string>();
   for (const row of remoteRepos) {
-    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    const parsed = parseGitHubAnyUrl(row.url ?? "", row.providerHost);
     if (!parsed) continue;
     const label = `${parsed.owner}/${parsed.repo}`;
-    const key = `${label.toLowerCase()}\u0000${row.branch}`;
+    const key = `${parsed.host ?? "github.com"}/${label.toLowerCase()}\u0000${row.branch}`;
     const existing = seen.get(key);
     if (existing) return existing;
     seen.set(key, label);

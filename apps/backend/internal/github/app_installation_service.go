@@ -43,9 +43,11 @@ type appInstallationStore interface {
 }
 
 type AppInstallationConfig struct {
-	RegistrationID string
-	Slug           string
-	CallbackURL    string
+	AppCredentialGeneration int64
+	GitHubHost              string
+	RegistrationID          string
+	Slug                    string
+	CallbackURL             string
 }
 
 type AppInstallationStart struct {
@@ -107,12 +109,18 @@ func (s *AppInstallationService) Start(
 	if err != nil {
 		return AppInstallationStart{}, fmt.Errorf("load GitHub workspace connection: %w", err)
 	}
+	host, err := connectionHost(s.config.GitHubHost)
+	if err != nil {
+		return AppInstallationStart{}, err
+	}
 	expected := workspaceConnectionExpectation(existing)
 	flow, err := s.flows.Start(ctx, OAuthFlowRequest{
-		WorkspaceID:                        workspaceID,
-		UserID:                             userID,
-		AppRegistrationID:                  s.config.RegistrationID,
-		Kind:                               AuthFlowKindAppInstallation,
+		WorkspaceID:       workspaceID,
+		UserID:            userID,
+		AppRegistrationID: s.config.RegistrationID,
+		Kind:              AuthFlowKindAppInstallation,
+		RedirectURI:       s.config.CallbackURL, ExpectedAppCredentialGeneration: s.config.AppCredentialGeneration,
+		GitHubHost:                         host.String(),
 		ExpectedWorkspaceSource:            expected.Source,
 		ExpectedWorkspaceGeneration:        expected.CredentialGeneration,
 		ExpectedInstallationID:             expected.InstallationID,
@@ -123,7 +131,7 @@ func (s *AppInstallationService) Start(
 	}
 	installURL := &url.URL{
 		Scheme: "https",
-		Host:   "github.com",
+		Host:   host.String(),
 		Path:   "/apps/" + s.config.Slug + "/installations/new",
 	}
 	query := installURL.Query()
@@ -144,6 +152,9 @@ func (s *AppInstallationService) Complete(
 		s.config.RegistrationID, AuthFlowKindAppInstallation,
 	)
 	if err != nil {
+		return AppInstallationResult{}, err
+	}
+	if err := validateAuthFlowRegistration(flow, s.config.GitHubHost, s.config.AppCredentialGeneration, s.config.CallbackURL); err != nil {
 		return AppInstallationResult{}, err
 	}
 	installation, user, err := s.verifyInstallationCallback(ctx, callback)
@@ -235,7 +246,7 @@ func (s *AppInstallationService) newInstallationConnection(
 	return &WorkspaceConnection{
 		WorkspaceID:              flow.WorkspaceID,
 		Source:                   ConnectionSourceGitHubAppInstallation,
-		GitHubHost:               "github.com",
+		GitHubHost:               defaultAuthFlowHost(flow.GitHubHost),
 		InstallationID:           &installation.ID,
 		InstallationAccountLogin: installation.AccountLogin,
 		InstallationAccountType:  installation.AccountType,

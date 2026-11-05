@@ -3,6 +3,7 @@ import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
 import { BASE_TEST_EXCLUDES, projectDefinitions } from "./scripts/vitest-project-selection";
+import { FrontendTimingSequencer } from "./scripts/vitest-ci-sequencer";
 import { resolveMaxWorkers } from "./scripts/vitest-worker-budget";
 
 if (process.env.DEBUG === "1") process.env.DEBUG = "";
@@ -12,6 +13,8 @@ process.env.NODE_ENV = "test";
 
 const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
 const isCI = Boolean(process.env.CI);
+const useFrontendTimingSequencer =
+  process.env.CI === "true" && process.env.KANDEV_FRONTEND_TIMINGS_ENABLED === "1";
 const allowUnsafeParallelism = process.env.KANDEV_ALLOW_UNSAFE_TEST_PARALLELISM === "1";
 const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, isCI, allowUnsafeParallelism);
 if (configuredMaxWorkers && !isCI && !allowUnsafeParallelism) {
@@ -41,6 +44,7 @@ export default mergeConfig(
       // Already the default, pinned because it is load-bearing: a run that
       // collects nothing must exit non-zero rather than read as a green suite.
       passWithNoTests: false,
+      sequence: useFrontendTimingSequencer ? { sequencer: FrontendTimingSequencer } : undefined,
       projects: [
         {
           extends: true,

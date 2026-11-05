@@ -181,7 +181,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
 			return mcpprofile.Context{}, err
 		}
-		return e.withCanvasCapability(profile), nil
+		return e.withTaskCapabilities(profile), nil
 	}
 	if noRow {
 		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
@@ -206,7 +206,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		if session.IsPassthrough {
 			capabilities = nil
 		}
-		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
 
 	if noRow {
@@ -218,10 +218,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		// state). Keep the legacy kanban profile in that narrow case; production
 		// task launches resolve the persisted task above and therefore still get
 		// the exact office/autopilot capability set.
-		return e.withCanvasCapability(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
+		return e.withTaskCapabilities(mcpprofile.Legacy("", session != nil && session.IsPassthrough, nil)), nil
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
-		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
+		return e.withTaskCapabilities(mcpprofile.NewAutomation()), nil
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -246,7 +246,7 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 			capabilities = append(capabilities, mcpprofile.CapabilityTaskVisibilityRead)
 		}
 	}
-	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
@@ -262,9 +262,16 @@ func (e *Executor) ResolveTaskSessionMCPProfile(
 	return e.resolveTaskSessionMCPProfile(ctx, taskID, session, allowTitleTool)
 }
 
-func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.Context {
-	if e != nil && e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
-		return profile.WithCapability(mcpprofile.CapabilityCanvas)
+func (e *Executor) withTaskCapabilities(profile mcpprofile.Context) mcpprofile.Context {
+	if e == nil {
+		return profile
+	}
+	if e.canvasesEnabled && profile.Surface == mcpprofile.SurfaceKanbanTask {
+		profile = profile.WithCapability(mcpprofile.CapabilityCanvas)
+	}
+	if e.workspaceCollaborationEnabled &&
+		(profile.Surface == mcpprofile.SurfaceKanbanTask || profile.Surface == mcpprofile.SurfaceAutomation) {
+		profile = profile.WithCapability(mcpprofile.CapabilityWorkspaceCollaborationReport)
 	}
 	return profile
 }
@@ -1428,7 +1435,18 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 // This allows the caller to get the session ID immediately and launch the agent later.
 // Returns the session ID.
 func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil, nil)
+}
+
+// PrepareSessionWithSeed creates a session and commits its initial prompt
+// state in the same insert transaction. A reused session ignores the seed.
+func (e *Executor) PrepareSessionWithSeed(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	seed *models.PreparedSessionSeed,
+) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", nil, seed)
 }
 
 // PrepareSessionWithWorkflowRoute creates a fresh session and records the
@@ -1439,7 +1457,19 @@ func (e *Executor) PrepareSessionWithWorkflowRoute(
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 	route *models.WorkflowSessionRoute,
 ) (string, error) {
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route, nil)
+}
+
+// PrepareSessionWithWorkflowRouteAndSeed is the seed-bearing variant used by
+// task creation with an explicit workflow start.
+func (e *Executor) PrepareSessionWithWorkflowRouteAndSeed(
+	ctx context.Context,
+	task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+	route *models.WorkflowSessionRoute,
+	seed *models.PreparedSessionSeed,
+) (string, error) {
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, true, "", route, seed)
 }
 
 // PrepareSessionForExistingEnvironment creates a workflow replacement session
@@ -1452,7 +1482,7 @@ func (e *Executor) PrepareSessionForExistingEnvironment(ctx context.Context, tas
 	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
 		return "", err
 	}
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, nil)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, nil, nil)
 }
 
 // PrepareSessionForExistingEnvironmentWithWorkflowRoute is the route-aware
@@ -1470,7 +1500,7 @@ func (e *Executor) PrepareSessionForExistingEnvironmentWithWorkflowRoute(
 	if err := e.preflightWorkflowWorkspaceReuse(ctx, task, taskEnvironmentID); err != nil {
 		return "", err
 	}
-	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, route)
+	return e.prepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID, false, taskEnvironmentID, route, nil)
 }
 
 // preflightWorkflowWorkspaceReuse rejects an invalid retained environment
@@ -1525,7 +1555,7 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 // transaction observes that a concurrent runner switch committed after the
 // caller loaded the task. Explicit runner selections keep their existing
 // caller-owned semantics and are not replaced by the task metadata.
-func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute, seed *models.PreparedSessionSeed) (string, error) {
 	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	currentTask := task
 	currentExecutorProfileID := executorProfileID
@@ -1540,6 +1570,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 			bindWorkspace,
 			taskEnvironmentID,
 			workflowRoute,
+			seed,
 		)
 		if err == nil || !errors.Is(err, models.ErrTaskRunnerChanged) || runnerProfileExplicit || attempt == 1 {
 			return sessionID, err
@@ -1559,7 +1590,7 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 }
 
 //nolint:cyclop,funlen,gocognit // Session construction keeps its existing validation sequence in one transaction boundary.
-func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute, seed *models.PreparedSessionSeed) (string, error) {
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return "", err
 	}
@@ -1567,8 +1598,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
 	}
+	if err := seed.Validate(); err != nil {
+		return "", fmt.Errorf("validate prepared session seed: %w", err)
+	}
 
 	metadata := cloneMetadata(task.Metadata)
+	metadata = seed.ApplyToMetadata(metadata)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)
@@ -1709,11 +1744,9 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
-	retriedWorkspaceBinding := false
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if errors.Is(createErr, models.ErrWorkspacePreparing) {
 		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.ID, createErr, func() error {
-			retriedWorkspaceBinding = true
 			primary, err := e.refreshRetriedSessionOrder(createCtx, session, isPrimarySession, appliedInitialRuntimeConfig)
 			if err != nil {
 				return err
@@ -1736,11 +1769,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		return "", createErr
 	}
 
-	// Set primary flag only for the first session (no existing primary).
-	// Subsequent sessions do not override the established primary.
+	// Session creation elected primary under the owning task lock and
+	// recorded the committed ownership on session. Legacy stores without that
+	// atomic contract retain the explicit promotion fallback.
 	if session.IsPrimary {
-		// A retry has already committed its primary election with the insert.
-		if !retriedWorkspaceBinding {
+		if !repositoryElectsPrimaryOnCreate(e.repo) {
 			if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 				e.logger.Warn("failed to update primary session flag",
 					zap.String("task_id", task.ID),
@@ -2045,7 +2078,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			}
 		}
 		if opts.McpProfile == nil {
-			profileContext, profileErr := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, opts.StartAgent)
+			profileContext, profileErr := e.launchMCPProfile(ctx, task.ID, session, opts.StartAgent)
 			if profileErr != nil {
 				return nil, profileErr
 			}
@@ -2267,7 +2300,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if hasRunning {
 			result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 				launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-				opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+				opts.OnExecutionAdmitted, opts.OnStartAttemptClaimed, opts.BeforeInitialPromptDispatch,
 				opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 				opts.RefuseIfAgentRunning, opts.TurnID,
 			)
@@ -2358,6 +2391,15 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 // before a binding retry. The election winner may have created the task's first
 // session while this start waited, so the retry must neither claim the
 // first-session origin nor take the primary flag from the winner.
+
+// repositoryElectsPrimaryOnCreate reports whether the store commits initial
+// primary selection with the session insert. Stores that predate that contract
+// keep the executor's explicit promotion fallback.
+func repositoryElectsPrimaryOnCreate(repo executorStore) bool {
+	elector, ok := repo.(interface{ ElectsPrimaryOnCreate() bool })
+	return ok && elector.ElectsPrimaryOnCreate()
+}
+
 func (e *Executor) refreshRetriedSessionOrder(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -2548,7 +2590,7 @@ func (e *Executor) handleLaunchFailure(
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr,
+		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
@@ -2566,8 +2608,24 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
+	session, loadErr := e.repo.GetTaskSession(failCtx, sessionID)
+	if loadErr != nil || session == nil || session.TaskID != taskID {
+		if loadErr != nil {
+			e.logger.Warn("failed to load session before recording early launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(loadErr))
+		}
+		return routingerr.SanitizeError(launchErr)
+	}
+	switch session.State {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput:
+	default:
+		return routingerr.SanitizeError(launchErr)
+	}
+	expectedState := session.State
 	safeErr, changed := e.transitionLaunchFailure(
-		failCtx, taskID, sessionID, repositoryID, "", launchErr,
+		failCtx, taskID, sessionID, repositoryID, "", launchErr, &expectedState,
 	)
 	if !changed {
 		return safeErr
@@ -2617,6 +2675,7 @@ func (e *Executor) transitionLaunchFailure(
 	failCtx context.Context,
 	taskID, sessionID, repositoryID, taskRepositoryID string,
 	launchErr error,
+	expectedState *models.TaskSessionState,
 ) (error, bool) {
 	safeErr := routingerr.SanitizeError(launchErr)
 	e.logger.Error("failed to launch agent",
@@ -2634,7 +2693,7 @@ func (e *Executor) transitionLaunchFailure(
 		}
 	}
 	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, nil, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+		failCtx, taskID, sessionID, expectedState, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
@@ -3123,7 +3182,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -3136,6 +3195,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	onStartAttemptClaimed func(string),
 	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
@@ -3235,6 +3295,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			zap.Error(err))
 		return nil, err
 	}
+	if onStartAttemptClaimed != nil {
+		onStartAttemptClaimed(startAttemptID)
+	}
 	if prompt != "" || len(request.Attachments) > 0 {
 		if err := e.registerInitialPromptCallbacks(
 			executionID, beforeInitialPromptDispatch,
@@ -3320,6 +3383,9 @@ func (e *Executor) configureExistingWorkspace(
 ) error {
 	if request == nil {
 		return errors.New("existing workspace launch request is required")
+	}
+	if err := e.prepareExistingWorkspaceBuiltin(ctx, executionID, request.McpProfile); err != nil {
+		return err
 	}
 	credentialReq := &LaunchAgentRequest{
 		TaskID:            task.ID,

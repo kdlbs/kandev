@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/kandev/kandev/internal/plugins/manifest"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // PluginAutomationProvider supplies a generation lease through verification and admission.

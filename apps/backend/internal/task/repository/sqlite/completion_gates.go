@@ -317,6 +317,9 @@ func (r *Repository) ListTaskCompletionGateHistory(ctx context.Context, taskID s
 
 //nolint:cyclop // The transaction checks completion gates before allowing a terminal state transition.
 func (r *Repository) guardTaskCompletionTransitionTx(ctx context.Context, tx *sql.Tx, taskID string, currentState, nextState v1.TaskState, currentWorkflowID, currentStepID, targetWorkflowID, targetStepID string) error {
+	if err := r.guardRequiredSubtaskAssignmentsTx(ctx, tx, taskID, currentState, nextState, targetWorkflowID, targetStepID); err != nil {
+		return err
+	}
 	if nextState != v1.TaskStateCompleted || currentState == v1.TaskStateCompleted {
 		return nil
 	}
@@ -413,7 +416,14 @@ func (r *Repository) readTaskCompletionGateTx(ctx context.Context, tx *sql.Tx, t
 			snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{CriterionID: criterion.ID, Reason: reason})
 		}
 	}
-	snapshot.Blocked = len(snapshot.Criteria) > 0 && len(snapshot.Blockers) > 0
+	required, assigned, err := r.readRequiredSubtaskAssignmentsTx(ctx, tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if required > assigned {
+		snapshot.Blockers = append(snapshot.Blockers, models.TaskCompletionBlocker{CriterionID: "required-subtask-assignments", Reason: "required_assignments_incomplete"})
+	}
+	snapshot.Blocked = len(snapshot.Blockers) > 0
 	return snapshot, nil
 }
 

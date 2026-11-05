@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/task/changes"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -102,6 +103,7 @@ type turnChangeHistoryHTTPRepo struct {
 	file             *models.TurnFileChange
 	content          *models.TurnChangeContentPayload
 	listCalls        int
+	sourceErr        error
 }
 
 func (r *turnChangeHistoryHTTPRepo) ListTurnChangeSets(context.Context, string, string, int, int) ([]*models.TurnChangeSet, int, error) {
@@ -154,3 +156,42 @@ func (r *turnChangeHistoryHTTPRepo) ReadTurnChangeContent(_ context.Context, set
 func (*turnChangeHistoryHTTPRepo) ReleaseTurnChangeContentLease(context.Context, string) error {
 	return nil
 }
+
+func (r *turnChangeHistoryHTTPRepo) GetTurnFileContentSource(_ context.Context, setID, fileID string) (*models.TurnFileContentSource, error) {
+	if r.sourceErr != nil {
+		return nil, r.sourceErr
+	}
+	if r.set == nil || r.file == nil || r.repositoryChange == nil ||
+		r.set.ID != setID || r.file.ID != fileID || r.file.RepositoryChangeID != r.repositoryChange.ID {
+		return nil, repoerrors.ErrTurnChangeContentNotFound
+	}
+	return &models.TurnFileContentSource{ChangeSet: r.set, Repository: r.repositoryChange, File: r.file}, nil
+}
+
+func TestTurnChangeHistoryHTTPReturnsRetryableReadFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.SetTenancyEnforced(false)
+	store := &turnChangeHistoryHTTPRepo{
+		set: &models.TurnChangeSet{
+			ID: "set-1", TaskID: "task-b", TaskSessionID: "sess-b", TurnID: "turn-1",
+			Availability: models.TurnChangeAvailabilityReady, TerminalAt: timePtr(time.Now().UTC()),
+		},
+		repositoryChange: &models.TurnRepositoryChangeSet{ID: "repository-change-1", TurnChangeSetID: "set-1", CheckoutID: "checkout-1"},
+		file:             &models.TurnFileChange{ID: "file-1", RepositoryChangeID: "repository-change-1", CheckoutID: "checkout-1"},
+		content:          &models.TurnChangeContentPayload{Content: []byte("patch")},
+		sourceErr:        changes.ErrHistoryReadRetryable,
+	}
+	ownerRepo := &foreignSessionRepo{}
+	svc := service.NewService(service.Repos{Workspaces: ownerRepo, Tasks: ownerRepo, Sessions: ownerRepo, TurnChanges: store}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
+	router := gin.New()
+	NewTaskHandlers(svc, nil, nil, nil, newTestLogger(t)).registerHTTP(router)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet,
+		"/api/v1/task-sessions/sess-b/turn-changes/set-1/files/file-1/content?variant=canonical_patch", nil)
+	request = request.WithContext(authn.WithIdentity(request.Context(), authn.Identity{UserID: "user-b", Role: authn.RoleMember}))
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "retryable")
+}
+
+func timePtr(value time.Time) *time.Time { return &value }

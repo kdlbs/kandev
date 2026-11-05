@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/githubhost"
 )
 
 // GraphQLExecutor runs a single GraphQL query against the GitHub API. Both
@@ -272,11 +274,41 @@ type batchedBranchPRNode struct {
 	batchedPRResult
 }
 
+// graphQLPath is one error path. GraphQL mixes field aliases (strings) with
+// list indices (numbers), so decode either form into a string segment.
+type graphQLPath []string
+
+func (p *graphQLPath) UnmarshalJSON(data []byte) error {
+	if string(data) == jsonNullLiteral {
+		*p = nil
+		return nil
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	segments := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		var text string
+		if err := json.Unmarshal(segment, &text); err == nil {
+			segments = append(segments, text)
+			continue
+		}
+		var number json.Number
+		if err := json.Unmarshal(segment, &number); err != nil {
+			return fmt.Errorf("decode graphql path segment: %w", err)
+		}
+		segments = append(segments, number.String())
+	}
+	*p = segments
+	return nil
+}
+
 // graphQLError mirrors a single entry in a GraphQL response's "errors" array.
 type graphQLError struct {
-	Message string   `json:"message"`
-	Type    string   `json:"type"`
-	Path    []string `json:"path"`
+	Message string      `json:"message"`
+	Type    string      `json:"type"`
+	Path    graphQLPath `json:"path"`
 }
 
 // graphQLPayloadRateLimited detects GitHub's application-level throttling
@@ -466,6 +498,11 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 	return b.String(), nil
 }
 
+const (
+	graphQLMergeQueueEntryFields   = `mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } `
+	graphQLMergeQueueRemovalFields = `mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
+)
+
 // prFieldsBlock is the GraphQL field selection used in every batched PR
 // query. Kept as a constant to make snapshot assertions stable and to keep
 // the batched and single-PR paths returning the same data.
@@ -473,7 +510,7 @@ func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid baseRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
-		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
+		graphQLMergeQueueEntryFields +
 		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
@@ -481,7 +518,7 @@ func prFieldsBlock() string {
 			graphQLReviewThreadPageSize) +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
 		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } } ` +
-		`mergeQueueRemovalEvents: timelineItems(last: 1, itemTypes: REMOVED_FROM_MERGE_QUEUE_EVENT) { nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } } } }`
+		graphQLMergeQueueRemovalFields
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -712,18 +749,22 @@ func (c *PATClient) ExecuteGraphQL(ctx context.Context, query string, variables 
 		return admissionErr
 	}
 	defer release()
+	if c.host.Family() == githubhost.EnterpriseFamily {
+		query = strings.ReplaceAll(query, graphQLMergeQueueEntryFields, "")
+		query = strings.ReplaceAll(query, graphQLMergeQueueRemovalFields, "")
+	}
 	body, err := json.Marshal(map[string]any{"query": query, "variables": variables})
 	if err != nil {
 		return fmt.Errorf("marshal graphql: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubAPIBase+"/graphql", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.host.GraphQLURL(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	c.setGitHubHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := doGitHubRequest(c.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
@@ -884,6 +925,7 @@ func runBatchedPRQueryWithProgress(
 		progress.allResidual = append(progress.allResidual, residual...)
 		progress.completed++
 	}
+	markUnsupportedQueueObservations(exec, progress.result)
 	batchErr := withPRDiscoveryRetryAt(
 		wrapBatchedErrors(progress.allMissing, progress.allResidual), progress.retryAt,
 	)
@@ -1209,6 +1251,7 @@ func runBatchedBranchQueryWithProgress(
 		progress.allResidual = append(progress.allResidual, residual...)
 		progress.completed++
 	}
+	markUnsupportedQueueObservations(exec, progress.result.Statuses)
 	statuses, err := finishBatchedQuery(
 		ctx, exec, progress.result.Statuses, progress.allMissing, progress.allResidual, nil, progress.retryAt,
 	)

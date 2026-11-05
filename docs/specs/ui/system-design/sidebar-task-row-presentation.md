@@ -12,8 +12,9 @@ requirements:
 The UI system owns this independent task-row presentation contract. Task and integration systems
 continue to own timestamps, task state, and change-request status.
 
-This refinement changes only the compact trailing slot. It does not change saved view data,
-provider state, task navigation, or the full relative-time formatter used by other surfaces.
+This refinement governs the compact trailing slot and the title-area status visibility for the
+Nothing selection. It does not change saved view data, provider state, task navigation, or the
+full relative-time formatter used by other surfaces.
 
 ## Requirement mapping
 
@@ -31,6 +32,11 @@ provider state, task navigation, or the full relative-time formatter used by oth
 - `app/globals.css` keeps the existing phone rule that exposes a 44 CSS pixel task action.
 
 ## Trailing layout
+
+When the saved trailing choice is `none`, `TaskItem` also suppresses the
+title-area change-request indicators for all providers. Other title badges,
+the independently configured pull request number detail, and the task menu
+remain available. Other trailing choices retain their existing status placement.
 
 The change-request branch uses one flex cluster. The status is the only width-bearing item while a
 fine-pointer row is idle. The menu wrapper has zero width and does not create a blank trailing gap.

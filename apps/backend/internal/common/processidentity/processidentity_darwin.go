@@ -181,3 +181,7 @@ func OwnedSessionTerminated(identity Identity) (bool, error) {
 	groups, err := processGroupsInSession(identity.SessionID, identity.BirthToken)
 	return len(groups) == 0, err
 }
+
+// OwnedGroupTerminated is not verified on Darwin yet; recovery keeps the
+// runtime-session proof there.
+func OwnedGroupTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

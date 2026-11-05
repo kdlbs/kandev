@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 )
 
@@ -20,9 +22,18 @@ func (r *sqliteRepository) GetMCPSelectionState(
 	if strings.TrimSpace(sessionID) == "" {
 		return mcpconfig.SessionMCPSelectionState{}, mcpconfig.ErrMCPInvalidSelection
 	}
+	return readMCPSelectionState(ctx, r.ro, sessionID)
+}
+
+type mcpStateReader interface {
+	QueryRowxContext(context.Context, string, ...any) *sqlx.Row
+	Rebind(string) string
+}
+
+func readMCPSelectionState(ctx context.Context, reader mcpStateReader, sessionID string) (mcpconfig.SessionMCPSelectionState, error) {
 	var state mcpconfig.SessionMCPSelectionState
 	var setup sql.NullString
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := reader.QueryRowxContext(ctx, reader.Rebind(`
 		SELECT desired_revision, applied_revision, apply_state,
 			failure_code, failure_summary, attachment_attempt_id, accepted_setup_json
 		FROM mcp_task_session_apply_state WHERE task_session_id = ?

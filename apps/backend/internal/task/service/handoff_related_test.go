@@ -156,6 +156,27 @@ func TestListRelatedForCaller_GatesUnrelatedAndCrossWorkspace(t *testing.T) {
 	}
 }
 
+// TestListRelatedForCaller_RootTasksAreUnrelated pins the independent-root
+// case from issue #4921: shared workspace membership alone does not make two
+// tasks related, so the task-bound tool must return a forbidden response
+// instead of an empty or partial relation projection.
+func TestListRelatedForCaller_RootTasksAreUnrelated(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root-a", "", "ws-1")
+	tasks.addTask("root-b", "", "ws-1")
+	tasks.setDescription("root-a", "root a plan")
+	tasks.setDescription("root-b", "root b plan")
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+
+	out, err := svc.ListRelatedForCaller(context.Background(), "root-a", "root-b")
+	if !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("independent roots should be unrelated, got err=%v out=%+v", err, out)
+	}
+	if out != nil {
+		t.Fatalf("denied target must return no relation projection, got %+v", out)
+	}
+}
+
 // TestListRelatedForCaller_ReturnsSiblingDescription confirms the gated entry
 // point still surfaces an authorized CREATED sibling's description end-to-end.
 func TestListRelatedForCaller_ReturnsSiblingDescription(t *testing.T) {

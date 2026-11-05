@@ -54,3 +54,20 @@ func TestRegisterMCPDeletionCleanupReadsDeletionEventScopes(t *testing.T) {
 		t.Fatalf("workspace cleanup IDs = %#v", cleaner.workspaces)
 	}
 }
+
+func (s *mcpDeletionCleanerStub) DeleteMCPSessionData(_ context.Context, sessionID string) error {
+	s.sessions = append(s.sessions, []string{sessionID})
+	return nil
+}
+
+func TestMCPSessionDeletionCleanup(t *testing.T) {
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	cleaner := &mcpDeletionCleanerStub{}
+	registerMCPDeletionCleanup(eventBus, cleaner, logger.Default())
+	if err := eventBus.Publish(context.Background(), events.SessionRemoved, bus.NewEvent(events.SessionRemoved, "task-service", map[string]interface{}{"session_id": "session", "task_id": "task"})); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cleaner.sessions, [][]string{{"session"}}) {
+		t.Fatalf("individual deletion not wired: %#v", cleaner.sessions)
+	}
+}

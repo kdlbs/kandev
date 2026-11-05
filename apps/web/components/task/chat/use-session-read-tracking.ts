@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskRouteSessionHydrated } from "@/components/task/task-route-session-hydration";
 import { markSessionRead } from "@/lib/api/domains/session-api";
 import { createDebugLogger } from "@/lib/debug/log";
 
 const readTrackingDebug = createDebugLogger("messages:read-tracking");
+
+function subscribePageVisibility(onChange: () => void): () => void {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+
+/** A background tab or minimized window is not reading its transcript. */
+function usePageVisible(): boolean {
+  return useSyncExternalStore(
+    subscribePageVisibility,
+    () => document.visibilityState === "visible",
+    () => true,
+  );
+}
 
 type Anchor = { sessionId: string; messageId: string | null };
 type Visit = {
@@ -60,7 +74,7 @@ function useReadTrackingEffects(params: {
   sessionId: string | null;
   isVisible: boolean;
   latestMessageId: string | null;
-  unreadDividerEnabled: boolean;
+  readTrackingEnabled: boolean;
   visit: Visit | null;
   store: ReturnType<typeof useAppStoreApi>;
   updateSessionReadCursor: (sessionId: string, messageId: string) => void;
@@ -69,7 +83,7 @@ function useReadTrackingEffects(params: {
     sessionId,
     isVisible,
     latestMessageId,
-    unreadDividerEnabled,
+    readTrackingEnabled,
     visit,
     store,
     updateSessionReadCursor,
@@ -86,7 +100,7 @@ function useReadTrackingEffects(params: {
 
   useEffect(() => {
     if (
-      !unreadDividerEnabled ||
+      !readTrackingEnabled ||
       !sessionId ||
       !isVisible ||
       !latestMessageId ||
@@ -143,7 +157,7 @@ function useReadTrackingEffects(params: {
     visit,
     latestMessageId,
     store,
-    unreadDividerEnabled,
+    readTrackingEnabled,
     updateSessionReadCursor,
   ]);
 }
@@ -171,9 +185,12 @@ function useReadTrackingEffects(params: {
  *   prevents a host where isVisible is true from its first render (such as
  *   mobile) from treating an unloaded session as a real empty cursor.
  *
+ * Read tracking runs while either the "New" divider or the unread task dot
+ * setting is on, because both read the same persisted cursor.
+ *
  * Returns the render-item key (see hooks/use-processed-messages.ts's
  * findUnreadDividerItemId) the "New" divider should render immediately
- * before, or null when there's nothing to mark.
+ * before, or null when the divider is off or there's nothing to mark.
  */
 export function useSessionReadTracking(
   sessionId: string | null,
@@ -183,9 +200,13 @@ export function useSessionReadTracking(
 ): string | null {
   const store = useAppStoreApi();
   const routeSessionHydrated = useTaskRouteSessionHydrated();
-  const trackedVisible = isVisible && routeSessionHydrated;
+  const pageVisible = usePageVisible();
+  const trackedVisible = isVisible && routeSessionHydrated && pageVisible;
   const updateSessionReadCursor = useAppStore((state) => state.updateSessionReadCursor);
   const unreadDividerEnabled = useAppStore((state) => state.userSettings.unreadDivider);
+  const readTrackingEnabled = useAppStore(
+    (state) => state.userSettings.unreadDivider || state.userSettings.unreadTaskDot,
+  );
   // Reactive (not store.getState()) so a session that hasn't loaded into the
   // store yet at mount — e.g. mobile, where isVisible defaults to true from
   // the very first render (see TaskChatPanelProps), unlike the dockview host
@@ -202,7 +223,7 @@ export function useSessionReadTracking(
   // immutable so live messages cannot create a new boundary mid-visit.
   const [visit, setVisit] = useState<Visit | null>(null);
 
-  if (unreadDividerEnabled && trackedVisible && sessionId && sessionLoaded) {
+  if (readTrackingEnabled && trackedVisible && sessionId && sessionLoaded) {
     if (visit?.sessionId !== sessionId) {
       const priorCursor =
         store.getState().taskSessions.items[sessionId]?.last_read_message_id ?? null;
@@ -222,7 +243,7 @@ export function useSessionReadTracking(
   // two even though the user never actually left.
   useEffect(() => {
     if (visit === null) return;
-    if (!unreadDividerEnabled) {
+    if (!readTrackingEnabled) {
       setVisit(null);
       setAnchor(null);
       return;
@@ -233,13 +254,13 @@ export function useSessionReadTracking(
       setAnchor(null);
     }, 300);
     return () => clearTimeout(timer);
-  }, [trackedVisible, unreadDividerEnabled, visit]);
+  }, [trackedVisible, readTrackingEnabled, visit]);
 
   useReadTrackingEffects({
     sessionId,
     isVisible: trackedVisible,
     latestMessageId,
-    unreadDividerEnabled,
+    readTrackingEnabled,
     visit,
     store,
     updateSessionReadCursor,

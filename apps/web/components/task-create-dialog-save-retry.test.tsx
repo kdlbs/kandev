@@ -438,6 +438,12 @@ describe("current task edit MCP save retry", () => {
     fireEvent.click(picker);
     const choice = await screen.findByRole("checkbox", { name: "Retry MCP" });
     expect(choice.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(screen.getByRole("button", { name: "Reload choices" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Reload choices" })).toBeNull(),
+    );
+    expect(choice.getAttribute("data-state")).toBe("checked");
+    expect(transport.selections).toEqual([[server.id]]);
     fireEvent.click(choice);
     fireEvent.keyDown(choice, { key: "Escape" });
     await submit();

@@ -6,12 +6,9 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconAlertTriangle,
-  IconUpload,
-  IconDotsVertical,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPriority } from "@/lib/types/http";
 import type { PriorityMeta } from "@/lib/state/slices/office/types";
@@ -202,23 +199,10 @@ function PriorityChip({ draft, onUpdate }: Props) {
 }
 
 export function NewTaskBottomBar({ draft, onUpdate }: Props) {
-  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 pt-2 border-t border-border">
       <StatusChip draft={draft} onUpdate={onUpdate} />
       <PriorityChip draft={draft} onUpdate={onUpdate} />
-      <Button variant="outline" className="cursor-pointer text-xs">
-        <IconUpload className="h-3.5 w-3.5 mr-1" />
-        {t("office:upload")}
-      </Button>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" className="cursor-pointer">
-            <IconDotsVertical className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("office:moreOptions")}</TooltipContent>
-      </Tooltip>
     </div>
   );
 }

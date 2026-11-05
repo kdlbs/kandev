@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { getMockAgent } from "../../helpers/agent-fixtures";
@@ -171,4 +172,122 @@ export async function previewWorkflowMove(
 
 export async function deleteFixtureTasks(apiClient: ApiClient, taskIds: string[]) {
   await Promise.all(taskIds.map((taskId) => apiClient.deleteTask(taskId).catch(() => undefined)));
+}
+
+export type ColdWorkflowMetadataScenario = {
+  fixture: WorkflowAgentOverrideFixture;
+  boardWorkflow: Awaited<ReturnType<ApiClient["createWorkflow"]>>;
+};
+
+type WorkflowMetadataRequest = {
+  workflowId: string;
+  kind: "snapshot" | "steps";
+};
+
+/** Board A owns the boot snapshot; workflow B is selectable only inside the dialog. */
+export async function seedColdWorkflowMetadataScenario(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  suffix: string,
+): Promise<ColdWorkflowMetadataScenario> {
+  const fixture = await seedWorkflowAgentOverrideFixture(apiClient, seedData, suffix);
+  await apiClient.updateWorkflowStep(fixture.prStep.id, {
+    prompt: "Ship {{task_prompt}}",
+  });
+  const boardWorkflow = await apiClient.createWorkflow(
+    seedData.workspaceId,
+    `${suffix} Loaded Board`,
+  );
+  await apiClient.createWorkflowStep(boardWorkflow.id, "Loaded board start", 0, {
+    is_start_step: true,
+  });
+  return { fixture, boardWorkflow };
+}
+
+export async function saveColdWorkflowMetadataSettings(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  scenario: ColdWorkflowMetadataScenario,
+  remembered: boolean,
+): Promise<void> {
+  await apiClient.saveUserSettings({
+    workspace_id: seedData.workspaceId,
+    workflow_filter_id: scenario.boardWorkflow.id,
+    task_create_last_used: {
+      repository_id: seedData.repositoryId,
+      branch: "main",
+      agent_profile_id: scenario.fixture.profileA.id,
+      workflow_ids_by_workspace: {
+        [seedData.workspaceId]: remembered
+          ? scenario.fixture.workflow.id
+          : scenario.boardWorkflow.id,
+      },
+    },
+  });
+}
+
+export async function cleanupColdWorkflowMetadataScenario(
+  apiClient: ApiClient,
+  scenario: ColdWorkflowMetadataScenario,
+  taskIds: string[],
+): Promise<void> {
+  await deleteFixtureTasks(apiClient, taskIds);
+  await apiClient.deleteWorkflow(scenario.fixture.workflow.id).catch(() => undefined);
+  await apiClient.deleteWorkflow(scenario.boardWorkflow.id).catch(() => undefined);
+}
+
+export function recordWorkflowMetadataRequests(page: Page): WorkflowMetadataRequest[] {
+  const requests: WorkflowMetadataRequest[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET") return;
+    const match = /^\/api\/v1\/workflows\/([^/]+)\/(snapshot|workflow\/steps)$/.exec(
+      new URL(request.url()).pathname,
+    );
+    if (!match) return;
+    requests.push({
+      workflowId: decodeURIComponent(match[1] ?? ""),
+      kind: match[2] === "snapshot" ? "snapshot" : "steps",
+    });
+  });
+  return requests;
+}
+
+export function workflowMetadataRequests(
+  requests: WorkflowMetadataRequest[],
+  workflowId: string,
+  kind: WorkflowMetadataRequest["kind"],
+): WorkflowMetadataRequest[] {
+  return requests.filter((request) => request.workflowId === workflowId && request.kind === kind);
+}
+
+export async function waitForLoadedBoardSnapshot(page: Page, workflowId: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((id) => {
+          const store = (
+            window as Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => { kanbanMulti?: { snapshots?: Record<string, unknown> } };
+              };
+            }
+          ).__KANDEV_E2E_STORE__;
+          return Boolean(store?.getState().kanbanMulti?.snapshots?.[id]);
+        }, workflowId),
+      { message: `board ${workflowId} did not load its snapshot` },
+    )
+    .toBe(true);
+}
+
+export async function hasWorkflowSnapshot(page: Page, workflowId: string): Promise<boolean> {
+  return page.evaluate((id) => {
+    const store = (
+      window as Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => { kanbanMulti?: { snapshots?: Record<string, unknown> } };
+        };
+      }
+    ).__KANDEV_E2E_STORE__;
+    return Boolean(store?.getState().kanbanMulti?.snapshots?.[id]);
+  }, workflowId);
 }

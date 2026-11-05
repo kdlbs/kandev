@@ -25,6 +25,7 @@ test("requires an offered choice when custom text is disabled", async ({
     caption: "Desktop clarification offers only the choices allowed by Codex",
   });
   await session.clarificationOption("Fast").click();
+  await session.submitClarification();
 
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   await expect(session.chat).toContainText("You answered");

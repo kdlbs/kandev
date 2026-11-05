@@ -94,6 +94,8 @@
   "failedToMigrateTasks": "Não foi possível migrar as tarefas",
   "failedToSaveWorkflowChanges": "Não foi possível guardar as alterações do fluxo de trabalho",
   "failedToUpdateWorkflowStep": "Não foi possível atualizar o passo do fluxo de trabalho",
+  "holdStep": "Passo em espera",
+  "holdStepHelp": "Marca este passo como um passo em espera. A classificação fica guardada no passo e não inicia, para nem move nenhuma tarefa.",
   "hopNumber": "Salto {{index}}",
   "import": "Importar",
   "importCompleteTitle": "Importação concluída",

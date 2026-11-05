@@ -1,16 +1,32 @@
 ---
 id: "03-registry-verification"
 title: "Verify regenerated catalog attribution"
-status: pending
+status: cancelled
 wave: 2
 depends_on: ["01-bitbucket-attribution", "02-youtrack-attribution"]
 plan: "plan.md"
-spec: "../../specs/plugins/requirements/marketplace.md"
+requirements:
+  - REQ-PLUGINS-MARKETPLACE-001
+acceptance_criteria:
+  - AC-PLUGINS-MARKETPLACE-001.4
+  - AC-PLUGINS-MARKETPLACE-001.5
+system_design:
+  - ../../specs/plugins/system-design/marketplace.md
 ---
 
 # Task 03: Verify regenerated catalog attribution
 
-## Acceptance
+## Supersession
+
+Cancelled on 2026-10-30. [Task 04](task-04-curated-owner-attribution.md)
+and [Task 05](task-05-declared-author-presentation.md) replace the remaining
+manifest-first repair and verification work. The source of truth is the amended
+marketplace requirement and native-plugin attribution design.
+
+The text and results below are historical. External release completion remains
+unverified. This cancellation changes no external PR, manifest, or release.
+
+## Historical acceptance
 
 - The generated official catalog record for Bitbucket has
   `author: "kandev"` and `repo_url: "https://github.com/kdlbs/kandev-plugin-bitbucket"`.
@@ -20,7 +36,7 @@ spec: "../../specs/plugins/requirements/marketplace.md"
 - `plugin-registry/plugins.yaml` remains a pointer list with no author override
   or ownership rewrite.
 
-## Verification
+## Historical verification
 
 From the Kandev repository:
 
@@ -36,33 +52,33 @@ generated `plugin-registry/index.json`. Preserve or remove the generated file
 according to the existing registry workflow and `.gitignore` policy. Finish
 with `git diff --check`.
 
-## Files likely touched
+## Historical files likely touched
 
 - No Kandev production source files are expected.
 - `plugin-registry/index.json` is a generated verification artifact only.
 
-## Dependencies
+## Historical dependencies
 
 Tasks 01 and 02, including their release artifacts.
 
-## Parallelism
+## Historical parallelism
 
 sequential. The task depends on both external release outputs and reads the
 shared official catalog.
 
-## Inputs
+## Historical inputs
 
 - `docs/specs/plugins/requirements/marketplace.md`, author and repository scenarios.
 - `plugin-registry/build-index.mjs`, release-manifest enrichment behavior.
 - `apps/web/components/settings/plugins/marketplace-entry-row.tsx`, unchanged
   presentation consumer.
 
-## Output contract
+## Historical output contract
 
 Report the exact catalog records, commands and results, generated-artifact
 handling, `git diff --check` result, and synchronized task/plan statuses.
 
-## Results
+## Historical results
 
 2026-08-22: Local verification passed with:
 

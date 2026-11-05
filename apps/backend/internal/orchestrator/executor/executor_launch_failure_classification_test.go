@@ -39,7 +39,7 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 	}
 
 	_, changed := exec.transitionLaunchFailure(
-		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1", recoveryErr,
+		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1", recoveryErr, nil,
 	)
 	if !changed {
 		t.Fatal("transitionLaunchFailure did not transition the session")
@@ -151,7 +151,7 @@ func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *test
 
 	_, changed := exec.transitionLaunchFailure(
 		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1",
-		errors.Join(errors.New("prepare failed"), worktree.ErrInvalidBaseBranch),
+		errors.Join(errors.New("prepare failed"), worktree.ErrInvalidBaseBranch), nil,
 	)
 	if !changed {
 		t.Fatal("transitionLaunchFailure did not transition the session")

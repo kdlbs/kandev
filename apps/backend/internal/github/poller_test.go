@@ -778,6 +778,9 @@ func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ ma
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if strings.Contains(query, "query WorkflowSuites") || strings.Contains(query, "query WorkflowSuiteJobs") {
+		return json.Unmarshal([]byte(`{"data":{}}`), out)
+	}
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {
@@ -1636,6 +1639,9 @@ func TestPRWatchFallbackDeduplicatesSharedTargetsAndFansOut(t *testing.T) {
 	client := &fallbackProbeClient{Client: NewMockClient()}
 	configureTestWorkspaceAuth(t, service, client, testWorkspaceID)
 	watches := seedSearchingFallbackWatches(t, store, 5)
+	if err := service.UpdatePRWatchBranchIfSearching(context.Background(), watches[1].ID, watches[0].Branch); err != nil {
+		t.Fatalf("share second watch target: %v", err)
+	}
 	watches[1].Branch = watches[0].Branch
 
 	poller.runPRWatchFallback(context.Background(), watches)
@@ -1781,14 +1787,24 @@ func TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls(t *testing.T) {
 }
 
 func TestSyncWatchesBatched_NumberedQueryError_ReturnsError(t *testing.T) {
-	_, svc, gh, _ := setupBatchedPollerTest(t)
+	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.prErr = errors.New("graphql 500")
 
-	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 1}}
+	seedTask(t, store, "task-numbered-error", false)
+	numberedWatch := withTestWorkspace(&PRWatch{
+		SessionID: "session-numbered-error", TaskID: "task-numbered-error", Owner: "o", Repo: "r", PRNumber: 1,
+	})
+	if err := store.CreatePRWatch(ctx, numberedWatch); err != nil {
+		t.Fatalf("create numbered watch: %v", err)
+	}
+	numbered := []*PRWatch{numberedWatch}
 	got, err := svc.SyncWatchesBatched(ctx, numbered)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on numbered query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on numbered query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed numbered phase results = %+v, want one unapplied entry", got)
 	}
 }
 
@@ -1797,14 +1813,24 @@ func TestSyncWatchesBatched_BranchQueryError_ReturnsError(t *testing.T) {
 	// the branch query fails (no numbered watches), an empty non-nil map
 	// silently absorbed the failure. The fix returns a non-nil error so the
 	// caller falls back per-watch.
-	_, svc, gh, _ := setupBatchedPollerTest(t)
+	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.branchErr = errors.New("graphql 500")
 
-	searching := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat"}}
+	seedTask(t, store, "task-branch-error", false)
+	searchingWatch := withTestWorkspace(&PRWatch{
+		SessionID: "session-branch-error", TaskID: "task-branch-error", Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat",
+	})
+	if err := store.CreatePRWatch(ctx, searchingWatch); err != nil {
+		t.Fatalf("create searching watch: %v", err)
+	}
+	searching := []*PRWatch{searchingWatch}
 	got, err := svc.SyncWatchesBatched(ctx, searching)
-	if err == nil || got != nil {
-		t.Errorf("expected (nil, err) on branch query error, got (%v, %v)", got, err)
+	if err == nil {
+		t.Fatalf("expected an error on branch query error, got results %v", got)
+	}
+	if len(got) != 1 || got[0].Applied || got[0].Found {
+		t.Fatalf("failed branch phase results = %+v, want one unapplied entry", got)
 	}
 }
 

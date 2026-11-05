@@ -1,85 +1,99 @@
 ---
-status: active
+status: draft
 system: platform
 created: 2026-10-22
+updated: 2026-10-27
 owners:
   - kandev
 ---
 
-# Bounded generic tool delivery requirements
+# Bounded tool delivery requirements
 
 ## Overview
 
-Platform owns normalized delivery before journal acceptance. Generic tool input,
-results and duplicate content can be arbitrarily larger than a storage record.
-The user selected a marked, bounded Kandev copy and then requested a focused fix
-without the surrounding protocol, database or UI work proposed in the first draft.
-This contract preserves the agent's own result and the existing
-[durable-delivery contract](durable-agent-delivery.md).
+Platform owns preparation of tool reports before durable acceptance. Large display data must not interrupt an otherwise valid agent turn.
+This contract covers every tool category and provider. The native agent keeps its original tool result.
+
+The [durable delivery requirements](durable-agent-delivery.md) own persistence, uncertainty, recovery, and admission.
+The [shell delivery requirements](incremental-shell-delivery.md) retain their output and write-volume guarantees.
 
 ## Requirements
 
-### REQ-PLATFORM-BOUNDED-TOOL-DATA-001: Size-safe generic tool data
+### REQ-PLATFORM-BOUNDED-TOOL-DATA-001: Size-safe tool reports
 
-**Intent:** Large generic results must not interrupt valid turn delivery.
+**Intent:** Large tool reports must preserve subsequent output and the actual terminal outcome.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.1:** For a generic tool result exceeding
-  the inline budget, Kandev shall retain a bounded copy and continue delivering
-  subsequent events and the actual terminal outcome without size-induced
-  cancellation, replacement or storage-error state.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.2:** The same behavior shall apply across
-  providers and generic tool names, including arguments, nested JSON, Unicode,
-  escaped text, large collections and duplicate content carriers.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.3:** Reduction shall preserve identity,
-  actual tool status and trusted adapter provenance. It shall not change native
-  agent results, issue tools/prompts or manufacture permission/control evidence.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.4:** Additional preparation memory and
-  traversal shall be bounded by byte, node and nesting budgets after source
-  decoding, without serializing or cloning the complete oversized JSON tree.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.5:** Small supported JSON values shall
-  preserve their JSON meaning, including nulls. Preparing an already bounded
-  representation again shall preserve its bytes and truncation marker.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.1:** When tool display data exceeds its inline budget, Kandev shall retain a bounded copy.
+  Delivery shall continue without size-induced cancellation, replacement, or storage-error state.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.2:** This guarantee shall cover every tool category, provider, and supported result carrier.
+  Coverage shall include arguments, nested JSON, typed output, rich content, collections, Unicode, escaping, and duplicate carriers.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.3:** Preparation shall preserve tool identity, category, actual status, and trusted adapter provenance.
+  It shall not change native results, execute tools, dispatch prompts, or manufacture permission or control evidence.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.4:** Preparation shall bound its additional memory, traversal, and nesting after source decoding.
+  It shall not serialize or clone a complete oversized tree before reduction.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-001.5:** Fitting supported values shall preserve their meaning, including nulls and explicit empty values.
+  Repeated preparation shall preserve the prepared bytes and omission markers.
 
 ### REQ-PLATFORM-BOUNDED-TOOL-DATA-002: Immutable retained representation
 
-**Intent:** The shortened copy remains ordinary durable tool evidence.
+**Intent:** Prepared reports remain ordinary durable evidence.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.1:** The bounded JSON copy and explicit
-  truncation marker shall be journaled before publication and survive normal
-  replay/persistence through the existing generic data fields. Previously
-  accepted payloads and hashes shall not be rewritten or reduced during replay.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.2:** Preparing an emitted event shall not
-  mutate the original provider payload or its cumulative content. Source
-  mutation shall not change the prepared retained copy.
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.3:** Existing readers shall accept the
-  shortened copy as ordinary generic JSON without a protocol/schema/hash
-  upgrade. Existing store, adoption and genuine persistence-failure behavior
-  shall remain unchanged.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.1:** Kandev shall commit the prepared representation before publication.
+  Replay shall preserve accepted payloads, hashes, ordering, identity, and actual status without further reduction.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.2:** Preparation shall not mutate provider objects or cumulative output.
+  Later source mutation shall not alter the retained copy.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.3:** Existing supported readers shall retain the prepared report through known JSON fields.
+  This change shall not require a journal, SQL, or payload-hash format migration.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-002.4:** Compatible adoption shall preserve existing streams and submissions.
+  Older producers shall retain their supported behavior until normal replacement. Adoption shall not rewrite history or force replacement to obtain new limits.
 
-### REQ-PLATFORM-BOUNDED-TOOL-DATA-003: Explicitly incomplete copy
+### REQ-PLATFORM-BOUNDED-TOOL-DATA-003: Existing incomplete-output representation
 
-**Intent:** Omitted data must not appear to be a complete result.
+**Intent:** Existing output representations remain honest without new interface controls.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-BOUNDED-TOOL-DATA-003.1:** A shortened generic input/output shall
-  contain an explicit `truncated: true` flag and bounded `preview` in the existing
-  JSON presentation. The preview shall not be a partial image or other malformed
-  rich block, confer control authority, or offer unavailable full-output retrieval.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-003.1:** Every reduced report shall carry an explicit truncation marker and a bounded preview.
+  Existing generic `truncated: true`, `preview`, and typed truncation fields shall remain supported.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-003.2:** Existing tool rows, disclosures, labels, and recovery controls shall retain their layout and actions on desktop and phone.
+  Existing truncation indicators shall remain usable. This repair shall not add an omission widget or preview control.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-003.3:** A preview shall not appear as a complete image, executable patch, complete file, or permission decision.
+  The interface shall not offer retrieval of omitted output that Kandev does not retain.
+
+### REQ-PLATFORM-BOUNDED-TOOL-DATA-004: Aligned delivery capacity
+
+**Intent:** The event limit provides useful headroom without creating another delivery bottleneck.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-004.1:** The default event payload limit shall be 2 MiB of encoded JSON.
+  Admission shall account for escaping, duplicate fields, and delivery metadata before publication.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-004.2:** A valid typed search report containing 1,048,607 ordinary text bytes shall fit without display reduction.
+  A report exceeding the display budget shall use the bounded representation instead.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-004.3:** Every admitted event shall fit the supported live transport and replay path.
+  Replay shall bound bytes and record count, preserve contiguous order, and make progress across a short byte-limited page.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-004.4:** The event increase shall preserve the existing prompt-size limit and supported shell tails.
+  It shall not introduce an operator setting or change retained evidence.
+- **AC-PLATFORM-BOUNDED-TOOL-DATA-004.5:** A remaining oversized control envelope shall produce a distinct size error.
+  Kandev shall not classify that error as storage exhaustion or wait for an acknowledgment to make it fit.
 
 ## Out of scope
 
-New UI/copy, full original-output storage/download, protocol/schema/hash
-migrations, logging redesign, non-generic tool representation, assistant content
-limits, shell patches, permissions, workflow changes and live-task repair.
-Unsupported non-JSON runtime values can be omitted in the marked preview.
+- New UI components, tool-output notices, preview controls, labels, or localization work.
+
+- Full original-output storage, download, or artifact references.
+- Increasing prompt limits or the supported shell tails.
+- Reducing permission, workflow, ownership, or background-work authority.
+- Changing accepted events during replay or projection.
+- Repairing a live session or rewriting its database records.
 
 ## Related documents
 
 - [System design](../system-design/bounded-tool-delivery.md).
-- [Implementation package](../../../plans/bounded-tool-delivery/plan.md).
-- [Decision](../../../decisions/2026-10-22-bounded-tool-display-data.md).
+- [Fix package](../../../plans/resilient-agent-output-delivery/plan.md).
+- [Original generic implementation](../../../plans/bounded-tool-delivery/plan.md).
+- [Boundary decision](../../../decisions/2026-10-27-all-tool-delivery-boundary.md).

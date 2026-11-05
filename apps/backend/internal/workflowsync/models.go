@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/authcircuit"
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
@@ -46,6 +47,7 @@ type Config struct {
 	WorkspaceID string `json:"workspace_id"`
 	// Provider selects the sync source: ProviderGitHub uses RepoOwner and
 	// RepoName, ProviderGitLab uses ProjectPath.
+	GitHubHost      string     `json:"github_host"`
 	Provider        string     `json:"provider"`
 	RepoOwner       string     `json:"repo_owner"`
 	RepoName        string     `json:"repo_name"`
@@ -115,7 +117,7 @@ func (c *Config) circuitOpen(now time.Time) bool {
 // SetConfig call) always resets the circuit — see Store.UpsertConfigForWorkspace.
 func (r *SetConfigRequest) fingerprint() string {
 	return strings.Join([]string{
-		r.Provider, r.RepoOwner, r.RepoName, r.ProjectPath, r.Branch, r.Path,
+		r.Provider, r.GitHubHost, r.RepoOwner, r.RepoName, r.ProjectPath, r.Branch, r.Path,
 		fmt.Sprintf("%d", r.IntervalSeconds),
 	}, "\x1f")
 }
@@ -126,6 +128,7 @@ func (r *SetConfigRequest) fingerprint() string {
 type SetConfigRequest struct {
 	// Provider is optional; an empty value means ProviderGitHub, which keeps
 	// pre-GitLab API clients working unchanged.
+	GitHubHost      string `json:"github_host"`
 	Provider        string `json:"provider"`
 	RepoOwner       string `json:"repo_owner"`
 	RepoName        string `json:"repo_name"`
@@ -161,6 +164,14 @@ func (r *SetConfigRequest) normalizeTarget() error {
 }
 
 func (r *SetConfigRequest) normalizeGitHubTarget() error {
+	if r.GitHubHost == "" {
+		r.GitHubHost = githubhost.Public().String()
+	}
+	host, err := githubhost.Parse(r.GitHubHost)
+	if err != nil {
+		return fmt.Errorf("%w: invalid github_host", ErrInvalidConfig)
+	}
+	r.GitHubHost = host.String()
 	if r.ProjectPath != "" {
 		return fmt.Errorf("%w: project_path is only valid for the %q provider", ErrInvalidConfig, ProviderGitLab)
 	}
@@ -177,6 +188,7 @@ func (r *SetConfigRequest) normalizeGitHubTarget() error {
 // arbitrarily nested paths ("group/subgroup/project"), so the value is
 // validated as a whole rather than split into owner and name.
 func (r *SetConfigRequest) normalizeGitLabTarget() error {
+	r.GitHubHost = ""
 	if r.RepoOwner != "" || r.RepoName != "" {
 		return fmt.Errorf(
 			"%w: repo_owner and repo_name are only valid for the %q provider", ErrInvalidConfig, ProviderGitHub)

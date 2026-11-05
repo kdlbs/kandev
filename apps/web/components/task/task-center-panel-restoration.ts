@@ -1,5 +1,12 @@
 "use client";
 
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import {
+  isRenameReserved,
+  trackRenameOpen,
+  waitForRenameRelease,
+} from "@/hooks/file-rename-continuity";
 import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -22,6 +29,7 @@ import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 export type FileTabRestorationOptions = {
+  store?: StoreApi<AppState>;
   activeSessionId: string | null;
   leftTab: string;
   setLeftTab: (tab: string) => void;
@@ -42,13 +50,16 @@ export function toPrimaryTab(savedTab: string) {
 export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFileTab[]) {
   const client = getWebSocketClient();
   if (!client) return null;
-  const loadedTabs: OpenFileTab[] = [];
-  for (const savedTab of savedTabs) {
-    try {
-      const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
-      const hash = await calculateHash(response.content);
-      loadedTabs.push(
-        installFileEditorTab({
+  const loadedTabs: Array<OpenFileTab | undefined> = new Array(savedTabs.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < savedTabs.length) {
+      const index = nextIndex++;
+      const savedTab = savedTabs[index];
+      try {
+        const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
+        const hash = await calculateHash(response.content);
+        loadedTabs[index] = installFileEditorTab({
           path: savedTab.path,
           name: savedTab.name,
           content: response.content,
@@ -62,13 +73,14 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
             getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
               ? savedTab.renderedPreview
               : undefined,
-        }),
-      );
-    } catch {
-      /* skip failed tabs */
+        });
+      } catch {
+        /* skip failed tabs */
+      }
     }
-  }
-  return loadedTabs;
+  };
+  await Promise.all(Array.from({ length: Math.min(4, savedTabs.length) }, worker));
+  return loadedTabs.filter((tab): tab is OpenFileTab => tab !== undefined);
 }
 
 type RestoreLoadedTabsParams = {
@@ -116,6 +128,7 @@ function restoreLoadedTabs({
 }
 
 export function useFileTabRestoration({
+  store,
   activeSessionId,
   leftTab,
   setLeftTab,
@@ -152,7 +165,24 @@ export function useFileTabRestoration({
     }
     restorationInProgressRef.current = true;
     const loadTabs = async (retryCount = 0): Promise<void> => {
+      if (store) {
+        while (
+          savedTabs.some((tab) => isRenameReserved(store, activeSessionId, tab.path, tab.repo))
+        ) {
+          await waitForRenameRelease(store, activeSessionId, savedTabs);
+        }
+      }
+      if (restoredTabsRef.current !== activeSessionId) return;
+      const pending = store
+        ? savedTabs.map((tab) => trackRenameOpen(store, activeSessionId, tab.path, tab.repo))
+        : [];
       const loadedTabs = await loadSavedFileTabs(activeSessionId, savedTabs);
+      const invalid = pending.some((entry) => !entry.current());
+      pending.forEach((entry) => entry.dispose());
+      if (invalid) {
+        void loadTabs(retryCount);
+        return;
+      }
       if (!loadedTabs) {
         if (retryCount < 5) {
           setTimeout(() => loadTabs(retryCount + 1), 200);

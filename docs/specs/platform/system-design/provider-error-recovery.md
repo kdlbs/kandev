@@ -3,6 +3,7 @@ status: current
 system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
+  - REQ-PLATFORM-RATE-THROTTLE-RETRY-001
 created: 2026-08-08
 updated: 2026-10-05
 owners:
@@ -483,3 +484,35 @@ relocated there at the size limit, and extended since.
 - Overriding effect-safety or generation fencing through profile settings.
 - Telemetry, cost, or subscription-usage routing. Those remain in the separate
   Dynamic Agent Telemetry Routing package.
+
+
+## Interactive throttles without reset metadata
+
+`REQ-PLATFORM-RATE-THROTTLE-RETRY-001` extends concrete-profile interactive
+eligibility. In `routingerr.Decide`, permit high-confidence `CodeRateLimited`
+with no reset hint for `ContextKanban`. Keep the existing short-deadline path.
+Do not broaden the context-free predicate for Office. Test both contexts from
+the same classification and preserve dynamic candidate policy evaluation.
+
+This rule is semantic and provider-neutral. It applies to every existing
+high-confidence rate-limit classification, including the new Codex signature.
+Do not inspect provider names or raw strings in orchestration. Preserve current
+structured precedence; this package does not reinterpret quota metadata.
+
+Reuse `provider_interruption_preparation.go` and the existing retry owner.
+No-output replay must retain current-turn effect fences. Post-output recovery
+requires the existing provider capability and continuation gates; no new Codex
+continuation capability is implied. Reuse the five-attempt delay ladder and
+existing hint handling. Do not borrow the longer model-capacity retry policy.
+
+Preserve one episode, cancellation, generation checks, retained-runtime rules,
+and manual recovery after uncertain dispatch or restart. Reuse localized retry
+feedback, storage, and diagnostics. No migration, new flag, API, metric, or
+browser timer is required. Do not record raw prompts in diagnostics.
+
+The alternative of manual recovery for every missing hint caused avoidable
+failure on explicit transient throttles. Retrying every 429 would also include
+hard limits. Semantic classification plus existing safety gates preserves that
+distinction. Office keeps its separate unattended scheduling contract.
+
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

@@ -7,6 +7,7 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { readTerminalBuffer } from "./mobile-terminal-helpers";
+import { expectCursorResult, startCursorProgram } from "./terminal-cursor-test-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,6 +74,24 @@ async function focusTerminal(page: Page, session: SessionPage): Promise<void> {
 // ---------------------------------------------------------------------------
 
 // Routing: uses /t/{taskId} (task-keyed routing) instead of /s/{sessionId}
+test.describe("Desktop application cursor control", () => {
+  test.describe.configure({ retries: 0 });
+
+  test("desktop application cursor keyboard", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(90_000);
+    const session = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Desktop cursor control",
+    );
+    await focusTerminal(testPage, session);
+    await startCursorProgram(testPage);
+    await testPage.keyboard.press("ArrowUp");
+    await expectCursorResult(testPage, "KEY_UP");
+  });
+});
+
 test.describe("Terminal keyboard navigation", () => {
   // Standalone executor can fail on cold start; retry once for transient failures.
   test.describe.configure({ retries: 1 });

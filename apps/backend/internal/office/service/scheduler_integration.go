@@ -78,6 +78,8 @@ type SchedulerIntegration struct {
 	// taskContexts feeds PromptContext.HandoffContext on every run.
 	// nil-safe: when unconfigured, the handoff section is omitted.
 	taskContexts TaskContextProvider
+	// creationAttachments supplies the task's explicit creation set.
+	creationAttachments TaskCreationAttachmentReader
 }
 
 // SetTaskContextProvider wires the office task-handoffs prompt
@@ -85,6 +87,27 @@ type SchedulerIntegration struct {
 // constructed.
 func (si *SchedulerIntegration) SetTaskContextProvider(p TaskContextProvider) {
 	si.taskContexts = p
+}
+
+// TaskCreationAttachmentReader supplies the explicit ordered creation set for
+// a task-bound launch. It must never include later chat or session claims.
+type TaskCreationAttachmentReader interface {
+	ReadTaskCreationAttachments(ctx context.Context, taskID string) ([]v1.MessageAttachment, error)
+}
+
+// SetTaskCreationAttachmentReader wires the task-owned creation attachment
+// reader used for every task-bound Office launch.
+func (si *SchedulerIntegration) SetTaskCreationAttachmentReader(reader TaskCreationAttachmentReader) {
+	si.creationAttachments = reader
+}
+
+func (si *SchedulerIntegration) launchCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]v1.MessageAttachment, error) {
+	if taskID == "" || si.creationAttachments == nil {
+		return nil, nil
+	}
+	return si.creationAttachments.ReadTaskCreationAttachments(ctx, taskID)
 }
 
 // NewSchedulerIntegration creates a new SchedulerIntegration.
@@ -451,10 +474,19 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.String("run_id", run.ID),
 		zap.Int("env_count", len(env)))
 
+	creationAttachments, err := si.launchCreationAttachments(ctx, taskID)
+	if err != nil {
+		si.logger.Warn("creation attachment read failed; retrying run",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID), zap.Error(err))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		_ = si.svc.HandleRunFailure(ctx, run, err)
+		return
+	}
 	launchCtx := LaunchContext{
 		ExecutorID:           execCfg.Type,
 		CausingRunID:         run.ID,
 		Prompt:               prompt,
+		Attachments:          creationAttachments,
 		Env:                  env,
 		ProfileID:            profileID,
 		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
@@ -786,7 +818,7 @@ func (si *SchedulerIntegration) launchAgent(
 		return false
 	}
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return false
 		}
@@ -815,11 +847,9 @@ func (si *SchedulerIntegration) launchAgent(
 // (the same status the routed dispatch path uses for the identical
 // disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
 // the scheduler's own wake-up loop from ever picking the run back up on
-// its own. There is no reconciliation path back from the orchestrator's
-// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism), so
-// the run stays parked until an operator finds it and clears the routing
-// block by hand.
+// its own. The orchestrator's ceiling replay owns reconciliation: it settles
+// the exact run when the launch is admitted, ready or terminal events recover
+// failed settlement writes, and a terminal drop fails the parked run.
 func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *runsmodels.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
@@ -860,6 +890,29 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 			zap.String("run_id", runID), zap.String("session_id", sessionID))
 		IncLoopSessionPersistFailed(workspaceID)
 	}
+}
+
+type circuitSuspensionSignal interface {
+	CircuitSuspendedUntil() time.Time
+}
+
+// deferCircuitSuspension preserves retry budget when no provider call was made.
+func (si *SchedulerIntegration) deferCircuitSuspension(ctx context.Context, run *runsmodels.Run, launchErr error) bool {
+	var signal circuitSuspensionSignal
+	if run == nil || !errors.As(launchErr, &signal) {
+		return false
+	}
+	until := signal.CircuitSuspendedUntil()
+	var err error
+	if until.IsZero() {
+		err = si.svc.repo.ParkRunForProviderCapacity(ctx, run.ID, routing.StatusBlockedActionRequired, time.Time{})
+	} else {
+		err = si.svc.repo.ScheduleRetry(ctx, run.ID, until, run.RetryCount)
+	}
+	if err != nil {
+		si.logger.Error("failed to defer circuit-suspended run", zap.String("run_id", run.ID), zap.Error(err))
+	}
+	return true
 }
 
 type sessionRecoveryRequiredSignal interface {
@@ -1062,7 +1115,7 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
-		if si.parkSessionRecoveryRun(ctx, run, err) {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
 			si.releaseCheckoutIfNeeded(ctx, run)
 			return true, false
 		}
@@ -1241,6 +1294,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
+	si.enrichRoutineWorkContext(ctx, pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
@@ -1279,6 +1333,13 @@ func (si *SchedulerIntegration) buildPromptContext(
 		if parsed["stage_type"] != "" {
 			pc.StageType = si.svc.resolveGateCommentStage(ctx, parsed)
 		}
+	}
+
+	if reason == RunReasonHandoffCompleted {
+		pc.HandoffDeliveryTaskID = parsed["delivery_task_id"]
+		pc.HandoffDeliveryTitle = parsed["delivery_title"]
+		pc.HandoffDeliveryState = parsed["delivery_state"]
+		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
 	}
 
 	if reason == RunReasonAgentError {

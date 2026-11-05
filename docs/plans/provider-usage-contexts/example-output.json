@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "evaluated_at": "2026-11-03T20:00:30Z",
+  "snapshot_generated_at": "2026-11-03T20:00:00Z",
+  "poll_interval_seconds": 300,
+  "stale_after_seconds": 600,
+  "partial": false,
+  "scope": {
+    "usage_scope": "instance",
+    "user_scoped": false,
+    "invocation_workspace_id": ""
+  },
+  "providers": [
+    {
+      "provider_id": "codex",
+      "provider_name": "Codex",
+      "account": null,
+      "support_state": "supported",
+      "availability_state": "available",
+      "fetched_at": "2026-11-03T20:00:00Z",
+      "age_seconds": 30,
+      "stale": false,
+      "windows": [
+        {
+          "window_id": "window-1",
+          "window_name": "5-hour",
+          "window_seconds": 18000,
+          "scoped": false,
+          "utilization_percentage": 25,
+          "remaining_percentage": 75,
+          "reset_at": "2026-11-04T00:00:00Z",
+          "availability_state": "available"
+        }
+      ]
+    }
+  ]
+}
