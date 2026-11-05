@@ -784,6 +784,9 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
 		"created_at":                      workspace.CreatedAt,
 		"updated_at":                      workspace.UpdatedAt,
+
+		"clarification_unanswered_inbox_enabled":  workspace.ClarificationUnansweredInboxEnabled,
+		"clarification_unanswered_retention_days": workspace.ClarificationUnansweredRetentionDays,
 	}
 }
 

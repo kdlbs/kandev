@@ -1654,6 +1654,9 @@ func (a *subagentContextAdapter) RecordSubagentContext(ctx context.Context, req 
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service
 	logger *logger.Logger
+	// duplicates hides older unanswered bundles a new bundle repeats. Nil
+	// disables duplicate merging.
+	duplicates clarificationDuplicateMerger
 
 	// sessionModelCache caches the resolved model per session to avoid repeated DB lookups.
 	// Invalidated via InvalidateModelCache when the model changes (e.g., model switch).
@@ -2029,7 +2032,33 @@ func (a *messageCreatorAdapter) CreateClarificationRequestMessages(ctx context.C
 		}
 		ids = append(ids, msg.ID)
 	}
+	a.mergeUnansweredDuplicates(ctx, taskID, pendingID, questions)
 	return ids, nil
+}
+
+// clarificationDuplicateMerger is the repository write that marks older
+// unanswered bundles merged into a newly asked one.
+type clarificationDuplicateMerger interface {
+	MergeUnansweredClarificationDuplicates(ctx context.Context, taskID, pendingID string, questions []models.ClarificationQuestionIdentity) ([]string, error)
+}
+
+// mergeUnansweredDuplicates is best-effort: the new bundle is already
+// durable and answerable, so a failed merge only leaves the older duplicate
+// listed as unanswered.
+func (a *messageCreatorAdapter) mergeUnansweredDuplicates(ctx context.Context, taskID, pendingID string, questions []clarification.Question) {
+	if a.duplicates == nil {
+		return
+	}
+	merged, err := a.duplicates.MergeUnansweredClarificationDuplicates(ctx, taskID, pendingID, clarification.QuestionIdentities(questions))
+	if err != nil {
+		a.logger.Warn("failed to merge duplicate unanswered clarifications",
+			zap.String("pending_id", pendingID), zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if len(merged) > 0 {
+		a.logger.Info("merged duplicate unanswered clarifications",
+			zap.String("pending_id", pendingID), zap.Strings("merged_pending_ids", merged))
+	}
 }
 
 // rollbackPartialBundle removes the messages already created when later writes
