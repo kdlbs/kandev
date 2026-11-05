@@ -19,6 +19,7 @@
     "typecheck": "pnpm run rich-output:check && tsrs --noEmit --fast",
     "pretest": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "test": "vitest run",
+    "test:debug-start": "node --test scripts/debug-start-production.test.mjs",
     "e2e:raw": "e2e/scripts/run-raw-e2e.sh",
     "e2e:run": "e2e/scripts/run-e2e.sh",
     "e2e:docker": "e2e/scripts/run-e2e.sh --docker",
