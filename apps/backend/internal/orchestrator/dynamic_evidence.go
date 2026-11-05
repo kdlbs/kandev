@@ -617,6 +617,37 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	return s.withPromptAttemptEvidenceLocked(data)
 }
 
+// withStartupAttemptObservations preserves typed pre-prompt evidence when no
+// prompt record exists, but never discards recorded output or effects from the
+// same execution. An ambiguous existing record fails closed.
+func (s *Service) withStartupAttemptObservations(data watcher.AgentEventData) watcher.AgentEventData {
+	if data.SessionID == "" {
+		return data
+	}
+	state, release := s.acquireTransientRetryNoticeState(data.SessionID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
+	evidence, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return data
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if state.retired.Load() || data.AgentExecutionID == "" || evidence.executionID == "" ||
+		evidence.executionID != data.AgentExecutionID ||
+		(data.PromptGeneration != 0 && evidence.promptGeneration != 0 && data.PromptGeneration != evidence.promptGeneration) {
+		data.EvidenceKnown = false
+		return data
+	}
+	data.EvidenceKnown = data.EvidenceKnown && evidence.evidenceKnown
+	data.OutputObserved = data.OutputObserved || evidence.outputObservedLocked(data)
+	data.EffectObserved = data.EffectObserved || evidence.effect
+	return data
+}
+
 func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) watcher.AgentEventData {
 	if data.SessionID == "" {
 		return data

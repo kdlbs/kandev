@@ -4502,10 +4502,11 @@ func (s *Service) handleDynamicAgentStartupFailure(
 	}
 	evidence := s.unclassifiedStartupEvidence(ctx, *failureData, session, attempt, startupFailure)
 	if classified.Code == routingerr.CodeModelUnavailable {
+		*failureData = s.withStartupAttemptObservations(*failureData)
 		evidence = s.unclassifiedFailureEvidence(
 			ctx, *failureData, session, attempt.SessionID == sessionID,
 			dynamicruntime.UnclassifiedOriginAgentStartup, routingerr.PhaseSessionInit,
-			attempt.ID, "", "", false, true, false, false,
+			attempt.ID, "", "", false, failureData.EvidenceKnown, failureData.OutputObserved, failureData.EffectObserved,
 		)
 	}
 	if !evidence.TaskScope || !evidence.CurrentAttempt {

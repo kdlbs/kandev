@@ -986,8 +986,9 @@ func (s *Service) prepareDynamicFailureEvidence(
 	if unclassified {
 		return s.prepareUnclassifiedFailureEvidence(ctx, data, session, classified, startupEvidence)
 	}
-	if classifiedStartupModelFailureSafe(classified, startupEvidence) {
-		return *startupEvidence, true
+	if classified != nil && classified.Code == routingerr.CodeModelUnavailable &&
+		classified.Phase == routingerr.PhaseSessionInit && startupEvidence != nil {
+		return *startupEvidence, classifiedStartupModelFailureSafe(classified, startupEvidence)
 	}
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false

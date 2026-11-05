@@ -18,7 +18,7 @@ asynchronous initial start. It does not change ceiling admission.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-DYNAMIC-LAUNCH-FAILURE-001` | [Launch error classification](#launch-error-classification) |
+| `REQ-AGENTS-DYNAMIC-LAUNCH-FAILURE-001` | [Launch error classification](#launch-error-classification), [asynchronous strict model rejection](#asynchronous-strict-model-rejection) |
 
 ## Components and responsibilities
 
@@ -56,6 +56,9 @@ When the current startup attempt reports `model_unavailable` with
 logical dynamic profile applies its existing candidate failure policy. The
 startup attempt, execution, route generation, and concrete profile must still
 own the session. The selected candidate is rejected before any prompt reaches
-the agent's default model, then the ordinary successor path selects another
-configured candidate. Fixed profiles and resume failures retain their existing
-manual recovery. No candidate order, tier, retry threshold, or ceiling changes.
+the agent's default model. An existing attempt record must not report output,
+effects, or an ambiguous identity; absent a record, the typed pre-prompt
+evidence remains usable. The configured candidate policy determines whether
+to retry, wait, stop, or advance. Fixed profiles and resume failures retain
+their existing manual recovery. No candidate order, tier, retry threshold, or
+ceiling changes.

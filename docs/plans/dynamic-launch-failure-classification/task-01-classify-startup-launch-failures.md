@@ -55,3 +55,6 @@ a launch error is classified.
   passed with a Go overlay, as did the existing startup admission and dynamic
   successor launch checks. Specification lint, documentation catalog validation
   and normal commit hooks passed. No live-provider or full-backend run is claimed.
+- A follow-up temporary overlay reproduced and rejected unsafe fallthrough when
+  startup evidence has output, effects, or unknown status. It also checked the
+  same-execution observation merge, absent record, and ambiguous identities.
