@@ -38,9 +38,9 @@ func (s *Service) SetRelay(r *ChannelRelay) {
 
 // publishCommentCreated emits an OfficeCommentCreated event.
 // If no event bus is configured the call is silently skipped.
-func (s *Service) publishCommentCreated(ctx context.Context, comment *models.TaskComment) {
+func (s *Service) publishCommentCreated(ctx context.Context, comment *models.TaskComment) error {
 	if s.eb == nil {
-		return
+		return nil
 	}
 	data := CommentPostedData{
 		TaskID:     comment.TaskID,
@@ -52,5 +52,7 @@ func (s *Service) publishCommentCreated(ctx context.Context, comment *models.Tas
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-service", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {
 		s.logger.Error("publish comment created event failed", zap.Error(err))
+		return err
 	}
+	return nil
 }

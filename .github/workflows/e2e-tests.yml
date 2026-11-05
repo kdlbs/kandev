@@ -259,7 +259,7 @@ jobs:
             echo "Build failed: backend=$backend_status web=$web_status" >&2
             exit 1
           fi
-          make build-e2e-delivery-fixture
+          make build-e2e-delivery-fixture build-e2e-send-now-fixture
 
       # Fixture plugin package consumed by the plugin E2E specs. Built here
       # (the build job has the Go toolchain) and shipped to the shards as its
@@ -285,6 +285,7 @@ jobs:
             "bin/kandev",
             "bin/mock-agent",
             "bin/e2e-delivery-fixture",
+            "bin/e2e-send-now-fixture",
             "bin/agentctl-linux-amd64",
             "bin/mock-agent-linux-amd64",
             ".build/kandev-plugin-e2e-1.0.0.tar.gz",
@@ -1272,9 +1273,9 @@ jobs:
         uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: |
-            apps/backend/go.sum
-            pluginsdk/go.sum
+          # Leave room for Rust artifacts and the release-shaped Go rebuild.
+          # The shared setup-go cache also contains unrelated test builds.
+          cache: false
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

@@ -502,11 +502,14 @@ func (s *Service) completeTurnForStreamEvent(
 			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 			return
 		}
+		fixedResourceKey := s.fixedResourceForCleanStreamCompletion(ctx, payload, capturedTurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+		} else {
+			s.profileExecutionResolver.ResetFixedProfileCircuitFailures(ctx, fixedResourceKey)
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)
@@ -538,6 +541,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 			AgentID:            payload.AgentID,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
+			ResourceCircuitKey: payload.ResourceCircuitKey,
 			PromptGeneration:   payload.Data.PromptGeneration,
 			ErrorMessage:       payload.Data.Error,
 			ProviderError:      payload.Data.ProviderError,
@@ -585,7 +589,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -1082,6 +1086,11 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			// Only the original async-launch result attests a new child.
+			// Settlement and resume updates describe its card, not liveness.
+			if isSubagentPresentationUpdate(payload) {
+				return
+			}
 			kind := backgroundWorkKind(payload.Data.Normalized)
 			// Only attest the parked projection for a workload whose provider
 			// can confirm later liveness on this connection. An identified but
@@ -1178,7 +1187,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
@@ -1202,6 +1234,25 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// subagentStatusAsyncLaunched is the subagent status carried only by the
+// original launch result of a detached Claude subagent.
+const subagentStatusAsyncLaunched = "async_launched"
+
+// isSubagentPresentationUpdate reports whether a terminal tool update only
+// re-presents a detached subagent card (settlement or resume) rather than
+// attesting its launch. Such updates must not record or publish background
+// work, because they carry no tool title and describe an existing child.
+func isSubagentPresentationUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	if !isTerminalToolStatus(payload.Data.ToolStatus) || !normalizedIsDetachedLaunch(payload.Data.Normalized) {
+		return false
+	}
+	if backgroundWorkKind(payload.Data.Normalized) != streams.BackgroundWorkKindSubagent {
+		return false
+	}
+	subagent := payload.Data.Normalized.SubagentTask()
+	return subagent == nil || subagent.Status != subagentStatusAsyncLaunched
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -3403,7 +3454,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(

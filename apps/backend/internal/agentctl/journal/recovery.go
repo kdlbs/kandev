@@ -7,6 +7,8 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
 // MaxRecoverySubmissionSummaries bounds the recovery-relevant submission
@@ -50,6 +52,10 @@ type RecoveryDescriptor struct {
 	Submissions          []SubmissionSummary `json:"submissions,omitempty"`
 	SubmissionCount      int                 `json:"submission_count"`
 	SubmissionsTruncated bool                `json:"submissions_truncated,omitempty"`
+	// AgentProcess is the running agent child's process-group identity. It is
+	// supplied by agentctl, absent while no verifiable child runs, and lets a
+	// shared runtime prove that one session's agent has exited.
+	AgentProcess *processidentity.Identity `json:"agent_process,omitempty"`
 }
 
 // RecoveryDescriptor returns a bounded, owner-scoped snapshot suitable for a

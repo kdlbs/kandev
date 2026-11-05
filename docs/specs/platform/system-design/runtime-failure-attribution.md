@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001
 created: 2026-09-24
-updated: 2026-09-28
+updated: 2026-11-04
 owners:
   - kandev
 ---
@@ -25,20 +25,141 @@ task repository identity checks.
 | --- | --- |
 | `REQ-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001` | [Diagnostic sites](#diagnostic-sites), [Safety](#safety) |
 
+AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.1 and .8 also use
+[Database phase diagnostics](#database-phase-diagnostics).
+AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9 uses
+[Agentctl failure producers](#agentctl-failure-producers).
+
 ## Diagnostic sites
 
 | Site | Bounded fields | Evidence boundary |
 | --- | --- | --- |
-| `internal/persistence/requiredstores/Health` | stage (`writer_ping`, `reader_ping`, `table_probe`), elapsed milliseconds, classified error, writer/reader `sql.DB.Stats` snapshots (`OpenConnections`, `InUse`, `WaitCount`, `WaitDuration`) | Capture on probe failure before cancellation; one diagnostic per failed sweep, not one per catalog store. Pool pressure is correlation evidence, not proof of the cause. |
+| `internal/persistence/requiredstores/Health` | stage (`writer_acquire`, `writer_ping`, `reader_acquire`, `reader_ping`, `table_probe`), elapsed milliseconds, classified error, writer/reader `sql.DB.Stats` snapshots (`OpenConnections`, `InUse`, `WaitCount`, `WaitDuration`) | One diagnostic per failed sweep. Acquisition and acquired-connection failures remain distinct. Pool pressure does not identify the writer owner. |
+| `internal/db/DurabilityBarrier` | fixed operation, outcome, failed stage, error class, numeric phase durations | One warning per failed or slow shared run, after connection release. Per-caller cancellation is separate from the run result. |
 | `internal/plugins/Controller.webhook` | plugin ID, HTTP status, origin (`host_lifecycle`, `host_rpc`, `plugin_response`), safe error class for host failures | Record only after the authenticated/declaration gate. A plugin response status is not recast as a host error. |
 | `internal/orchestrator/executor` PR-base resolution | task-repository ID, PR number, mismatch reason enum | Have the comparison return a reason while retaining the current boolean decision. Test bound and unbound fork identities and every failure branch. |
 | `internal/agent/runtime/lifecycle` recovery | candidate count, retracked count, not-retracked count, classified known reasons, unknown count | Summarize only outcomes the recovery code can prove. A missing backend return is `not_retracked_unknown` unless a specific reason is available; it is not evidence that the process is dead. |
 
-The recovery summary is separate from the counted startup progress step. The
-step continues to advance only at its current reconstruction points and can
-end below total with the existing warning. The summary is a single event for
-one recovery pass, including zero-candidate passes; it does not log one row per
-old inventory record.
+The recovery summary remains separate from counted startup progress.
+The [startup progress design](startup-progress-visibility.md#measuring-each-step)
+counts conclusively resolved candidates under AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.7.
+Retracking success does not determine completed work.
+The summary remains one event per pass, including zero-candidate passes.
+
+## Database phase diagnostics
+
+Platform owns this diagnostic contract because it covers shared database capacity.
+The task repository retains delivery and journal-release authority.
+The [write-cost design](durable-delivery-write-cost.md) retains its durability boundary.
+
+### Probe acquisition
+
+`Health.pingObserved` acquires each connection explicitly through its existing pool.
+It calls `PingContext` on the acquired connection and releases it before the next stage.
+The writer and reader retain the same shared probe context and two-second runtime deadline.
+Maintenance deferral, catalog probes, readiness transitions, and the probe interval remain unchanged.
+
+Acquisition failures use `writer_acquire` or `reader_acquire`.
+A failed ping after acquisition keeps `writer_ping` or `reader_ping`.
+`elapsed_ms` measures the failing stage.
+Connection acquisition can include opening a connection and applying its initialization work.
+It is not a measurement of pure pool wait or native lock time.
+Existing cumulative pool counters remain correlation evidence.
+The health diagnostic does not identify an uninstrumented transaction as the owner.
+
+### Durability run
+
+`DurabilityBarrier.run` owns one local diagnostic record for its actual shared run.
+The record measures work after the coalescing window.
+`NewDurabilityBarrier` accepts the existing logger as a constructor argument.
+The task repository supplies `r.log` when its existing `sync.Once` creates the barrier.
+A nil logger preserves operation without diagnostic emission.
+The database package already uses this logger for migration diagnostics.
+No observer framework, driver wrapper, new metric registry, or background timer is required.
+
+The record contains these fixed fields:
+
+| Field | Meaning |
+| --- | --- |
+| `operation` | Always `durability_barrier` |
+| `outcome` | `success` or `error` for the actual run |
+| `stage` | `complete`, `writer_acquire`, `set_full`, `begin`, `generation_write`, `commit`, or `restore_normal` |
+| `error_class` | `none`, `context_canceled`, `deadline_exceeded`, or `operation_failed` |
+| `elapsed_ms` | Admission through connection release, excluding the coalescing window |
+| `acquire_ms` | Time in `sql.DB.Conn`, including connection opening when required |
+| `hold_ms` | Successful acquisition through connection release, including discard when required |
+| `begin_ms`, `write_ms`, `commit_ms` | Time in the corresponding transaction operation |
+
+The timed phases record their elapsed duration even on error.
+Stages without a timing field, such as `set_full` and `restore_normal`, are identified by `stage` only.
+Unreached stages omit their timing fields.
+An unacquired connection therefore has no `hold_ms` field.
+Commit duration can include synchronization and checkpoint work.
+It is not reported as pure filesystem synchronization time.
+
+The existing generation helper records its begin, write, and commit boundaries.
+Its SQL, transaction order, rollback, and returned errors remain unchanged.
+The record emits through the existing logger after connection release and outside the barrier mutex.
+The initiating caller receives the actual run result before that emission, so a blocked log sink cannot replace the result with a caller deadline.
+Covered-ticket publication remains independent of diagnostic emission.
+A failed run or a run lasting at least one second emits one warning.
+An ordinary successful run adds no log entry.
+The existing per-caller counters and duration buckets keep their current meanings.
+
+The run keeps its independent 30-second context after a waiting caller cancels.
+That caller's cancellation cannot finish, cancel, or classify the shared run.
+The implementation preserves FULL-before-release and failed-connection discard.
+It never acknowledges data because a diagnostic reports success.
+
+This first increment observes probe stages and durability-barrier phases only.
+A barrier waiting for the writer does not establish which other operation holds it.
+Other writer owners remain unknown until a scoped observation identifies them.
+
+## Agentctl failure producers
+
+`Server.handleAgentConfigure` and the generic error branch of Git status add safe context at their current log sites.
+They emit `operation`, `error_class`, and available task, session, and instance UUIDs from the trusted instance configuration.
+An instance without task or session identity omits those fields.
+No new identity lookup or tracking registry is required.
+
+The configuration refusal in `process.Manager.configure` becomes `ErrConfigureWhileRunning` (new).
+Its error text remains `cannot configure while agent is running`.
+The handler classifies that sentinel as `agent_running`.
+Cancellation and deadline use their existing typed identities.
+Other configuration errors use `unknown` without matching arbitrary error text.
+Git status reuses `fsdiagnostics.ErrorClass` and `operation=git_inspection`.
+A changing-evidence failure keeps its existing warning and adds the same operation, `evidence_changed` class, and trusted identity.
+Every other status failure uses the generic error record.
+Both the single-repository and multi-repository status paths share that record.
+
+The utility handler adds `operation=agent_probe` to its failure summaries.
+When the API server supplies the instance's trusted identity, the summary also carries `instance_id`.
+It recognizes only the four existing `ProbeFailureCode` constants.
+An empty or unsupported code uses `unknown`.
+Direct execution errors use typed cancellation or deadline evidence before `unknown`.
+The [agent-owned probe design](../../agents/system-design/probe-failure-diagnostics.md)
+continues to own stderr capture, managed classification, and provider redaction.
+No new provider signatures or client-visible codes enter this package.
+
+The parent uses the existing typed
+[forwarding allowlist](runtime-diagnostic-signal.md#safe-context-allowlist).
+That design owns the exact additional operation and error-class values.
+Raw `error` fields remain excluded from forwarded context.
+The producer does not concatenate an unsanitized error into its message to bypass that exclusion.
+
+## Verification of phase diagnostics
+
+File-backed tests distinguish a held connection from an acquired connection with a failed ping.
+They retain maintenance, missing-schema, cancellation, and recovery controls.
+Barrier tests distinguish admission from ownership and commit timings without machine-specific latency limits.
+They cover coalescing, cancellation of the initiating caller, failed connection discard, and quiet fast success.
+An unreached commit has no commit timing or successful result.
+The existing delivery tests retain FULL-before-journal-release evidence.
+
+Producer tests cover the configuration sentinel, classified Git errors, and known or unknown probe codes.
+Forwarding tests use the real JSON encoder at an info threshold.
+They retain allowed fields and exclude raw errors, paths, command arguments, credentials, and invalid UUIDs.
+No browser surface changes in this package.
 
 ## Safety
 
@@ -66,8 +187,10 @@ The summary adds fixed numeric fields for these outcomes, retains existing
 fields, and resets its state on every pass. Internal record keys are not logged.
 Candidate count equals retracked plus classified not-retracked plus unknown
 for known inventory, including mixed-runtime and partially recovered sets.
-No new outcome increments startup progress or changes recovery guards, stops,
-deadlines, persistence, or readiness. The existing below-total warning remains.
+The candidate completion ledger consumes only conclusive outcomes.
+It advances each input candidate at most once and leaves unresolved work incomplete.
+Recovery guards, stops, deadlines, persistence, and readiness retain their existing policy.
+The existing warning remains for a genuinely incomplete pass.
 
 ### Cleanup inspection attribution
 
@@ -146,3 +269,5 @@ readiness state, retry, stop decision, or persisted record.
 - [Recent runtime log remediation](../../../plans/recent-runtime-log-remediation/plan.md)
 - [Startup log corrections](../../../plans/startup-log-corrections/plan.md)
 - [Cleanup preparation failure attribution](../../../plans/cleanup-preparation-attribution/plan.md)
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)
+- [Runtime stall diagnostics](../../../plans/runtime-stall-diagnostics/plan.md)

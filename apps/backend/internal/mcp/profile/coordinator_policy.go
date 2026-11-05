@@ -5,15 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // CoordinatorToolPolicyMetadataKey is the conversation task metadata key that
 // carries the coordinator's bound tool list.
 const CoordinatorToolPolicyMetadataKey = "kandev.coordinator_tool_policy"
 
-const coordinatorToolPolicyVersion = 1
+const (
+	// CoordinatorToolPolicyVersionV1 binds only the core coordinator tools.
+	CoordinatorToolPolicyVersionV1 = 1
+	// CoordinatorToolPolicyVersionV2 adds exact instance-read plugin refs.
+	CoordinatorToolPolicyVersionV2 = 2
 
-// coordinatorToolUniverse is every tool name a coordinator binding may list.
+	// MaxCoordinatorPluginTools bounds the aggregate binding across every
+	// eligible plugin. Manifest validation caps each plugin at 16, so this
+	// must stay above one plugin's share; overflow is trimmed deterministically
+	// when the conversation binding is stamped.
+	MaxCoordinatorPluginTools = 256
+)
+
+// coordinatorToolUniverse is every core tool name a coordinator binding may list.
 var coordinatorToolUniverse = []string{
 	"list_tasks_kandev", "get_task_conversation_kandev",
 	"list_workflows_kandev", "list_workflow_steps_kandev",
@@ -25,21 +37,33 @@ var coordinatorToolUniverse = []string{
 	"list_coordinator_turns_kandev",
 }
 
+// CoordinatorPluginTool is one exact instance-read plugin tool reference in a
+// version-2 binding. InstallationID and PolicyVersion pin the reference to the
+// installation that was eligible when the conversation opened.
+type CoordinatorPluginTool struct {
+	PluginID       string `json:"plugin_id"`
+	LocalName      string `json:"local_name"`
+	InstallationID string `json:"installation_id"`
+	PolicyVersion  string `json:"policy_version"`
+}
+
 // CoordinatorToolPolicy is the tool list bound to one coordinator conversation
 // when it opens. Agent-controlled MCP arguments never supply it.
 type CoordinatorToolPolicy struct {
-	Version            int      `json:"version"`
-	CoordinatorID      string   `json:"coordinator_id"`
-	WorkspaceID        string   `json:"workspace_id"`
-	ConversationTaskID string   `json:"conversation_task_id"`
-	PolicyRevision     int      `json:"policy_revision"`
-	ToolNames          []string `json:"tool_names"`
+	Version            int                     `json:"version"`
+	CoordinatorID      string                  `json:"coordinator_id"`
+	WorkspaceID        string                  `json:"workspace_id"`
+	ConversationTaskID string                  `json:"conversation_task_id"`
+	PolicyRevision     int                     `json:"policy_revision"`
+	ToolNames          []string                `json:"tool_names"`
+	PluginTools        []CoordinatorPluginTool `json:"plugin_tools,omitempty"`
 }
 
 // Validate refuses a binding that is incomplete or names a tool outside the
-// coordinator tool universe.
+// coordinator tool universe. A version-1 binding is readable and grants no
+// plugin tools.
 func (p CoordinatorToolPolicy) Validate() error {
-	if p.Version != coordinatorToolPolicyVersion {
+	if p.Version != CoordinatorToolPolicyVersionV1 && p.Version != CoordinatorToolPolicyVersionV2 {
 		return errors.New("coordinator tool policy version is unsupported")
 	}
 	if p.CoordinatorID == "" || p.WorkspaceID == "" || p.ConversationTaskID == "" {
@@ -58,12 +82,56 @@ func (p CoordinatorToolPolicy) Validate() error {
 		}
 		seen[name] = struct{}{}
 	}
+	if p.Version == CoordinatorToolPolicyVersionV1 {
+		return nil
+	}
+	if len(p.PluginTools) > MaxCoordinatorPluginTools {
+		return errors.New("coordinator tool policy declares too many plugin tools")
+	}
+	pluginSeen := make(map[string]struct{}, len(p.PluginTools))
+	for _, tool := range p.PluginTools {
+		if strings.TrimSpace(tool.PluginID) != tool.PluginID || tool.PluginID == "" ||
+			strings.TrimSpace(tool.LocalName) != tool.LocalName || !managedToolNamePattern.MatchString(tool.LocalName) ||
+			strings.TrimSpace(tool.InstallationID) != tool.InstallationID || tool.InstallationID == "" ||
+			strings.TrimSpace(tool.PolicyVersion) != tool.PolicyVersion || tool.PolicyVersion == "" {
+			return errors.New("coordinator plugin tool reference is incomplete")
+		}
+		key := tool.PluginID + "\x00" + tool.LocalName
+		if _, dup := pluginSeen[key]; dup {
+			return fmt.Errorf("coordinator tool policy duplicates plugin tool %q", tool.LocalName)
+		}
+		pluginSeen[key] = struct{}{}
+	}
 	return nil
 }
 
-// Allows reports whether the bound list names the tool.
+// Allows reports whether the bound list names the core tool.
 func (p CoordinatorToolPolicy) Allows(toolName string) bool {
 	return slices.Contains(p.ToolNames, toolName)
+}
+
+// AllowsPlugin reports whether this version-2 binding carries the exact
+// reference, including the installation and policy version it was pinned to.
+func (p CoordinatorToolPolicy) AllowsPlugin(pluginID, localName, installationID, policyVersion string) bool {
+	if p.Version != CoordinatorToolPolicyVersionV2 {
+		return false
+	}
+	for _, tool := range p.PluginTools {
+		if tool.PluginID == pluginID && tool.LocalName == localName &&
+			tool.InstallationID == installationID && tool.PolicyVersion == policyVersion {
+			return true
+		}
+	}
+	return false
+}
+
+// PluginToolNames returns the bound plugin local names, for discovery filters.
+func (p CoordinatorToolPolicy) PluginToolNames() []string {
+	names := make([]string, 0, len(p.PluginTools))
+	for _, tool := range p.PluginTools {
+		names = append(names, tool.LocalName)
+	}
+	return names
 }
 
 // MarshalCoordinatorToolPolicy returns the canonical JSON stored in task
@@ -100,6 +168,10 @@ func ParseCoordinatorToolPolicyMetadata(value any) (*CoordinatorToolPolicy, erro
 		return nil, err
 	}
 	policy.ToolNames = slices.Clone(policy.ToolNames)
+	if policy.Version == CoordinatorToolPolicyVersionV1 {
+		policy.PluginTools = nil
+	}
+	policy.PluginTools = slices.Clone(policy.PluginTools)
 	return &policy, nil
 }
 

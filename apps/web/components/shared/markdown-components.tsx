@@ -2,6 +2,7 @@
 
 import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
 import type { Options as MarkdownOptions } from "react-markdown";
+import { MarkdownImage } from "./markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
@@ -72,6 +73,7 @@ type MarkdownCodeProps = {
 };
 
 export type MarkdownFileLinkContextValue = {
+  sessionId?: string | null;
   worktreePath?: string | null;
   onOpenFile?: (path: string) => void;
   fileRootAliases?: readonly MarkdownFileRootAlias[];
@@ -198,5 +200,6 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
 export const markdownComponents = {
   code: MarkdownCode,
   a: MarkdownLink,
+  img: MarkdownImage,
   table: ResizableMarkdownTable,
 };

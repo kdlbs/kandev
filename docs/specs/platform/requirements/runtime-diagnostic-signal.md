@@ -28,7 +28,11 @@ The existing [severity contract](expected-runtime-log-severity.md) and [logging 
   A level word inside message content shall not determine severity.
 - **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.3:** Existing console and slog records shall retain their severity.
   Forwarding shall not convert a fatal child record into parent-process termination.
-- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.4:** A recognized agentctl JSON record shall be forwarded using only its `level`, `timestamp`, `caller`, and `msg` envelope fields. Duplicate additional fields shall not invalidate recognition, and additional child fields shall not enter parent logs.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.4:** A recognized agentctl JSON record shall retain its validated envelope and only explicitly allowed, bounded diagnostic context.
+  Credentials, paths, provider output, arbitrary errors, and unknown fields shall remain excluded.
+  Duplicate additional fields shall not invalidate severity recognition.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5:** Safe component, correlation, classification, exit-code, and pressure fields shall survive forwarding under the system design's typed allowlist.
+  Invalid optional context shall be omitted without exposing the original line or changing its recognized severity.
 
 ### REQ-PLATFORM-DIAGNOSTIC-SIGNAL-002: Quiet routine diagnostics
 
@@ -44,6 +48,9 @@ The existing [severity contract](expected-runtime-log-severity.md) and [logging 
   If no supported transport survives, the capability refusal shall remain a warning.
 - **AC-PLATFORM-DIAGNOSTIC-SIGNAL-002.4:** Warning and error records shall not enter a global sampling or suppression policy.
   Explicit debug thresholds, log paths, retention, and diagnostic bundles shall retain their existing contracts.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-002.5:** A delivery-pressure transition to `healthy`, including initialization and recovery, shall use info severity.
+  Pressure, guarded, failed, and unknown transitions shall remain visible at warning severity or higher.
+  This classification shall not change prompt admission, cancellation, journal limits, or replay.
 
 ### REQ-PLATFORM-DIAGNOSTIC-SIGNAL-003: Continuous child log draining
 
@@ -60,6 +67,19 @@ The existing [severity contract](expected-runtime-log-severity.md) and [logging 
 - **AC-PLATFORM-DIAGNOSTIC-SIGNAL-003.4:** Stream EOF and supervised pipe closure shall release the reader.
   The correction shall preserve existing startup cancellation, stop deadlines, exit callbacks, and process-survival policy.
 
+### REQ-PLATFORM-DIAGNOSTIC-SIGNAL-004: Accurate shutdown attribution
+
+**Intent:** Operators can distinguish planned shutdown from unexpected loss of parent liveness.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-004.1:** Planned launcher shutdown shall produce an informational signal-triggered child shutdown without a false parent-death warning.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-004.2:** Unexpected parent-liveness pipe closure shall trigger bounded cleanup and a warning that describes the observed closure.
+  Pipe closure alone shall not assert that the parent process died.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-004.3:** An absent parent monitor shall retain ordinary signal and ownership-shutdown handling.
+  Real parent loss shall retain orphan protection and process-tree cleanup.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-004.4:** Planned shutdown shall preserve existing stop deadlines, forced cleanup, exit notification, reaping, and process-survival behavior.
+
 ## Out of scope
 
 - Changing production log thresholds or globally sampling event and WebSocket records.
@@ -72,3 +92,4 @@ The existing [severity contract](expected-runtime-log-severity.md) and [logging 
 - [System design](../system-design/runtime-diagnostic-signal.md)
 - [Implementation plan](../../../plans/runtime-log-reliability/plan.md)
 - [Child log drain fix plan](../../../plans/agentctl-log-drain/plan.md)
+- [Startup and shutdown diagnostic integrity](../../../plans/startup-shutdown-diagnostic-integrity/plan.md)

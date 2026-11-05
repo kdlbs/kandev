@@ -164,13 +164,16 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 	}
 
 	// 4. Compose effective mcpServers and ownership mapping
-	newMCPServers, newOwnership := composeEffectiveMCPServers(
+	newMCPServers, newOwnership, err := composeEffectiveMCPServers(
 		execution,
 		allowedProfileServers,
 		userOwnedProjectServers,
 		allowedImportCandidates,
 		m.agentMCPHost(execution),
 	)
+	if err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
