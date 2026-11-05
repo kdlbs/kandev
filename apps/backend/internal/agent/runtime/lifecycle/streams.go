@@ -413,7 +413,7 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := sm.streamContext(execution)
-	startupGeneration := execution.startupAttemptSnapshot()
+	startupGeneration, attempt := execution.deliveryStreamStartupSnapshot()
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		if ready != nil {
@@ -444,9 +444,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
 	}
 
-	// Bind this connection to the startup attempt that owns it. Reconnects and
-	// replacement attempts must never complete or cancel this gate.
-	attempt := execution.deliveryStartupSnapshot()
+	// Bind this connection to the startup attempt captured before the replay
+	// RPC. Reconnects and replacement attempts must never complete this gate.
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration, attempt)
 	monitorCtx, monitorCancel := context.WithCancel(ctx)
 	attachment := sm.startDeliveryHealthMonitor(monitorCtx, monitorCancel, execution, client)

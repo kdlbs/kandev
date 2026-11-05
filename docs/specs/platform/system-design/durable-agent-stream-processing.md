@@ -244,9 +244,10 @@ waits that can depend on projected setup events. It does not wait for the whole
 The startup caller can finish before the asynchronous SQL generation commit.
 After native success, its normal context cleanup cannot invalidate committed
 authority. The generation wait remains owned by its captured stream and
-bounded SQL wait. On cancellation, it can make one final bounded authority
-read under the stream context to distinguish a successful commit from missing
-authority.
+bounded SQL wait. Startup-context cancellation is ignored after native success.
+A late event whose budget already ended makes one short bounded probe under the
+connected stream, without extending the native-anchored budget; stream
+cancellation releases the wait.
 
 An initialization error completes all pending results with that cause. Caller
 cancellation, Stop, manager shutdown, and an obsolete startup attempt release

@@ -397,6 +397,11 @@ func TestDeliveryStartupStreamOrdering(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("setup event callback did not run after the generation commit")
 	}
+	select {
+	case event := <-callback:
+		t.Fatalf("unexpected extra agent event %q", event.Type)
+	default:
+	}
 	requireStartupDeliveryRows(t, database, 1, 1, 1)
 	cursor, err := repository.GetAgentDeliveryCursor(ctx, startupStreamID)
 	require.NoError(t, err)

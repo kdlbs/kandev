@@ -90,10 +90,11 @@ pending work when its own initialization fails or stops.
 
 - `TestDeliveryStartupNegotiationBudget`: delay the valid handshake to 35
   seconds under a longer caller deadline.
-- `TestDeliveryStartupNativeBudget`: cover fresh g1 new, a g1 native restore,
-  and an uncommitted first-launch retry. Delay native completion to 35 seconds,
-  then commit matching authority. Before the correction, the existing poll
-  aborts at 30 seconds.
+- `TestDeliveryStartupNativeBudget`: cover the shared event-preparation gate for
+  fresh g1, a g1 native restore, and an uncommitted first-launch retry. Delay
+  native completion to 35 seconds, then commit matching authority. Native
+  `session/new` and `session/load` wiring is covered separately by
+  `TestDeliveryStartupStreamOrdering` and the resumed bootstrap fixture.
 - `TestDeliveryStartupMissingAuthority`: native success does not grant authority.
   The generation commit never arrives, and the bounded wait fails.
 - `TestDeliveryStartupCancellationAndReplacement`: cover initialization error,
@@ -113,8 +114,8 @@ pending work when its own initialization fails or stops.
   control response reaches the initializer and preserves the returned native ID.
 - Keep receipts, projections, event callbacks, and ACKs at zero until the
   generation transaction commits. Then allow normal ordered processing and ACK.
-- Capture outbound actions. Reject prompt dispatch, tool replay, and fabricated
-  terminal outcomes in the no-prompt fixture.
+- Capture outbound actions. The no-prompt fixture rejects prompt dispatch and
+  asserts that no callback arrives beyond the real setup frame.
 - Join all goroutines during cleanup. Do not use wall-clock sleeps to order
   these assertions or add public test-only timeout configuration.
 
@@ -126,8 +127,8 @@ production wiring. An isolated helper test is insufficient by itself.
 Run this block from the repository root after implementation:
 
 ```bash
-(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/lifecycle -run '^(TestDeliveryStartup|TestDurableRetention(Bootstrap|Negotiation)|TestResumedDeliveryBootstrap|TestDeliveryPreflight|TestNativeResume|TestSilentRestoreDelivery)')
-(cd apps/backend && go test -trimpath -race -count=1 ./internal/agent/runtime/agentctl -run '^(TestStreamUpdates|TestSendStreamRequest|TestCleanupPending|TestResolvePending)')
+(cd apps/backend && go test -trimpath -tags fts5 -race -count=1 ./internal/agent/runtime/lifecycle -run '^(TestDeliveryStartup|TestDurableRetention(Bootstrap|Negotiation)|TestResumedDeliveryBootstrap|TestDeliveryPreflight|TestNativeResume|TestSilentRestoreDelivery)')
+(cd apps/backend && go test -trimpath -tags fts5 -race -count=1 ./internal/agent/runtime/agentctl -run '^(TestStreamUpdates|TestSendStreamRequest|TestCleanupPending|TestResolvePending)')
 bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/delivery_bootstrap.go apps/backend/internal/agent/runtime/lifecycle/durable_delivery_stream.go apps/backend/internal/agent/runtime/lifecycle/session.go apps/backend/internal/agent/runtime/lifecycle/streams.go apps/backend/internal/agent/runtime/lifecycle/stream_event_processor.go apps/backend/internal/agent/runtime/lifecycle/delivery_startup_deadline_test.go apps/backend/internal/agent/runtime/lifecycle/delivery_startup_stream_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
@@ -233,9 +234,12 @@ Completed on 5 November 2026.
   returned native ID and publishing `AgentACPSessionCreated`. Configuration
   waits and prompt dispatch no longer own that result.
 - `streams.go`, `stream_event_processor.go`, and `durable_delivery_stream.go`
-  carry the captured attempt into every prepared event. Replays and direct
-  callers keep their existing entry points. `types.go` replaces the private
-  negotiation pointer with the startup-attempt pointer.
+  carry the captured attempt into every prepared event. `connectUpdatesStream`
+  captures the attempt together with its startup generation before the replay
+  RPC. Replays and direct callers keep their existing entry points. `types.go`
+  replaces the private negotiation pointer with the startup-attempt pointer.
+- A successful attempt remains attached to the execution so queued or replayed
+  setup events keep its native completion anchor. Failed attempts are cleared.
 - `delivery_startup_deadline_test.go` covers the 35-second virtual-time
   negotiation and native budgets, missing authority, cancellation, replacement,
   startup cleanup, an authority commit after the budget, bounded initial and
@@ -247,7 +251,10 @@ Completed on 5 November 2026.
   and observes the resulting receipt, cursor, callback, and ACK.
 - The initial authority read now shares the native-anchored deadline; an
   already-expired attempt uses a separate short probe instead of the stream
-  lifetime.
+  lifetime. Releasing a successful attempt retains its anchor, so a late event
+  cannot restart the budget.
+- The stream fixture rejects prompt dispatch and asserts that only the real
+  setup frame reaches the callback.
 - `clearDeliveryBootstrapForAttempt` now runs its ownership check and flag
   mutation as one `withStartupAttempt` lease, so a successor cannot advance
   between them and inherit a cleared bootstrap.

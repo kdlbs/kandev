@@ -211,6 +211,42 @@ func TestDeliveryStartupAuthorityQueryIsBounded(t *testing.T) {
 		})
 	})
 
+	t.Run("released successful attempt keeps its native anchor", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			execution, attempt := deliveryStartupTestExecution(t)
+			execution.DeliveryMode = DurableDeliveryV1
+			attempt.finishNegotiation(nil)
+			attempt.finishNative(nil)
+			execution.releaseDeliveryStartupAttempt(attempt)
+			if execution.deliveryStartupSnapshot() != attempt {
+				t.Fatal("successful attempt anchor was cleared on release")
+			}
+			repository := &blockingAuthorityRepository{
+				retentionBootstrapRepository: retentionBootstrapRepository{firstRead: make(chan struct{})},
+				readStarted:                  make(chan time.Time, 1),
+			}
+			manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+			time.Sleep(20 * time.Second)
+			result := deliveryStartupTestPrepare(t, manager, context.Background(), execution, repository)
+			select {
+			case deadline := <-repository.readStarted:
+				remaining := time.Until(deadline)
+				if remaining <= 8*time.Second || remaining > 11*time.Second {
+					t.Fatalf("released attempt deadline is %v away, want the original native anchor", remaining)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("released attempt did not query authority")
+			}
+			time.Sleep(11 * time.Second)
+			if err := <-result; !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("released attempt budget = %v", err)
+			}
+			if repository.receipts.Load() != 0 || repository.projections.Load() != 0 {
+				t.Fatal("released attempt budget admitted delivery evidence")
+			}
+		})
+	})
+
 	t.Run("expired attempt probe has its own bound", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			execution, _ := retentionBootstrapOwner()
@@ -256,7 +292,7 @@ func TestDeliveryStartupCancellationAndReplacement(t *testing.T) {
 			manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 			result := deliveryStartupTestPrepare(t, manager, context.Background(), execution, repository)
 			attempt.finishNegotiation(nil)
-			time.Sleep(time.Second)
+			synctest.Wait()
 			attempt.fail(errDeliveryStartupInitialization)
 			if err := <-result; !errors.Is(err, errDeliveryStartupInitialization) {
 				t.Fatalf("initialization failure surfaced as %v", err)
@@ -296,7 +332,7 @@ func TestDeliveryStartupCancellationAndReplacement(t *testing.T) {
 			manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 			streamCtx, cancel := context.WithCancel(context.Background())
 			result := deliveryStartupTestPrepare(t, manager, streamCtx, execution, repository)
-			time.Sleep(time.Second)
+			synctest.Wait()
 			cancel()
 			if err := <-result; !errors.Is(err, context.Canceled) {
 				t.Fatalf("stream cancellation surfaced as %v", err)
@@ -316,7 +352,7 @@ func TestDeliveryStartupCancellationAndReplacement(t *testing.T) {
 			stopCh := make(chan struct{})
 			manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, stopCh)
 			result := deliveryStartupTestPrepare(t, manager, manager.streamContext(execution), execution, repository)
-			time.Sleep(time.Second)
+			synctest.Wait()
 			close(stopCh)
 			if err := <-result; !errors.Is(err, context.Canceled) {
 				t.Fatalf("manager shutdown surfaced as %v", err)

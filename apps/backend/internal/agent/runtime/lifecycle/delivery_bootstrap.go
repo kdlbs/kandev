@@ -47,13 +47,27 @@ func (e *AgentExecution) beginDeliveryStartupAttempt(ctx context.Context) *deliv
 	return attempt
 }
 
-// releaseDeliveryStartupAttempt clears only the captured attempt. A replacement
-// startup keeps its own gate and late completion cannot disturb it.
+// releaseDeliveryStartupAttempt clears a failed attempt. A successful attempt
+// stays visible so queued or replayed setup events keep its native completion
+// anchor until SQL authority clears bootstrap admission. A replacement startup
+// still stores its own attempt and late completion cannot disturb it.
 func (e *AgentExecution) releaseDeliveryStartupAttempt(attempt *deliveryStartupAttempt) {
-	if e == nil || attempt == nil {
+	if e == nil || attempt == nil || attempt.nativeSucceeded() {
 		return
 	}
 	e.deliveryStartup.CompareAndSwap(attempt, nil)
+}
+
+func (a *deliveryStartupAttempt) nativeSucceeded() bool {
+	if a == nil {
+		return false
+	}
+	select {
+	case <-a.nativeDone:
+		return a.nativeErr == nil
+	default:
+		return false
+	}
 }
 
 func (e *AgentExecution) deliveryStartupSnapshot() *deliveryStartupAttempt {
@@ -61,6 +75,17 @@ func (e *AgentExecution) deliveryStartupSnapshot() *deliveryStartupAttempt {
 		return nil
 	}
 	return e.deliveryStartup.Load()
+}
+
+// deliveryStreamStartupSnapshot returns one consistent startup generation and
+// attempt pair for a new connection. A replacement startup cannot split the
+// pair across the two reads.
+func (e *AgentExecution) deliveryStreamStartupSnapshot() (uint64, *deliveryStartupAttempt) {
+	attempt := e.deliveryStartupSnapshot()
+	if attempt != nil {
+		return attempt.startupGeneration, attempt
+	}
+	return e.startupAttemptSnapshot(), nil
 }
 
 func (a *deliveryStartupAttempt) finishNegotiation(err error) {

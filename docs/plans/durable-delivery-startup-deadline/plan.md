@@ -285,12 +285,16 @@ Implementation and permanent regression results passed on 5 November 2026:
   processing stays responsive, and receipts, projections, callbacks, and ACKs
   remain at zero until the generation commit.
 - `TestDeliveryStartupAuthorityQueryIsBounded` proves the initial SQL read
-  carries the native-anchored deadline and that an already-expired attempt gets
-  a separately bounded authority probe.
+  carries the native-anchored deadline, that a released successful attempt
+  keeps that anchor for late events, and that an already-expired attempt gets a
+  separately bounded authority probe.
 - The bootstrap reset runs under the execution's startup ownership lease.
   `TestDeliveryStartupCancellationAndReplacement` advances a successor during
   the old reset's ownership interval and proves the replacement keeps its own
   native and SQL bootstrap wait.
+- `connectUpdatesStream` captures the startup generation and attempt as one pair
+  before the replay RPC, and the stream fixture rejects prompt dispatch and
+  unexpected extra callbacks.
 - Temporary reverts reproduced both the original 30-second failure and the
   unbounded-query and check-then-mutate review defects before the corrections.
 - Focused `-race` lifecycle and agentctl suites passed, the full lifecycle
