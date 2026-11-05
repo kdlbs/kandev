@@ -256,7 +256,8 @@ invoking shell sets `NODE_ENV=development`. This serves production React, which
 omits React development warnings and default performance-track
 instrumentation. Kandev runtime diagnostics are independent of that choice:
 `make start-debug` still enables backend debug file logging, pprof, and ACP
-frame logging. Use `make dev` when you need development React and hot reload.
+frame logging. Use `make dev` with `NODE_ENV` unset or set to `development` when
+you need development React and hot reload.
 
 ### OS service commands
 

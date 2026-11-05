@@ -111,6 +111,8 @@ The abbreviated criteria above belong to `AC-PLATFORM-SOURCE-FRONTEND-BUILD-MODE
 `apps/web/scripts/debug-start-production.test.mjs` uses Node's test runner and the installed Playwright Chromium browser.
 Its shared observation and process-cleanup helpers live under `apps/web/scripts/lib/`.
 It covers `.1`, `.2`, and `.6` through the actual `make start-debug` path.
+The check is excluded from Vitest and exposed as `pnpm --filter @kandev/web test:debug-start`.
+It remains a dedicated manual target because it builds the backend and launches Chromium; it is not part of the default unit-test or CI job.
 This source-build integration check does not use the standard E2E fixture, which launches a different backend path.
 It owns disposable data and processes and runs headless.
 

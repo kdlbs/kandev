@@ -467,7 +467,8 @@ frontend as production React regardless of an inherited `NODE_ENV` value.
 Runtime diagnostics do not depend on that build mode, so `make start-debug`
 keeps debug logging and pprof while React development warnings and default
 performance-track instrumentation stay out of the bundle. Use `make dev` for
-development React. Debug mode is high risk. It
+development React when `NODE_ENV` is unset or set to `development`. Debug mode
+is high risk. It
 enables local diagnostic surfaces and implies
 `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
 not explicitly locked by the environment. ACP JSONL frames include complete

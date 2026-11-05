@@ -91,7 +91,7 @@ Record these measurements separately:
 - `performance.getEntriesByType("measure").length` and the dominant entry names.
 - Browser JavaScript heap usage from Chromium diagnostics.
 - Heap-snapshot `PerformanceMeasure` counts and `UserTiming` retained bytes, when available.
-- Renderer process memory in bytes from an identified renderer process, when available.
+- Renderer process memory in bytes summed across identified renderer processes, when available.
 
 Browser heap usage and renderer process memory are different measurements.
 If the automation cannot obtain a metric, record it as unavailable.

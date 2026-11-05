@@ -29,6 +29,10 @@ The check asserts the launcher's resolved database path from its startup output 
 owned SQLite file before any API write. After the task workload it re-reads the outside sentinel
 and fails if the hostile database changed.
 
+The check is excluded from Vitest and exposed as `pnpm --filter @kandev/web test:debug-start`.
+It remains a dedicated manual target because it builds the backend and launches Chromium; it is
+not part of the default unit-test or CI job.
+
 The browser installs the React DevTools observation hook before application scripts execute and
 requires an injected `react-dom` renderer. The check also fetches every JavaScript asset referenced
 by the served shell, compares each SHA-256 digest with the fresh build, and scans the served bytes
@@ -52,8 +56,12 @@ Commands:
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && NODE_ENV=development node --test scripts/debug-start-production.test.mjs)
 (cd apps/web && NODE_ENV=development KANDEV_DEBUG_START_SOAK_MINUTES=35 node --test scripts/debug-start-production.test.mjs)
+baseline_dir="$(mktemp -d "${TMPDIR:-/tmp}/kandev-5050-baseline.XXXXXX")"
+git worktree add --detach "$baseline_dir" 81cb56a3550f7fb7fe5c5b4a36a2305882984500
+(cd "$baseline_dir/apps" && pnpm install --frozen-lockfile)
 (cd apps/web && NODE_ENV=development KANDEV_DEBUG_START_REPO="$baseline_dir" KANDEV_DEBUG_START_EXPECT_REACT=development node --test scripts/debug-start-production.test.mjs)
 (cd apps/web && NODE_ENV=development KANDEV_DEBUG_START_REPO="$baseline_dir" KANDEV_DEBUG_START_EXPECT_REACT=development KANDEV_DEBUG_START_SOAK_MINUTES=35 node --test scripts/debug-start-production.test.mjs)
+git worktree remove --force "$baseline_dir"
 ```
 
 ## Short smoke observations
@@ -113,7 +121,8 @@ recorded without expanding this patch.
 ## Unavailable measurements
 
 - Heap-snapshot `PerformanceMeasure` counts and retained `UserTiming` bytes were not collected.
-  The check records unavailable metrics explicitly rather than inferring them from live heap usage.
+  The report includes explicit unavailable entries for both and does not infer them from live
+  heap usage.
 - The reporting macOS and Chrome environment is unavailable. Results apply to the Linux host above.
 - Native Windows `cmd.exe` execution was not observed. The native recipe is covered by dry-run
   generation assertions, not by a Windows launcher run.

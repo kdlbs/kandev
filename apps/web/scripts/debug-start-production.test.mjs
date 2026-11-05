@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   POSIX,
   assertOwnedDatabase,
+  buildObservationReport,
   collectObservation,
   collectOwnedBackendPids,
   createHostileInputs,
@@ -26,7 +27,6 @@ import {
   readFileTail,
   readInstalledReactVersion,
   repo,
-  soakMinutes,
   spawnDebugSource,
   startTimeoutMs,
   stopLauncher,
@@ -99,18 +99,20 @@ test(
   "cleanup drains an owned group after an early startup failure",
   { skip: POSIX ? false : "POSIX process groups are required" },
   async () => {
-    const startLog = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), "kandev-5050-stop-")),
-      "start.log",
-    );
+    const stopDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-5050-stop-"));
+    const startLog = path.join(stopDir, "start.log");
     const child = spawn("bash", ["-c", "sleep 300 & exit 1"], {
       detached: true,
       stdio: "ignore",
     });
-    await new Promise((resolve) => child.once("exit", resolve));
-    await stopLauncher(child, startLog);
-    assert.equal(processGroupAlive(child.pid), false, "the descendant group is drained");
-    fs.rmSync(path.dirname(startLog), { recursive: true, force: true });
+    try {
+      await new Promise((resolve) => child.once("exit", resolve));
+      await stopLauncher(child, startLog);
+      assert.equal(processGroupAlive(child.pid), false, "the descendant group is drained");
+    } finally {
+      await stopLauncher(child, startLog).catch(() => {});
+      fs.rmSync(stopDir, { recursive: true, force: true });
+    }
   },
 );
 
@@ -118,17 +120,19 @@ test(
   "cleanup is idempotent for repeated stop requests",
   { skip: POSIX ? false : "POSIX process groups are required" },
   async () => {
-    const startLog = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), "kandev-5050-stop-")),
-      "start.log",
-    );
+    const stopDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-5050-stop-"));
+    const startLog = path.join(stopDir, "start.log");
     const child = spawn("bash", ["-c", "sleep 300"], {
       detached: true,
       stdio: "ignore",
     });
-    await Promise.all([stopLauncher(child, startLog), stopLauncher(child, startLog)]);
-    assert.equal(processGroupAlive(child.pid), false, "repeated cleanup drains the group");
-    fs.rmSync(path.dirname(startLog), { recursive: true, force: true });
+    try {
+      await Promise.all([stopLauncher(child, startLog), stopLauncher(child, startLog)]);
+      assert.equal(processGroupAlive(child.pid), false, "repeated cleanup drains the group");
+    } finally {
+      await stopLauncher(child, startLog).catch(() => {});
+      fs.rmSync(stopDir, { recursive: true, force: true });
+    }
   },
 );
 
@@ -199,24 +203,19 @@ test(
         sentinelContents,
       });
 
-      const report = {
+      const report = buildObservationReport({
         expectedReact,
         repo,
-        soakMinutes,
         reactVersion,
-        browserVersion: browser.version(),
-        nodeVersion: process.version,
-        platform: `${process.platform} ${os.release()}`,
+        browser,
         configPath,
         dbPath,
-        servedAssetCount: observation.assets.assetCount,
-        developmentSentinelAssets: observation.assets.sentinelAssets,
+        assets: observation.assets,
         kandevDebugMessage: observation.kandevDebugMessage,
         documentLoads: observation.documentLoads,
-        workloadRounds: observation.workloadRounds.length,
-        firstWorkload: observation.workloadRounds[0],
+        workloadRounds: observation.workloadRounds,
         samples: observation.samples,
-      };
+      });
       console.log(`KANDEV_DEBUG_START_REPORT ${JSON.stringify(report)}`);
 
       const first = observation.samples[0];

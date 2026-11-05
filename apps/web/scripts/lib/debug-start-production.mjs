@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 import { delay, repo } from "./debug-start-production-process.mjs";
@@ -723,9 +724,14 @@ export async function createObservedBrowser(baseUrl, reactVersion) {
     headless: true,
     args: ["--enable-precise-memory-info"],
   });
-  const { context, page, debugMessages, pageErrors } = await openObservedPage(browser, baseUrl);
-  await assertReactRuntime(page, reactVersion);
-  return { browser, context, page, debugMessages, pageErrors };
+  try {
+    const { context, page, debugMessages, pageErrors } = await openObservedPage(browser, baseUrl);
+    await assertReactRuntime(page, reactVersion);
+    return { browser, context, page, debugMessages, pageErrors };
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -749,11 +755,6 @@ export async function collectObservation(input) {
     /^\[[a-z0-9-]+:[a-z0-9-]+\]/.test(message),
   );
   assert.ok(kandevDebugMessage, "a namespaced Kandev debug message reached the browser console");
-  assert.deepEqual(
-    input.pageErrors,
-    [],
-    `the page raised no uncaught errors: ${input.pageErrors.join(" | ")}`,
-  );
   assert.equal(
     fs.readFileSync(input.sentinelDb, "utf8"),
     input.sentinelContents,
@@ -770,6 +771,45 @@ export async function collectObservation(input) {
   });
   await browserCdp.detach();
   assert.equal(documentLoads, 0, "the observation workload does not reload the document");
+  assert.deepEqual(
+    input.pageErrors,
+    [],
+    `the page raised no uncaught errors: ${input.pageErrors.join(" | ")}`,
+  );
 
   return { assets, kandevDebugMessage, samples, workloadRounds, documentLoads };
+}
+
+/**
+ * Build the machine-readable observation report.
+ *
+ * @param {{expectedReact: string, repo: string, reactVersion: string, browser: import("@playwright/test").Browser, configPath: string, dbPath: string, assets: {assetCount: number, sentinelAssets: string[]}, kandevDebugMessage: string | undefined, documentLoads: number, workloadRounds: Array<Record<string, unknown>>, samples: Array<Record<string, unknown>>}} input
+ */
+export function buildObservationReport(input) {
+  return {
+    expectedReact: input.expectedReact,
+    repo: input.repo,
+    soakMinutes,
+    reactVersion: input.reactVersion,
+    browserVersion: input.browser.version(),
+    nodeVersion: process.version,
+    platform: `${process.platform} ${os.release()}`,
+    configPath: input.configPath,
+    dbPath: input.dbPath,
+    servedAssetCount: input.assets.assetCount,
+    developmentSentinelAssets: input.assets.sentinelAssets,
+    kandevDebugMessage: input.kandevDebugMessage,
+    documentLoads: input.documentLoads,
+    workloadRounds: input.workloadRounds.length,
+    firstWorkload: input.workloadRounds[0],
+    heapSnapshotPerformanceMeasures: {
+      available: false,
+      reason: "not collected by this integration check",
+    },
+    userTimingRetainedBytes: {
+      available: false,
+      reason: "not collected by this integration check",
+    },
+    samples: input.samples,
+  };
 }
