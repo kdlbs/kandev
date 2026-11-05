@@ -141,10 +141,14 @@ func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID str
 }
 
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
-	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
+	execution, err := h.resolveEnvironmentTerminalExecution(c.Request.Context(), environmentID, terminalID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
 			h.closeMissingEnvironmentTerminal(c)
+			return
+		}
+		if errors.Is(err, terminalservice.ErrTaskMismatch) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "terminal not found"})
 			return
 		}
 		h.logger.Warn("environment terminal execution not ready",

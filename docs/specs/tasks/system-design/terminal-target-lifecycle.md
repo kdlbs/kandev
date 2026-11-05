@@ -37,6 +37,12 @@ Other lookup and readiness failures keep their existing 503 and retry behavior.
 Authentication and environment access checks still precede this path. No
 persistence schema, environment identity, or recovery-block policy changes.
 
+For a managed ordinary terminal, the gateway reads its persisted task owner
+before selecting an execution. Lifecycle validates access to that task and
+environment, resolves the task's current primary session, and rechecks the
+binding after obtaining its workspace execution. Reading the owner does not
+consume a one-shot shell command. Unmanaged terminal routing is unchanged.
+
 ## Browser state
 
 `ws-reconnect` stops only on the exact missing-environment close code/reason or

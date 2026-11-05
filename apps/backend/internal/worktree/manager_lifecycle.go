@@ -386,7 +386,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	reuseSlug := requestBranchIdentitySlug(req)
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
-		if err == nil && existing != nil {
+		// A replacement keeps the session identity while selecting a fresh
+		// environment. Preserve its former checkout instead of reusing it.
+		if err == nil && existing != nil && (req.TaskEnvironmentID == "" || existing.TaskEnvironmentID == req.TaskEnvironmentID) {
 			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
@@ -422,7 +424,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	// If WorktreeID is provided, try to reuse that specific worktree (session resumption)
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
-		if err == nil && existing != nil {
+		if err == nil && existing != nil && (req.TaskEnvironmentID == "" || existing.TaskEnvironmentID == req.TaskEnvironmentID) {
 			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
 			if err != nil {
 				return nil, true, err
