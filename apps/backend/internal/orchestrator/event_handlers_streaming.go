@@ -1188,7 +1188,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
