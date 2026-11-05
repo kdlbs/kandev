@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -284,6 +285,10 @@ func retryAfter(raw string, now time.Time) (time.Time, RetrySource) {
 }
 
 func resourceForEndpoint(endpoint string) Resource {
+	if parsed, err := url.Parse(endpoint); err == nil {
+		endpoint = parsed.Path
+	}
+	endpoint = strings.TrimPrefix(endpoint, "/api/v3")
 	switch {
 	case strings.HasPrefix(endpoint, "/graphql"):
 		return ResourceGraphQL

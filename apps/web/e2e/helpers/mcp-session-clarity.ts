@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import { waitForSessionDone } from "./session";
@@ -28,17 +28,32 @@ export async function checkMCPSessionClarity({
   if (!task.session_id) throw new Error("Missing clarity test session");
   await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for clarity session");
   const url = `**/api/v1/task-sessions/${task.session_id}/mcp-selections*`;
-  await page.route(url, async (route) => {
-    if (route.request().method() !== "GET") return route.continue();
-    const response = await route.fetch();
-    const body = await response.json();
-    body.mcp_state = {
-      desired_revision: 3,
-      applied_revision: 1,
-      apply_state: "deferred_restart",
-    };
-    await route.fulfill({ response, json: body });
-  });
+  const activeRoutes = new Set<Promise<void>>();
+  const handler = async (route: Route) => {
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    activeRoutes.add(finished);
+    try {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const body = await response.json();
+      body.mcp_state = {
+        desired_revision: 3,
+        applied_revision: 1,
+        apply_state: "deferred_restart",
+      };
+      await route.fulfill({ response, json: body });
+    } finally {
+      activeRoutes.delete(finished);
+      finish();
+    }
+  };
+  await page.route(url, handler);
   try {
     await page.goto(`/t/${task.id}`);
     await new SessionPage(page).waitForLoad();
@@ -57,6 +72,8 @@ export async function checkMCPSessionClarity({
     await openMCPComposerCustomization(page);
     await expect(surface).toContainText("Additional servers");
   } finally {
-    await page.unroute(url);
+    // Removing an active route continues its request before our callback can fulfill it.
+    while (activeRoutes.size > 0) await Promise.all([...activeRoutes]);
+    await page.unroute(url, handler);
   }
 }

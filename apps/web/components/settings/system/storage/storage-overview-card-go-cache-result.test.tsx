@@ -38,8 +38,8 @@ describe("StorageOverviewCard Go-cache result", () => {
 
     fireEvent.click(screen.getByTestId("storage-resource-go-cache-trigger"));
     const result = screen.getByTestId("storage-go-cache-inline-result");
-    expect(result.textContent).toContain("2 GB removed");
-    expect(result.textContent).toContain("The remaining cache size is unknown.");
+    expect(result.textContent).toContain("Removed: 2 GB");
+    expect(result.textContent).toContain("Remaining: unknown");
     expect(result.textContent).toContain("Cleanup was partial.");
     expect(result.textContent).toContain(
       "Go cache cleanup during active tasks was enabled for this run.",

@@ -75,6 +75,7 @@ function installIntersectionObserver() {
     readonly root: Element | Document | null = null;
     readonly rootMargin = "0px";
     readonly thresholds: readonly number[] = [];
+    readonly scrollMargin = "0px";
     private readonly record: ObserverRecord;
 
     constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
@@ -268,6 +269,33 @@ describe("ReviewDiffList auto-mark", () => {
     fireEvent.wheel(scrollRoot);
     firePassedTop(firstAutoMarkObserver!, firstAutoMarkObserver!.targets[0]);
     expect(onToggleReviewed).toHaveBeenCalledWith("a.ts", true);
+  });
+});
+
+describe("ReviewDiffList touch input", () => {
+  function contact(target: Element, pointerType: string) {
+    const event = new Event("pointerdown", { bubbles: true });
+    Object.defineProperty(event, "pointerType", { value: pointerType });
+    fireEvent(target, event);
+  }
+
+  it("marks a touch scroll from diff content without a touchmove event", () => {
+    const view = renderAutoMarkList();
+    firePosition(activeAutoMarkObserver(), false, 0);
+    contact(view.getByText("a.ts"), "touch");
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
+    firePosition(activeAutoMarkObserver(), true, 200);
+    expect(view.onToggleReviewed).toHaveBeenCalledExactlyOnceWith("a.ts", true);
+  });
+
+  it("keeps mouse and pen clicks inside diff content suppressed", () => {
+    const view = renderAutoMarkList();
+    for (const pointerType of ["mouse", "pen"]) {
+      firePosition(activeAutoMarkObserver(), false, 0);
+      contact(view.getByText("a.ts"), pointerType);
+      firePosition(activeAutoMarkObserver(), true, 200);
+    }
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
   });
 });
 

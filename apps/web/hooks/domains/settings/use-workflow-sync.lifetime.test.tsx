@@ -571,3 +571,7 @@ describe("current mutation outcomes", () => {
     expect(hook.result.current.saving).toBe(false);
   });
 });
+
+vi.mock("@/hooks/domains/github/use-github-status", () => ({
+  useGitHubStatus: () => ({ status: null }),
+}));

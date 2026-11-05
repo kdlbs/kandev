@@ -27,7 +27,7 @@ async function expectMobileModelSettings(page: Page, capture: PrAssetCapture) {
 }
 
 async function editRuntimeDraft(page: Page): Promise<string> {
-  const selector = page.getByRole("button", { name: "Profile start model settings" });
+  const selector = page.getByTestId("model-config-trigger");
   await expect(selector).toHaveText("Mock Fast");
   const selectedBefore = (await selector.textContent()) ?? "";
   await page.getByTestId("env-var-row-0").locator("input").nth(1).fill("mobile-runtime-draft");
@@ -206,7 +206,7 @@ test.describe("Mobile profile capability discovery", () => {
 
     try {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+      const selector = testPage.getByTestId("model-config-trigger");
       await expect(selector).toBeVisible({ timeout: 15_000 });
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
         "data-status",
@@ -253,7 +253,7 @@ test.describe("Mobile profile capability discovery", () => {
 
     try {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-      const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+      const selector = testPage.getByTestId("model-config-trigger");
       await expect(selector).toBeVisible({ timeout: 15_000 });
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
         "data-status",
@@ -324,6 +324,7 @@ test.describe("Mobile profile capability discovery", () => {
       );
       expect(probeRequest?.body.profile_id).toBe(profile.id);
       expect(probeRequest?.body.launch_settings).toEqual({
+        mode: "",
         env_vars: [
           { key: "MOCK_AGENT_PROFILE_CATALOG", value: "mobile-draft" },
           { key: "MOCK_AGENT_PROFILE_EVIDENCE_FILE", value: evidencePath },
@@ -336,6 +337,7 @@ test.describe("Mobile profile capability discovery", () => {
           },
         ],
         command_prefix: commandPrefix,
+        copilot_selected_plugins: [],
       });
       await expectWrapperRetry(
         testPage,

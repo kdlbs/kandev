@@ -306,6 +306,7 @@ test.describe("Profile capability discovery", () => {
       );
       expect(draftProbe?.body.profile_id).toBe(alpha.profile.id);
       expect(draftProbe?.body.launch_settings).toEqual({
+        mode: "",
         env_vars: [
           { key: "MOCK_AGENT_PROFILE_CATALOG", value: "draft-env" },
           { key: "MOCK_AGENT_PROFILE_EVIDENCE_FILE", value: alpha.evidencePath },
@@ -318,6 +319,7 @@ test.describe("Profile capability discovery", () => {
           },
         ],
         command_prefix: alpha.commandPrefix,
+        copilot_selected_plugins: [],
       });
       expect(
         requests.some(

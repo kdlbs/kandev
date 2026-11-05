@@ -30,6 +30,11 @@ type PermissionRequestHandler func(ctx context.Context, req *types.PermissionReq
 // cancellation semantics, so it takes no context.
 type CursorTaskHandler func(params json.RawMessage)
 
+// ExtensionNotificationHandler receives inbound ACP extension notifications
+// (methods beginning with "_"). Notifications carry no response, so it takes
+// no context and returns nothing.
+type ExtensionNotificationHandler func(method string, params json.RawMessage)
+
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
 	logger        *zap.Logger
@@ -40,6 +45,7 @@ type Client struct {
 	updateHandler     UpdateHandler
 	permissionHandler PermissionRequestHandler
 	cursorTaskHandler CursorTaskHandler
+	extensionHandler  ExtensionNotificationHandler
 }
 
 // ClientOption configures a Client
@@ -77,6 +83,13 @@ func WithPermissionHandler(h PermissionRequestHandler) ClientOption {
 func WithCursorTaskHandler(h CursorTaskHandler) ClientOption {
 	return func(c *Client) {
 		c.cursorTaskHandler = h
+	}
+}
+
+// WithExtensionNotificationHandler sets the handler for inbound ACP extension notifications.
+func WithExtensionNotificationHandler(h ExtensionNotificationHandler) ClientOption {
+	return func(c *Client) {
+		c.extensionHandler = h
 	}
 }
 
@@ -325,6 +338,19 @@ func (c *Client) HandleExtensionMethod(_ context.Context, method string, params 
 }
 
 const cursorTaskMethod = "cursor/task"
+
+// HandleExtensionNotification forwards inbound ACP extension notifications to
+// the registered handler. Without a handler they are ignored, as ACP requires
+// for unknown extension notifications.
+func (c *Client) HandleExtensionNotification(_ context.Context, method string, params json.RawMessage) error {
+	c.mu.RLock()
+	handler := c.extensionHandler
+	c.mu.RUnlock()
+	if handler != nil {
+		handler(method, params)
+	}
+	return nil
+}
 
 // resolvePath resolves a file path, making relative paths relative to the workspace root.
 // It validates that the resolved path stays within the workspace root to prevent path traversal.

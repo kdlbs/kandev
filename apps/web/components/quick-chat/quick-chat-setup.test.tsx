@@ -185,6 +185,11 @@ const props = {
   configurationStarting: false,
   configurationError: null,
   quickChatError: null,
+  pendingCreation: null,
+  checkingCreation: false,
+  onCheckCreation: vi.fn().mockResolvedValue(undefined),
+  onRetryCreation: vi.fn().mockResolvedValue(false),
+  onDeleteCreation: vi.fn().mockResolvedValue(undefined),
   draft: initialDraft,
   onDraftChange: vi.fn(),
   onStartQuickChat: vi.fn().mockResolvedValue(true),
@@ -220,118 +225,212 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("QuickChatSetup", () => {
-  it("publishes the initial attachment list once while retaining draft updates", async () => {
-    render(<QuickChatSetupHarness />);
+it("publishes the initial attachment list once while retaining draft updates", async () => {
+  render(<QuickChatSetupHarness />);
 
-    await waitFor(() => expect(props.onDraftChange).toHaveBeenCalledWith({ attachments: [] }));
-    expect(props.onDraftChange).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(props.onDraftChange).toHaveBeenCalledWith({ attachments: [] }));
+  expect(props.onDraftChange).toHaveBeenCalledTimes(1);
+});
+
+it("shows the opening prompt and configuration choice", () => {
+  render(<QuickChatSetupHarness />);
+
+  expect(screen.getByText(/idea, question, or codebase/i)).toBeTruthy();
+  fireEvent.click(screen.getByRole("switch", { name: "Configuration chat" }));
+  expect(props.onKindChange).toHaveBeenCalledWith("config");
+});
+
+it("hides configuration mode when a configuration session already exists", () => {
+  render(<QuickChatSetupHarness overrides={{ canCreateConfigurationChat: false }} />);
+  expect(screen.queryByRole("switch", { name: "Configuration chat" })).toBeNull();
+});
+
+it("shows Send in the composer and waits for a prompt before starting", () => {
+  render(<QuickChatSetupHarness />);
+
+  const send = screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement;
+  expect(send.disabled).toBe(true);
+  fireEvent.change(screen.getByTestId(DESCRIPTION_TEST_ID), {
+    target: { value: PROMPT_MESSAGE },
   });
+  expect(send.disabled).toBe(false);
+  fireEvent.click(send);
 
-  it("shows the opening prompt and configuration choice", () => {
-    render(<QuickChatSetupHarness />);
+  expect(props.onStartQuickChat).toHaveBeenCalledWith(
+    AGENT_A_ID,
+    [],
+    expect.objectContaining({ message: PROMPT_MESSAGE, clientMessageId: expect.any(String) }),
+    { message: PROMPT_MESSAGE, attachments: [] },
+  );
+});
 
-    expect(screen.getByText(/idea, question, or codebase/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: "Configuration chat" }));
-    expect(props.onKindChange).toHaveBeenCalledWith("config");
-  });
+it("uses the configured chat submit key and keeps modified or composing Enter in the draft", async () => {
+  chatSubmitKey = "cmd_enter";
+  render(<QuickChatSetupHarness />);
+  const input = screen.getByTestId(DESCRIPTION_TEST_ID);
+  fireEvent.change(input, { target: { value: PROMPT_MESSAGE } });
 
-  it("hides configuration mode when a configuration session already exists", () => {
-    render(<QuickChatSetupHarness overrides={{ canCreateConfigurationChat: false }} />);
-    expect(screen.queryByRole("switch", { name: "Configuration chat" })).toBeNull();
-  });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, shiftKey: true });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, altKey: true });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, repeat: true });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, isComposing: true, keyCode: 229 });
 
-  it("shows Send in the composer and waits for a prompt before starting", () => {
-    render(<QuickChatSetupHarness />);
+  expect(props.onStartQuickChat).not.toHaveBeenCalled();
 
-    const send = screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    fireEvent.change(screen.getByTestId(DESCRIPTION_TEST_ID), {
-      target: { value: PROMPT_MESSAGE },
-    });
-    expect(send.disabled).toBe(false);
-    fireEvent.click(send);
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledOnce());
+  expect(props.onStartQuickChat).toHaveBeenCalledWith(
+    AGENT_A_ID,
+    [],
+    expect.objectContaining({ message: PROMPT_MESSAGE }),
+    { message: PROMPT_MESSAGE, attachments: [] },
+  );
+});
 
-    expect(props.onStartQuickChat).toHaveBeenCalledWith(
-      AGENT_A_ID,
+it("blocks button and keyboard submission while a creation is unresolved", async () => {
+  chatSubmitKey = "cmd_enter";
+  render(
+    <QuickChatSetupHarness
+      overrides={{
+        pendingCreation: {
+          creationId: "pending-creation",
+          clientMessageId: "pending-message",
+          message: PROMPT_MESSAGE,
+          attachments: [],
+          agentProfileId: AGENT_A_ID,
+          repositories: [],
+          runtimeId: "runtime-1",
+          state: "unknown",
+          messageAttempted: false,
+        },
+        draft: { ...initialDraft, message: PROMPT_MESSAGE },
+      }}
+    />,
+  );
+
+  const send = screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement;
+  expect(send.disabled).toBe(true);
+
+  fireEvent.keyDown(screen.getByTestId(DESCRIPTION_TEST_ID), { key: "Enter", ctrlKey: true });
+
+  expect(props.onStartQuickChat).not.toHaveBeenCalled();
+  expect(props.onRetryCreation).not.toHaveBeenCalled();
+});
+
+it("keeps an uncertain submission identity when Enter is pressed again", async () => {
+  chatSubmitKey = "cmd_enter";
+  const creationId = "uncertain-creation-id";
+  let acceptedMessageId = "";
+  const start: ComponentProps<typeof QuickChatSetup>["onStartQuickChat"] = async (
+    _agentId,
+    _repositories,
+    payload,
+  ) => {
+    props.onStartQuickChat("agent-a", [], payload, { message: PROMPT_MESSAGE, attachments: [] });
+    acceptedMessageId = payload.clientMessageId ?? "";
+    return false;
+  };
+  function Harness() {
+    const [pendingCreation, setPendingCreation] = useState<NonNullable<
+      ComponentProps<typeof QuickChatSetup>["pendingCreation"]
+    > | null>(null);
+    const [draft, setDraft] = useState({ ...initialDraft, message: PROMPT_MESSAGE });
+    const handleDraftChange = useCallback((patch: Partial<QuickChatSetupDraft>) => {
+      setDraft((current) => ({ ...current, ...patch }));
+    }, []);
+    const onStart = useCallback<ComponentProps<typeof QuickChatSetup>["onStartQuickChat"]>(
+      async (agentId, repositories, payload, capturedDraft) => {
+        const accepted = await start(agentId, repositories, payload, capturedDraft);
+        setPendingCreation({
+          creationId,
+          clientMessageId: payload.clientMessageId ?? "",
+          message: payload.message,
+          attachments: [],
+          agentProfileId: agentId,
+          repositories,
+          runtimeId: "runtime-1",
+          state: "unknown",
+          messageAttempted: false,
+        });
+        return accepted;
+      },
       [],
-      expect.objectContaining({ message: PROMPT_MESSAGE, clientMessageId: expect.any(String) }),
     );
+    return (
+      <QuickChatSetup
+        {...props}
+        draft={draft}
+        pendingCreation={pendingCreation}
+        onDraftChange={handleDraftChange}
+        onStartQuickChat={onStart}
+      />
+    );
+  }
+  render(<Harness />);
+  const input = screen.getByTestId(DESCRIPTION_TEST_ID);
+
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledOnce());
+  expect((screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+  expect(props.onStartQuickChat).toHaveBeenCalledTimes(1);
+  expect(acceptedMessageId).toEqual(expect.any(String));
+  expect(screen.getByText(/Retry creation/i)).toBeTruthy();
+});
+
+it("delivers staged attachments with the opening message", () => {
+  const attachment: FileAttachment = {
+    id: "attachment-row",
+    attachmentId: "staged-attachment",
+    mimeType: "image/png",
+    fileName: "diagram.png",
+    size: 8,
+    isImage: true,
+    deliveryMode: "prompt",
+    uploadStatus: "ready",
+  };
+  render(
+    <QuickChatSetupHarness overrides={{ draft: { ...initialDraft, attachments: [attachment] } }} />,
+  );
+  fireEvent.change(screen.getByTestId(DESCRIPTION_TEST_ID), {
+    target: { value: "Explain this image" },
   });
+  fireEvent.click(screen.getByTestId(SEND_TEST_ID));
 
-  it("uses the configured chat submit key and keeps modified or composing Enter in the draft", async () => {
-    chatSubmitKey = "cmd_enter";
-    render(<QuickChatSetupHarness />);
-    const input = screen.getByTestId(DESCRIPTION_TEST_ID);
-    fireEvent.change(input, { target: { value: PROMPT_MESSAGE } });
+  expect(props.onStartQuickChat).toHaveBeenCalledWith(
+    AGENT_A_ID,
+    [],
+    expect.objectContaining({
+      message: "Explain this image",
+      attachments: [
+        expect.objectContaining({ attachment_id: "staged-attachment", name: "diagram.png" }),
+      ],
+    }),
+    {
+      message: "Explain this image",
+      attachments: [attachment],
+    },
+  );
+});
 
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, shiftKey: true });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, altKey: true });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, repeat: true });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, isComposing: true, keyCode: 229 });
+it("keeps the opening draft available when creation fails so the user can retry", async () => {
+  props.onStartQuickChat.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  render(<QuickChatSetupHarness />);
+  const editor = screen.getByTestId(DESCRIPTION_TEST_ID);
+  const send = screen.getByTestId(SEND_TEST_ID);
+  fireEvent.change(editor, { target: { value: "Retry this opening prompt" } });
 
-    expect(props.onStartQuickChat).not.toHaveBeenCalled();
+  fireEvent.click(send);
+  await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledTimes(1));
+  expect((editor as HTMLTextAreaElement).value).toBe("Retry this opening prompt");
+  expect((send as HTMLButtonElement).disabled).toBe(false);
 
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledOnce());
-    expect(props.onStartQuickChat).toHaveBeenCalledWith(
-      AGENT_A_ID,
-      [],
-      expect.objectContaining({ message: PROMPT_MESSAGE }),
-    );
-  });
-
-  it("delivers staged attachments with the opening message", () => {
-    const attachment: FileAttachment = {
-      id: "attachment-row",
-      attachmentId: "staged-attachment",
-      mimeType: "image/png",
-      fileName: "diagram.png",
-      size: 8,
-      isImage: true,
-      deliveryMode: "prompt",
-      uploadStatus: "ready",
-    };
-    render(
-      <QuickChatSetupHarness
-        overrides={{ draft: { ...initialDraft, attachments: [attachment] } }}
-      />,
-    );
-    fireEvent.change(screen.getByTestId(DESCRIPTION_TEST_ID), {
-      target: { value: "Explain this image" },
-    });
-    fireEvent.click(screen.getByTestId(SEND_TEST_ID));
-
-    expect(props.onStartQuickChat).toHaveBeenCalledWith(
-      AGENT_A_ID,
-      [],
-      expect.objectContaining({
-        message: "Explain this image",
-        attachments: [
-          expect.objectContaining({ attachment_id: "staged-attachment", name: "diagram.png" }),
-        ],
-      }),
-    );
-  });
-
-  it("keeps the opening draft available when creation fails so the user can retry", async () => {
-    props.onStartQuickChat.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    render(<QuickChatSetupHarness />);
-    const editor = screen.getByTestId(DESCRIPTION_TEST_ID);
-    const send = screen.getByTestId(SEND_TEST_ID);
-    fireEvent.change(editor, { target: { value: "Retry this opening prompt" } });
-
-    fireEvent.click(send);
-    await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledTimes(1));
-    expect((editor as HTMLTextAreaElement).value).toBe("Retry this opening prompt");
-    expect((send as HTMLButtonElement).disabled).toBe(false);
-
-    fireEvent.click(send);
-    await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledTimes(2));
-    expect(props.onStartQuickChat.mock.calls[1]?.[2]).toMatchObject({
-      message: "Retry this opening prompt",
-    });
+  fireEvent.click(send);
+  await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledTimes(2));
+  expect(props.onStartQuickChat.mock.calls[1]?.[2]).toMatchObject({
+    message: "Retry this opening prompt",
   });
 });
 

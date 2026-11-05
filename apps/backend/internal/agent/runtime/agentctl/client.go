@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -252,12 +253,15 @@ func (c *Client) getTraceCtx() context.Context {
 // StatusResponse from agentctl
 type StatusResponse struct {
 	DeliveryHealth struct {
-		State               string `json:"state"`
-		CancellationPending bool   `json:"cancellation_pending"`
-		ProducerPaused      bool   `json:"producer_paused"`
+		State               string                         `json:"state"`
+		CancellationPending bool                           `json:"cancellation_pending"`
+		ProducerPaused      bool                           `json:"producer_paused"`
+		Capacity            journal.Capacity               `json:"capacity"`
+		Failure             *types.DeliveryFailureSnapshot `json:"failure,omitempty"`
 	} `json:"delivery_health"`
-	AgentStatus string                 `json:"agent_status"`
-	ProcessInfo map[string]interface{} `json:"process_info"`
+	RuntimeStorage *streams.RuntimeStorageSnapshot `json:"runtime_storage,omitempty"`
+	AgentStatus    string                          `json:"agent_status"`
+	ProcessInfo    map[string]interface{}          `json:"process_info"`
 }
 
 // IsAgentRunning returns true if the agent process is running or starting

@@ -29,7 +29,9 @@ subsequent reading pass.
   not revisit that file.
 - **AC-UI-REVIEW-VIEWED-001.2:** With automatic marking enabled, when the user
   scrolls back until that file's start is in or below the viewport and then scrolls
-  downward past it again, the file shall become viewed again.
+  downward past it again, the file shall become viewed again. Manual scroll
+  input that cancels a pending reading-position restoration shall authorize
+  that subsequent reading pass; restoration cleanup shall not revoke it.
 - **AC-UI-REVIEW-VIEWED-001.3:** Initial rendering, observer reconnection,
   programmatic navigation, and layout movement shall not themselves undo a
   manual clearing. Existing initial-load and programmatic-jump suppression

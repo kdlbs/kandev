@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { seedStaleRuntimeConfigWithoutSettlement } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 type E2EModelStoreWindow = Window & {
@@ -115,7 +116,7 @@ test.describe("Mobile chat model selector", () => {
     const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
     const trigger = testPage
       .getByTestId("mobile-chat-toolbar-left-actions")
-      .getByRole("button", { name: "Session model settings" });
+      .getByTestId("model-config-trigger");
     await expect(trigger).toContainText("Mock Fast");
     await trigger.tap();
     const effort = testPage.getByTestId("config-option-trigger-effort");
@@ -161,7 +162,7 @@ test.describe("Mobile chat model selector", () => {
 
     await expect(leftActions.getByTestId("session-mode-selector")).toBeVisible();
 
-    const trigger = leftActions.getByRole("button", { name: "Session model settings" });
+    const trigger = leftActions.getByTestId("model-config-trigger");
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
     await expect(trigger.getByTestId("model-provider-icon")).toBeVisible();
@@ -264,5 +265,73 @@ test.describe("Mobile chat model selector", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       viewport!.width,
     );
+  });
+
+  test("stale runtime config without settlement keeps touch controls usable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("expected a seeded model-selector session");
+
+    const trigger = testPage
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByTestId("model-config-trigger");
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    const seeded = await seedStaleRuntimeConfigWithoutSettlement(testPage, sessionId);
+    expect(seeded.configOptionsSettled).toBe(false);
+    expect(seeded.staleKeyValues).toEqual({ context: "200k", reasoning_effort: "high" });
+    expect(seeded.advertisedConfigOptionCount).toBeGreaterThan(0);
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+
+    const configRequests: string[] = [];
+    await testPage.route("**/set-config-option", async (route) => {
+      const body = route.request().postDataJSON() as { config_id?: string };
+      if (body.config_id) configRequests.push(body.config_id);
+      await route.continue();
+    });
+    await testPage.route("**/set-model", async (route) => {
+      await route.continue();
+    });
+
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+
+    await trigger.tap();
+    const smartOption = testPage.getByRole("option", { name: /Mock Smart/ });
+    await expect(smartOption).toBeVisible({ timeout: 5_000 });
+
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    const optionBox = await smartOption.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.x).toBeGreaterThanOrEqual(0);
+    expect(optionBox!.x + optionBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport!.width,
+    );
+
+    await smartOption.tap();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+        const runtime = sessions.find((item) => item.id === sessionId)?.metadata?.runtime_config as
+          | { model?: string }
+          | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 5_000 });
+    await effortTrigger.tap();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+
+    expect(configRequests).toEqual(["model"]);
   });
 });

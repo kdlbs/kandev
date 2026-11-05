@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codex-session","update":{"sessionUpdate":"compaction_update","compactionId":"codex-compaction","status":"in_progress"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"codex-session","update":{"sessionUpdate":"compaction_update","compactionId":"codex-compaction","status":"completed"}}}

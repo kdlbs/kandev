@@ -34,7 +34,12 @@ function arePropsEqual(
   );
 }
 
-const LIVE_SUBAGENT_PAYLOAD_STATUSES = new Set(["pendingInit", "started", "async_launched"]);
+const LIVE_SUBAGENT_PAYLOAD_STATUSES = new Set([
+  "pendingInit",
+  "started",
+  "async_launched",
+  "running",
+]);
 
 // Mirrors backend subagentStatusTerminal: Codex session statuses that mean the
 // nested task has already settled, even while the parent turn is still active.
@@ -104,17 +109,20 @@ export function isSubagentEffectivelyActive(
   return false;
 }
 
-// The result is what the subagent was dispatched to produce, so it is shown
-// whether or not the subagent also streamed child tool calls. The prompt is a
-// fallback for subagents that reported neither.
 function deriveSubagentBody(
   childCount: number,
   subagentTask: SubagentTaskPayload | undefined,
-): { resultText?: string; prompt?: string } {
-  if (subagentTask?.result_text) return { resultText: subagentTask.result_text };
+): {
+  resultText?: string;
+  prompt?: string;
+} {
+  const resultText = subagentTask?.result_text;
+  if (subagentTask?.provider === "copilot") {
+    return { resultText, prompt: subagentTask.prompt };
+  }
+  if (resultText) return { resultText };
   if (childCount > 0) return {};
-  if (subagentTask?.prompt) return { prompt: subagentTask.prompt };
-  return {};
+  return { prompt: subagentTask?.prompt };
 }
 
 /** The collapsed card carries one line of the result — the first non-empty one,
@@ -174,6 +182,7 @@ export function stripSubagentTypePrefix(description: string, subagentType: strin
 type SubagentHeaderProps = {
   isExpanded: boolean;
   subagentType: string;
+  name?: string;
   description: string;
   isActive: boolean;
   status?: ToolCallMetadata["status"];
@@ -222,6 +231,7 @@ function SubagentStatusIcon({
 function SubagentHeader({
   isExpanded,
   subagentType,
+  name,
   description,
   isActive,
   status,
@@ -253,6 +263,15 @@ function SubagentHeader({
       >
         {subagentType}
       </span>
+      {name && (
+        <span
+          data-testid="subagent-name"
+          title={name}
+          className="font-medium text-xs truncate text-foreground min-w-0"
+        >
+          {name}
+        </span>
+      )}
       {showDescription && (
         <span
           data-testid="subagent-description"
@@ -316,43 +335,60 @@ function SubagentContent({
   renderChild,
 }: SubagentContentProps) {
   if (!isExpanded) return null;
-  if (childMessages.length > 0) {
-    return (
-      <div className={cn(NESTED_BORDER, "space-y-2")}>
-        {resultText && (
-          <p
-            data-testid="subagent-result-text"
-            className="text-xs text-foreground/80 whitespace-pre-wrap break-words"
-          >
-            {resultText}
-          </p>
-        )}
-        {childMessages.map((child) => (
-          <div key={child.id}>{renderChild(child)}</div>
-        ))}
-      </div>
-    );
-  }
-  if (resultText) {
-    return (
-      <div className={NESTED_BORDER}>
+  return (
+    <div className={cn(NESTED_BORDER, "space-y-2")}>
+      {resultText && (
         <p
           data-testid="subagent-result-text"
           className="text-xs text-foreground/80 whitespace-pre-wrap break-words"
         >
           {resultText}
         </p>
-      </div>
-    );
-  }
-  if (prompt) {
-    return (
-      <div className={NESTED_BORDER}>
-        <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">{prompt}</p>
-      </div>
-    );
-  }
-  return null;
+      )}
+      {childMessages.map((child) => (
+        <div key={child.id}>{renderChild(child)}</div>
+      ))}
+      {prompt && (
+        <p
+          data-testid="subagent-prompt"
+          className="text-xs text-muted-foreground whitespace-pre-wrap break-words"
+        >
+          {prompt}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SubagentCardFooter({
+  isActive,
+  isExpanded,
+  resultSummary,
+  subagentTask,
+  childCount,
+}: {
+  isActive: boolean;
+  isExpanded: boolean;
+  resultSummary: string;
+  subagentTask: SubagentTaskPayload | undefined;
+  childCount: number;
+}) {
+  const showResultSummary = !isActive && !isExpanded && resultSummary.length > 0;
+  const showMetadata = !isActive || (subagentTask?.resume_count ?? 0) > 0;
+  return (
+    <>
+      {showResultSummary && (
+        <p
+          data-testid="subagent-result-summary"
+          title={resultSummary}
+          className="ml-2 pl-4 text-xs text-foreground/80 truncate"
+        >
+          {resultSummary}
+        </p>
+      )}
+      {showMetadata && <SubagentMetaRow subagentTask={subagentTask} childCount={childCount} />}
+    </>
+  );
 }
 
 export const ToolSubagentMessage = memo(function ToolSubagentMessage({
@@ -370,6 +406,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   const childCount = childMessages.length;
   const { subagentTask, isActive, resultText, prompt, hasExpandableContent } =
     deriveSubagentDisplay(metadata, childCount, isContainingTurnActive);
+  const isCopilotSubagent = subagentTask?.provider === "copilot";
   const resultSummary = firstResultLine(resultText);
   const description = subagentTask?.description || comment.content || t("task:subagent");
   const subagentType = subagentTask?.subagent_type || t("common:task");
@@ -397,6 +434,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
       <SubagentHeader
         isExpanded={isExpanded}
         subagentType={subagentType}
+        name={isCopilotSubagent ? subagentTask?.name : undefined}
         description={description}
         isActive={isActive}
         status={metadata?.status}
@@ -405,16 +443,13 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         hasExpandableContent={hasExpandableContent}
         onToggle={handleToggle}
       />
-      {!isActive && !isExpanded && resultSummary && (
-        <p
-          data-testid="subagent-result-summary"
-          title={resultSummary}
-          className="ml-2 pl-4 text-xs text-foreground/80 truncate"
-        >
-          {resultSummary}
-        </p>
-      )}
-      {!isActive && <SubagentMetaRow subagentTask={subagentTask} childCount={childCount} />}
+      <SubagentCardFooter
+        isActive={isActive}
+        isExpanded={isExpanded}
+        resultSummary={resultSummary}
+        subagentTask={subagentTask}
+        childCount={childCount}
+      />
       <SubagentContent
         isExpanded={isExpanded}
         childMessages={childMessages}

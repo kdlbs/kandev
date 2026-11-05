@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // RecordEarlyLaunchFailure preserves typed recovery details for a prepared
@@ -20,6 +21,104 @@ import (
 // transition is conditional, so an already settled session keeps its history.
 func (e *Executor) RecordEarlyLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
 	return e.handleEarlyLaunchFailure(ctx, taskID, sessionID, "", launchErr)
+}
+
+type quickChatStartFailureCommitter interface {
+	CommitQuickChatStartFailureIfCurrentAttempt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		models.LastAgentError,
+	) (bool, time.Time, error)
+}
+
+func (e *Executor) RecordEarlyQuickChatStartFailure(
+	ctx context.Context,
+	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
+	launchErr error,
+) (bool, models.TaskSessionState, time.Time, error) {
+	safeErr := routingerr.SanitizeError(launchErr)
+	if safeErr == nil || taskID == "" || sessionID == "" || quickChatAttemptID == "" ||
+		errors.Is(launchErr, ErrExecutionAlreadyRunning) {
+		return false, "", time.Time{}, safeErr
+	}
+	committer, ok := e.repo.(quickChatStartFailureCommitter)
+	if !ok {
+		return false, "", time.Time{}, safeErr
+	}
+	failCtx := context.WithoutCancel(ctx)
+	session, owned := e.loadQuickChatFailureOwner(
+		failCtx, taskID, sessionID, quickChatAttemptID, agentAttemptID,
+	)
+	if !owned {
+		if session == nil {
+			return false, "", time.Time{}, safeErr
+		}
+		return false, session.State, time.Time{}, safeErr
+	}
+	errorValue := e.buildLastAgentError(failCtx, taskID, "", launchErr)
+	changed, updatedAt, err := committer.CommitQuickChatStartFailureIfCurrentAttempt(
+		failCtx,
+		taskID,
+		sessionID,
+		quickChatAttemptID,
+		agentAttemptID,
+		session.State,
+		errorValue,
+	)
+	if err != nil {
+		e.logger.Warn("failed to commit Quick Chat launch failure for its owning attempt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return false, session.State, time.Time{}, safeErr
+	}
+	if !changed {
+		return false, session.State, time.Time{}, safeErr
+	}
+	e.notifyQuickChatStartFailure(failCtx, taskID, sessionID, safeErr)
+	return true, session.State, updatedAt, safeErr
+}
+
+func (e *Executor) loadQuickChatFailureOwner(
+	ctx context.Context,
+	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
+) (*models.TaskSession, bool) {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		if err != nil {
+			e.logger.Warn("failed to load session before recording Quick Chat launch failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return nil, false
+	}
+	if models.StringFromAny(session.Metadata[models.SessionMetaKeyQuickChatStartAttemptID]) != quickChatAttemptID ||
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != agentAttemptID {
+		return session, false
+	}
+	return session, isQuickChatStartFailureState(session.State)
+}
+
+func isQuickChatStartFailureState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Executor) notifyQuickChatStartFailure(ctx context.Context, taskID, sessionID string, safeErr error) {
+	if e.onEarlyLaunchTaskStateReconcile != nil {
+		if err := e.onEarlyLaunchTaskStateReconcile(ctx, taskID, sessionID, v1.TaskStateFailed); err != nil {
+			e.logger.Warn("failed to reconcile task after Quick Chat launch failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+	if e.onLaunchFailed != nil {
+		e.onLaunchFailed(ctx, taskID, sessionID, "", safeErr)
+	}
 }
 
 type launchFailureClassification struct {

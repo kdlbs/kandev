@@ -7,19 +7,25 @@ import {
   IconSearch,
   IconSend,
   IconTrash,
-  IconTerminal2,
-  IconCpu,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { useTranslation } from "react-i18next";
-import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "@/components/task/panel-primitives";
+import { PanelRoot } from "@/components/task/panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { useBackgroundWork } from "@/hooks/domains/session/use-background-work";
+import { useClearedOutput } from "@/hooks/domains/session/use-cleared-background-output";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { WorkloadRunObservation } from "@/lib/types/background-work";
-import { cn } from "@/lib/utils";
+import { canRunWorkloadAction, hasReadableOutput } from "@/lib/background-work/capabilities";
+import { BackgroundWorkOverview } from "./background-work-overview";
+import {
+  workloadExitStatusKey,
+  workloadKindLabelKey,
+  workloadOutputUnavailableKey,
+} from "./presentation";
+import { WorkloadStateBadge } from "./workload-state-badge";
 
 export type BackgroundWorkPanelProps = {
   panelId: string;
@@ -31,7 +37,8 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
   const sessionId =
     typeof params?.sessionId === "string" && params.sessionId ? params.sessionId : activeSessionId;
   const workId = typeof params?.workId === "string" ? params.workId : undefined;
-  const { workloads, isLoading, executeAction } = useBackgroundWork(sessionId);
+  const { workloads, isLoading, isInitialLoading, loadError, executeAction, fetchWorkloads } =
+    useBackgroundWork(sessionId);
 
   const selectedWorkload = useMemo(() => {
     if (!workId) return null;
@@ -39,141 +46,33 @@ export function BackgroundWorkPanel({ params }: BackgroundWorkPanelProps) {
   }, [workloads, workId]);
 
   if (selectedWorkload) {
-    return <WorkloadDetailView workload={selectedWorkload} onAction={executeAction} />;
-  }
-
-  return <WorkloadOverviewView workloads={workloads} isLoading={isLoading} />;
-}
-
-function WorkloadOverviewBody({
-  isLoading,
-  workloads,
-  filtered,
-}: {
-  isLoading: boolean;
-  workloads: WorkloadRunObservation[];
-  filtered: WorkloadRunObservation[];
-}) {
-  const { t } = useTranslation();
-  if (isLoading && workloads.length === 0) {
     return (
-      <div className="py-8 text-center text-xs text-muted-foreground">
-        {t("task:loadingBackgroundWork")}
-      </div>
+      <WorkloadDetailView
+        sessionId={sessionId ?? ""}
+        workload={selectedWorkload}
+        onAction={executeAction}
+      />
     );
   }
-  if (filtered.length === 0) {
-    return (
-      <div className="py-8 text-center text-xs text-muted-foreground">
-        {t("task:noBackgroundWork")}
-      </div>
-    );
-  }
-  return (
-    <div className="grid gap-2">
-      {filtered.map((w) => (
-        <WorkloadCard key={w.work_id} workload={w} />
-      ))}
-    </div>
-  );
-}
-
-function WorkloadOverviewView({
-  workloads,
-  isLoading,
-}: {
-  workloads: WorkloadRunObservation[];
-  isLoading: boolean;
-}) {
-  const { t } = useTranslation();
-  const [search, setSearch] = useState("");
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return workloads;
-    const q = search.toLowerCase();
-    return workloads.filter(
-      (w) => w.title.toLowerCase().includes(q) || w.kind.toLowerCase().includes(q),
-    );
-  }, [workloads, search]);
 
   return (
     <PanelRoot data-testid="background-work-overview-panel">
-      <PanelHeaderBarSplit
-        left={
-          <div className="flex items-center gap-2">
-            <IconTerminal2 className="h-4 w-4 text-primary" />
-            <span className="font-semibold">{t("task:backgroundWorkOverview")}</span>
-            <Badge variant="outline" className="text-[10px]">
-              {workloads.length}
-            </Badge>
-          </div>
-        }
-        right={
-          <div className="relative w-48">
-            <IconSearch className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("task:searchOutput")}
-              className="h-7 pl-7 text-xs"
-            />
-          </div>
-        }
+      <BackgroundWorkOverview
+        workloads={workloads}
+        isLoading={isLoading || isInitialLoading}
+        loadError={loadError}
+        onRetry={fetchWorkloads}
+        resetKey={sessionId}
+        onOpenWorkload={(workload) => {
+          useDockviewStore.getState().addBackgroundWorkPanel?.({
+            sessionId: sessionId ?? undefined,
+            workId: workload.work_id,
+            title: workload.title,
+            inCenter: true,
+          });
+        }}
       />
-      <PanelBody padding scroll className="space-y-2">
-        <WorkloadOverviewBody isLoading={isLoading} workloads={workloads} filtered={filtered} />
-      </PanelBody>
     </PanelRoot>
-  );
-}
-
-function WorkloadCard({ workload }: { workload: WorkloadRunObservation }) {
-  const { t } = useTranslation();
-  const handleOpen = () => {
-    useDockviewStore.getState().addBackgroundWorkPanel?.({
-      workId: workload.work_id,
-      title: workload.title,
-      inCenter: true,
-    });
-  };
-
-  return (
-    <div
-      data-testid={`background-workload-card-${workload.work_id}`}
-      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/60 p-3 shadow-sm transition-colors hover:bg-muted/40"
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          {workload.kind === "subagent" ? (
-            <IconCpu className="h-4 w-4" />
-          ) : (
-            <IconTerminal2 className="h-4 w-4" />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-medium text-sm text-foreground">{workload.title}</span>
-            <Badge
-              variant={workload.state === "running" ? "default" : "outline"}
-              className="text-[10px] capitalize"
-            >
-              {workload.state}
-            </Badge>
-          </div>
-          <span className="text-[11px] text-muted-foreground capitalize">{workload.kind}</span>
-        </div>
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 cursor-pointer text-xs"
-        onClick={handleOpen}
-        data-testid={`open-workload-${workload.work_id}`}
-      >
-        {t("task:openBackgroundWork")}
-      </Button>
-    </div>
   );
 }
 
@@ -187,66 +86,62 @@ function WorkloadDetailHeader({
   onStop: () => void;
 }) {
   const { t } = useTranslation();
-  const stopCap = workload.capabilities?.actions?.stop;
-  const canStop =
-    stopCap !== undefined
-      ? stopCap.supported && stopCap.available
-      : workload.state === "running" || workload.state === "waiting";
-  const intCap = workload.capabilities?.actions?.interrupt;
-  const canInterrupt =
-    intCap !== undefined
-      ? intCap.supported && intCap.available
-      : workload.kind === "subagent" &&
-        (workload.state === "running" || workload.state === "waiting");
+  const canStop = canRunWorkloadAction(workload, "stop");
+  const canInterrupt = canRunWorkloadAction(workload, "interrupt");
+  const exitKey = workloadExitStatusKey(workload);
 
   return (
-    <PanelHeaderBarSplit
-      left={
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">{workload.title}</span>
-          <Badge variant="outline" className="text-[10px] capitalize">
-            {workload.kind}
+    <div className="shrink-0 border-b border-border" data-testid="background-work-detail-header">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {t(workloadKindLabelKey(workload.kind))}
           </Badge>
-          <Badge
-            variant={workload.state === "running" ? "default" : "outline"}
-            className={cn(
-              "text-[10px] capitalize",
-              workload.state === "running" && "bg-primary text-primary-foreground",
-            )}
-          >
-            {workload.state}
-          </Badge>
+          <WorkloadStateBadge workload={workload} />
+          {exitKey && (
+            <Badge variant="outline" className="shrink-0 text-[10px] font-mono">
+              {t(exitKey, { code: workload.exit_code })}
+            </Badge>
+          )}
         </div>
-      }
-      right={
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!canInterrupt}
-            onClick={onInterrupt}
-            className="h-6 cursor-pointer px-2 text-[11px]"
-            data-testid="interrupt-workload-button"
-          >
-            <IconPlayerPause className="mr-1 h-3 w-3" />
-            {t("task:interruptBackgroundWork")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={!canStop}
-            onClick={onStop}
-            className="h-6 cursor-pointer px-2 text-[11px]"
-            data-testid="stop-workload-button"
-          >
-            <IconPlayerStop className="mr-1 h-3 w-3" />
-            {t("task:stopBackgroundWork")}
-          </Button>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {canInterrupt && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onInterrupt}
+              className="h-7 cursor-pointer px-2 text-[11px]"
+              data-testid="interrupt-workload-button"
+            >
+              <IconPlayerPause className="mr-1 h-3 w-3" />
+              {t("task:interruptBackgroundWork")}
+            </Button>
+          )}
+          {canStop && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={onStop}
+              className="h-7 cursor-pointer px-2 text-[11px]"
+              data-testid="stop-workload-button"
+            >
+              <IconPlayerStop className="mr-1 h-3 w-3" />
+              {t("task:stopBackgroundWork")}
+            </Button>
+          )}
+          {!canStop && !canInterrupt && (
+            <span
+              className="text-[11px] text-muted-foreground"
+              data-testid="background-work-actions-unavailable"
+            >
+              {t("task:backgroundActionsUnavailable")}
+            </span>
+          )}
         </div>
-      }
-    />
+      </div>
+    </div>
   );
 }
 
@@ -260,15 +155,29 @@ function WorkloadOutputViewer({
   outputEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  const unavailableKey = workloadOutputUnavailableKey(workload);
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto bg-black/95 p-3 font-mono text-xs text-green-400">
-      {workload.output_truncated && (
-        <div className="mb-2 text-[10px] text-amber-400">[{t("task:earlierOutputTruncated")}]</div>
-      )}
-      <pre className="whitespace-pre-wrap break-all">
-        {displayOutput || t("task:liveOutputUnavailable")}
-      </pre>
-      <div ref={outputEndRef} />
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+      data-testid="background-work-detail-scroll"
+    >
+      <div className="border-b border-border bg-background p-3">
+        <p
+          className="whitespace-pre-wrap break-words font-mono text-[11px] text-foreground [overflow-wrap:anywhere]"
+          data-testid="background-work-detail-command"
+        >
+          {workload.title}
+        </p>
+      </div>
+      <div className="bg-black/95 p-3 font-mono text-xs text-green-400">
+        {workload.output_truncated && (
+          <div className="mb-2 text-[10px] text-amber-400">
+            [{t("task:earlierOutputTruncated")}]
+          </div>
+        )}
+        <pre className="whitespace-pre-wrap break-all">{displayOutput || t(unavailableKey)}</pre>
+        <div ref={outputEndRef} />
+      </div>
     </div>
   );
 }
@@ -288,17 +197,20 @@ function WorkloadOutputToolbar({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-between border-b border-border px-3 py-1 text-xs text-muted-foreground">
-      <div className="relative w-48">
-        <IconSearch className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1 text-xs text-muted-foreground">
+      <div className="relative min-w-[8rem] flex-1 sm:max-w-48">
+        <IconSearch
+          className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
         <Input
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={t("task:searchOutput")}
-          className="h-6 pl-7 text-[11px]"
+          className="h-6 min-w-0 pl-7 text-[11px]"
         />
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Button
           type="button"
           variant="ghost"
@@ -341,10 +253,15 @@ function WorkloadInputForm({
         value={input}
         onChange={(e) => onInputChange(e.target.value)}
         placeholder={t("task:inputPlaceholder")}
-        className="h-7 text-xs font-mono"
+        className="h-7 min-w-0 flex-1 text-xs font-mono"
         disabled={isSending}
       />
-      <Button type="submit" size="sm" className="h-7 cursor-pointer text-xs" disabled={isSending}>
+      <Button
+        type="submit"
+        size="sm"
+        className="h-7 shrink-0 cursor-pointer text-xs"
+        disabled={isSending}
+      >
         <IconSend className="mr-1 h-3.5 w-3.5" />
         {t("task:sendInput")}
       </Button>
@@ -353,9 +270,11 @@ function WorkloadInputForm({
 }
 
 function WorkloadDetailView({
+  sessionId,
   workload,
   onAction,
 }: {
+  sessionId: string;
   workload: WorkloadRunObservation;
   onAction: (req: {
     action: "stop" | "interrupt" | "write_input";
@@ -367,25 +286,20 @@ function WorkloadDetailView({
   const [input, setInput] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [search, setSearch] = useState("");
-  const [clearedOffset, setClearedOffset] = useState<number>(0);
+  const { displayOutput, clear } = useClearedOutput(sessionId, workload, search);
   const [isSending, setIsSending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
+  const hasMountedRef = useRef(false);
 
-  const displayOutput = useMemo(() => {
-    let text = workload.output || "";
-    if (clearedOffset > 0) {
-      text = text.slice(clearedOffset);
-    }
-    if (!search.trim()) return text;
-    const q = search.toLowerCase();
-    return text
-      .split("\n")
-      .filter((line) => line.toLowerCase().includes(q))
-      .join("\n");
-  }, [workload.output, clearedOffset, search]);
-
+  const outputAvailable = hasReadableOutput(workload.capabilities);
   useEffect(() => {
+    // Keep the complete command and status visible when the detail first opens;
+    // later output updates may follow the live tail.
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
     if (autoScroll && outputEndRef.current) {
       outputEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
@@ -415,7 +329,7 @@ function WorkloadDetailView({
     }
   };
 
-  const writeInputAvailable = workload.capabilities?.actions?.write_input?.available ?? false;
+  const writeInputAvailable = canRunWorkloadAction(workload, "write_input");
 
   return (
     <PanelRoot data-testid={`background-work-detail-${workload.work_id}`}>
@@ -424,14 +338,16 @@ function WorkloadDetailView({
         onInterrupt={() => onAction({ work_id: workload.work_id, action: "interrupt" })}
         onStop={() => onAction({ work_id: workload.work_id, action: "stop" })}
       />
-      <div className="flex flex-1 min-h-0 flex-col bg-background">
-        <WorkloadOutputToolbar
-          search={search}
-          onSearchChange={setSearch}
-          autoScroll={autoScroll}
-          onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
-          onClear={() => setClearedOffset((workload.output || "").length)}
-        />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+        {outputAvailable && (
+          <WorkloadOutputToolbar
+            search={search}
+            onSearchChange={setSearch}
+            autoScroll={autoScroll}
+            onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
+            onClear={clear}
+          />
+        )}
 
         <WorkloadOutputViewer
           workload={workload}

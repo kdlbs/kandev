@@ -8,6 +8,7 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007
+  - REQ-PLATFORM-DURABLE-AGENT-SEGMENTATION-001
 ---
 
 # Durable agent stream processing
@@ -19,10 +20,14 @@ The [streaming repair package](../../../plans/durable-agent-stream-repair/plan.m
 The earlier implementation results do not establish completion of this repair.
 Existing requirements remain authoritative; this section specifies their implementation details.
 
+The [durable text segmentation package](../../../plans/durable-agent-text-segmentation/plan.md)
+implements [REQ-PLATFORM-DURABLE-AGENT-SEGMENTATION-001](../requirements/durable-agent-text-segmentation.md)
+under [the segment identity decision](../../../decisions/2026-10-26-durable-agent-text-segment-identity.md).
+
 ### Journal batching
 
 Normal journal batches contain at most 64 KiB and wait at most 20 ms before starting their commit.
-One supported indivisible event above 64 KiB uses a singleton transaction within the 1 MiB event limit.
+One supported indivisible event above 64 KiB uses a singleton transaction within the 2 MiB event limit.
 These are batching bounds, not guarantees about disk completion latency.
 
 ### Replay and legacy handling
@@ -46,7 +51,62 @@ The bounded intake budget is 4 MiB; storage work does not hold control-response 
 Every original event retains its sequence and effect identity.
 Tool, permission, terminal, turn, and owner changes flush the preceding batch.
 Canonical message changes and projected cursor advancement commit atomically.
+For a batched event, inbox receipt and received-cursor advancement join that
+same transaction; see [delivery write cost](durable-delivery-write-cost.md).
+Unbatched events keep a separate receipt transaction.
 Notification follows successful projection and does not depend on HTTP acknowledgment success.
+
+### Canonical text segments
+
+The backend SQL delivery cursor owns the committed text-segment boundary. It
+stores the sequence of the latest projected top-level tool call. Projection
+updates that sequence in the same transaction as the tool event and projected
+cursor. A tool call with a parent ID and a tool update do not advance it.
+Every projection route that commits a top-level tool event, including normal
+`ProjectAgentDeliveryEvent`, retained replay, and canonical shell-start
+projection, updates the boundary in that transaction. A mixed projection batch
+applies boundaries in event sequence order.
+
+For an ID-less assistant message chunk, canonical projection combines its
+stable base identity, built from the existing stream and turn or submission
+scope, with the committed boundary sequence. Chunks before the next top-level
+tool call therefore share one canonical message ID. Keep base and resolved
+identity distinct: retries and reconnects derive only from the base, never
+from an already-resolved ID. Do not mutate caller-owned event payloads before
+the transaction commits. Reasoning messages and messages with a native protocol
+ID keep their existing identity rules. The `canonical_message_id` inbox column
+is the authoritative committed projection ID. The projector persists it in the
+same transaction as the event's reconstructable payload metadata and returns
+that exact committed value to the notification path. `canonical_message_id` is
+projection-only metadata; transport identity and payload hash comparisons
+exclude it, and duplicate admission preserves the column value.
+
+Payload compaction changes the payload, pruning timestamp, hash, and byte count
+without changing `canonical_message_id`. For a projected row created before
+the column existed, an empty column may fall back to the exact ID in an
+unpruned stored payload. If that payload has already been pruned, duplicate
+projection returns an empty ID and suppresses notification. It does not infer
+an ID from incoming reconstructed metadata or the current segment boundary,
+rewrite a transcript row, or notify a row that cannot be identified. This
+fallback applies only while the inbox receipt still exists. Whole-row receipt
+retirement deletes the column with the receipt, advances `retired_sequence`,
+and retains the existing expired-replay rejection semantics.
+
+An unprojected retained event resolves its canonical ID from the SQL cursor in
+sequence order. Projection persists that resolved ID with the event and message
+effect before advancing the cursor, then exposes the result only after commit.
+An already projected event returns its stored column value and is not rewritten.
+The inbox ID, boundary, and message effect commit atomically, so restart,
+duplicate delivery, and partial batch retries cannot advance them independently.
+Add the boundary column as nullable for pre-existing streams. On their first
+projection after upgrade, initialize a NULL boundary once from the then-current
+projected sequence, or from the current sequence if that event is itself a
+top-level tool call. New streams initialize the boundary to zero. Later reopen,
+owner/generation changes, and cursor updates preserve a non-NULL boundary. This
+can begin a fresh text segment after upgrade when earlier boundary evidence was
+pruned; it never changes an existing projected transcript row. Initialization,
+message effect, resolved event identity, boundary, and projected cursor commit
+atomically.
 
 This repair retains the current projection-before-acknowledgment rule.
 A cumulative ACK scheduler has at most one in-flight request per stream.
@@ -83,7 +143,7 @@ Remote agents retain output and continue independent work during prolonged backe
 Default production retention has no fixed logical byte ceiling. The former 256 MiB stream and 2 GiB journal limits do not stop execution.
 Explicit positive internal limits remain available for bounded-quota tests.
 Keep the existing bbolt format, sequence checks, and owner checks.
-Keep the 1 MiB event limit and bounded pending producer buffers and replay pages.
+Keep the 2 MiB event limit and bounded pending producer buffers and replay pages.
 Unacknowledged records grow on the executor volume without age-based expiry or deletion to reclaim space.
 
 Disk pressure uses available capacity on that volume, a 32 MiB control/recovery reserve, and pending write headroom.
@@ -113,7 +173,7 @@ Raw SQL cursors and internal storage paths are diagnostic details, not required 
 
 Oversized assistant/reasoning text uses the existing chunk representation.
 [Bounded tool delivery](bounded-tool-delivery.md) defines marked presentation
-reduction before acceptance, including generic nested results and duplicate
+reduction before acceptance, including typed and generic results and duplicate
 carriers. Accepted output must not be truncated during replay or projection.
 Representation changes require the existing version and rollback checks.
 Keep coverage for cumulative snapshots that can multiply retained bytes.
@@ -125,6 +185,17 @@ Journal and SQL checkpoint changes require restart-reconcilable intent and owner
 A journal already above its submission limit blocks new admission until safe rollover.
 Representation changes require a versioned migration and an explicit supported rollback boundary.
 An older binary must not read a changed format as an empty or newly dispatchable stream.
+
+### Event budgets and writer failure
+
+The [tool delivery design](bounded-tool-delivery.md) owns the 2 MiB event budget,
+separate 1 MiB submission limit, and 4 MiB encoded replay-page ceiling.
+The record count remains an additional replay limit.
+Short pages continue to the captured high-water mark without changing accepted records.
+
+The [failure design](durable-delivery-failure.md) owns independent status observation
+and bounded producer drain after a writer failure.
+A health report cannot replace an actual terminal or authorize another prompt.
 
 ### Visible failure and overload
 
@@ -182,3 +253,38 @@ The predecessor's retained stream, submissions and recovery block stay as
 history; current-generation admission no longer consults them. Fresh start never
 receives, projects, or acknowledges the predecessor stream.
 Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).
+
+## Uncommitted first-generation relaunch
+
+A first launch can fail before any native conversation commits, for example
+when the provider rejects ACP `session/new`. Its child may still have appended
+setup events to stream `<incarnation>:g1`. Without a committed generation, an
+explicit relaunch (Resume or Start fresh) stays on generation one and reuses
+that stream. Such a relaunch is a generation-one bootstrap, not a restored
+session. Preflight permits replay from zero under the fresh-bootstrap rule when
+all of these hold:
+
+- The launch carries no native session ID and no required native conversation.
+- SQL has no harness generation for the session incarnation and no delivery cursor.
+- The authenticated stream retains the full prefix from sequence one.
+- The stream has zero acknowledgments, no unresolved submissions, and no
+  submission records.
+
+The launch's predecessor execution does not matter. Replay creates no
+checkpoint or receipt. The existing bootstrap processor waits for the
+replacement's generation-one commit before it receives, projects, or
+acknowledges any event. If any condition fails, the checkpoint stays missing.
+That covers committed native conversations, retained prompt work, pruned
+history, and an existing cursor. Those cases keep their dedicated recovery
+paths above.
+
+Managed process-exit errors carry both `process_generation` and an opaque
+`process_manager_id`. The authenticated delivery descriptor reports the
+current manager ID. Lifecycle compares manager IDs before it uses the local
+process generation, because each new process manager starts its counter at one.
+An error from a different manager is retired even when both managers report
+generation one. If an event has a manager ID but the current ID is unavailable,
+lifecycle also retires it. A managed exit without an ID is retired when the
+current descriptor has an ID, because the producer cannot be identified. Older
+descriptors keep the existing generation check for compatibility.
+Delivery: [Uncommitted bootstrap relaunch](../../../plans/uncommitted-bootstrap-relaunch/plan.md).

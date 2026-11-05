@@ -44,6 +44,8 @@ export function causeLabel(code: string | undefined, translate: TFunction): stri
       return translate("task:sessionBootstrapCausePermissionModeUnconfirmed");
     case "permission_mode_mismatch":
       return translate("task:sessionBootstrapCausePermissionModeMismatch");
+    case "delivery_storage":
+      return translate("task:sessionBootstrapCauseDeliveryStorage");
     default:
       return translate("task:sessionBootstrapCauseUnknown");
   }
@@ -54,6 +56,7 @@ export function operationLabel(operation: string | undefined, translate: TFuncti
   if (operation === "restore_workspace") {
     return translate("task:sessionRecoveryRestoreAttempt");
   }
+  if (operation === "delivery") return translate("task:sessionRecoveryDeliveryAttempt");
   return translate("task:sessionRecoveryResumeAttempt");
 }
 

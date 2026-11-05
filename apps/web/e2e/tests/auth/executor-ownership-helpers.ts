@@ -213,8 +213,8 @@ export function registerExecutorOwnershipTests(mobile: boolean) {
       let catalogue = await (await alice.request.get(`${baseUrl}/api/v1/executors`)).json();
       const profile = catalogue.executors
         .flatMap(
-          (executor: { profiles: { id: string; name: string; owner_user_id: string }[] }) =>
-            executor.profiles,
+          (executor: { profiles?: { id: string; name: string; owner_user_id: string }[] }) =>
+            executor.profiles ?? [],
         )
         .find((entry: { name: string }) => entry.name === "Owner creation UI");
       expect(profile?.owner_user_id).toBe(aliceId);
@@ -230,8 +230,8 @@ export function registerExecutorOwnershipTests(mobile: boolean) {
           catalogue = await (await bob.request.get(`${baseUrl}/api/v1/executors`)).json();
           return catalogue.executors
             .flatMap(
-              (executor: { profiles: { id: string; owner_user_id: string }[] }) =>
-                executor.profiles,
+              (executor: { profiles?: { id: string; owner_user_id: string }[] }) =>
+                executor.profiles ?? [],
             )
             .find((entry: { id: string }) => entry.id === profile.id)?.owner_user_id;
         })

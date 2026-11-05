@@ -65,6 +65,11 @@ function InstallButton({
   );
 }
 
+/** Reports whether an agent has an install script or a local-install action. */
+export function canInstallAgent(agent: AvailableAgent): boolean {
+  return Boolean(agent.install_script || agent.supports_local_install);
+}
+
 /**
  * Card shown under "Available to Install" on the Agents settings page. While a
  * job is queued/running it shows a live log streamed via the agent.install.*
@@ -74,9 +79,9 @@ function InstallButton({
  * The Install button, or nothing.
  *
  * Installing an agent is an org.config.manage write, so a caller without the
- * scope is offered no button; an agent with no install script has nothing to
- * run. Its own component so the two branches do not count against
- * InstallAgentCard's complexity ceiling.
+ * scope is offered no button; an agent with no install script or local-install
+ * action has nothing to run. Its own component so the branches do not count
+ * against InstallAgentCard's complexity ceiling.
  */
 function InstallAction({
   agent,
@@ -87,7 +92,7 @@ function InstallAction({
   status: InstallStatus;
   onInstall?: (name: string) => void;
 }) {
-  if (!agent.install_script || !onInstall) return null;
+  if (!canInstallAgent(agent) || !onInstall) return null;
   return <InstallButton agentName={agent.name} status={status} onInstall={onInstall} />;
 }
 

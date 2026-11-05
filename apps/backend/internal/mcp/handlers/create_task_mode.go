@@ -26,6 +26,7 @@ type mcpCreateTaskRequest struct {
 	WorkspaceMode          string               `json:"workspace_mode"`
 	Title                  string               `json:"title"`
 	Description            string               `json:"description"`
+	Priority               string               `json:"priority"`
 	Autopilot              bool                 `json:"autopilot"`
 	AgentProfileID         string               `json:"agent_profile_id"`
 	ExecutorProfileID      string               `json:"executor_profile_id"`

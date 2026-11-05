@@ -14,6 +14,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page, Route } from "@playwright/test";
 
+test.use({ trace: "retain-on-failure" });
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -185,30 +187,56 @@ test.describe("Session resume (ACP mode)", () => {
     });
 
     await backend.restart();
-    await testPage.reload();
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 60_000 });
-    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-    await waitForSessionState(apiClient, {
-      taskId: task.id,
-      sessionId,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "Resumed session did not settle before activity reconciliation",
-      timeout: 30_000,
-    });
-    await waitForTaskSessionsSettled(testPage, task.id);
-
     const sessionsPath = `/api/v1/tasks/${task.id}/sessions`;
     const matchesSessions = (url: URL) => url.pathname === sessionsPath;
+    const matchesSessionDetail = (url: URL) =>
+      url.pathname === `/api/v1/task-sessions/${sessionId}`;
     const releaseResponse = Promise.withResolvers<void>();
+    const releaseDetailReads = Promise.withResolvers<void>();
+    const pendingDetailReads = new Set<Promise<void>>();
+    let holdDetailReads = false;
+    const handleSessionDetail = async (route: Route) => {
+      if (holdDetailReads) {
+        await releaseDetailReads.promise;
+        await route.continue();
+        return;
+      }
+      const delivery = (async () => {
+        const response = await route.fetch();
+        await route.fulfill({ response });
+      })();
+      pendingDetailReads.add(delivery);
+      try {
+        await delivery;
+      } finally {
+        pendingDetailReads.delete(delivery);
+      }
+    };
     const holdSessionResponse = async (route: Route) => {
       await releaseResponse.promise;
       await route.continue();
     };
-    await testPage.route(matchesSessions, holdSessionResponse);
+    await testPage.route(matchesSessionDetail, handleSessionDetail);
     try {
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 60_000 });
+      await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+        timeout: 15_000,
+      });
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Resumed session did not settle before activity reconciliation",
+        timeout: 30_000,
+      });
+
+      // Drain earlier detail reads and hold later ones while the list refresh is tested.
+      holdDetailReads = true;
+      await Promise.all([...pendingDetailReads]);
+      await waitForTaskSessionsSettled(testPage, task.id);
+      await testPage.route(matchesSessions, holdSessionResponse);
       const refreshRequested = testPage.waitForRequest(
         (request) => request.method() === "GET" && matchesSessions(new URL(request.url())),
       );
@@ -233,7 +261,8 @@ test.describe("Session resume (ACP mode)", () => {
       await expect(session.anyIdleInput()).toBeVisible();
     } finally {
       releaseResponse.resolve();
-      await testPage.unroute(matchesSessions, holdSessionResponse);
+      releaseDetailReads.resolve();
+      await testPage.unrouteAll({ behavior: "wait" });
     }
   });
 

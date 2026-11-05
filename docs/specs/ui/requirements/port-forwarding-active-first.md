@@ -66,6 +66,12 @@ replace it.
 - **AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.8:** Session changes shall display
   only the selected session's ports and tunnels; delayed responses from an old
   session shall not populate the new session's list or active count.
+- **AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.9:** On desktop and phone, a
+  dedicated tunnel URL shall use HTTP with the backend hostname and the
+  returned dedicated tunnel port, even when the dashboard uses HTTPS. Its
+  displayed, copied, and opened URLs shall agree. The path-based proxy URL
+  shall continue to use the backend base URL, including its scheme, host, port,
+  and base path, with its existing session and target-port path.
 
 ## Out of scope
 
@@ -75,3 +81,4 @@ new top-bar counters, launcher changes, and changes to proxy/Browser panel routi
 ## Implementation Plans
 
 - [Active-first port forwarding](../../../plans/port-forwarding-active-first/plan.md)
+- [Dedicated tunnel URL scheme](../../../plans/dedicated-tunnel-url-scheme/plan.md)

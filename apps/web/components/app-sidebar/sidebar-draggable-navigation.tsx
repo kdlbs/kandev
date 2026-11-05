@@ -50,6 +50,11 @@ function DraggableRow({
     <div
       ref={setNodeRef}
       {...listeners}
+      onPointerDown={(event) => {
+        if ((event.target as Element).closest("[data-sidebar-node-id]") !== event.currentTarget)
+          return;
+        listeners?.onPointerDown?.(event);
+      }}
       data-sidebar-node-id={id}
       data-testid={`sidebar-node-${id}`}
       className={over?.id === id && !isDragging ? "relative border-t-2 border-primary" : "relative"}
@@ -59,8 +64,11 @@ function DraggableRow({
         opacity: isDragging ? 0.5 : 1,
       }}
       onKeyDown={(event) => {
+        if ((event.target as Element).closest("[data-sidebar-node-id]") !== event.currentTarget)
+          return;
         if (disabled || !event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
         event.preventDefault();
+        event.stopPropagation();
         move(event.key === "ArrowUp" ? -1 : 1);
       }}
     >

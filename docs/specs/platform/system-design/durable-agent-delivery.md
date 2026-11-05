@@ -92,9 +92,9 @@ Unknown versions, invalid ownership, hash conflicts, expired cursors, and lost j
 
 ## Agentctl journal
 
-A new package under `internal/agentctl/journal` owns one bbolt database per agentctl owner.
-bbolt provides pure-Go transactions without breaking CGO-disabled remote agentctl builds.
-The implementation pins a compatible maintained version in go.mod and go.sum.
+`internal/agentctl/journal` owns each bbolt database.
+[Journal ownership](durable-agent-journal-ownership.md) defines safe reopening and diagnostics.
+bbolt supports CGO-disabled remote builds. The version is pinned in go.mod.
 
 Buckets contain schema metadata, stream records, normalized events, submissions, acknowledgment cursors, and retired incarnations.
 Each write transaction allocates sequence numbers and persists its records atomically.
@@ -107,7 +107,7 @@ Batch bounds follow the [stream processing design](durable-agent-stream-processi
 Terminal state and its terminal event commit together.
 
 The producer queue has a 4 MiB byte bound.
-An event has a 1 MiB serialized limit.
+An event has a 2 MiB serialized limit.
 Text uses ordered chunks. [Bounded tool delivery](bounded-tool-delivery.md)
 defines marked tool-display reduction before acceptance. Accepted data stays
 immutable; unsupported control payloads fail explicitly.
@@ -344,7 +344,7 @@ Office and automation consumers use the persistent block from the continuity con
 Provider recovery, budget retries, and scheduler ticks cannot release that block.
 Transport loss does not synthesize task completion or workflow advancement.
 
-The user sees reconnecting, recovered, or uncertain status in the existing recovery surface.
+The [delivery failure design](durable-delivery-failure.md) extends the existing recovery surface.
 Stop remains available during reconciliation.
 Retry reconnect queries state only.
 It does not resend the prompt.

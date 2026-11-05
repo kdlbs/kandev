@@ -32,7 +32,7 @@ func (m *Manager) ProbeProfileCapabilities(
 	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, localEnv, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
 	if err != nil {
 		return ProfileCapabilityResult{}, err
 	}
@@ -62,7 +62,7 @@ func (m *Manager) ProbeProfileCapabilities(
 		if !m.profileContextIsCurrent(agentType, baseRevision, runtimeGeneration, contextGeneration) {
 			return nil, errProfileContextChanged
 		}
-		return m.probeProfileCapabilitiesFlight(probeCtx, inst, ia, cfg, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration)
+		return m.probeProfileCapabilitiesFlight(probeCtx, inst, ia, cfg, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration)
 	})
 	if err != nil {
 		return ProfileCapabilityResult{}, err
@@ -79,6 +79,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	ia agents.InferenceAgent,
 	cfg *agents.InferenceConfig,
 	command agents.Command,
+	localEnv map[string]string,
 	req ProfileCapabilityRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -86,10 +87,26 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	if !m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
 		return ProfileCapabilityResult{}, errProfileContextChanged
 	}
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, req.Context, inst.workDir, command.Args())
+	if err != nil {
+		status := profileCopilotPluginStatus(err)
+		caps := AgentCapabilities{
+			AgentType: inst.agentType, Status: status,
+			Error: err.Error(), LastCheckedAt: time.Now(),
+		}
+		return ProfileCapabilityResult{
+			Capabilities: caps, ContextRevision: revision,
+			ReasonCode: profileCopilotPluginReasonCode(inst.agentType, status, err),
+		}, nil
+	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
-	probeReq.InferenceConfig.Env = cloneStringMap(req.Context.Env)
-	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.Context.CLIFlags...)
+	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.Context.Env), localEnv)
+	cliFlags := req.Context.CLIFlags
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
+	probeReq.InferenceConfig.CLIFlags = append([]string(nil), cliFlags...)
 	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.Context.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -133,7 +150,7 @@ func (m *Manager) resolveProfileModelConfig(
 	}
 	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), modelConfigResolveTimeout)
 	defer cancel()
-	inst, ia, cfg, command, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
+	inst, ia, cfg, command, localEnv, runtimeGeneration, err := m.profileProbeInputs(probeCtx, agentType)
 	if err != nil {
 		return ModelConfigResolution{}, err
 	}
@@ -155,7 +172,7 @@ func (m *Manager) resolveProfileModelConfig(
 	}
 	value, err, _ := m.profileGroup.Do(key, func() (interface{}, error) {
 		return m.resolveProfileModelConfigFlightOrCached(
-			probeCtx, inst, ia, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
+			probeCtx, inst, ia, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
 		)
 	})
 	if err != nil {
@@ -172,6 +189,7 @@ func (m *Manager) resolveProfileModelConfigFlightOrCached(
 	inst *instance,
 	ia agents.InferenceAgent,
 	command agents.Command,
+	localEnv map[string]string,
 	req ModelConfigResolutionRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -191,7 +209,7 @@ func (m *Manager) resolveProfileModelConfigFlightOrCached(
 		return nil, errProfileContextChanged
 	}
 	return m.resolveProfileModelConfigFlight(
-		ctx, inst, ia, command, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
+		ctx, inst, ia, command, localEnv, req, key, baseRevision, revision, runtimeGeneration, contextGeneration,
 	)
 }
 
@@ -200,6 +218,7 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	inst *instance,
 	ia agents.InferenceAgent,
 	command agents.Command,
+	localEnv map[string]string,
 	req ModelConfigResolutionRequest,
 	key, baseRevision, revision string,
 	runtimeGeneration, contextGeneration uint64,
@@ -207,13 +226,28 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	if !m.profileContextIsCurrent(inst.agentType, baseRevision, runtimeGeneration, contextGeneration) {
 		return ModelConfigResolution{}, errProfileContextChanged
 	}
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, inst.agentType, *req.ProfileContext, inst.workDir, command.Args())
+	if err != nil {
+		status := profileCopilotPluginStatus(err)
+		resolution := ModelConfigResolution{
+			AgentType: inst.agentType, Model: req.Model,
+			Status: status, Error: err.Error(),
+			ContextRevision: revision,
+			ReasonCode:      profileCopilotPluginReasonCode(inst.agentType, status, err),
+		}
+		return resolution, nil
+	}
 	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.ProfileContext = true
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	probeReq.InferenceConfig.Env = cloneStringMap(req.ProfileContext.Env)
-	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.ProfileContext.CLIFlags...)
+	probeReq.InferenceConfig.Env = mergeInferenceEnv(cloneStringMap(req.ProfileContext.Env), localEnv)
+	cliFlags := req.ProfileContext.CLIFlags
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
+	probeReq.InferenceConfig.CLIFlags = append([]string(nil), cliFlags...)
 	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.ProfileContext.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -249,24 +283,24 @@ func (m *Manager) resolveProfileModelConfigFlight(
 func (m *Manager) profileProbeInputs(
 	ctx context.Context,
 	agentType string,
-) (*instance, agents.InferenceAgent, *agents.InferenceConfig, agents.Command, uint64, error) {
+) (*instance, agents.InferenceAgent, *agents.InferenceConfig, agents.Command, map[string]string, uint64, error) {
 	runtimeGeneration := m.profileGeneration(agentType)
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
-		return nil, nil, nil, agents.Command{}, 0, err
+		return nil, nil, nil, agents.Command{}, nil, 0, err
 	}
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		return nil, nil, nil, agents.Command{}, 0, errors.New("inference configuration not available")
+		return nil, nil, nil, agents.Command{}, nil, 0, errors.New("inference configuration not available")
 	}
-	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
+	command, localEnv, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
 	if err != nil {
-		return nil, nil, nil, agents.Command{}, 0, err
+		return nil, nil, nil, agents.Command{}, nil, 0, err
 	}
 	if m.profileGeneration(agentType) != runtimeGeneration {
-		return nil, nil, nil, agents.Command{}, 0, errProfileContextChanged
+		return nil, nil, nil, agents.Command{}, nil, 0, errProfileContextChanged
 	}
-	return inst, ia, cfg, command, runtimeGeneration, nil
+	return inst, ia, cfg, command, localEnv, runtimeGeneration, nil
 }
 
 func (m *Manager) profileGeneration(agentType string) uint64 {
