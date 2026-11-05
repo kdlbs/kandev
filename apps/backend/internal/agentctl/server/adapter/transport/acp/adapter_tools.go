@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -741,6 +742,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	isAsyncLaunchedSub := isSubagentAsyncLaunched(tcu.Meta)
 	supplemental := toolCallUpdateSupplemental(tcu)
 	pluginPromptGeneration := promptGeneration
+	agentName, agentVersion := a.connectedAgentIdentity()
 
 	a.mu.Lock()
 	updateTitle := ""
@@ -808,10 +810,20 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	// terminal updates so Generic.Output stays the structured `{monitor: …}`
 	// view rather than getting clobbered by the rawOutput string.
 	recognizedShellUpdate := false
+	var claudeTerminalObservation *streams.WorkloadRunObservation
 	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
 		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
 		a.normalizer.confirmBackgroundLaunch(payload, tcu.RawOutput)
 		a.recordOpenCodePluginClaimLocked(string(tcu.ToolCallId), pluginPromptGeneration, payload)
+		if claudeBackgroundTerminalExit(
+			a.agentID, agentName, agentVersion, tcu.Meta, toolCallID, payload,
+		) {
+			background := payload.BackgroundWork()
+			payload.SetBackgroundWorkIdentity(background.Kind, background.WorkID, background.Detached, true)
+			claudeTerminalObservation = claudeBackgroundTerminalObservation(
+				payload, emittedToolCallID, time.Now().UTC(),
+			)
+		}
 	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
 		result := tcu.RawOutput
 		if canonicalMCPUpdate {
@@ -839,6 +851,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		if background := payload.BackgroundWork(); background != nil && background.Kind == streams.BackgroundWorkKindShell {
 			payload.SetBackgroundWorkIdentity(background.Kind, background.WorkID, background.Detached, true)
 		}
+	}
+	if claudeTerminalObservation != nil {
+		status = toolStatusComplete
 	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
@@ -967,6 +982,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ToolStatusMissing: tcu.Status == nil,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
+		BackgroundWork:    claudeTerminalObservation,
 	}
 }
 

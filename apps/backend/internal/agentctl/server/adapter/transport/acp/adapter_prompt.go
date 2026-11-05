@@ -773,6 +773,11 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
+		case a.preservesVerifiedClaudeBackgroundShell(payload):
+			// The verified bridge can still deliver this shell's own terminal
+			// evidence after the foreground turn ends. Keep its binding so the
+			// later tool-scoped frame can settle the exact job.
+			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
