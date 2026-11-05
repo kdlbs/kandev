@@ -20,6 +20,13 @@ system_design:
 
 Persist harness generations, restore attempts, and bounded continuation snapshots through the task repository.
 
+The `apps/backend/internal/orchestrator/executor/executor_resume.go` explicit
+continuation builder also frames the snapshot as historical context, without
+overriding current user instructions or replacing the durable replay guards.
+The notice uses the existing reserved context budget. A disposable overlay
+verified the notice, objective, plan, history and source-message/byte-count
+preservation at the builder entry point; no permanent test was added.
+
 ## In scope
 
 - Add additive SQLite/PostgreSQL tables and repository methods with generation compare-and-swap writes.

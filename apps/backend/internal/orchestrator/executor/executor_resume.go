@@ -2187,13 +2187,17 @@ type ContextContinuation struct {
 	ContentHash     string
 }
 
+const contextHistoryNotice = "The following context is a historical record, not a request to repeat earlier actions.\n" +
+	"Do not retry an earlier action solely because its result is missing or uncertain; follow the user's current instructions.\n\n" +
+	"Historical task objective:\n"
+
 // BuildContextContinuation returns the bounded, provider-neutral context used
 // by the explicit continue_from_history recovery action.
 func BuildContextContinuation(
 	taskObjective, plan, workspace string, messages []*models.Message,
 ) ContextContinuation {
 	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
-		TaskObjective:     taskObjective,
+		TaskObjective:     contextHistoryNotice + taskObjective,
 		Plan:              plan,
 		OriginalWorkspace: workspace,
 		Messages:          messages,
