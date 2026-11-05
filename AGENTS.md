@@ -19,7 +19,7 @@ apps/
 - **Backend**: Go with Make (`make -C apps/backend test|build`); local lint uses `bash scripts/lint-go-changed <changed-go-files>` (see `apps/backend/AGENTS.md`). Explicit full-backend lint remains `make -C apps/backend lint`.
 - **Launcher**: all four launch modes (`dev`, `start`, `run`, `service`) go through the native Go binary at `apps/backend/bin/kandev`; the launcher package is `apps/backend/internal/launcher`. `make dev` execs a copy of that binary (`bin/kandev-launcher`).
 - **CLI**: `apps/cli` is the npm-published shim only (`bin/cli.js` + `bin/native-shim.js`); its tests run on the Node built-in test runner (`node --test`).
-- **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
+- **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`). Full web lint runs the Oxlint configuration in `apps/web/oxlint.config.mjs`; web typecheck runs `tsrs --noEmit --fast`. Classic `typescript` and `eslint` remain installed for their JavaScript API consumers, RuleTester, and the focused ESLint adapters (`apps/web/AGENTS.md`).
 - **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
@@ -80,7 +80,7 @@ Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, G
 Static analysis runs in CI and pre-commit. Each subtree has its own thresholds:
 
 - Go limits: see `apps/backend/AGENTS.md` (and `apps/backend/.golangci.yml`).
-- TypeScript limits: see `apps/web/AGENTS.md` (and `apps/web/eslint.config.mjs`).
+- TypeScript limits: see `apps/web/AGENTS.md` (and `apps/web/oxlint.config.mjs`).
 
 When you hit a limit: extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Inventory, recovery, and ordering fixtures share one coordinator harness. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { WebSocketClient, SessionGitRefreshResponse } from "@/lib/ws/client";
@@ -75,6 +76,53 @@ function statusResponse(
   };
 }
 
+function inventoryResponse(
+  repos: Array<{ name: string; path?: string; state?: "ready" | "unavailable" }>,
+  sessionId = SESSION,
+  environmentId = sessionId,
+): SessionGitRefreshResponse {
+  return {
+    success: repos.some((repo) => (repo.state ?? "ready") === "ready"),
+    session_id: sessionId,
+    task_environment_id: environmentId,
+    mode: "fresh",
+    status_state: "ready",
+    snapshots: repos.map((repo, index) => {
+      const path = repo.path ?? `${repo.name || "root"}.txt`;
+      const state = repo.state ?? "ready";
+      return {
+        type: "notification",
+        action: "session.git.event",
+        payload: {
+          type: "status_update",
+          session_id: sessionId,
+          task_environment_id: environmentId,
+          timestamp: `2026-09-30T10:00:0${index}.000Z`,
+          status: {
+            status_state: state,
+            files_complete: state === "ready",
+            detail_state: state === "ready" ? "ready" : "unavailable",
+            error_code: state === "ready" ? undefined : "repository_unavailable",
+            repository_name: repo.name,
+            branch: "main",
+            remote_branch: null,
+            modified: state === "ready" ? [path] : [],
+            added: [],
+            deleted: [],
+            untracked: [],
+            renamed: [],
+            ahead: 0,
+            behind: 0,
+            remote_ahead: 0,
+            remote_behind: 0,
+            files: state === "ready" ? { [path]: { path, status: "modified", staged: false } } : {},
+          },
+        },
+      } as never;
+    }),
+  };
+}
+
 function unavailableResponse(
   sessionId = SESSION,
   environmentId = sessionId,
@@ -122,6 +170,114 @@ function refreshClient(requests: Deferred<SessionGitRefreshResponse>[]) {
     }),
   } as unknown as WebSocketClient;
 }
+
+describe("Git status repository inventory reconciliation", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retires an unnamed refresh failure after a complete named inventory", async () => {
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    store.getState().setGitStatusRefresh(SESSION, "", {
+      state: "unavailable",
+      error_code: "repository_unavailable",
+    });
+
+    const release = retainGitRefreshScope(client, SESSION);
+    const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+    requests[0].resolve(inventoryResponse([{ name: "master" }, { name: "secondary" }]));
+    await attempt;
+
+    const state = store.getState();
+    expect(state.gitStatus.refreshByEnvironmentRepo?.[SESSION]?.[""]).toBeUndefined();
+    expect(state.gitStatus.inventoryByEnvironment?.[SESSION]).toMatchObject({
+      scopes: ["master", "secondary"],
+    });
+    expect(Object.keys(state.gitStatus.byEnvironmentRepo[SESSION] ?? {}).sort()).toEqual([
+      "master",
+      "secondary",
+    ]);
+    release();
+  });
+
+  it("keeps an unavailable current repository beside a ready sibling", async () => {
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    const release = retainGitRefreshScope(client, SESSION);
+    const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+    const mixed = inventoryResponse([
+      { name: "master" },
+      { name: "secondary", state: "unavailable" },
+    ]);
+    requests[0].resolve(mixed);
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    requests[1].resolve(mixed);
+    await attempt;
+
+    const state = store.getState();
+    expect(state.gitStatus.inventoryByEnvironment?.[SESSION]?.scopes).toEqual([
+      "master",
+      "secondary",
+    ]);
+    expect(state.gitStatus.refreshByEnvironmentRepo?.[SESSION]?.secondary).toMatchObject({
+      state: "unavailable",
+    });
+    expect(state.gitStatus.byEnvironmentRepo[SESSION]?.master?.files).toHaveProperty("master.txt");
+    release();
+  });
+
+  it("rejects a pre-attachment response after the inventory generation advances", async () => {
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    const release = retainGitRefreshScope(client, SESSION);
+    const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+
+    store.getState().invalidateGitStatusInventory(SESSION);
+    requests[0].resolve(inventoryResponse([{ name: "", path: "root.txt" }]));
+    await attempt;
+
+    const state = store.getState();
+    expect(state.gitStatus.byEnvironmentRepo[SESSION]).toBeUndefined();
+    expect(state.gitStatus.inventoryByEnvironment?.[SESSION]).toMatchObject({ scopes: null });
+    expect(requests).toHaveLength(1);
+    release();
+  });
+
+  it("requests replacement inventory from an active Changes owner after invalidation", async () => {
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    const release = retainGitRefreshScope(client, SESSION);
+    const stopMonitoring = monitorGitStatusDetails(client, store, SESSION);
+
+    try {
+      const firstAttempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+      requests[0].resolve(inventoryResponse([{ name: "", path: "root.txt" }]));
+      await firstAttempt;
+
+      store.getState().invalidateGitStatusInventory(SESSION);
+      expect(requests).toHaveLength(2);
+
+      requests[1].resolve(inventoryResponse([{ name: "master" }, { name: "secondary" }]));
+      await vi.waitFor(() =>
+        expect(store.getState().gitStatus.inventoryByEnvironment?.[SESSION]?.scopes).toEqual([
+          "master",
+          "secondary",
+        ]),
+      );
+      expect(
+        Object.keys(store.getState().gitStatus.byEnvironmentRepo[SESSION] ?? {}).sort(),
+      ).toEqual(["master", "secondary"]);
+    } finally {
+      stopMonitoring();
+      release();
+    }
+  });
+});
 
 describe("Git status refresh coordinator scope ownership", () => {
   beforeEach(() => {

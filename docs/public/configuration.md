@@ -462,7 +462,13 @@ select **Validate**; this explicit check is independent of discovery roots.
 `KANDEV_DEBUG_DEV_MODE=true` selects the `dev` profile. `make dev` sets that
 selector and defaults the browser title to `Dev Kandev`. `make start-debug`
 enables pprof and debug logging without selecting the `dev` profile, and
-defaults the browser title to `Debug Kandev`. Debug mode is high risk. It
+defaults the browser title to `Debug Kandev`. Source startup compiles the
+frontend as production React regardless of an inherited `NODE_ENV` value.
+Runtime diagnostics do not depend on that build mode, so `make start-debug`
+keeps debug logging and pprof while React development warnings and default
+performance-track instrumentation stay out of the bundle. Use `make dev` for
+development React when `NODE_ENV` is unset or set to `development`. Debug mode
+is high risk. It
 enables local diagnostic surfaces and implies
 `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
 not explicitly locked by the environment. ACP JSONL frames include complete

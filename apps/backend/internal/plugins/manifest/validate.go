@@ -203,12 +203,41 @@ func validateAgentTool(prefix string, tool AgentTool, seen map[string]struct{}) 
 		errs = append(errs, fmt.Errorf("%s.description must be 1-1024 bytes", prefix))
 	}
 	errs = append(errs, validateAgentToolSurfaces(prefix, tool.Surfaces)...)
+	errs = append(errs, validateAgentToolInvocationScope(prefix, tool)...)
 	errs = append(errs, validateAgentToolSchemas(prefix, tool)...)
 	if tool.Annotations.ReadOnlyHint != nil && tool.Annotations.DestructiveHint != nil &&
 		*tool.Annotations.ReadOnlyHint && *tool.Annotations.DestructiveHint {
 		errs = append(errs, fmt.Errorf("%s.annotations cannot set both read_only_hint and destructive_hint", prefix))
 	}
 	return errs
+}
+
+func validateAgentToolInvocationScope(prefix string, tool AgentTool) []error {
+	scope := tool.NormalizedInvocationScope()
+	if scope != AgentToolInvocationScopeTask && scope != AgentToolInvocationScopeInstance {
+		return []error{fmt.Errorf("%s.invocation_scope must be %q or %q", prefix, AgentToolInvocationScopeTask, AgentToolInvocationScopeInstance)}
+	}
+	instanceSurface := declaredInstanceOnlySurface(tool.Surfaces)
+	if instanceSurface == "" {
+		return nil
+	}
+	var errs []error
+	if scope != AgentToolInvocationScopeInstance {
+		errs = append(errs, fmt.Errorf("%s.surfaces requires invocation_scope: %s", prefix, AgentToolInvocationScopeInstance))
+	}
+	if tool.Annotations.ReadOnlyHint == nil || !*tool.Annotations.ReadOnlyHint {
+		errs = append(errs, fmt.Errorf("%s.surfaces requires annotations.read_only_hint: true", prefix))
+	}
+	return errs
+}
+
+func declaredInstanceOnlySurface(surfaces []string) string {
+	for _, surface := range surfaces {
+		if surface == AgentToolSurfaceCoordinator || surface == AgentToolSurfaceExternal {
+			return surface
+		}
+	}
+	return ""
 }
 
 func validateAgentToolIdentity(prefix, name string, seen map[string]struct{}) []error {
@@ -231,7 +260,8 @@ func validateAgentToolSurfaces(prefix string, surfaces []string) []error {
 	seen := map[string]struct{}{}
 	for _, surface := range surfaces {
 		if surface != AgentToolSurfaceKanban && surface != AgentToolSurfaceOffice &&
-			surface != AgentToolSurfaceManaged && surface != AgentToolSurfaceAutomation {
+			surface != AgentToolSurfaceManaged && surface != AgentToolSurfaceAutomation &&
+			surface != AgentToolSurfaceCoordinator && surface != AgentToolSurfaceExternal {
 			errs = append(errs, fmt.Errorf("%s.surfaces contains unsupported surface %q", prefix, surface))
 		}
 		if _, ok := seen[surface]; ok {

@@ -18,11 +18,7 @@ export class CandidateStore {
   async obtain(source, { allowCreate, bootstrapAllowed = false }) {
     await mkdir(this.directory, { recursive: true });
     const names = assetNames(source.record.sdk_version);
-    const retained = await this.assets.download(
-      source.hostTag,
-      names,
-      this.directory,
-    );
+    const retained = await this.assets.download(source, names, this.directory);
     let { archive, receiptPath, signaturePath } = retained;
     let receipt;
     if (!receiptPath) {
@@ -71,6 +67,7 @@ export class CandidateStore {
       node: receipt.node,
       npm: receipt.npm,
       sdk_version: receipt.sdk_version,
+      retention: retained.retention,
     };
   }
 }

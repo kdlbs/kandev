@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { closeModelConfigSheetIfOpen } from "../../helpers/model-config-sheet";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForFiniteAnimations } from "../../helpers/animations";
@@ -330,10 +331,11 @@ test("keeps native model, cancellation and attachment controls usable by touch",
     await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
     await testPage.goto("/threads");
     const tile = testPage.getByTestId(`thread-column-${task.id}`);
-    const model = tile.getByRole("button", { name: "Session model settings" });
+    const model = tile.getByTestId("model-config-trigger");
     await model.tap();
     await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
     await expect(model).toContainText("Mock Smart");
+    await closeModelConfigSheetIfOpen(testPage);
     const editor = tile.getByTestId("chat-input-editor");
     await editor.fill("/slow 8s");
     await tile.getByTestId("submit-message-button").tap();

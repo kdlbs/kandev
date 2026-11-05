@@ -285,7 +285,7 @@ func (m *Manager) configureAntigravityLoginInstance(
 		return err
 	}
 	env := mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv)
-	if err := inst.client.ConfigureAgent(ctx, args[0], args[1:], env, "", nil); err != nil {
+	if err := inst.client.ConfigureAgent(ctx, args[0], args, env, "", nil); err != nil {
 		return fmt.Errorf("configure antigravity login instance: %w", err)
 	}
 	if _, err := inst.client.Start(ctx); err != nil {

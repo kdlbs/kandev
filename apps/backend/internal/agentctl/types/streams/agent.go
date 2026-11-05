@@ -1,6 +1,10 @@
 package streams
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/modelcatalog"
+)
 
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
@@ -758,6 +762,10 @@ type ConfigOption struct {
 
 	// Options lists the selectable values.
 	Options []ConfigOptionValue `json:"options,omitempty"`
+
+	// Catalog carries the provider's bounded group structure and verified
+	// composition bindings. Options stays the flat compatibility projection.
+	Catalog *modelcatalog.Catalog `json:"catalog,omitempty"`
 }
 
 // ConfigOptionValue represents a selectable value for a ConfigOption.

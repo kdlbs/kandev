@@ -276,6 +276,7 @@ export function useDialogFormState(
     lockedWorkflow,
     resetters: {
       setBlockedBy: dependencies.setBlockedBy,
+      setBuiltinMCPPreferences: mcpSelections.setBuiltinMCPPreferences,
       setMcpServerIds: mcpSelections.setMcpServerIds,
       setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,
       setTaskName: form.setTaskName,

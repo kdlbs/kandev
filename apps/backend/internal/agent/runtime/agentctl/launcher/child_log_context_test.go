@@ -32,7 +32,12 @@ func encodeChildLogLine(t *testing.T, level zapcore.Level, message string, field
 
 func forwardChildLogLine(t *testing.T, line string) (*observer.ObservedLogs, string) {
 	t.Helper()
-	core, observed := observer.New(zapcore.DebugLevel)
+	return forwardChildLogLineAt(t, line, zapcore.DebugLevel)
+}
+
+func forwardChildLogLineAt(t *testing.T, line string, level zapcore.Level) (*observer.ObservedLogs, string) {
+	t.Helper()
+	core, observed := observer.New(level)
 	parentLog, err := logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
 	launcher := &Launcher{logger: parentLog.WithFields(zap.String("component", "agentctl-launcher"))}
@@ -275,5 +280,63 @@ func TestChildLogIntegerBounds(t *testing.T) {
 func TestChildLogContextAcceptsPollTrigger(t *testing.T) {
 	if !childLogContextValidators["trigger"](json.RawMessage(`"poll"`)) {
 		t.Fatal("periodic poll trigger must remain forwardable")
+	}
+}
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
+// @covers AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.9
+func TestPipeOutputForwardsAgentFailureContext(t *testing.T) {
+	const instanceID = "33333333-3333-4333-8333-333333333333"
+	for _, tt := range []struct {
+		operation string
+		class     string
+	}{
+		{operation: "agent_configure", class: "agent_running"},
+		{operation: "agent_configure", class: "unknown"},
+		{operation: "agent_probe", class: "managed_runtime_npm_resolution"},
+		{operation: "agent_probe", class: "managed_runtime_npm_policy"},
+		{operation: "agent_probe", class: "unsupported_profile_context"},
+		{operation: "agent_probe", class: "authentication_required"},
+		{operation: "git_inspection", class: "evidence_changed"},
+	} {
+		t.Run(tt.operation+"-"+tt.class, func(t *testing.T) {
+			line := encodeChildLogLine(t, zapcore.WarnLevel, "agent operation failed",
+				zap.String("task_id", childLogTestTaskID),
+				zap.String("session_id", childLogTestSessionID),
+				zap.String("instance_id", instanceID),
+				zap.String("operation", tt.operation),
+				zap.String("error_class", tt.class),
+				zap.String("error", "raw failure must not cross"),
+			)
+			observed, _ := forwardChildLogLineAt(t, line, zapcore.InfoLevel)
+			entries := observed.All()
+			require.Len(t, entries, 1)
+			require.Equal(t, zapcore.WarnLevel, entries[0].Level)
+			decoded := decodedChildMessage(t, entries[0].Message)
+			require.Equal(t, tt.operation, decoded["operation"])
+			require.Equal(t, tt.class, decoded["error_class"])
+			require.Equal(t, childLogTestTaskID, decoded["task_id"])
+			require.Equal(t, childLogTestSessionID, decoded["session_id"])
+			require.Equal(t, instanceID, decoded["instance_id"])
+			require.NotContains(t, entries[0].Message, "raw failure must not cross")
+		})
+	}
+}
+
+// @covers AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.5
+func TestPipeOutputRejectsUnsupportedAgentFailureContext(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		key  string
+		raw  string
+	}{
+		{name: "unknown operation", key: "operation", raw: `"agent_restart"`},
+		{name: "unclassified configure failure", key: "error_class", raw: `"configure_failed"`},
+		{name: "free-form probe code", key: "error_class", raw: `"npm Etarget private"`},
+		{name: "operation with path", key: "operation", raw: `"/private/workspace"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.False(t, childLogContextValidators[tt.key](json.RawMessage(tt.raw)))
+		})
 	}
 }

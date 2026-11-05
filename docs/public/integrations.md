@@ -485,7 +485,7 @@ Linked MRs appear in the GitLab results and task toolbar. One MR can be linked t
 Open a linked MR from the task review surface. Kandev fetches and displays its overview, source and target branches, mergeability and conflicts, approvals, pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. From the same panel you can:
 
 - reply to or resolve a discussion and add selected feedback to the active task session's prompt context;
-- approve or unapprove, merge after confirmation, and update labels or assignees;
+- approve or unapprove, merge after confirmation, and update labels or assignees. A draft MR cannot be merged: Merge stays disabled with a hint until you select **Mark as ready**, which removes the leading `Draft:`, `[Draft]` or `(Draft)` title marker (Kandev never clears a draft on its own, including during merge or automation);
 - search active project members and replace or clear the reviewer list using GitLab user IDs;
 - subscribe or unsubscribe the connected GitLab user from that MR's upstream notifications;
 - refresh, open in GitLab, or unlink the association.

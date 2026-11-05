@@ -137,6 +137,17 @@ function repoStatusUpdateEvent(
   };
 }
 
+function unavailableRepoEvent(timestamp: string, repositoryName: string): GitStatusUpdateEvent {
+  const event = repoStatusUpdateEvent(timestamp, repositoryName, "a.ts");
+  event.status.status_state = "unavailable";
+  event.status.files_complete = false;
+  event.status.detail_state = "unavailable";
+  event.status.error_code = "repository_unavailable";
+  event.status.files = {};
+  event.status.modified = [];
+  return event;
+}
+
 function seedSessionCommits(store: StoreApi<AppState>) {
   store.getState().setSessionCommits(SESSION, [
     {
@@ -155,6 +166,49 @@ function seedSessionCommits(store: StoreApi<AppState>) {
     },
   ]);
 }
+
+describe("git-status WS handler — inventory scope guard", () => {
+  it("rejects a late unnamed failure after a validated named inventory", () => {
+    const store = freshStore();
+    expect(store.getState().reconcileGitStatusInventory(SESSION, 0, ["", "master"])).toBe(true);
+    expect(store.getState().reconcileGitStatusInventory(SESSION, 0, ["master"])).toBe(true);
+    const handler = gitStatusHandler(store);
+
+    handler(gitEvent(unavailableRepoEvent(STATUS_TIME_2, "")));
+
+    const state = store.getState();
+    expect(state.gitStatus.byEnvironmentRepo[SESSION]?.[""]).toBeUndefined();
+    expect(state.gitStatus.refreshByEnvironmentRepo?.[SESSION]?.[""]).toBeUndefined();
+  });
+
+  it("accepts a current named repository failure", () => {
+    const store = freshStore();
+    store.getState().reconcileGitStatusInventory(SESSION, 0, ["master"]);
+    const handler = gitStatusHandler(store);
+
+    handler(gitEvent(unavailableRepoEvent(STATUS_TIME_2, "master")));
+
+    expect(store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.master).toMatchObject({
+      state: "unavailable",
+    });
+  });
+
+  it("accepts and inventories a newly discovered submodule scope", () => {
+    const store = freshStore();
+    store.getState().reconcileGitStatusInventory(SESSION, 0, ["master"]);
+    const handler = gitStatusHandler(store);
+
+    handler(gitEvent(unavailableRepoEvent(STATUS_TIME_2, "submodule/new")));
+
+    const inventory = store.getState().gitStatus.inventoryByEnvironment?.[SESSION];
+    expect(inventory?.scopes).toBeNull();
+    expect(
+      store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.["submodule/new"],
+    ).toMatchObject({
+      state: "unavailable",
+    });
+  });
+});
 
 describe("git-status WS handler — commit events", () => {
   it("commits_reset bumps refetchTrigger and keeps existing commits visible", () => {

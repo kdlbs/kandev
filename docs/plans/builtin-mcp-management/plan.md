@@ -13,18 +13,60 @@ legacy_specs: []
 
 # Implementation plan: Selectable built-in MCP packages
 
-## Current CI and main integration (2026-11-04)
+## New-task MCP placement correction (2026-11-04)
+
+PR #4762 merged at `a1013e89fc460b39b17003e5022d756bf480e3d2` before this
+request. This correction uses `fix/task-create-mcp-package-placement-6d1b` from
+verified current main `5d6adcbca18231a5aa3726ca9ee642bfa255cd4a`, which contains
+that merge. The merged delivery branch is unchanged. The initial work is backed
+up as a patch and retained stash before applying it to this new branch.
+
+The user reported a separate package disclosure above Advanced settings and a
+repeated package title. Work order 03 was reopened for this existing UI-02 management
+scope. The correction is complete and locally verified. Put task-creation packages inside Advanced settings > MCP servers, using
+the shipped desktop popover and phone drawer. Render one package-list heading.
+Keep the task draft in the form owner so closing either disclosure does not
+discard consent. Reset it on a new task or workspace change. No package default,
+permission, persisted format, process-start timing, or existing-task flow changes.
+
+After testing the isolated preview, the user authorized its shutdown and merge
+of this follow-up once conflicts, bot findings, and failing or pending CI are
+clear. This supersedes the historical no-merge checkpoints below. The preview
+is stopped. Work order 03 also covers the valid review finding that slow
+additional-server reads must not block the built-in picker. Exact-head remote
+verification remains a delivery gate recorded in the saved task plan.
+
+Desktop: New Task > Advanced settings > MCP servers > package list/detail and
+additional servers in one popover. Phone: the same entry opens the shipped MCP
+drawer, with one scroll body and its existing Close control. Package Back stays
+inside the same surface and does not submit. The existing form footer creates
+the task after the picker closes. Work order 03 names focused regressions.
+
+## Follow-up hosted CI repair (2026-11-04)
+
+The first follow-up fix head passed local checks and bot disposition, but hosted
+Shard 26 failed in mobile navigation hydration and workflow-model test
+sequencing. The scoped test-only repair waits for the actual restored commits
+response and finishes the initial workflow launch before changing its model.
+Both phone journeys pass repeated checks, and all five desktop navigation
+cases pass. The package implementation and UI remain unchanged. See
+[implementation results](implementation-results.md#hosted-ci-sequencing-repair-2026-11-04).
+Exact-head CI and the final merge gate remain pending publication of this repair.
+
+## Historical pre-merge CI and main integration (2026-11-04)
 
 The user's current CI/conflict requests and later "continue" authorize repair,
 rebasing, publication to the existing PR, and remote verification. No merge is
 authorized. These requests supersede the older no-CI delivery checkpoints below.
 The approved requirements, package boundaries, and implementation scope remain.
 
-The current integration base is main `e180953eae3e433ed91fd15844ad3fe4571b7b76`.
+Before PR #4762 merged, its integration base was main
+`e180953eae3e433ed91fd15844ad3fe4571b7b76`.
 All 16 owned patches were preserved by the rebase, including the recovery-ledger
 and navigation-readiness repairs. Main's clarification attachment schemas,
 caller checks, and prevent-auto-start behavior are preserved. Earlier baseline
-and publication sections are historical receipts; keep the current owned branch.
+and publication sections are historical receipts. The placement correction above
+records the active branch and its verified base.
 
 Work orders 01, 02 and 03 remain implemented. Current-source compatibility
 checks and delivery evidence are recorded in
@@ -53,7 +95,7 @@ Focused post-rebase race and browser checks pass. See
 [implementation-results.md](implementation-results.md#secondary-adversarial-review-2026-11-03)
 for review coverage limits, regressions and final publication evidence.
 
-## Checkpoint and verified baseline
+## Historical implementation checkpoint and verified baseline
 
 Design approved by the user; implementation explicitly authorized with "go for it"
 on 2026-10-24 and "continue impl" on 2026-10-25. Work order 01 is complete;
@@ -63,7 +105,7 @@ Implementation uses sequential TDD. The publication checkpoint below supersedes
 the earlier instruction to retain this package only as uncommitted files.
 
 Workspace: `/home/zeval/.kandev/tasks/unify-built-in-mcp-m_mk09846g/kdlbs-kandev`.
-Current feature branch: `feature/builtin-mcp-packages-6d1b`.
+Original feature branch: `feature/builtin-mcp-packages-6d1b` (merged in PR #4762).
 Verified base: `0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`, actual squash merge of
 [#3293](https://github.com/kdlbs/kandev/pull/3293) and fetched main on 2026-10-24.
 The parent finished at `e053e8caa565e93564bd1a3e2c04b4f61f1eb362` before merge.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
 )
 
 type AgentProfileDTO struct {
@@ -303,6 +304,7 @@ type ConfigOptionDTO struct {
 	CurrentValue string                  `json:"current_value"`
 	Category     string                  `json:"category,omitempty"`
 	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog   `json:"catalog,omitempty"`
 }
 
 type ConfigOptionChoiceDTO struct {
@@ -626,6 +628,10 @@ type ProfileLaunchSettingsRequest struct {
 	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
 	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
 	CommandPrefix *string             `json:"command_prefix"`
+	// Mode is the draft ACP mode. A pointer distinguishes an explicit empty
+	// value from an omitted field on an older client. It is request-only and
+	// never persisted by discovery.
+	Mode *string `json:"mode,omitempty"`
 	// CopilotSelectedPlugins optionally replaces the saved selection for this
 	// request. Omission uses the saved profile value, or an empty set for a
 	// new draft.

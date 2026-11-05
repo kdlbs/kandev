@@ -56,6 +56,19 @@ func TestBuildPrompt_TaskComment(t *testing.T) {
 	}
 }
 
+func TestBuildPrompt_HandoffCompletedIncludesTheReport(t *testing.T) {
+	prompt := service.BuildPrompt(&service.PromptContext{
+		Reason:         service.RunReasonHandoffCompleted,
+		TaskIdentifier: "KAN-51",
+		CommentBody:    `Handed-off task "Delivery task" (delivery-1) reached state COMPLETED.`,
+	})
+	for _, want := range []string{"handed-off task", "Delivery task", "COMPLETED"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("handoff completion prompt missing %q: %s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPrompt_BlockersResolved(t *testing.T) {
 	pc := &service.PromptContext{
 		Reason:                service.RunReasonTaskBlockersResolved,
