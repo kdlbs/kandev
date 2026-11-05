@@ -70,9 +70,13 @@ function repositoryStatusesForFailure(input: ChangesPanelGitStatusInput): Reposi
 function failedRepositoryNames(input: ChangesPanelGitStatusInput): string[] {
   const names = new Set<string>();
   for (const [repositoryName, refresh] of Object.entries(input.repositoryRefresh ?? {})) {
-    if (refresh.state === "unavailable") names.add(repositoryName);
+    if (refresh.state === "unavailable" && repositoryName !== "") names.add(repositoryName);
   }
   for (const { repository_name, status } of repositoryStatusesForFailure(input)) {
+    // An unnamed root failure stays visible through the generic unavailable
+    // notice; rendering the raw empty name would produce " could not be
+    // refreshed." and imply a repository that does not exist.
+    if (repository_name === "") continue;
     if (status.status_state === "unavailable" || hasRecoverableGitStatusDetailFailure(status)) {
       names.add(repository_name);
     }
