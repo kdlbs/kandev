@@ -36,7 +36,7 @@ func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, e
 		var original processidentity.Identity
 		client, release := execution.AcquireAgentCtlClient()
 		if client != nil {
-			original = client.RuntimeProcessIdentity()
+			original = withAgentProcessGroup(ctx, client, execution.DeliveryStreamID, client.RuntimeProcessIdentity())
 		}
 		release()
 		execution.setMetadataValue(deliveryPromptTurnBindingMetadataKey, deliveryPromptTurnBinding{

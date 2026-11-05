@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
@@ -36,6 +37,12 @@ func (systemGHAccountRunner) Run(ctx context.Context, args ...string) (string, e
 	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, resolveGHExecTimeout(ctx), func(execCtx context.Context) *exec.Cmd {
 		cmd := exec.CommandContext(execCtx, "gh", args...)
 		cmd.Env = githubCLIEnvironment(os.Environ())
+		for i := range args {
+			if args[i] == "--hostname" && i+1 < len(args) {
+				cmd.Env = append(cmd.Env, "GH_HOST="+args[i+1])
+				break
+			}
+		}
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		return cmd
@@ -58,7 +65,7 @@ func githubCLIEnvironment(source []string) []string {
 	filtered := make([]string, 0, len(source))
 	for _, item := range source {
 		key, _, ok := strings.Cut(item, "=")
-		if ok && (strings.EqualFold(key, "GH_TOKEN") || strings.EqualFold(key, "GITHUB_TOKEN")) {
+		if ok && (strings.EqualFold(key, "GH_TOKEN") || strings.EqualFold(key, "GITHUB_TOKEN") || strings.EqualFold(key, "GH_ENTERPRISE_TOKEN") || strings.EqualFold(key, "GITHUB_ENTERPRISE_TOKEN") || strings.EqualFold(key, "GH_HOST")) {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -188,9 +195,11 @@ func resolveGHAccountToken(ctx context.Context, runner ghAccountCommandRunner, h
 	if host == "" {
 		host = defaultGitHubHost
 	}
-	if host != defaultGitHubHost {
-		return "", fmt.Errorf("unsupported GitHub host %q", host)
+	parsedHost, err := githubhost.Parse(host)
+	if err != nil {
+		return "", err
 	}
+	host = parsedHost.String()
 	if login == "" {
 		return "", fmt.Errorf("GitHub login is required")
 	}

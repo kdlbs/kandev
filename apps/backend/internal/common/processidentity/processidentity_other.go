@@ -17,3 +17,5 @@ func TerminateOwnedSession(context.Context, Identity, time.Duration) error {
 
 // OwnedSessionTerminated fails closed when descendant ownership cannot be inspected.
 func OwnedSessionTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }
+
+func OwnedGroupTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

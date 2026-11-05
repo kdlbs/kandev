@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/lib/i18n";
@@ -356,5 +356,157 @@ describe("ChangeRequestDetail actions and states", () => {
     expect(retry.classList.contains("h-7")).toBe(true);
     expect(retry.classList.contains("max-md:h-11")).toBe(true);
     expect(retry.classList.contains("[@media(pointer:coarse)]:h-11")).toBe(true);
+  });
+});
+
+const ROOT_TEXT = "Root text";
+const REPLY_TEXT = "Reply text";
+const root = {
+  id: "root",
+  author: { name: "Root" },
+  body: ROOT_TEXT,
+  path: "file.ts",
+  line: 7,
+};
+const reply = { id: "reply", parentId: "root", author: { name: "Reply" }, body: REPLY_TEXT };
+
+function addThread(fragmentId: string) {
+  fireEvent.click(
+    within(screen.getByTestId(`change-request-thread-context-${fragmentId}`)).getByRole("button"),
+  );
+}
+
+describe("whole review thread context", () => {
+  it.each([false, true])(
+    "adds both sides of a two-comment mixed thread (root bot: %s)",
+    (rootIsBot) => {
+      const onAddContext = vi.fn();
+      const comments = [
+        { ...root, author: { ...root.author, isBot: rootIsBot } },
+        { ...reply, author: { ...reply.author, isBot: !rootIsBot } },
+      ];
+      renderDetail({ detail: { ...detail, comments }, onAddContext });
+      expect(screen.getByText(rootIsBot ? REPLY_TEXT : ROOT_TEXT)).toBeTruthy();
+      expect(screen.queryByText(rootIsBot ? ROOT_TEXT : REPLY_TEXT)).toBeNull();
+      addThread(rootIsBot ? "reply" : "root");
+      expect(onAddContext).toHaveBeenCalledTimes(1);
+      expect(onAddContext).toHaveBeenCalledWith(
+        "comment",
+        [
+          "### Comment Thread",
+          "",
+          "**Root** on `file.ts:7`:",
+          ROOT_TEXT,
+          "",
+          "**Reply**:",
+          REPLY_TEXT,
+          "",
+          `PR: ${detail.url}`,
+          "Please address this comment thread.",
+        ].join("\n"),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Bot comments (1)" }));
+      expect(screen.getByText(rootIsBot ? ROOT_TEXT : REPLY_TEXT)).toBeTruthy();
+      addThread(rootIsBot ? "root" : "reply");
+      expect(onAddContext.mock.calls[1]).toEqual(onAddContext.mock.calls[0]);
+    },
+  );
+
+  it("preserves supplied reply order and every author across multiple mixed replies", () => {
+    const onAddContext = vi.fn();
+    renderDetail({
+      detail: {
+        ...detail,
+        comments: [
+          root,
+          { ...reply, author: { name: "Bot", isBot: true } },
+          { id: "third", parentId: "root", author: { name: "Human" }, body: "Third text" },
+        ],
+      },
+      onAddContext,
+    });
+    addThread("root");
+    expect(onAddContext).toHaveBeenCalledWith(
+      "comment",
+      [
+        "### Comment Thread",
+        "",
+        "**Root** on `file.ts:7`:",
+        ROOT_TEXT,
+        "",
+        "**Bot**:",
+        REPLY_TEXT,
+        "",
+        "**Human**:",
+        "Third text",
+        "",
+        `PR: ${detail.url}`,
+        "Please address this comment thread.",
+      ].join("\n"),
+    );
+  });
+});
+
+describe("whole review thread context controls", () => {
+  it.each([false, true])("keeps homogeneous threads working (bot: %s)", (isBot) => {
+    const onAddContext = vi.fn();
+    renderDetail({
+      detail: {
+        ...detail,
+        comments: [
+          { ...root, author: { ...root.author, isBot } },
+          { ...reply, author: { ...reply.author, isBot } },
+        ],
+      },
+      onAddContext,
+    });
+    if (isBot) fireEvent.click(screen.getByRole("button", { name: "Bot comments (2)" }));
+    addThread("root");
+    expect(onAddContext.mock.calls[0][1]).toContain("Root text\n\n**Reply**:\nReply text");
+  });
+
+  it("treats a missing parent as a root and leaves standalone comments without a thread action", () => {
+    const onAddContext = vi.fn();
+    renderDetail({
+      detail: {
+        ...detail,
+        comments: [
+          { ...root, parentId: "missing" },
+          { ...reply, author: { ...reply.author, isBot: true } },
+          { id: "alone", author: { name: "Alone" }, body: "Standalone" },
+        ],
+      },
+      onAddContext,
+    });
+    addThread("root");
+    expect(onAddContext.mock.calls[0][1]).toContain("Root text\n\n**Reply**:\nReply text");
+    expect(screen.queryByTestId("change-request-thread-context-alone")).toBeNull();
+  });
+
+  it("keeps actions unavailable without a context callback", () => {
+    renderDetail({ detail: { ...detail, comments: [root, reply] } });
+    expect(screen.queryByTestId("change-request-thread-context-root")).toBeNull();
+  });
+
+  it("preserves visible fragment reply action identity", () => {
+    const onAction = vi.fn();
+    renderDetail({
+      detail: {
+        ...detail,
+        comments: [{ ...root, author: { ...root.author, isBot: true } }, reply],
+      },
+      actions: [{ id: "reply-action", label: "Reply", placement: "thread", input: "text" }],
+      onAction,
+      onAddContext: vi.fn(),
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply to thread reply" }), {
+      target: { value: "Response" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reply to thread reply" }));
+    expect(onAction).toHaveBeenCalledWith({
+      actionId: "reply-action",
+      body: "Response",
+      threadId: "reply",
+    });
   });
 });

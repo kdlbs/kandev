@@ -42,6 +42,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-001.2:** When a provider cannot supply an operation, output stream, hierarchy, reasoning summary, or usage attribution, the system shall indicate its unavailability and shall not fabricate data or attempt an alternative process-control mechanism.
 - **AC-AGENTS-BACKGROUND-WORK-001.3:** When the shared feature is disabled or an older peer omits the new contract, existing chat, inline subagent history, background accounting, and admission behavior shall continue; new controls shall not execute.
 - **AC-AGENTS-BACKGROUND-WORK-001.4:** When Codex native support is enabled, its supported capabilities shall be established against the selected protocol version; enabling this feature shall not enable unrelated provider experiments or override an explicit operator restriction.
+- **AC-AGENTS-BACKGROUND-WORK-001.5:** When shipped profiles use their defaults, shared background-work inspection shall be enabled. Explicit operator overrides shall remain effective.
 
 ### REQ-AGENTS-BACKGROUND-WORK-002: Identity and reliable lifecycle
 
@@ -70,16 +71,21 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-004.2:** When inspecting command output, users shall have ANSI-color-safe text rendering, search within retained output, pause/resume auto-scroll, and local clear. Clear shall not stop the process or delete durable conversation history.
 - **AC-AGENTS-BACKGROUND-WORK-004.3:** When child summaries, tool activity, or reasoning summaries are exposed by the provider, the shared viewer shall reuse their normalized transcript representation; unavailable private reasoning shall not be inferred or promised.
 - **AC-AGENTS-BACKGROUND-WORK-004.4:** When usage can be attributed to a child, the viewer shall use the existing accounting source, distinguish reported/estimated/unavailable values, and avoid adding the same measurement to parent and child totals twice.
+- **AC-AGENTS-BACKGROUND-WORK-004.5:** After a user clears a command output view, subsequent retained output for that workload and run shall appear, including while its bounded output window rolls. Repeated clears hide output through the latest clear; a clear in one view shall not hide output for another session, workload, or run.
 
 ### REQ-AGENTS-BACKGROUND-WORK-005: Desktop and phone experience
 
 **Intent:** Keep background work accessible without changing how prompts are admitted.
 
-- **AC-AGENTS-BACKGROUND-WORK-005.1:** When running, waiting, or unknown work exists, a small, content-width pill directly above the chat input shall show the total as a localized label such as "2 Background Jobs". Clicking, keyboard-activating, or tapping it shall open a summary with separate running, waiting, and unknown counts. A history entry shall remain reachable when only completed work exists.
+- **AC-AGENTS-BACKGROUND-WORK-005.1:** When running work exists, a compact, content-width composer chip directly above the chat input shall count and summarize only running workloads. Otherwise, the chip shall be absent, including when waiting, unknown, or terminal records remain. Its popover or phone summary shall exclude those records.
 - **AC-AGENTS-BACKGROUND-WORK-005.2:** When background state changes, typing and the user's draft shall be preserved. Send, queue, steering, and root-cancel behavior shall retain existing session-admission rules; background visibility alone shall not enable concurrent turns. Explicit same-turn input is governed separately by the [Platform steering contract](../../platform/requirements/explicit-turn-steering.md).
 - **AC-AGENTS-BACKGROUND-WORK-005.3:** When opening details, selecting a job or agent on desktop shall open its own named detail tab in the central Dockview group. Different workloads shall remain open independently, selecting an already-open workload shall activate its existing tab, and closing a tab shall not stop work. View all shall open a separate Background Work overview; phone shall offer a focused list and full-height detail surface with Back navigation, visible actions, safe-area and keyboard clearance, and no document horizontal overflow.
 - **AC-AGENTS-BACKGROUND-WORK-005.4:** When loading, empty, disconnected, unsupported, or failed states occur, each shall be distinguishable and accessible without color alone. Phone/coarse-pointer actions shall have at least 44px hit targets, and each content view shall have one vertical scroll owner with focus returned on dismissal.
 - **AC-AGENTS-BACKGROUND-WORK-005.5:** When changing locale, new labels, action/error feedback, counts, and accessibility names shall use the existing translation system with all supported catalogs and correct pluralization.
+- **AC-AGENTS-BACKGROUND-WORK-005.6:** When users open the overview, Active and History tabs shall separate running or waiting work from terminal or unknown records. Counts shall describe each tab before search. Search shall filter the selected tab. Unknown records shall retain their status and disclose unavailable activity.
+- **AC-AGENTS-BACKGROUND-WORK-005.7:** When commands exceed the available width, summary and overview titles shall truncate without hiding status or actions. Details shall show the full command with wrapping, including unbroken tokens. Lists, details, and their containers shall require no horizontal scrolling on desktop or phone.
+- **AC-AGENTS-BACKGROUND-WORK-005.8:** When a workload changes state, the chip and tabs shall update without changing the selected tab, search, open detail, or composer draft. An open summary shall dismiss when its last running workload leaves. Focus shall return to a stable chat control if the chip disappears.
+- **AC-AGENTS-BACKGROUND-WORK-005.9:** When the feature is available, users shall be able to open Background Work without a composer chip. Desktop shall provide a panel-menu entry. Phone shall provide a Panels entry and a focused overview with the same tabs. Initial opening shall select Active when running or waiting work exists, and History otherwise. Loading shall finish before this initial selection resolves.
 
 ### REQ-AGENTS-BACKGROUND-WORK-006: Delivery and compatibility evidence
 
@@ -88,6 +94,60 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-006.1:** When enabling the feature for Codex, contract tests shall prove discovery, targeted termination, isolated child interruption, output fallback, and reconnection against the pinned schema, with real-provider evidence distinguished from deterministic fake-server coverage.
 - **AC-AGENTS-BACKGROUND-WORK-006.2:** When an ACP adapter supplies existing normalized observations, it shall use the shared viewer with unsupported controls absent. A provider-neutral conformance fixture shall exercise supported and unsupported capabilities without protocol-name branches in the UI.
 - **AC-AGENTS-BACKGROUND-WORK-006.3:** When running through local, Docker, SSH, or Kubernetes executors, controls and observations shall use the owning runtime; a remote process identifier shall never be treated as a host OS process identifier.
+
+### REQ-AGENTS-BACKGROUND-WORK-007: OpenCode background shell continuity
+
+**Intent:** Keep OpenCode jobs identifiable after their launch tool finishes.
+
+- **AC-AGENTS-BACKGROUND-WORK-007.1:** When OpenCode confirms a detached shell launch, the system shall retain one workload with its original conversation, command, and launch association.
+- **AC-AGENTS-BACKGROUND-WORK-007.2:** When the launch tool completes while its shell remains active, the system shall distinguish launch completion from workload completion.
+- **AC-AGENTS-BACKGROUND-WORK-007.3:** When OpenCode reports a job outcome, the system shall update that job once and retain its available output and exit status.
+- **AC-AGENTS-BACKGROUND-WORK-007.4:** When completion delivery or current liveness is unavailable, the system shall show that limitation without reporting successful completion or verified running activity.
+- **AC-AGENTS-BACKGROUND-WORK-007.5:** When a new foreground turn starts, jobs from earlier turns shall retain their identity and remain inspectable.
+- **AC-AGENTS-BACKGROUND-WORK-007.6:** When the supported v2 plugin reports an owned shell outcome, the workload shall retain its actual terminal state and available exit code.
+- **AC-AGENTS-BACKGROUND-WORK-007.7:** When that outcome arrives after a foreground response or during another turn, it shall settle the original job without changing that turn.
+- **AC-AGENTS-BACKGROUND-WORK-007.8:** When the plugin lacks output or live-activity evidence, the system shall retain those limitations. An unknown job can settle only from actual outcome evidence.
+- **AC-AGENTS-BACKGROUND-WORK-007.9:** When the plugin is absent, disabled, incompatible, or loses an outcome, ordinary ACP prompting and inspection shall retain their existing behavior.
+
+### REQ-AGENTS-BACKGROUND-WORK-008: OpenCode automatic follow-up delivery
+
+**Intent:** Deliver the agent response that follows a background result.
+
+- **AC-AGENTS-BACKGROUND-WORK-008.1:** When a supported OpenCode connection resumes the agent after a job result, the response shall appear once in the original conversation.
+- **AC-AGENTS-BACKGROUND-WORK-008.2:** When an automatic response starts or ends, its activity and completion shall belong to that response and preserve foreground prompt ownership.
+- **AC-AGENTS-BACKGROUND-WORK-008.3:** When a user message races an automatic response, the system shall serialize delivery without losing, duplicating, or moving either message to another conversation.
+- **AC-AGENTS-BACKGROUND-WORK-008.4:** When a connection loses events or changes ownership, the system shall preserve history and disclose uncertain activity until fresh provider evidence resolves it.
+- **AC-AGENTS-BACKGROUND-WORK-008.5:** When an older OpenCode version lacks continuous delivery, existing prompting shall remain available and automatic follow-up delivery shall be reported as unavailable.
+
+### REQ-AGENTS-BACKGROUND-WORK-009: OpenCode background-work experience
+
+**Intent:** Keep background work visible while the main conversation remains usable.
+
+- **AC-AGENTS-BACKGROUND-WORK-009.1:** When OpenCode jobs have verified live activity, the session shall show working-in-background activity through the shared background-work experience.
+- **AC-AGENTS-BACKGROUND-WORK-009.2:** When the foreground turn is idle, a user shall be able to send another prompt while its background jobs continue.
+- **AC-AGENTS-BACKGROUND-WORK-009.3:** When OpenCode has an active foreground prompt without steering support, additional input shall queue and shall not claim immediate delivery.
+- **AC-AGENTS-BACKGROUND-WORK-009.4:** When users inspect OpenCode jobs on desktop or phone, they shall use the shared viewer, retain their draft, and see only supported controls.
+- **AC-AGENTS-BACKGROUND-WORK-009.5:** When all OpenCode jobs become terminal, the active count shall clear while completed history remains reachable.
+- **AC-AGENTS-BACKGROUND-WORK-009.6:** When a job fails, the viewer shall show its failure independently from any later agent recovery attempt.
+
+### REQ-AGENTS-BACKGROUND-WORK-010: Claude background shells do not stay running
+
+**Intent:** The background jobs count reflects work that is still running.
+
+- **AC-AGENTS-BACKGROUND-WORK-010.1:** When the agent process that owns a workload has ended, including through replacement, idle reclaim, or a backend restart, every non-terminal workload of that session shall become terminal with an unknown outcome. Verified liveness shall still be required before settlement.
+- **AC-AGENTS-BACKGROUND-WORK-010.2:** When the connected Claude bridge advertises background task lifecycle support, a detached shell shall settle from the lifecycle event that names its launch tool, retaining the reported outcome. The launch tool completing shall not settle it. **Not yet delivered:** the capture confirms the bridge frames, but the pinned ACP SDK cannot represent them, and advertising the capability changes transcript and follow-up-turn behavior. Process-end settlement (`010.1`) applies. See the [rejected proposal](../../../decisions/2026-11-01-claude-async-task-lifecycle-capability.md); a new proposal requires SDK support (or a safe raw-frame path) and a product decision on the follow-up turn.
+- **AC-AGENTS-BACKGROUND-WORK-010.3:** When neither task lifecycle support nor attributed shell termination evidence is available, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
+- **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
+- **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
+- **AC-AGENTS-BACKGROUND-WORK-010.6:** When `@agentclientprotocol/claude-agent-acp` version `0.97.0`, identified at initialize, reports a tool-scoped terminal exit for a tracked detached shell, only that workload shall leave the running count. An unavailable outcome shall remain unavailable. Launch completion, malformed evidence, and evidence for another workload shall not imply termination.
+
+The [OpenCode continuity design](../system-design/background-work-opencode.md)
+owns full provider continuity. The
+[Kandev plugin design](../system-design/opencode-kandev-plugin.md) owns the
+bounded v2 compatibility path for criteria 007.6 through 007.9. The shared
+criteria retain their existing meanings. A working-in-background display does
+not change workflow placement, authorize concurrent prompts, or declare the
+user's goal complete.
 
 ## Exclusions and related contracts
 
@@ -98,6 +158,7 @@ Input is part of the shared contract, but Codex background stdin is unsupported
 unless independently proven for thread-owned commands in the pinned version.
 
 - [Design](../system-design/background-work.md)
+- [Stuck turn and queue delivery repair](../../../plans/stuck-turn-queue-delivery/plan.md)
 - [Native Codex requirements](codex-app-server.md)
 - [Subagent invocation history](subagent-context-persistence.md)
 - [Existing subagent presentation](../../ui/requirements/subagent-observability.md)

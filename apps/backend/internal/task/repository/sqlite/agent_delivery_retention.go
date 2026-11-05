@@ -69,6 +69,13 @@ func (r *Repository) RunAgentDeliveryRetentionBatch(
 	options = normalizeAgentDeliveryRetentionOptions(options)
 	workCtx, cancel := context.WithTimeout(ctx, options.WorkTimeout)
 	defer cancel()
+	return r.runAgentDeliveryRetentionBatch(workCtx, options)
+}
+
+func (r *Repository) runAgentDeliveryRetentionBatch(
+	workCtx context.Context,
+	options models.AgentDeliveryRetentionBatchOptions,
+) (models.AgentDeliveryRetentionBatchResult, error) {
 	if err := workCtx.Err(); err != nil {
 		return models.AgentDeliveryRetentionBatchResult{}, err
 	}

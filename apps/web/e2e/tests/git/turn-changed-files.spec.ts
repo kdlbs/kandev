@@ -8,6 +8,7 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import {
   assertHistoricalSelectorStyle,
   assertLatestTurnCardInView,
+  assertTurnCardMessageGap,
   enableTurnChangedFiles,
   openFirstTurnChangesDiff,
   readTurnChangeHistory,
@@ -109,6 +110,127 @@ test.describe("historical turn changed files", () => {
       await restorePreference();
     }
   });
+
+  test("leaves a 16px gap after anchored cards and keeps presentation aligned after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const restorePreference = await enableTurnChangedFiles(apiClient);
+    try {
+      const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+      resetTurnQaFile(seedData.repositoryPath);
+      const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+      await waitForTurnChangeCount(apiClient, sessionId, 1);
+
+      const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+      git.stageFile("untracked_test.txt");
+      git.commit("capture initial changed file");
+      await session.sendMessage("/e2e:untracked-file-modify");
+      await waitForTurnChangeCount(apiClient, sessionId, 2);
+      await expect(
+        session.chat.getByText("untracked-file-modify complete", { exact: false }),
+      ).toBeVisible();
+      await session.waitForChatIdle();
+
+      let cards = session.activeChat().getByTestId("turn-changed-files-card");
+      await expect(cards).toHaveCount(2);
+      await assertTurnCardMessageGap(cards.first());
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+      cards = session.activeChat().getByTestId("turn-changed-files-card");
+      await expect(cards).toHaveCount(2);
+      await assertTurnCardMessageGap(cards.first());
+
+      const secondCard = cards.nth(1);
+      const fileRow = secondCard.locator("[data-turn-file-change-id]").first();
+      await expect(fileRow).toContainText("Modified");
+      const cardIcon = fileRow.locator("span[style*='font-family']");
+      const cardIconDetails = await cardIcon.evaluate((element) => ({
+        glyph: element.textContent,
+        color: getComputedStyle(element).color,
+      }));
+
+      await session.clickTab("Files");
+      const treeNode = session.fileTreeNode("untracked_test.txt");
+      await expect(treeNode).toBeVisible();
+      const treeIcon = treeNode.locator("span[style*='font-family']");
+      await expect(treeIcon).toHaveCount(1);
+      const treeIconDetails = await treeIcon.evaluate((element) => ({
+        glyph: element.textContent,
+        color: getComputedStyle(element).color,
+      }));
+      expect(cardIconDetails).toEqual(treeIconDetails);
+
+      await session.clickTab("Changes");
+      const changesRow = session.changes.locator('[data-changes-file="untracked_test.txt"]');
+      await expect(changesRow).toBeVisible();
+      const statusIcon = changesRow.locator('[data-file-status="modified"]');
+      await expect(statusIcon).toHaveCount(1);
+      const cardKind = fileRow.getByText("Modified", { exact: true });
+      const cardAddedLines = fileRow.locator(".text-emerald-600").first();
+      const panelAddedLines = changesRow.locator(".text-emerald-600").first();
+      const cardRemovedLines = fileRow.locator(".text-rose-600").first();
+      const panelRemovedLines = changesRow.locator(".text-rose-600").first();
+
+      for (const colorScheme of ["light", "dark"] as const) {
+        await testPage.emulateMedia({ colorScheme });
+        const [
+          kindColor,
+          statusColor,
+          cardAddedColor,
+          panelAddedColor,
+          cardRemovedColor,
+          panelRemovedColor,
+        ] = await Promise.all([
+          cardKind.evaluate((element) => getComputedStyle(element).color),
+          statusIcon.evaluate((element) => getComputedStyle(element).color),
+          cardAddedLines.evaluate((element) => getComputedStyle(element).color),
+          panelAddedLines.evaluate((element) => getComputedStyle(element).color),
+          cardRemovedLines.evaluate((element) => getComputedStyle(element).color),
+          panelRemovedLines.evaluate((element) => getComputedStyle(element).color),
+        ]);
+        expect(kindColor).toBe(statusColor);
+        expect(cardAddedColor).toBe(panelAddedColor);
+        expect(cardRemovedColor).toBe(panelRemovedColor);
+      }
+    } finally {
+      await restorePreference();
+    }
+  });
+
+  test("leaves a 16px gap after fallback cards", async ({ testPage, apiClient, seedData }) => {
+    const restorePreference = await enableTurnChangedFiles(apiClient);
+    try {
+      const { resetTurnQaFile, routeTurnChangeFallback } =
+        await import("./turn-changed-files-qa-helpers");
+      resetTurnQaFile(seedData.repositoryPath);
+      await routeTurnChangeFallback(testPage);
+      const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+      await waitForTurnChangeCount(apiClient, sessionId, 1);
+      await session.sendMessage("/e2e:untracked-file-modify");
+      await waitForTurnChangeCount(apiClient, sessionId, 2);
+      await session.waitForChatIdle();
+
+      let fallbackCards = testPage
+        .locator("[data-transcript-fallback-anchor]")
+        .getByTestId("turn-changed-files-card");
+      await expect(fallbackCards).toHaveCount(2);
+      await assertTurnCardMessageGap(fallbackCards.first());
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+      fallbackCards = testPage
+        .locator("[data-transcript-fallback-anchor]")
+        .getByTestId("turn-changed-files-card");
+      await expect(fallbackCards).toHaveCount(2);
+      await assertTurnCardMessageGap(fallbackCards.first());
+    } finally {
+      await restorePreference();
+    }
+  });
 });
 
 test("recovers a failed file list instead of claiming no files", async ({
@@ -146,24 +268,46 @@ test("recovers a failed file list instead of claiming no files", async ({
   }
 });
 
-test("discloses renamed paths and sizes narrow fine-pointer actions", async ({
-  testPage,
+test("keeps renamed paths readable on a narrow fine-pointer viewport", async ({
+  desktopTestPage: testPage,
   apiClient,
   seedData,
 }) => {
   const restorePreference = await enableTurnChangedFiles(apiClient);
   try {
-    const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
-      await import("./turn-changed-files-qa-helpers");
     await testPage.setViewportSize({ width: 390, height: 844 });
+    expect(await testPage.evaluate(() => window.matchMedia("(pointer: fine)").matches)).toBe(true);
+    const {
+      routeRenamedTurnFile,
+      resetTurnQaFile,
+      assertCardResponsiveContainment,
+      assertCardTouchTargets,
+      assertTurnFileDisclosure,
+    } = await import("./turn-changed-files-qa-helpers");
     await routeRenamedTurnFile(testPage);
-    const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
     resetTurnQaFile(seedData.repositoryPath);
+    const fileTreeLoaded = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/repositories/") &&
+        response.url().includes("/files?") &&
+        response.status() === 200,
+    );
     const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await fileTreeLoaded;
+
+    const card = testPage.getByTestId("turn-changed-files-card");
+    await expect(card).toBeVisible();
+    const expandAll = card.getByRole("button", { name: "Expand all", exact: true });
+    await expect(expandAll).toBeVisible();
+    await expandAll.click();
+    await expect(card.locator("[data-turn-file-change-id]")).toHaveCount(1);
+    await assertCardResponsiveContainment(testPage, card);
     await assertCardTouchTargets(testPage);
     await assertTurnFileDisclosure(testPage);
-    await testPage.screenshot({ path: test.info().outputPath("renamed-path-narrow.png") });
+    await testPage.screenshot({
+      path: test.info().outputPath("renamed-path-narrow-fine-pointer.png"),
+    });
   } finally {
     await restorePreference();
   }

@@ -160,13 +160,18 @@ test.describe("Routine catch-up policy UI", () => {
     // server under the wire's snake_case key.
     await catchUpPolicyCombobox(testPage).click();
     await testPage.getByRole("option", { name: SUMMARIZE_MISSED_LABEL }).click();
-    await testPage.getByRole("button", { name: "Save" }).click();
-    // A successful save calls `router.refresh()` (`window.location.reload()`
-    // in this SPA — pre-existing, unchanged by this capability), which races
-    // the success toast off the page before it can be observed. Wait for the
-    // reload and read the freshly-seeded form instead, which also proves the
-    // read path round-trips what this save just wrote.
-    await testPage.waitForLoadState("load");
+    // Observe the save and its new document load before clicking. The current
+    // document is already loaded and the form already contains the draft.
+    const [saved] = await Promise.all([
+      testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname === `/api/v1/office/routines/${routine.id}`,
+      ),
+      testPage.waitForEvent("load"),
+      testPage.getByRole("button", { name: "Save" }).click(),
+    ]);
+    expect(saved.ok()).toBe(true);
     await expect(testPage.getByText("E2E Catch-up Wire Round Trip")).toBeVisible({
       timeout: 10_000,
     });

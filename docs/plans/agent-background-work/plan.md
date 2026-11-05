@@ -84,8 +84,10 @@ cases; `background_work_attestation_test.go`; task repository
   domain hook/store drives desktop and phone. New reads/mutations are gated
   server-side; old adapters/clients retain current behavior.
 - The shared gate is `features.agentBackgroundWork`, independent of
-  `features.codexAppServer` and Claude prompt handoff; all shipped defaults off.
-  Apply `/runtime-feature-flags` during implementation and trace every entry path.
+  `features.codexAppServer` and Claude prompt handoff. Its initial rollout used
+  all-off defaults. The later [default-on work order](../opencode-background-continuity/task-07-default-on-rollout.md)
+  promotes the shared gate and retains its operator off switch.
+  Apply `/runtime-feature-flags` and trace every entry path.
 - Platform owns the additive [explicit steering contract](../../specs/platform/system-design/explicit-turn-steering.md).
   Task 07 implements exact-turn native dispatch and durable delivery receipts;
   Task 08 adds explicit composer choice. `features.sameTurnSteering` is off in
@@ -349,6 +351,12 @@ production files were changed. Public-doc updates belong to Task 06 when the
 behavior is implemented, not to this design-only change.
 
 ## Risks and evidence limits
+
+The [OpenCode continuity extension](../opencode-background-continuity/plan.md)
+uses the implemented shared observation/viewer seams. It owns its upstream
+producer dependency and OpenCode-specific work orders. Its delivery does not
+complete this package's pending native-steering Tasks 07/08 or change their
+recorded results.
 
 - Live Codex child correlation and exact usage remain unproven by the PR's
   earlier live suite. Task 03/06 evidence must distinguish observed/unsupported/

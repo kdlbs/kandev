@@ -181,6 +181,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.Int("children", len(children)))
 
 	bareRoot := m.newTrackerForRepo(workDir, "")
+	bareRoot.suppressGitPublication = true
 	m.configureTracker(bareRoot, "", roots)
 	m.prepareTrackerComparisonTarget(bareRoot, false)
 	bareRoot.Start(ctx)
@@ -205,7 +206,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	m.workspaceTracker = bareRoot
 	m.repoTrackers = append(m.repoTrackers, newRepoTrackers...)
 	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bareRoot}, newRepoTrackers...)...)
-	m.cfg.WorkDir = workDir
+	m.setWorkspaceWorkDirLocked(workDir)
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
@@ -265,7 +266,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 		m.repoTrackers = append(m.repoTrackers, t)
 		m.applyWorkspacePollModeLocked(t)
 	}
-	m.cfg.WorkDir = workDir
+	m.setWorkspaceWorkDirLocked(workDir)
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()

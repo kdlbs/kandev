@@ -10,12 +10,14 @@ import { ArchiveConfirmationSettings } from "@/components/settings/archive-confi
 import { CreationAutoFocusSettings } from "@/components/settings/creation-auto-focus-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { PreventAutoStartAgentSettings } from "@/components/settings/prevent-auto-start-agent-settings";
+import { PromptSuggestionSettings } from "@/components/settings/prompt-suggestion-settings";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { TurnChangedFilesSettings } from "@/components/settings/turn-changed-files-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
+import { UnreadTaskDotSettings } from "@/components/settings/unread-task-dot-settings";
 import {
   MessageQueueSettingsContent,
   useMessageQueueSettingsDraft,
@@ -124,9 +126,11 @@ export function TaskBehaviorSettings() {
           >
             <AgentTabCloseBehaviorSettings />
             <UnreadDividerSettings presentation="row" />
+            <UnreadTaskDotSettings />
             <TurnChangedFilesSettings />
             <AnchoredPromptBarSettings presentation="row" />
             <TodoListPanelSettings presentation="row" />
+            <PromptSuggestionSettings />
             <MessageTimeDisplaySettings />
           </SettingsGroup>
         </SettingsTabsPanel>

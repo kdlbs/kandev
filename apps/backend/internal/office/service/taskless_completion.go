@@ -11,12 +11,21 @@ import (
 
 // Taskless turns have no task orchestrator to stop the execution after AgentReady.
 // Keep the run claimed until its exact execution has stopped successfully.
-func (s *Service) handleTasklessAgentReady(ctx context.Context, event *bus.Event) error {
+//
+// A task-owned launch can reach here only as the recovery path for a
+// ceiling-deferred Office run whose replay-success settlement failed: its ready
+// event carries the same causing run id, so the parked run can be settled
+// without another launch. Ordinary task-owned launches are already claimed and
+// settle as a no-op.
+func (s *Service) handleAgentReady(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[AgentLifecycleData](event)
 	if err != nil {
 		return err
 	}
-	if data.OwnerKind != string(runtimeapi.ExecutionOwnerRun) || data.TaskID != "" ||
+	if data.TaskID != "" {
+		return s.settleCeilingDeferredLaunchOnReady(ctx, data)
+	}
+	if data.OwnerKind != string(runtimeapi.ExecutionOwnerRun) ||
 		!exactRunSessionEvent(data) || data.AgentExecutionID == "" {
 		return nil
 	}

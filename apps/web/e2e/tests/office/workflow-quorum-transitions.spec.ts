@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test, expect } from "./workflow-quorum-fixture";
 import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
 
@@ -337,6 +337,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     officeApi,
     officeSeed,
     seedData,
+    quorumWorkflowId,
   }) => {
     const reviewer = (await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Quorum Rejecting Reviewer",
@@ -345,18 +346,14 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     const reviewerId = reviewer.id as string;
 
     const task = await apiClient.createTask(officeSeed.workspaceId, "Quorum Reject Task", {
-      workflow_id: officeSeed.workflowId,
+      workflow_id: quorumWorkflowId,
       agent_profile_id: seedData.agentProfileId,
     });
 
-    // Move to Review BEFORE ensuring a session: only the Work step has the
-    // auto_start_agent on-enter action, so EnsureSession would otherwise
-    // resolve intent=start and launch through startTask, which requires
-    // office-scheduler-injected KANDEV_* runtime env this external HTTP call
-    // has no way to supply. Wait for the persisted move before registering
-    // the reviewer; participant rows are scoped to the current step.
-    const reviewStepId = await findStepId(apiClient, officeSeed.workflowId, "review");
-    await apiClient.moveTask(task.id, officeSeed.workflowId, reviewStepId);
+    // Register the reviewer after the move lands: participant rows belong
+    // to the current step. The quorum fixture keeps Work free of launches.
+    const reviewStepId = await findStepId(apiClient, quorumWorkflowId, "review");
+    await apiClient.moveTask(task.id, quorumWorkflowId, reviewStepId);
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
       .toBe(reviewStepId);
@@ -422,7 +419,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     // the stale any_reject vote must not immediately fire the same guard
     // again (AC-56) — the fresh read should show an unsatisfied-but-pending
     // reviewer guard, not an empty (already-bounced) one.
-    await apiClient.moveTask(task.id, officeSeed.workflowId, reviewStepId);
+    await apiClient.moveTask(task.id, quorumWorkflowId, reviewStepId);
 
     await expect
       .poll(

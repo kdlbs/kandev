@@ -474,7 +474,7 @@ func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx c
 	if err := rollbackOwnedDirectoryLinks(materialization.linkUndo); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
-	m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree, materialization.newWorktrees...)
+	rollbackErr = errors.Join(rollbackErr, m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree, materialization.newWorktrees...))
 	if !materialization.linkRootExisted && materialization.linkRoot != materialization.root {
 		_ = os.Remove(materialization.linkRoot)
 	}
@@ -513,10 +513,12 @@ func rollbackOwnedDirectoryLink(undo ownedDirectoryLinkUndo) error {
 	return nil
 }
 
-func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, taskID string, known map[string]bool, additional ...*worktree.Worktree) {
+func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, taskID string, known map[string]bool, additional ...*worktree.Worktree) error {
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(context.WithoutCancel(ctx), taskID)
+	var cleanupErr error
 	if err != nil {
 		m.logger.Warn("list worktrees for workspace rollback", zap.String("task_id", taskID), zap.Error(err))
+		cleanupErr = fmt.Errorf("list worktrees for workspace rollback: %w", err)
 		worktrees = nil
 	}
 	worktrees = append(worktrees, additional...)
@@ -534,8 +536,11 @@ func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, t
 		}
 	}
 	if len(created) > 0 {
-		_ = m.worktreeMgr.CleanupWorktrees(context.WithoutCancel(ctx), created)
+		if err := m.worktreeMgr.CleanupWorktrees(context.WithoutCancel(ctx), created); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup new workspace worktrees: %w", err))
+		}
 	}
+	return cleanupErr
 }
 
 func (m *workspaceSourceMaterializer) restoreSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, workspacePath string, sourceRoots []string) error {

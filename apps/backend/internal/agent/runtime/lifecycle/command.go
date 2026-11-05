@@ -26,21 +26,7 @@ func (cb *CommandBuilder) BuildCommand(ag agents.Agent, opts agents.CommandOptio
 	if len(opts.CLIFlagTokens) > 0 {
 		cmd = cmd.With().Flag(opts.CLIFlagTokens...).Build()
 	}
-	return prependCommandPrefix(cmd, opts.CommandPrefixTokens)
-}
-
-// prependCommandPrefix wraps the built command in a launcher prefix so the
-// agent subprocess runs under a sandbox (e.g. ["greywall", "--"] turns
-// "npx -y <pkg>" into "greywall -- npx -y <pkg>"). Returns cmd unchanged when
-// there is no prefix.
-func prependCommandPrefix(cmd agents.Command, prefixTokens []string) agents.Command {
-	if len(prefixTokens) == 0 {
-		return cmd
-	}
-	args := make([]string, 0, len(prefixTokens)+len(cmd.Args()))
-	args = append(args, prefixTokens...)
-	args = append(args, cmd.Args()...)
-	return agents.NewCommand(args...)
+	return cmd
 }
 
 // BuildCommandArgs builds the executable argv for an agent launch.
@@ -61,7 +47,6 @@ func (cb *CommandBuilder) BuildContinueCommandArgs(ag agents.Agent, opts agents.
 		Settings(ag.PermissionSettings(), opts.PermissionValues).
 		Flag(opts.CLIFlagTokens...).
 		Build()
-	cmd = prependCommandPrefix(cmd, opts.CommandPrefixTokens)
 
 	return cmd.Args()
 }

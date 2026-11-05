@@ -15,6 +15,7 @@ export const BASE_TEST_EXCLUDES = [
   "e2e/fixtures/**",
   "e2e/pages/**",
   "node_modules/**",
+  "scripts/debug-start-production.test.mjs",
 ] as const;
 
 const TEST_FILE_NAME = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/;

@@ -144,9 +144,13 @@ export function CollapsibleSection({
 export function AddToContextButton({
   onClick,
   tooltip,
+  ariaLabel,
+  className,
 }: {
   onClick: () => void;
   tooltip?: string;
+  ariaLabel?: string;
+  className?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -155,7 +159,8 @@ export function AddToContextButton({
         <Button
           size="sm"
           variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer shrink-0 text-muted-foreground hover:text-foreground"
+          className={`h-6 w-6 p-0 cursor-pointer shrink-0 text-muted-foreground hover:text-foreground ${className ?? ""}`}
+          aria-label={ariaLabel}
           onClick={(e) => {
             e.stopPropagation();
             onClick();

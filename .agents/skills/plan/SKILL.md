@@ -254,6 +254,12 @@ never rely on a preceding `cd`. Confirm each referenced path exists and stays
 inside the tool or package scope, and that every changed test suite is covered
 before marking Results complete. Record actual results, not planned or stale counts.
 
+When an acceptance criterion defines a benchmark bound, keep the plan and work
+order `in_progress` until the criterion's benchmark procedure satisfies every
+bound. Record measured values and environment caveats; a missed or unmeasured
+bound is not acceptance, and an earlier or different benchmark run cannot
+substitute for it.
+
 Before marking a new plan package complete, run `git diff --check --
 docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;
 the status check catches untracked work orders. Confirm every work order names

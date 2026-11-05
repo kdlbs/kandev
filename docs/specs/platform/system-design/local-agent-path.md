@@ -70,8 +70,11 @@ existing task sessions as part of the repair.
 
 ## Persistence, security, and observability
 
-No schema, settings, API, or event changes. Do not execute shell startup files
-to recover PATH, prepend user directories ahead of configured tools, or log the
-full environment. Existing install and capability status events report recovery.
+This shared normalization has no schema, settings, API, or event changes.
+It must not execute shell startup files, prepend user directories ahead of
+configured tools, or log the full environment. The separate draft
+[CLI service-shell design](../../cli/system-design/service-login-shell.md)
+defines explicit login initialization before this boundary. It does not change
+the default normalization contract. Existing install and capability status events report recovery.
 Public CLI documentation should explain the supported local executable directory
 after implementation.

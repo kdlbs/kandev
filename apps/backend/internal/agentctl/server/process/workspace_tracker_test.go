@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // setupTestRepo creates a git repository with a remote for testing.
@@ -118,7 +119,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	// that git sets when running hooks. Without this, test git commands leak into
 	// the parent repo when executed from a pre-commit hook context because GIT_DIR
 	// overrides the -C flag.
-	cmd.Env = filterTestGitEnv(os.Environ())
+	cmd.Env = hermeticTestGitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)
@@ -138,6 +139,44 @@ func filterTestGitEnv(env []string) []string {
 		result = append(result, e)
 	}
 	return result
+}
+
+// hermeticTestGitEnv keeps repository fixtures independent from the runner's
+// Git configuration and authentication helpers. A global hook or credential
+// manager can otherwise block a local file-transport command indefinitely.
+func hermeticTestGitEnv(env []string) []string {
+	clean := filterTestGitEnv(env)
+	clean = append(clean,
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+	return subproc.PrepareGitEnvironment(clean)
+}
+
+func TestHermeticTestGitEnvDisablesAmbientGitConfiguration(t *testing.T) {
+	env := hermeticTestGitEnv([]string{
+		"GIT_CONFIG_GLOBAL=ambient-global-config",
+		"GIT_TERMINAL_PROMPT=1",
+		"GCM_INTERACTIVE=Always",
+		"KEEP_ME=yes",
+	})
+	values := environmentMap(env)
+
+	if values["GIT_CONFIG_GLOBAL"] != os.DevNull {
+		t.Fatalf("GIT_CONFIG_GLOBAL = %q, want %q", values["GIT_CONFIG_GLOBAL"], os.DevNull)
+	}
+	if values["GIT_CONFIG_NOSYSTEM"] != "1" {
+		t.Fatalf("GIT_CONFIG_NOSYSTEM = %q, want 1", values["GIT_CONFIG_NOSYSTEM"])
+	}
+	if values["GIT_TERMINAL_PROMPT"] != "0" {
+		t.Fatalf("GIT_TERMINAL_PROMPT = %q, want 0", values["GIT_TERMINAL_PROMPT"])
+	}
+	if values["GCM_INTERACTIVE"] != "Never" {
+		t.Fatalf("GCM_INTERACTIVE = %q, want Never", values["GCM_INTERACTIVE"])
+	}
+	if values["KEEP_ME"] != "yes" {
+		t.Fatalf("KEEP_ME = %q, want yes", values["KEEP_ME"])
+	}
 }
 
 func writeFile(t *testing.T, dir, name, content string) {

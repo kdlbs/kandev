@@ -63,6 +63,27 @@ observed Cursor title `kandev: <tool>_kandev` and unwraps
 remainder is a valid suffixed tool name. Bare categories, foreign namespaces,
 and unrelated tools remain generic activity.
 
+### Copilot ACP title compatibility
+
+The observed Copilot message retains `generic.name: "other"`, the title
+`kandev-<tool>_kandev`, and direct report arguments in `input.raw_input`.
+The shared frontend parser recognizes the exact `kandev-` prefix with the
+existing non-empty stem, suffix, and namespace-separator checks. It does not
+split arbitrary hyphenated names or infer a provider from the tool suffix.
+Only a registered stem selects a native renderer.
+
+`kandevToolStemOf` remains the shared scanner for renderer dispatch and
+rich-output grouping. Explicit foreign normalized identities and foreign
+`raw_input.providerIdentifier` values continue to block title fallback.
+Existing `extractKandevArgs` already handles direct `raw_input` objects.
+Live messages and stored history use this same path without a database rewrite.
+
+This compatibility path repairs the observed serialized shape. It does not
+establish a Copilot wire-envelope contract. Adapter normalization requires a
+verified explicit provider envelope; a display title alone is insufficient.
+The [Copilot fix package](../../../plans/copilot-rich-output-identity/plan.md)
+records the reproduction and planned regression coverage.
+
 ## Result selection
 
 `extractMcpResult` uses this precedence:

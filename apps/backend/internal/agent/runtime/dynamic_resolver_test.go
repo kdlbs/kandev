@@ -125,6 +125,47 @@ func TestResolveExecutionFollowsOfficeBinding(t *testing.T) {
 	}
 }
 
+func TestResetCircuitFailuresRespectsDynamicRoutingFlag(t *testing.T) {
+	ctx := context.Background()
+	engine := dynamic.NewEngine()
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, engine, true)
+	execution, err := resolver.Resolve(ctx, "session-reset", "dynamic-profile", 0, "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	key := dynamic.ResourceKey(dynamic.ScopeProfile, "concrete-profile")
+	engine.Circuits().OpenFailure(key, dynamic.FailureOpen{Code: routingerr.CodeRateLimited, Now: time.Now()})
+	if got := engine.Circuits().Snapshots()[0].Failures; got != 1 {
+		t.Fatalf("test circuit history was not established: %d", got)
+	}
+
+	resolver.SetEnabled(false)
+	cleared, err := resolver.ResetCircuitFailures(ctx, "session-reset", "dynamic-profile", execution.ExecutionProfileID, execution.Generation)
+	if err != nil || cleared {
+		t.Fatalf("disabled ResetCircuitFailures = (%v, %v), want no mutation", cleared, err)
+	}
+	if got := engine.Circuits().Snapshots()[0].Failures; got != 1 {
+		t.Fatalf("disabled routing reset failure count to %d", got)
+	}
+
+	resolver.SetEnabled(true)
+	cleared, err = resolver.ResetCircuitFailures(ctx, "session-reset", "dynamic-profile", execution.ExecutionProfileID, execution.Generation)
+	if err != nil {
+		t.Fatalf("enabled ResetCircuitFailures: %v", err)
+	}
+	if !cleared || engine.Circuits().Snapshots()[0].Failures != 0 {
+		t.Fatalf("enabled routing did not reset failure count: cleared=%v snapshots=%+v", cleared, engine.Circuits().Snapshots())
+	}
+}
+
 // TestResolveExecutionFailsClosedWhenOfficeBindingDisabled covers the disabled
 // bound profile: the binding still names a dynamic profile with a live route
 // document, but that profile is no longer enabled, so resolution fails closed

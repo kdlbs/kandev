@@ -85,7 +85,7 @@ Send focus only on explicit selection/open or browser visibility/window focus re
 Debounce duplicate events and check durable idle-suspension provenance on the backend.
 For an already-live settled session, persist the explicit-focus observation in existing session metadata, bound to the current execution. Reconstruct that floor during idle-candidate selection so a restart cannot discard a recent focus interval. Validate its identity and observation time independently of passive session metadata timestamps.
 Hidden mounted tabs, generic session reads, and list subscriptions cannot wake processes.
-The focus exception bypasses prevent-auto-start-on-open only for this idle-suspended session.
+Focus recovery honors prevent-auto-start-on-open. The web client gates both open-time and window-focus recovery: with the preference enabled it sends no focus resume for an idle-suspended session, records the resume-skipped marker, and leaves recovery to an accepted message. Visible restart priority for a session with a recovery block applies the same gate when the stored session state can be idle-suspended. A completed idle-suspended session keeps its terminal recovery actions instead of the composer hint. The backend focus path is unchanged because the preference is a web-client gate.
 Workflow ownership, archive checks, and authorization still apply. Focus must not wake every sibling session.
 
 Resume through the existing provider resume/load path using the saved token. Focus sends no prompt.
