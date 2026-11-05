@@ -1,4 +1,4 @@
-import type { NativeDashboard } from "@/lib/types/control-native";
+import type { NativeDashboard, NativeTaskList } from "@/lib/types/control-native";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 export const nativeRecord = (v: unknown): v is Record<string, unknown> =>
@@ -38,5 +38,48 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
             texts(row, ["state", "step_id", "step_name", "stage_type"]) &&
             count(row.count),
         )))
+  );
+}
+export function nativeTasks(
+  v: unknown,
+  id: string,
+  filter: string,
+  archive: string,
+): v is NativeTaskList {
+  if (
+    !nativeRecord(v) ||
+    v.kind !== "tasks" ||
+    v.filter !== filter ||
+    v.archive !== archive ||
+    !count(v.total) ||
+    !Array.isArray(v.tasks) ||
+    v.tasks.length > Number(v.total) ||
+    typeof v.truncated !== "boolean" ||
+    time(v.generated_at) === null
+  )
+    return false;
+  return v.tasks.every(
+    (r) =>
+      nativeRecord(r) &&
+      r.workspace_id === id &&
+      texts(r, [
+        "task_id",
+        "title",
+        "state",
+        "step_id",
+        "step_name",
+        "stage_type",
+        "session_id",
+        "session_state",
+        "updated_at",
+      ]) &&
+      Boolean(r.task_id) &&
+      time(r.updated_at) !== null &&
+      typeof r.archived === "boolean" &&
+      count(r.running_sessions) &&
+      count(r.queued_messages) &&
+      (r.hold_mode === undefined || typeof r.hold_mode === "string") &&
+      (r.queued_paused_messages === undefined || count(r.queued_paused_messages)) &&
+      (r.queued_auto_run_messages === undefined || count(r.queued_auto_run_messages)),
   );
 }

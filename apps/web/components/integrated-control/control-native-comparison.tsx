@@ -7,7 +7,10 @@ import { useRouter } from "@/lib/routing/client-router";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import type { NativeDashboard } from "@/lib/types/control-native";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
-import { useNativeDashboards } from "@/hooks/domains/coordinator/use-control-native";
+import {
+  useNativeDashboards,
+  useNativeTasks,
+} from "@/hooks/domains/coordinator/use-control-native";
 import type {
   ControlRead,
   ControlReadStatus,
@@ -236,6 +239,14 @@ export function ControlNativeComparison({
     workspaces.map((workspace) => workspace.id),
     revision,
   );
+  const taskRead = useNativeTasks(
+    workspaces.map((workspace) => workspace.id),
+    "all",
+    "active",
+    -1,
+    revision,
+  );
+  const tasksByWorkspace = new Map((taskRead.data ?? []).map((row) => [row.id, row]));
   const rows: NativeRow[] = workspaces.map((workspace) => ({
     workspace,
     ...(read.data?.find((row) => row.id === workspace.id) ?? { status: "loading" as const }),
@@ -245,7 +256,12 @@ export function ControlNativeComparison({
       <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
       <NativeComparisonTable rows={rows} kind="tasks" />
       <NativeComparisonTable rows={rows} kind="sessions" />
-      <ControlWaitReasons rows={rows} />
+      <ControlWaitReasons
+        rows={rows.map((row) => ({
+          ...row,
+          taskRead: tasksByWorkspace.get(row.workspace.id) ?? { status: "loading" },
+        }))}
+      />
       {rows.map((row) => (
         <ReadState key={row.workspace.id} row={row} />
       ))}

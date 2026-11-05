@@ -20,3 +20,35 @@ export type NativeDashboard = {
   transitions_24h: number;
   completed_tasks_24h: number;
 };
+
+/** One recorded task row of the per-task control projection. */
+export type NativeTask = {
+  task_id: string;
+  workspace_id: string;
+  title: string;
+  state: string;
+  step_id: string;
+  step_name: string;
+  stage_type: string;
+  session_id: string;
+  session_state: string;
+  archived: boolean;
+  running_sessions: number;
+  queued_messages: number;
+  /** Per-message session policy. Missing means the policy source is unavailable. */
+  queued_paused_messages?: number;
+  queued_auto_run_messages?: number;
+  /** Active native tree-hold mode. Missing means the source could not be read. */
+  hold_mode?: string;
+  updated_at: string;
+};
+export type NativeArchive = "active" | "archived" | "all";
+export type NativeTaskList = {
+  kind: "tasks";
+  filter: string;
+  archive: NativeArchive;
+  total: number;
+  truncated: boolean;
+  generated_at: string;
+  tasks: NativeTask[];
+};

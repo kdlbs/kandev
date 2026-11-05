@@ -391,6 +391,9 @@ func (h *Handler) listTasks(c *gin.Context) {
 	if rejectAgentTaskReader(c) {
 		return
 	}
+	if h.controlTasks(c) {
+		return
+	}
 
 	ctx := c.Request.Context()
 	wsID := c.Param("wsId")
