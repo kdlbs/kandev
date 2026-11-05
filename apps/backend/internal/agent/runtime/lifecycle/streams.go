@@ -444,7 +444,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
 	}
 
-	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
+	// Bind this connection to the startup attempt that owns it. Reconnects and
+	// replacement attempts must never complete or cancel this gate.
+	attempt := execution.deliveryStartupSnapshot()
+	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration, attempt)
 	monitorCtx, monitorCancel := context.WithCancel(ctx)
 	attachment := sm.startDeliveryHealthMonitor(monitorCtx, monitorCancel, execution, client)
 	// Processor failure cancels only this connection, including when no later
@@ -592,7 +595,9 @@ func (sm *StreamManager) prepareAgentEvent(
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 ) (preparedAgentEvent, error) {
-	return sm.prepareAgentEventWithReceipt(ctx, execution, client, delivery, event, false)
+	return sm.prepareAgentEventWithReceipt(
+		ctx, execution, client, delivery, event, false, execution.deliveryStartupSnapshot(),
+	)
 }
 
 // prepareAgentEventWithReceipt defers the inbox receipt for an event that the
@@ -605,8 +610,9 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 	deferReceipt bool,
+	attempt *deliveryStartupAttempt,
 ) (preparedAgentEvent, error) {
-	if err := waitForDeliveryNegotiation(ctx, execution); err != nil {
+	if err := attempt.awaitNegotiation(ctx); err != nil {
 		return preparedAgentEvent{}, err
 	}
 	durable, err := durableAgentEventIdentity(execution, event)
@@ -628,7 +634,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
 	process, skipCallback, effect, deferred, err := sm.prepareDurableAgentDeliveryEvent(
-		ctx, execution, durableEvent, delivery, client, deferReceipt,
+		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
@@ -692,11 +698,12 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	repository AgentDeliveryRepository,
 	client *agentctl.Client,
 	deferReceipt bool,
+	attempt *deliveryStartupAttempt,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, deferred bool, err error) {
 	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
 		return true, false, nil, false, nil
 	}
-	stale, err := deliveryEventIsStale(ctx, execution, durableEvent, repository)
+	stale, err := deliveryEventIsStale(ctx, execution, durableEvent, repository, attempt)
 	if err != nil {
 		return false, false, nil, false, err
 	}
@@ -804,6 +811,7 @@ func (sm *StreamManager) commitPreparedAgentEvents(
 	delivery AgentDeliveryRepository,
 	client *agentctl.Client,
 	startupGeneration uint64,
+	attempt *deliveryStartupAttempt,
 ) error {
 	if len(prepared) == 0 {
 		return nil
@@ -814,7 +822,7 @@ func (sm *StreamManager) commitPreparedAgentEvents(
 		// reaches this path, replay it through admission instead of projecting
 		// an unadmitted event.
 		if batchHasDeferredReceipt(prepared) {
-			return sm.replayPreparedAgentEventsWithReceipt(ctx, execution, prepared, delivery, client, startupGeneration)
+			return sm.replayPreparedAgentEventsWithReceipt(ctx, execution, prepared, delivery, client, startupGeneration, attempt)
 		}
 		return sm.projectCanonicalAgentEvents(ctx, execution, prepared, delivery, client, startupGeneration)
 	}
@@ -830,7 +838,7 @@ func (sm *StreamManager) commitPreparedAgentEvents(
 		// The combined transaction rolled back, so the existing two-phase path
 		// starts from the same SQL state. Expiry reconciliation and typed
 		// recovery stay in prepareAgentEvent.
-		return sm.replayPreparedAgentEventsWithReceipt(ctx, execution, prepared, delivery, client, startupGeneration)
+		return sm.replayPreparedAgentEventsWithReceipt(ctx, execution, prepared, delivery, client, startupGeneration, attempt)
 	}
 	if len(results) != len(prepared) {
 		return fmt.Errorf("canonical delivery batch receiver returned %d results for %d events", len(results), len(prepared))
@@ -875,9 +883,10 @@ func (sm *StreamManager) replayPreparedAgentEventsWithReceipt(
 	delivery AgentDeliveryRepository,
 	client *agentctl.Client,
 	startupGeneration uint64,
+	attempt *deliveryStartupAttempt,
 ) error {
 	for _, item := range prepared {
-		retry, err := sm.prepareAgentEventWithReceipt(ctx, execution, client, delivery, item.event, false)
+		retry, err := sm.prepareAgentEventWithReceipt(ctx, execution, client, delivery, item.event, false, attempt)
 		if err != nil {
 			return err
 		}
