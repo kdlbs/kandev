@@ -496,6 +496,9 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
+	if coordinatorSvc != nil && pluginsSvc != nil {
+		coordinatorSvc.SetPluginBindingSource(pluginsSvc)
+	}
 	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
 		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,

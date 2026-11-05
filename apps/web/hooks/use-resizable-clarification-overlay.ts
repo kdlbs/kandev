@@ -24,12 +24,46 @@ type ClarificationResizeOptions = {
   isPhone?: boolean;
   sizingState?: ClarificationSizingState;
 };
-type ClarificationSizingState = {
-  desktopHeight: number | null;
-  phoneHeight: number | null;
-  setDesktopHeight: Dispatch<SetStateAction<number | null>>;
-  setPhoneHeight: Dispatch<SetStateAction<number | null>>;
+
+export type ClarificationPanelSizeMode = "auto" | "manual" | "expanded";
+export type ClarificationNormalPanelSize = {
+  mode: "auto" | "manual";
+  height: number | null;
 };
+export type ClarificationPanelSize = {
+  mode: ClarificationPanelSizeMode;
+  height: number | null;
+  restore: ClarificationNormalPanelSize | null;
+};
+export type ClarificationPanelSizes = {
+  desktop: ClarificationPanelSize;
+  phone: ClarificationPanelSize;
+};
+export type ClarificationSizingState = ClarificationPanelSizes & {
+  setDesktopSize: Dispatch<SetStateAction<ClarificationPanelSize>>;
+  setPhoneSize: Dispatch<SetStateAction<ClarificationPanelSize>>;
+};
+
+export const DEFAULT_CLARIFICATION_PANEL_SIZE: ClarificationPanelSize = {
+  mode: "auto",
+  height: null,
+  restore: null,
+};
+
+export function emptyClarificationPanelSizes(): ClarificationPanelSizes {
+  return {
+    desktop: DEFAULT_CLARIFICATION_PANEL_SIZE,
+    phone: DEFAULT_CLARIFICATION_PANEL_SIZE,
+  };
+}
+
+function isDefaultPanelSize(size: ClarificationPanelSize): boolean {
+  return size.mode === "auto" && size.height === null && size.restore === null;
+}
+
+export function isEmptyClarificationPanelSizes(sizes: ClarificationPanelSizes): boolean {
+  return isDefaultPanelSize(sizes.desktop) && isDefaultPanelSize(sizes.phone);
+}
 
 type VerticalInterval = { top: number; bottom: number };
 type HostMeasurement = { hostHeight: number | null; viewportHeight: number };
@@ -230,42 +264,69 @@ function useMeasuredPanelHeight(element: HTMLDivElement | null): number | null {
   return panelHeight;
 }
 
-function maxHeightForState(
-  desired: number | null,
+function maxHeightForSize(
+  size: ClarificationPanelSize,
   host: number | null,
   initialCap: number,
 ): number {
-  if (desired !== null) return host ?? initialCap;
-  if (host === null) return initialCap;
-  return Math.min(initialCap, host);
+  if (size.mode === "auto") {
+    return host === null ? initialCap : Math.min(initialCap, host);
+  }
+  return host ?? initialCap;
+}
+
+function heightForSize(
+  size: ClarificationPanelSize,
+  host: number | null,
+  initialCap: number,
+): number | null {
+  if (size.mode === "expanded") return host ?? initialCap;
+  if (size.mode === "manual") return size.height;
+  return null;
+}
+
+function effectiveHeightFor(
+  size: ClarificationPanelSize,
+  hostHeight: number | null,
+  initialCap: number,
+): number | null {
+  if (size.mode === "expanded") return hostHeight ?? initialCap;
+  if (size.mode === "manual" && size.height !== null) {
+    return Math.min(size.height, hostHeight ?? initialCap);
+  }
+  return null;
+}
+
+function normalPanelSize(size: ClarificationPanelSize): ClarificationNormalPanelSize {
+  if (size.mode === "manual" && size.height !== null) {
+    return { mode: "manual", height: size.height };
+  }
+  return { mode: "auto", height: null };
+}
+
+function expandedPanelSize(size: ClarificationPanelSize): ClarificationPanelSize {
+  return { mode: "expanded", height: null, restore: normalPanelSize(size) };
+}
+
+function restoredPanelSize(size: ClarificationPanelSize): ClarificationPanelSize {
+  if (size.mode !== "expanded") return size;
+  const restore = size.restore ?? DEFAULT_CLARIFICATION_PANEL_SIZE;
+  return { mode: restore.mode, height: restore.height, restore: null };
 }
 
 function useResolvedSizingState(sharedState?: ClarificationSizingState): ClarificationSizingState {
-  const [desktopHeight, setDesktopHeight] = useState<number | null>(null);
-  const [phoneHeight, setPhoneHeight] = useState<number | null>(null);
-  return sharedState ?? { desktopHeight, phoneHeight, setDesktopHeight, setPhoneHeight };
+  const [desktop, setDesktopSize] = useState<ClarificationPanelSize>(
+    DEFAULT_CLARIFICATION_PANEL_SIZE,
+  );
+  const [phone, setPhoneSize] = useState<ClarificationPanelSize>(DEFAULT_CLARIFICATION_PANEL_SIZE);
+  return sharedState ?? { desktop, phone, setDesktopSize, setPhoneSize };
 }
 
 function activeSizingState(isPhone: boolean, sizingState: ClarificationSizingState) {
   if (isPhone) {
-    return {
-      desiredHeight: sizingState.phoneHeight,
-      setDesiredHeight: sizingState.setPhoneHeight,
-    };
+    return { size: sizingState.phone, setSize: sizingState.setPhoneSize };
   }
-  return {
-    desiredHeight: sizingState.desktopHeight,
-    setDesiredHeight: sizingState.setDesktopHeight,
-  };
-}
-
-function effectiveHeightFor(
-  desiredHeight: number | null,
-  hostHeight: number | null,
-  initialCap: number,
-): number | null {
-  if (desiredHeight === null) return null;
-  return Math.min(desiredHeight, hostHeight ?? initialCap);
+  return { size: sizingState.desktop, setSize: sizingState.setDesktopSize };
 }
 
 function canExpandToHost(hostHeight: number | null, panelHeight: number): boolean {
@@ -277,9 +338,10 @@ function useResizeDrag(
   hostHeight: number | null,
   initialCap: number,
   minHeight: number,
-  setDesiredHeight: Dispatch<SetStateAction<number | null>>,
+  setSize: Dispatch<SetStateAction<ClarificationPanelSize>>,
 ) {
   const isDragging = useRef(false);
+  const hasMoved = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
   const handleMouseDown = useCallback(
@@ -287,6 +349,7 @@ function useResizeDrag(
       event.preventDefault();
       const measured = containerRef.current?.getBoundingClientRect().height ?? minHeight;
       isDragging.current = true;
+      hasMoved.current = false;
       startY.current = event.clientY;
       startHeight.current = measured;
       document.body.style.cursor = "ns-resize";
@@ -299,8 +362,11 @@ function useResizeDrag(
     const handleMouseMove = (event: MouseEvent) => {
       if (!isDragging.current) return;
       const delta = startY.current - event.clientY;
+      if (delta === 0 && !hasMoved.current) return;
+      hasMoved.current = true;
       const max = hostHeight ?? initialCap;
-      setDesiredHeight(clampHeight(startHeight.current + delta, Math.min(MIN_HEIGHT, max), max));
+      const height = clampHeight(startHeight.current + delta, Math.min(MIN_HEIGHT, max), max);
+      setSize({ mode: "manual", height, restore: null });
     };
     const handleMouseUp = () => {
       if (!isDragging.current) return;
@@ -319,7 +385,7 @@ function useResizeDrag(
         document.body.style.userSelect = "";
       }
     };
-  }, [hostHeight, initialCap, setDesiredHeight]);
+  }, [hostHeight, initialCap, setSize]);
 
   return handleMouseDown;
 }
@@ -345,7 +411,7 @@ export function useResizableClarificationOverlay({
     reservedHeightPx,
   );
   const resolvedSizingState = useResolvedSizingState(sizingState);
-  const { setDesktopHeight, setPhoneHeight } = resolvedSizingState;
+  const { setDesktopSize, setPhoneSize } = resolvedSizingState;
   const containerElementRef = useRef<HTMLDivElement>(null);
   const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
   const containerRef = useCallback((element: HTMLDivElement | null) => {
@@ -354,44 +420,62 @@ export function useResizableClarificationOverlay({
   }, []);
   const measuredPanelHeight = useMeasuredPanelHeight(containerElement);
 
-  const { desiredHeight, setDesiredHeight } = activeSizingState(isPhone, resolvedSizingState);
+  const { size, setSize } = activeSizingState(isPhone, resolvedSizingState);
   const initialCap = Math.round((viewportHeight * initialMaxHeightVh) / 100);
-  const maxHeight = maxHeightForState(desiredHeight, hostHeight, initialCap);
+  const maxHeight = maxHeightForSize(size, hostHeight, initialCap);
   const maxHostHeight = hostHeight;
   const minHeight = Math.min(MIN_HEIGHT, hostHeight ?? initialCap);
-  const effectiveHeight = effectiveHeightFor(desiredHeight, hostHeight, initialCap);
+  const height = heightForSize(size, hostHeight, initialCap);
+  const effectiveHeight = effectiveHeightFor(size, hostHeight, initialCap);
   const renderedHeight =
     measuredPanelHeight ??
     containerElement?.getBoundingClientRect().height ??
     effectiveHeight ??
     maxHeight;
 
-  const resetHeight = useCallback(() => setDesiredHeight(null), [setDesiredHeight]);
+  const resetHeight = useCallback(() => setSize(DEFAULT_CLARIFICATION_PANEL_SIZE), [setSize]);
   const resetAllHeights = useCallback(() => {
-    setDesktopHeight(null);
-    setPhoneHeight(null);
-  }, [setDesktopHeight, setPhoneHeight]);
-  const expandHeight = useCallback(() => {
-    if (hostHeight !== null) setDesiredHeight(hostHeight);
-  }, [hostHeight, setDesiredHeight]);
+    setDesktopSize(DEFAULT_CLARIFICATION_PANEL_SIZE);
+    setPhoneSize(DEFAULT_CLARIFICATION_PANEL_SIZE);
+  }, [setDesktopSize, setPhoneSize]);
+  const measureLiveHostHeight = useCallback(
+    () =>
+      measuredHostHeight(
+        allocationRef?.current ?? null,
+        anchorRef?.current ?? null,
+        reservedSiblingRefs,
+        reservedHeightPx,
+      ),
+    [allocationRef, anchorRef, reservedHeightPx, reservedSiblingRefs],
+  );
+  const toggleHeight = useCallback(() => {
+    setSize((current) => {
+      if (current.mode === "expanded") return restoredPanelSize(current);
+      const liveHostHeight = measureLiveHostHeight() ?? hostHeight;
+      const livePanelHeight =
+        containerElementRef.current?.getBoundingClientRect().height ?? renderedHeight;
+      if (!canExpandToHost(liveHostHeight, livePanelHeight)) return current;
+      return expandedPanelSize(current);
+    });
+  }, [hostHeight, measureLiveHostHeight, renderedHeight, setSize]);
   const handleMouseDown = useResizeDrag(
     containerElementRef,
     hostHeight,
     initialCap,
     minHeight,
-    setDesiredHeight,
+    setSize,
   );
 
   return {
-    height: desiredHeight,
+    expanded: size.mode === "expanded",
+    height,
     effectiveHeight,
     maxHeight,
     maxHostHeight,
     minHeight,
-    canExpand: canExpandToHost(hostHeight, renderedHeight),
-    canReset: desiredHeight !== null,
+    canExpand: size.mode !== "expanded" && canExpandToHost(hostHeight, renderedHeight),
     containerRef,
-    expandHeight,
+    toggleHeight,
     resetHeight,
     resetAllHeights,
     resizeHandleProps: { onMouseDown: handleMouseDown, onDoubleClick: resetHeight },

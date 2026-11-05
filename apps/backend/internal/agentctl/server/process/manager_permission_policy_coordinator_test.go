@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	"github.com/kandev/kandev/internal/mcp/profile"
 )
 
@@ -201,6 +202,46 @@ func TestCoordinatorPermissionPolicyApprovesExactlyTheBoundNames(t *testing.T) {
 		if approved != want {
 			t.Errorf("tool %q approved = %v, want %v", tool, approved, want)
 		}
+	}
+}
+
+func TestCoordinatorPermissionPolicyApprovesBoundPluginReferences(t *testing.T) {
+	m := coordinatorPermissionManager(t)
+	exposed := plugintools.ExposedName("kandev-provider-usage", "get_provider_usage")
+	m.cfg.McpProfile.CoordinatorToolPolicy = &profile.CoordinatorToolPolicy{
+		Version: profile.CoordinatorToolPolicyVersionV2, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t",
+		ToolNames: []string{"list_tasks_kandev"},
+		PluginTools: []profile.CoordinatorPluginTool{{
+			PluginID: "kandev-provider-usage", LocalName: "get_provider_usage",
+			InstallationID: "installation-1", PolicyVersion: "policy-1",
+		}},
+	}
+	allow := []adapter.PermissionOption{{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce}}
+	for tool, want := range map[string]bool{
+		"mcp__kandev__list_tasks_kandev":                      true,
+		"mcp__kandev__" + exposed:                             true,
+		"mcp__kandev__kandev_provider_usage_other_tool":       false,
+		"mcp__kandev__kandev_other_plugin_get_provider_usage": false,
+	} {
+		_, approved := m.autoApproveCoordinatorPermission(&adapter.PermissionRequest{ToolName: permissionStringPtr(tool), Options: allow})
+		if approved != want {
+			t.Errorf("tool %q approved = %v, want %v", tool, approved, want)
+		}
+	}
+
+	legacy := coordinatorPermissionManager(t)
+	legacy.cfg.McpProfile.CoordinatorToolPolicy = &profile.CoordinatorToolPolicy{
+		Version: profile.CoordinatorToolPolicyVersionV1, CoordinatorID: "c", WorkspaceID: "w", ConversationTaskID: "t",
+		ToolNames: []string{"list_tasks_kandev"},
+		PluginTools: []profile.CoordinatorPluginTool{{
+			PluginID: "kandev-provider-usage", LocalName: "get_provider_usage",
+			InstallationID: "installation-1", PolicyVersion: "policy-1",
+		}},
+	}
+	if _, approved := legacy.autoApproveCoordinatorPermission(&adapter.PermissionRequest{
+		ToolName: permissionStringPtr("mcp__kandev__" + exposed), Options: allow,
+	}); approved {
+		t.Fatal("a version-1 binding must not auto-approve a plugin tool")
 	}
 }
 

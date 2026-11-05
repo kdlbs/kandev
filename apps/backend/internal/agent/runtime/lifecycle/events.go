@@ -259,7 +259,13 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	if p.eventBus == nil {
 		return
 	}
-	p.publishAgentctlEventPayload(ctx, eventType, p.agentctlEventPayload(ctx, execution, errMsg))
+	payload := p.agentctlEventPayload(ctx, execution, errMsg)
+	// Only a ready event confirms the launched execution workspace. A starting
+	// event can carry a prepared path that has not been validated yet.
+	if eventType == events.AgentctlReady {
+		payload.AgentWorkspacePath = execution.WorkspacePath
+	}
+	p.publishAgentctlEventPayload(ctx, eventType, payload)
 }
 
 // PublishAgentctlDeliveryRecovery publishes an immutable reconciliation state
@@ -730,6 +736,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
 

@@ -1136,7 +1136,7 @@ func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.Per
 // to an automation task and, if so, rejects the prompt and marks the
 // corresponding automation_run row as failed.
 func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
-	if s.automationService == nil || data.TaskID == "" {
+	if s.automationService == nil || data.TaskID == "" || data.HumanInput {
 		return
 	}
 	task, err := s.repo.GetTask(ctx, data.TaskID)

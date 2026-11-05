@@ -13,7 +13,8 @@ import {
   IconPlus,
   IconUnlink,
 } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
+import { Button, buttonVariants } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { t } from "@/lib/i18n";
 import { formatCompactDuration } from "@/lib/i18n/formats";
@@ -41,6 +42,7 @@ function ChangeRequestPopoverHeaderActions({
   number,
   url,
   externalLabel,
+  externalActionLabel,
   mobile,
   onUnlink,
   unlinking,
@@ -49,6 +51,7 @@ function ChangeRequestPopoverHeaderActions({
   number: number | string;
   url?: string;
   externalLabel?: string;
+  externalActionLabel?: string;
   mobile: boolean;
   onUnlink?: (signal: AbortSignal) => void | Promise<void>;
   unlinking: boolean;
@@ -62,11 +65,21 @@ function ChangeRequestPopoverHeaderActions({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="cursor-pointer text-muted-foreground hover:text-foreground"
+          className={
+            externalActionLabel
+              ? cn(
+                  buttonVariants({ variant: "outline" }),
+                  "h-7 gap-1 px-2 [@media(pointer:coarse)]:min-h-12 [@media(pointer:coarse)]:min-w-12 [@media(max-width:767px)]:min-h-12 [@media(max-width:767px)]:min-w-12",
+                )
+              : "cursor-pointer text-muted-foreground hover:text-foreground"
+          }
           aria-label={externalLabel ?? t("integrations:viewPullRequestExternally", { number })}
           onClick={(event) => event.stopPropagation()}
         >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
+          {externalActionLabel ?? <IconGitPullRequest className="h-3.5 w-3.5" />}
+          {externalActionLabel ? (
+            <IconExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : null}
         </a>
       ) : null}
       {onUnlink ? (
@@ -93,6 +106,20 @@ function ChangeRequestPopoverHeaderActions({
   );
 }
 
+type ChangeRequestPopoverHeaderProps = {
+  number: number | string;
+  title: string;
+  author?: string;
+  url?: string;
+  onOpenReview?: () => void;
+  onUnlink?: (signal: AbortSignal) => void | Promise<void>;
+  mobile?: boolean;
+  externalLabel?: string;
+  openDetailsLabel?: string;
+  externalActionLabel?: string;
+  className?: string;
+};
+
 export function ChangeRequestPopoverHeader({
   number,
   title,
@@ -103,17 +130,9 @@ export function ChangeRequestPopoverHeader({
   mobile = false,
   externalLabel,
   openDetailsLabel,
-}: {
-  number: number | string;
-  title: string;
-  author?: string;
-  url?: string;
-  onOpenReview?: () => void;
-  onUnlink?: (signal: AbortSignal) => void | Promise<void>;
-  mobile?: boolean;
-  externalLabel?: string;
-  openDetailsLabel?: string;
-}) {
+  externalActionLabel,
+  className,
+}: ChangeRequestPopoverHeaderProps) {
   const [unlinking, setUnlinking] = useState(false);
   const unlinkController = useRef<AbortController | null>(null);
   useEffect(
@@ -143,7 +162,11 @@ export function ChangeRequestPopoverHeader({
   return (
     <div
       data-testid="pr-popover-header"
-      className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
+      data-slot="change-request-popover-header"
+      className={cn(
+        "flex items-center justify-between gap-2 border-b border-border/50 pb-2",
+        className,
+      )}
     >
       <div className="min-w-0 flex-1">
         {onOpenReview ? (
@@ -179,6 +202,7 @@ export function ChangeRequestPopoverHeader({
         number={number}
         url={url}
         externalLabel={externalLabel}
+        externalActionLabel={externalActionLabel}
         mobile={mobile}
         onUnlink={onUnlink}
         unlinking={unlinking}
@@ -504,11 +528,17 @@ function defaultElapsed(seconds: number): string {
   return t("integrations:updatedAgo", { elapsed });
 }
 
-export function ChangeRequestCIPopoverFrame({ children }: { children: ReactNode }) {
+export function ChangeRequestCIPopoverFrame({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div
       data-testid="pr-topbar-popover-inner"
-      className="flex flex-col gap-2"
+      className={cn("flex flex-col gap-2", className)}
       onClick={(event) => event.stopPropagation()}
     >
       {children}

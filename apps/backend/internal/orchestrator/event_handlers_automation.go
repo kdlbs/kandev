@@ -1532,6 +1532,7 @@ func (s *Service) promptAutomationContinuation(
 
 	var acceptanceErr error
 	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
+		capacityIntent: turnCapacityOverride,
 		beforeProviderAdmission: func() error {
 			if err := s.validateFixedProfileWaitIdentity(ctx, session.ID); err != nil {
 				return err

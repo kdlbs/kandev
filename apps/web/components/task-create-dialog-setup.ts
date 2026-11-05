@@ -257,6 +257,7 @@ function useSubmitHandlersWiring({
     blockedBy: fs.blockedBy,
     editDependencies,
     mcpServerIds: fs.mcpServerIds,
+    builtinMCPPreferences: fs.builtinMCPPreferences,
     mcpServerIdsDirty: fs.mcpServerIdsDirty,
     saveTaskMCPSelections:
       !isSessionMode && taskId && workspaceId
@@ -381,6 +382,7 @@ function useDialogSetupData(
   const repositoryBranches = useAppStore((state) => state.repositoryBranches);
   const data = useTaskCreateDialogData({
     open,
+    enabled: (props.mode ?? "create") === "create",
     workspaceId,
     workflowId,
     defaultStepId,
@@ -402,7 +404,6 @@ function useDialogSetupData(
   useTaskCreateDialogEffects(fs, {
     open,
     workspaceId,
-    workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
     repositories,
     repositoriesLoading,
@@ -421,6 +422,7 @@ function useDialogSetupData(
     lastUsedBranch: taskCreateLastUsed.branch,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
     editingTaskExecutorProfileId: props.editingTask?.primaryExecutorProfileId,
+    selectedWorkflowSteps: data.selectedWorkflowSteps,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs, props.lockedFields?.workflow === true);
   const handlers = useDialogHandlers(fs, repositories, {
@@ -449,15 +451,11 @@ function useDialogSetupData(
 
 function resolveWorkflowAgentOverrideValidation(
   mode: TaskCreateDialogProps["mode"],
-  workspaceId: string | null | undefined,
   fs: ReturnType<typeof useDialogFormState>,
   data: ReturnType<typeof useDialogSetupData>,
 ): WorkflowAgentOverrideValidation {
   return buildWorkflowAgentOverrideValidation({
-    effectiveWorkflowId: data.computed.effectiveWorkflowId,
-    snapshots: data.snapshots,
-    workspaceSnapshotRead: data.workspaceSnapshotRead,
-    workspaceId,
+    selectedWorkflowSteps: data.selectedWorkflowSteps,
     profiles: data.agentProfiles,
     replacementOptions: data.computed.agentProfileOptions,
     overrides: fs.workflowAgentOverrides,
@@ -545,12 +543,7 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     savedBaseSubmitBlockedReason,
   } = data;
-  const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(
-    mode,
-    workspaceId,
-    fs,
-    data,
-  );
+  const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(mode, fs, data);
   const workflowAgentOverridesBlockedReason =
     mode === "create" ? workflowAgentOverrideValidation.blockedReason : undefined;
   const mcp = useMCPSetupForDialog(

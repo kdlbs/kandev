@@ -20,11 +20,16 @@ import (
 // durable dynamic continuation package is stored with the route generation
 // separately.
 type promptAttemptEvidence struct {
-	mu               sync.Mutex
-	executionID      string
-	promptGeneration uint64
-	evidenceKnown    bool
-	output           bool
+	mu sync.Mutex
+	// retirementState and retirementGeneration identify the notice lifecycle
+	// observed when this attempt began. Reclaimed entries can be replaced by a
+	// state with the same generation, so the counter alone is not unique.
+	retirementState      *transientRetryNoticeState
+	retirementGeneration uint64
+	executionID          string
+	promptGeneration     uint64
+	evidenceKnown        bool
+	output               bool
 	// providerDiagnosticCode records an ACP agent-message diagnostic which is
 	// followed by the matching prompt RPC failure. It is not model output, so it
 	// must not make an otherwise pre-result provider failure unsafe to route.
@@ -81,18 +86,21 @@ func (s *Service) beginPromptAttempt(
 	sessionID, executionID string,
 	promptGeneration uint64,
 	dynamic bool,
-) {
+) *promptAttemptEvidence {
 	if sessionID == "" {
-		return
+		return nil
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
-	s.dynamicAttemptEvidence.Store(sessionID, &promptAttemptEvidence{
-		executionID:      executionID,
-		promptGeneration: promptGeneration,
-		evidenceKnown:    true,
-		dynamic:          dynamic,
-	})
+	evidence := &promptAttemptEvidence{
+		executionID:          executionID,
+		promptGeneration:     promptGeneration,
+		evidenceKnown:        true,
+		dynamic:              dynamic,
+		retirementState:      state,
+		retirementGeneration: state.retirementGeneration,
+	}
+	s.dynamicAttemptEvidence.Store(sessionID, evidence)
 	// A new prompt must publish its complete execution identity before it opens
 	// a retired retry lifecycle to provider events. Initial launches have no
 	// execution yet; bindPromptAttempt clears the fence after launch acceptance.
@@ -101,10 +109,11 @@ func (s *Service) beginPromptAttempt(
 	}
 	state.mu.Unlock()
 	release()
+	return evidence
 }
 
-func (s *Service) beginDynamicAttempt(sessionID string) {
-	s.beginPromptAttempt(sessionID, "", 1, true)
+func (s *Service) beginDynamicAttempt(sessionID string) *promptAttemptEvidence {
+	return s.beginPromptAttempt(sessionID, "", 1, true)
 }
 
 func (s *Service) beginInteractivePromptAttempt(
@@ -203,6 +212,10 @@ func (s *Service) isDynamicPromptSession(session *models.TaskSession) bool {
 }
 
 func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGeneration uint64) {
+	s.bindPromptAttemptIfCurrent(sessionID, executionID, promptGeneration, nil)
+}
+
+func (s *Service) bindPromptAttemptIfCurrent(sessionID, executionID string, promptGeneration uint64, expected *promptAttemptEvidence) {
 	if sessionID == "" || (executionID == "" && promptGeneration == 0) {
 		return
 	}
@@ -213,24 +226,19 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 		release()
 	}()
 	evidence, ok := s.promptAttemptForSession(sessionID)
-	if !ok {
+	if !ok || (expected != nil && evidence != expected) {
+		return
+	}
+	// A fence already present when this attempt began belongs to its predecessor;
+	// a newer retirement must not be cleared by this admission callback.
+	if expected != nil && state.retired.Load() &&
+		(state != expected.retirementState || state.retirementGeneration != expected.retirementGeneration) {
 		return
 	}
 	evidence.mu.Lock()
 	defer evidence.mu.Unlock()
-	if executionID != "" {
-		if evidence.executionID != "" && evidence.executionID != executionID {
-			evidence.evidenceKnown = false
-			return
-		}
-		evidence.executionID = executionID
-	}
-	if promptGeneration != 0 {
-		if evidence.promptGeneration != 0 && evidence.promptGeneration != promptGeneration {
-			evidence.evidenceKnown = false
-			return
-		}
-		evidence.promptGeneration = promptGeneration
+	if !bindPromptAttemptIdentityLocked(evidence, executionID, promptGeneration) {
+		return
 	}
 	if executionID != "" {
 		// The evidence lock is released only after the identity is complete, while
@@ -239,8 +247,30 @@ func (s *Service) bindPromptAttempt(sessionID, executionID string, promptGenerat
 	}
 }
 
-func (s *Service) bindDynamicAttemptExecution(sessionID, executionID string) {
-	s.bindPromptAttempt(sessionID, executionID, 0)
+func bindPromptAttemptIdentityLocked(evidence *promptAttemptEvidence, executionID string, promptGeneration uint64) bool {
+	if executionID != "" {
+		if evidence.executionID != "" && evidence.executionID != executionID {
+			evidence.evidenceKnown = false
+			return false
+		}
+		evidence.executionID = executionID
+	}
+	if promptGeneration != 0 {
+		if evidence.promptGeneration != 0 && evidence.promptGeneration != promptGeneration {
+			evidence.evidenceKnown = false
+			return false
+		}
+		evidence.promptGeneration = promptGeneration
+	}
+	return true
+}
+
+func (s *Service) bindDynamicAttemptExecution(sessionID, executionID string, expected ...*promptAttemptEvidence) {
+	var current *promptAttemptEvidence
+	if len(expected) > 0 {
+		current = expected[0]
+	}
+	s.bindPromptAttemptIfCurrent(sessionID, executionID, 0, current)
 }
 
 func (s *Service) observePromptAttempt(
@@ -615,6 +645,41 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 		return data
 	}
 	return s.withPromptAttemptEvidenceLocked(data)
+}
+
+// withStartupAttemptObservations preserves typed pre-prompt evidence when no
+// prompt record exists, but never discards recorded output or effects from the
+// same execution. An ambiguous existing record fails closed.
+func (s *Service) withStartupAttemptObservations(data watcher.AgentEventData) watcher.AgentEventData {
+	if data.SessionID == "" {
+		return data
+	}
+	state, release := s.acquireTransientRetryNoticeState(data.SessionID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
+	if state.retired.Load() {
+		data.EvidenceKnown = false
+		return data
+	}
+	evidence, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return data
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if data.AgentExecutionID == "" || evidence.executionID == "" ||
+		evidence.executionID != data.AgentExecutionID ||
+		(data.PromptGeneration != 0 && evidence.promptGeneration != 0 && data.PromptGeneration != evidence.promptGeneration) {
+		data.EvidenceKnown = false
+		return data
+	}
+	data.EvidenceKnown = data.EvidenceKnown && evidence.evidenceKnown
+	data.OutputObserved = data.OutputObserved || evidence.outputObservedLocked(data)
+	data.EffectObserved = data.EffectObserved || evidence.effect
+	return data
 }
 
 func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) watcher.AgentEventData {

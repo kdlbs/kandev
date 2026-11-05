@@ -175,8 +175,11 @@ type PendingAgentPermission struct {
 	Title      string             `json:"title"`
 	Action     PermissionAction   `json:"action"`
 	Options    []PermissionChoice `json:"options"`
-	CreatedAt  time.Time          `json:"created_at"`
-	Status     string             `json:"status"`
+	// HumanInput marks a provider-native question that only a person can
+	// answer. Automatic consumers must leave it pending.
+	HumanInput bool      `json:"human_input,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	Status     string    `json:"status"`
 }
 
 type PermissionListResponse struct {

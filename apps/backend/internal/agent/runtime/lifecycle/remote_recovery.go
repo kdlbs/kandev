@@ -328,7 +328,7 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 		return
 	}
 	if ri == nil {
-		if err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, rowPresent, outcomes[entry.record.SessionID]); err != nil {
+		if _, err := m.settleRemoteRecoveryAbsence(ctx, entry, attemptRecord, rowPresent, outcomes[entry.record.SessionID]); err != nil {
 			m.logger.Debug("confirmed remote absence remains guarded until its runtime row is repaired",
 				zap.String("session_id", entry.record.SessionID), zap.Error(err))
 		}

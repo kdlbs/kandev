@@ -571,6 +571,7 @@ type createAgentProfileRequest struct {
 	Mode                    string                 `json:"mode,omitempty"`
 	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
 	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
@@ -601,6 +602,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			Mode:                    profile.Mode,
 			CLIFlags:                profile.CLIFlags,
 			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
 			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
@@ -611,7 +613,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

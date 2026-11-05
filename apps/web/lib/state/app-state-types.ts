@@ -562,6 +562,12 @@ export type AppState = KanbanSlice & {
   ) => void;
   clearGitStatus: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
+  invalidateGitStatusInventory: (sessionId: string) => void;
+  reconcileGitStatusInventory: (
+    environmentId: string,
+    generation: number,
+    scopes: readonly string[],
+  ) => boolean;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setSessionCommits: (
     sessionId: string,
