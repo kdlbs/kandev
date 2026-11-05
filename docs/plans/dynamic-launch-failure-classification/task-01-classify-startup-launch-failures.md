@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.2
   - AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.3
   - AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.4
+  - AC-AGENTS-DYNAMIC-LAUNCH-FAILURE-001.5
 system_design:
   - ../../specs/agents/system-design/dynamic-launch-failure-classification.md
 ---
@@ -32,8 +33,25 @@ a launch error is classified.
 2. An `AgentStartupFailure` with a provider network error returns a classified
    `network_unavailable` failure.
 3. An already classified error keeps its code.
+4. A current asynchronous dynamic startup with an explicitly unsent prompt
+   and a typed requested-model rejection applies the existing candidate policy.
+   Fixed profiles, resume failures, stale attempts, and unknown delivery keep
+   their existing recovery behavior.
+
+## Asynchronous model rejection implementation
+
+- `apps/backend/internal/orchestrator/dynamic_startup_model.go` accepts only the
+  typed rejection and current no-output/no-effect startup evidence.
+- `apps/backend/internal/orchestrator/event_handlers_agent.go` associates that
+  evidence with the current execution, generation, session and profile.
+- `apps/backend/internal/orchestrator/dynamic_launch.go` preserves the proven
+  pre-prompt evidence for the existing dynamic candidate policy.
 
 ## Verification
 
 - `go test ./internal/orchestrator/ -run 'TestDynamicLaunch'`
 - `make -C apps/backend build`
+- On this change, three temporary startup-model boundary and ownership checks
+  passed with a Go overlay, as did the existing startup admission and dynamic
+  successor launch checks. Specification lint, documentation catalog validation
+  and normal commit hooks passed. No live-provider or full-backend run is claimed.
