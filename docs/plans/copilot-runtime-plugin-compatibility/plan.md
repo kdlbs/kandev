@@ -9,10 +9,12 @@ requirements:
   - REQ-AGENTS-COPILOT-PLUGINS-005
   - REQ-AGENTS-COPILOT-PLUGINS-006
   - REQ-AGENTS-COPILOT-PLUGINS-007
+  - REQ-AGENTS-BACKGROUND-WORK-005
 system_design:
   - ../../specs/agents/system-design/copilot-profile-plugins.md
   - ../../specs/agents/system-design/copilot-profile-plugins-native-qualification.md
   - ../../specs/agents/system-design/copilot-plugin-contract-compatibility.md
+  - ../../specs/agents/system-design/background-work.md
 legacy_specs: []
 ---
 
@@ -299,6 +301,20 @@ projects sequentially through the managed runner with fresh builds.
 - [x] [Task 03: Correct profile compatibility recovery](task-03-profile-recovery.md)
 - [x] [Task 04: Admit through observed contracts](task-04-contract-admission.md)
 - [x] [Task 05: Preserve actionable startup failures](task-05-durable-plugin-failures.md)
+- [x] [Task 06: Preserve live workloads during snapshot reads](task-06-background-work-snapshot-race.md)
+
+## PR fixup: background workload snapshot ordering
+
+The first delivery CI round failed the phone process-end regression because
+its running-job chip was absent despite a running backend row. A controlled
+phone regression on the exact CI merge reproduces the same missing chip:
+hold the initial empty HTTP snapshot, accept a live running job, then release
+the snapshot. The old read removes the newer live row. This repairs the
+existing Background Work contract without changing either viewport's layout.
+
+Task 06 records the scoped remediation and local checks. The task's external
+delivery record owns the eventual PR head, CI, and review results. They remain
+pending until the new head's checks finish.
 
 Original order: 01, 02, 03. Task 02 and task 03 each required 01. Native
 artifacts became available, so task 02 completed rather than remaining blocked.

@@ -563,6 +563,8 @@ export type BackgroundWorkState = {
   nextOutputWindowGeneration: number;
   activeWorkIdBySessionId: Record<string, string>;
   loadingBySessionId: Record<string, boolean>;
+  readGenerationBySessionId: Record<string, number>;
+  nextReadGeneration: number;
 };
 
 export type BackgroundOutputWindow = {
@@ -714,6 +716,7 @@ export type SessionRuntimeSliceActions = {
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  beginBackgroundWorkRead: (sessionId: string) => number;
   setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
   updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
   appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;

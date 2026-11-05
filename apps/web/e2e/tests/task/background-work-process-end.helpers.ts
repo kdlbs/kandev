@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { firstSessionId } from "../../helpers/session";
 import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
 /**
