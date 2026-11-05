@@ -1,7 +1,7 @@
 ---
 id: "06-retained-local-alias"
 title: "Resolve retained local executor aliases at admission"
-status: done
+status: in_progress
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -23,11 +23,32 @@ profile ownership and storage failures remain authoritative.
 ## Scope
 
 - `apps/backend/internal/task/service/executor_admission.go`
+- `apps/backend/internal/task/service/executor_ownership_legacy_test.go`
 - The associated ownership requirement and design.
 
 ## Validation
 
-The existing legacy-alias ownership scenarios were run with `local` through a
-temporary overlay. The upstream baseline failed the shared and history-read
-scenarios; the candidate passed all seven scenarios. Normal commit hooks passed.
-No permanent test case or additional authorization path was introduced.
+### Contributor evidence
+
+The contributor reported seven legacy-alias ownership scenarios with `local`
+through a temporary overlay. The upstream baseline failed the shared and
+history-read scenarios. The candidate passed all seven scenarios. Normal commit
+hooks passed for the original submission.
+
+### Maintainer review follow-up
+
+The permanent scenario table now includes `local_pc` and `local`. Each alias
+uses both `PrepareExecutorAdmission` and `AuthorizeExecutorConfiguration`.
+The storage-error wrapper uses the selected alias. The scenarios cover shared
+access, private profiles, real private rows, retired rows, unknown identifiers,
+read errors, and history-read errors.
+
+The follow-up changes tests and implementation records. Production behavior
+remains the contributor's implementation. The reviewer requested no builds,
+tests, linters, or other validation commands. Commit hooks are bypassed because
+they run validation. Execution of the permanent cases remains pending:
+
+```bash
+cd apps/backend
+go test -trimpath ./internal/task/service -run '^TestExecutorOwnershipLegacyLocalAliasUsesBuiltinPolicy$' -count=1
+```
