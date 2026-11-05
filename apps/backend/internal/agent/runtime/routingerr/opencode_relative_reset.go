@@ -10,7 +10,7 @@ const openCodePeriodUsageRule = "opencode.stderr.usage_limit.v1"
 
 var openCodeRelativeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`)
 var openCodeRelativeUnitPattern = regexp.MustCompile(`(?i)(\d{1,4})\s*(days?|hours?|hrs?|minutes?|mins?|min|seconds?|secs?)\b`)
-var openCodeRelativeGluedSuffix = regexp.MustCompile(`^[.!?;][\pL\pN]`)
+var openCodeRelativeGluedSuffix = regexp.MustCompile(`^[.!?;]+[\pL\pN]`)
 
 // openCodePeriodResetAt accepts relative timing only on a line that itself
 // matches the classified OpenCode period-limit rule. Multiple different

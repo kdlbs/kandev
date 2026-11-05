@@ -123,8 +123,11 @@ The resulting hint is marked inferred under the existing circuit contract. An
 explicit structured or dated reset keeps precedence. For relative durations,
 unrelated lines, multiple matching period lines or reset expressions,
 incomplete or unsupported units, and overflow leave the hint unknown without
-changing the error classification. Office post-start handling carries the
-provider diagnostic's observation time into the classifier. The result
+changing the error classification. OpenCode stderr records whether the original
+diagnostic was one line before sanitization; Office post-start handling carries
+its observation time into the classifier only with that evidence. Older peers
+or records containing escapes or line separators leave the relative reset
+unknown. Existing structured reset hints retain precedence. The result
 does not change candidate order or authorize prompt replay.
 
 ## OpenCode admission refusal
