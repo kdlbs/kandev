@@ -26,8 +26,19 @@ promotion or session state, and do not use the session log for guarded decisions
 
 ## Validation
 
-The operating scenario was run as a disposable Go overlay: unmodified upstream
-failed because the deferral log was missing, and the candidate passed while
-preserving queued placement and deferred entry. Existing guarded-decision
-lifecycle tests, specification validation, and normal commit hooks passed. The
-temporary overlay was removed; no permanent test was added.
+The contributor recorded the initial scenario as a disposable Go overlay:
+unmodified upstream failed because the deferral log was missing, and the
+candidate passed while preserving queued placement and deferred entry. The
+contributor also reported that existing guarded-decision lifecycle tests,
+specification validation, and normal commit hooks passed. The temporary overlay
+was removed after that initial validation.
+
+The review follow-up adds permanent coverage in
+`apps/backend/internal/orchestrator/event_handlers_workflow_wip_deferral_test.go`.
+It covers the log message, level, and fields for turn-start and turn-complete
+transitions. It also covers queued placement, deferred entry, and an unchanged
+decider session without the session log for guarded decisions. An admitted
+destination provides a positive control for entry without a deferral log.
+
+Execution of the permanent tests is pending. The review followed the requested
+source-only scope and ran no tests, builds, linters, or validation commands.
