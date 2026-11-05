@@ -134,6 +134,7 @@ type AgentctlEventPayload struct {
 	DeliveryHarnessGeneration uint64                   `json:"delivery_harness_generation,omitempty"`
 	PromptGeneration          uint64                   `json:"prompt_generation,omitempty"`
 	WorktreeID                string                   `json:"worktree_id,omitempty"`
+	WorktreeRepositoryID      string                   `json:"worktree_repository_id,omitempty"`
 	WorktreePath              string                   `json:"worktree_path,omitempty"`
 	WorktreeBranch            string                   `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
@@ -142,6 +143,11 @@ type AgentctlEventPayload struct {
 	// than the initial session ready. The frontend uses this to repoint the
 	// file browser at the task root once the task becomes multi-branch.
 	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
+	// AgentWorkspacePath is the launched execution's confirmed working
+	// directory. It stays stable when attachment promotes the task workspace
+	// root, so the frontend can keep resolving repository-relative chat links
+	// against the checkout the agent still runs in.
+	AgentWorkspacePath string `json:"agent_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.

@@ -601,7 +601,7 @@ test-scripts:
 	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
-	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
+	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs scripts/release/existing-release.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e

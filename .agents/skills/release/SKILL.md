@@ -45,11 +45,11 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 1. Maintainer clicks "Run workflow" → keeps `channel=stable` → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
 3. `build-web`, `build-bundles`, `build-remote-helpers`, `build-desktop`, and both Docker builds create the channel inputs.
-4. `publish-release` promotes staged standard archives to the existing default names, publishes full archives and helper assets, then attaches checksums, the size report, desktop artifacts, and notes.
+4. `publish-release` promotes staged standard archives, publishes full archives and helpers, then attaches checksums, size reports, desktop artifacts, and notes. An immutable published host is reused only after signed-source and artifact verification; its assets, notes, and updater feed stay unchanged.
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
-8. `prepare-plugin-sdk` retains the exact tested original archive and signed receipt before creating/verifying its signed tag. `publish-plugin-sdk` uses OIDC without signing secrets, then verifies both public consumers. These jobs also run on backfill.
+8. `prepare-plugin-sdk` retains the exact tested archive, receipt, and signature on a `pluginsdk/vS` draft, then creates/verifies the signed SDK tag and finalizes the release with `make_latest=false`. Complete legacy host evidence is reused read-only. `publish-plugin-sdk` requires finalized evidence, uses OIDC without signing secrets, then verifies both public consumers. Both jobs run on backfill.
 9. `stable-complete` and automatic contributor notices require successful SDK verification. `bootstrap_required` is incomplete; maintainers publish only the retained bytes and retry after configuring trusted publishing. Never add a token fallback or overwrite conflicting immutable evidence.
 
 ## Contributor notices

@@ -345,7 +345,7 @@ func comparisonTargetErrorCode(err error) string {
 }
 
 func (m *Manager) refreshComparisonTrackerDetached(tracker *WorkspaceTracker) {
-	if tracker == nil {
+	if !gitEligibleTracker(tracker) {
 		return
 	}
 	go func() {
