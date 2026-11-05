@@ -16,6 +16,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/durable-delivery-write-cost.md
   - ../../specs/platform/system-design/postgres-domain-store-parity.md
+  - ../../specs/platform/system-design/backend-agent-delivery-retention.md
 ---
 
 # Task 01: Index the session identity admission query
@@ -82,11 +83,11 @@ index changes, transaction scope, health policy, and live-instance load.
 
 ```bash
 cd apps/backend
-go test -trimpath -race ./internal/task/repository/sqlite -run 'AgentDeliveryIdentityAdmission|Retention|Retire|ManagedConversationAdmission' -count=1
-go test -trimpath -race ./internal/task/repository/sqlite -count=1
-go test -trimpath -race ./internal/task/service -run 'AgentConversation|ManagedConversationAdmission' -count=1
+go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'AgentDeliveryIdentityAdmission|Retention|Retire|ManagedConversationAdmission' -count=1
+go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -count=1
+go test -trimpath -tags fts5 -race ./internal/task/service -run 'AgentConversation|ManagedConversationAdmission' -count=1
 go run ./cmd/sqlguard ./internal
-go test -trimpath -race ./internal/persistence/storeconformance -count=1
+go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1
 cd ../.. && bash scripts/lint-go-changed apps/backend/internal/task/repository/sqlite/agent_delivery_retention_admission.go apps/backend/internal/task/repository/sqlite/agent_delivery_identity_admission_test.go
 python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all
 git diff --check

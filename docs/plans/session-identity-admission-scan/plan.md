@@ -8,6 +8,7 @@ requirements:
 system_design:
   - ../../specs/platform/system-design/durable-delivery-write-cost.md
   - ../../specs/platform/system-design/postgres-domain-store-parity.md
+  - ../../specs/platform/system-design/backend-agent-delivery-retention.md
 legacy_specs: []
 ---
 

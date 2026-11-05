@@ -21,8 +21,8 @@ a slow prepare interval, and in each case the writer was released when the
 session entry was created. Persistence recovered on the next probes, at
 10:25:30.475 and 10:26:15.476. The slow HTTP requests that ended inside those
 intervals were GitHub API reads, which do not hold the writer. Logs cannot
-prove that nothing else held it. The query measurements below explain the
-durations.
+prove that nothing else held it. The query measurements below are consistent
+with the durations, but the live host's page-cache state was not measured.
 
 ## Dataset
 
