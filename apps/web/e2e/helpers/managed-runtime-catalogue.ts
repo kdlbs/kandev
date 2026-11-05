@@ -1,11 +1,9 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-const cataloguePath = fileURLToPath(
-  new URL(
-    "../../../backend/internal/agent/agents/managed_npm_runtime_versions.json",
-    import.meta.url,
-  ),
+const cataloguePath = path.resolve(
+  __dirname,
+  "../../../backend/internal/agent/agents/managed_npm_runtime_versions.json",
 );
 
 export function managedRuntimePackageSpec(packageName: string): string {
