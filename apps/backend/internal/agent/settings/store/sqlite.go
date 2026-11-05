@@ -106,6 +106,7 @@ func (r *sqliteRepository) initSchema() error {
 		failure_threshold INTEGER NOT NULL DEFAULT 3,
 		executor_preference TEXT NOT NULL DEFAULT '',
 		execution_agent_profile_id TEXT NOT NULL DEFAULT '',
+		command_override TEXT NOT NULL DEFAULT '',
 		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
@@ -356,6 +357,7 @@ func (r *sqliteRepository) initSchema() error {
 	// Added after the table-recreation block for the same reason as
 	// command_prefix / provider_kind.
 	_ = r.migrate.Apply("agent_profiles.execution_agent_profile_id", `ALTER TABLE agent_profiles ADD COLUMN execution_agent_profile_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("agent_profiles.command_override", `ALTER TABLE agent_profiles ADD COLUMN command_override TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
 	}
@@ -1251,7 +1253,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled,
 			mcp_selection_mode, mcp_selected_servers,
 			copilot_selected_plugins,
-			execution_agent_profile_id
+			execution_agent_profile_id, command_override
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1267,7 +1269,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?,
 			?, ?,
 			?,
-			?
+			?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1291,7 +1293,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
 		copilotSelectedPluginsJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, profile.CommandOverride,
 	)
 	return err
 }
@@ -1628,7 +1630,7 @@ func (r *sqliteRepository) updateAgentProfile(
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
 		dialect.BoolToInt(selectionProvided), selectionJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, profile.CommandOverride,
 		profile.ID)
 	var committedEnabled bool
 	var committedSelectionJSON string
@@ -1683,7 +1685,7 @@ const updateAgentProfileQuery = `
 			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?,
 			mcp_selection_mode = ?, mcp_selected_servers = ?,
 			copilot_selected_plugins = CASE WHEN ? = 1 THEN ? ELSE copilot_selected_plugins END,
-			execution_agent_profile_id = ?
+			execution_agent_profile_id = ?, command_override = ?
 		WHERE id = ? AND deleted_at IS NULL
 		RETURNING enabled, copilot_selected_plugins
 	`
@@ -1811,7 +1813,8 @@ const agentProfileSelectColumns = `
 		COALESCE(mcp_selection_mode, 'inherit'),
 		COALESCE(mcp_selected_servers, '[]'),
 		COALESCE(copilot_selected_plugins, '[]'),
-		COALESCE(execution_agent_profile_id, '')
+		COALESCE(execution_agent_profile_id, ''),
+		COALESCE(command_override, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -2049,6 +2052,7 @@ func scanAgentProfile(scanner interface {
 		&mcpSelectedServersJSON,
 		&copilotSelectedPluginsJSON,
 		&profile.ExecutionAgentProfileID,
+		&profile.CommandOverride,
 	); err != nil {
 		return nil, err
 	}

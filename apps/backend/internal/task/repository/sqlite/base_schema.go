@@ -63,6 +63,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.healBuiltinWorkflowStepOnCommentFanOut,
 		r.normalizeTaskWorktreeOwnership,
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
+		r.ensureUnrecordedPluginExecutorsSchema,
 		r.ensureTaskEnvironmentRecoveryArtifactsSchema,
 		r.ensureTaskEnvironmentRecoveryOperationsSchema,
 		r.ensureWorkspaceAdoptionsSchema,

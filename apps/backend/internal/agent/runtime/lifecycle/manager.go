@@ -292,6 +292,7 @@ type Manager struct {
 	executorProfileReader         ExecutorProfileReader
 	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
 	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginExecutorClaimStore      PluginExecutorClaimStore
 	pluginRuntimeAPIURL           string
 	pluginExecutorCallbackMu      sync.Mutex
 	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
@@ -1005,6 +1006,11 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
 	m.wireKubernetesEnvironmentStore()
+}
+
+// RuntimeSecretStore returns the store that holds runtime auth secrets, or nil.
+func (m *Manager) RuntimeSecretStore() secrets.SecretStore {
+	return m.secretStore
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses

@@ -35,7 +35,13 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 	if err != nil || delivery == nil || execution.DeliveryIncarnationID == "" || execution.DeliveryHarnessGeneration == 0 {
 		return after, err
 	}
-	status, err := client.GetDeliveryStatus(ctx, streamID)
+	// A legacy execution pins no stream: the peer's stream is named after its
+	// incarnation and generation, not the session ID that keys the SQL cursor.
+	queryStreamID := streamID
+	if execution.DeliveryStreamID == "" && execution.DeliveryMode != DurableDeliveryV1 {
+		queryStreamID = ""
+	}
+	status, err := client.GetDeliveryStatus(ctx, queryStreamID)
 	if err != nil {
 		if canUseLegacyEmptyDelivery(ctx, execution, delivery, streamID, err) {
 			return after, nil
@@ -43,6 +49,10 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 		return 0, fmt.Errorf("read authenticated delivery descriptor: %w", err)
 	}
 	if canUseLegacyStorageDescriptor(ctx, execution, delivery, streamID, status) {
+		if status.SessionID != execution.SessionID || status.IncarnationID != execution.DeliveryIncarnationID ||
+			status.HarnessGeneration != execution.DeliveryHarnessGeneration {
+			return 0, ErrDeliveryOwnerMismatch
+		}
 		return 0, nil
 	}
 	if err := validateAuthenticatedDeliveryDescriptor(execution, status); err != nil {

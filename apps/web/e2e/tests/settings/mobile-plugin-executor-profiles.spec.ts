@@ -6,6 +6,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { useRegularMode } from "../../helpers/regular-mode";
 import {
   createFixtureExecutorProfile,
+  expectImageSchemaFeedback,
   installFixtureExecutorProvider,
   readFixtureProfile,
 } from "../../helpers/plugin-executor-profile";
@@ -107,6 +108,22 @@ test("phone users can configure and select a remote provider profile", async ({
     await expect(selector).toContainText(profile.name);
     await expect(selector).toBeFocused();
     await assertNoDocumentHorizontalOverflow(testPage, "provider profile picker drawer");
+  } finally {
+    await uninstallFixturePlugin(apiClient);
+  }
+});
+
+test("phone users see schema defaults and length errors on a profile field", async ({
+  testPage,
+  apiClient,
+}) => {
+  test.setTimeout(120_000);
+  try {
+    const executor = await installFixtureExecutorProvider(testPage, apiClient);
+    await testPage.goto("/settings/executors");
+    await createFixtureExecutorProfile(testPage, executor, true);
+    await expectImageSchemaFeedback(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage, "provider profile length error");
   } finally {
     await uninstallFixturePlugin(apiClient);
   }

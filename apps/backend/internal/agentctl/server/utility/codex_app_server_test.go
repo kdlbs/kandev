@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 func TestResolveCodexAppServerCommandAllowList(t *testing.T) {
@@ -141,5 +142,28 @@ func TestCodexUtilityMCPConfigPrefersHTTPAndDropsSSE(t *testing.T) {
 	kandevServer, ok := servers["kandev"].(map[string]any)
 	if !ok || kandevServer["url"] != "http://localhost:4231/mcp" {
 		t.Fatalf("kandev server = %#v, want http endpoint", kandevServer)
+	}
+}
+
+func TestCodexUtilitySandboxModeFollowsNodeEnforcement(t *testing.T) {
+	valid := launchwrapper.Spec{Version: launchwrapper.Version, Source: launchwrapper.SourceNode, Argv: []string{"/usr/bin/true", "--"}}
+	tests := []struct {
+		name string
+		node launchwrapper.Node
+		want string
+	}{
+		{"default", launchwrapper.Node{}, "read-only"},
+		{"required without a loaded wrapper", launchwrapper.Node{Required: true}, "read-only"},
+		{"optional wrapper loaded", launchwrapper.Node{Spec: valid}, "read-only"},
+		{"enforced wrapper", launchwrapper.Node{Required: true, Spec: valid}, "danger-full-access"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := NewCodexAppServerInferenceExecutor(nil)
+			e.SetNodeLaunchWrapper(tt.node)
+			if got := e.sandboxMode(); got != tt.want {
+				t.Fatalf("sandboxMode() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

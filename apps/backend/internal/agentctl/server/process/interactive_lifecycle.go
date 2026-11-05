@@ -113,6 +113,12 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		}
 		req.LaunchWrapper.Argv = slices.Clone(req.LaunchWrapper.Argv)
 	}
+	if req.NodeLaunchWrapper.Required && req.NodeLaunchWrapper.Spec.IsZero() {
+		return nil, launchwrapper.ErrNodeRequired
+	}
+	if r.node.Required && !req.IsUserShell && req.NodeLaunchWrapper.Spec.IsZero() {
+		return nil, fmt.Errorf("%w: this runner cannot apply it", launchwrapper.ErrNodeRequired)
+	}
 	id := uuid.New().String()
 	if req.ProcessID != "" {
 		id = req.ProcessID
@@ -259,9 +265,10 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	// The process lifecycle is managed by Stop() and wait(), not by context cancellation
 	env := launchwrapper.StripControlCredentials(mergeEnvWithStrip(proc.startEnv, req.StripEnv))
 	args := proc.startCmd
-	if !req.LaunchWrapper.IsZero() {
+	wrapped := !req.LaunchWrapper.IsZero() || req.NodeLaunchWrapper.Active()
+	if wrapped {
 		var err error
-		args, err = launchwrapper.Prepare(req.LaunchWrapper, args, launchwrapper.Context{WorkDir: proc.startDir, Env: env})
+		args, err = req.NodeLaunchWrapper.Prepare(req.LaunchWrapper, args, launchwrapper.Context{WorkDir: proc.startDir, Env: env})
 		if err != nil {
 			return err
 		}
@@ -278,7 +285,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	// Unix: creack/pty, Windows: ConPTY
 	ptmx, err := ptyexec.Start(cmd, ptyDimension(cols, defaultPTYCols), ptyDimension(rows, defaultPTYRows))
 	if err != nil {
-		if !req.LaunchWrapper.IsZero() {
+		if wrapped {
 			return launchwrapper.ErrContext
 		}
 		return fmt.Errorf("failed to start pty: %w", err)

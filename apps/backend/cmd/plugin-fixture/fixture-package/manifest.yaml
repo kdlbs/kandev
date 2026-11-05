@@ -71,6 +71,9 @@ executor_providers:
         image:
           type: string
           title: Image
+          default: fixture-agent:latest
+          minLength: 3
+          maxLength: 32
         workspace_label:
           type: string
           title: Environment label with additional context for long names

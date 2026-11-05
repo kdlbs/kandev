@@ -325,6 +325,13 @@ func pluginExecutorLifecycleRecord(t *testing.T, key string, stateVersion uint32
 
 func testExecutorProviderPackage(t *testing.T, version, key string, stateVersions []int) *bytes.Buffer {
 	t.Helper()
+	return testExecutorProviderPackageRequiring(t, version, key, stateVersions, "")
+}
+
+// testExecutorProviderPackageRequiring adds extraProviderYAML, indented as
+// provider fields, to the single declared provider.
+func testExecutorProviderPackageRequiring(t *testing.T, version, key string, stateVersions []int, extraProviderYAML string) *bytes.Buffer {
+	t.Helper()
 	platform := goruntime.GOOS + "-" + goruntime.GOARCH
 	versions := make([]string, 0, len(stateVersions))
 	for _, value := range stateVersions {
@@ -358,7 +365,7 @@ executor_providers:
         handle: {type: string}
     capabilities:
       retention: persistent
-`, version, platform, key, strings.Join(versions, ", "))
+%s`, version, platform, key, strings.Join(versions, ", "), extraProviderYAML)
 	var packageBytes bytes.Buffer
 	if err := pkgtartest.WritePackage(&packageBytes, map[string][]byte{
 		"manifest.yaml": []byte(manifestYAML),

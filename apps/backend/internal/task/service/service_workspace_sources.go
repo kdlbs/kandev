@@ -482,6 +482,9 @@ func hasCloneableWorkspaceRepositoryLocator(repository *models.Repository) bool 
 	if locator == "" && repository.ProviderOwner != "" && repository.ProviderName != "" {
 		locator, _ = repoclone.CloneURLWithHost(repository.Provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repoclone.ProtocolHTTPS)
 	}
+	if _, ok := repoclone.E2ELocalRemote(repository.Provider, locator); ok {
+		return true
+	}
 	if locator == "" || strings.HasPrefix(locator, "/") || strings.HasPrefix(locator, "file:") {
 		return false
 	}

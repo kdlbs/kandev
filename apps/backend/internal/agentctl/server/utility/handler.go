@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
 )
@@ -26,6 +27,12 @@ type Handler struct {
 	logger               *zap.Logger
 	authenticatedControl func(*gin.Context) bool
 	instanceID           string
+}
+
+// SetNodeLaunchWrapper installs the operator-owned wrapper on every executor.
+func (h *Handler) SetNodeLaunchWrapper(node launchwrapper.Node) {
+	h.acpExecutor.SetNodeLaunchWrapper(node)
+	h.codexExecutor.SetNodeLaunchWrapper(node)
 }
 
 // NewHandler creates a new inference handler.
@@ -193,6 +200,7 @@ func (h *Handler) promptExecutor(req PromptRequest) inferenceExecutor {
 type inferenceExecutor interface {
 	Execute(context.Context, *PromptRequest) (*PromptResponse, error)
 	Probe(context.Context, *ProbeRequest) (*ProbeResponse, error)
+	SetNodeLaunchWrapper(launchwrapper.Node)
 }
 
 // SetInstanceID supplies the trusted instance identity for failure

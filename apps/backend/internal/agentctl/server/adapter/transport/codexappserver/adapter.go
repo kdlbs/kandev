@@ -195,6 +195,22 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return &copy
 }
 
+const (
+	sandboxWorkspaceWrite   = "workspace-write"
+	sandboxDangerFullAccess = "danger-full-access"
+)
+
+// sandboxMode is Codex's own sandbox for the thread. Codex's Seatbelt cannot
+// nest inside the node launch wrapper's sandbox, so under an enforced node
+// policy the outer sandbox is the boundary and Codex runs without its own.
+// Every other launch keeps workspace-write.
+func (a *Adapter) sandboxMode() string {
+	if a.cfg.OuterSandboxEnforced {
+		return sandboxDangerFullAccess
+	}
+	return sandboxWorkspaceWrite
+}
+
 func (a *Adapter) NewSession(ctx context.Context, servers []agenttypes.McpServer) (string, error) {
 	client := a.getClient()
 	if client == nil {
@@ -207,7 +223,7 @@ func (a *Adapter) NewSession(ctx context.Context, servers []agenttypes.McpServer
 	params := protocol.ThreadStartParams{
 		CWD:            a.cfg.WorkDir,
 		ApprovalPolicy: policy,
-		Sandbox:        "workspace-write",
+		Sandbox:        a.sandboxMode(),
 		Config:         codexConfig(servers),
 	}
 	var response protocol.ThreadStartResponse
@@ -252,7 +268,7 @@ func (a *Adapter) LoadSession(ctx context.Context, threadID string, servers []ag
 		ThreadID:       threadID,
 		CWD:            a.cfg.WorkDir,
 		ApprovalPolicy: policy,
-		Sandbox:        "workspace-write",
+		Sandbox:        a.sandboxMode(),
 		Config:         codexConfig(servers),
 	}
 	var response protocol.ThreadStartResponse

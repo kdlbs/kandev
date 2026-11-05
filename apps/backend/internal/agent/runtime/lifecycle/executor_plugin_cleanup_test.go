@@ -69,16 +69,30 @@ func TestPluginExecutorStopMatrix(t *testing.T) {
 		t.Fatalf("backend shutdown stopped or destroyed remote compute: destroy=%#v stop_requests=%d", operations.destroyRequest, stopRequests)
 	}
 
-	archiveClient := newPluginExecutorTestClient(t, server)
-	instance := &ExecutorInstance{
-		InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
-		Client: archiveClient, StopReason: StopReasonTaskArchived, Metadata: store.record.Metadata,
+	for _, reason := range []string{
+		StopReasonTaskArchived, StopReasonTaskDeleted, StopReasonSessionArchived, StopReasonSessionDeleted,
+		StopReasonCascadeArchive, StopReasonCascadeDelete, StopReasonTaskTreeArchived, StopReasonTaskTreeDeleted,
+	} {
+		before := stopRequests
+		if err := runtime.StopInstance(context.Background(), &ExecutorInstance{
+			InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
+			Client: newPluginExecutorTestClient(t, server), StopReason: reason, Metadata: store.record.Metadata,
+		}, true); err != nil {
+			t.Fatalf("stop for %q: %v", reason, err)
+		}
+		if operations.destroyRequest != nil || store.claimRequest.OwnerTaskID != "" || stopRequests != before+1 {
+			t.Fatalf("stop for %q must only stop agentctl; the task-environment cleanup job owns the destroy: destroy=%#v claim=%+v stops=%d",
+				reason, operations.destroyRequest, store.claimRequest, stopRequests-before)
+		}
 	}
-	if err := runtime.StopInstance(context.Background(), instance, true); err != nil {
-		t.Fatalf("archive cleanup: %v", err)
+
+	if err := runtime.DestroyTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: "environment-plugin-recovery", TaskID: "task-plugin-recovery", OwnershipGeneration: 7,
+	}); err != nil {
+		t.Fatalf("task-environment cleanup: %v", err)
 	}
 	if operations.destroyRequest == nil || operations.destroyRequest.GetResource().GetResourceHandle() != "resource-recovery" ||
-		operations.destroyRequest.GetCleanupClaim() != "operation-plugin-recovery:cleanup" || operations.destroyRequest.GetCleanupReason() != pluginExecutorCleanupReasonTask {
+		operations.destroyRequest.GetCleanupClaim() != store.claimRequest.OperationID || !strings.HasPrefix(operations.destroyRequest.GetCleanupClaim(), pluginExecutorClaimPrefix("operation-plugin-recovery", "cleanup")) || operations.destroyRequest.GetCleanupReason() != "task_environment_reset" {
 		t.Fatalf("destroy request = %#v", operations.destroyRequest)
 	}
 	if store.claimRequest.OwnerTaskID != "task-plugin-recovery" || store.claimRequest.OwnershipGeneration != 7 ||
@@ -136,10 +150,9 @@ func TestPluginExecutorOwnershipFence(t *testing.T) {
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
-	err := runtime.StopInstance(context.Background(), &ExecutorInstance{
-		InstanceID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
-		StopReason: StopReasonTaskDeleted, Metadata: store.record.Metadata,
-	}, true)
+	err := runtime.DestroyTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: "environment-plugin-recovery", TaskID: "task-plugin-recovery", OwnershipGeneration: 7,
+	})
 	if err == nil || !strings.Contains(err.Error(), "fenced") {
 		t.Fatalf("stale ownership cleanup error = %v, want fail-closed fence", err)
 	}

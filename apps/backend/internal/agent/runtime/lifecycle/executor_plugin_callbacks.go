@@ -96,6 +96,17 @@ func (m *Manager) validatePluginExecutorOwnership(ctx context.Context, req *Exec
 }
 
 func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest) error {
+	err := m.acceptExecutorResourceCheckpoint(ctx, request)
+	if err != nil {
+		m.logPluginExecutorCheckpointRefusal(ctx, request, strings.TrimSpace(request.GetPhase()), err)
+	}
+	return err
+}
+
+func (m *Manager) acceptExecutorResourceCheckpoint(ctx context.Context, request *pluginsdk.CheckpointExecutorResourceRequest) error {
+	if phase := strings.TrimSpace(request.GetPhase()); isPluginExecutorClaimPhase(phase) {
+		return m.checkpointPluginExecutorClaim(ctx, request, phase)
+	}
 	req, err := m.pluginExecutorCallbackRequest(ctx, request.GetContext())
 	if err != nil {
 		return err
@@ -115,6 +126,14 @@ func (m *Manager) CheckpointExecutorResource(ctx context.Context, request *plugi
 	if existing, decodeErr := decodePluginExecutorInventory(req.Metadata); decodeErr == nil &&
 		existing.EnvironmentID == inventory.EnvironmentID && existing.EnvironmentGeneration == inventory.EnvironmentGeneration {
 		inventory.ExpiresAt = existing.ExpiresAt
+		inventory.WorkspaceDescriptor = existing.WorkspaceDescriptor
+		inventory.HandshakeRejected = existing.HandshakeRejected
+		if existing.CredentialRecorded != nil {
+			inventory.CredentialRecorded = existing.CredentialRecorded
+		}
+	}
+	if inventory.WorkspaceDescriptor, err = resolvePluginExecutorEarlyWorkspace(inventory.NegotiatedCapabilities, inventory.WorkspaceDescriptor, request.GetResource()); err != nil {
+		return err
 	}
 	inventory.ExpiresAt, err = pluginExecutorEarlierExpiry(inventory.ExpiresAt, request.GetResource().GetExpiresAt())
 	if err != nil {
@@ -161,7 +180,7 @@ func (m *Manager) ReadExecutorRuntimeArtifact(ctx context.Context, request *plug
 	if _, err := m.pluginExecutorCallbackRequest(ctx, request.GetContext()); err != nil {
 		return err
 	}
-	if request.GetArtifactId() != "agentctl" || send == nil {
+	if request.GetArtifactId() != pluginExecutorAgentctlPurpose || send == nil {
 		return errors.New("plugin executor runtime artifact request is invalid")
 	}
 	platform, err := parsePluginExecutorPlatform(request.GetPlatform())
@@ -205,12 +224,14 @@ func pluginExecutorInventoryForLaunch(req *ExecutorCreateRequest, request *plugi
 		EnvironmentID:          req.TaskEnvironmentID,
 		ContractVersion:        profile.Provider.ContractVersion,
 		SupportedStateVersions: append([]int(nil), profile.Provider.SupportedStateVersions...),
+		NegotiatedCapabilities: negotiatedCapabilities(profile.Provider),
 		ProfileID:              profile.ProfileID, ProfileConfig: clonePluginExecutorStringMap(profile.Config),
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      request.GetOperationId(), InputDigest: request.GetInputDigest(),
 		RuntimeIdentity:       request.GetExecutionId(),
 		Capabilities:          profile.Provider.Capabilities,
 		EnvironmentGeneration: int64(request.GetEnvironmentGeneration()),
+		CredentialRecorded:    initialCredentialRecorded(negotiatedCapabilities(profile.Provider)),
 	}
 }
 

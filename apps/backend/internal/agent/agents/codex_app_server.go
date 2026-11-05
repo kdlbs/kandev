@@ -43,7 +43,7 @@ func (a *CodexAppServer) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(codexAppServerPackage, "app-server")
 }
 func (a *CodexAppServer) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().RuntimeCommand(opts.ManagedRuntimeVersion)
+	return a.ManagedNPMRuntime().CommandFor(opts)
 }
 
 func (a *CodexAppServer) InferenceConfig() *InferenceConfig {

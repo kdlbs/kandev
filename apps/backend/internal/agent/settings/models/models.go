@@ -135,6 +135,13 @@ type AgentProfile struct {
 	// Empty means the agent command runs unwrapped.
 	CommandPrefix string `json:"command_prefix" db:"command_prefix"`
 
+	// CommandOverride is an optional absolute path to a preinstalled agent
+	// executable that replaces the managed npm launch (npx) for agents that
+	// run from a managed npm runtime. Argv is the path plus the agent's own
+	// runtime arguments; nothing is shell-interpreted. Empty keeps the npm
+	// launch. Validated by agents.ValidateCommandOverride.
+	CommandOverride string `json:"command_override,omitempty" db:"command_override"`
+
 	// ProviderKind selects how the profile routes model inference.
 	// "" / ProviderKindNative (default) keeps the agent CLI's own provider
 	// configuration untouched. ProviderKindOpenAICompatible makes Kandev

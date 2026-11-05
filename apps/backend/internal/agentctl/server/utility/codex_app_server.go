@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	"go.uber.org/zap"
 )
@@ -25,6 +26,11 @@ const (
 	codexNpmPrefixFlag        = "--prefix"
 )
 
+const (
+	codexSandboxReadOnly         = "read-only"
+	codexSandboxDangerFullAccess = "danger-full-access"
+)
+
 var codexPackageSpec = regexp.MustCompile(`^@openai/codex@[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
 // CodexAppServerInferenceExecutor runs short utility prompts through the same
@@ -32,6 +38,30 @@ var codexPackageSpec = regexp.MustCompile(`^@openai/codex@[0-9]+\.[0-9]+\.[0-9]+
 // command because this endpoint crosses the agentctl process boundary.
 type CodexAppServerInferenceExecutor struct {
 	logger *zap.Logger
+	node   launchwrapper.Node
+}
+
+// SetNodeLaunchWrapper installs the operator-owned wrapper for every launch.
+func (e *CodexAppServerInferenceExecutor) SetNodeLaunchWrapper(node launchwrapper.Node) {
+	e.node = node
+}
+
+// sandboxMode picks the Codex thread sandbox. Codex's macOS Seatbelt cannot
+// nest inside the node wrapper's sandbox, so under an enforced node policy the
+// outer sandbox is the boundary; every other launch stays read-only.
+func (e *CodexAppServerInferenceExecutor) sandboxMode() string {
+	if e.node.Enforced() {
+		return codexSandboxDangerFullAccess
+	}
+	return codexSandboxReadOnly
+}
+
+// diagnosticStderr hides wrapper-controlled stderr from responses and logs.
+func (e *CodexAppServerInferenceExecutor) diagnosticStderr(stderr *stderrBuffer) string {
+	if e.node.Active() {
+		return ""
+	}
+	return stderr.tail()
 }
 
 func NewCodexAppServerInferenceExecutor(log *zap.Logger) *CodexAppServerInferenceExecutor {
@@ -64,6 +94,9 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	start := time.Now()
 	client, cleanupCommand, stderr, err := e.start(ctx, command, args, req.InferenceConfig)
 	if err != nil {
+		if e.node.Active() {
+			return &ProbeResponse{Error: "wrapped utility process failed to start", DurationMs: int(time.Since(start).Milliseconds())}, nil
+		}
 		return &ProbeResponse{Error: fmt.Sprintf("start Codex app-server: %v", err), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
 	var cleanupOnce sync.Once
@@ -72,7 +105,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	if err := initializeCodexAppServer(ctx, client); err != nil {
 		// Join the process and stderr copier before classifying its failure.
 		cleanup()
-		stderrTail := stderr.tail()
+		stderrTail := e.diagnosticStderr(stderr)
 		failureMessage := utilityUpstreamError(err, stderrTail)
 		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
 		if req.ProfileContext {
@@ -96,7 +129,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
 		cleanup()
-		stderrTail := stderr.tail()
+		stderrTail := e.diagnosticStderr(stderr)
 		failureMessage := utilityUpstreamError(err, stderrTail)
 		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
 		if req.ProfileContext {
@@ -153,7 +186,7 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	}
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
-		return &PromptResponse{Error: utilityUpstreamError(err, stderr.tail()), DurationMs: int(time.Since(start).Milliseconds())}, nil
+		return &PromptResponse{Error: utilityUpstreamError(err, e.diagnosticStderr(stderr)), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
 	model := strings.TrimSpace(req.Model)
 	var modelPtr *string
@@ -164,9 +197,9 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	var thread protocol.ThreadStartResponse
 	if err := client.Call(ctx, protocol.MethodThreadStart, protocol.ThreadStartParams{
 		Model: modelPtr, CWD: req.InferenceConfig.WorkDir, Ephemeral: &ephemeral,
-		ApprovalPolicy: "never", Sandbox: "read-only", Config: codexUtilityMCPConfig(req.MCPServers),
+		ApprovalPolicy: "never", Sandbox: e.sandboxMode(), Config: codexUtilityMCPConfig(req.MCPServers),
 	}, &thread); err != nil {
-		return &PromptResponse{Error: utilityUpstreamError(err, stderr.tail()), DurationMs: int(time.Since(start).Milliseconds())}, nil
+		return &PromptResponse{Error: utilityUpstreamError(err, e.diagnosticStderr(stderr)), DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
 	if strings.TrimSpace(thread.Thread.ID) == "" {
 		return &PromptResponse{Error: "Codex app-server thread/start omitted thread ID", DurationMs: int(time.Since(start).Milliseconds())}, nil
@@ -176,7 +209,7 @@ func (e *CodexAppServerInferenceExecutor) Execute(ctx context.Context, req *Prom
 	}
 	result, err := executeCodexUtilityTurn(ctx, client, thread.Thread.ID, model, req.Prompt)
 	if err != nil {
-		return &PromptResponse{Error: utilityUpstreamError(err, stderr.tail()), Model: model, DurationMs: int(time.Since(start).Milliseconds())}, nil
+		return &PromptResponse{Error: utilityUpstreamError(err, e.diagnosticStderr(stderr)), Model: model, DurationMs: int(time.Since(start).Milliseconds())}, nil
 	}
 	return &PromptResponse{Success: true, Response: result, Model: model, DurationMs: int(time.Since(start).Milliseconds())}, nil
 }
@@ -188,12 +221,19 @@ func (e *CodexAppServerInferenceExecutor) start(
 	cfg *InferenceConfigDTO,
 ) (*protocol.Client, func(), *stderrBuffer, error) {
 	args = append([]string(nil), args...)
-	if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
+	env := sanitizeEnvForAgent(cfg)
+	if e.node.Active() {
+		argv, err := e.node.Prepare(launchwrapper.Spec{}, append([]string{command}, args...), launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
+		if err != nil {
+			return nil, nil, nil, errors.New("wrapped utility process could not be prepared")
+		}
+		command, args = argv[0], argv[1:]
+	} else if err := managedruntime.PrepareNPMProjectPrefix(args); err != nil {
 		return nil, nil, nil, fmt.Errorf("prepare managed npm project prefix: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = cfg.WorkDir
-	cmd.Env = sanitizeEnvForAgent(cfg)
+	cmd.Env = env
 	configureACPCommand(cmd, e.logger)
 	stderr := &stderrBuffer{}
 	cmd.Stderr = stderr
@@ -206,6 +246,9 @@ func (e *CodexAppServerInferenceExecutor) start(
 		return nil, nil, stderr, fmt.Errorf("stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		if e.node.Active() {
+			return nil, nil, stderr, errors.New("wrapped utility process failed to start")
+		}
 		return nil, nil, stderr, fmt.Errorf("start: %w", err)
 	}
 	lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)

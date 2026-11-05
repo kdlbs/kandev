@@ -30,6 +30,8 @@ function fieldErrorMessage(
     enum: "executors:providerFieldOption",
     minimum: "executors:providerFieldRangeMin",
     maximum: "executors:providerFieldRangeMax",
+    minLength: "executors:providerFieldLengthMin",
+    maxLength: "executors:providerFieldLengthMax",
   }[error.code];
   return t(key, { field: field.label, value: error.value });
 }
@@ -179,6 +181,7 @@ function FieldInputControl({
         step={fieldStep(field)}
         min={field.minimum}
         max={field.maximum}
+        maxLength={field.maxLength}
         value={value}
         disabled={disabled || cleared}
         autoComplete={field.secret ? "new-password" : undefined}
@@ -282,6 +285,14 @@ function PluginExecutorProfileField({
       {description && (
         <p id={`${id}-description`} className="text-xs text-muted-foreground">
           {description}
+        </p>
+      )}
+      {field.defaultValue !== undefined && (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid={`executor-profile-default-${field.name}`}
+        >
+          {t("executors:providerFieldDefault", { value: field.defaultValue })}
         </p>
       )}
       {message && (

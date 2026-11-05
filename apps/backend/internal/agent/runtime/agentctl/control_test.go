@@ -824,3 +824,28 @@ func TestClaimOwnership_SuccessReturnsNilError(t *testing.T) {
 		t.Fatalf("ClaimOwnership() error = %v, want nil", err)
 	}
 }
+
+func TestHandshake_OnlyAForbiddenReplyIsARejection(t *testing.T) {
+	for status, rejected := range map[int]bool{
+		http.StatusForbidden: true, http.StatusBadGateway: false, http.StatusInternalServerError: false,
+	} {
+		srv := httptest.NewServer(jsonResponder(status, `{"error":"invalid or already-consumed nonce"}`))
+		c := newTestControlClient(t, srv)
+		_, err := c.Handshake(context.Background(), "n")
+		srv.Close()
+		if err == nil || errors.Is(err, ErrHandshakeRejected) != rejected {
+			t.Fatalf("status %d: error = %v, rejected = %v, want rejected = %v", status, err, errors.Is(err, ErrHandshakeRejected), rejected)
+		}
+	}
+	srv := httptest.NewServer(jsonResponder(http.StatusForbidden, `{}`))
+	defer srv.Close()
+	if _, err := newTestControlClient(t, srv).Handshake(canceledContext(), "n"); errors.Is(err, ErrHandshakeRejected) {
+		t.Fatal("a canceled handshake was reported as a rejection")
+	}
+}
+
+func canceledContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}

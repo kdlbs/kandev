@@ -112,6 +112,7 @@ func RegisterRoutes(
 	ctrl.registerMarketplaceRoutes(api)
 	api.GET("/workspaces/:workspace_id/managed-conversation-destinations", ctrl.managedConversationDestinations)
 	api.GET("/settings", ctrl.getSettings)
+	api.GET("/host-capabilities", authn.RequireAdmin(), ctrl.hostCapabilities)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)
 	api.POST("/host/interactions/response-receipts", ctrl.issueHumanInteractionResponseReceipt)
 	api.GET("", ctrl.list)

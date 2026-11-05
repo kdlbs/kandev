@@ -6,6 +6,7 @@ import { expectControlHeight } from "../../helpers/control-sizing";
 import { useRegularMode } from "../../helpers/regular-mode";
 import {
   createFixtureExecutorProfile,
+  expectImageSchemaFeedback,
   FIXTURE_PROFILE_SECRET,
   installFixtureExecutorProvider,
   readFixtureProfile,
@@ -116,6 +117,21 @@ test.describe("remote executor profiles", () => {
       await expect(option).toContainText("Maximum lifetime: 8 hours.");
       await option.click();
       await expect(selector).toContainText(profile.name);
+    } finally {
+      await uninstallFixturePlugin(apiClient);
+    }
+  });
+
+  test("shows schema defaults and length errors on a profile field", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    try {
+      const executor = await installFixtureExecutorProvider(testPage, apiClient);
+      await testPage.goto("/settings/executors");
+      await createFixtureExecutorProfile(testPage, executor, false);
+      await expectImageSchemaFeedback(testPage);
     } finally {
       await uninstallFixturePlugin(apiClient);
     }

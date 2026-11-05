@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/plugins/profileschema"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -18,11 +17,8 @@ import (
 const executorProfileSecretNamePrefix = "kandev-executor-profile:"
 
 type executorProviderField struct {
-	typeName string
+	property profileschema.Property
 	secret   bool
-	enum     []any
-	minimum  *float64
-	maximum  *float64
 }
 
 // kandevExecutorProfileKeys are executor profile keys owned by Kandev rather than
@@ -67,11 +63,11 @@ func executorProviderSchemaFields(schema map[string]any) (map[string]executorPro
 		if !ok {
 			return nil, nil, fmt.Errorf("%w: invalid provider field type", ErrInvalidExecutorConfig)
 		}
-		field := executorProviderField{typeName: typeName}
-		field.secret, _ = property["secret"].(bool)
-		field.enum, _ = schemaAnySlice(property["enum"])
-		field.minimum = schemaNumber(property["minimum"])
-		field.maximum = schemaNumber(property["maximum"])
+		parsed, err := profileschema.ParseProperty(property)
+		if err != nil || parsed.Type != typeName {
+			return nil, nil, fmt.Errorf("%w: invalid provider field schema", ErrInvalidExecutorConfig)
+		}
+		field := executorProviderField{property: parsed, secret: parsed.Secret}
 		fields[name] = field
 	}
 	required, _ := schemaStringSlice(schema["required"])
@@ -114,136 +110,6 @@ func schemaStringSlice(value any) ([]string, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func schemaAnySlice(value any) ([]any, bool) {
-	switch typed := value.(type) {
-	case []any:
-		return typed, true
-	case []string:
-		out := make([]any, len(typed))
-		for index := range typed {
-			out[index] = typed[index]
-		}
-		return out, true
-	default:
-		return nil, false
-	}
-}
-
-func schemaNumber(value any) *float64 {
-	var parsed float64
-	switch typed := value.(type) {
-	case int:
-		parsed = float64(typed)
-	case int64:
-		parsed = float64(typed)
-	case float64:
-		parsed = typed
-	default:
-		return nil
-	}
-	return &parsed
-}
-
-func validatePluginExecutorProfileSchema(provider models.ExecutorProvider, config map[string]string) error {
-	fields, required, err := executorProviderSchemaFields(provider.ProfileSchema)
-	if err != nil {
-		return err
-	}
-	for key, value := range config {
-		if _, kandevKey := kandevExecutorProfileKeys[key]; kandevKey {
-			if err := validateKandevExecutorProfileValue(key, value); err != nil {
-				return err
-			}
-			continue
-		}
-		field, exists := fields[key]
-		if !exists {
-			return fmt.Errorf("%w: undeclared provider profile field %q", ErrInvalidExecutorConfig, key)
-		}
-		if field.secret {
-			if _, ok := models.ExecutorProfileSecretID(value); !ok {
-				return fmt.Errorf("%w: secret field %q is not stored in the vault", ErrInvalidExecutorConfig, key)
-			}
-			continue
-		}
-		if _, ok := models.ExecutorProfileSecretID(value); ok {
-			return fmt.Errorf("%w: secret references are allowed only for declared secret fields", ErrInvalidExecutorConfig)
-		}
-		if err := validateExecutorProviderScalar(key, value, field); err != nil {
-			return err
-		}
-	}
-	for _, key := range required {
-		value, exists := config[key]
-		if !exists || value == "" {
-			return fmt.Errorf("%w: required provider profile field %q is missing", ErrInvalidExecutorConfig, key)
-		}
-	}
-	return nil
-}
-
-func validateExecutorProviderScalar(key, value string, field executorProviderField) error {
-	numeric, hasNumeric, err := parseExecutorProviderScalar(key, value, field.typeName)
-	if err != nil {
-		return err
-	}
-	if err := validateExecutorProviderEnum(key, value, field.enum); err != nil {
-		return err
-	}
-	return validateExecutorProviderBounds(key, numeric, hasNumeric, field)
-}
-
-func parseExecutorProviderScalar(key, value, typeName string) (float64, bool, error) {
-	switch typeName {
-	case "string":
-		return 0, false, nil
-	case "boolean":
-		if value != "true" && value != "false" {
-			return 0, false, fmt.Errorf("%w: provider profile field %q must be a boolean", ErrInvalidExecutorConfig, key)
-		}
-		return 0, false, nil
-	case "integer":
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, false, fmt.Errorf("%w: provider profile field %q must be an integer", ErrInvalidExecutorConfig, key)
-		}
-		return float64(parsed), true, nil
-	case "number":
-		parsed, err := strconv.ParseFloat(value, 64)
-		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-			return 0, false, fmt.Errorf("%w: provider profile field %q must be a number", ErrInvalidExecutorConfig, key)
-		}
-		return parsed, true, nil
-	default:
-		return 0, false, fmt.Errorf("%w: provider profile field %q has an unsupported type", ErrInvalidExecutorConfig, key)
-	}
-}
-
-func validateExecutorProviderEnum(key, value string, allowed []any) error {
-	if len(allowed) == 0 {
-		return nil
-	}
-	for _, candidate := range allowed {
-		if fmt.Sprint(candidate) == value {
-			return nil
-		}
-	}
-	return fmt.Errorf("%w: provider profile field %q is not an allowed value", ErrInvalidExecutorConfig, key)
-}
-
-func validateExecutorProviderBounds(key string, numeric float64, hasNumeric bool, field executorProviderField) error {
-	if field.minimum == nil && field.maximum == nil {
-		return nil
-	}
-	if !hasNumeric {
-		return fmt.Errorf("%w: numeric bounds require a number field", ErrInvalidExecutorConfig)
-	}
-	if field.minimum != nil && numeric < *field.minimum || field.maximum != nil && numeric > *field.maximum {
-		return fmt.Errorf("%w: provider profile field %q is outside its allowed range", ErrInvalidExecutorConfig, key)
-	}
-	return nil
 }
 
 func executorProfileSecretName(profileID, key string) string {
@@ -304,9 +170,6 @@ func (s *Service) normalizePluginExecutorProfileField(
 	}
 	if _, isReference := models.ExecutorProfileSecretID(value); isReference {
 		return nil, fmt.Errorf("%w: vault references are allowed only for declared secret fields", ErrInvalidExecutorConfig)
-	}
-	if err := validateExecutorProviderScalar(key, value, field); err != nil {
-		return nil, err
 	}
 	config[key] = value
 	return nil, nil
@@ -392,26 +255,22 @@ func (s *Service) ExecutorProviderProfileForLaunch(ctx context.Context, profileI
 	if err != nil {
 		return nil, err
 	}
-	if err := validatePluginExecutorProfileSchema(*provider, profile.Config); err != nil {
+	filled, err := fillPluginExecutorProfile(*provider, profile.Config)
+	if err != nil {
 		return nil, err
 	}
 	secretValues, err := s.executorProviderProfileSecrets(ctx, profile, *provider)
 	if err != nil {
 		return nil, err
 	}
-	secretReferences := make(map[string]string, len(secretValues))
-	for key := range secretValues {
-		if id, ok := models.ExecutorProfileSecretID(profile.Config[key]); ok {
-			secretReferences[key] = id
-		}
-	}
+	secretReferences := executorProfileSecretReferences(profile.Config, secretValues)
 	environment, err := s.taskEnvironments.GetTaskEnvironment(ctx, environmentID)
 	if err != nil || environment == nil || environment.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("%w: plugin executor environment ownership is unavailable", ErrExecutorProviderUnavailable)
 	}
 	return &models.ExecutorProviderLaunchProfile{
 		Provider: *provider, ProfileID: profile.ID, OwnershipGeneration: environment.OwnershipGeneration,
-		Config:       publicExecutorProviderConfig(*provider, profile.Config),
+		Config:       publicExecutorProviderConfig(*provider, filled),
 		SecretValues: secretValues, SecretReferences: secretReferences,
 	}, nil
 }
@@ -451,7 +310,7 @@ func (s *Service) ExecutorProviderProfileForRecovery(
 	if err != nil {
 		return nil, err
 	}
-	if err := validatePluginExecutorProfileSchema(*provider, validationConfig); err != nil {
+	if err := validateRecordedPluginExecutorProfile(*provider, validationConfig); err != nil {
 		return nil, err
 	}
 	if err := validateRequiredRecordedExecutorProviderSecrets(fields, required, secretValues); err != nil {
@@ -511,6 +370,7 @@ func (s *Service) validatePluginExecutorProfile(ctx context.Context, profile *mo
 	}
 	fieldErrors, err := s.executorProviderCatalog.ValidateExecutorProviderProfile(ctx, provider.ExecutorID, models.ExecutorProviderProfile{
 		ProfileID: profile.ID, Config: publicExecutorProviderConfig(provider, profile.Config), SecretValues: secretValues,
+		SecretReferences: executorProfileSecretReferences(profile.Config, secretValues),
 	})
 	if err != nil {
 		return fmt.Errorf("%w: provider profile validation is unavailable", ErrExecutorProviderUnavailable)
@@ -749,4 +609,16 @@ func cloneExecutorProfileConfig(config map[string]string) map[string]string {
 		clone[key] = value
 	}
 	return clone
+}
+
+// executorProfileSecretReferences maps each secret property that holds a value
+// to the store ID the profile records for it.
+func executorProfileSecretReferences(config, secretValues map[string]string) map[string]string {
+	references := make(map[string]string, len(secretValues))
+	for key := range secretValues {
+		if id, ok := models.ExecutorProfileSecretID(config[key]); ok {
+			references[key] = id
+		}
+	}
+	return references
 }

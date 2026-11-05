@@ -10,14 +10,34 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
+// wrapped reports whether a profile or node wrapper shapes this launch, so
+// responses and logs stay redacted.
+func (c *InferenceConfigDTO) wrapped() bool {
+	return !c.LaunchWrapper.IsZero() || c.node.Active()
+}
+
+// observationPrefix is the wrapper argv that makes runtime observation skip
+// executables it would otherwise run directly. It is empty without a wrapper.
+func observationPrefix(cfg *InferenceConfigDTO) []string {
+	if !cfg.wrapped() {
+		return cfg.CommandPrefix
+	}
+	prefix := slices.Clone(cfg.node.Spec.Argv)
+	prefix = append(prefix, cfg.LaunchWrapper.Argv...)
+	if len(prefix) == 0 {
+		prefix = []string{"[node wrapper]"}
+	}
+	return prefix
+}
+
 func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []string) ([]string, error) {
-	if !cfg.LaunchWrapper.IsZero() && (len(cfg.CommandPrefix) != 0 || (cfg.Protocol != "" && cfg.Protocol != agent.ProtocolACP)) {
+	if cfg.wrapped() && (len(cfg.CommandPrefix) != 0 || (cfg.Protocol != "" && cfg.Protocol != agent.ProtocolACP)) {
 		return nil, launchwrapper.ErrInvalid
 	}
 	inner := append(slices.Clone(args), cfg.CLIFlags...)
 	inner[0] = admitted
-	if !cfg.LaunchWrapper.IsZero() {
-		return launchwrapper.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
+	if cfg.wrapped() {
+		return cfg.node.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})
 	}
 	if err := managedruntime.PrepareNPMProjectPrefix(inner); err != nil {
 		return nil, err
@@ -34,7 +54,7 @@ func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []stri
 }
 
 func utilityStartError(cfg *InferenceConfigDTO, err error) string {
-	if !cfg.LaunchWrapper.IsZero() {
+	if cfg.wrapped() {
 		return "wrapped utility process failed to start"
 	}
 	return fmt.Sprintf("start: %v", err)

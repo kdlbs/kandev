@@ -34,6 +34,7 @@ type pluginExecutorOperationsFake struct {
 	recoverRequest     *pluginsdk.RecoverExecutorOperationRequest
 	recoverResponse    *pluginsdk.RecoverExecutorOperationResponse
 	recoverErr         error
+	recoverCtxErr      error
 	attachRequest      *pluginsdk.AttachExecutorEnvironmentRequest
 	attachResponse     *pluginsdk.AttachExecutorEnvironmentResponse
 	attachErr          error
@@ -44,18 +45,26 @@ type pluginExecutorOperationsFake struct {
 	connectionResponse *pluginsdk.ResolveExecutorConnectionResponse
 	connectionErr      error
 	connectionPorts    []int
+	connectionRequests []*pluginsdk.ResolveExecutorConnectionRequest
 	destroyRequest     *pluginsdk.DestroyExecutorEnvironmentRequest
 	destroyResponse    *pluginsdk.DestroyExecutorEnvironmentResponse
 	destroyErr         error
+	beforeDestroy      func()
+	destroyDeadline    time.Time
+	onProvision        func()
 }
 
 func (f *pluginExecutorOperationsFake) ProvisionExecutorEnvironment(_ context.Context, req *pluginsdk.ProvisionExecutorEnvironmentRequest) (*pluginsdk.ProvisionExecutorEnvironmentResponse, error) {
 	f.provisionRequest = req
+	if f.onProvision != nil {
+		f.onProvision()
+	}
 	return f.provisionResponse, f.provisionErr
 }
 
-func (f *pluginExecutorOperationsFake) RecoverExecutorOperation(_ context.Context, req *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
+func (f *pluginExecutorOperationsFake) RecoverExecutorOperation(ctx context.Context, req *pluginsdk.RecoverExecutorOperationRequest) (*pluginsdk.RecoverExecutorOperationResponse, error) {
 	f.recoverRequest = req
+	f.recoverCtxErr = ctx.Err()
 	return f.recoverResponse, f.recoverErr
 }
 
@@ -79,11 +88,16 @@ func (f *pluginExecutorOperationsFake) InspectExecutorEnvironment(_ context.Cont
 
 func (f *pluginExecutorOperationsFake) ResolveExecutorConnection(_ context.Context, req *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
 	f.connectionPorts = append(f.connectionPorts, int(req.GetRuntimePort()))
+	f.connectionRequests = append(f.connectionRequests, req)
 	return f.connectionResponse, f.connectionErr
 }
 
-func (f *pluginExecutorOperationsFake) DestroyExecutorEnvironment(_ context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
+func (f *pluginExecutorOperationsFake) DestroyExecutorEnvironment(ctx context.Context, req *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error) {
 	f.destroyRequest = req
+	f.destroyDeadline, _ = ctx.Deadline()
+	if f.beforeDestroy != nil {
+		f.beforeDestroy()
+	}
 	return f.destroyResponse, f.destroyErr
 }
 
@@ -149,8 +163,8 @@ func TestPluginExecutorLaunch(t *testing.T) {
 	if ready, ok := checkpoints[len(checkpoints)-1][MetadataKeyPluginExecutor].(pluginExecutorInventory); !ok || ready.InstancePort != instancePort {
 		t.Fatalf("ready checkpoint = %#v, want instance port %d", checkpoints[len(checkpoints)-1], instancePort)
 	}
-	if len(checkpoints) != 3 {
-		t.Fatalf("checkpoint count = %d, want allocating, provisioned, and ready", len(checkpoints))
+	if len(checkpoints) != 5 {
+		t.Fatalf("checkpoint count = %d, want allocating, provisioned, handshake_started, instance port, and ready", len(checkpoints))
 	}
 	encoded, err := json.Marshal(checkpoints)
 	if err != nil {
@@ -241,7 +255,7 @@ func TestPluginExecutorConnectionResolverPreservesProviderRejection(t *testing.T
 		},
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
-	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort)
+	resolver := runtime.connectionResolver(&pluginsdk.ExecutorProviderRequestContext{}, &pluginsdk.ExecutorResourceDescriptor{}, pluginExecutorRuntimePort, nil)
 
 	_, err := resolver(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "connection_unavailable") || !strings.Contains(err.Error(), "provider.connection.unavailable") {
@@ -270,7 +284,7 @@ func TestPluginExecutorInstanceCreationRejectsUnusablePorts(t *testing.T) {
 
 			_, err = createPluginAgentctlInstance(context.Background(), control, &ExecutorCreateRequest{
 				InstanceID: "execution-plugin-1", SessionID: "session-plugin-1",
-			})
+			}, pluginExecutorInventory{})
 			if err == nil || !strings.Contains(err.Error(), "without a usable port") {
 				t.Fatalf("createPluginAgentctlInstance() error = %v, want unusable port", err)
 			}

@@ -172,6 +172,8 @@ type Manager struct {
 	openCodePluginGuard     openCodePluginAdmissionGuard
 	openCodePluginRetirer   openCodePluginClaimRetirer
 
+	oneShotBase *oneShotBase
+
 	// diskSampler is the process-wide advisory capacity cache shared by every
 	// instance. Nil falls back to a direct bounded read on the advisory route.
 	diskSampler   *systemmetrics.DiskCapacitySampler
@@ -1924,7 +1926,7 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 	if err := m.cmd.Start(); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		if !m.cfg.LaunchWrapper.IsZero() {
+		if m.launchWrapped() {
 			return 0, errors.New("wrapped agent process failed to start")
 		}
 		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
@@ -2053,6 +2055,7 @@ func (m *Manager) buildAdapterConfig() error {
 		ProviderGatewayAuth:        m.cfg.ProviderGatewayAuth,
 		AuthPolicy:                 m.cfg.AuthPolicy,
 		PromptSuggestions:          m.cfg.PromptSuggestions,
+		OuterSandboxEnforced:       m.cfg.NodeLaunchWrapper.Enforced(),
 	}
 	if m.cfg.AuthPolicy != nil && acpcompat.IsAntigravity(m.cfg.AgentType) {
 		harness := acpcompat.EnvValue(m.cfg.AgentEnv, acpcompat.AntigravityHarnessPathEnv)
@@ -2139,7 +2142,7 @@ func (m *Manager) buildFinalCommand() error {
 		return err
 	}
 	m.finalCommand = strings.Join(finalArgs, " ")
-	if !m.cfg.LaunchWrapper.IsZero() {
+	if m.launchWrapped() {
 		m.finalCommand = "[wrapped agent]"
 	}
 	cmdArgs = finalArgs[1:]
@@ -3518,7 +3521,7 @@ func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 		}
 
 		line, keep := safeManagedNpmStderrLine(rawLine)
-		if !keep && m.cfg != nil && !m.cfg.LaunchWrapper.IsZero() {
+		if !keep && m.cfg != nil && m.launchWrapped() {
 			continue
 		}
 		if !keep {

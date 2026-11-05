@@ -12,14 +12,19 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins/workspacedescriptor"
+	"github.com/kandev/kandev/internal/runtimeprobe"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kdlbs/kandev/pluginsdk"
@@ -28,29 +33,36 @@ import (
 )
 
 const (
-	pluginExecutorInventoryMaxBytes    = 32 << 10
-	pluginExecutorRuntimePort          = 8765
-	pluginExecutorWorkspacePath        = "/workspace"
-	pluginExecutorPhaseAllocating      = "allocating"
-	pluginExecutorPhaseArtifactStaging = "artifact_staging"
-	pluginExecutorPhaseBootstrapping   = "bootstrapping"
-	pluginExecutorPhaseProvisioned     = "provisioned"
-	pluginExecutorPhaseReady           = "ready"
-	pluginExecutorPhaseCleanupPending  = "cleanup_pending"
-	pluginExecutorPhaseExpired         = "expired"
-	pluginExecutorPhaseAbsent          = "absent"
-	pluginExecutorStateRunning         = "running"
-	pluginExecutorStateSuspended       = "suspended"
-	pluginExecutorStateTerminated      = "terminated"
-	pluginExecutorStateUnknown         = "unknown"
-	pluginExecutorStateUnavailable     = "unavailable"
-	pluginExecutorRetentionBounded     = "bounded"
-	pluginExecutorCleanupReasonTask    = "task_cleanup"
-	pluginExecutorCleanupReasonLaunch  = "launch_failed"
+	pluginExecutorInventoryMaxBytes     = 32 << 10
+	pluginExecutorRuntimePort           = 8765
+	pluginExecutorWorkspacePath         = "/workspace"
+	pluginExecutorAgentctlPurpose       = "agentctl"
+	pluginExecutorPhaseAllocating       = "allocating"
+	pluginExecutorPhaseArtifactStaging  = "artifact_staging"
+	pluginExecutorPhaseBootstrapping    = "bootstrapping"
+	pluginExecutorPhaseProvisioned      = "provisioned"
+	pluginExecutorPhaseReady            = "ready"
+	pluginExecutorPhaseCleanupPending   = "cleanup_pending"
+	pluginExecutorPhaseExpired          = "expired"
+	pluginExecutorPhaseAbsent           = "absent"
+	pluginExecutorPhaseCleanupProgress  = "cleanup_progress"
+	pluginExecutorPhaseRecoveryProgress = "recovery_progress"
+	pluginExecutorStateRunning          = "running"
+	pluginExecutorStateSuspended        = "suspended"
+	pluginExecutorStateTerminated       = "terminated"
+	pluginExecutorStateUnknown          = "unknown"
+	pluginExecutorStateUnavailable      = "unavailable"
+	pluginExecutorRetentionBounded      = "bounded"
+	pluginExecutorCleanupReasonTask     = "task_cleanup"
+	pluginExecutorCleanupReasonLaunch   = "launch_failed"
 )
 
 type PluginExecutorLaunch struct {
 	Profile models.ExecutorProviderLaunchProfile
+	// Repositories and PlainEnv feed the provider's repository intent and
+	// agent_env; they are read only when the provider requires that capability.
+	Repositories []PluginRepositorySource
+	PlainEnv     map[string]string
 }
 
 type PluginExecutorProviderOperations interface {
@@ -60,6 +72,14 @@ type PluginExecutorProviderOperations interface {
 	InspectExecutorEnvironment(context.Context, *pluginsdk.InspectExecutorEnvironmentRequest) (*pluginsdk.InspectExecutorEnvironmentResponse, error)
 	ResolveExecutorConnection(context.Context, *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error)
 	DestroyExecutorEnvironment(context.Context, *pluginsdk.DestroyExecutorEnvironmentRequest) (*pluginsdk.DestroyExecutorEnvironmentResponse, error)
+}
+
+// PluginExecutorTunnelOperations is implemented by a provider host that can open
+// host-initiated tunnel streams. A launch whose lease asks for host_tunnel
+// fails closed when the operations value does not implement it.
+type PluginExecutorTunnelOperations interface {
+	OpenExecutorTunnel(ctx context.Context, requestContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, allowedPorts []uint32, profile *pluginsdk.ExecutorProfileSnapshot) (net.Conn, error)
+	CloseExecutorTunnels(installationID, environmentID string)
 }
 
 type PluginExecutorProfileLoader interface {
@@ -75,7 +95,12 @@ type PluginExecutorInventoryStore interface {
 	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
 	GetTaskSession(context.Context, string) (*models.TaskSession, error)
 	ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error)
+	ListUnrecordedPluginExecutors(context.Context, string, string) ([]*models.UnrecordedPluginExecutor, error)
+	ListAllUnrecordedPluginExecutors(context.Context) ([]*models.UnrecordedPluginExecutor, error)
+	DeleteUnrecordedPluginExecutor(context.Context, string) error
 }
+
+type pluginTokenControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, error)
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
 type pluginAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
@@ -88,9 +113,21 @@ type PluginRemoteExecutor struct {
 	profileLoader               PluginExecutorProfileLoader
 	inventoryStore              PluginExecutorInventoryStore
 	newAgentctlControlClient    pluginControlClientFactory
+	newTokenControlClient       pluginTokenControlClientFactory
 	newAgentctlClient           pluginAgentctlClientFactory
 	recoveredAgentctlInfoReader pluginRecoveredAgentctlInstanceReader
 	ready                       pluginAgentctlReadinessCheck
+	drainRuntime                pluginRuntimeDrainer
+	runtimeSecrets              PluginExecutorRuntimeSecrets
+	hostAPIURL                  string
+	hostAPIProbes               *runtimeprobe.Registry
+	hostAPIProbeInterval        time.Duration
+	cleanupClaimWait            time.Duration
+	launching                   sync.Map
+	cleanupClaimRetry           time.Duration
+	claimEpoch                  string
+	cleanupSweepInterval        time.Duration
+	cleanupSweep                pluginExecutorCleanupSweep
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -107,6 +144,10 @@ type pluginExecutorInventory struct {
 	ContractVersion        int                                   `json:"contract_version"`
 	SupportedStateVersions []int                                 `json:"supported_state_versions"`
 	StateVersion           uint32                                `json:"state_version,omitempty"`
+	NegotiatedCapabilities []string                              `json:"negotiated_capabilities,omitempty"`
+	WorkspaceDescriptor    *workspacedescriptor.Descriptor       `json:"workspace_descriptor,omitempty"`
+	WorkspacePreparation   string                                `json:"workspace_preparation,omitempty"`
+	Repositories           []pluginExecutorRepository            `json:"repositories,omitempty"`
 	ProfileID              string                                `json:"profile_id"`
 	ProfileConfig          map[string]string                     `json:"profile_config,omitempty"`
 	SecretReferences       map[string]string                     `json:"secret_references,omitempty"`
@@ -121,9 +162,48 @@ type pluginExecutorInventory struct {
 	ExpiresAt              string                                `json:"expires_at,omitempty"`
 	ExpiryCheckAt          string                                `json:"expiry_check_at,omitempty"`
 	LastInspectionState    string                                `json:"last_inspection_state,omitempty"`
-	Revision               uint64                                `json:"revision"`
-	Generation             uint64                                `json:"generation"`
-	EnvironmentGeneration  int64                                 `json:"environment_generation"`
+	Claim                  *pluginExecutorClaimState             `json:"claim,omitempty"`
+	DrainOutcome           string                                `json:"drain_outcome,omitempty"`
+	DrainReceiptID         string                                `json:"drain_receipt_id,omitempty"`
+	DrainClaim             string                                `json:"drain_claim,omitempty"`
+	HandshakeStarted       bool                                  `json:"handshake_started,omitempty"`
+	CredentialRecorded     *bool                                 `json:"credential_recorded,omitempty"`
+	HandshakeRejected      bool                                  `json:"handshake_rejected,omitempty"`
+	PublishPending         bool                                  `json:"publish_pending,omitempty"`
+	CleanupRequested       bool                                  `json:"cleanup_requested,omitempty"`
+	// AbandonReason marks a launch that can never become ready. It is
+	// checkpointed before the environment is failed, so a crash at any later
+	// step still ends in the environment failed and the resource destroyed.
+	AbandonReason         string `json:"abandon_reason,omitempty"`
+	Revision              uint64 `json:"revision"`
+	Generation            uint64 `json:"generation"`
+	EnvironmentGeneration int64  `json:"environment_generation"`
+}
+
+// credentialRecorded reports whether the host recorded an agentctl credential
+// for the environment. The field is sticky: once true it is never cleared.
+func (i pluginExecutorInventory) credentialRecorded() bool {
+	return i.CredentialRecorded != nil && *i.CredentialRecorded
+}
+
+// recordCredential marks that the checkpoint being written names the token
+// secret. It always stores a fresh value, so inventories copied earlier are
+// not changed.
+func (i *pluginExecutorInventory) recordCredential() {
+	recorded := true
+	i.CredentialRecorded = &recorded
+}
+
+// initialCredentialRecorded is the credential_recorded a new environment is
+// admitted with: an explicit false under drain_receipt version 2, which tells a
+// host that never recorded a credential from a record written before the field
+// existed; absent under any other version, so those records keep their shape.
+func initialCredentialRecorded(negotiated []string) *bool {
+	if negotiatedVersion(negotiated, pluginExecutorCapabilityDrainReceipt) < pluginDrainReceiptNeverHeldCredential {
+		return nil
+	}
+	recorded := false
+	return &recorded
 }
 
 func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *logger.Logger) *PluginRemoteExecutor {
@@ -131,7 +211,12 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		log = logger.Default()
 	}
 	runtime := &PluginRemoteExecutor{operations: operations, logger: log.WithFields(zap.String("runtime", string(executor.NamePluginRemote)))}
+	runtime.claimEpoch = uuid.NewString()
+	runtime.cleanupSweepInterval = pluginExecutorCleanupSweepInterval
+	runtime.cleanupClaimWait, runtime.cleanupClaimRetry = pluginExecutorCleanupClaimWait, pluginExecutorCleanupClaimRetry
 	runtime.newAgentctlControlClient = createPluginEndpointControlClient
+	runtime.newTokenControlClient = createPluginEndpointTokenControlClient
+	runtime.drainRuntime = defaultPluginRuntimeDrainer
 	runtime.newAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
 			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token))
@@ -151,11 +236,23 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		return control.GetInstance(ctx, executionID)
 	}
 	runtime.ready = func(ctx context.Context, client *agentctl.Client) error { return client.Health(ctx) }
+	runtime.hostAPIProbeInterval = hostAPIProbeInterval
 	return runtime
 }
 
 // createPluginEndpointControlClient performs the bootstrap handshake with agentctl's
 // control server and returns the credential its instances accept.
+// createPluginEndpointTokenControlClient opens the control server with a
+// credential an earlier handshake produced, without handshaking again.
+func createPluginEndpointTokenControlClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, token string) (*agentctl.ControlClient, error) {
+	control, err := agentctl.NewEndpointControlClient(ctx, resolver, log)
+	if err != nil {
+		return nil, err
+	}
+	control.SetAuthToken(token)
+	return control, nil
+}
+
 func createPluginEndpointControlClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, nonce string) (*agentctl.ControlClient, string, error) {
 	control, err := agentctl.NewEndpointControlClient(ctx, resolver, log)
 	if err != nil {
@@ -186,6 +283,8 @@ func (r *PluginRemoteExecutor) CreateInstance(ctx context.Context, req *Executor
 	if err != nil {
 		return nil, err
 	}
+	r.launching.Store(req.InstanceID, struct{}{})
+	defer r.launching.Delete(req.InstanceID)
 	resource, err := r.provisionPluginExecutor(ctx, launch)
 	if err != nil {
 		return nil, err
@@ -203,25 +302,37 @@ type pluginExecutorLaunchState struct {
 	request          *ExecutorCreateRequest
 	profile          models.ExecutorProviderLaunchProfile
 	operationContext *pluginsdk.ExecutorProviderRequestContext
+	snapshot         *pluginsdk.ExecutorProfileSnapshot
 	apiURL           string
+	hostAPIURL       string
+	workerAPIURL     string
 	nonce            string
 	inventory        pluginExecutorInventory
+	intent           []*pluginsdk.ExecutorRepositoryIntent
+	agentEnv         map[string]string
 }
 
 func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, req *ExecutorCreateRequest) (*pluginExecutorLaunchState, error) {
 	if err := r.validateLaunch(req); err != nil {
 		return nil, err
 	}
-	apiURL, err := validatePluginRuntimeAPIURL(req.Env[envKeyKandevAPIURL])
+	profile := req.PluginExecutor.Profile
+	apiURL, hostAPIURL, err := r.resolvePluginExecutorAPIEndpoints(profile.Provider, req.Env)
 	if err != nil {
 		return nil, err
 	}
-	profile := req.PluginExecutor.Profile
 	if err := r.rejectExpiredPluginExecutorEnvironment(ctx, req.TaskEnvironmentID, profile.OwnershipGeneration); err != nil {
 		return nil, err
 	}
+	if err := r.confirmPluginExecutorCapabilities(ctx, profile); err != nil {
+		return nil, err
+	}
+	intent, agentEnv, err := pluginRepositoryHandoff(req, profile.Provider)
+	if err != nil {
+		return nil, err
+	}
 	operationID := strings.TrimSpace(req.InstanceID)
-	digest, err := pluginExecutorInputDigest(profile)
+	digest, err := pluginExecutorInputDigestWith(profile, intent, agentEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +342,23 @@ func (r *PluginRemoteExecutor) preparePluginExecutorLaunch(ctx context.Context, 
 	}
 	operationContext := pluginExecutorRequestContext(ctx, req, profile, operationID, digest)
 	inventory := pluginExecutorLaunchInventory(req, profile, operationID, digest)
+	snapshot, err := pluginExecutorProfileSnapshot(profile, inventory.NegotiatedCapabilities)
+	if err != nil {
+		return nil, err
+	}
+	if pluginExecutorDurableBootstrap(inventory) {
+		if err := r.persistDurableNonce(ctx, req, nonce); err != nil {
+			return nil, err
+		}
+	}
 	if err := checkpointPluginExecutor(ctx, req, inventory); err != nil {
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
 		return nil, fmt.Errorf("persist plugin executor allocation intent: %w", err)
 	}
 	return &pluginExecutorLaunchState{
-		request: req, profile: profile, operationContext: operationContext,
-		apiURL: apiURL, nonce: nonce, inventory: inventory,
+		request: req, profile: profile, operationContext: operationContext, snapshot: snapshot,
+		apiURL: apiURL, hostAPIURL: hostAPIURL, nonce: nonce, inventory: inventory,
+		intent: intent, agentEnv: agentEnv,
 	}, nil
 }
 
@@ -247,44 +369,91 @@ func pluginExecutorLaunchInventory(req *ExecutorCreateRequest, profile models.Ex
 		EnvironmentID:          req.TaskEnvironmentID,
 		ContractVersion:        profile.Provider.ContractVersion,
 		SupportedStateVersions: append([]int(nil), profile.Provider.SupportedStateVersions...),
+		NegotiatedCapabilities: negotiatedCapabilities(profile.Provider),
+		WorkspacePreparation:   pluginWorkspacePreparationMode(profile.Provider),
 		ProfileID:              profile.ProfileID, ProfileConfig: clonePluginExecutorStringMap(profile.Config),
 		SecretReferences: clonePluginExecutorStringMap(profile.SecretReferences),
 		OperationID:      operationID, InputDigest: digest, RuntimeIdentity: req.InstanceID, Phase: pluginExecutorPhaseAllocating,
 		Capabilities: profile.Provider.Capabilities, EnvironmentGeneration: profile.OwnershipGeneration,
+		CredentialRecorded: initialCredentialRecorded(negotiatedCapabilities(profile.Provider)),
 	}
 }
 
-func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, launch *pluginExecutorLaunchState) (*pluginsdk.ExecutorResourceDescriptor, error) {
-	bootstrap, err := json.Marshal(map[string]any{
+// pluginExecutorBootstrapJSON is the provider-facing bootstrap. A provider that
+// requires drain_receipt also receives idle_timeout_seconds 0, which the
+// provider maps to a disabled agentctl idle reaper so a retained environment is
+// never reaped from inside; other providers keep agentctl's default.
+func pluginExecutorBootstrapJSON(launch *pluginExecutorLaunchState) (string, error) {
+	fields := map[string]any{
 		"nonce": launch.nonce, "runtime_port": pluginExecutorRuntimePort,
-		"api_url": launch.apiURL, "execution_id": launch.request.InstanceID, "artifact_id": "agentctl",
-	})
+		"execution_id": launch.request.InstanceID, "artifact_id": pluginExecutorAgentctlPurpose,
+	}
+	if launch.hostAPIURL != "" {
+		fields["host_api_url"] = launch.hostAPIURL
+	} else {
+		fields["api_url"] = launch.apiURL
+	}
+	if negotiatedDeclares(launch.inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		fields["idle_timeout_seconds"] = 0
+	}
+	encoded, err := json.Marshal(fields)
+	return string(encoded), err
+}
+
+func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, launch *pluginExecutorLaunchState) (*pluginsdk.ExecutorResourceDescriptor, error) {
+	bootstrap, err := pluginExecutorBootstrapJSON(launch)
 	if err != nil {
 		return nil, errors.New("plugin executor bootstrap could not be encoded")
 	}
 	provisioned, err := r.operations.ProvisionExecutorEnvironment(ctx, &pluginsdk.ProvisionExecutorEnvironmentRequest{
 		Context:       launch.operationContext,
-		Profile:       &pluginsdk.ExecutorProfileSnapshot{ProfileId: launch.profile.ProfileID, Config: launch.profile.Config, SecretValues: launch.profile.SecretValues},
-		BootstrapJson: string(bootstrap),
+		Profile:       launch.snapshot,
+		BootstrapJson: bootstrap,
+		Repositories:  launch.intent,
+		AgentEnv:      launch.agentEnv,
 	})
 	if err != nil || provisioned == nil || provisioned.GetResource() == nil || provisioned.GetResource().GetResourceHandle() == "" {
+		if err == nil && provisioned.GetError() != nil {
+			err = pluginExecutorProviderError(provisioned.GetError())
+		}
 		return nil, r.recoverOrRetainFailedProvision(ctx, launch.request, launch.operationContext, launch.profile, launch.inventory, err)
 	}
 	resource := provisioned.GetResource()
+	r.reachCrashBarrier(ctx, BarrierAfterSideEffect)
 	if provisioned.GetError() != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_rejected", pluginExecutorProviderError(provisioned.GetError()))
 	}
-	if err := validatePluginExecutorResourceForProvider(launch.profile.Provider, resource); err != nil {
+	if err := rejectSecretInProviderState(launch.profile.SecretValues, resource); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
-			"resource_descriptor", err)
+			"secret_in_state", err)
 	}
-	launch.inventory.Resource = resource
+	if stage, err := launch.checkProvisionedDescriptor(resource); err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			stage, err)
+	}
+	descriptor, err := resolvePluginExecutorWorkspace(launch.inventory.NegotiatedCapabilities, launch.inventory.WorkspaceDescriptor, resource)
+	if err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"workspace_descriptor", err)
+	}
+	launch.inventory.WorkspaceDescriptor = descriptor
+	repositories, err := checkPluginExecutorRepositories(launch.inventory, descriptor, resource, launch.intent)
+	if err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			cleanupStageRepositoryInventory, err)
+	}
+	launch.inventory.Repositories = repositories
+	launch.inventory.Resource = withoutPluginExecutorRepositories(resource)
 	launch.inventory.StateVersion = resource.GetStateVersion()
 	launch.inventory.Platform = resource.GetPlatform()
 	launch.inventory.ExpiresAt = resource.GetExpiresAt()
 	launch.inventory.Capabilities = intersectPluginExecutorCapabilities(launch.profile.Provider.Capabilities, resource.GetCapabilities(), resource.GetRetention())
 	launch.inventory.Phase = pluginExecutorPhaseProvisioned
+	if err := checkPluginExecutorEnvelopeBudget(launch.inventory, pluginExecutorStateBudget(launch.profile.Provider)); err != nil {
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"state_budget", err)
+	}
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"provision_checkpoint", err)
@@ -298,17 +467,45 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	fail := func(stage string, err error) (*agentctl.Client, string, error) {
 		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource, stage, err)
 	}
-	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort), r.logger, launch.nonce)
+	durable := pluginExecutorDurableBootstrap(launch.inventory)
+	launch.inventory.HandshakeStarted = true
+	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+		return fail("handshake_checkpoint", err)
+	}
+	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort, launch.snapshot), r.logger, launch.nonce)
 	if err != nil {
+		launch.inventory.HandshakeRejected = launch.inventory.HandshakeRejected || errors.Is(err, agentctl.ErrHandshakeRejected)
 		return fail("control_handshake", err)
 	}
-	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request)
+	launch.request.rollbackToken = token
+	if durable {
+		r.reachCrashBarrier(ctx, BarrierAfterHandshake)
+		if err := r.persistDurableToken(ctx, launch.request, token); err != nil {
+			control.Close()
+			return fail("token_persist", err)
+		}
+		launch.inventory.recordCredential()
+		if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+			control.Close()
+			return fail("token_checkpoint", err)
+		}
+	}
+	if launch.hostAPIURL != "" {
+		if err := r.probeForwardedHostAPI(ctx, launch, control); err != nil {
+			control.Close()
+			return fail(cleanupReasonAPIUnreachable, err)
+		}
+	}
+	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request, launch.inventory)
 	control.Close()
 	if err != nil {
 		return fail("instance_create", err)
 	}
 	launch.inventory.InstancePort = instancePort
-	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort), r.logger,
+	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
+		return fail("instance_checkpoint", err)
+	}
+	client, err := r.newAgentctlClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort, launch.snapshot), r.logger,
 		launch.request.InstanceID, token)
 	if err != nil {
 		return fail("instance_connect", err)
@@ -320,8 +517,9 @@ func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, 
 	return client, token, nil
 }
 
-func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest) (uint32, error) {
-	instanceReq := agentctlInstanceRequest(req, pluginExecutorWorkspacePath)
+func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest, inventory pluginExecutorInventory) (uint32, error) {
+	instanceReq := agentctlInstanceRequest(req, inventory.workspacePath())
+	instanceReq.DurableJournalPath = pluginExecutorJournalPath(req, inventory)
 	created, err := control.CreateInstance(ctx, &instanceReq)
 	if err != nil {
 		return 0, err
@@ -332,20 +530,35 @@ func createPluginAgentctlInstance(ctx context.Context, control *agentctl.Control
 	return uint32(created.Port), nil
 }
 
+// pluginExecutorJournalPath keeps delivery state below the provider-declared
+// workspace, which survives a backend restart and is removed with the
+// environment. A provider without a workspace descriptor has no known writable
+// worker path, so its agentctl keeps legacy delivery.
+func pluginExecutorJournalPath(req *ExecutorCreateRequest, inventory pluginExecutorInventory) string {
+	if req == nil || req.DurableJournalOwnerID == "" || inventory.WorkspaceDescriptor == nil {
+		return ""
+	}
+	return path.Join(inventory.WorkspaceDescriptor.Path, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt")
+}
+
 func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor, client *agentctl.Client, token string) (*ExecutorInstance, error) {
 	launch.inventory.Phase = pluginExecutorPhaseReady
 	launch.inventory.Generation++
+	delete(launch.request.Metadata, MetadataKeyBootstrapNonceSecret)
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 		client.Close()
 		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
 			"ready_checkpoint", err)
+	}
+	if pluginExecutorDurableBootstrap(launch.inventory) {
+		r.settlePluginExecutorNonce(ctx, launch.request.InstanceID)
 	}
 	metadata := clonePluginExecutorMetadata(launch.request.Metadata)
 	metadata[MetadataKeyPluginExecutor] = launch.inventory
 	return &ExecutorInstance{
 		InstanceID: launch.request.InstanceID, TaskID: launch.request.TaskID, SessionID: launch.request.SessionID,
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client,
-		WorkspacePath: pluginExecutorWorkspacePath, Metadata: metadata, AuthToken: token,
+		WorkspacePath: launch.inventory.workspacePath(), Metadata: metadata, AuthToken: token,
 		ReleaseRuntimeInventory: launch.request.ReleaseRuntimeInventory,
 	}, nil
 }
@@ -421,7 +634,10 @@ func (r *PluginRemoteExecutor) StopInstance(ctx context.Context, instance *Execu
 		stopErr = instance.Client.Stop(ctx)
 		instance.Client.Close()
 	}
-	if shouldRunExecutorCleanup(instance.StopReason) {
+	// Archive and delete stops only stop agentctl. The task-environment cleanup
+	// job is the single authority that drains and destroys the environment; a
+	// stop that raced it for the cleanup claim could only be fenced by it.
+	if instance.StopReason == StopReasonLaunchRollback {
 		if err := r.cleanupPluginExecutorInstance(ctx, instance); err != nil {
 			return errors.Join(stopErr, err)
 		}
@@ -476,12 +692,28 @@ func validatePluginRuntimeAPIURL(raw string) (string, error) {
 }
 
 func pluginExecutorInputDigest(profile models.ExecutorProviderLaunchProfile) (string, error) {
+	return pluginExecutorInputDigestWith(profile, nil, nil)
+}
+
+// pluginExecutorInputDigestWith also covers the repository intent and agent
+// environment; both are omitted when empty so a launch without them keeps the
+// digest it always had.
+func pluginExecutorInputDigestWith(profile models.ExecutorProviderLaunchProfile, intent []*pluginsdk.ExecutorRepositoryIntent, agentEnv map[string]string) (string, error) {
+	type repository struct {
+		ID, Locator, Branch, BaseBranch, CheckoutRef string
+	}
+	var repositories []repository
+	for _, entry := range intent {
+		repositories = append(repositories, repository{entry.GetId(), entry.GetLocator(), entry.GetBranch(), entry.GetBaseBranch(), entry.GetCheckoutRef()})
+	}
 	data, err := json.Marshal(struct {
 		ProviderIdentity string            `json:"provider_identity"`
 		ProfileID        string            `json:"profile_id"`
 		Config           map[string]string `json:"config"`
 		SecretReferences map[string]string `json:"secret_references"`
-	}{profile.Provider.Identity, profile.ProfileID, profile.Config, profile.SecretReferences})
+		Repositories     []repository      `json:"repositories,omitempty"`
+		AgentEnv         map[string]string `json:"agent_env,omitempty"`
+	}{profile.Provider.Identity, profile.ProfileID, profile.Config, profile.SecretReferences, repositories, agentEnv})
 	if err != nil {
 		return "", errors.New("plugin executor profile snapshot could not be hashed")
 	}
@@ -576,6 +808,9 @@ func pluginExecutorRetentionRank(retention string) int {
 }
 
 func checkpointPluginExecutor(ctx context.Context, req *ExecutorCreateRequest, inventory pluginExecutorInventory) error {
+	if err := checkPluginExecutorEnvelopeBudget(inventory, pluginExecutorMaxStateBudget); err != nil {
+		return err
+	}
 	data, err := json.Marshal(inventory)
 	if err != nil || len(data) > pluginExecutorInventoryMaxBytes {
 		return errors.New("plugin executor inventory exceeds the 32 KiB limit")
@@ -583,12 +818,12 @@ func checkpointPluginExecutor(ctx context.Context, req *ExecutorCreateRequest, i
 	return req.CheckpointRuntimeInventory(ctx, map[string]interface{}{MetadataKeyPluginExecutor: inventory})
 }
 
-func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, runtimePort uint32) agentctl.ConnectionLeaseResolver {
+func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, runtimePort uint32, snapshot *pluginsdk.ExecutorProfileSnapshot) agentctl.ConnectionLeaseResolver {
 	return func(ctx context.Context) (*agentctl.ConnectionLease, error) {
 		requestContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 		requestContext.Deadline = time.Now().Add(15 * time.Second).UTC().Format(time.RFC3339Nano)
 		response, err := r.operations.ResolveExecutorConnection(ctx, &pluginsdk.ResolveExecutorConnectionRequest{
-			Context: requestContext, Resource: resource, Purpose: "agentctl", RuntimePort: runtimePort,
+			Context: requestContext, Resource: resource, Purpose: pluginExecutorAgentctlPurpose, RuntimePort: runtimePort, Profile: snapshot,
 		})
 		if err != nil || response == nil {
 			return nil, errors.New("provider connection lease is unavailable")
@@ -604,12 +839,42 @@ func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.Ex
 		if err != nil {
 			return nil, errors.New("provider connection lease expiry is invalid")
 		}
+		dial, err := r.tunnelDialer(lease.GetTransport(), operationContext, resource, runtimePort, snapshot)
+		if err != nil {
+			return nil, err
+		}
 		return &agentctl.ConnectionLease{
+			Transport: lease.GetTransport(), Dial: dial,
 			BaseURL: lease.GetBaseUrl(), HTTPHeaders: stringMapToHeader(lease.GetHttpHeaders()),
 			WebSocketHeaders:      stringMapToHeader(lease.GetWebsocketHeaders()),
 			WebSocketSubprotocols: append([]string(nil), lease.GetWebsocketSubprotocols()...),
 			ExpiresAt:             expiresAt, Generation: lease.GetGeneration(),
 		}, nil
+	}
+}
+
+// tunnelDialer binds a host_tunnel lease to the environment, ownership
+// generation and port of the call that resolved it. The allowed ports are the
+// agentctl control port and the instance port being resolved.
+func (r *PluginRemoteExecutor) tunnelDialer(transport string, operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, port uint32, snapshot *pluginsdk.ExecutorProfileSnapshot) (agentctl.TunnelDialer, error) {
+	if transport != agentctl.LeaseTransportHostTunnel {
+		return nil, nil
+	}
+	tunnels, ok := r.operations.(PluginExecutorTunnelOperations)
+	if !ok {
+		return nil, errors.New("provider connection lease requires a host tunnel that is unavailable")
+	}
+	allowed := []uint32{pluginExecutorRuntimePort, port}
+	return func(ctx context.Context) (net.Conn, error) {
+		return tunnels.OpenExecutorTunnel(ctx, proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext), resource, port, allowed, snapshot)
+	}, nil
+}
+
+// closePluginExecutorTunnels closes every open tunnel stream of an environment
+// before its provider resource is destroyed.
+func (r *PluginRemoteExecutor) closePluginExecutorTunnels(operationContext *pluginsdk.ExecutorProviderRequestContext) {
+	if tunnels, ok := r.operations.(PluginExecutorTunnelOperations); ok && operationContext != nil {
+		tunnels.CloseExecutorTunnels(operationContext.GetInstallationId(), operationContext.GetEnvironmentId())
 	}
 }
 
@@ -644,21 +909,25 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 	inventory pluginExecutorInventory,
 	provisionErr error,
 ) error {
-	recovery, err := r.operations.RecoverExecutorOperation(ctx, &pluginsdk.RecoverExecutorOperationRequest{
-		Context: operationContext,
-		Profile: &pluginsdk.ExecutorProfileSnapshot{ProfileId: profile.ProfileID, Config: profile.Config, SecretValues: profile.SecretValues},
-	})
+	snapshot, snapshotErr := pluginExecutorProfileSnapshot(profile, inventory.NegotiatedCapabilities)
+	var recovery *pluginsdk.RecoverExecutorOperationResponse
+	err := snapshotErr
+	if snapshotErr == nil {
+		// An archive cancels the launch context; the recovery that decides
+		// whether a resource exists must not be cancelled with it.
+		recoverCtx, cancelRecover := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		recovery, err = r.operations.RecoverExecutorOperation(recoverCtx, &pluginsdk.RecoverExecutorOperationRequest{Context: operationContext, Profile: snapshot})
+		cancelRecover()
+	}
 	if err != nil || recovery == nil || recovery.GetOutcome() == pluginExecutorStateUnknown {
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(ctx, req, inventory)
-		return errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained")
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_recover_unknown", provisionErr,
+			"plugin executor allocation outcome is unknown; cleanup inventory was retained"))
 	}
 	if recovery.GetOutcome() == pluginExecutorPhaseAbsent {
 		claim, claimErr := r.acquirePluginExecutorCleanupClaim(ctx, req.TaskID, req.SessionID, inventory)
 		if claimErr != nil {
-			inventory.Phase = pluginExecutorPhaseCleanupPending
-			_ = checkpointPluginExecutor(ctx, req, inventory)
-			return errors.New("plugin executor allocation is absent but inventory cleanup is fenced")
+			return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_absent_fenced", provisionErr,
+				"plugin executor allocation is absent but inventory cleanup is fenced"))
 		}
 		defer r.releasePluginExecutorCleanupClaim(claim)
 		claimedCtx := recoveryclaim.WithClaim(ctx, claim)
@@ -669,15 +938,49 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 		if err := req.ReleaseRuntimeInventory(claimedCtx); err != nil {
 			return fmt.Errorf("release absent plugin executor inventory: %w", err)
 		}
-		return errors.New("plugin executor allocation failed before creating a resource")
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
+		return withPluginExecutorProviderRefusal(provisionErr, errors.New("plugin executor allocation failed before creating a resource"))
 	}
 	resource := recovery.GetResource()
 	if resource == nil || resource.GetResourceHandle() == "" {
-		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(ctx, req, inventory)
-		return errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained")
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, nil, "provision_recover_no_handle", provisionErr,
+			"plugin executor allocation outcome is unknown; cleanup inventory was retained"))
+	}
+	if err := validatePluginExecutorResourceForProvider(profile.Provider, resource); err != nil {
+		return withPluginExecutorProviderRefusal(provisionErr, r.retainPendingLaunchCleanup(ctx, req, inventory, fixedSizePluginExecutorResource(resource), "provision_recovered_rejected", provisionErr,
+			fmt.Sprintf("plugin executor recovered resource was rejected and cleanup was retained: %v", err)))
 	}
 	return r.cleanupAfterPluginExecutorFailure(ctx, req, operationContext, inventory, resource, "provision_recovered", provisionErr)
+}
+
+// retainPendingLaunchCleanup records the retry information of a failed launch as
+// cleanup_pending and returns the error that says so. When the record cannot be
+// written and a resource handle is known, the handle goes to the durable
+// hand-off so the environment cleanup still removes it; without a handle the
+// failure is logged because there is nothing left to hand off.
+func (r *PluginRemoteExecutor) retainPendingLaunchCleanup(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	inventory pluginExecutorInventory,
+	resource *pluginsdk.ExecutorResourceDescriptor,
+	stage string,
+	cause error,
+	message string,
+) error {
+	inventory.Phase = pluginExecutorPhaseCleanupPending
+	if resource != nil {
+		inventory.Resource = resource
+	}
+	checkpointErr := checkpointPluginExecutor(ctx, req, inventory)
+	if checkpointErr == nil {
+		return errors.New(message)
+	}
+	if resource.GetResourceHandle() != "" {
+		return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, resource, stage, cause)
+	}
+	r.logger.Error("plugin executor cleanup retry information was not retained",
+		zap.String("execution_id", req.InstanceID), zap.String("stage", stage), zap.Error(checkpointErr))
+	return errors.New(message + "; the retry information could not be recorded")
 }
 
 // cleanupAfterPluginExecutorFailure logs the failed launch stage and removes the
@@ -698,44 +1001,127 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 			zap.String("session_id", req.SessionID),
 			zap.String("cause_type", fmt.Sprintf("%T", cause)))
 	}
+	retained := resource
+	// A state that carries a revealed secret is never recorded, whichever gate
+	// refused the response first.
+	if errors.Is(cause, models.ErrExecutorStateTooLarge) || errors.Is(cause, models.ErrExecutorSecretInState) ||
+		req.PluginExecutor != nil && rejectSecretInProviderState(req.PluginExecutor.Profile.SecretValues, resource) != nil {
+		retained = fixedSizePluginExecutorResource(resource)
+	}
+	claim, claimErr := r.acquireLaunchCleanupClaim(context.WithoutCancel(ctx), req, inventory)
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	claim, claimErr := r.acquirePluginExecutorCleanupClaim(cleanupCtx, req.TaskID, req.SessionID, inventory)
 	if claimErr != nil {
-		inventory.Resource = resource
+		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseCleanupPending
-		_ = checkpointPluginExecutor(cleanupCtx, req, inventory)
-		return errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained")
+		if err := checkpointPluginExecutor(cleanupCtx, req, inventory); err != nil {
+			r.logger.Warn("plugin executor launch cleanup is fenced and its retry information was not retained",
+				zap.String("execution_id", req.InstanceID), zap.Error(err))
+			return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, retained, stage, cause)
+		}
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; cleanup is fenced and retry information was retained"))
 	}
 	defer r.releasePluginExecutorCleanupClaim(claim)
 	cleanupCtx = recoveryclaim.WithClaim(cleanupCtx, claim)
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
-	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: cleanupContext, Resource: resource, CleanupReason: pluginExecutorCleanupReasonLaunch, CleanupClaim: claim.OperationID,
-	})
-	if err == nil && response != nil && response.GetConfirmedAbsent() {
-		inventory.Resource = resource
+	r.closePluginExecutorTunnels(cleanupContext)
+	snapshot, snapshotErr := pluginExecutorProfileSnapshot(req.PluginExecutor.Profile, inventory.NegotiatedCapabilities)
+	if snapshotErr != nil {
+		return withPluginExecutorLaunchCode(cause, r.retainPendingLaunchCleanup(cleanupCtx, req, inventory, retained, stage, cause,
+			"plugin executor launch failed; recorded profile is unavailable and cleanup remains pending"))
+	}
+	request := &pluginsdk.DestroyExecutorEnvironmentRequest{
+		Context: cleanupContext, Resource: resource, CleanupReason: launchCleanupReason(stage), CleanupClaim: claim.OperationID,
+		Profile: snapshot,
+	}
+	if negotiatedDeclares(inventory.NegotiatedCapabilities, pluginExecutorCapabilityDrainReceipt) {
+		decision := r.drainPluginRuntime(cleanupCtx, req.rollbackToken, cleanupContext, inventory, resource, snapshot, claim.OperationID, request.CleanupReason)
+		inventory.DrainClaim = claim.OperationID
+		inventory.DrainOutcome = decision.outcome
+		inventory.DrainReceiptID = decision.receipt.GetReceiptId()
+		// A provider checkpoints artifact_staging and bootstrapping from inside
+		// its provision call, so this launch's phase can be behind the stored
+		// row and the store refuses a move back to allocating. Cleanup is owed
+		// from here, and every live phase may move to cleanup_pending.
+		inventory.Resource = retained
+		inventory.Phase = pluginExecutorPhaseCleanupPending
+		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
+			if retainErr := checkpointPluginExecutor(cleanupCtx, req, inventory); retainErr != nil {
+				return r.handOffUnrecordedPluginExecutorResource(ctx, req, inventory, retained, stage, cause)
+			}
+			return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; drain outcome was not persisted and cleanup remains pending"))
+		}
+		decision.applyTo(request)
+	}
+	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, request)
+	_, inventory, retained = r.refreshAfterClaimCheckpoints(cleanupCtx, &models.ExecutorRunning{SessionID: req.SessionID, AgentExecutionID: req.InstanceID}, inventory, retained)
+	if err == nil && response != nil && response.GetError() == nil && response.GetConfirmedAbsent() && latestPluginExecutorClaimCheckpointPersisted(inventory, claim) {
+		inventory.Resource = retained
 		inventory.Phase = pluginExecutorPhaseAbsent
 		if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
 			return fmt.Errorf("remote launch failed and absence checkpoint failed: %w", checkpointErr)
 		}
+		r.reachCrashBarrier(cleanupCtx, BarrierAfterDestroyConfirm)
 		if releaseErr := req.ReleaseRuntimeInventory(cleanupCtx); releaseErr != nil {
 			return fmt.Errorf("remote launch failed and inventory release failed: %w", releaseErr)
 		}
-		return errors.New("plugin executor launch failed; allocated resource was removed")
+		r.settlePluginExecutorSecrets(ctx, inventory, req.InstanceID)
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was removed"))
 	}
-	inventory.Resource = resource
+	inventory.Resource = retained
 	inventory.Phase = pluginExecutorPhaseCleanupPending
 	if checkpointErr := checkpointPluginExecutor(cleanupCtx, req, inventory); checkpointErr != nil {
-		return fmt.Errorf("remote launch failed and cleanup inventory checkpoint failed: %w", checkpointErr)
+		r.logger.Error("plugin executor resource is unrecorded and could not be removed",
+			zap.String("execution_id", req.InstanceID), zap.String("stage", stage), zap.Error(checkpointErr))
+		return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; allocated resource was not recorded and was not removed"))
 	}
 	r.logger.Warn("plugin executor cleanup remains pending", zap.String("execution_id", req.InstanceID))
-	return errors.New("plugin executor launch failed; resource cleanup remains pending")
+	return withPluginExecutorLaunchCode(cause, errors.New("plugin executor launch failed; resource cleanup remains pending"))
+}
+
+// pluginExecutorProviderFailure is a provider-declared refusal. Only its
+// stable code and message id are kept.
+type pluginExecutorProviderFailure struct{ code, messageID string }
+
+func (e *pluginExecutorProviderFailure) Error() string {
+	return fmt.Sprintf("provider error %q (%s)", e.code, e.messageID)
+}
+
+// acquireLaunchCleanupClaim takes the cleanup claim for a failed launch. An
+// archive or a cascade cleanup can hold the claim at that moment; it releases
+// once its own pass ends, so a busy claim is retried for a bounded time before
+// the launch gives up and leaves the retry information behind.
+func (r *PluginRemoteExecutor) acquireLaunchCleanupClaim(ctx context.Context, req *ExecutorCreateRequest, inventory pluginExecutorInventory) (*models.TaskEnvironmentRecoveryClaim, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, r.cleanupClaimWait)
+	defer cancel()
+	for {
+		claim, err := r.acquirePluginExecutorCleanupClaim(ctx, req.TaskID, req.SessionID, inventory)
+		if !errors.Is(err, recoveryclaim.ErrBusy) {
+			return claim, err
+		}
+		timer := time.NewTimer(r.cleanupClaimRetry)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return nil, err
+		case <-timer.C:
+		}
+	}
 }
 
 func pluginExecutorProviderError(providerErr *pluginsdk.ExecutorProviderError) error {
-	return fmt.Errorf("provider error %q (%s)", providerErr.GetCode(), providerErr.GetMessageId())
+	return &pluginExecutorProviderFailure{code: providerErr.GetCode(), messageID: providerErr.GetMessageId()}
+}
+
+// withPluginExecutorProviderRefusal keeps the provider's refusal visible
+// through the host's allocation-outcome wording.
+func withPluginExecutorProviderRefusal(cause, failure error) error {
+	var refusal *pluginExecutorProviderFailure
+	if errors.As(cause, &refusal) {
+		return fmt.Errorf("%w: %v", refusal, failure)
+	}
+	return failure
 }
 
 var _ ExecutorBackend = (*PluginRemoteExecutor)(nil)

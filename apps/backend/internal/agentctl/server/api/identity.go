@@ -2,9 +2,11 @@ package api
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 )
@@ -21,6 +23,7 @@ var SurvivalCapabilities = []string{
 	launchwrapper.Capability,
 	acpcompat.AntigravityPersonalAuthCapability,
 	p.BuiltinPackagesCapability,
+	agentctltypes.RuntimeDrainVersion,
 }
 
 // handleIdentity reports this launch's opaque identity and capability
@@ -33,7 +36,7 @@ var SurvivalCapabilities = []string{
 func (m *ControlServer) handleIdentity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"server_identity":             m.cfg.ServerIdentity,
-		"capabilities":                SurvivalCapabilities,
+		"capabilities":                capabilitiesFor(m.cfg.NodeLaunchWrapper),
 		"builtin_mcp_catalog_version": 1,
 		// unowned_period_ms is this server's own resolved unowned period
 		// (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7), not the caller's config:
@@ -48,5 +51,14 @@ func (m *ControlServer) handleIdentity(c *gin.Context) {
 }
 
 func (s *Server) handleInstanceIdentity(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"capabilities": SurvivalCapabilities, "builtin_mcp_catalog_version": 1})
+	c.JSON(http.StatusOK, gin.H{"capabilities": capabilitiesFor(s.cfg.NodeLaunchWrapper), "builtin_mcp_catalog_version": 1})
+}
+
+// capabilitiesFor adds the node wrapper capability only while one is loaded.
+// It reveals that the wrapper is applied, never its path or contents.
+func capabilitiesFor(node launchwrapper.Node) []string {
+	if node.Spec.IsZero() {
+		return SurvivalCapabilities
+	}
+	return append(slices.Clone(SurvivalCapabilities), launchwrapper.NodeCapability)
 }

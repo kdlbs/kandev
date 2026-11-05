@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -32,6 +33,8 @@ func (f failingProbeExecutor) Probe(context.Context, *ProbeRequest) (*ProbeRespo
 func (f failingProbeExecutor) Execute(context.Context, *PromptRequest) (*PromptResponse, error) {
 	return nil, f.err
 }
+
+func (f failingProbeExecutor) SetNodeLaunchWrapper(launchwrapper.Node) {}
 
 func newProbeDiagnosticRouter(t *testing.T, handler *Handler) *gin.Engine {
 	t.Helper()
