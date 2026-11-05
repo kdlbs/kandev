@@ -28,6 +28,9 @@ const DEFAULT_LABEL = "Default";
 const FILTER_MODELS = "Filter models...";
 const MODEL_ROW_CONTEXT = "model-row-context";
 const GLM_GROUP = "GLM-5.2";
+const GLM_STANDARD = "glm-standard";
+const GLM_TURBO = "glm-turbo";
+const TRAILING_CHOICE = "trailing-choice";
 const FUSION_COMPOSITION_ROW = "model-catalog-composition-row-fusion";
 const PROVIDER_MODEL_ID = "loose-model";
 const PROVIDER_MODEL_NAME = "Loose model";
@@ -50,7 +53,7 @@ function catalogNodes(): ModelCatalogNode[] {
         choice("family-a-default", DEFAULT_LABEL, "Balanced default"),
       ]),
     ]),
-    group(GLM_GROUP, GLM_GROUP, [choice("glm-standard", "Standard"), choice("glm-turbo", "Turbo")]),
+    group(GLM_GROUP, GLM_GROUP, [choice(GLM_STANDARD, "Standard"), choice(GLM_TURBO, "Turbo")]),
     group("dup-a", "Alpha family", [choice("dup-model", "Duplicate", "Alpha copy")]),
     group("dup-b", "Beta family", [choice("dup-model", "Duplicate", "Beta copy")]),
     group("fusion", "Fusion", [choice("fusion-pair", "Fusion pair")]),
@@ -85,8 +88,8 @@ function catalogModelOption(currentValue = PROVIDER_MODEL_ID): SelectConfigOptio
       { value: PROVIDER_MODEL_ID, name: PROVIDER_MODEL_NAME },
       { value: "kimi-k2-7", name: "Kimi K2.7" },
       { value: "family-a-default", name: DEFAULT_LABEL },
-      { value: "glm-standard", name: "Standard" },
-      { value: "glm-turbo", name: "Turbo" },
+      { value: GLM_STANDARD, name: "Standard" },
+      { value: GLM_TURBO, name: "Turbo" },
       { value: "dup-model", name: "Duplicate" },
       { value: "fusion-pair", name: "Fusion pair" },
     ],
@@ -167,7 +170,7 @@ describe("ModelConfigSelector singleton projection", () => {
 
   it("keeps repeated values as distinct occurrences under their own paths", () => {
     const onModelChange = vi.fn();
-    renderSelector({ currentModel: "glm-standard", onModelChange });
+    renderSelector({ currentModel: GLM_STANDARD, onModelChange });
     openPicker();
     const duplicates = screen.getAllByRole("option", { name: "Duplicate" });
     expect(duplicates).toHaveLength(2);
@@ -395,5 +398,52 @@ describe("ModelConfigSelector long-path phone context", () => {
     }
     expect(within(rows[0]).getByText("Alpha default")).toBeTruthy();
     expect(within(rows[1]).getByText("Beta default")).toBeTruthy();
+  });
+});
+
+describe("ModelConfigSelector catalog filtering and headings", () => {
+  it("does not match opaque command identities while filtering", () => {
+    renderSelector({});
+    openPicker();
+    fireEvent.change(screen.getByPlaceholderText(FILTER_MODELS), {
+      target: { value: "row" },
+    });
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.getByText("No models found.")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText(FILTER_MODELS), {
+      target: { value: "composition" },
+    });
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("labels top-level loose choices that follow a group", () => {
+    const catalog: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: TRAILING_CHOICE,
+      category: "model",
+      options: [
+        { value: GLM_STANDARD, name: "Standard" },
+        { value: GLM_TURBO, name: "Turbo" },
+        { value: TRAILING_CHOICE, name: "Trailing choice" },
+      ],
+      catalog: {
+        version: 1,
+        nodes: [
+          group(GLM_GROUP, GLM_GROUP, [
+            choice(GLM_STANDARD, "Standard"),
+            choice(GLM_TURBO, "Turbo"),
+          ]),
+          choice(TRAILING_CHOICE, "Trailing choice"),
+        ],
+      },
+    };
+    renderCatalogOption(catalog, TRAILING_CHOICE);
+    openPicker();
+    const headingGroup = screen.getByRole("group", { name: "Model" });
+    expect(within(headingGroup).getByRole("option", { name: "Trailing choice" })).toBeTruthy();
+    expect(within(headingGroup).queryByRole("option", { name: "Standard" })).toBeNull();
   });
 });

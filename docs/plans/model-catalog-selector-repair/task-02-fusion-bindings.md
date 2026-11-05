@@ -86,7 +86,7 @@ Run from the repository root after the fixture gate.
 Record capture qualification separately from deterministic fixture test results.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/common/modelcatalog ./internal/agentctl/acpcompat -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/common/modelcatalog ./internal/agentctl/acpcompat -count=1)
 bash scripts/lint-go-changed apps/backend/internal/agentctl/acpcompat/devin_catalog.go apps/backend/internal/agentctl/acpcompat/devin_catalog_test.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -133,7 +133,7 @@ Pure normalization implemented 2026-11-04. The captured-fixture gate is still op
 - `apps/backend/internal/agentctl/acpcompat/devin_catalog.go` adds the bounded `families[]`/`variants[]` decoder, the exact identifier and label join, first-occurrence dimension ordering from the ACP group, ambiguity rejection, tuple-collision fallback, and non-mutating enrichment that validates a copy before publication.
   An unqualified, malformed, colliding, or existing composition keeps the original catalog and its flat projection.
 - `apps/backend/internal/agentctl/acpcompat/devin_catalog_test.go` covers parsing bounds and duplicates, exact bindings, current-catalog intersection, mixed unknown leaves, tuple collisions, ambiguous pairs, unexplained labels, repeated leaves, and original-catalog preservation.
-- `(cd apps/backend && go test -trimpath ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed.
 - `bash scripts/lint-go-changed apps/backend/internal/agentctl/acpcompat/devin_catalog.go apps/backend/internal/agentctl/acpcompat/devin_catalog_test.go`: 0 issues.
 
 Qualification gate status:

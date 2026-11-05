@@ -388,7 +388,6 @@ function renderEntries(
       continue;
     }
     flushRows();
-    headingPending = false;
     nodes.push(renderChild(entry, context, depth));
   }
   flushRows();

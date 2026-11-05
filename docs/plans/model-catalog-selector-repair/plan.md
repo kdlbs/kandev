@@ -292,7 +292,7 @@ Implementation on 2026-11-04:
 - `(cd apps/web && pnpm run typecheck)`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet`: passed.
 - Task 02 added `internal/agentctl/acpcompat/devin_catalog.go`: a bounded native parser, the exact identifier/label join, tuple-collision rejection, and non-mutating validated enrichment.
   `internal/agentctl/acpcompat/devin_catalog_test.go` covers parsing bounds, exact bindings, current-catalog intersection, tuple collisions, ambiguous pairs, unexplained leaves, and original-catalog preservation with synthetic fixtures only.
-- `(cd apps/backend && go test -trimpath ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed.
 - `bash scripts/lint-go-changed <changed Go files>`: 0 issues.
 - `(cd apps/backend && go build -trimpath ./cmd/agentctl ./cmd/kandev)`: passed.
 
@@ -302,7 +302,10 @@ Review fixes on 2026-11-04:
   A slash-ambiguous fixture (root group `a/b` plus nested `b` under `a`) now proves distinct `data-value`, a single keyboard-selected entry, Enter opening the nested configuration, and a click opening the root one.
 - The removed-path detail wraps on phone and coarse-pointer layouts so long shared-prefix paths stay distinguishable; desktop keeps the single-line density and the provider description stays on its own line.
   A phone regression covers two repeated `Default` labels under long paths.
-- Re-verified: `(cd apps/web && pnpm exec vitest run <selector and ownership suites>)`: 11 files, 99 tests passed; oxlint clean; Prettier clean.
+- The catalog `Command` root scores only declared keywords, so command-identity prefixes and counted suffixes never participate in fuzzy search; a focused regression types `row` and `composition` and expects no results.
+- A top-level loose choice that follows a group keeps the `Model` heading, because the heading attaches to the first top-level row run regardless of preceding groups; a regression covers the trailing-row case.
+- `EnrichDevinCatalog` validates injected native evidence before indexing it and leaves repeated advertised values unbound, so a duplicate identifier or duplicated leaf can never produce a first-match binding; both have Go regressions.
+- Re-verified: `(cd apps/web && pnpm exec vitest run <selector and ownership suites>)`: 11 files, 101 tests passed; `(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/acpcompat ./internal/common/modelcatalog -count=1)`: passed; oxlint and Prettier clean.
 
 Remaining blocker on 2026-11-04:
 

@@ -250,7 +250,8 @@ func TestDevinCompositionRejectsUnexplainedLeaves(t *testing.T) {
 			}
 		})
 	}
-	if enriched := EnrichDevinCatalog(devinTestCatalog(devinFusionGroup()), nil); enriched == nil {
+	unchanged := devinTestCatalog(devinFusionGroup())
+	if enriched := EnrichDevinCatalog(unchanged, nil); enriched != unchanged {
 		t.Fatal("nil native evidence must keep the catalog")
 	}
 }
@@ -348,5 +349,56 @@ func TestDevinCompositionKeepsExactValuesAndSourceOrder(t *testing.T) {
 	}
 	if got := composition.Bindings[0].Model; got != "fusion-gpt-sol-high-sidekick-luna-low" {
 		t.Fatalf("the exact advertised value must survive an effort-like suffix: %q", got)
+	}
+}
+
+func TestDevinCompositionRejectsInvalidNativeEvidence(t *testing.T) {
+	cases := map[string]func(*DevinNativeCatalog){
+		"duplicate family": func(native *DevinNativeCatalog) {
+			native.Families = append(native.Families, DevinNativeFamily{
+				UID:      "gpt-family",
+				Label:    "GPT-6.1",
+				Variants: []DevinNativeVariant{{UID: "gpt-other", Label: "Other"}},
+			})
+		},
+		"duplicate variant": func(native *DevinNativeCatalog) {
+			native.Families = append(native.Families, DevinNativeFamily{
+				UID:      "duplicate-family",
+				Label:    "Duplicate",
+				Variants: []DevinNativeVariant{{UID: "gpt-sol", Label: "Sol"}},
+			})
+		},
+		"empty families": func(native *DevinNativeCatalog) {
+			native.Families = nil
+		},
+	}
+	for name, corrupt := range cases {
+		t.Run(name, func(t *testing.T) {
+			native := devinTestNative()
+			corrupt(native)
+			catalog := devinTestCatalog(devinFusionGroup())
+			if enriched := EnrichDevinCatalog(catalog, native); enriched != catalog {
+				t.Fatalf("invalid native evidence must keep the ordinary catalog: %+v", enriched.Compositions)
+			}
+		})
+	}
+}
+
+func TestDevinCompositionLeavesRepeatedValuesUnbound(t *testing.T) {
+	catalog := devinTestCatalog(devinGroupNode("fusion", "Fusion",
+		devinChoiceNode("fusion-gpt-sol-sidekick-luna-high", DevinFusionLabel("Sol", "Luna High")),
+		devinChoiceNode("fusion-gpt-sol-sidekick-luna-high", DevinFusionLabel("Sol", "Luna High")),
+		devinChoiceNode("fusion-gpt-sol-sidekick-luna-low", DevinFusionLabel("Sol", "Luna Low")),
+	))
+	enriched := EnrichDevinCatalog(catalog, devinTestNative())
+	if len(enriched.Compositions) != 1 {
+		t.Fatalf("expected one composition, got %d", len(enriched.Compositions))
+	}
+	bindings := enriched.Compositions[0].Bindings
+	if len(bindings) != 1 || bindings[0].Model != "fusion-gpt-sol-sidekick-luna-low" {
+		t.Fatalf("a repeated advertised value must stay unbound: %+v", bindings)
+	}
+	if got, want := modelcatalog.LeafChoices(enriched.Nodes), modelcatalog.LeafChoices(catalog.Nodes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("repeated leaves must remain advertised: %+v != %+v", got, want)
 	}
 }

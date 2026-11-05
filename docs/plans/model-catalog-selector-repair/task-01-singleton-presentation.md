@@ -150,4 +150,8 @@ Review fixes (2026-11-04):
 - The removed-path detail now wraps on phone and coarse-pointer layouts (`max-md:whitespace-normal max-md:break-words` plus the `pointer:coarse` variants) instead of ellipsizing, so two long family paths that share a prefix stay visually distinguishable after their heading disappears. Desktop keeps the single-line `truncate` density. The provider description remains its own line and `aria-describedby` still names both.
   A phone regression renders two repeated `Default` labels under long shared-prefix paths and asserts both full paths, the wrapping classes, and the separate descriptions.
 
+- Review follow-up: the catalog `Command` root scores only the declared keywords, so the opaque `row:`/`composition:` identity and its counted suffix never match unrelated models; a regression types `row` and `composition` and expects no results.
+- Review follow-up: a top-level loose choice that follows a group keeps its `Model` heading, because the heading now attaches to the first top-level row run regardless of preceding groups; a regression renders a group followed by a loose choice and finds that row inside the named heading group.
+- Review follow-up: the acpcompat normalizer validates injected native evidence before indexing it and leaves repeated advertised values unbound so no duplicate row is hidden; both have focused Go regressions.
+
 Those fixes change no catalog data, no selection callback value, and no Task 02 qualification status.

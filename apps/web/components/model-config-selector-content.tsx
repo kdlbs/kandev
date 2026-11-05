@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { defaultFilter } from "cmdk";
 
 import { cn } from "@/lib/utils";
 import * as selectorOptions from "@/lib/utils/selector-options";
@@ -172,6 +173,15 @@ export type ModelConfigSelectorContentProps = {
   embedded?: boolean;
 };
 
+/**
+ * cmdk also scores an item's `value`, which catalog rows use as an opaque
+ * occurrence identity. Score only the declared keywords so prefixes such as
+ * `row:`/`composition:` and the counted suffix never match unrelated models.
+ */
+function catalogCommandFilter(value: string, search: string, keywords?: string[]): number {
+  return defaultFilter(keywords && keywords.length > 0 ? keywords.join(" ") : value, search, []);
+}
+
 /** Adds provider branding while preserving the model group label. */
 function ModelFilterInput({
   value,
@@ -307,7 +317,7 @@ function ModelListBody({
 }: ModelListBodyProps) {
   const { t } = useTranslation();
   return (
-    <Command>
+    <Command filter={catalogCommandFilter}>
       {(allowCustomModel || orderedModelOptions.length > 5 || catalogTree) && (
         <ModelFilterInput value={filterText} onValueChange={onFilterChange} />
       )}

@@ -249,7 +249,12 @@ type devinAcceptedBinding struct {
 // evidence explains. The original catalog and its flat projection stay
 // untouched, and any unusable enrichment returns the original catalog.
 func EnrichDevinCatalog(catalog *modelcatalog.Catalog, native *DevinNativeCatalog) *modelcatalog.Catalog {
-	if catalog == nil || native == nil || len(native.Families) == 0 {
+	if catalog == nil || native == nil {
+		return catalog
+	}
+	// Native evidence can arrive from a bounded parser or an injected runner
+	// fixture; reject invalid identities before the index can pick a first match.
+	if err := native.validate(); err != nil {
 		return catalog
 	}
 	index := native.index()
@@ -331,16 +336,17 @@ func devinCompositionForGroup(
 // drops every advertised value whose tuple is not unique. Duplicate leaves and
 // ambiguous pairs never receive a binding.
 func acceptedDevinBindings(group *modelcatalog.Node, index devinIndex) []devinAcceptedBinding {
+	counts := catalogLeafCounts(group.Children)
 	var accepted []devinAcceptedBinding
-	seen := make(map[string]struct{}, len(group.Children))
 	for _, child := range group.Children {
 		if child.Kind != modelcatalog.NodeKindChoice {
 			continue
 		}
-		if _, repeated := seen[child.Value]; repeated {
+		// A composition renders one configuration entry and hides its bound
+		// leaves, so a repeated advertised value would lose its other rows.
+		if counts[child.Value] > 1 {
 			continue
 		}
-		seen[child.Value] = struct{}{}
 		native, ok := index.variants[child.Value]
 		if !ok || native.Label != child.Label {
 			continue
@@ -356,6 +362,16 @@ func acceptedDevinBindings(group *modelcatalog.Node, index devinIndex) []devinAc
 		})
 	}
 	return uniqueDevinTuples(accepted)
+}
+
+func catalogLeafCounts(children []modelcatalog.Node) map[string]int {
+	counts := make(map[string]int, len(children))
+	for _, child := range children {
+		if child.Kind == modelcatalog.NodeKindChoice {
+			counts[child.Value]++
+		}
+	}
+	return counts
 }
 
 func uniqueDevinTuples(accepted []devinAcceptedBinding) []devinAcceptedBinding {

@@ -146,7 +146,7 @@ function openFusionComposition() {
 }
 
 describe("ModelConfigSelector catalog navigation", () => {
-  it("renders native groups instead of one flat list", () => {
+  it("collapses a singleton group into a row with path context", () => {
     renderSelector({});
     openPicker();
     expect(screen.getByTestId(COMPOSITION_ROW)).toBeTruthy();
