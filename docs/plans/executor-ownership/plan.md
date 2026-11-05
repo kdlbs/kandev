@@ -14,6 +14,9 @@ legacy_specs: []
 
 # Implementation plan: Per-user executor ownership
 
+The retained `local` admission compatibility follow-up is recorded in
+[task 06](task-06-retained-local-alias.md).
+
 ## Overview
 
 Deliver [#4512](https://github.com/kdlbs/kandev/issues/4512): private executor
