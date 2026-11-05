@@ -10,6 +10,7 @@ const openCodePeriodUsageRule = "opencode.stderr.usage_limit.v1"
 
 var openCodeRelativeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`)
 var openCodeRelativeUnitPattern = regexp.MustCompile(`(?i)(\d{1,4})\s*(days?|hours?|hrs?|minutes?|mins?|min|seconds?|secs?)\b`)
+var openCodeRelativeGluedSuffix = regexp.MustCompile(`^[.!?;][\pL\pN]`)
 
 // openCodePeriodResetAt accepts relative timing only on a line that itself
 // matches the classified OpenCode period-limit rule. Multiple different
@@ -28,11 +29,14 @@ func openCodePeriodResetAt(text string, observedAt time.Time) *time.Time {
 			return nil
 		}
 		matched = true
-		match := openCodeRelativeResetPattern.FindStringSubmatch(line)
-		if len(match) != 2 {
+		matches := openCodeRelativeResetPattern.FindAllStringSubmatchIndex(line, -1)
+		if len(matches) == 0 {
 			continue
 		}
-		duration, ok := parseOpenCodeRelativeDuration(match[1])
+		if len(matches) != 1 || openCodeRelativeGluedSuffix.MatchString(line[matches[0][1]:]) {
+			return nil
+		}
+		duration, ok := parseOpenCodeRelativeDuration(line[matches[0][2]:matches[0][3]])
 		if !ok {
 			return nil
 		}

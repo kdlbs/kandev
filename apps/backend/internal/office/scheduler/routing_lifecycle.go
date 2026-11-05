@@ -41,17 +41,20 @@ func (ss *SchedulerService) HandlePostStartFailure(
 	}
 	message := errorMessage
 	var resetHint *time.Time
+	var observedAt time.Time
 	if providerError != nil {
 		if providerError.Message != "" {
 			message = providerError.Message
 		}
 		resetHint = providerError.ResetAt
+		observedAt = providerError.OccurredAt
 	}
 	classified := routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhaseStreaming,
 		ProviderID: string(candidate.ProviderID),
 		Stderr:     message,
 		ResetHint:  resetHint,
+		OccurredAt: observedAt,
 	})
 	if !classified.FallbackAllowed {
 		return false, nil
