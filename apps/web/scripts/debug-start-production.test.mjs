@@ -19,8 +19,8 @@ import {
   createHostileInputs,
   createLaunchEnvironment,
   createObservedBrowser,
+  createRunWorkspace,
   expectedReact,
-  findFreePort,
   isOwnedBackendProcess,
   openWorkloadPage,
   processGroupAlive,
@@ -50,7 +50,10 @@ test("launch environment pins a private sqlite database over hostile inputs", ()
     assert.equal(env.PGDATABASE, undefined);
     const config = fs.readFileSync(configPath, "utf8");
     assert.match(config, /driver: "sqlite"/);
-    assert.ok(config.includes(dbPath), "the private config names the owned database");
+    assert.ok(
+      config.includes(JSON.stringify(dbPath)),
+      "the private config names the owned database",
+    );
     assert.equal(fs.readFileSync(sentinelDb, "utf8"), sentinelContents);
   } finally {
     fs.rmSync(homeDir, { recursive: true, force: true });
@@ -143,12 +146,8 @@ test(
     timeout: testTimeoutMs,
   },
   async (t) => {
-    const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "kandev-5050-home-"));
-    const runDir = await fsp.mkdtemp(path.join(os.tmpdir(), "kandev-5050-run-"));
-    const startLog = path.join(runDir, "start.log");
-    const port = await findFreePort();
+    const { homeDir, runDir, startLog, port, startedAt } = await createRunWorkspace();
     const baseUrl = `http://127.0.0.1:${port}`;
-    const startedAt = Date.now();
 
     const { sentinelDb, sentinelContents, hostileEnv } = createHostileInputs(runDir);
     const { env, configPath, dbPath } = createLaunchEnvironment(homeDir, port, runDir, hostileEnv);
@@ -170,6 +169,16 @@ test(
     const onTerminate = () => onSignal("SIGTERM");
     process.once("SIGINT", onInterrupt);
     process.once("SIGTERM", onTerminate);
+    const watchdog = setTimeout(
+      () => {
+        void (async () => {
+          if (browser) await browser.close().catch(() => {});
+          await requestStop();
+        })();
+      },
+      Math.max(30_000, testTimeoutMs - 60_000),
+    );
+    watchdog.unref();
 
     try {
       await waitForHttp(`${baseUrl}/health`, startTimeoutMs, child);
@@ -232,11 +241,14 @@ test(
         `${error instanceof Error ? error.message : String(error)}\n\n--- make start-debug tail ---\n${tail}`,
       );
     } finally {
+      clearTimeout(watchdog);
       process.removeListener("SIGINT", onInterrupt);
       process.removeListener("SIGTERM", onTerminate);
       if (browser) await browser.close().catch(() => {});
       await requestStop();
-      await new Promise((resolve) => logStream.end(resolve));
+      if (!logStream.writableEnded) {
+        await new Promise((resolve) => logStream.end(resolve));
+      }
       await fsp.rm(homeDir, { recursive: true, force: true });
       await fsp.rm(runDir, { recursive: true, force: true });
     }

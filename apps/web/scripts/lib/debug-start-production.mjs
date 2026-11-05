@@ -277,7 +277,7 @@ export async function readReactRenderers(page) {
  */
 export async function goHome(page) {
   const homeLink = page.locator('a[href^="/?home=overview"]').first();
-  assert.ok((await homeLink.count()) > 0, "the Home navigation link is present");
+  await homeLink.waitFor({ state: "attached", timeout: 30_000 });
   await homeLink.click({ timeout: 5_000 });
   await page.waitForURL(
     (url) => url.pathname === "/" && url.searchParams.get("home") === "overview",
@@ -296,18 +296,18 @@ export async function runWorkload(page, taskId) {
   await goHome(page);
 
   const taskCard = page.getByRole("button", { name: new RegExp(TASK_TITLE) }).first();
-  assert.ok((await taskCard.count()) > 0, "the probe task card is present");
+  await taskCard.waitFor({ state: "visible", timeout: 30_000 });
   await taskCard.click({ timeout: 5_000 });
   await page.waitForURL((url) => url.pathname === `/t/${taskId}`, { timeout: 5_000 });
   await goHome(page);
 
   const settings = page.getByTestId("sidebar-settings-gear");
-  assert.equal(await settings.count(), 1, "the Settings navigation control is present");
+  await settings.waitFor({ state: "visible", timeout: 30_000 });
   await settings.click({ timeout: 5_000 });
   await page.waitForURL((url) => url.pathname.startsWith("/settings"), { timeout: 5_000 });
 
   const themeToggle = page.locator('button[aria-label^="Switch to "]').first();
-  assert.ok((await themeToggle.count()) > 0, "the theme toggle is present");
+  await themeToggle.waitFor({ state: "visible", timeout: 30_000 });
   const themeBefore = await themeToggle.getAttribute("aria-label");
   await themeToggle.click({ timeout: 5_000 });
   await page.waitForFunction(
@@ -462,6 +462,7 @@ export function createLaunchEnvironment(homeDir, port, runDir, baseEnv = process
     "KANDEV_DEBUG_AGENT_MESSAGES",
     "KANDEV_DEBUG_PPROF_ENABLED",
     "KANDEV_DEBUG_LOG_DIR",
+    "KANDEV_FEATURES_AUTH",
     "KANDEV_MOCK_AGENT",
     "KANDEV_E2E_MOCK",
     ...DATABASE_ENV_NAMES,
@@ -489,8 +490,12 @@ export function spawnDebugSource(env, startLog) {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  child.stdout.pipe(logStream);
-  child.stderr.pipe(logStream);
+  child.stdout.pipe(logStream, { end: false });
+  child.stderr.pipe(logStream, { end: false });
+  logStream.on("error", () => {});
+  child.once("close", () => {
+    if (!logStream.writableEnded) logStream.end();
+  });
   return { child, logStream };
 }
 
@@ -811,5 +816,22 @@ export function buildObservationReport(input) {
       reason: "not collected by this integration check",
     },
     samples: input.samples,
+  };
+}
+
+/**
+ * Create the owned temporary home, run directory, free port, and start time.
+ *
+ * @returns {Promise<{homeDir: string, runDir: string, startLog: string, port: number, startedAt: number}>}
+ */
+export async function createRunWorkspace() {
+  const homeDir = await fsp.mkdtemp(path.join(os.tmpdir(), "kandev-5050-home-"));
+  const runDir = await fsp.mkdtemp(path.join(os.tmpdir(), "kandev-5050-run-"));
+  return {
+    homeDir,
+    runDir,
+    startLog: path.join(runDir, "start.log"),
+    port: await findFreePort(),
+    startedAt: Date.now(),
   };
 }

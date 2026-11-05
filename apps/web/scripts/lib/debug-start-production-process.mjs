@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const currentRepo = path.resolve(scriptDir, "../../../..");
 
-export const repo = path.resolve(process.env.KANDEV_DEBUG_START_REPO || currentRepo);
+const resolvedRepo = path.resolve(process.env.KANDEV_DEBUG_START_REPO || currentRepo);
+export const repo = fs.existsSync(resolvedRepo)
+  ? fs.realpathSync.native(resolvedRepo)
+  : resolvedRepo;
 export const POSIX = process.platform !== "win32";
 
 /**
@@ -28,6 +31,10 @@ export async function delay(ms) {
 export function processGroupAlive(pgid) {
   if (!POSIX || !pgid) return false;
   try {
+    const table = readProcessTable();
+    if (table.length > 0) {
+      return table.some((entry) => entry.pgid === pgid && entry.stat !== "Z");
+    }
     process.kill(-pgid, 0);
     return true;
   } catch (error) {
@@ -38,24 +45,25 @@ export function processGroupAlive(pgid) {
 /**
  * Read the POSIX process table. `ps -axo` is available on Linux and macOS.
  *
- * @returns {Array<{pid: number, ppid: number, pgid: number, command: string}>}
+ * @returns {Array<{pid: number, ppid: number, pgid: number, stat: string, command: string}>}
  */
 export function readProcessTable() {
   if (!POSIX) return [];
   try {
-    const output = execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,command="], {
+    const output = execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,stat=,command="], {
       encoding: "utf8",
     });
     return output
       .split("\n")
       .map((line) => {
-        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
         if (!match) return null;
         return {
           pid: Number(match[1]),
           ppid: Number(match[2]),
           pgid: Number(match[3]),
-          command: match[4],
+          stat: match[4],
+          command: match[5],
         };
       })
       .filter(Boolean);
@@ -161,7 +169,10 @@ export async function stopLauncher(child, startLog) {
 
   signalProcessGroup(child.pid, "SIGTERM");
   await waitForGroupExit(child.pid, 15_000);
-  if (processGroupAlive(child.pid)) signalProcessGroup(child.pid, "SIGKILL");
+  if (processGroupAlive(child.pid)) {
+    signalProcessGroup(child.pid, "SIGKILL");
+    await waitForGroupExit(child.pid, 5_000);
+  }
 
   const table = readProcessTable();
   for (const pid of collectOwnedBackendPids(
