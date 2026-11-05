@@ -40,6 +40,7 @@ function capabilityResponse(
 }
 
 const savedLaunchSettings = {
+  mode: "",
   env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "saved" }],
   cli_flags: [{ flag: "--catalog", enabled: true, description: "catalog" }],
   command_prefix: "npx --",
@@ -128,6 +129,7 @@ it("does not probe a draft profile until refresh is called", async () => {
   expect(probeAgentProfileMock).toHaveBeenCalledWith(MOCK_AGENT_NAME, {
     profile_id: PROFILE_ID_A,
     launch_settings: {
+      mode: "",
       env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "draft-val", secret_id: undefined }],
       cli_flags: [{ flag: "--catalog", enabled: true, description: "catalog" }],
       command_prefix: "npx --",
@@ -308,6 +310,7 @@ it("carries a changed draft Copilot selection into the capability probe", async 
   expect(probeAgentProfileMock).toHaveBeenCalledWith(MOCK_AGENT_NAME, {
     profile_id: PROFILE_ID_A,
     launch_settings: {
+      mode: "",
       env_vars: [{ key: "MOCK_AGENT_PROFILE_CATALOG", value: "saved", secret_id: undefined }],
       cli_flags: [{ flag: "--catalog", enabled: true, description: "catalog" }],
       command_prefix: "npx --",

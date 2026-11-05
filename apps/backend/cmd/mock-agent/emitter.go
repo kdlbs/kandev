@@ -23,6 +23,7 @@ type emitter struct {
 	sid                  acp.SessionId
 	mcpServers           map[string]mcpServerDef
 	registerDetachedWork func(acp.SessionId, context.CancelFunc) func()
+	supportsCompaction   bool
 }
 
 // callMCPTool invokes an MCP tool through the server definitions attached to
@@ -198,6 +199,21 @@ func (e *emitter) startMonitorTool(id acp.ToolCallId, taskID, command string) {
 	})
 }
 
+func (e *emitter) startClaudeControlTool(id acp.ToolCallId, title, toolName string, input any) {
+	withMeta := func(tc *acp.SessionUpdateToolCall) {
+		tc.Meta = map[string]any{"claudeCode": map[string]any{"toolName": toolName}}
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.StartToolCall(id, title,
+			acp.WithStartKind(acp.ToolKindOther),
+			acp.WithStartStatus(acp.ToolCallStatusPending),
+			acp.WithStartRawInput(input),
+			withMeta,
+		),
+	})
+}
+
 // toMetaMap is a small adapter so the local meta builders can return `any`
 // (matching the kandev-side recognizer signature) while the SDK's Meta field
 // requires `map[string]any` specifically.
@@ -249,6 +265,7 @@ const (
 	subagentKeyStatus       = "status"
 	subagentStatusCompleted = "completed"
 	subagentStatusAsync     = "async_launched"
+	subagentKeyName         = "name"
 	subagentKeyDescription  = "description"
 	subagentKeyPrompt       = "prompt"
 	subagentKeySubagentType = "subagent_type"
@@ -313,7 +330,7 @@ func subagentClaudeMetaWithResponse(r subagentResult) any {
 
 // startSubagentTool emits the initial subagent tool_call (status=pending) in
 // claude-agent-acp's wire shape: title "Task", kind Other, the Agent meta
-// marker, and rawInput carrying description/prompt/subagent_type.
+// marker, and rawInput carrying name/description/prompt/subagent_type.
 func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, subagentType string) {
 	withStartMeta := func(meta any) acp.ToolCallStartOpt {
 		return func(tc *acp.SessionUpdateToolCall) { tc.Meta = toMetaMap(meta) }
@@ -324,6 +341,7 @@ func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, suba
 			acp.WithStartKind(acp.ToolKindOther),
 			acp.WithStartStatus(acp.ToolCallStatusPending),
 			acp.WithStartRawInput(map[string]any{
+				subagentKeyName:         "repo-explorer",
 				subagentKeyDescription:  description,
 				subagentKeyPrompt:       prompt,
 				subagentKeySubagentType: subagentType,

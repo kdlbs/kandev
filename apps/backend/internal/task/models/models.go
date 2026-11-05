@@ -2029,6 +2029,10 @@ type MessageAuthorType string
 const (
 	MessageMetaKeyDeliveryStatus = "delivery_status"
 	MessageDeliveryStatusBlocked = "blocked"
+	// MessageDeliveryStatusNotDelivered marks a user message whose Send Now
+	// claim could neither deliver nor restore it. The message stays in the
+	// history so the user can send it again.
+	MessageDeliveryStatusNotDelivered = "not_delivered"
 )
 
 const (

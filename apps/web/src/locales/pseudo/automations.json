@@ -359,5 +359,19 @@
   "runStatusRetrySchedulingFailed": "Ŕēţŕŷ ćōũĺď ńōţ ƀē śćĥēďũĺēď",
   "retryAttempt": "Àţţēḿƥţ {{attempt}}",
   "retryDue": "Ďũē {{when}}",
-  "stopRetry": "Śţōƥ ŕēţŕĩēś"
+  "stopRetry": "Śţōƥ ŕēţŕĩēś",
+  "pluginToolsTitle": "Ƥĺũĝĩń ţōōĺś (ōƥţĩōńàĺ)",
+  "pluginToolsDescription": "Śēĺēćţ ţĥē ţōōĺś ţĥĩś àũţōḿàţĩōń ćàń ũśē.",
+  "pluginToolsLoading": "Ĺōàďĩńĝ ƥĺũĝĩń ţōōĺś...",
+  "pluginToolsLoadError": "Ćōũĺď ńōţ ĺōàď ƥĺũĝĩń ţōōĺś. Ţĥē śàvēď śēĺēćţĩōń ĩś ũńćĥàńĝēď.",
+  "pluginToolsRetry": "Ŕēţŕŷ",
+  "pluginToolsEmpty": "Ńō ĩńśţàĺĺēď ƥĺũĝĩń ćũŕŕēńţĺŷ ōƒƒēŕś ţōōĺś ƒōŕ ƥŕĩvàţē àũţōḿàţĩōńś.",
+  "pluginToolsReviewRequired": "Ŕēvĩēŵ ŕēqũĩŕēď: ţĥē ƥĺũĝĩń ćōńƒĩĝũŕàţĩōń ćĥàńĝēď.",
+  "pluginToolsPreviouslySelected": "Ƥŕēvĩōũśĺŷ śēĺēćţēď: {{names}}",
+  "pluginToolsReselect": "Śēĺēćţ ţōōĺś àĝàĩń àńď śàvē ţō ŕēśţōŕē àććēśś.",
+  "pluginToolsClear": "Ćĺēàŕ",
+  "pluginToolsRead": "Ŕēàď",
+  "pluginToolsWrite": "Ŵŕĩţē",
+  "pluginToolsClearedHint": "Śàvē ţō ŕēḿōvē ƥĺũĝĩń ţōōĺ àććēśś.",
+  "pluginToolsUnavailable": "Ƥĺũĝĩń ũńàvàĩĺàƀĺē"
 }

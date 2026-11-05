@@ -2,7 +2,7 @@
 status: done
 created: 2026-10-23
 requirements:
-  - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-005
 system_design:
   - ../../specs/agents/system-design/session-concurrency-ceiling.md
 ---

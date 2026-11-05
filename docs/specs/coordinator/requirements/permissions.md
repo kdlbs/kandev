@@ -157,6 +157,11 @@ run.
   approval with 409 and the code `policy_denied`, leave the proposal in its
   status, and the card shall say that its May do settings no longer allow
   this and offer Reject. Rejecting it shall still succeed.
+- **AC-COORDINATOR-PERMISSIONS-002.7:** A coordinator session shall discover
+  and invoke only instance-read plugin tools in its exact version-2 binding,
+  revalidating the live binding and installation per call. Absent, invalid, or
+  version-1 bindings grant none; changed installations or policies fail before
+  execution.
 
 ### REQ-COORDINATOR-PERMISSIONS-003: Watches
 

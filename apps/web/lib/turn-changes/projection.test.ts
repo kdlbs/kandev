@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TurnChangeSetSummary, TurnRepositoryChange } from "@/lib/types/turn-changes";
 import {
   isTurnChangeCardVisible,
+  isUnavailableHistoryComparison,
   projectTurnChangeSummary,
   projectTurnRepositoryAvailability,
 } from "./projection";
@@ -102,7 +103,7 @@ describe("projectTurnRepositoryAvailability", () => {
 });
 
 describe("turn change transcript eligibility", () => {
-  it.each(["ready", "failed", "unavailable", "expired"] as const)(
+  it.each(["ready", "expired"] as const)(
     "hides settled %s captures without recorded files",
     (availability) => {
       expect(isTurnChangeCardVisible(summary({ availability, file_count: 0 }))).toBe(false);
@@ -116,6 +117,11 @@ describe("turn change transcript eligibility", () => {
     expect(isTurnChangeCardVisible(summary({ terminal_at: undefined }))).toBe(false);
   });
 
+  it("keeps usable partial summaries visible", () => {
+    const partial = summary({ summary_complete: false, file_count: 2 });
+    expect(isTurnChangeCardVisible(partial)).toBe(true);
+  });
+
   it("keeps an unavailable empty turn in history while hiding its chat card", () => {
     const unavailable = summary({ availability: "unavailable", file_count: 0 });
     expect(projectTurnChangeSummary(unavailable).visible).toBe(true);
@@ -123,13 +129,21 @@ describe("turn change transcript eligibility", () => {
   });
 });
 
-describe("history-unavailable card visibility", () => {
-  it("shows one unavailable card when every comparison is unavailable", () => {
-    const unavailable = summary({
+describe("unavailable and failed transcript eligibility", () => {
+  it.each(["unavailable", "failed"] as const)(
+    "hides %s summaries with zero or retained files",
+    (availability) => {
+      expect(isTurnChangeCardVisible(summary({ availability, file_count: 0 }))).toBe(false);
+      expect(isTurnChangeCardVisible(summary({ availability, file_count: 3 }))).toBe(false);
+    },
+  );
+
+  function historyComparison(reason: string): TurnChangeSetSummary {
+    return summary({
       availability: "unavailable",
       counts_available: false,
       file_count: 0,
-      reason: "history_conflict",
+      reason,
       repositories: [
         {
           id: "repo-1",
@@ -142,14 +156,26 @@ describe("history-unavailable card visibility", () => {
         },
       ],
     });
-    expect(isTurnChangeCardVisible(unavailable)).toBe(true);
+  }
+
+  it.each(["history_conflict", "history_context_changed"] as const)(
+    "hides an unavailable history comparison with reason %s",
+    (reason) => {
+      const unavailable = historyComparison(reason);
+      expect(projectTurnChangeSummary(unavailable).visible).toBe(true);
+      expect(isTurnChangeCardVisible(unavailable)).toBe(false);
+    },
+  );
+
+  it("retains the unavailable history projection for viewer diagnostics", () => {
+    expect(isUnavailableHistoryComparison(historyComparison("history_conflict"))).toBe(true);
   });
 
-  it("keeps ordinary zero-entry unavailable captures hidden", () => {
+  it("hides an ordinary unavailable capture that retains recorded files", () => {
     const captureFailure = summary({
       availability: "unavailable",
       counts_available: false,
-      file_count: 0,
+      file_count: 2,
       reason: "checkout_unavailable",
       repositories: [],
     });

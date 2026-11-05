@@ -310,3 +310,6 @@ export const taskLinksPlugin = {
 };
 
 export const TASK_LINK_RULE_ID = "task-links/no-task-link-bypass";
+
+/** Default export so an Oxlint JS-plugin registration can load this module directly. */
+export default taskLinksPlugin;

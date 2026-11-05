@@ -1,9 +1,15 @@
+import type {
+  BuiltinMCPPackage,
+  BuiltinMCPManifest,
+  BuiltinMCPAcceptedBinding,
+} from "@/lib/types/builtin-mcp";
 import type { WorkloadRunObservation, WorkloadOutputChunk } from "@/lib/types/background-work";
 import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
 } from "./workspace-restoration";
 import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -326,6 +332,8 @@ export type ConfigOptionEntry = {
   currentValue: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 export type AgentCapabilitiesEntry = {
@@ -389,6 +397,8 @@ export type MCPToolSummary = {
 };
 
 export type MCPAttachmentServer = {
+  builtin_package?: BuiltinMCPPackage;
+  accepted_at?: string;
   name: string;
   source?: "kandev" | "profile";
   transport?: string;
@@ -404,20 +414,21 @@ export type MCPAttachmentServer = {
   tool_token_estimator?: string;
 };
 
+export type MCPAttachmentAttempt = {
+  attachment_attempt_id: string;
+  task_id?: string;
+  session_id?: string;
+  execution_id?: string;
+  builtin_packages?: BuiltinMCPManifest;
+  started_at: string;
+  updated_at?: string;
+  servers?: MCPAttachmentServer[];
+};
 export type MCPAttachmentHistory = {
   version: number;
-  current: {
-    attachment_attempt_id: string;
-    started_at: string;
-    updated_at?: string;
-    servers?: MCPAttachmentServer[];
-  };
-  previous?: Array<{
-    attachment_attempt_id: string;
-    started_at: string;
-    updated_at?: string;
-    servers?: MCPAttachmentServer[];
-  }>;
+  builtin_binding?: BuiltinMCPAcceptedBinding;
+  current: MCPAttachmentAttempt;
+  previous?: MCPAttachmentAttempt[];
 };
 
 export type SessionMCPStatusState = { bySessionId: Record<string, MCPAttachmentHistory> };

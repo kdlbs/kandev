@@ -59,7 +59,7 @@ func (c *Controller) DiscoverCopilotPlugins(
 		return unsupported, nil
 	}
 	profileContext, err := c.resolveProfileProbeContext(
-		ctx, agent.Name, req.AuthorizationScope, req.ProfileID, req.LaunchSettings,
+		ctx, agent.Name, req.AuthorizationScope, req.ProfileID, req.LaunchSettings, nil,
 	)
 	if err != nil {
 		return nil, err

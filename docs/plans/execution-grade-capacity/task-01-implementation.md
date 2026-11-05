@@ -6,18 +6,27 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-005
 acceptance_criteria:
-  - AC-AGENTS-SESSION-CEILING-003.1
-  - AC-AGENTS-SESSION-CEILING-003.2
-  - AC-AGENTS-SESSION-CEILING-003.3
-  - AC-AGENTS-SESSION-CEILING-003.4
-  - AC-AGENTS-SESSION-CEILING-003.5
+  - AC-AGENTS-SESSION-CEILING-005.1
+  - AC-AGENTS-SESSION-CEILING-005.2
+  - AC-AGENTS-SESSION-CEILING-005.3
+  - AC-AGENTS-SESSION-CEILING-005.4
+  - AC-AGENTS-SESSION-CEILING-005.5
 system_design:
   - ../../specs/agents/system-design/session-concurrency-ceiling.md
 ---
 
 # feat(capacity): add opt-in total and execution-grade limits
+
+## Main integration: message-turn tickets
+
+The newer shared ceiling also counts in-flight message-turn tickets in its
+total. A ticket already represented by an admitted row or launch reservation
+uses the existing grade once. A separate ticket has no grade snapshot, so the
+all-policy grade population is unknown until it is represented by an admitted
+row or launch reservation. Existing session ownership and automatic-policy
+message-turn behavior remain unchanged.
 
 ## Outcome and scope
 

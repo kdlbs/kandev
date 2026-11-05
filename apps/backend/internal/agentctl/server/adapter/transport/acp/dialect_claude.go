@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 const claudePermissionOtherActionType = "other"
@@ -11,7 +13,22 @@ const claudePermissionOtherActionType = "other"
 // newClaudeACPDialect enables only the compatibility translations verified
 // against Claude ACP frames. Other providers retain their normal identity path.
 func newClaudeACPDialect() acpDialect {
-	return acpDialect{permissionToolName: normalizeClaudePermissionToolName}
+	return acpDialect{
+		permissionToolName: normalizeClaudePermissionToolName,
+		subagentControl:    claudeSubagentControl,
+	}
+}
+
+func claudeSubagentControl(_ string, meta map[string]any, _ any) streams.SubagentControl {
+	claude, ok := nestedMap(meta, "claudeCode")
+	if !ok {
+		return ""
+	}
+	toolName, _ := claude["toolName"].(string)
+	if toolName == "SendMessage" {
+		return streams.SubagentControlMessage
+	}
+	return ""
 }
 
 func normalizeClaudePermissionToolName(
@@ -43,7 +60,7 @@ func normalizeClaudePermissionToolName(
 	}
 	candidate := strings.TrimSpace(title)
 	server, _, ok := types.ParseQualifiedMCPToolName(candidate)
-	if !ok || server != kandevMCPServerName {
+	if !ok || mcpprofile.BuiltinPackageForRuntimeName(server) == "" {
 		return nil
 	}
 	return &candidate

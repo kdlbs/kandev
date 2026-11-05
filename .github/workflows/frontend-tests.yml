@@ -94,6 +94,10 @@ jobs:
             apps/backend/go.sum
             .github/workflows/frontend-tests.yml
             .github/scripts/frontend-timings.*
+            .github/scripts/web-toolchain-evidence.py
+            .github/scripts/web-toolchain-evidence_test.py
+            .github/scripts/upgrade-regression-workflow-contract_test.py
+            scripts/web-native-toolchain.test.mjs
             .github/scripts/changed-paths.py
             .github/scripts/runner-plan.py
             .github/actions/plan-external-runners/**
@@ -320,6 +324,10 @@ jobs:
 
       - name: Run lint
         run: pnpm --filter @kandev/web lint
+
+      - name: Test native web toolchain routing
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/web-native-toolchain.test.mjs
 
       # `build` below is Vite, which strips types with esbuild and never checks
       # them, so nothing in this job used to fail on a type error. Runs before

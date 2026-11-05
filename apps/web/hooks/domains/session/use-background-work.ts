@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
@@ -10,6 +10,11 @@ import type {
   BackgroundWorkActionRequest,
   BackgroundWorkActionResponse,
 } from "@/lib/types/background-work";
+import {
+  selectActiveWorkloads,
+  selectHistoryWorkloads,
+  selectRunningWorkloads,
+} from "@/lib/background-work/workload-views";
 
 const EMPTY_WORKLOADS: WorkloadRunObservation[] = [];
 
@@ -45,8 +50,29 @@ function summarizeWorkloads(workloads: WorkloadRunObservation[]): WorkloadCountS
   };
 }
 
+/** Derived counts and tab membership for the shared workload list. */
+function useWorkloadViews(workloads: WorkloadRunObservation[]) {
+  const summary = useMemo(() => summarizeWorkloads(workloads), [workloads]);
+  const views = useMemo(
+    () => ({
+      runningWorkloads: selectRunningWorkloads(workloads),
+      activeWorkloads: selectActiveWorkloads(workloads),
+      historyWorkloads: selectHistoryWorkloads(workloads),
+    }),
+    [workloads],
+  );
+  return { ...summary, ...views };
+}
+
 export interface UseBackgroundWorkReturn {
+  /** Every accepted observation, including terminal and unknown history. */
   workloads: WorkloadRunObservation[];
+  /** Running records only; the composer chip and summary read this list. */
+  runningWorkloads: WorkloadRunObservation[];
+  /** Running and waiting records; the overview Active tab reads this list. */
+  activeWorkloads: WorkloadRunObservation[];
+  /** Terminal and unknown records; the overview History tab reads this list. */
+  historyWorkloads: WorkloadRunObservation[];
   activeWorkload: WorkloadRunObservation | null;
   activeWorkId: string | null;
   runningCount: number;
@@ -59,11 +85,77 @@ export interface UseBackgroundWorkReturn {
   hasActiveWork: boolean;
   hasHistory: boolean;
   isLoading: boolean;
+  /** True until this session's first read settles, so a fresh empty store does
+   *  not resolve the overview before its rows arrive. */
+  isInitialLoading: boolean;
+  /** True when the last read failed and no verified rows are available. */
+  loadError: boolean;
   executeAction: (
     req: Omit<BackgroundWorkActionRequest, "work_id"> & { work_id?: string },
   ) => Promise<BackgroundWorkActionResponse>;
   setActiveWorkload: (workId: string) => void;
   fetchWorkloads: () => Promise<void>;
+}
+
+/** The workload a session-level action targets: the explicit active id when
+ *  present, otherwise the first accepted row. */
+function useActiveWorkload(
+  workloads: WorkloadRunObservation[],
+  activeWorkId: string | null,
+): WorkloadRunObservation | null {
+  return useMemo(() => {
+    if (!activeWorkId) return workloads[0] ?? null;
+    return workloads.find((w) => w.work_id === activeWorkId) ?? workloads[0] ?? null;
+  }, [workloads, activeWorkId]);
+}
+
+/** Session-scoped first-read readiness, so an empty initial store does not
+ *  resolve the overview before its rows arrive. */
+function useInitialWorkloadReadiness(
+  sessionId: string | null,
+  enabled: boolean,
+  detailActive: boolean,
+) {
+  const sessionRef = useRef<string | null>(null);
+  const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
+  const [failedSessionId, setFailedSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (sessionRef.current === sessionId) return;
+    sessionRef.current = sessionId;
+    setSettledSessionId(null);
+    setFailedSessionId(null);
+  }, [sessionId]);
+
+  const settle = useCallback((target: string, failed: boolean) => {
+    if (sessionRef.current !== target) return;
+    setSettledSessionId(target);
+    setFailedSessionId(failed ? target : null);
+  }, []);
+
+  const isInitialLoading =
+    Boolean(detailActive && enabled && sessionId) &&
+    (sessionRef.current !== sessionId || settledSessionId !== sessionId);
+  const loadError = Boolean(sessionId) && failedSessionId === sessionId;
+
+  return { isInitialLoading, loadError, settle };
+}
+
+/** Read the session-scoped store projection. */
+function useSessionBackgroundWorkState(sessionId: string | null, enabled: boolean) {
+  const workloads = useAppStore((state) => {
+    if (!sessionId || !enabled) return EMPTY_WORKLOADS;
+    return state.backgroundWork.workloadsBySessionId[sessionId] ?? EMPTY_WORKLOADS;
+  });
+  const activeWorkId = useAppStore((state) => {
+    if (!sessionId || !enabled) return null;
+    return state.backgroundWork.activeWorkIdBySessionId[sessionId] ?? null;
+  });
+  const isLoading = useAppStore((state) => {
+    if (!sessionId || !enabled) return false;
+    return state.backgroundWork.loadingBySessionId[sessionId] ?? false;
+  });
+  return { workloads, activeWorkId, isLoading };
 }
 
 export function useBackgroundWork(
@@ -72,34 +164,31 @@ export function useBackgroundWork(
 ): UseBackgroundWorkReturn {
   const store = useAppStoreApi();
   const enabled = useFeature("agentBackgroundWork");
-
-  const workloads = useAppStore((state) => {
-    if (!sessionId || !enabled) return EMPTY_WORKLOADS;
-    return state.backgroundWork.workloadsBySessionId[sessionId] ?? EMPTY_WORKLOADS;
-  });
-
-  const activeWorkId = useAppStore((state) => {
-    if (!sessionId || !enabled) return null;
-    return state.backgroundWork.activeWorkIdBySessionId[sessionId] ?? null;
-  });
-
-  const isLoading = useAppStore((state) => {
-    if (!sessionId || !enabled) return false;
-    return state.backgroundWork.loadingBySessionId[sessionId] ?? false;
-  });
+  const { workloads, activeWorkId, isLoading } = useSessionBackgroundWorkState(sessionId, enabled);
 
   const lastFetchedSessionIdRef = useRef<string | null>(null);
+  const latestFetchIdRef = useRef(0);
+  const { isInitialLoading, loadError, settle } = useInitialWorkloadReadiness(
+    sessionId,
+    enabled,
+    detailActive,
+  );
 
   const fetchWorkloads = useCallback(async () => {
     if (!detailActive || !sessionId || !enabled) return;
+    const requestId = (latestFetchIdRef.current += 1);
+    let failed = false;
     try {
       store.getState().setBackgroundWorkLoading?.(sessionId, true);
       const response = await listBackgroundWorkloads(sessionId);
       store.getState().setBackgroundWorkloads(sessionId, response.workloads ?? []);
     } catch {
+      failed = true;
       store.getState().setBackgroundWorkLoading?.(sessionId, false);
+    } finally {
+      if (requestId === latestFetchIdRef.current) settle(sessionId, failed);
     }
-  }, [detailActive, sessionId, enabled, store]);
+  }, [detailActive, sessionId, enabled, store, settle]);
 
   useEffect(() => {
     if (!detailActive || !sessionId || !enabled) {
@@ -111,10 +200,7 @@ export function useBackgroundWork(
     fetchWorkloads();
   }, [detailActive, sessionId, enabled, fetchWorkloads]);
 
-  const activeWorkload = useMemo(() => {
-    if (!activeWorkId) return workloads[0] ?? null;
-    return workloads.find((w) => w.work_id === activeWorkId) ?? workloads[0] ?? null;
-  }, [workloads, activeWorkId]);
+  const activeWorkload = useActiveWorkload(workloads, activeWorkId);
 
   const {
     runningCount,
@@ -124,7 +210,10 @@ export function useBackgroundWork(
     totalJobCount,
     hasActiveWork,
     hasHistory,
-  } = useMemo(() => summarizeWorkloads(workloads), [workloads]);
+    runningWorkloads,
+    activeWorkloads,
+    historyWorkloads,
+  } = useWorkloadViews(workloads);
 
   const executeAction = useCallback(
     async (
@@ -157,6 +246,9 @@ export function useBackgroundWork(
 
   return {
     workloads,
+    runningWorkloads,
+    activeWorkloads,
+    historyWorkloads,
     activeWorkload,
     activeWorkId,
     runningCount,
@@ -167,6 +259,8 @@ export function useBackgroundWork(
     hasActiveWork,
     hasHistory,
     isLoading,
+    isInitialLoading,
+    loadError,
     executeAction,
     setActiveWorkload,
     fetchWorkloads,

@@ -1,4 +1,5 @@
 "use client";
+import { TaskCreateBuiltinPackages } from "./task-create-builtin-packages";
 
 import {
   FormEvent,
@@ -250,6 +251,16 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onWorkflowAgentOverrideChange={props.onWorkflowAgentOverrideChange}
         onResetWorkflowAgentOverrides={props.onResetWorkflowAgentOverrides}
         onRetryWorkflowAgentOverrides={props.onRetryWorkflowAgentOverrides}
+        builtinPackages={
+          isCreateMode && props.workspaceId && props.fs.setBuiltinMCPPreferences ? (
+            <TaskCreateBuiltinPackages
+              key={props.workspaceId}
+              workspaceId={props.workspaceId}
+              draft={props.fs.builtinMCPPreferences}
+              onChange={props.fs.setBuiltinMCPPreferences}
+            />
+          ) : null
+        }
         mcpDefinitions={props.mcpDefinitions}
         mcpDefinitionsLoading={props.mcpDefinitionsLoading}
         mcpSelectionIds={props.fs.mcpServerIds}

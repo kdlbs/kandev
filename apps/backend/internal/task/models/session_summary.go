@@ -42,6 +42,7 @@ type TaskSessionSummaryObservation struct {
 	TaskEnvironmentID           string
 	LastReadMessageID           string
 	Worktrees                   []*TaskEnvironmentRepo
+	AgentProfileAgentID         string
 }
 
 // ToTaskSession returns the bounded model fields represented by this
@@ -66,8 +67,14 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		TaskEnvironmentID: o.TaskEnvironmentID, LastReadMessageID: o.LastReadMessageID,
 		Worktrees: o.Worktrees,
 	}
-	if o.AgentProfileName != "" {
-		session.AgentProfileSnapshot = map[string]interface{}{"name": o.AgentProfileName}
+	if o.AgentProfileName != "" || o.AgentProfileAgentID != "" {
+		session.AgentProfileSnapshot = map[string]interface{}{}
+		if o.AgentProfileName != "" {
+			session.AgentProfileSnapshot["name"] = o.AgentProfileName
+		}
+		if o.AgentProfileAgentID != "" {
+			session.AgentProfileSnapshot["agent_id"] = o.AgentProfileAgentID
+		}
 	}
 	if o.ExecutorType != "" || o.ExecutorName != "" {
 		session.ExecutorSnapshot = map[string]interface{}{}

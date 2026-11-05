@@ -106,6 +106,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		"ts.repository_id", "ts.base_branch", "ts.base_commit_sha",
 		"COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path)",
 		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name"),
+		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id"),
 		"e.type AS executor_type", "e.name AS executor_name",
 		dialect.JSONExtract(driver, "ts.repository_snapshot", "path"),
 		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
@@ -117,34 +118,35 @@ func taskSessionSummarySelectCols(driver string) string {
 func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSummaryObservation, error) {
 	var observation models.TaskSessionSummaryObservation
 	var (
-		queueIncarnationID sql.NullString
-		agentProfileID     sql.NullString
-		executionProfileID sql.NullString
-		routeState         sql.NullString
-		routeReason        sql.NullString
-		executorID         sql.NullString
-		executorProfileID  sql.NullString
-		environmentID      sql.NullString
-		repositoryID       sql.NullString
-		baseBranch         sql.NullString
-		baseCommitSHA      sql.NullString
-		workspacePath      sql.NullString
-		agentProfileName   sql.NullString
-		executorType       sql.NullString
-		executorName       sql.NullString
-		repositoryPath     sql.NullString
-		state              sql.NullString
-		errorMessage       sql.NullString
-		modelID            sql.NullString
-		modelName          sql.NullString
-		lastAgentErrorJSON sql.NullString
-		completedAt        sql.NullTime
-		isPrimary          int
-		reviewStatus       sql.NullString
-		isPassthrough      int
-		taskEnvironmentID  sql.NullString
-		name               sql.NullString
-		lastReadMessageID  sql.NullString
+		queueIncarnationID  sql.NullString
+		agentProfileID      sql.NullString
+		executionProfileID  sql.NullString
+		routeState          sql.NullString
+		routeReason         sql.NullString
+		executorID          sql.NullString
+		executorProfileID   sql.NullString
+		environmentID       sql.NullString
+		repositoryID        sql.NullString
+		baseBranch          sql.NullString
+		baseCommitSHA       sql.NullString
+		workspacePath       sql.NullString
+		agentProfileName    sql.NullString
+		agentProfileAgentID sql.NullString
+		executorType        sql.NullString
+		executorName        sql.NullString
+		repositoryPath      sql.NullString
+		state               sql.NullString
+		errorMessage        sql.NullString
+		modelID             sql.NullString
+		modelName           sql.NullString
+		lastAgentErrorJSON  sql.NullString
+		completedAt         sql.NullTime
+		isPrimary           int
+		reviewStatus        sql.NullString
+		isPassthrough       int
+		taskEnvironmentID   sql.NullString
+		name                sql.NullString
+		lastReadMessageID   sql.NullString
 	)
 	if err := rows.Scan(
 		&observation.ID, &observation.TaskID, &queueIncarnationID,
@@ -152,7 +154,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&agentProfileID, &executionProfileID, &observation.RouteGeneration,
 		&routeState, &routeReason, &executorID, &executorProfileID,
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath,
-		&agentProfileName, &executorType, &executorName, &repositoryPath,
+		&agentProfileName, &agentProfileAgentID, &executorType, &executorName, &repositoryPath,
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
@@ -173,6 +175,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	observation.BaseCommitSHA = sessionSummaryNullableString(baseCommitSHA)
 	observation.WorkspacePath = sessionSummaryNullableString(workspacePath)
 	observation.AgentProfileName = sessionSummaryNullableString(agentProfileName)
+	observation.AgentProfileAgentID = sessionSummaryNullableString(agentProfileAgentID)
 	observation.ExecutorType = sessionSummaryNullableString(executorType)
 	observation.ExecutorName = sessionSummaryNullableString(executorName)
 	observation.RepositoryPath = sessionSummaryNullableString(repositoryPath)
