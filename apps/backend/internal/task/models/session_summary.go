@@ -6,8 +6,6 @@ import "time"
 // navigation, status summaries, and compact session rows. It intentionally
 // excludes the full session metadata and configuration snapshots.
 type TaskSessionSummaryObservation struct {
-	AdmittedExecutionGrade      string
-	AdmittedExecutionGradeKnown bool
 	ID                          string
 	TaskID                      string
 	QueueIncarnationID          string
@@ -16,6 +14,7 @@ type TaskSessionSummaryObservation struct {
 	ContainerID                 string
 	AgentProfileID              string
 	AgentProfileName            string
+	AgentProfileAgentID         string
 	ExecutionProfileID          string
 	RouteGeneration             int64
 	RouteState                  string
@@ -30,6 +29,7 @@ type TaskSessionSummaryObservation struct {
 	BaseBranch                  string
 	BaseCommitSHA               string
 	WorkspacePath               string
+	AgentWorkspacePath          string
 	State                       TaskSessionState
 	ErrorMessage                string
 	Metadata                    map[string]interface{}
@@ -42,7 +42,8 @@ type TaskSessionSummaryObservation struct {
 	TaskEnvironmentID           string
 	LastReadMessageID           string
 	Worktrees                   []*TaskEnvironmentRepo
-	AgentProfileAgentID         string
+	AdmittedExecutionGrade      string
+	AdmittedExecutionGradeKnown bool
 }
 
 // ToTaskSession returns the bounded model fields represented by this
@@ -61,7 +62,8 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		ExecutorID: o.ExecutorID, ExecutorProfileID: o.ExecutorProfileID,
 		EnvironmentID: o.EnvironmentID, RepositoryID: o.RepositoryID,
 		BaseBranch: o.BaseBranch, BaseCommitSHA: o.BaseCommitSHA, WorkspacePath: o.WorkspacePath,
-		State: o.State, ErrorMessage: o.ErrorMessage, Metadata: o.Metadata,
+		AgentWorkspacePath: o.AgentWorkspacePath,
+		State:              o.State, ErrorMessage: o.ErrorMessage, Metadata: o.Metadata,
 		StartedAt: o.StartedAt, CompletedAt: o.CompletedAt, UpdatedAt: o.UpdatedAt,
 		IsPrimary: o.IsPrimary, IsPassthrough: o.IsPassthrough, ReviewStatus: o.ReviewStatus,
 		TaskEnvironmentID: o.TaskEnvironmentID, LastReadMessageID: o.LastReadMessageID,

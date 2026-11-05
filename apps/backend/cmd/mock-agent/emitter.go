@@ -24,6 +24,9 @@ type emitter struct {
 	mcpServers           map[string]mcpServerDef
 	registerDetachedWork func(acp.SessionId, context.CancelFunc) func()
 	supportsCompaction   bool
+	// scenarioArgs carries the text after `/e2e:<name>` for scenarios that
+	// accept per-session arguments. Empty for ordinary predefined scenarios.
+	scenarioArgs string
 }
 
 // callMCPTool invokes an MCP tool through the server definitions attached to

@@ -123,7 +123,7 @@ func TestBootstrapReplayIgnoresExitFromFailedPredecessorManager(t *testing.T) {
 		t.Fatalf("replacement bootstrap preflight = (%d, %v), want (0, nil)", after, err)
 	}
 
-	processor := newStreamEventProcessor(streamManager, ctx, execution, client, delivery, execution.startupAttemptSnapshot())
+	processor := newStreamEventProcessor(streamManager, ctx, execution, client, delivery, execution.startupAttemptSnapshot(), nil)
 	defer func() { _ = processor.close() }()
 	if !processor.enqueue(event) {
 		t.Fatal("retained predecessor exit event was refused")

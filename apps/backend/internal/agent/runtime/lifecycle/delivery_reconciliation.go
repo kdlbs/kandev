@@ -347,6 +347,14 @@ func (sm *StreamManager) cancelDeliveryReconciliation(executionID string) {
 	sm.reconciliationMu.Unlock()
 }
 
+// restoreDeliveryReconciliation re-enables recovery when stop admission fails
+// and the execution remains attached to this stream manager.
+func (sm *StreamManager) restoreDeliveryReconciliation(executionID string) {
+	sm.reconciliationMu.Lock()
+	delete(sm.stoppedReconciliations, executionID)
+	sm.reconciliationMu.Unlock()
+}
+
 func (sm *StreamManager) runDeliveryReconciliation(
 	ctx context.Context,
 	execution *AgentExecution,

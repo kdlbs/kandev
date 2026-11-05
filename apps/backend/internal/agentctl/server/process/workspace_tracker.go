@@ -54,9 +54,15 @@ var workspaceTrackerEpochCounter atomic.Uint64
 type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
-	logger       *logger.Logger
-	gitEnv       []string
-	gitEnvMu     sync.RWMutex
+	// suppressGitPublication marks a manager-built bare multi-repository task
+	// root. It owns Files events but no Git scope, so an unavailable capture
+	// must never become the Changes panel's unnamed repository. Standalone
+	// trackers, including repo-less roots, keep publishing their explicit
+	// unavailable status.
+	suppressGitPublication bool
+	logger                 *logger.Logger
+	gitEnv                 []string
+	gitEnvMu               sync.RWMutex
 	// allowedSourceRoots are canonical roots of durable sources explicitly
 	// attached to this workspace. They are deliberately separate from workDir:
 	// a link may point outside the workspace, but only to one of these roots.

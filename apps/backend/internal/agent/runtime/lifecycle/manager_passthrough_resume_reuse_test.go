@@ -97,7 +97,7 @@ func TestPassthroughFreshStartKeepsPendingProcess(t *testing.T) {
 
 func TestPassthroughResumeReadinessDefersContendedProcessLocks(t *testing.T) {
 	mgr, _, execution := newPassthroughResetReadyTest(t, "read -r input")
-	for _, lock := range []*sync.Mutex{&execution.remoteInstanceLifecycleMu, &execution.passthroughLifecycleMu} {
+	for _, lock := range []sync.Locker{&execution.remoteInstanceLifecycleMu, &execution.passthroughLifecycleMu} {
 		lock.Lock()
 		done := make(chan bool, 1)
 		go func() { done <- mgr.IsLocalPassthroughReadyForResume(execution.SessionID, execution.ID, "attempt") }()
