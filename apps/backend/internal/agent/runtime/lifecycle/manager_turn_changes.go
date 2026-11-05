@@ -402,20 +402,9 @@ func (m *Manager) captureTurnChangesBeforeStop(ctx context.Context, execution *A
 	clearTurnChangeCaptureAnchor(execution, terminal.PromptGeneration)
 	finishTurnChangeCaptureLocked(execution, terminal.PromptGeneration)
 	execution.promptLifecycleMu.Unlock()
-	return m.processStopTurnChangeSummary(ctx, execution, terminal)
-}
-
-func (m *Manager) processStopTurnChangeSummary(ctx context.Context, execution *AgentExecution, terminal TurnChangeTerminal) error {
-	processor, ok := m.turnChangeCaptureHandler.(TurnChangeSummaryProcessor)
-	if !ok {
-		return nil
-	}
-	client, release := execution.AcquireAgentCtlClient()
-	defer release()
-	if err := processor.ProcessTurnChanges(ctx, terminal, client); err != nil {
-		m.scheduleTurnChangeSummary(execution, terminal)
-		return err
-	}
+	// The accepted checkpoint is the stop-safety boundary. Summary generation
+	// is derived work and continues through the retry worker after teardown.
+	m.scheduleTurnChangeSummary(execution, terminal)
 	return nil
 }
 

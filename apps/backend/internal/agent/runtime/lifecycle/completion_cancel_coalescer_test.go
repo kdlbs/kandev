@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,11 @@ import (
 func TestLateCompletionCoalescerAndSettlementAcknowledgementProgress(t *testing.T) {
 	fixture := newDispatchCompletionFixture(t, false)
 	manager, execution := fixture.manager, fixture.execution
+	execution.Owner = ExecutionOwner{Kind: ExecutionOwnerTask, TaskID: execution.TaskID, SessionID: execution.SessionID}
+	execution.TaskScope = TaskLaunchScopeTask
+	execution.AgentProfileID = "profile-codex"
+	execution.AgentID = "codex-acp"
+	execution.setSessionInitialized(true)
 	eventBus := bus.NewMemoryEventBus(newTestLogger())
 	t.Cleanup(eventBus.Close)
 	manager.eventBus = eventBus
@@ -81,6 +87,8 @@ func TestLateCompletionCoalescerAndSettlementAcknowledgementProgress(t *testing.
 		defer close(completionDone)
 		accepted.Store(manager.handleCompleteEvent(execution, &agentctl.AgentEvent{
 			Type: "complete", SessionID: execution.SessionID, PromptGeneration: 1,
+			Error: "Selected model is at capacity.", PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+			Data: map[string]any{"is_error": true},
 		}))
 	}()
 	t.Cleanup(func() {
@@ -101,11 +109,13 @@ func TestLateCompletionCoalescerAndSettlementAcknowledgementProgress(t *testing.
 	releaseGuard()
 	ackDone := make(chan bool, 1)
 	go func() { ackDone <- manager.AcknowledgeRetainedPromptFailure(execution.ID, 1) }()
+	var acknowledged bool
 	select {
-	case <-ackDone:
+	case acknowledged = <-ackDone:
 	case <-time.After(lockOrderDeadlockGuard):
 		t.Fatal("settlement acknowledgement did not finish after the session guard was released")
 	}
+	require.True(t, acknowledged, "the retained turn failure must acknowledge its own settlement")
 	select {
 	case <-completionDone:
 	case <-time.After(lockOrderDeadlockGuard):

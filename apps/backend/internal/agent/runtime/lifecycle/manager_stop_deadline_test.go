@@ -2,9 +2,11 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -48,6 +50,11 @@ func TestStopAgentCheckpointAdmissionHonorsDeadline(t *testing.T) {
 			current, exists := manager.executionStore.Get(execution.ID)
 			require.True(t, exists, "an unconfirmed stop must retain its runtime registration")
 			require.Same(t, execution, current)
+			manager.streamManager.reconciliationMu.Lock()
+			_, reconciliationStopped := manager.streamManager.stoppedReconciliations[execution.ID]
+			manager.streamManager.reconciliationMu.Unlock()
+			require.False(t, reconciliationStopped,
+				"an abandoned stop must restore delivery reconciliation for the still-attached execution")
 			require.Empty(t, backend.stopInstanceCalls, "timed-out admission cannot destroy the runtime")
 			releaseOwner()
 			require.NoError(t, manager.StopAgentWithReason(context.Background(), execution.ID, "task tree deleted", false))
@@ -124,9 +131,71 @@ func (h *deadlineStopCaptureHandler) wait(ctx context.Context) error {
 	}
 }
 
+type failedStopSummaryHandler struct {
+	summaryCalls atomic.Int32
+}
+
+func (*failedStopSummaryHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (*failedStopSummaryHandler) FinishTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (h *failedStopSummaryHandler) ProcessTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	if h.summaryCalls.Add(1) == 1 {
+		return errors.New("summary unavailable")
+	}
+	return nil
+}
+
+// @covers AC-TASKS-RUNTIME-CLEANUP-001.1
+func TestStopAgentSummaryFailureDoesNotBlockRuntimeStop(t *testing.T) {
+	manager, backend := newDetachTestManager(t, false)
+	execution := &AgentExecution{
+		ID: "stop-summary-failure", TaskID: "task-stop-summary", SessionID: "session-stop-summary",
+		TaskEnvironmentID: "environment-stop-summary", RuntimeName: executor.NameStandalone,
+		Status: v1.AgentStatusRunning, promptGeneration: 1,
+		promptTurnIDs: map[uint64]string{1: "turn-stop-summary"},
+	}
+	handler := &failedStopSummaryHandler{}
+	manager.SetTurnChangeCaptureHandler(handler)
+	require.NoError(t, manager.executionStore.Add(execution))
+
+	require.NoError(t, manager.StopAgentWithReason(context.Background(), execution.ID, "task tree deleted", false))
+	require.Len(t, backend.stopInstanceCalls, 1, "a derived summary failure must not prevent runtime teardown")
+	require.Eventually(t, func() bool { return handler.summaryCalls.Load() >= 2 }, time.Second, time.Millisecond,
+		"the failed summary should be retried after runtime stop is admitted")
+}
+
+func TestStopAgentSummaryProcessingDoesNotBlockRuntimeStop(t *testing.T) {
+	manager, backend := newDetachTestManager(t, false)
+	execution := &AgentExecution{
+		ID: "stop-summary-delay", TaskID: "task-stop-summary-delay", SessionID: "session-stop-summary-delay",
+		TaskEnvironmentID: "environment-stop-summary-delay", RuntimeName: executor.NameStandalone,
+		Status: v1.AgentStatusRunning, promptGeneration: 1,
+		promptTurnIDs: map[uint64]string{1: "turn-stop-summary-delay"},
+	}
+	handler := &deadlineStopCaptureHandler{phase: "summary", entered: make(chan struct{}), release: make(chan struct{})}
+	manager.SetTurnChangeCaptureHandler(handler)
+	require.NoError(t, manager.executionStore.Add(execution))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(handler.release) }) }
+	t.Cleanup(release)
+
+	require.NoError(t, manager.StopAgentWithReason(context.Background(), execution.ID, "task tree deleted", false))
+	require.Len(t, backend.stopInstanceCalls, 1, "runtime stop must not wait for derived summary processing")
+	select {
+	case <-handler.entered:
+	case <-time.After(time.Second):
+		t.Fatal("summary retry worker did not start")
+	}
+}
+
 // @covers AC-TASKS-RUNTIME-CLEANUP-001.1, AC-TASKS-RUNTIME-CLEANUP-001.42
 func TestStopAgentCaptureWorkHonorsDeadline(t *testing.T) {
-	for _, phase := range []string{"capture", "summary"} {
+	for _, phase := range []string{"capture"} {
 		t.Run(phase, func(t *testing.T) {
 			manager, backend := newDetachTestManager(t, false)
 			execution := &AgentExecution{
@@ -145,7 +214,13 @@ func TestStopAgentCaptureWorkHonorsDeadline(t *testing.T) {
 			t.Cleanup(cancel)
 			done := make(chan error, 1)
 			go func() { done <- manager.StopAgentWithReason(ctx, execution.ID, "task tree deleted", false) }()
-			<-handler.entered
+			select {
+			case <-handler.entered:
+			case err := <-done:
+				t.Fatalf("stop returned before the %s phase ran: %v", phase, err)
+			case <-time.After(lockOrderDeadlockGuard):
+				t.Fatalf("%s phase was not entered within %v", phase, lockOrderDeadlockGuard)
+			}
 			cancel()
 			select {
 			case err := <-done:

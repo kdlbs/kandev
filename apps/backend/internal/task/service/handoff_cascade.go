@@ -605,6 +605,11 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	deleteCompensationCtx, cancelDeleteCompensation := archivecascade.ContinuationContextUntil(ctx, deleteDeadline)
 	defer cancelDeleteCompensation()
 	postDeleteCtx := deleteCompensationCtx
+	if err := s.cancelDeleteRuns(postDeleteCtx, all, options); err != nil {
+		cancelErr := s.cancelDeletePreparedCleanups(deleteCompensationCtx, all, cleanupOps)
+		rollbackErr := s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(deleteCompensationCtx, ownershipTransfers, nil)
+		return out, errors.Join(err, cancelErr, rollbackErr)
+	}
 	var noCascadeSnapshots []*models.Task
 	if !cascade {
 		noCascadeSnapshots, err = s.reparentNoCascadeChildren(postDeleteCtx, rootID)
@@ -614,13 +619,6 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 				deleteCompensationCtx, ownershipTransfers, err)
 			return out, errors.Join(err, rollbackErr, cancelErr)
 		}
-	}
-
-	if err := s.cancelDeleteRuns(postDeleteCtx, all, options); err != nil {
-		cancelErr := s.cancelDeletePreparedCleanups(deleteCompensationCtx, all, cleanupOps)
-		rollbackErr := s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(deleteCompensationCtx, ownershipTransfers, nil)
-		childRestoreErr := s.restoreNoCascadeChildren(deleteCompensationCtx, noCascadeSnapshots)
-		return out, errors.Join(err, cancelErr, rollbackErr, childRestoreErr)
 	}
 	// Release memberships BEFORE deleting the task rows so the
 	// membership cleanup evaluation sees the group's full audit

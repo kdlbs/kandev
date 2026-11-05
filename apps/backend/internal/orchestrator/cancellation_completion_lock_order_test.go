@@ -33,6 +33,7 @@ func (m *settlementGuardAgentManager) AcknowledgeRetainedPromptFailure(execution
 func newSettlementGuardFixture(t *testing.T) (*Service, *settlementGuardAgentManager, *mockMessageCreator) {
 	t.Helper()
 	svc, messages := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
 	base := svc.agentManager.(*mockAgentManager)
 	base.isAgentRunning = true
 	base.currentPromptExecutionID = "execution-1"

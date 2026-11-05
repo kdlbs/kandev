@@ -1373,7 +1373,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
 	execution.cancelStartupRecovery()
-	if err := execution.remoteInstanceLifecycleMu.LockContext(ctx); err != nil {
+	stopCtx := ctx
+	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
+	if force || preserveRuntime {
+		var cancelStop context.CancelFunc
+		stopCtx, cancelStop = kubernetesDurableContext(ctx)
+		defer cancelStop()
+	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(stopCtx); err != nil {
 		return err
 	}
 	defer execution.remoteInstanceLifecycleMu.Unlock()
@@ -1387,13 +1394,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		m.streamManager.cancelDeliveryReconciliation(executionID)
 	}
 	backendForce := force
-	stopCtx := ctx
-	preserveRuntime := shouldPreserveRecoverableRuntime(execution, reason)
 	if preserveRuntime {
 		backendForce = false
-		var cancelStop context.CancelFunc
-		stopCtx, cancelStop = kubernetesDurableContext(ctx)
-		defer cancelStop()
 	}
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
@@ -1437,6 +1439,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// stop the failed process before its environment is preserved for another retry.
 	if reason != StopReasonBackendShutdown {
 		if err := m.preserveTurnChangesBeforeStop(stopCtx, execution, reason); err != nil {
+			if m.streamManager != nil {
+				m.streamManager.restoreDeliveryReconciliation(executionID)
+			}
 			return fmt.Errorf("preserve turn changes for execution %q: %w", executionID, err)
 		}
 	}

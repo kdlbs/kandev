@@ -78,6 +78,49 @@ type failedDeleteStop struct {
 	deadline time.Time
 }
 
+type waitForDeleteDeadlineStop struct{}
+
+func (waitForDeleteDeadlineStop) CancelTaskExecution(context.Context, string, string, bool) error {
+	return errors.New("synchronous stop is required")
+}
+
+func (waitForDeleteDeadlineStop) CancelTaskExecutionSynchronously(ctx context.Context, _, _ string, _ bool) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type contextAwareDeleteRepo struct {
+	*fakeDeleteRepo
+}
+
+func (r *contextAwareDeleteRepo) RestoreTaskParentIfUnchanged(
+	ctx context.Context, childID, expectedParentID, parentID string, workspaceMode string,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.fakeDeleteRepo.RestoreTaskParentIfUnchanged(ctx, childID, expectedParentID, parentID, workspaceMode)
+}
+
+func TestDeleteTaskTreeStopDeadlinePreservesNoCascadeChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	base := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	repo := &contextAwareDeleteRepo{fakeDeleteRepo: base}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	svc.SetRunCanceller(waitForDeleteDeadlineStop{})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := svc.DeleteTaskTree(ctx, "root", false)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	child, getErr := tasks.GetTask(context.Background(), "child")
+	require.NoError(t, getErr)
+	require.Equal(t, "root", child.ParentID,
+		"the parent link must remain untouched when strict shutdown reaches the delete deadline")
+}
+
 func (s *failedDeleteStop) CancelTaskExecution(context.Context, string, string, bool) error {
 	return errors.New("synchronous stop is required")
 }
