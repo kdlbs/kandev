@@ -43,6 +43,9 @@ provenance. See [task 01](task-01-classify-startup-launch-failures.md).
 - `golangci-lint run ./internal/orchestrator/...`
 - `make -C apps/backend build`
 
-The typed-rejection follow-up uses temporary targeted checks of startup
-identity, recorded effects and the pre-process admission callback; it does not
-claim a live-provider or full-backend run.
+The typed-rejection follow-up has permanent regressions in
+`dynamic_startup_model_test.go` and `dynamic_startup_evidence_test.go`.
+They cover typed rejection, prompt delivery evidence, resume failures, route
+ownership, candidate policy, recorded effects, and execution admission.
+The work order records focused verification. No live-provider or full-backend
+run is claimed.

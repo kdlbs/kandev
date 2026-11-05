@@ -66,3 +66,41 @@ a launch error is classified.
   binding, generic model classification without typed rejection, and retired
   state without a record. It verifies exact-attempt pre-start binding, caller
   callback preservation, stale-callback fencing, and the typed/retired guards.
+
+## Permanent regression coverage
+
+`dynamic_startup_model_test.go` covers the typed rejection, missing or false
+unsent-prompt evidence, resume failures, fixed profiles, and stale route ownership.
+The handler tests use persisted routes to verify both `try_next` and `stop`.
+
+`dynamic_startup_evidence_test.go` covers unsafe evidence, recorded output and
+effects, absent records, retired attempts, and stale admission callbacks.
+The admission test uses `dynamicTaskDownstream.Launch` and the executor callback
+to verify execution binding before process start and preservation of the caller callback.
+
+Focused verification from `apps/backend` passed:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -trimpath -race -p 2 \
+  ./internal/orchestrator \
+  -run 'TestDynamicStartup|TestDynamicLaunch|TestDynamicAttemptEvidence|TestDynamicPreResult|TestWorkflowAsyncStartFailure_DynamicFallbackOwnership' \
+  -count=1
+```
+
+The documentation catalog check passed with `python3 scripts/list-docs.py validate`.
+Scoped Go lint passed with zero issues for the same package.
+The default wrapper reported zero issues but timed out. A serialized retry with
+a ten-minute limit passed:
+
+```bash
+task_lint_base=$(scripts/resolve-go-lint-base --comparison-base)
+cd apps/backend
+export GOMEMLIMIT=3GiB GOMAXPROCS=2
+export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=2"
+golangci-lint run ./internal/orchestrator \
+  --new-from-rev="$task_lint_base" --timeout=10m --concurrency=2 \
+  --allow-serial-runners
+```
+
+Public documentation needs no update because this follow-up adds coverage without
+changing production behavior.
