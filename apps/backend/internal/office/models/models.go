@@ -120,23 +120,25 @@ const (
 // receives a new ID and attempt number, so delayed predecessor events cannot
 // be accepted as updates to the successor.
 type RunSession struct {
-	ID                 string          `json:"id" db:"id"`
-	WorkspaceID        string          `json:"workspace_id" db:"workspace_id"`
-	AgentProfileID     string          `json:"agent_profile_id" db:"agent_profile_id"`
-	RunID              string          `json:"run_id" db:"run_id"`
-	Attempt            int             `json:"attempt" db:"attempt"`
-	State              RunSessionState `json:"state" db:"state"`
-	ExecutionID        string          `json:"execution_id" db:"execution_id"`
-	ExecutionProfileID string          `json:"execution_profile_id" db:"execution_profile_id"`
-	Adapter            string          `json:"adapter" db:"adapter"`
-	Model              string          `json:"model" db:"model"`
-	ACPSessionID       string          `json:"acp_session_id" db:"acp_session_id"`
-	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
-	StartedAt          *time.Time      `json:"started_at,omitempty" db:"started_at"`
-	FinishedAt         *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
-	CancelRequestedAt  *time.Time      `json:"cancel_requested_at,omitempty" db:"cancel_requested_at"`
-	ErrorMessage       string          `json:"error_message,omitempty" db:"error_message"`
-	Version            int64           `json:"version" db:"version"`
+	AdmittedExecutionGrade      string          `json:"admitted_execution_grade" db:"admitted_execution_grade"`
+	AdmittedExecutionGradeKnown bool            `json:"admitted_execution_grade_known" db:"admitted_execution_grade_known"`
+	ID                          string          `json:"id" db:"id"`
+	WorkspaceID                 string          `json:"workspace_id" db:"workspace_id"`
+	AgentProfileID              string          `json:"agent_profile_id" db:"agent_profile_id"`
+	RunID                       string          `json:"run_id" db:"run_id"`
+	Attempt                     int             `json:"attempt" db:"attempt"`
+	State                       RunSessionState `json:"state" db:"state"`
+	ExecutionID                 string          `json:"execution_id" db:"execution_id"`
+	ExecutionProfileID          string          `json:"execution_profile_id" db:"execution_profile_id"`
+	Adapter                     string          `json:"adapter" db:"adapter"`
+	Model                       string          `json:"model" db:"model"`
+	ACPSessionID                string          `json:"acp_session_id" db:"acp_session_id"`
+	CreatedAt                   time.Time       `json:"created_at" db:"created_at"`
+	StartedAt                   *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt                  *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
+	CancelRequestedAt           *time.Time      `json:"cancel_requested_at,omitempty" db:"cancel_requested_at"`
+	ErrorMessage                string          `json:"error_message,omitempty" db:"error_message"`
+	Version                     int64           `json:"version" db:"version"`
 }
 
 // ProjectStatus represents the status of a project.

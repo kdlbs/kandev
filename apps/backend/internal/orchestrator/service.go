@@ -1917,6 +1917,7 @@ func NewService(
 		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
 		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
+	s.wireQueuedTaskCapacityPriority()
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
 	}); ok {

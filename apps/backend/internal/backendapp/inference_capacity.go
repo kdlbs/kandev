@@ -32,7 +32,7 @@ type sharedInferenceConsumer struct {
 	sources          []inferenceClientSource
 	refreshMu        sync.Mutex
 	workerMu         sync.Mutex
-	workers          map[string]struct{}
+	workers          map[string]inferenceWorker
 }
 
 func inferenceBindingKey(owner, attempt string) string { return "inference:" + owner + ":" + attempt }
@@ -140,10 +140,10 @@ func (b *sharedInferenceConsumer) markWorker(key string, active bool) {
 	b.workerMu.Lock()
 	defer b.workerMu.Unlock()
 	if b.workers == nil {
-		b.workers = make(map[string]struct{})
+		b.workers = make(map[string]inferenceWorker)
 	}
 	if active {
-		b.workers[key] = struct{}{}
+		b.workers[key] = inferenceWorker{}
 	} else {
 		delete(b.workers, key)
 	}
