@@ -535,6 +535,22 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 	return result, nil
 }
 
+// taskSessionAgentWorkspaceSelect projects the confirmed native workspace from
+// the current incarnation's latest committed harness generation. The raw
+// task_sessions.workspace_path column is mutable and can be overwritten with
+// the effective environment root, so it is not durable evidence of the
+// agent's checkout. The correlated subquery reuses the existing
+// (session_id, incarnation_id, generation DESC) index and stays portable
+// across SQLite and PostgreSQL.
+const taskSessionAgentWorkspaceSelect = `COALESCE((
+		SELECT NULLIF(hg.current_workspace, '')
+		FROM harness_session_generations hg
+		WHERE hg.session_id = ts.id
+		  AND hg.incarnation_id = COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id)
+		ORDER BY hg.generation DESC
+		LIMIT 1
+	), '')`
+
 // taskSessionSelectCols is the column list used by every SELECT that scans
 // into a *models.TaskSession via scanTaskSession / scanTaskSessionRow. Centralised
 // so columns can be added in one place. Order MUST match the scan helpers.
@@ -554,6 +570,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.executor_id, ts.executor_profile_id, ts.environment_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha,
 	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
+	` + taskSessionAgentWorkspaceSelect + `,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
@@ -1612,6 +1629,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
@@ -4561,6 +4579,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.ExecutionProfileID, &session.RouteGeneration, &session.RouteState, &session.RouteReason, &session.DownstreamACPSessionID,
 		&session.ExecutorID, &session.ExecutorProfileID, &session.EnvironmentID,
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
+		&session.AgentWorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,

@@ -1653,6 +1653,43 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("xdg-utils", install)
         self.assertIn("command -v xdg-open", install)
 
+    def test_immutable_host_release_is_verified_without_publication_writes(self) -> None:
+        inspect = job_step_block("publish-release", "Inspect published release")
+        self.assertIn("id: existing_release", inspect)
+        self.assertIn("existing-release.mjs inspect", inspect)
+        verify = job_step_block("publish-release", "Verify immutable release assets")
+        self.assertIn("if: steps.existing_release.outputs.reuse == 'true'", verify)
+        self.assertIn("existing-release.mjs verify", verify)
+        self.assertNotIn("continue-on-error", verify)
+        for name in (
+            "Generate release notes",
+            "Add unsigned desktop warning to release notes",
+            "Generate and verify updater manifest",
+            "Publish release",
+        ):
+            block = job_step_block("publish-release", name)
+            self.assertIn("if: steps.existing_release.outputs.reuse != 'true'", block)
+        load = job_step_block("publish-release", "Load publication helpers")
+        self.assertIn('git checkout "$GITHUB_WORKFLOW_SHA" -- scripts/release', load)
+        self.assertIn("needs.publish-release.result == 'success'", job_block("prepare-plugin-sdk"))
+
+    def test_updater_verifier_uses_installed_supported_toolchain(self) -> None:
+        install = step_block("Install updater signature verifier toolchain")
+        generate = step_block("Generate and verify updater manifest")
+        installed = re.search(r"rustup toolchain install (\d+\.\d+\.\d+)", install)
+        selected = re.search(r"RUSTUP_TOOLCHAIN: (\d+\.\d+\.\d+)", generate)
+        self.assertIsNotNone(installed)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected[1], installed[1])
+
+        manifest = (REPO_ROOT / "apps/desktop/src-tauri/Cargo.toml").read_text()
+        minimum = re.search(r'^rust-version = "([\d.]+)"', manifest, re.MULTILINE)
+        self.assertIsNotNone(minimum)
+        self.assertGreaterEqual(
+            tuple(map(int, selected[1].split("."))),
+            tuple(map(int, minimum[1].split("."))),
+        )
+
     def test_updater_manifest_date_dereferences_annotated_tag(self) -> None:
         generate = step_block("Generate and verify updater manifest")
         self.assertIn("git show -s --format=%cI", generate)

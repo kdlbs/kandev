@@ -14,7 +14,7 @@ owners:
 ## Purpose and boundaries
 
 Platform owns repository observation, bounded computation, and publication. Tasks owns the canonical environment and workspace binding.
-This design specifies progressive refresh publication while preserving those ownership boundaries.
+It covers progressive publication. [Scope lifecycle](git-repository-scope-lifecycle.md) covers inventory transitions.
 The [environment-owned design](../../tasks/system-design/environment-owned-git-status.md) remains authoritative for source eligibility and persistence selection.
 The protocol and lifecycle rules below describe the current system.
 

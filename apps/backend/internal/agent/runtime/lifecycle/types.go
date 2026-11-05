@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -107,7 +108,7 @@ type AgentExecution struct {
 	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
 	// Fresh native startup buffers delivery until its initial SQL generation exists.
 	deliveryBootstrap          atomic.Bool
-	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStartup            atomic.Pointer[deliveryStartupAttempt]
 	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
@@ -190,7 +191,7 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptTurnIDs     map[uint64]string
-	promptLifecycleMu sync.Mutex
+	promptLifecycleMu ctxmutex.Mutex
 	// cancelEscalatedPromptGeneration identifies a prompt whose cancellation
 	// released the execution locally before the agentctl stream closed. The
 	// resulting disconnect is expected teardown and must not replace the
@@ -242,7 +243,7 @@ type AgentExecution struct {
 	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
-	remoteInstanceLifecycleMu sync.Mutex
+	remoteInstanceLifecycleMu ctxmutex.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
 	// manager has committed the new ACP session. A timed-out attempt discards
