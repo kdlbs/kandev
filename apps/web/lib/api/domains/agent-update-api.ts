@@ -70,6 +70,16 @@ export type AgentUpdatePreview = {
   available_versions?: AgentUpdateVersion[];
   command: string[];
   command_string: string;
+  copilot_plugin_compatibility?: CopilotPluginCompatibility;
+};
+
+export type CopilotPluginCompatibility = {
+  runtime_version: string;
+  supported: boolean;
+  supported_versions: string[];
+  reason?: string;
+  /** Null means the saved-profile impact could not be read. */
+  selected_profile_count: number | null;
 };
 
 export async function previewAgentUpdate(

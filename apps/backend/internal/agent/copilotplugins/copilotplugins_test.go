@@ -509,7 +509,7 @@ func TestConfigDirPrecedence(t *testing.T) {
 }
 
 func TestRuntimeSupportedVersions(t *testing.T) {
-	for _, version := range []string{"1.0.88", "1.0.104"} {
+	for _, version := range []string{"1.0.88", "1.0.104", "1.0.105"} {
 		if !RuntimeSupported(version) {
 			t.Fatalf("%s should be qualified", version)
 		}
@@ -565,7 +565,7 @@ func TestSelectionTimeoutUsesRequestDeadline(t *testing.T) {
 }
 
 func TestCopilotPluginNativeAuthorityAdmission(t *testing.T) {
-	for _, version := range []string{"1.0.88", "1.0.104"} {
+	for _, version := range []string{"1.0.88", "1.0.104", "1.0.105"} {
 		t.Run(version, func(t *testing.T) {
 			root := t.TempDir()
 			writePlugin(t, root, "plugin.json", "spark", "1.0.0")
@@ -600,6 +600,64 @@ func TestCopilotPluginNativeAuthorityAdmission(t *testing.T) {
 				t.Fatalf("inventory argv = %#v, want selected runtime %s", runner.calls[0], version)
 			}
 		})
+	}
+}
+
+// TestCopilotPluginRuntime105Admission is the offline production-path
+// regression for the native-observed 1.0.105 flat inventory and cached-install
+// config shape. Native-written agreement is covered separately by
+// TestCopilotPluginNativeAdapterAcceptance under the copilot_native tag.
+func TestCopilotPluginRuntime105Admission(t *testing.T) {
+	const version = "1.0.105"
+	root := t.TempDir()
+	writePlugin(t, root, "plugin.json", "spark", "1.0.0")
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDir := t.TempDir()
+	writeFile(t, filepath.Join(configDir, "config.json"),
+		`{"installedPlugins":[{"name":"spark","marketplace":"m","version":"1.0.0","cache_path":`+quote(root)+`}]}`)
+	runner := &fakeRunner{result: CommandResult{Stdout: []byte(
+		`[{"name":"spark","marketplace":"m","version":"1.0.0","enabled":true,"source":"installed"}]`,
+	)}}
+	launch := launchFor(t, configDir)
+	launch.RuntimeVersion = version
+	launch.RuntimeCommand = []string{"npx", "--yes", "--prefer-offline", "@github/copilot@" + version}
+
+	snapshot := Discover(context.Background(), runner, launch)
+	if snapshot.Status != StatusReady || len(snapshot.Rows) != 1 {
+		t.Fatalf("discovery = %#v, want one ready 1.0.105 row", snapshot)
+	}
+	prepared, err := ResolveLaunchSelection(
+		context.Background(), runner, launch, []string{"installed:m/spark"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveLaunchSelection: %v", err)
+	}
+	if len(prepared.Plugins) != 1 || prepared.Plugins[0].Root != wantRoot {
+		t.Fatalf("prepared plugins = %#v, want verified root %q", prepared.Plugins, wantRoot)
+	}
+	args, err := ApplyToArgs(
+		[]string{"npx", "--yes", "--prefer-offline", "@github/copilot@" + version, "--acp"},
+		prepared.Plugins,
+	)
+	if err != nil {
+		t.Fatalf("ApplyToArgs: %v", err)
+	}
+	if !containsSequence(args, "--plugin-dir", wantRoot) {
+		t.Fatalf("prepared argv = %#v, want selected plugin mount", args)
+	}
+	if !RuntimeSupported(version) || !MountsPermitted(version) {
+		t.Fatalf("version %s is not consistently eligible for discovery and mounting", version)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("inventory calls = %d, want discovery and admission", len(runner.calls))
+	}
+	for _, call := range runner.calls {
+		if !containsSequence(call, "@github/copilot@"+version, "plugin", "list") {
+			t.Fatalf("inventory argv = %#v, want selected runtime %s", call, version)
+		}
 	}
 }
 

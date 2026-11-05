@@ -103,15 +103,16 @@ func (c *Controller) DiscoverCopilotPlugins(
 		return nil, ErrCopilotPluginDiscoverySuperseded
 	}
 	response := &dto.CopilotPluginDiscoveryResponse{
-		AgentID:         agentID,
-		ProfileID:       req.ProfileID,
-		ProviderID:      copilotPluginDiscoveryProvider,
-		Status:          string(snapshot.Status),
-		Reason:          string(snapshot.Reason),
-		ContextRevision: revision,
-		RuntimeVersion:  snapshot.RuntimeVersion,
-		MountPermitted:  copilotplugins.MountsPermitted(version),
-		Plugins:         copilotPluginRows(snapshot.Rows),
+		AgentID:                  agentID,
+		ProfileID:                req.ProfileID,
+		ProviderID:               copilotPluginDiscoveryProvider,
+		Status:                   string(snapshot.Status),
+		Reason:                   string(snapshot.Reason),
+		ContextRevision:          revision,
+		RuntimeVersion:           snapshot.RuntimeVersion,
+		SupportedRuntimeVersions: copilotplugins.SupportedRuntimeVersions(),
+		MountPermitted:           copilotplugins.MountsPermitted(version),
+		Plugins:                  copilotPluginRows(snapshot.Rows),
 	}
 	if !c.publishCopilotPluginDiscovery(revision, generation, response) {
 		return nil, ErrCopilotPluginDiscoverySuperseded
@@ -339,5 +340,6 @@ func cloneCopilotPluginResponse(value *dto.CopilotPluginDiscoveryResponse) *dto.
 	}
 	clone := *value
 	clone.Plugins = append([]dto.CopilotPluginDiscoveryPlugin{}, value.Plugins...)
+	clone.SupportedRuntimeVersions = append([]string{}, value.SupportedRuntimeVersions...)
 	return &clone
 }

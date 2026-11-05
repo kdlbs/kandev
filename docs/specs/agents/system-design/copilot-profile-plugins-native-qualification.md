@@ -35,12 +35,130 @@ not grant policy, credential, or administrator authority.
 
 Numbers use prefix `REQ-AGENTS-COPILOT-PLUGINS-`.
 
+## Runtime compatibility amendment
+
+The [issue #5064 package](../../../plans/copilot-runtime-plugin-compatibility/plan.md)
+extends adapter qualification and exposes its effect in runtime and profile
+settings. Implementation now delivers the runtime-impact preview, profile
+recovery, and exact `1.0.105` admission described here.
+
+### One adapter-version source
+
+`copilotplugins.RuntimeSupported` remains the admission predicate.
+Add `SupportedRuntimeVersions() []string` beside it, derived from the same
+exact-version inventory set. Return an independent, deterministically ordered
+slice. Discovery, runtime previews, and recovery must not maintain another list.
+
+`1.0.105` was added only after the exact managed npm package passed adapter
+checks with disposable native fixtures. Those checks cover inventory containers,
+native installation metadata, matching manifests, and repeated `--plugin-dir`
+arguments, including a special-character path. Native-written installation
+evidence agrees with Kandev resolution; a hand-written compatible JSON fixture
+alone does not qualify the adapter.
+
+Use the existing evidence ledger. A focused `copilot_native` adapter test can
+exercise this contract without model prompts or enterprise-policy fixtures.
+Keep the full authenticated diagnostic separate and preserve its failures.
+No authenticated tool behavior or enterprise enforcement follows from adapter
+qualification. A demonstrated incompatible schema requires a bounded adapter
+design before admission; do not widen support to a version range.
+
+### Runtime preview projection
+
+Extend `settings/dto.AgentUpdatePreviewDTO` with optional
+`copilot_plugin_compatibility`, populated only for the built-in `copilot-acp`
+managed package. The response-only object contains:
+
+- `runtime_version`: the exact resolved preview target, including use-default.
+- `supported`: the result of `RuntimeSupported(runtime_version)`.
+- `supported_versions`: the shared qualified-version list.
+- `reason`: `runtime_unsupported` for an unqualified target; absent otherwise.
+- `selected_profile_count`: a nullable integer. Null means impact is unknown.
+
+An absent object means that an older server supplied no compatibility evidence.
+It does not mean supported. The object reports preparation eligibility, not
+native policy, authentication, root availability, or general ACP compatibility.
+
+Build the projection in `Controller.previewAgentUpdate` after target resolution.
+Use `GetAgentByName(ctx, agents.CopilotACPAgentID)` and `ListAgentProfiles`
+through the existing settings repository. Count each non-deleted concrete
+Copilot profile once if `len(CopilotSelectedPlugins) > 0`, including disabled
+profiles. Empty selections, foreign providers, and deleted profiles do not
+contribute. Mixed-state tests must contain all these controls.
+
+A repository error produces a null count, without raw error text or a false
+zero. Cancellation still follows the preview request context. This read-only
+snapshot does not fence later profile edits or promise an atomic impact count
+at activation. A reopen or target change obtains a new preview.
+
+Do not run native inventory, inspect plugin roots, read profile secrets, or
+enumerate authentication stores for the preview. Return no profile names,
+identities, plugin IDs, roots, or native output in this object.
+
+Render compatibility beside the target summary before the existing approval
+action in `RuntimeUpdatePreviewDetails`. An unqualified target shows the impact
+count, or explicit unknown impact, and qualified alternatives. Zero affected
+profiles still leaves the target's plugin limitation visible. A qualified
+target must not promise that every selected plugin can load.
+
+Reuse `useAgentUpdateDialogState` request ownership and target fencing. A delayed
+preview for another target must not replace the current compatibility notice.
+The notice adds no approval, persistence, fallback, or activation gate. The
+[runtime selection contract](runtime-updates-01.md) still governs staging and
+ACP validation.
+
+### Profile recovery and unknown status
+
+Add optional `supported_runtime_versions` to the safe Copilot discovery DTO and
+browser type. Populate it from the shared list for concrete Copilot responses,
+including an unsupported runtime result. Preserve existing authorization,
+runtime/context revisions, cache invalidation, and superseded-response handling.
+
+`CopilotPluginProfileSelection` uses the current response's `reason`,
+`runtime_version`, and supported list for localized guidance. A
+`runtime_unsupported` response explains the actual version and qualified
+alternatives. Keep explicit uncheck/Save recovery. Legacy `policy_unverified`,
+unsupported launch contexts, absent metadata, and unknown reason codes retain
+their own safe fallback; do not label every failure as a version rejection.
+Stale data cannot identify a previously observed version as the current one.
+
+Change the browser row's `nativeEnabled` to `boolean | null`. Only a fresh,
+successful inventory row supplies a boolean. Missing identities and stale or
+failed observations supply null. Root unavailability on a fresh discovered row
+does not erase its native activation observation. Render null as localized
+unknown status; never convert it to disabled. This is a browser projection
+change, not a nullable native inventory parser or stored profile migration.
+
+Preserve selection arrays, unrelated drafts, model choices, Save/Reset, missing
+row removal, and deferred command preview. Refresh does not qualify versions.
+An older response without a version list cannot justify a hardcoded list in
+the browser.
+
+### Desktop and phone composition
+
+Reuse the shipped `AgentRuntimeUpdateSurface`: desktop dialog, phone bottom
+drawer, one existing body scroller, fixed actions, and safe-area clearance.
+Compatibility is inline content before approval, never tooltip-only feedback.
+Keep phone targets at least 44px and ordinary desktop actions at 28px.
+
+Profile recovery stays on the direct Settings > Agents > Copilot > Profile
+route. Reuse `CopilotPluginProfileSelection`, wrapping row metadata, the
+settings page scroller, and `SettingsFloatingSave`. No additional overlay or
+nested plugin scroller is necessary for these short status messages.
+All new text uses the seven shipped catalogs and generated Traditional
+Chinese/pseudo catalogs. The plan and UI work orders contain structural views.
+
 ## Evidence baseline
 
-The inventory adapter supports `1.0.88` and `1.0.104`. WO-04 removed the empty
-`policyVerifiedVersions` gate and `RequireMountPolicy`. Mount preparation now
-uses the same supported-version predicate as discovery, not privileged
-qualification results.
+The inventory adapter supports `1.0.88`, `1.0.104`, and `1.0.105`. WO-04
+removed the empty `policyVerifiedVersions` gate and `RequireMountPolicy`. Mount
+preparation uses the same supported-version predicate as discovery, not
+privileged qualification results. The focused Linux x64 adapter test recorded
+exact package identity, a successful fresh inventory, a native-written remote
+marketplace install with `config.json` installed metadata and a
+`source=installed` row, a local directory marketplace `source=live` control,
+matching root manifests, production discovery/admission for both shapes, and
+two repeated mounts with special-character paths.
 
 The [sole evidence ledger](../../../plans/copilot-profile-plugins/compatibility-evidence.md)
 preserves historical Linux observations and macOS arm64 native attempts.
@@ -131,9 +249,11 @@ implicit replacement release gate.
 ## Fixtures and execution
 
 Use the existing `copilot_native` build-tagged external acceptance harness.
-Ordinary tests remain offline and credential-free. Native runs use temporary
-plugin/MCP fixtures and structured argv under an existing authorized identity.
-Do not copy an authentication store or bootstrap credentials.
+The focused adapter test owns disposable home, config, npm cache, and work
+directories and needs no model prompt or authentication. Ordinary tests remain
+offline and credential-free. Native runs use temporary plugin/MCP fixtures and
+structured argv under an existing authorized identity. Do not copy an
+authentication store or bootstrap credentials.
 
 The explicit full diagnostic test still fails if its required controls are
 missing. That failure is a diagnostic result, not a production permission bit.

@@ -32,6 +32,10 @@ type CopilotPluginDiscoveryResponse struct {
 	Reason          string `json:"reason,omitempty"`
 	ContextRevision string `json:"context_revision,omitempty"`
 	RuntimeVersion  string `json:"runtime_version,omitempty"`
+	// SupportedRuntimeVersions names the exact runtimes whose native inventory
+	// and plugin mount adapters are qualified. It is bounded provider metadata,
+	// never a claim about native policy or authentication.
+	SupportedRuntimeVersions []string `json:"supported_runtime_versions,omitempty"`
 	// MountPermitted reports whether a nonempty selection can start a new
 	// local/worktree process on the qualified runtime.
 	MountPermitted bool                           `json:"mount_permitted"`

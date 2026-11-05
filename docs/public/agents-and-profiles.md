@@ -1062,13 +1062,25 @@ selection asks Copilot to load the whole plugin for this profile; it does not
 enable the plugin globally.
 
 Kandev supports inventory and plugin-metadata adapters for managed Copilot CLI
-versions **1.0.88** and **1.0.104**. For a supported version and valid local or
-worktree context, Kandev can prepare a native `--plugin-dir` mount without an
-enterprise-policy qualification gate. `mount_permitted` describes that
-preparation eligibility; it is not policy approval, authentication, or a
-guarantee that a plugin component will load. Kandev uses the runtime selected
-for this profile and does not fall back to an unrelated global CLI or change a
-runtime pin.
+versions **1.0.88**, **1.0.104**, and **1.0.105**. For a supported version and
+valid local or worktree context, Kandev can prepare a native `--plugin-dir`
+mount without an enterprise-policy qualification gate. `mount_permitted`
+describes that preparation eligibility; it is not policy approval,
+authentication, or a guarantee that a plugin component will load. Kandev uses
+the runtime selected for this profile and does not fall back to an unrelated
+global CLI or change a runtime pin.
+
+Before a Copilot runtime change, the update preview names the target version's
+plugin support and, for an unqualified target, how many saved profiles have
+nonempty selections. The notice is advisory. It does not block the update,
+change selections, or stop a running process. Successful ACP validation does
+not by itself make explicit profile plugins compatible.
+
+If the active runtime is unqualified, the profile shows that version and the
+qualified alternatives. Select a qualified runtime, or uncheck plugins and
+Save. Refresh does not qualify a runtime. Native enabled status is unknown for
+a saved plugin that the current successful inventory did not observe; Kandev
+does not report that unknown state as disabled.
 
 A selection asks Copilot to load the whole plugin through its native support. A plugin
 can run MCP servers, skills, agents, commands, hooks, and other executable

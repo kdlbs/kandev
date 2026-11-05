@@ -7,7 +7,15 @@ export const COPILOT_RECOVERY_MODEL_ID = "fixture-copilot-model";
 export const COPILOT_RECOVERY_CONFIG_OPTIONS = { reasoning_effort: "high" };
 
 type CopilotPluginDiscoveryOptions = Partial<
-  Pick<CopilotPluginDiscoveryResponse, "status" | "runtime_version" | "mount_permitted" | "plugins">
+  Pick<
+    CopilotPluginDiscoveryResponse,
+    | "status"
+    | "runtime_version"
+    | "mount_permitted"
+    | "plugins"
+    | "reason"
+    | "supported_runtime_versions"
+  >
 >;
 
 export type CopilotPluginFixture = NonNullable<
@@ -167,6 +175,12 @@ export function copilotPluginDiscovery(
     provider_id: "copilot-acp",
     status: options.status ?? "ready",
     runtime_version: options.runtime_version ?? "1.0.88",
+    supported_runtime_versions: options.supported_runtime_versions ?? [
+      "1.0.88",
+      "1.0.104",
+      "1.0.105",
+    ],
+    ...(options.reason ? { reason: options.reason } : {}),
     mount_permitted: options.mount_permitted ?? true,
     plugins: options.plugins ?? [
       {

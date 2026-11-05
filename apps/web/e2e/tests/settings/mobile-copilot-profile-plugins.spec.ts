@@ -205,7 +205,9 @@ test("phone users can remove a saved selection when the runtime is unsupported",
         body: JSON.stringify(
           copilotPluginDiscovery(fixture.agentId, fixture.profileId, {
             status: "unsupported",
-            runtime_version: "unsupported-fixture",
+            reason: "runtime_unsupported",
+            runtime_version: "9.9.9",
+            supported_runtime_versions: ["1.0.88", "1.0.104", "1.0.105"],
             mount_permitted: false,
             plugins: [],
           }),
@@ -218,6 +220,17 @@ test("phone users can remove a saved selection when the runtime is unsupported",
     const spark = selector.getByRole("checkbox", { name: "Select spark" });
     await expect(selector).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("copilot-plugins-unsupported")).toBeVisible();
+    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "Copilot 9.9.9: plugin adapter unavailable.",
+    );
+    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "Qualified versions: 1.0.88, 1.0.104, 1.0.105",
+    );
+    await expect(testPage.getByTestId("copilot-plugins-unsupported")).toContainText(
+      "Select a qualified runtime, or uncheck plugins and Save.",
+    );
+    await expect(selector.getByText("Native status: unknown")).toBeVisible();
+    await expect(selector.getByText("Availability not checked.", { exact: true })).toBeVisible();
     await expect(selector.getByTestId("copilot-plugins-start-blocked")).toBeVisible();
     await expect(spark).toHaveCount(1);
     await expect(spark).toBeChecked();

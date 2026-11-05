@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +21,7 @@ const windowsOS = "windows"
 var inventoryQualifiedVersions = map[string]struct{}{
 	"1.0.88":  {},
 	"1.0.104": {},
+	"1.0.105": {},
 }
 
 // RuntimeSupported reports whether safe inventory discovery is qualified for
@@ -26,6 +29,51 @@ var inventoryQualifiedVersions = map[string]struct{}{
 func RuntimeSupported(version string) bool {
 	_, ok := inventoryQualifiedVersions[strings.TrimSpace(version)]
 	return ok
+}
+
+// SupportedRuntimeVersions returns the qualified versions in ascending order.
+// The slice is independent of the internal inventory set so callers cannot
+// mutate the admission predicate.
+func SupportedRuntimeVersions() []string {
+	versions := make([]string, 0, len(inventoryQualifiedVersions))
+	for version := range inventoryQualifiedVersions {
+		versions = append(versions, version)
+	}
+	sort.Slice(versions, func(left, right int) bool {
+		return compareRuntimeVersions(versions[left], versions[right]) < 0
+	})
+	return versions
+}
+
+func compareRuntimeVersions(left, right string) int {
+	leftParts := strings.Split(left, ".")
+	rightParts := strings.Split(right, ".")
+	for index := 0; index < len(leftParts) || index < len(rightParts); index++ {
+		leftPart, rightPart := "0", "0"
+		if index < len(leftParts) {
+			leftPart = leftParts[index]
+		}
+		if index < len(rightParts) {
+			rightPart = rightParts[index]
+		}
+		leftNumber, leftErr := strconv.Atoi(leftPart)
+		rightNumber, rightErr := strconv.Atoi(rightPart)
+		switch {
+		case leftErr == nil && rightErr == nil:
+			if leftNumber != rightNumber {
+				if leftNumber < rightNumber {
+					return -1
+				}
+				return 1
+			}
+		case leftPart != rightPart:
+			if leftPart < rightPart {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // MountsPermitted reports whether the selected runtime has a supported native

@@ -234,6 +234,28 @@ func TestCopilotPluginRuntimeSnapshotNotReread(t *testing.T) {
 	}
 }
 
+func TestCopilotPluginRuntime105Preparation(t *testing.T) {
+	root, configDir, runner := copilotPluginFixture(t)
+	selection := &copilotSelectionReader{version: "1.0.105"}
+	mgr := newCopilotLifecycleManager(t, copilotLaunchProfile(), selection)
+	mgr.SetCopilotPluginRunner(runner)
+	args, err := mgr.prepareCopilotPluginArgs(
+		context.Background(), copilotExecution(t, "profile-1"),
+		map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
+		[]string{"npx", "--yes", "--prefer-offline", "@github/copilot@1.0.105", "--acp"},
+	)
+	if err != nil {
+		t.Fatalf("prepare 1.0.105 runtime: %v", err)
+	}
+	if !containsSequence(args, "--plugin-dir", canonicalCopilotPluginRootForTest(t, root)) {
+		t.Fatalf("prepared args = %#v, want selected plugin mount", args)
+	}
+	if len(runner.calls) != 1 ||
+		!containsSequence(runner.calls[0], "@github/copilot@1.0.105", "plugin", "list") {
+		t.Fatalf("inventory command = %#v, want the selected 1.0.105 runtime", runner.calls)
+	}
+}
+
 func TestCopilotPluginSelectionUsesExecutionSnapshotAndRefreshesLegacy(t *testing.T) {
 	profile := copilotLaunchProfile()
 	mgr := newCopilotLifecycleManager(t, profile, nil)

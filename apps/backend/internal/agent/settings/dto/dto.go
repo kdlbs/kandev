@@ -517,25 +517,37 @@ type AgentUpdateJobDTO struct {
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
-	UpdateMode          AgentUpdateMode         `json:"update_mode"`
-	ManagedFallback     bool                    `json:"managed_fallback,omitempty"`
-	AgentName           string                  `json:"agent_name"`
-	Package             string                  `json:"package"`
-	CurrentVersion      string                  `json:"current_version,omitempty"`
-	DefaultVersion      string                  `json:"default_version"`
-	ActiveVersion       string                  `json:"active_version,omitempty"`
-	EffectiveVersion    string                  `json:"effective_version"`
-	TargetVersion       string                  `json:"target_version"`
-	StableLatestVersion string                  `json:"stable_latest_version,omitempty"`
-	Operation           string                  `json:"operation"`
-	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
-	Command             []string                `json:"command"`
-	CommandString       string                  `json:"command_string"`
-	Family              string                  `json:"family,omitempty"`
-	Source              string                  `json:"source,omitempty"`
-	TargetFamily        string                  `json:"target_family,omitempty"`
-	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
-	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
+	UpdateMode                 AgentUpdateMode                `json:"update_mode"`
+	ManagedFallback            bool                           `json:"managed_fallback,omitempty"`
+	AgentName                  string                         `json:"agent_name"`
+	Package                    string                         `json:"package"`
+	CurrentVersion             string                         `json:"current_version,omitempty"`
+	DefaultVersion             string                         `json:"default_version"`
+	ActiveVersion              string                         `json:"active_version,omitempty"`
+	EffectiveVersion           string                         `json:"effective_version"`
+	TargetVersion              string                         `json:"target_version"`
+	StableLatestVersion        string                         `json:"stable_latest_version,omitempty"`
+	Operation                  string                         `json:"operation"`
+	AvailableVersions          []AgentUpdateVersionDTO        `json:"available_versions"`
+	Command                    []string                       `json:"command"`
+	CommandString              string                         `json:"command_string"`
+	Family                     string                         `json:"family,omitempty"`
+	Source                     string                         `json:"source,omitempty"`
+	TargetFamily               string                         `json:"target_family,omitempty"`
+	RuntimeRevision            uint64                         `json:"runtime_revision,omitempty"`
+	MigrationAvailable         bool                           `json:"migration_available,omitempty"`
+	CopilotPluginCompatibility *CopilotPluginCompatibilityDTO `json:"copilot_plugin_compatibility,omitempty"`
+}
+
+// CopilotPluginCompatibilityDTO is the read-only runtime plugin preparation
+// projection for the built-in Copilot managed package. It reports preparation
+// eligibility, not native policy, authentication, or root availability.
+type CopilotPluginCompatibilityDTO struct {
+	RuntimeVersion       string   `json:"runtime_version"`
+	Supported            bool     `json:"supported"`
+	SupportedVersions    []string `json:"supported_versions"`
+	Reason               string   `json:"reason,omitempty"`
+	SelectedProfileCount *int     `json:"selected_profile_count"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.

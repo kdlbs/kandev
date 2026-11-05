@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -108,8 +109,42 @@ func TestCopilotPluginDiscoveryMountPermission(t *testing.T) {
 	if got.RuntimeVersion != "1.0.88" || !copilotplugins.RuntimeSupported(got.RuntimeVersion) {
 		t.Fatalf("discovery runtime = %q, want the supported default", got.RuntimeVersion)
 	}
+	if len(got.SupportedRuntimeVersions) != 3 || got.SupportedRuntimeVersions[0] != "1.0.88" {
+		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
+	}
 	if len(runner.calls) != 1 {
 		t.Fatalf("discovery ran %d inventory commands, want one", len(runner.calls))
+	}
+}
+
+func TestCopilotPluginDiscoveryReportsSupportedVersionsForUnsupportedRuntime(t *testing.T) {
+	ctrl, _, profileID := newCopilotDiscoveryController(t)
+	runner := &recordingCopilotRunner{stdout: []byte(`[]`)}
+	ctrl.copilotPluginRunnerImpl = runner
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values[agents.CopilotACPAgentID+"\x00@github/copilot"] = managedruntime.Selection{
+		Package: "@github/copilot",
+		Version: "9.9.9",
+	}
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	got, err := ctrl.DiscoverCopilotPlugins(context.Background(), "agent-row-1", dto.CopilotPluginDiscoveryRequest{
+		ProfileID: profileID, AuthorizationScope: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("DiscoverCopilotPlugins: %v", err)
+	}
+	if got.Status != "unsupported" || got.Reason != "runtime_unsupported" {
+		t.Fatalf("response = %#v", got)
+	}
+	if got.RuntimeVersion != "9.9.9" || got.MountPermitted {
+		t.Fatalf("runtime = %q mount permitted = %t", got.RuntimeVersion, got.MountPermitted)
+	}
+	if len(got.SupportedRuntimeVersions) != 3 || !copilotplugins.RuntimeSupported(got.SupportedRuntimeVersions[0]) {
+		t.Fatalf("supported runtime versions = %v", got.SupportedRuntimeVersions)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("unsupported runtime ran %d native commands", len(runner.calls))
 	}
 }
 

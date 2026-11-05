@@ -468,3 +468,4 @@ platform without claiming unobserved enterprise enforcement.
 
 - [Copilot profile plugins](../../../plans/copilot-profile-plugins/plan.md).
 - [Copilot profile plugin completion](../../../plans/copilot-profile-plugin-completion/plan.md).
+- [Copilot runtime plugin compatibility](../../../plans/copilot-runtime-plugin-compatibility/plan.md): issue #5064; qualification and runtime/profile recovery.

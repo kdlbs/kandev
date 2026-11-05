@@ -102,6 +102,24 @@ func TestCopilotPluginProfileUtility(t *testing.T) {
 	assertCopilotUtilityInventory(t, runner, 0, "1.0.104", workDir, configDir)
 }
 
+func TestCopilotPluginProfileUtilityRuntime105(t *testing.T) {
+	configDir, runner := copilotUtilityFixture(t)
+	mgr := &Manager{}
+	mgr.SetCopilotPluginRunner(runner)
+	workDir := t.TempDir()
+	flags, err := mgr.profileCopilotPluginFlags(context.Background(), agents.CopilotACPAgentID, ProfileProbeContext{
+		Env:                    map[string]string{"COPILOT_HOME": configDir, "PATH": os.Getenv("PATH")},
+		CopilotSelectedPlugins: []string{"installed:m/spark"},
+	}, workDir, utilityInferenceCommand("1.0.105"))
+	if err != nil {
+		t.Fatalf("profileCopilotPluginFlags: %v", err)
+	}
+	if !containsSequence(flags, "--plugin-dir", canonicalCopilotPluginRootForTest(t, runner.root)) {
+		t.Fatalf("utility flags = %#v, want selected plugin mount", flags)
+	}
+	assertCopilotUtilityInventory(t, runner, 0, "1.0.105", workDir, configDir)
+}
+
 func TestCopilotPluginExecuteProfilePromptUsesSelectedInventory(t *testing.T) {
 	configDir, runner := copilotUtilityFixture(t)
 	log := newTestLogger(t)

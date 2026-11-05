@@ -56,6 +56,13 @@ type UpdatePreview = {
   available_versions?: Array<{ version: string; latest: boolean }>;
   command: string[];
   command_string: string;
+  copilot_plugin_compatibility?: {
+    runtime_version: string;
+    supported: boolean;
+    supported_versions: string[];
+    reason?: string;
+    selected_profile_count: number | null;
+  };
 };
 
 export type RuntimeUpdateStatus = {
@@ -189,17 +196,38 @@ function previewForRequest(
 ): UpdatePreview {
   if (useDefault) {
     const defaultVersion = previewResponse.default_version ?? "0.64.0";
-    return {
-      ...previewResponse,
-      target_version: defaultVersion,
-      operation: "use_default",
-    };
+    return withTarget(previewResponse, defaultVersion, "use_default");
   }
   if (!requestedTarget) return previewResponse;
+  return withTarget(
+    previewResponse,
+    requestedTarget,
+    operationForTarget(previewResponse.current_version, requestedTarget),
+  );
+}
+
+function withTarget(
+  previewResponse: UpdatePreview,
+  targetVersion: string,
+  operation: UpdateOperation,
+): UpdatePreview {
+  const compatibility = previewResponse.copilot_plugin_compatibility;
   return {
     ...previewResponse,
-    target_version: requestedTarget,
-    operation: operationForTarget(previewResponse.current_version, requestedTarget),
+    target_version: targetVersion,
+    operation,
+    ...(compatibility
+      ? {
+          copilot_plugin_compatibility: {
+            ...compatibility,
+            runtime_version: targetVersion,
+            supported: compatibility.supported_versions.includes(targetVersion),
+            ...(compatibility.supported_versions.includes(targetVersion)
+              ? { reason: undefined }
+              : { reason: "runtime_unsupported" }),
+          },
+        }
+      : {}),
   };
 }
 
