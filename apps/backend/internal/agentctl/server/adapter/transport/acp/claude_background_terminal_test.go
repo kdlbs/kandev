@@ -81,11 +81,12 @@ func activeClaudeToolCallCount(a *Adapter) int {
 // @covers AC-AGENTS-BACKGROUND-WORK-010.6
 func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 	cleanups := []struct {
-		name string
-		run  func(*Adapter)
+		name      string
+		preserves bool
+		run       func(*Adapter)
 	}{
-		{name: "prompt end", run: func(a *Adapter) { a.cancelPromptEndToolCalls("session-claude") }},
-		{name: "explicit cancel", run: func(a *Adapter) { a.cancelActiveToolCalls("session-claude") }},
+		{name: "prompt end", preserves: true, run: func(a *Adapter) { a.cancelPromptEndToolCalls("session-claude") }},
+		{name: "explicit cancel", preserves: false, run: func(a *Adapter) { a.cancelActiveToolCalls("session-claude") }},
 	}
 	identities := []struct {
 		name          string
@@ -126,7 +127,7 @@ func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 				cleanup.run(a)
 
 				events := drainEvents(a)
-				if identity.wantPreserved {
+				if identity.wantPreserved && cleanup.preserves {
 					require.Equal(t, 1, activeClaudeToolCallCount(a),
 						"the verified bridge can still report this shell's terminal exit")
 					for _, event := range events {
@@ -135,7 +136,7 @@ func TestClaudeBackgroundTerminalPromptCleanupScope(t *testing.T) {
 					return
 				}
 				require.Equal(t, 0, activeClaudeToolCallCount(a),
-					"an unverified bridge keeps the prompt-end cleanup fallback")
+					"unsupported cleanup paths keep the prompt-end/explicit-cancel fallback")
 				require.Len(t, events, 1)
 				require.Equal(t, launch.toolCallID, events[0].ToolCallID)
 				require.Equal(t, toolStatusCancelled, events[0].ToolStatus)
@@ -157,9 +158,9 @@ func TestClaudeBackgroundTerminalExit(t *testing.T) {
 		startClaudeBackgroundLaunch(t, a, "session-claude", first)
 		startClaudeBackgroundLaunch(t, a, "session-claude", second)
 		// The foreground turn can end while a detached command still runs; the
-		// verified binding must survive so its later terminal frame can settle
-		// the exact job.
-		a.cancelActiveToolCalls("session-claude")
+		// verified binding must survive prompt-end cleanup so its later terminal
+		// frame can settle the exact job.
+		a.cancelPromptEndToolCalls("session-claude")
 		for _, event := range drainEvents(a) {
 			require.NotEqual(t, toolStatusCancelled, event.ToolStatus,
 				"a verified detached shell must not be cancelled at prompt end")
@@ -169,6 +170,8 @@ func TestClaudeBackgroundTerminalExit(t *testing.T) {
 		event := a.convertToolCallResultUpdate("session-claude", claudeTerminalExitUpdate(first.toolCallID, nil, nil))
 		require.NotNil(t, event)
 		require.Equal(t, toolStatusComplete, event.ToolStatus)
+		require.False(t, event.ToolStatusMissing,
+			"the adapter synthesized a terminal status from exact evidence")
 		require.NotNil(t, event.BackgroundWork)
 		require.Equal(t, first.toolCallID, event.BackgroundWork.WorkID)
 		require.Equal(t, streams.WorkloadKindShell, event.BackgroundWork.Kind)
@@ -280,8 +283,9 @@ func TestClaudeBackgroundTerminalExit(t *testing.T) {
 	}{
 		{
 			name: "mismatched terminal id",
-			build: func(string) *acp.SessionToolCallUpdate {
-				update := claudeTerminalExitUpdate("toolu_other", nil, nil)
+			build: func(toolCallID string) *acp.SessionToolCallUpdate {
+				update := claudeTerminalExitUpdate(toolCallID, nil, nil)
+				update.Meta["terminal_exit"].(map[string]any)["terminal_id"] = "toolu_other"
 				return update
 			},
 		},

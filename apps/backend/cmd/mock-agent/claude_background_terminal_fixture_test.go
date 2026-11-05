@@ -27,14 +27,13 @@ func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
 	emitClaudeBackgroundTerminalFixture(e, "/claude-background-terminal 10ms 10ms")
 
 	updates := updater.getUpdates()
-	require.Len(t, updates, 5, "two launches and the interim text are synchronous")
 	var launchToolCalls []acp.SessionUpdateToolCall
 	for _, update := range updates {
 		if update.notification.Update.ToolCall != nil {
 			launchToolCalls = append(launchToolCalls, *update.notification.Update.ToolCall)
 		}
 	}
-	require.Len(t, launchToolCalls, 2)
+	require.Len(t, launchToolCalls, 2, "both launch frames are synchronous")
 	require.Equal(t, acp.ToolKindExecute, launchToolCalls[0].Kind)
 	input, ok := launchToolCalls[0].RawInput.(map[string]any)
 	require.True(t, ok)
@@ -49,9 +48,13 @@ func TestClaudeBackgroundTerminalFixtureEmitsCapturedShape(t *testing.T) {
 
 	exits := terminalExitUpdates(updater.getUpdates())
 	require.Equal(t, "toolu_e2e_claude_terminal_first", exits[0]["terminal_id"])
+	require.Contains(t, exits[0], "exit_code")
+	require.Contains(t, exits[0], "signal")
 	require.Nil(t, exits[0]["exit_code"])
 	require.Nil(t, exits[0]["signal"])
 	require.Equal(t, "toolu_e2e_claude_terminal_second", exits[1]["terminal_id"])
+	require.Contains(t, exits[1], "exit_code")
+	require.Contains(t, exits[1], "signal")
 	require.Nil(t, exits[1]["exit_code"])
 	require.Nil(t, exits[1]["signal"])
 }

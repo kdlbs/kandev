@@ -139,7 +139,7 @@ background-liveness requirements remain authoritative in their own scope.
 - **AC-AGENTS-BACKGROUND-WORK-010.3:** When neither task lifecycle support nor attributed shell termination evidence is available, a detached shell shall stay open until process-end evidence applies. An unattributed completion signal shall not settle a specific workload.
 - **AC-AGENTS-BACKGROUND-WORK-010.4:** Task lifecycle support shall add no background job controls, and it shall not change transcript content, turn completion, or prompt admission.
 - **AC-AGENTS-BACKGROUND-WORK-010.5:** When all workloads of a session become terminal, the active count shall clear on desktop and phone and completed history shall remain reachable.
-- **AC-AGENTS-BACKGROUND-WORK-010.6:** When a supported Claude bridge identifies an ended background shell, only that workload shall leave the running count. An unavailable outcome shall remain unavailable. Launch completion, malformed evidence, and evidence for another workload shall not imply termination.
+- **AC-AGENTS-BACKGROUND-WORK-010.6:** When `@agentclientprotocol/claude-agent-acp` version `0.97.0`, identified at initialize, reports a tool-scoped terminal exit for a tracked detached shell, only that workload shall leave the running count. An unavailable outcome shall remain unavailable. Launch completion, malformed evidence, and evidence for another workload shall not imply termination.
 
 The [OpenCode continuity design](../system-design/background-work-opencode.md)
 owns full provider continuity. The

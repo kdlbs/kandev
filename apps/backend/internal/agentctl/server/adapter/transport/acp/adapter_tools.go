@@ -709,6 +709,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	toolCallID := string(tcu.ToolCallId)
 	convertedContents := a.convertToolCallContents(tcu.Content)
 	status := ""
+	statusMissing := tcu.Status == nil
 	if tcu.Status != nil {
 		status = string(*tcu.Status)
 	}
@@ -854,6 +855,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 	if claudeTerminalObservation != nil {
 		status = toolStatusComplete
+		statusMissing = false
 	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
@@ -979,7 +981,7 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		ParentToolCallID:  parentToolCallID,
 		ToolTitle:         title,
 		ToolStatus:        status,
-		ToolStatusMissing: tcu.Status == nil,
+		ToolStatusMissing: statusMissing,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 		BackgroundWork:    claudeTerminalObservation,

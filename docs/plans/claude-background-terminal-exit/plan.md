@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-status: completed
+status: done
 requirements:
   - REQ-AGENTS-BACKGROUND-WORK-002
   - REQ-AGENTS-BACKGROUND-WORK-005
@@ -132,13 +132,13 @@ AC-AGENTS-BACKGROUND-WORK-010.5 and .6. There is no UI markup change.
 
 - Diagnostic adapter repro: numeric control passed, null-code case failed as expected.
 - Temporary repro removed; permanent adapter and durable-projection regressions added.
-- `go test ./internal/agentctl/server/adapter/transport/acp -count=1`: passed.
-- `go test ./internal/orchestrator -run 'Test.*(BackgroundWork|BackgroundTask|ClaudeBackgroundTerminal)' -count=1`: passed.
-- `go test ./internal/orchestrator -count=1`: passed.
+- `go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1`: passed.
+- `go test -trimpath -tags fts5 ./internal/orchestrator -count=1`: passed.
 - Adapter and orchestrator review regressions: verified/legacy cleanup scope, exact terminal accounting retirement, live sibling retention, duplicate delivery, and stale execution isolation passed.
-- `go test ./internal/task/service -run 'Test.*BackgroundWork' -count=1`: passed.
-- `go test ./cmd/mock-agent -count=1`: passed.
+- `go test -trimpath -tags fts5 ./internal/task/service -run 'Test.*BackgroundWork' -count=1`: passed.
+- `go test -trimpath -tags fts5 ./cmd/mock-agent -count=1`: passed.
 - Desktop and mobile Playwright scenarios: passed (`1 passed` each, about 36 s and 33 s).
+- Phone coverage is Chromium phone emulation only. No physical-device validation was performed; that gate remains open.
 - `bash scripts/lint-go-changed <changed-go-files>`: passed (0 issues).
 - `pnpm lint` and `pnpm run typecheck` in `apps/web`: passed.
 - `python3 scripts/list-docs.py validate`: passed (431 decisions, 1921 specifications).

@@ -1,7 +1,7 @@
 ---
 id: "01-settle-terminal-exits"
 title: "Settle qualified Claude terminal exits"
-status: completed
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -64,11 +64,11 @@ when dependencies are absent.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -count=1)
-(cd apps/backend && go test ./internal/orchestrator -run 'Test.*(BackgroundWork|BackgroundTask|ClaudeBackgroundTerminal)' -count=1)
-(cd apps/backend && go test ./internal/task/service -run 'Test.*BackgroundWork' -count=1)
-(cd apps/backend && go test ./cmd/mock-agent -count=1)
-bash scripts/lint-go-changed apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_tools.go apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go apps/backend/internal/orchestrator/claude_background_terminal_projection_test.go apps/backend/cmd/mock-agent/main.go apps/backend/cmd/mock-agent/handler.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/service -run 'Test.*BackgroundWork' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./cmd/mock-agent -count=1)
+bash scripts/lint-go-changed apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_tools.go apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_prompt.go apps/backend/internal/agentctl/server/adapter/transport/acp/dialect_claude_terminal.go apps/backend/internal/agentctl/server/adapter/transport/acp/claude_background_terminal_test.go apps/backend/internal/orchestrator/claude_background_terminal_projection_test.go apps/backend/internal/orchestrator/claude_background_terminal_accounting_test.go apps/backend/internal/orchestrator/event_handlers_streaming.go apps/backend/cmd/mock-agent/main.go apps/backend/cmd/mock-agent/handler.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture.go apps/backend/cmd/mock-agent/claude_background_terminal_fixture_test.go
 (cd apps/web && pnpm e2e:run --project chromium tests/task/claude-background-terminal-exit.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-claude-background-terminal-exit.spec.ts)
 python3 scripts/list-docs.py validate
@@ -130,5 +130,5 @@ unidentified bridges keep their prior prompt-end cleanup. The exact end frame
 also retires the session's execution-scoped background-accounting registration
 without touching a live sibling or successor execution. Permanent adapter,
 accounting, durable-projection, mock-fixture, and desktop/mobile E2E regressions
-pass; the commands and results are recorded in the
+pass. Phone coverage is Chromium phone emulation only; physical-device validation remains open. The commands and results are recorded in the
 [plan](plan.md#verification-results).
