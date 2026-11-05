@@ -35,5 +35,14 @@
   "tabLabel": "Needs you",
   "failedClauseSome_one": "This list does not count failed tasks. {{count}} task has also failed. See the Failed tab.",
   "failedClauseSome_other": "This list does not count failed tasks. {{count}} tasks have also failed. See the Failed tab.",
-  "failedClauseNone": "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time."
+  "failedClauseNone": "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time.",
+  "unansweredTitle": "Unanswered (agent not waiting)",
+  "unansweredDescription": "Questions an agent moved past before anyone answered. Answering sends a new message to the task; the agent is not paused on these. They close on their own after the workspace's retention period.",
+  "unansweredLoadFailed": "Could not load unanswered questions. Try again.",
+  "unansweredClose": "Close",
+  "unansweredCloseFailed": "Could not close this question. Try again.",
+  "unansweredSendTo": "Send answer to",
+  "unansweredTargetOriginal": "Original session",
+  "unansweredTargetTask": "Task's current session",
+  "unansweredSessionEnded": "The session that asked this has ended."
 }

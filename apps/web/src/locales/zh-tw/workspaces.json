@@ -301,5 +301,12 @@
   "cloneSourceMissing": "源工作區已不可用。",
   "cloneConfigurationUnsupported": "此工作區包含無法複製的受管理設定、不可用的預設設定或工作流程引用。",
   "cloneFailed": "無法複製工作區，請重試。",
-  "workspaceActionsNamed": "{{name}}的操作"
+  "workspaceActionsNamed": "{{name}}的操作",
+  "unansweredInboxTitle": "未回答的問題",
+  "unansweredInboxDescription": "讓代理程式未得到回答就繼續工作的問題，繼續顯示在 Needs-you 收件箱中，並對列出待處理問題的代理程式可見。此設定預設關閉。",
+  "unansweredInboxEnabled": "顯示未回答的問題",
+  "unansweredInboxEnabledDescription": "回答會作為新訊息傳送到任務，重複提出的問題會替換較早的副本。這些問題不會阻塞代理程式或工作流程步驟。",
+  "unansweredRetentionDays": "自動關閉（天）",
+  "unansweredRetentionDescription": "早於此天數的未回答問題會自動關閉。允許範圍：1 到 90 天。",
+  "unansweredRetentionInvalid": "請輸入 1 到 90 之間的整數。"
 }

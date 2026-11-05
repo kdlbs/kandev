@@ -301,5 +301,12 @@
   "cloneSourceMissing": "源工作区已不可用。",
   "cloneConfigurationUnsupported": "此工作区包含无法克隆的受管理设置、不可用的默认配置或工作流引用。",
   "cloneFailed": "无法克隆工作区，请重试。",
-  "workspaceActionsNamed": "{{name}}的操作"
+  "workspaceActionsNamed": "{{name}}的操作",
+  "unansweredInboxTitle": "未回答的问题",
+  "unansweredInboxDescription": "让智能体未得到回答就继续工作的问题，继续显示在 Needs-you 收件箱中，并对列出待处理问题的智能体可见。此设置默认关闭。",
+  "unansweredInboxEnabled": "显示未回答的问题",
+  "unansweredInboxEnabledDescription": "回答会作为新消息发送到任务，重复提出的问题会替换较早的副本。这些问题不会阻塞智能体或工作流步骤。",
+  "unansweredRetentionDays": "自动关闭（天）",
+  "unansweredRetentionDescription": "早于此天数的未回答问题会自动关闭。允许范围：1 到 90 天。",
+  "unansweredRetentionInvalid": "请输入 1 到 90 之间的整数。"
 }

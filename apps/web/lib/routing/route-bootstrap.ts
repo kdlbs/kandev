@@ -78,6 +78,9 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
     acp_idle_suspension_enabled: ws.acp_idle_suspension_enabled ?? false,
     acp_idle_timeout_minutes: ws.acp_idle_timeout_minutes ?? 120,
+    // Passed through as sent: consumers default an absent value (off, 14 days).
+    clarification_unanswered_inbox_enabled: ws.clarification_unanswered_inbox_enabled,
+    clarification_unanswered_retention_days: ws.clarification_unanswered_retention_days,
     office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
