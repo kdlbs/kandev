@@ -296,6 +296,30 @@ an incomplete inventory. Recovery records and snapshots remain beside the
 original checkout for inspection and can contain ignored files, including
 sensitive data.
 
+### Inspect cleanup identity conflicts
+
+A worktree cleanup can refuse to remove a checkout when Git still registers a
+different branch or commit at that path. The cleanup job records the exact
+worktree, stage, reason, recorded-versus-current comparison, and a read-only
+inspection action. Use that evidence to inspect the recorded registration or
+compare the recorded commit with the current branch before you change anything.
+The diagnostic does not authorize deletion and does not expose paths, commit
+IDs, branch names, repository contents, or raw Git output.
+
+A confirmed identity conflict reports `cleanup_condition=reconciliation_required`
+while cleanup follows its effective retry policy. Cascade cleanup without
+unverified-change consent keeps its capped retry schedule across restart;
+cascade cleanup that allows unverified changes becomes `failed` after eight
+attempts and is not retried automatically. Each attempt checks the original
+immutable snapshot against current Git state again. An independent healthy
+worktree can still be removed in the same batch.
+
+Do not force-delete a checkout, reset a branch, or edit the cleanup snapshot to
+make a conflict pass. Use the inspection action first. If the evidence shows an
+inventory defect, follow the explicit repair procedure below. Keep the original
+checkout and its files until a verified repair or an authorized cleanup removes
+them.
+
 ### Repair inconsistent worktree inventory
 
 Use the source maintenance utility when healthy Git checkouts disagree with
@@ -415,12 +439,18 @@ resolve the interrupted operation, and verify before restarting.
 
 After restart, resume the affected session or retry archive or confirmed delete
 through the normal task controls. Check the resulting cleanup job separately.
-**Metadata verification does not mean cleanup completed.** Borrowed workspaces
-remain protected, and dirty-file, branch, commit, ownership, and deletion-consent
-checks still apply. An archived borrower session can continue to protect a
-shared checkout. A cascade delete can report pending cleanup after deleting the
-task rows. Inspect the durable cleanup jobs and workspace-group status separately;
-a completed task cleanup job does not clear an older group cleanup error.
+**Metadata verification does not mean cleanup completed.** Dirty-file, branch,
+commit, ownership, and deletion-consent checks still apply. A borrowed workspace
+stays protected while the borrower can still use it: a live borrower, or one
+whose runtime stop failed, holds a shared checkout. Archiving the borrower
+releases that hold once its session is terminal and no runtime remains. Releasing
+the hold removes nothing while the owner is live. When the owner's archived
+worktree is reclaimed, the shared checkout and any uncommitted borrower files in
+it are removed. If the owner was archived first, reclaim runs on the next 24-hour
+recheck or after a backend restart. A cascade delete can report pending cleanup
+after deleting the task rows. Inspect the durable cleanup jobs and workspace-group
+status separately; a completed task cleanup job does not clear an older group
+cleanup error.
 
 ### Named branch policies
 

@@ -27,6 +27,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"permission-flow":                  scenarioPermissionFlow,
 	toolKeyError:                       scenarioError,
 	"subagent":                         scenarioSubagent,
+	"subagent-resume-setup":            scenarioSubagentResumeSetup,
+	"subagent-resume":                  scenarioSubagentResume,
 	"all-tools":                        scenarioAllTools,
 	"multi-turn":                       scenarioMultiTurn,
 	"diff-expansion-setup":             scenarioDiffExpansionSetup,
@@ -38,6 +40,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"untracked-file-setup":             scenarioUntrackedFileSetup,
 	"untracked-file-modify":            scenarioUntrackedFileModify,
 	"clarification":                    scenarioClarification,
+	"clarification-files":              scenarioClarificationAttachments,
+	"clarification-files-choice":       scenarioClarificationAttachmentsChoiceOnly,
 	"clarification-no-other":           scenarioClarificationNoOther,
 	"clarification-markdown":           scenarioClarificationMarkdown,
 	"clarification-context-paragraphs": scenarioClarificationContextParagraphs,
@@ -45,6 +49,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"clarification-timeout":            scenarioClarificationTimeout,
 	"multi-permission":                 scenarioMultiPermission,
 	"kandev-mcp-permission":            scenarioKandevMCPPermission,
+	"subagent-controls":                scenarioSubagentControls,
 	"review-cumulative-setup":          scenarioReviewCumulativeSetup,
 	"walkthrough-setup":                scenarioWalkthroughSetup,
 	"walkthrough-basic":                scenarioWalkthroughBasic,
@@ -73,6 +78,8 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"turn-title-rename-only":           scenarioTurnTitleRenameOnly,
 	"turn-title-rename-edit":           scenarioTurnTitleRenameEdit,
 	"turn-title-rename-switch":         scenarioTurnTitleRenameSwitch,
+	"async-followup":                   scenarioAsyncFollowup,
+	"compaction":                       scenarioContextCompaction,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -129,6 +136,12 @@ func scenarioEmptyTurn(e *emitter) {
 // directive inside a backend-generated expansion block.
 func scenarioSavedPromptDelivery(e *emitter) {
 	e.text(savedPromptDeliveryResponse)
+}
+
+// scenarioAsyncFollowup runs the agent-started follow-up fixture that emits a
+// status-less tool update for an already finished tool.
+func scenarioAsyncFollowup(e *emitter) {
+	emitAsyncFollowup(e, "")
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -323,6 +336,39 @@ func scenarioSubagent(e *emitter) {
 
 	fixedDelay(50)
 	e.text("Subagent scenario complete.")
+}
+
+func scenarioSubagentControls(e *emitter) {
+	sendMessageID := nextToolID()
+	e.startClaudeControlTool(sendMessageID, "SendMessage", "SendMessage", map[string]any{"to": "child-agent"})
+	e.completeTool(sendMessageID, map[string]any{"success": true})
+
+	waitID := nextToolID()
+	e.startTool(waitID, "wait", acp.ToolKindOther, map[string]any{})
+	e.completeTool(waitID, map[string]any{"completed": true})
+}
+
+func scenarioSubagentResumeSetup(e *emitter) {
+	taskToolID := nextToolID()
+	fixedDelay(50)
+	e.launchAsyncSubagentTool(
+		taskToolID,
+		"Explore the codebase",
+		"Find the relevant implementation and report the result",
+		"general-purpose",
+	)
+	e.foregroundIdle()
+	e.text("The background subagent is ready for a follow-up message.")
+}
+
+func scenarioSubagentResume(e *emitter) {
+	sendMessageID := nextToolID()
+	e.startClaudeControlTool(sendMessageID, "SendMessage", "SendMessage", map[string]any{
+		"to":      asyncSubagentAgentID,
+		"message": "Continue and report the final result.",
+	})
+	e.completeTool(sendMessageID, map[string]any{"success": true})
+	e.text("The background subagent resumed.")
 }
 
 // scenarioAllTools: one of each tool type with fixed delays, using real files.
@@ -651,7 +697,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 
 	e.text("First tour incoming.")
-	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+	if _, err := e.callMCPTool("kandev-walkthroughs", "show_walkthrough_kandev", wtArgs("First",
 		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
 		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
 	)); err != nil {
@@ -663,7 +709,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 
 // scenarioWalkthroughReemitSecond emits a new tour on a later user prompt.
 func scenarioWalkthroughReemitSecond(e *emitter) {
-	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+	if _, err := e.callMCPTool("kandev-walkthroughs", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
 		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
@@ -766,7 +812,7 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	toolName := "show_walkthrough_kandev"
 	args := walkthroughDemoArgs()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
-	result, err := e.callMCPTool("kandev", toolName, args)
+	result, err := e.callMCPTool("kandev-walkthroughs", toolName, args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))

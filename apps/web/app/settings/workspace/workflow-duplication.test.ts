@@ -197,9 +197,10 @@ describe("createWorkflowDuplication", () => {
     result.steps[1].name = "Changed step";
 
     expect(source.description).toBe("Review configuration");
-    expect(
-      (steps[0].events?.on_turn_complete?.[0] as { config: { step_id: string } }).config.step_id,
-    ).toBe(DONE_STEP_ID);
+    const completion = steps[0].events?.on_turn_complete?.[0] as
+      | { config: { step_id: string } }
+      | undefined;
+    expect(completion?.config.step_id).toBe(DONE_STEP_ID);
     expect(steps[1].name).toBe("Done");
   });
 });
