@@ -126,6 +126,12 @@ function isExternalHref(href: string): boolean {
   return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//");
 }
 
+export function isBlockedMarkdownImageSource(href?: string): boolean {
+  if (!href || isExternalHref(href)) return false;
+  const decodedPath = decodeHrefPath(href);
+  return decodedPath === null || isInvalidFilePath(normalizePath(decodedPath));
+}
+
 function isAbsoluteFileSystemPath(path: string): boolean {
   return path.startsWith("/") || isWindowsDriveAbsolutePath(path);
 }
@@ -162,7 +168,7 @@ function blockedAbsolutePath(path: string): { kind: "blocked" } | null {
 function looksLikeHostAbsolutePath(path: string): boolean {
   return (
     isWindowsDriveAbsolutePath(path) ||
-    /^\/(?:Users|home|root|tmp|private|var|etc|usr|opt|mnt|Volumes)\//i.test(path)
+    /^\/(?:Users|home|root|tmp|private|var|etc|usr|opt|mnt|srv|Volumes)\//i.test(path)
   );
 }
 

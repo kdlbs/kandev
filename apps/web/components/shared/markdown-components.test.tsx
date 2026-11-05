@@ -359,6 +359,18 @@ describe("markdownComponents", () => {
   });
 });
 
+describe("shared Markdown image rendering", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("keeps browser-rendered images when there is no session context", () => {
+    render(<Markdown>{"![Preview](/assets/chart.svg)"}</Markdown>);
+
+    expect(screen.getByRole("img", { name: "Preview" }).getAttribute("src")).toBe(
+      "/assets/chart.svg",
+    );
+  });
+});
+
 describe("markdownComponents registered source links", () => {
   afterEach(resetMarkdownComponentTestState);
 

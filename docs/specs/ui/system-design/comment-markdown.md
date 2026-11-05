@@ -132,6 +132,8 @@ No new telemetry is needed for this deterministic transform.
   The active task's repository links restrict which workspace repositories can become aliases.
 - `MarkdownFileLinkContext` carries one stable file-link context through the transcript so message
   renderers do not independently subscribe to repository and worktree state.
+- Shared Markdown image rendering uses the session file reader only when a session context exists.
+  It preserves browser image rendering outside task sessions and blocks rejected local paths.
 - `MemoizedMarkdown` preserves an inherited task-level file-link context while allowing an explicit
   message renderer to override the workspace root or open action.
 - The shared Markdown anchor resolver classifies and normalizes a link, produces a task-workspace-
@@ -203,8 +205,10 @@ same-named repositories or an unrelated sibling directory from becoming accident
 
 - An unmatched host absolute path invokes the existing file-open action with that absolute
   path; its anchor prevents browser navigation to a same-origin filesystem URL.
-- An absolute path contained by a trusted root but not recognized as an openable file is also
-  non-actionable, so a directory or extensionless target cannot fall through to browser navigation.
+- A path beneath a trusted root that is not recognized as a file target is non-actionable. An
+  unmatched host absolute path keeps its original path, including an extensionless path; the
+  current-file service decides whether it names a readable file and does not provide directory
+  listing.
 - Missing alias evidence never invents a repository mapping. Ambiguous eligible aliases fail
   closed. Unmapped absolute reads follow ADR 0016 using the exact requested path.
 - External HTTP, HTTPS, mail, issue, and application links keep their existing navigation behavior.
@@ -236,8 +240,8 @@ mapping and prove the same file content is opened from the active workspace.
   missing task membership, mismatched repository IDs, paths outside the active workspace, ambiguous
   roots, stale worktrees, traversal, unsupported contained targets, and unmatched Windows paths.
 - Shared Markdown component coverage reproduces a registered source checkout link with a trailing
-  line selector, asserts the workspace-relative open target, and asserts an unrelated host path is
-  inert.
+  line selector and asserts the workspace-relative open target. An unrelated host path uses the
+  existing file-open action with the exact absolute path, without browser navigation.
 - Memoization/context coverage proves a task-level alias context reaches nested agent and user
   message Markdown without replacing explicit open actions.
 - The existing desktop attach-workspace-sources scenario cites the attached repository through its

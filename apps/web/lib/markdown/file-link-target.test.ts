@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMarkdownFileRootAliases,
+  isBlockedMarkdownImageSource,
   resolveMarkdownFileTarget,
   type MarkdownFileRootAlias,
 } from "./file-link-target";
@@ -257,6 +258,25 @@ describe("resolveMarkdownFileTarget safety boundaries", () => {
     ).toEqual({ kind: "blocked" });
     expect(resolveMarkdownFileTarget("https://example.com/docs.md", { workspaceRoot })).toBeNull();
     expect(resolveMarkdownFileTarget("/office/tasks/KAN-42", { workspaceRoot })).toBeNull();
+  });
+
+  it("keeps less common Unix host roots absolute and supports extensionless Windows files", () => {
+    expect(resolveMarkdownFileTarget("/srv/reports/report.md", { workspaceRoot })).toEqual({
+      kind: "file",
+      path: "/srv/reports/report.md",
+    });
+    expect(
+      resolveMarkdownFileTarget(String.raw`C:\Windows\System32\drivers\etc\hosts`, {
+        workspaceRoot: String.raw`C:\workspace`,
+      }),
+    ).toEqual({ kind: "file", path: "C:/Windows/System32/drivers/etc/hosts" });
+  });
+
+  it("blocks rejected relative image paths but keeps external image sources", () => {
+    expect(isBlockedMarkdownImageSource("../chart.png")).toBe(true);
+    expect(isBlockedMarkdownImageSource("%2e%2e/chart.png")).toBe(true);
+    expect(isBlockedMarkdownImageSource("https://example.com/chart.png")).toBe(false);
+    expect(isBlockedMarkdownImageSource("/assets/chart.png")).toBe(false);
   });
 
   it("preserves relative and workspace-root file links", () => {

@@ -1,11 +1,19 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { MarkdownFileLinkContext } from "./markdown-components";
-import { resolveMarkdownFileTarget } from "@/lib/markdown/file-link-target";
+import {
+  isBlockedMarkdownImageSource,
+  resolveMarkdownFileTarget,
+} from "@/lib/markdown/file-link-target";
 import { useMarkdownImage } from "@/hooks/use-markdown-image";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
+
+function preventMarkdownLinkNavigation(event: MouseEvent<HTMLSpanElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
 
 export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   const context = useContext(MarkdownFileLinkContext);
@@ -16,10 +24,9 @@ export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
   const image = useMarkdownImage(context.sessionId, target?.kind === "file" ? target.path : null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const { t } = useTranslation();
-  if (!target) return <img src={src} alt={alt} className="max-w-full" />;
   if (
-    target.kind === "blocked" ||
-    !context.sessionId ||
+    target?.kind === "blocked" ||
+    isBlockedMarkdownImageSource(src) ||
     image.error ||
     (image.src && failedSrc === image.src)
   ) {
@@ -29,9 +36,13 @@ export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
       </span>
     );
   }
+  if (!target || !context.sessionId) return <img src={src} alt={alt} className="max-w-full" />;
   if (!image.src) return <span role="status">{t("common:loading")}</span>;
   return (
-    <span onErrorCapture={() => setFailedSrc(image.src ?? null)}>
+    <span
+      onClick={preventMarkdownLinkNavigation}
+      onErrorCapture={() => setFailedSrc(image.src ?? null)}
+    >
       <ImagePreviewDialog
         src={image.src}
         alt={alt ?? ""}
